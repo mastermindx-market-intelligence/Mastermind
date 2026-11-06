@@ -38,6 +38,7 @@ import { qualifyExecutiveOfficeSession, SESSION_TARGET_REF } from "./meta-ceo/se
 import { Projects } from "./projects/Projects";
 import { ProjectPlanningJourney } from "./projects/ProjectPlanningJourney";
 import { useProjectJourneyState } from "./projects/useProjectJourneyState";
+import {createSessionExecutiveOwnerGetter} from "./auth-recovery/session-executive-owner";
 import { useNativeProjectGoalRecovery } from "./auth-recovery/useNativeProjectGoalRecovery";
 import { NativeDraftRecoveryNotice } from "./auth-recovery/NativeDraftRecoveryNotice";
 import { readProjectJourneyLocation } from "./projects/project-journey-location";
@@ -1897,16 +1898,17 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     previousLiveComposerScope.current = liveComposerScope;
   }, [signedIn, liveComposerScope]);
   // The session owner context and host-projected target stay fenced on the
-  // live signed-in state; the binding itself is read once per render above.
-  const sessionOwner =
-    sessionBinding && signedIn ? readSessionOwnerContext(sessionBinding) : null;
+  // current resource owner; the binding itself is read once per render above.
+  const sessionExecutiveOwner=useMemo(()=>createSessionExecutiveOwnerGetter({host:freshHost??null,native,
+    authRevision,currentAuthRevision:freshAuthRevision}),[freshHost,freshHostGeneration,native,authRevision,sessionBinding,sessionBinding?.port.context]);
+  const sessionOwner = native?sessionExecutiveOwner():sessionBinding&&signedIn?readSessionOwnerContext(sessionBinding):null;
   const sessionTargetKey = sessionOwner && sessionBinding
     ? sessionBinding.port.currentTargetRef()
     : null;
   // Read-only exact-session association from the existing Executive owner.
   // Unknown/legacy/DSH/Grok native sessions stay UNBOUND, not guessed.
   const officeSession = qualifyExecutiveOfficeSession(
-    signedIn, selection, sessionBinding,
+    native?!!sessionOwner:signedIn, selection, sessionBinding,
   );
   const office = useOfficeProjection(authRevision, selection, officeSession);
   // The Office draft is part of the unsent-text signal. It is read after the
@@ -1921,25 +1923,28 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     index.programs.some(card => card.workRef === selection.workRef && card.rootState === "RESOLVED" &&
       card.rootJobId === selection.rootJobId && card.rootCandidates.length === 1 &&
       card.rootCandidates[0] === selection.rootJobId);
+  const officeSessionPresentation=active==='Meta-CEO'&&officeSession.sessionRef!==null&&
+    officeSession.sessionRef===sessionTargetKey&&office.projection.mission.source.state==='CURRENT';
+  const nativeSessionPresentation=native&&!signedIn&&!!sessionOwner&&conversationNavigation.view==='detail';
   const answerView = useQualifiedOriginalAnswer();
   // React may abandon an interrupted render. Only the committed layout
   // publishes a current identity to the private reply acceptance fence.
   useLayoutEffect(() => {
-    answerView.setCurrent(sessionBinding && sessionOwner && signedIn ? {
+    answerView.setCurrent(sessionBinding && sessionOwner && (native||signedIn) ? {
       binding: sessionBinding,
       principalScope: sessionOwner.principalScope,
       generation: sessionOwner.generation,
       selectionSeq: selectionSeq.current,
       authRevision,
-      active: active === "Conversations" || projectConversationActive,
+      active: active === "Conversations" || projectConversationActive || officeSessionPresentation || nativeSessionPresentation,
     } : null);
-  }, [active, projectConversationActive, signedIn, sessionBinding, sessionOwner?.principalScope,
+  }, [active, projectConversationActive,officeSessionPresentation,nativeSessionPresentation, signedIn, sessionBinding, sessionOwner?.principalScope,
     sessionOwner?.generation, authRevision, selection?.workRef, selection?.rootJobId]);
   const ownsSession = (binding: MountedExecutiveSessionBinding, ctx: { principalScope: string; generation: string }, sequence: number) => {
     const liveBinding = completeExecutiveSessionBinding(window.MastermindMissionHost?.sessionCommandBinding);
     const liveContext = liveBinding ? readSessionOwnerContext(liveBinding) : null;
     return liveBinding === binding && selectionSeq.current === sequence &&
-      window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
+      (native?!!sessionExecutiveOwner():window.MastermindMissionHost?.auth?.getState().status === "signed_in") &&
       liveContext?.principalScope === ctx.principalScope && liveContext.generation === ctx.generation;
   };
   const makeSessionController = (
@@ -2183,8 +2188,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation,
     selection?.workRef, selection?.rootJobId]);
   useEffect(() => {
-    if (active !== "Conversations" && !projectConversationActive) answerView.leavePresentation();
-  }, [active, projectConversationActive]);
+    if (active !== "Conversations" && !projectConversationActive && !officeSessionPresentation && !nativeSessionPresentation) answerView.leavePresentation();
+  }, [active, projectConversationActive,officeSessionPresentation,nativeSessionPresentation]);
 
   useEffect(() => () => {
     commandSlot.current?.controller.invalidate();
@@ -3317,11 +3322,18 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       window.MastermindMissionHost?.sessionCommandBinding,
     );
     const liveAuth = window.MastermindMissionHost?.auth?.getState();
-    const ctx = binding ? readSessionOwnerContext(binding) : null;
+    const ctx = native?sessionExecutiveOwner():binding?readSessionOwnerContext(binding):null;
     const liveTarget = binding ? binding.port.currentTargetRef() : null;
-    if (!binding || liveAuth?.status !== "signed_in" || !ctx || !liveTarget) {
+    if (!binding || (!native&&liveAuth?.status !== "signed_in") || !ctx || !liveTarget) {
       onComplete({ status: "refused" });
       return;
+    }
+    // Native caller binds the user's rendered selected-session frame, not
+    // merely whichever valid E target happens to be current at click time.
+    if(native&&(binding!==sessionBinding||ctx.principalScope!==sessionOwner?.principalScope||
+        ctx.generation!==sessionOwner?.generation||liveTarget!==sessionTargetKey||
+        selectionSeq.current!==commandSelectionRevision)){
+      onComplete({status:"refused"});return;
     }
     if (sessionPending.current) {
       // One session dispatch at a time: the newer callback is refused exactly
@@ -3384,9 +3396,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       window.MastermindMissionHost?.sessionCommandBinding,
     );
     const liveAuth = window.MastermindMissionHost?.auth?.getState();
-    const ctx = binding ? readSessionOwnerContext(binding) : null;
+    const ctx = native?sessionExecutiveOwner():binding?readSessionOwnerContext(binding):null;
     const slot = sessionSlot.current;
-    if (!binding || liveAuth?.status !== "signed_in" || !ctx || !slot) return;
+    if (!binding || (!native&&liveAuth?.status !== "signed_in") || !ctx || !slot) return;
     if (
       slot.generation !== ctx.generation ||
       slot.principalScope !== ctx.principalScope ||
@@ -3828,11 +3840,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     </section>
   );
   const sessionLive =
-    !!sessionBinding && signedIn && !!sessionOwner && !!sessionTargetKey;
+    !!sessionBinding && (native||signedIn) && !!sessionOwner && !!sessionTargetKey;
   // A qualified original READ is scoped to the current selected-session
   // owner, even if the old target is now unavailable for NEW sends.
   const presentedSessionAnswer = answerView.visible(
-    sessionBinding && sessionOwner && signedIn ? {
+    sessionBinding && sessionOwner && (native||signedIn) ? {
       binding: sessionBinding,
       principalScope: sessionOwner.principalScope,
       generation: sessionOwner.generation,
@@ -4724,11 +4736,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const sessionEntryContext = sessionBinding?.port.context;
   const sessionEntryGeneration = sessionEntryHost?.invalidationGeneration;
   const sessionEntrySequence = selectionSeq.current;
-  const openSessionRequests = sessionBinding && sessionOwner && signedIn ? () => {
+  const openSessionRequests = sessionBinding && sessionOwner && (native||signedIn) ? () => {
     try {
       if (!sessionEntryHost || window.MastermindMissionHost !== sessionEntryHost ||
           sessionEntryHost.auth !== sessionEntryAuth || sessionEntryAuth?.getState !== sessionEntryAuthRead ||
-          !sessionEntryAuthRead || sessionEntryAuthRead.call(sessionEntryAuth).status !== "signed_in" ||
+          !sessionEntryAuthRead || (!native&&sessionEntryAuthRead.call(sessionEntryAuth).status !== "signed_in") ||
           sessionEntryHost.sessionCommandBinding !== sessionBinding || sessionBinding.port.context !== sessionEntryContext ||
           sessionEntryHost.invalidationGeneration !== sessionEntryGeneration ||
           (sessionEntryGeneration?.call(sessionEntryHost) ?? null) !== freshHostGeneration ||
@@ -4774,7 +4786,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <ConversationWindow
           headingLevel={active === "Conversations" ? 1 : 2}
           locale={locale}
-          continuation={active === "Projects" ? undefined : sessionContinuationPanel}
+          continuation={active === "Projects" && !(native&&!signedIn) ? undefined : sessionContinuationPanel}
           historicalAnswers={<HistoricalOriginalAnswers
             binding={sessionBinding}
             selection={selection}
@@ -4838,6 +4850,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       }}>{locale === "zh-CN" ? "返回原项目设置" : "Return to original project setup"}</button> : null}
       <button type="button" onClick={projectJourney.discardRetainedGoal}>{locale === "zh-CN" ? "丢弃项目目标" : "Discard project goal"}</button>
     </section> : null;
+  const nativeSessionReturn=native&&!signedIn&&sessionOwner?<>
+    {conversationNavigation.view==='detail'?<>
+      <button type="button" onClick={conversationNavigation.backToList}>{locale==='zh-CN'?'返回对话':'Back to conversations'}</button>
+      {currentConversationPanel}
+    </>:openSessionRequests?<button type="button" onClick={()=>openSessionRequests()}>{locale==='zh-CN'?'查看会话请求':'Open session requests'}</button>:null}
+  </>:null;
   const retainedFreshMessage = freshDraft.retainedDraft &&
     (!freshDraft.retainedDraft.passivelyHeld || passiveExpiryHold.current) ?
     <section className="card" aria-label={locale === "zh-CN" ? "保留的第一条消息" : "Retained first message"}>
@@ -4908,7 +4926,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             officeSession.sessionRef !== null &&
             officeSession.sessionRef === sessionTargetKey &&
             office.projection.mission.source.state === "CURRENT"
-              ? sessionContinuationPanel
+              ? currentConversationPanel
               : null
           }
           onStartNewWork={canLaunch && commandView ? startOfficeLaunch : undefined}
@@ -5386,8 +5404,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       authState.reason === "POPUP_CLOSED" ? copy.popupClosed :
       authState.reason.includes("EXPIRED") || authState.reason.includes("TIMEOUT") ? copy.signInTimeout : copy.signInFailed
     }</p> : undefined}
-    protectedWork={(nativeGoalQuarantined || (passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.session || office.draft.text || observedConversation.draft || projectJourney.retainedGoal?.text || freshDraft.retainedDraft?.text)) || showCheckStatus) ? <>
-      {nativeGoalNotice}
+    protectedWork={(nativeGoalQuarantined || nativeSessionReturn || (passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.session || office.draft.text || observedConversation.draft || projectJourney.retainedGoal?.text || freshDraft.retainedDraft?.text)) || showCheckStatus) ? <>
+      {nativeGoalNotice}{nativeSessionReturn}
       {passiveExpiryHold.current ? retainedProjectGoal : null}
       {passiveExpiryHold.current ? retainedFreshMessage : null}
       {passiveExpiryHold.current && office.draft.text ? <section className="card">

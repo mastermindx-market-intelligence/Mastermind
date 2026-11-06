@@ -1,4 +1,5 @@
 mod auth;
+mod native_session_send;
 mod project_planning;
 mod fresh_conversation;
 mod project_conversations_read;
@@ -152,6 +153,7 @@ fn main() {
             auth::executive_project_planning,
             auth::executive_fresh_conversation,
             auth::executive_session_context,
+            auth::executive_session_send,
             auth::executive_project_history_context,
             auth::executive_project_conversations_read,
             auth::executive_session_reply,

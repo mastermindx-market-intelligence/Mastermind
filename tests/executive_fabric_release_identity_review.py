@@ -601,4 +601,4 @@ REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '3ee477861ae7344849499c3af483e8650f26fa58aea7874ad2a6479e776824ac', 'sites': ((3308, 68, 71, 'int', '503'), (3313, 69, 72, 'int', '503'), (3317, 67, 70, 'int', '503'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'fa4f167aa76089356d6a476c30dfd8027c972d644cfb7e5821eebdba44835473', 'sites': ((3322, 68, 71, 'int', '503'), (3327, 69, 72, 'int', '503'), (3331, 67, 70, 'int', '503'))}

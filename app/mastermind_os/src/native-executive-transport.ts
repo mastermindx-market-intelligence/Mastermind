@@ -2,7 +2,7 @@ import {freshConversationArguments} from "./orchestration/fresh-conversation-tra
 import {projectConversationArguments} from './conversations/project-conversation-transport';
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
-import { decodeSessionContext } from "./orchestration/executive-session-command-port";
+import {sessionSendArguments} from "./orchestration/session-send-arguments";
 import type { ProjectConversationHistoryTransport } from "./conversations/project-conversation-history-owner";
 import { projectHistorySelection } from "./conversations/project-history-selection";
 import { normalizeDirectSelection, type DirectNativeTransport } from "./direct-native-result";
@@ -23,20 +23,6 @@ const WORK = /^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ROOT = /^JOB-[A-Za-z0-9][A-Za-z0-9._:-]{0,250}$/;
 const OPERATION = /^session-continue-[0-9a-f]{64}$/;
 const CURSOR = /^[A-Za-z0-9_=-]{1,2048}$/;
-/** Deprivilege the existing authenticated native context to READ-only; never
- * rewrite identity, selection or native source. Only a fully qualified backend
- * context can be projected, and its capability is reduced, not invented. */
-function nativeReadContextOnly(raw: unknown, selected: { workRef: string; rootJobId: string }): unknown {
-  if (!decodeSessionContext(raw, selected)) return raw;
-  const envelope = raw as Record<string, unknown>;
-  const data = envelope.data as Record<string, unknown>;
-  const capability = data.capabilities as Record<string, unknown>;
-  return {
-    ...envelope,
-    data: { ...data, capabilities: { ...capability, send: false } },
-  };
-}
-
 /** Private native auth epoch; no token/claims enter the webview, no arbitrary native command. */
 export async function createNativeExecutiveTransport(invoke: Invoke, listen: Listen) {
   let nativeGeneration = -1, epoch = 0, available = false;
@@ -92,7 +78,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
   })();
 
   function call(command: "executive_context" | "executive_submit" | "executive_status" |
-    "executive_session_context" | "executive_session_reply" | "executive_session_references" |
+    "executive_session_context" | "executive_session_send" | "executive_session_reply" | "executive_session_references" |
     "executive_project_session_references" |
     "executive_project_history_context" | "executive_fresh_conversation" | "executive_project_conversations_read" |
     "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction" | "executive_project_planning",
@@ -202,9 +188,9 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     context: async (selection, signal) => {
       if (!WORK.test(selection.workRef) || !ROOT.test(selection.rootJobId))
         throw new Error("SESSION_SELECTION_INVALID");
-      return nativeReadContextOnly(await call("executive_session_context", signal, {
+      return call("executive_session_context", signal, {
         selection: { work_ref: selection.workRef, root_job_id: selection.rootJobId },
-      }), selection);
+      });
     },
     reply: (args, signal) => OPERATION.test(args.operation_key)
       ? call("executive_session_reply", signal, { operationKey: args.operation_key })
@@ -228,7 +214,11 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
         ...(args.cursor ? { cursor: args.cursor } : {}),
       });
     },
-    send: () => Promise.reject(new Error("NATIVE_SESSION_READ_ONLY")),
+    send: (arguments_,signal) => {
+      const closed=sessionSendArguments(arguments_);
+      return closed?call("executive_session_send",signal,{arguments:closed})
+        :Promise.reject(new Error("SESSION_SEND_INVALID"));
+    },
   };
   return { transport, sessionTransport, ready,
     invalidate() {
