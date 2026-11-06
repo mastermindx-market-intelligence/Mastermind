@@ -1664,7 +1664,9 @@ def main(argv: list[str] | None = None) -> int:
     p_request.add_argument("--class", dest="task_class", required=True)
     p_request.add_argument("--native-return", action="store_true", help="Subscribe this new paid child to the separately reviewed/trusted native Stop hook")
     p_request.add_argument("--artifact-output", action="append", help="Required new file basename; opts into verified artifact production")
-    p_request.add_argument("--cwd", default=os.getcwd())
+    # Resolve an implicit working directory on the receiving host.
+    # The receiving host still validates explicit --cwd values.
+    p_request.add_argument("--cwd", default="~")
     p_request.add_argument("--new-macro-worktree", metavar="COMMIT_SHA40",
                            help="Explicit new Macro sparse workspace at original run ID; never resume/reuse")
     p_request.add_argument("--cpu-scope-percent", type=int, choices=(100, 200, 400),

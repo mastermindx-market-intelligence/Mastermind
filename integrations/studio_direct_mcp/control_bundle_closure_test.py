@@ -158,7 +158,18 @@ print("authenticated compiler snapshot")
 
     def test_actual_payload_installs_exact_closed_runtime(self):
         installed = self._install()
+        self.assertEqual(len(bundle.CONTROL_FILES), 13)
+        self.assertEqual(len(bundle.CAPTURED_CONTROL_FILES), 10)
+        self.assertIn("fleet_git_failure_compat.py", bundle.CONTROL_FILES)
+        self.assertIn(
+            "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+            bundle.CONTROL_FILES)
+        self.assertNotEqual(set(bundle.CONTROL_FILES), set(bundle.CAPTURED_CONTROL_FILES))
         self.assertEqual(set(installed["files"]), EXPECTED_FILES)
+        self.assertEqual(set(installed["files"]), set(bundle.CONTROL_FILES))
+        import private_service as source_service
+        self.assertEqual(set(source_service.CONTROL_BUNDLE_FILES), set(bundle.CONTROL_FILES))
+        self.assertEqual(len(source_service.CONTROL_BUNDLE_FILES), 13)
         verified = bundle.verify(control_root=self.control, launcher=self.launcher)
         self.assertEqual(verified["bundleDigest"], installed["bundleDigest"])
         for name, digest in installed["files"].items():
