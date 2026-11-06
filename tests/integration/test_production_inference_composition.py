@@ -21,7 +21,7 @@ from brain import client, production_inference, thinking_log
 
 class DispatcherTests(unittest.TestCase):
     def test_explicit_unknown_or_empty_backend_cannot_fall_back(self):
-        for name in ("fabric", "production_mdoe", ""):
+        for name in ("fabric_typo", "production_mdoe", ""):
             with self.subTest(backend=name), patch.dict(os.environ, {"BOT_LLM_BACKEND": name}), \
                     patch.object(client.cli_bridge, "_cfg", side_effect=AssertionError("fallback")):
                 self.assertFalse(client.available())
