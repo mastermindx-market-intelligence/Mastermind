@@ -103,3 +103,5 @@
   .office-lanes li { align-items: flex-start; flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) { .meta-ceo-office * { scroll-behavior: auto; } }
+
+.office-byok-refresh { display: flex; justify-content: flex-end; margin-block: 12px 24px; }

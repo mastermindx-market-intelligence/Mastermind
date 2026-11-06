@@ -233,7 +233,7 @@ class OperatorOwner:
                 "child_budget_remaining": max(0, min(grant["child_budget"] - used, root["child_limit"] - root_used)),
                 "expires_at": grant["expires_at"], "allowed_classes": grant["allowed_classes"]}
 
-    def reserve(self, token, request):
+    def reserve(self, token, request, *, participant=None):
         with self.transaction() as con:
             grant, launch, lease, root = self._authorized(con, token)
             used = con.execute("SELECT COUNT(*) FROM operator_child_authorizations WHERE operator_run=?", (grant["operator_run"],)).fetchone()[0]
@@ -251,8 +251,15 @@ class OperatorOwner:
                 p = self.here / "state/remote_sub" / (rid + suffix)
                 if p.exists() or p.is_symlink():
                     refuse("RUN_EXISTS")
+            stored = request
+            if participant is not None:
+                from fabric_participant_owner import prepare
+                # Version only this new row; no table migration can break a
+                # still-running old writer's eight-column normal INSERT.
+                stored = {"schema":"mastermind.fabric_bound_child_authorization.v2",
+                          "request":request,"participant":json.loads(prepare(self,grant,request,participant))}
             con.execute("INSERT INTO operator_child_authorizations VALUES (?,?,?,?,?,?,NULL,NULL)",
-                        (rid, grant["operator_run"], grant["root"], digest(canonical(request).encode()), self.clock(), canonical(request)))
+                        (rid, grant["operator_run"], grant["root"], digest(canonical(stored).encode()), self.clock(), canonical(stored)))
         return grant
 
     def child_binding(self, token, rid):
@@ -265,8 +272,9 @@ class OperatorOwner:
                 refuse("child_binding_refused")
         return grant
 
-    def dispatch(self, token, request, *, popen=subprocess.Popen):
-        grant = self.reserve(token, request)
+    def dispatch(self, token, request, *, popen=subprocess.Popen, participant=None):
+        grant = (self.reserve(token, request) if participant is None
+                 else self.reserve(token, request, participant=participant))
         rid = request["run_id"]
         # These files capture the existing adapter transport only. No worker
         # status or lease decisions are stored here.
@@ -301,6 +309,14 @@ class OperatorOwner:
         finally:
             for fd in fds:
                 os.close(fd)
+
+    def participant_observation(self, token, rid, binding_sha256):
+        from fabric_participant_owner import observation
+        return observation(self, token, rid, binding_sha256)
+
+    def participant_metadata(self, token, rid, binding_sha256, object_id):
+        from fabric_participant_owner import metadata
+        return metadata(self, token, rid, binding_sha256, object_id)
 
     def observe(self, token, action, rid):
         grant = self.child_binding(token, rid)
@@ -395,6 +411,11 @@ def validate_child_admission(con, run_id, root, *, now, admitted_lease_id=None, 
     request = json.loads(row['request_json'])
     if digest(canonical(request).encode()) != row['request_digest']:
         refuse("operator_child_authorization_changed")
+    if type(request) is not dict:
+        refuse("operator_child_authorization_changed")
+    if request.get("schema") == "mastermind.fabric_bound_child_authorization.v2":
+        from fabric_participant_owner import unwrap
+        request, _ = unwrap(None, grant, request, expected_run=run_id)
     validate_launch(grant, lease, launch, request, now=now, used_children=0,
                     root_children_remaining=1)
     if admitted_lease_id is not None:
@@ -438,6 +459,10 @@ def main():
         result = owner.wait(value["token"], args["run_id"], args["seconds"])
     elif action == "request":
         result = owner.dispatch(value["token"], args)
+    elif action == "participant_observation" and type(args) is dict and set(args) == {"run_id", "binding_sha256"}:
+        result = owner.participant_observation(value["token"], args["run_id"], args["binding_sha256"])
+    elif action == "participant_metadata" and type(args) is dict and set(args) == {"run_id", "binding_sha256", "object_id"}:
+        result = owner.participant_metadata(value["token"], args["run_id"], args["binding_sha256"], args["object_id"])
     elif action in ("status", "result") and type(args) is dict and set(args) == {"run_id"}:
         result = owner.observe(value["token"], action, args["run_id"])
     else:

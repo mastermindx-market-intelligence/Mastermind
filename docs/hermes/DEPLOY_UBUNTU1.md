@@ -632,3 +632,77 @@ From each final service prove an unrelated wildcard TCP listener is denied
 through the role's OWN alias, and synthetic sibling-file reads are denied.
 A skipped Linux test or source-only mock is not host proof. TCP restrictions
 do not claim UDP/Unix IPC containment, TLS, billing, or Slack acceptance.
+
+
+## Isolated runtime source entry
+
+The root-managed unit selects
+`/opt/mastermind-executive/releases/<40-character-commit>/ops/executive_os/release_manifest.py`
+with CPython 3.12 and `-I -S -B`. The fixed `hermes-runtime` entry admits the
+existing `supervise` and separately authorized `canary` commands. The renderer
+refuses other release-root shapes and a supplied implementation label that
+differs from the selected release directory.
+
+Before importing Hermes, the existing release owner holds the physical source
+ancestry, manifest and imported files. It refuses writable or non-root-owned
+objects, links, ACLs, changed descriptors, unlisted imports and changed source
+bytes. It compiles manifest-matched source snapshots and uses the existing
+pinned pure PyYAML closure. It adds no repository or site-package import path.
+The held context stays with the existing CLI process; there is no second
+supervisor, lifecycle owner or retry service.
+
+Linux enrollment includes exactly `paid_yaml_runtime.py`,
+`paid_pyyaml_6_0_3.zip` and `paid_pyyaml_provenance.json` from the current native
+Fabric source owner. It does not install packages or enable a role.
+
+This closes the source-loading recipe. Interpreter/stdlib/native-library
+qualification, effective-unit and current-process binding, credentials and
+kernel isolation still belong to their existing host owners. The BYOK observer
+continues to report its installed source as unbound until those facts are
+qualified. A rendered unit or implementation label does not establish them.
+
+### Credential-free qualification entry
+
+The fixed isolated release entry also accepts `hermes-runtime isolation-probe`.
+Use the same CPython 3.12 `-I -S -B` recipe, protected release path and held
+source/YAML context as the role service. This is a closed entry to the existing
+finite probe, not an arbitrary module launcher. `--list-cases` is inert.
+Follow [FINAL_ROLE_QUALIFICATION.md](FINAL_ROLE_QUALIFICATION.md) for the
+qualification-only unit override, source identity, external witnesses and
+restoration. This source capability does not clear the serving/deployment hold.
+
+### Mastermind OS role observations through the existing host gateway
+
+The authenticated Office role cards read the fixed pair through the existing
+Workspace HTTP route, Control socket and MH1 mTLS host-observation family.
+Control does not run Linux PID1 queries on the Mac. The Linux gateway owns its
+local Hermes metadata observer.
+
+Control's existing root-pinned Fabric v2 binding document may include one
+optional `hermes_role_metadata_read` object with exactly these fields:
+
+- `host_ref` and `worker_id`: one exact pair already present in
+  `remote_transports` and its physical binding.
+- `expected_host_binding_sha256`: the Linux owner's
+  `remote_worker_gateway_config_digest(config)`, including its Hermes
+  capability. This is not the physical Fabric binding digest.
+- `expected_implementation_sha`: the protected Linux release commit expected
+  by that gateway's Hermes observer.
+
+The binding document remains selected through the existing
+`fabric_bindings_path` and `fabric_bindings_sha256` Control inputs. There is
+no second configuration file, endpoint or credential owner. An absent selection
+preserves SOURCE_UNBOUND and performs no remote read. A malformed selection or
+missing exact transport refuses configuration. The reader rechecks the original
+source and TLS-file identities before and after one bounded request; changed
+custody discards the observation as SOURCE_CHANGED. It neither retries nor falls
+back to the Mac, another host or an Attempt client. Existing paid/attended
+composition exclusions remain unchanged.
+
+The selection enables only the authenticated metadata read; it does not arm
+worker execution, install a role or enroll a key. The Linux installed-source
+qualifier must still establish the actual release/runtime binding. Until then
+the UI remains honestly unavailable even when the transport is connected.
+Office refresh updates this observation without changing the direction draft,
+frozen preview or existing launch owner. Configuration observed is not proof of
+credential enrollment, service health, served model, useful turn or usage.
