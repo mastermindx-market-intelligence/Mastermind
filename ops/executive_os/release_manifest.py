@@ -826,8 +826,17 @@ def _hermes_observation(argv):
             finder.hermes_observation = installation
             from ops.executive_os.hermes_role_metadata_observer import HermesRoleMetadataObserver
             import asyncio
-            result = asyncio.run(HermesRoleMetadataObserver(
-                host_binding_sha256=argv[0], implementation_sha=root.name).read_pair())
+            import signal
+            async def owned_read():
+                loop = asyncio.get_running_loop()
+                task = asyncio.current_task()
+                loop.add_signal_handler(signal.SIGTERM, task.cancel)
+                try:
+                    return await HermesRoleMetadataObserver(
+                        host_binding_sha256=argv[0], implementation_sha=root.name).read_pair()
+                finally:
+                    loop.remove_signal_handler(signal.SIGTERM)
+            result = asyncio.run(owned_read())
             finder.check()
             installation.identity()
             print(json.dumps(result, sort_keys=True, separators=(',', ':'), allow_nan=False))

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import signal
 import sys
 import time
 from pathlib import Path
@@ -23,6 +25,56 @@ _PROPERTIES = ("Id", "MainPID", "ExecMainStartTimestampMonotonic", "InvocationID
                "NotifyAccess", "ActiveState", "SubState", "StatusText")
 _SOURCE_PROPERTIES = ('FragmentPath', 'DropInPaths', 'NeedDaemonReload', 'User', 'Group', 'ExecStart')
 _MAX_PID1_BYTES = 32_768
+
+
+async def _settle_owned_read(process, *, session=False):
+    """Settle only a subprocess created by this request, never a recorded PID.
+
+    The outer reader has its own new session. Its SIGTERM handler cancels the
+    actual main coroutine, whose finally reaps systemctl. A bounded hard stop
+    targets only that new owned group if the graceful cleanup cannot finish.
+    No kill call is itself reported as successful settlement.
+    """
+    if process.returncode is not None:
+        await process.wait()
+        return
+    def stop(sig):
+        try:
+            if session:
+                # start_new_session is part of this exact create call. Refuse
+                # a different group rather than target the caller's session.
+                if os.getpgid(process.pid) != process.pid:
+                    raise RoleStatusError()
+                os.killpg(process.pid, sig)
+            else:
+                process.send_signal(sig)
+        except ProcessLookupError:
+            pass
+    stop(signal.SIGTERM if session else signal.SIGKILL)
+    waiter = asyncio.create_task(process.wait())
+    try:
+        await asyncio.wait_for(asyncio.shield(waiter), timeout=0.5)
+    except asyncio.TimeoutError:
+        stop(signal.SIGKILL)
+        try:
+            await asyncio.wait_for(asyncio.shield(waiter), timeout=0.5)
+        except asyncio.TimeoutError:
+            raise RoleStatusError() from None
+    if process.returncode is None:
+        raise RoleStatusError()
+
+
+async def _await_owned_cleanup(cleanup):
+    """Repeated caller cancellation must not abandon the bounded cleanup."""
+    cancelled = False
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            cancelled = True
+    cleanup.result()
+    if cancelled:
+        raise asyncio.CancelledError()
 
 
 def _installed_source_identity(expected_implementation_sha: str) -> str | None:
@@ -120,13 +172,10 @@ async def _query_fixed_pid1() -> list[dict]:
             raise RoleStatusError()
         return _decode_pid1(bytes(chunks), source_bound=True)
     finally:
-        if process.returncode is None:
-            # Kill only this owned, read-only query. Do not reset the caller's
-            # deadline while waiting for cancellation/SSL cleanup.
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
+        # Cancellation must reap the exact query too. Killing the outer
+        # Python process alone would strand this descendant.
+        cleanup = asyncio.create_task(_settle_owned_read(process))
+        await _await_owned_cleanup(cleanup)
 
 
 def qualify_pair(before, after, *, host_binding_sha256: str, implementation_sha: str,
@@ -255,7 +304,8 @@ class InstalledHermesRoleMetadataObserver:
                     process = await asyncio.create_subprocess_exec(*command,
                         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.DEVNULL,
-                        env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C', 'LANG': 'C'})
+                        env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C', 'LANG': 'C'},
+                        start_new_session=True)
                     assert process.stdout is not None
                     raw = await process.stdout.read(8193)
                     if len(raw) > 8192 or await process.wait() != 0:
@@ -269,6 +319,6 @@ class InstalledHermesRoleMetadataObserver:
         except (OSError, ValueError, RuntimeError, asyncio.TimeoutError):
             raise RoleStatusError() from None
         finally:
-            if process is not None and process.returncode is None:
-                try: process.kill()
-                except ProcessLookupError: pass
+            if process is not None:
+                cleanup = asyncio.create_task(_settle_owned_read(process, session=True))
+                await _await_owned_cleanup(cleanup)

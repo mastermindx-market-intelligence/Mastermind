@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import signal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -308,6 +309,87 @@ async def test_source_epoch_changes_during_query_withholds_rows(installed, monke
     with pytest.raises(RoleStatusError):
         await observer.HermesRoleMetadataObserver(host_binding_sha256=BINDING,
             implementation_sha=IMPLEMENTATION).read_pair()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize('mode', ['timeout', 'cancel', 'cancel-twice'])
+async def test_owned_observation_timeout_and_cancel_settle_waiting_descendant(tmp_path, mode):
+    # Only two newly-created benign fixture processes. The parent owns/reaps
+    # its child and reports cleanup; no Hermes, systemctl or host PID is read.
+    marker = tmp_path/'settled'
+    script = r'''
+import os,signal,subprocess,sys
+child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])
+def stop(sig,frame):
+ child.terminate()
+ child.wait(timeout=2)
+ with open(sys.argv[1],'w') as f:f.write('owned-descendant-reaped')
+ raise SystemExit(0)
+signal.signal(signal.SIGTERM,stop)
+print('READY',flush=True)
+signal.pause()
+'''
+    process = await asyncio.create_subprocess_exec(sys.executable, '-I', '-S', '-B', '-c', script, str(marker),
+        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+    assert await process.stdout.readline() == b'READY\n'
+    published = []
+    async def request():
+        try:
+            if mode=='timeout':
+                async with asyncio.timeout(0.02): await process.stdout.read()
+            else: await process.stdout.read()
+            published.append('observation')
+        finally:
+            task=asyncio.create_task(observer._settle_owned_read(process,session=True))
+            await observer._await_owned_cleanup(task)
+    task=asyncio.create_task(request())
+    if mode!='timeout':
+        await asyncio.sleep(0.02);task.cancel()
+        if mode=='cancel-twice': await asyncio.sleep(0);task.cancel()
+    with pytest.raises((asyncio.CancelledError,asyncio.TimeoutError)):
+        await asyncio.wait_for(task,timeout=3)
+    assert process.returncode is not None and await process.wait()==0
+    assert marker.read_text()=='owned-descendant-reaped' and published==[]
+    assert await process.stdout.read()==b''
+
+
+@pytest.mark.anyio
+async def test_fixed_query_cancellation_kills_and_awaits_its_exact_owned_process(monkeypatch):
+    process=await asyncio.create_subprocess_exec(sys.executable,'-I','-S','-B','-c','import time;time.sleep(60)',
+        stdin=asyncio.subprocess.DEVNULL,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL)
+    create=AsyncMock(return_value=process)
+    monkeypatch.setattr(observer.asyncio,'create_subprocess_exec',create)
+    task=asyncio.create_task(observer._query_fixed_pid1())
+    await asyncio.sleep(0.02);task.cancel()
+    with pytest.raises(asyncio.CancelledError): await task
+    assert process.returncode is not None and await process.wait()!=0
+    args,kwargs=create.call_args
+    assert args[:3]==('/usr/bin/systemctl','show','--no-pager')
+    assert args[-2:]==tuple(observer.UNITS)
+
+
+@pytest.mark.anyio
+async def test_direct_parent_kill_preimage_leaves_the_owned_descendant_pipe_open():
+    # Causal preimage: the exact former kill-only strategy leaves a waiting
+    # descendant. Give only this inert fixture a private session for cleanup;
+    # this does not claim the old production reader created one.
+    script="import subprocess,sys,time;subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);print('READY',flush=True);time.sleep(60)"
+    process=await asyncio.create_subprocess_exec(sys.executable,'-I','-S','-B','-c',script,
+        stdin=asyncio.subprocess.DEVNULL,stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,start_new_session=True)
+    assert await process.stdout.readline()==b'READY\n'
+    process.kill()  # The previous outer finally, targeting Python only.
+    await process.wait()
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(process.stdout.read(),timeout=0.03)
+    finally:
+        # Only the known private fixture group, whose live child holds its
+        # session/group identity. No historical or unrelated process target.
+        try: os.killpg(process.pid,signal.SIGKILL)
+        except ProcessLookupError: pass
+        assert await asyncio.wait_for(process.stdout.read(),timeout=1)==b''
 
 
 @pytest.mark.anyio
