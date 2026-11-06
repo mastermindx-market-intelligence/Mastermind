@@ -1,5 +1,5 @@
 {
-  "protected_source": "58e319d26195e01d1b9c0edc06fe50006a9c9d65",
+  "protected_source": "c571acc9d7d5a2b28b7b9a250163da8667cf5364",
   "installed_preimage_generation": "177118be6675cf5a292524610afaaf4d5afc33dc6a150c22291240e3b6245fcd",
   "files": {
     "artifact_delivery.py": {
@@ -11,5 +11,9 @@
       "bytes": 17909
     }
   },
-  "scope": "NEXTCUT source only; no install/read/publication; original operation remains Memory-root-owned"
+  "scope": "NEXTCUT source only; no install/read/publication; original operation remains Memory-root-owned",
+  "protected_preimage_paths": {
+    "artifact_delivery.py": "ops/native_fabric/quota_continuity/candidate/artifact_delivery.py",
+    "artifact_reader.py": "ops/native_fabric/quota_continuity/source/artifact_reader.py"
+  }
 }

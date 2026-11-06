@@ -880,6 +880,12 @@ def transport(alias, request, *, observer_source_hash=None, current_sources_sha2
         import original_result_read
         code = original_result_read.code_for_request(request, expected_hashes=current_sources_sha256)
         response_limit = original_result_read.MAX_RESPONSE
+    elif type(request) is dict and request.get("schema") == "mastermind.source_admitted_advertised_artifact_read.v1":
+        # Exact source-admitted advertised artifact recovery: one closed scope,
+        # one remote read, no producer attestation and no outcome acceptance.
+        import original_advertised_artifact
+        code = original_advertised_artifact.code_for_request(request)
+        response_limit = original_advertised_artifact.MAX_RESPONSE
     elif type(request) is dict and request.get("schema") == "mastermind.native_host_review_source_read.v1":
         if digest(local_file(HERE / "native_host_review_source_delivery.py", 65536)) != '3ec53fa0be3c69c28e265a1bb5b1cab3cc0ee3f6f6c03b93908d6c2685f2e902':
             raise ValueError("native_source_delivery_head_changed")
@@ -1599,6 +1605,9 @@ def main():
             if args.run_id == "rf-codegen-contracts-impl-01a1333c-v1":
                 import operator_stdout_delivery
                 receipt = operator_stdout_delivery.collect(args.run_id, args.destination)
+            elif args.run_id == "mm-u0-revision-lens-component-20261105-root":
+                import original_advertised_artifact
+                receipt = original_advertised_artifact.collect(args.run_id, args.destination)
             elif args.run_id in ("rf-static-checks-01a1333c-v1", "rf-fixed-smoke-runsc-01a1333c-v1", "rf-fixed-smoke-runsc-01a1333c-v2", "rf-fixed-smoke-runsc-01a1333c-v3"):
                 import current_failed_artifact_evidence
                 receipt = current_failed_artifact_evidence.export(args.run_id, args.destination)
