@@ -11,6 +11,7 @@ import {completeExecutiveSessionBinding} from './orchestration/os-executive-sess
 import {composeMissionHost} from './compose-mission-host';
 import unavailableContext from './fixtures/native-session-context-unavailable.json';
 import fixture from './fixtures/native-session-send-producer.json';
+import hermesFixture from './fixtures/native-hermes-session-send-producer.json';
 import programs from './fixtures/programs-available-workspace-service.json';
 import paired from './fixtures/window-mission-association-producer.json';
 import {decodeMissionv3} from './mission';
@@ -19,14 +20,16 @@ import namespace from './auth-recovery/fixtures/native-draft-owner-sequence.json
 const disposals:Array<()=>void>=[];
 beforeEach(()=>{history.replaceState(null,'',`/os/?work_ref=${fixture.selection.work_ref}&root_job_id=${fixture.selection.root_job_id}`);localStorage.clear();vi.spyOn(Date,'now').mockReturnValue(fixture.now_ms);Object.assign(window,{__TAURI_INTERNALS__:{}});});
 afterEach(()=>{cleanup();disposals.splice(0).forEach(f=>f());vi.restoreAllMocks();delete window.MastermindMissionHost;delete (window as unknown as {__TAURI_INTERNALS__?:unknown}).__TAURI_INTERNALS__;});
-async function setup(options:{readOnly?:boolean;unknown?:boolean;pending?:boolean;office?:boolean;unavailable?:boolean}={}){
- const room=controlRoomFixture(),row=structuredClone(room.work[0]);row.work_ref=fixture.selection.work_ref;row.agent_os.workstream=fixture.selection.work_ref.slice(3);row.agent_os.title='Inert supplied Office project';room.work=[row];
- const responsibility=structuredClone(room.autonomy.responsibilities[0]);Object.assign(responsibility,{responsibility_ref:fixture.selection.work_ref,root_job_id:fixture.selection.root_job_id,root_job_candidates:[fixture.selection.root_job_id],root_job_ambiguous:false,runtime_root_state:'RESOLVED'});room.autonomy.responsibilities=[responsibility];
+async function setup(options:{readOnly?:boolean;unknown?:boolean;pending?:boolean;office?:boolean;unavailable?:boolean;secretary?:boolean}={}){
+ const selectedFixture=options.secretary?hermesFixture:fixture;
+ if(options.secretary)history.replaceState(null,'','/os/?work_ref='+selectedFixture.selection.work_ref+'&root_job_id='+selectedFixture.selection.root_job_id+'&session_target_kind=hermes_secretary');
+ const room=controlRoomFixture(),row=structuredClone(room.work[0]);row.work_ref=selectedFixture.selection.work_ref;row.agent_os.workstream=selectedFixture.selection.work_ref.slice(3);row.agent_os.title='Inert supplied Office project';room.work=[row];
+ const responsibility=structuredClone(room.autonomy.responsibilities[0]);Object.assign(responsibility,{responsibility_ref:selectedFixture.selection.work_ref,root_job_id:selectedFixture.selection.root_job_id,root_job_candidates:[selectedFixture.selection.root_job_id],root_job_ambiguous:false,runtime_root_state:'RESOLVED'});room.autonomy.responsibilities=[responsibility];
  // Explicit inert Workspace source premises. No extra Runtime target or
  // permission is derived from these display documents.
- const mission=JSON.parse(JSON.stringify(paired.mission).replaceAll(paired.selection.work_ref,fixture.selection.work_ref).replaceAll(paired.selection.root_job_id,fixture.selection.root_job_id));
+ const mission=JSON.parse(JSON.stringify(paired.mission).replaceAll(paired.selection.work_ref,selectedFixture.selection.work_ref).replaceAll(paired.selection.root_job_id,selectedFixture.selection.root_job_id));
  mission.result_refs.absent_job_ids.sort();mission.result_refs.omitted_job_ids.sort();
- if(options.office)expect(decodeMissionv3(mission,{workRef:fixture.selection.work_ref,rootJobId:fixture.selection.root_job_id})).not.toBeNull();
+ if(options.office)expect(decodeMissionv3(mission,{workRef:selectedFixture.selection.work_ref,rootJobId:selectedFixture.selection.root_job_id})).not.toBeNull();
  const events=new Map<string,Set<(event:{payload:unknown})=>void>>();
  let sendHeld:Promise<unknown>|null=null;
  const invoke=vi.fn(async(command:string,args?:Record<string,unknown>):Promise<unknown>=>{
@@ -34,22 +37,22 @@ async function setup(options:{readOnly?:boolean;unknown?:boolean;pending?:boolea
   if(options.office&&command==='read_programs')return {...structuredClone(programs),control_room:room};
   if(options.office&&command==='read_mission_v3')return mission;
   if(command==='executive_auth_status')return {generation:1,available:true};
-  if(command==='executive_session_context')return structuredClone(options.unavailable?unavailableContext:options.readOnly?fixture.read_context:fixture.context);
+  if(command==='executive_session_context')return structuredClone(options.unavailable?unavailableContext:options.readOnly?selectedFixture.read_context:selectedFixture.context);
   if(command==='read_native_draft_continuity')return namespace.expired;
-  if(command==='executive_session_send')return sendHeld??structuredClone(options.unknown?fixture.unknown:fixture.sent);
-  if(command==='executive_session_reply')return structuredClone(fixture.reply);
+  if(command==='executive_session_send')return sendHeld??structuredClone(options.unknown?selectedFixture.unknown:selectedFixture.sent);
+  if(command==='executive_session_reply')return structuredClone(selectedFixture.reply);
   throw Error('SOURCE_NOT_SUPPLIED');
  });
  const raw=await createNativeClient(invoke as never,async(name,fn)=>{const set=events.get(name)??new Set();set.add(fn);events.set(name,set);return()=>set.delete(fn);});
  const composed=composeMissionHost(raw,null,new IDBFactory(),'native');disposals.push(composed.dispose);await composed.ready;await composed.sessionReady;
  const sessionBinding=completeExecutiveSessionBinding(composed.host.sessionCommandBinding)!;
- const pointer={kind:'message' as const,operationKey:fixture.arguments.operation_key,targetKey:fixture.arguments.target_ref};
- if(options.pending)await sessionBinding.store.reserve(fixture.context.data.principal_scope,pointer);
+ const pointer={kind:'message' as const,operationKey:selectedFixture.arguments.operation_key,targetKey:selectedFixture.arguments.target_ref};
+ if(options.pending)await sessionBinding.store.reserve(selectedFixture.context.data.principal_scope,pointer);
  window.MastermindMissionHost=composed.host;render(<App/>);
  if(!options.office&&!options.unavailable)fireEvent.click(await screen.findByRole('button',{name:'Open session requests'}));
  const panel=()=>within(screen.getByRole('region',{name:'Session continuation'}));
- const edit=async()=>{const field=await screen.findByRole('textbox',{name:'What would you like done?'});fireEvent.focus(field);await waitFor(()=>expect(field).toHaveProperty('readOnly',false));fireEvent.change(field,{target:{value:fixture.arguments.instruction}});fireEvent.change(screen.getByRole('textbox',{name:'How will we know it is done?'}),{target:{value:fixture.arguments.stop_condition}});return field;};
- const saved=()=>sessionBinding.store.read(fixture.context.data.principal_scope);
+ const edit=async()=>{const field=await screen.findByRole('textbox',{name:'What would you like done?'});fireEvent.focus(field);await waitFor(()=>expect(field).toHaveProperty('readOnly',false));fireEvent.change(field,{target:{value:selectedFixture.arguments.instruction}});fireEvent.change(screen.getByRole('textbox',{name:'How will we know it is done?'}),{target:{value:selectedFixture.arguments.stop_condition}});return field;};
+ const saved=()=>sessionBinding.store.read(selectedFixture.context.data.principal_scope);
  const noWorkspaceWrite=()=>expect(invoke.mock.calls.filter(([name])=>/executive_submit|consume|project_planning|fresh_conversation/.test(name))).toHaveLength(0);
  return {host:composed.host,invoke,pointer,panel,edit,saved,noWorkspaceWrite,
   restore:async()=>{await act(async()=>events.get('mastermind-executive-auth-state')?.forEach(fn=>fn({payload:{generation:3,available:true}})));},
@@ -122,5 +125,73 @@ it('ordinary unavailable Session context cannot turn public native availability 
  await act(async()=>{await Promise.resolve();await Promise.resolve();});
  expect(completeExecutiveSessionBinding(e.host.sessionCommandBinding)!.port.context()).toBeNull();
  expect(screen.queryByRole('button',{name:'Open session requests'})).toBeNull();expect(screen.queryByRole('textbox',{name:'What would you like done?'})).toBeNull();
+ expect(e.invoke.mock.calls.filter(([name])=>name==='executive_session_send')).toHaveLength(0);e.noWorkspaceWrite();
+});
+
+
+it('native Office sends once to the explicit Secretary and clears its original pointer only after the qualified answer renders',async()=>{
+ const e=await setup({office:true,secretary:true});fireEvent.click(screen.getByRole('button',{name:'Meta-CEO'}));
+ await e.edit();await waitFor(()=>expect(e.panel().getByRole('button',{name:'Send'})).toHaveProperty('disabled',false));
+ fireEvent.click(e.panel().getByRole('button',{name:'Send'}));
+ await waitFor(()=>expect(e.invoke.mock.calls.filter(([name])=>name==='executive_session_send')).toHaveLength(1));
+ expect(e.invoke.mock.calls.find(([name])=>name==='executive_session_send')?.[1]).toEqual({arguments:hermesFixture.arguments});
+ await waitFor(async()=>expect(await e.saved()).toEqual(e.pointer));
+ expect(screen.queryByText(hermesFixture.reply.data.answer)).toBeNull();
+ fireEvent.click(await e.panel().findByRole('button',{name:'Check status'}));
+ expect((await screen.findByRole('region',{name:'Original reply'})).textContent).toContain(hermesFixture.reply.data.answer);
+ await waitFor(async()=>expect(await e.saved()).toBeNull());
+ expect(e.invoke.mock.calls.filter(([name])=>name==='executive_session_send')).toHaveLength(1);
+ expect(e.invoke.mock.calls.find(([name])=>name==='executive_session_reply')?.[1]).toEqual({operationKey:e.pointer.operationKey});
+ e.noWorkspaceWrite();
+});
+
+it('a native read-only Secretary context exposes observation without a new SEND action',async()=>{
+ const e=await setup({secretary:true,readOnly:true});await screen.findByRole('region',{name:'Session continuation'});
+ expect(screen.queryByRole('textbox',{name:'What would you like done?'})).toBeNull();
+ expect(e.invoke.mock.calls.filter(([name])=>name==='executive_session_send')).toHaveLength(0);e.noWorkspaceWrite();
+});
+
+it('an uncertain native Secretary send retains its original pointer and status reads that operation without resubmission',async()=>{
+ const e=await setup({secretary:true,unknown:true});await e.edit();
+ await waitFor(()=>expect(e.panel().getByRole('button',{name:'Send'})).toHaveProperty('disabled',false));
+ fireEvent.click(e.panel().getByRole('button',{name:'Send'}));
+ await waitFor(async()=>expect(await e.saved()).toEqual(e.pointer));
+ fireEvent.click(await e.panel().findByRole('button',{name:'Check status'}));
+ await waitFor(async()=>expect(await e.saved()).toBeNull());
+ expect(e.invoke.mock.calls.filter(([name])=>name==='executive_session_send')).toHaveLength(1);
+ expect(e.invoke.mock.calls.find(([name])=>name==='executive_session_reply')?.[1]).toEqual({operationKey:e.pointer.operationKey});e.noWorkspaceWrite();
+});
+
+it('native Secretary auth revocation after entered send withholds late success and preserves the same pending operation',async()=>{
+ const e=await setup({secretary:true});await e.edit();const finish=e.holdSend();
+ await waitFor(()=>expect(e.panel().getByRole('button',{name:'Send'})).toHaveProperty('disabled',false));
+ fireEvent.click(e.panel().getByRole('button',{name:'Send'}));
+ await waitFor(()=>expect(e.invoke.mock.calls.filter(([name])=>name==='executive_session_send')).toHaveLength(1));
+ await e.revoke();await act(async()=>finish(hermesFixture.sent));
+ expect(await e.saved()).toEqual(e.pointer);expect(screen.queryByText(hermesFixture.reply.data.answer)).toBeNull();
+ expect(e.invoke.mock.calls.filter(([name])=>name==='executive_session_send')).toHaveLength(1);e.noWorkspaceWrite();
+});
+
+it('native Secretary reopen reads the retained original answer without preparing or sending again',async()=>{
+ const e=await setup({secretary:true,pending:true});fireEvent.click(await screen.findByRole('button',{name:'Check status'}));
+ await waitFor(async()=>expect(await e.saved()).toBeNull());
+ expect(await screen.findByText(hermesFixture.reply.data.answer)).toBeTruthy();
+ expect(e.invoke.mock.calls.filter(([name])=>name==='executive_session_send')).toHaveLength(0);e.noWorkspaceWrite();
+});
+
+it('a replaced native host cannot borrow the rendered Secretary target for a send',async()=>{
+ const e=await setup({secretary:true});await e.edit();const send=e.panel().getByRole('button',{name:'Send'});
+ await waitFor(()=>expect(send).toHaveProperty('disabled',false));
+ window.MastermindMissionHost={...e.host};fireEvent.click(send);await act(async()=>{});
+ expect(e.invoke.mock.calls.filter(([name])=>name==='executive_session_send')).toHaveLength(0);
+ expect(await e.saved()).toBeNull();e.noWorkspaceWrite();
+});
+
+it('unavailable native Secretary context creates neither an entry nor a send despite native auth availability',async()=>{
+ const e=await setup({secretary:true,unavailable:true});
+ await waitFor(()=>expect(e.invoke.mock.calls.some(([name])=>name==='executive_session_context')).toBe(true));
+ await act(async()=>{await Promise.resolve();await Promise.resolve();});
+ expect(completeExecutiveSessionBinding(e.host.sessionCommandBinding)!.port.context()).toBeNull();
+ expect(screen.queryByRole('button',{name:'Open session requests'})).toBeNull();
  expect(e.invoke.mock.calls.filter(([name])=>name==='executive_session_send')).toHaveLength(0);e.noWorkspaceWrite();
 });

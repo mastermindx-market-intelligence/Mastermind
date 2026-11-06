@@ -711,10 +711,10 @@ REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'f20b5b399ff9c6ee6c0cef0447156c59994b6db358c14b759b1d8e3e4bd253cc', 'sites': ((3513, 68, 71, 'int', '503'), (3518, 69, 72, 'int', '503'), (3522, 67, 70, 'int', '503'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '74bb421b1d49df530d226bceefe05aafd84f8f97a64bca79c69716f2651a8bf2', 'sites': ((3513, 68, 71, 'int', '503'), (3518, 69, 72, 'int', '503'), (3522, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'cd31cfc2d232e8d3b432ba059209a8a5f8479fd7dc5a811d1897ca664207645f', 'sites': ((13, 118, 121, 'int', '700'),)}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'c09be202e4c09efc98ba3568122d5d281b82f3f5539b1a16fbe4aa0d71b805df', 'sites': ((13, 118, 121, 'int', '700'),)}
 
 # BYOK metadata READ re-pin: same eight action literals and unchanged action AST.
 # Attended parent source check under the current Chairman waiver; no formal approval claim.
