@@ -99,3 +99,50 @@ python3 -m unittest tests.test_linux_cache_preview tests.test_fleet_storage_volu
 
 Do not run `sweep.main()` or any remote invocation in tests. Existing scheduled
 sweep behavior is unchanged unless the new explicit preview flag is supplied.
+
+## Fixed-preview installation preparation — source only
+
+`preview_install.py` provides the missing narrow installation/preflight operation
+inside this existing owner. It has **no network or automatic entrypoint**. Its
+only file targets are `linux_cache_preview.py` on Linux and the existing
+`fleet_remote_sweep.py` on M2. It cannot install a service, change enrollment or
+admission, clear a lease, reclaim cache bytes, or run the preview/sweeper.
+
+The receiver must first qualify the actual maintenance authorization, protected
+source bytes and current target custody. Public Fabric enrollment is addressing
+evidence, not that authorization. `enrolled_binding` resolves the semantic Ubuntu
+ID through the existing `ext/hosts.json` `ssh_alias`/`hostnames` and the same
+account's public SSH configuration. Dynamic Include/Match or unknown mappings
+are held rather than evaluated by another process. No credentials are read.
+For example, an enrolled `ubuntu0` can resolve to `mmx-ubuntu0`; the literal
+`--hosts ubuntu0` spelling alone is never a qualified maintenance operation.
+
+`transport_plan` prepares one argv for the existing driver's `SSH`/`run` carrier,
+without calling it. The operation is only fixed-target `inspect`, `install`, or
+source-bound `preview`; each remote command first requires the exact expected
+account and enrolled machine hostname. There is no reachability probe, rsync,
+alternate alias/host, retry, sweep or fallback. A separately authorized operator
+must re-read/reconcile the public binding at action time before using that argv.
+
+Remote installed preimages remain UNKNOWN until an authorized fixed `inspect`
+actually reports their SHA or ABSENT. Unknown is never converted to ABSENT.
+Installing requires that exact observed preimage and the accepted payload SHA.
+M2 driver installation additionally requires its exact current installed SHA.
+The original fleet-driver lock (M2) or admission lock and empty active namespace
+(Linux) must be available. No stale marker is removed. Target directories,
+ownership, modes, symlinks, hardlinks, namespace and lock identity are checked.
+
+Before replacement, the installer verifies an import of the accepted module
+under a non-main name, durably retains the original bytes when present and
+writes a PREPARED receipt in the existing storage-cleanup state directory.
+It rechecks the exact target preimage, then atomically replaces that fixed file;
+an ABSENT target uses atomic no-replace. A matching postimage import produces a
+separate VERIFIED receipt. Neither import invokes preview, sweep or network.
+An unresolved PREPARED record holds later installs, including new IDs. After an
+uncertain effect there is no automatic rollback or replay: the same owner must
+reconcile the target and retained backup/receipt. Installing does not itself
+authorize a preview or cleanup, and does not prove physical capacity recovery.
+
+Hermetic installer checks: `python3 -m unittest tests.test_storage_preview_install`.
+The source candidate and prepared operation packet have not installed anything
+or invoked a remote host. Root retains the actual installation/preview decision.
