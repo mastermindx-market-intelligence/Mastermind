@@ -594,5 +594,175 @@ class ClonePruneGuardTests(unittest.TestCase):
         self.assertFalse(hasattr(g, "clone_file"))
 
 
+class BasicInfoEnvelopeTruncationTests(unittest.TestCase):
+    """An explicitly truncated outer envelope must be refused before normalization.
+
+    The vendor may mark a get_basic_info response, or its result envelope, as
+    truncated. The guard normalizes the result into a file/page census, so an
+    envelope flag that is dropped before normalization lets a partial
+    observation become a file census, a scoped parity or a prune readiness.
+    Absent and literal False stay valid; only literal True is refused.
+    """
+
+    FILE_NAMES = {SRC: "Young harmony", CLONE: "Young harmony (copy)"}
+
+    def _file_payload(self, file_id):
+        return {"fileId": file_id, "fileName": self.FILE_NAMES[file_id],
+                "pages": copy.deepcopy(PAGES), "contentHash": {"tokens": "c1"}}
+
+    def _page_payload(self, file_id, page):
+        boards = ([{"id": "1-1", "name": "Migration fidelity specimen", "childCount": 3}]
+                  if page["id"] == "p-1-0" else [])
+        return {"fileId": file_id, "fileName": self.FILE_NAMES[file_id],
+                "pageId": page["id"], "pageName": page["name"],
+                "nodeCount": 5 if boards else 1, "artboardCount": len(boards),
+                "artboards": boards, "fontFamilies": ["Inter"] if boards else []}
+
+    def _response(self, payload, *, outer=None, result=None, warning=False):
+        content = [{"type": "text", "text": json.dumps(payload)}]
+        if warning:
+            content.append({"type": "text", "text": WARNING})
+        envelope = {"content": content}
+        if result is not None:
+            envelope["truncated"] = result
+        response = {"state": "OBSERVED", "result": envelope}
+        if outer is not None:
+            response["truncated"] = outer
+        return response
+
+    def _vendor(self, *, outer=None, result=None, warning=False):
+        def native(action, *, tool, arguments):
+            self.assertEqual((action, tool), ("read", "get_basic_info"))
+            file_id = arguments["fileId"]
+            page_id = arguments.get("pageId")
+            if page_id is None:
+                return self._response(self._file_payload(file_id), outer=outer,
+                                      result=result, warning=warning)
+            page = next(item for item in PAGES if item["id"] == page_id)
+            return self._response(self._page_payload(file_id, page), outer=outer,
+                                  result=result, warning=warning)
+        return native
+
+    def _expect_refusal(self, thunk, describe):
+        try:
+            outcome = thunk()
+        except g.bridge.Refusal as exc:
+            self.assertEqual(exc.code, "DOCUMENT_SCHEMA_UNVERIFIED",
+                             "wrong refusal code %r" % (exc.code,))
+            return
+        self.fail("no refusal; accepted outcome: %s" % (describe(outcome),))
+
+    def test_reject_read_refuses_outer_response_truncated(self):
+        raw = self._response(self._file_payload(SRC), outer=True)
+        with patch.object(g.bridge, "execute", return_value=raw):
+            self._expect_refusal(
+                lambda: g._read(SRC),
+                lambda info: "file info fileId=%r pages=%r"
+                % (info.get("fileId"), info.get("pages")))
+
+    def test_reject_read_refuses_result_envelope_truncated(self):
+        raw = self._response(self._file_payload(SRC), result=True)
+        with patch.object(g.bridge, "execute", return_value=raw):
+            self._expect_refusal(
+                lambda: g._read(SRC),
+                lambda info: "file info fileId=%r pages=%r"
+                % (info.get("fileId"), info.get("pages")))
+
+    def test_reject_native_page_refuses_outer_response_truncated(self):
+        raw = self._response(self._page_payload(SRC, PAGES[0]), outer=True)
+        with patch.object(g.bridge, "execute", return_value=raw):
+            self._expect_refusal(
+                lambda: g._read_native_page(SRC, PAGES[0]),
+                lambda page: "page %r nodes=%r"
+                % (page.get("page_id"), page.get("node_count")))
+
+    def test_reject_native_page_refuses_result_envelope_truncated(self):
+        raw = self._response(self._page_payload(SRC, PAGES[0]), result=True)
+        with patch.object(g.bridge, "execute", return_value=raw):
+            self._expect_refusal(
+                lambda: g._read_native_page(SRC, PAGES[0]),
+                lambda page: "page %r nodes=%r"
+                % (page.get("page_id"), page.get("node_count")))
+
+    def test_reject_compare_refuses_outer_response_truncated(self):
+        with patch.object(g.bridge, "execute", side_effect=self._vendor(outer=True)):
+            self._expect_refusal(
+                lambda: g.compare_file_pair(SRC, CLONE),
+                lambda out: "state=%r complete_file_native_census_observed=%r"
+                % (out.get("state"), out.get("complete_file_native_census_observed")))
+
+    def test_reject_compare_refuses_result_envelope_truncated(self):
+        with patch.object(g.bridge, "execute", side_effect=self._vendor(result=True)):
+            self._expect_refusal(
+                lambda: g.compare_file_pair(SRC, CLONE),
+                lambda out: "state=%r complete_file_native_census_observed=%r"
+                % (out.get("state"), out.get("complete_file_native_census_observed")))
+
+    def test_control_read_accepts_absent_and_false_truncated_flags(self):
+        for label, outer, result in (("absent", None, None),
+                                     ("outer-false", False, None),
+                                     ("result-false", None, False),
+                                     ("both-false", False, False)):
+            with self.subTest(flags=label):
+                raw = self._response(self._file_payload(SRC), outer=outer,
+                                     result=result, warning=True)
+                warnings = []
+                with patch.object(g.bridge, "execute", return_value=raw):
+                    info = g._read(SRC, warnings=warnings)
+                self.assertEqual(info["fileId"], SRC)
+                self.assertEqual(info["fileName"], self.FILE_NAMES[SRC])
+                self.assertEqual(info["pages"], PAGES)
+                self.assertEqual([w["text"] for w in warnings], [WARNING])
+
+    def test_control_native_page_accepts_absent_and_false_truncated_flags(self):
+        for label, outer, result in (("absent", None, None),
+                                     ("outer-false", False, None),
+                                     ("result-false", None, False),
+                                     ("both-false", False, False)):
+            with self.subTest(flags=label):
+                raw = self._response(self._page_payload(SRC, PAGES[0]), outer=outer,
+                                     result=result, warning=True)
+                warnings = []
+                with patch.object(g.bridge, "execute", return_value=raw):
+                    page = g._read_native_page(SRC, PAGES[0], warnings=warnings)
+                self.assertEqual(page["page_id"], "p-1-0")
+                self.assertEqual(page["node_count"], 5)
+                self.assertEqual(page["artboard_count"], 1)
+                self.assertEqual(page["artboards"],
+                                 [{"id": "1-1", "name": "Migration fidelity specimen",
+                                   "childCount": 3}])
+                self.assertEqual(page["font_families"], ["Inter"])
+                self.assertEqual([w["text"] for w in warnings], [WARNING])
+
+    def test_control_compare_reaches_scoped_parity_with_absent_and_false_flags(self):
+        for label, outer, result in (("absent", None, None),
+                                     ("outer-false", False, None),
+                                     ("result-false", None, False),
+                                     ("both-false", False, False)):
+            with self.subTest(flags=label):
+                with patch.object(g.bridge, "execute",
+                                  side_effect=self._vendor(outer=outer, result=result)):
+                    out = g.compare_file_pair(SRC, CLONE)
+                self.assertEqual(out["state"], "OBSERVED_SCOPE_PARITY")
+                self.assertTrue(out["complete_file_native_census_observed"])
+                self.assertTrue(out["token_hash_equal"])
+                self.assertFalse(out["native_restore_verified"])
+                self.assertFalse(out["resource_actions_authorized"])
+                self.assertFalse(out["atomic_native_revision_bound"])
+                self.assertEqual(out["paper_mutations"], 0)
+                self.assertEqual(out["native_page_scope_ids"], ["p-1-0", "p-3-0"])
+
+    def test_control_warning_text_is_retained_under_valid_envelope_flags(self):
+        with patch.object(g.bridge, "execute",
+                          side_effect=self._vendor(outer=False, result=False, warning=True)):
+            out = g.compare_file_pair(SRC, CLONE)
+        texts = [w["text"] for w in out["warnings"]]
+        self.assertTrue(texts)
+        self.assertEqual(set(texts), {WARNING})
+        self.assertEqual({w["file_id"] for w in out["warnings"]}, {SRC, CLONE})
+        self.assertFalse(out["native_restore_verified"])
+        self.assertFalse(out["resource_actions_authorized"])
+
+
 if __name__ == "__main__":
     unittest.main()
