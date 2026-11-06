@@ -35,6 +35,12 @@ it('inspects actual source provenance and returns to the same acquired project S
  const scoped=e.calls.filter(c=>c.command.startsWith('read_project_knowledge_'));
  expect(scoped.length).toBeGreaterThan(0);
  expect(scoped.every(c=>(c.args as {selection:{work_ref:string}}).selection.work_ref===sourcesWorkRef)).toBe(true);
+ fireEvent.click(screen.getByRole('button',{name:'Sources',exact:true}));
+ await screen.findByRole('heading',{name:'Sources',level:1});
+ expect(screen.queryByRole('button',{name:'Close source details'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Back to search',exact:true}));
+ expect(screen.getByLabelText('Search this project')).toHaveProperty('value','literal');
+ expect(document.activeElement).toBe(screen.getByLabelText('Search this project'));
  expect(e.calls.filter(c=>/prepare|submit|consume|create|send|pause|resume|reconcile/.test(c.command))).toHaveLength(0);
 });
 it('does not revive a detached return or private query after actual auth withdrawal',async()=>{
