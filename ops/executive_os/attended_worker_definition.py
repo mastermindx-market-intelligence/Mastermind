@@ -81,7 +81,7 @@ def attest_binary_document(path, *, allowed_versions):
                   'binary': dataclasses.asdict(binary)})
 
 
-def build_finite_control_delta(*, definition_dir, worker_artifacts):
+def build_finite_control_delta(*, definition_dir, worker_artifacts, native_capacity_v2=None):
     """Pure staging delta for the existing root-owned Control publisher.
 
     No arm/submit flag, activation receipt, quota or service is produced here.
@@ -107,9 +107,23 @@ def build_finite_control_delta(*, definition_dir, worker_artifacts):
             or physical.worker_source_config_digest != _digest(worker_bytes)
             or worker.get('harness_binding_id') != canary.BINDING):
         raise AttendedDefinitionError('finite Control delta differs from its original worker')
-    return dict(fabric_bridge_armed=False, fabric_bindings_path=str(directory/'bindings.json'),
+    value = dict(fabric_bridge_armed=False, fabric_bindings_path=str(directory/'bindings.json'),
         fabric_bindings_sha256=_digest(bindings_bytes),
         fabric_attended_probe={'worker_config_path': str(directory/'worker.json')})
+    if native_capacity_v2 is not None:
+        from ops.executive_os.capacity_source_contract import validate_native_subscription_capacity_enrollment
+        from scripts.executive_os_phase1c import _validate_fabric_bridge_config, ServiceError
+        enrollment = validate_native_subscription_capacity_enrollment(
+            worker.get('native_capacity_enrollment'))
+        if (type(native_capacity_v2) is not dict
+                or native_capacity_v2.get('macro_release') != enrollment['registration_source']['release_commit']):
+            raise AttendedDefinitionError('native Control source differs from its worker')
+        value['native_capacity_v2'] = dict(native_capacity_v2)
+        try:
+            _validate_fabric_bridge_config(value)
+        except ServiceError:
+            raise AttendedDefinitionError('native Control source pin is invalid') from None
+    return value
 
 
 def _entry(release_root, commit_sha, tree_sha, manifest_sha256, arguments):
@@ -216,7 +230,7 @@ def build_finite_worker_artifacts(*, primary_config, worker_id, worker_user, wor
         realm_generation, release_root, release_commit, release_tree, release_manifest_sha256, python_binary,
         host_ref, model_class, execution_profile_digest, service_source_sha256=None,
         permission_profile_sha256=None, routing_root_id, routing_parent_run_id,
-        max_turns=2, capacity_capability_id=None):
+        max_turns=2, capacity_capability_id=None, native_capacity_enrollment=None):
     """Return exact bytes for one owner-selected secondary worker, never publish.
 
     primary_config is the existing installed primary definition supplied by its
@@ -301,6 +315,14 @@ def build_finite_worker_artifacts(*, primary_config, worker_id, worker_user, wor
                 or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', capacity_capability_id) is None):
             raise AttendedDefinitionError('exact capacity capability identity required')
         worker['capacity_capability_id'] = capacity_capability_id
+    if native_capacity_enrollment is not None:
+        from ops.executive_os.capacity_source_contract import validate_native_subscription_capacity_enrollment
+        if capacity_capability_id is None:
+            raise AttendedDefinitionError('native enrollment requires its Provider Control identity')
+        stanza = validate_native_subscription_capacity_enrollment(native_capacity_enrollment)
+        if stanza['host_ref'] != host_ref:
+            raise AttendedDefinitionError('native enrollment differs from physical host owner')
+        worker['native_capacity_enrollment'] = stanza
     worker_bytes = _json(worker)
     physical = FabricHostBinding(socket_path=str(socket), host_ref=host_ref, worker_id=worker_id,
         worker_uid=worker_uid, worker_gid=worker_gid, bridge_uid=worker_uid,

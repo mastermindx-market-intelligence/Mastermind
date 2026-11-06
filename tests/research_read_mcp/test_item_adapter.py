@@ -175,20 +175,29 @@ async def test_sync_owner_exception_sanitized_and_slot_released():
 @pytest.mark.anyio
 async def test_shared_four_slots_and_cancelled_worker_retains_slot():
     release = threading.Event()
+    first_started = threading.Event()
+    release_cancelled = threading.Event()
     four_started = threading.Event()
     fifth_started = threading.Event()
     lock = threading.Lock()
+    started = [0]
     active = [0]
     peak = [0]
 
     class Blocking(Service):
         def work(self, **kwargs):
             with lock:
+                ordinal = started[0]
+                started[0] += 1
                 active[0] += 1
+                if ordinal == 0:
+                    first_started.set()
                 peak[0] = max(peak[0], active[0])
                 if active[0] == 4:
                     four_started.set()
             assert release.wait(5)
+            if ordinal == 0:
+                assert release_cancelled.wait(5)
             with lock:
                 active[0] -= 1
 
@@ -202,10 +211,12 @@ async def test_shared_four_slots_and_cancelled_worker_retains_slot():
             return dict(ok=True)
 
     adapter = ResearchPortAdapter(Blocking(), lambda _: 1000, "a" * 40)
-    workers = [asyncio.create_task(adapter.resolve_evidence_item(caller_context=context(), item_id=ITEM))
-               for _ in range(4)]
+    workers = [asyncio.create_task(adapter.resolve_evidence_item(caller_context=context(), item_id=ITEM))]
     status = None
     try:
+        assert await asyncio.wait_for(asyncio.to_thread(first_started.wait, 3), 4)
+        workers.extend(asyncio.create_task(adapter.resolve_evidence_item(caller_context=context(), item_id=ITEM))
+                       for _ in range(3))
         assert await asyncio.wait_for(asyncio.to_thread(four_started.wait, 3), 4)
         workers[0].cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -220,9 +231,24 @@ async def test_shared_four_slots_and_cancelled_worker_retains_slot():
         await asyncio.gather(*workers[1:], status)
         assert fifth_started.is_set()
         assert peak[0] == 4
+        # Joining the callers excludes the cancelled caller's shielded producer.
+        # Keep that producer alive deliberately: its slot must still be retained.
+        assert adapter._slots._value == 3
+        release_cancelled.set()
+        acquired = 0
+        try:
+            # Acquiring every permit joins the actual release callback, without
+            # assuming a thread/event-loop scheduling order or sleeping for it.
+            for _ in range(4):
+                await asyncio.wait_for(adapter._slots.acquire(), 3)
+                acquired += 1
+        finally:
+            for _ in range(acquired):
+                adapter._slots.release()
         assert adapter._slots._value == 4
     finally:
         release.set()
+        release_cancelled.set()
         await asyncio.gather(*workers, *([status] if status else []), return_exceptions=True)
 
 

@@ -1,0 +1,101 @@
+{
+  "schema": "mastermind.delivery_turnaround_observation.v1",
+  "started_at": "2026-11-02T18:49:26.971503+00:00",
+  "completed_at": "2026-11-02T18:49:51.864327+00:00",
+  "method": "Read-only native GitHub GraphQL open-PR pagination. Non-atomic cross-repository observation; counts are not product completion, workload admission or author ownership.",
+  "repos": {
+    "Mastermind": {
+      "open_count": 516,
+      "reported_counts": [
+        516
+      ],
+      "coverage_complete": true,
+      "draft_count": 402,
+      "created_before_2026_10_01": 207,
+      "age_days_median": 28.68,
+      "oldest_age_days": 71.52,
+      "merge_queue_entries": [
+        {
+          "number": 1828,
+          "state": "AWAITING_CHECKS",
+          "position": 2
+        },
+        {
+          "number": 1932,
+          "state": "AWAITING_CHECKS",
+          "position": 1
+        }
+      ],
+      "auto_merge_requested_count": 0
+    },
+    "macro": {
+      "open_count": 891,
+      "reported_counts": [
+        891
+      ],
+      "coverage_complete": true,
+      "draft_count": 613,
+      "created_before_2026_10_01": 470,
+      "age_days_median": 36.43,
+      "oldest_age_days": 77.49,
+      "merge_queue_entries": [],
+      "auto_merge_requested_count": 0
+    },
+    "mastermind-terminal": {
+      "open_count": 167,
+      "reported_counts": [
+        167
+      ],
+      "coverage_complete": true,
+      "draft_count": 87,
+      "created_before_2026_10_01": 69,
+      "age_days_median": 26.35,
+      "oldest_age_days": 62.73,
+      "merge_queue_entries": [],
+      "auto_merge_requested_count": 10
+    }
+  },
+  "outcome_metrics": {
+    "accepted_user_journeys": null,
+    "active_product_outcomes": null,
+    "source_to_deploy_days": null,
+    "deploy_to_user_proof_days": null,
+    "premature_session_stop_rate": null,
+    "recovery_rework_time": null
+  },
+  "limits": [
+    "GitHub source facts only; Executive connector read failed with HTTP429.",
+    "Missing outcomes/production/served-session facts are null, not zero.",
+    "No PR was closed, reassigned, labelled or classified terminal from age."
+  ],
+  "source_snapshot_sha256": "6b9055c0bcebd5d6b2af27e95aefe90ebd1798211342569ac7c6badc50d2fb06",
+  "totals": {
+    "open_count": 1574,
+    "draft_count": 1102,
+    "created_before_2026_10_01": 746
+  },
+  "source_fields": [
+    "number",
+    "title",
+    "url",
+    "createdAt",
+    "updatedAt",
+    "isDraft",
+    "headRefOid",
+    "reviewDecision",
+    "mergeQueueEntry.state",
+    "mergeQueueEntry.position",
+    "autoMergeRequest.enabledAt"
+  ],
+  "pagination": {
+    "first": 100,
+    "states": "OPEN",
+    "orderBy": {
+      "field": "CREATED_AT",
+      "direction": "ASC"
+    },
+    "cursor_guard": "no repeated endCursor; stop only at hasNextPage=false",
+    "coverage": "All page totalCount values matched final unique-row count in every repository."
+  },
+  "raw_snapshot_location": "Ephemeral original evidence on authorized M2; digest retained here. Re-query current native GitHub facts for current state; do not recreate an authoritative registry from this snapshot."
+}

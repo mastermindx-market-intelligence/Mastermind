@@ -25,3 +25,17 @@ section.card.session-continuation .unjoined { display:grid; gap:12px; border-sty
 
 section.card.session-continuation .state { color:var(--muted); background:var(--raised); border:1px solid var(--border); font-size:14px; line-height:20px; }
 [data-theme="light"] section.card.session-continuation textarea { background:var(--panel); }
+
+section.card.session-continuation .session-keyboard-hint { font-size:12px; line-height:18px; color:var(--muted); }
+
+/* The local preview uses neutral nested panels in both art directions. */
+section.card.session-continuation .session-request-preview summary { min-height:44px; padding-block:12px; cursor:pointer; font-size:14px; line-height:20px; }
+section.card.session-continuation .session-preview-content { display:grid; gap:24px; padding-top:12px; container-type:inline-size; container-name:session-message-preview; }
+section.card.session-continuation .session-preview-columns { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,320px); gap:24px; }
+section.card.session-continuation .session-preview-panel { display:grid; align-content:start; gap:16px; min-width:0; padding:24px; border:1px solid var(--border); border-radius:12px; background:var(--bg); }
+section.card.session-continuation .session-preview-panel h3 { margin:0; font-size:14px; line-height:20px; font-weight:600; }
+section.card.session-continuation .session-preview-text { white-space:pre-wrap; overflow-wrap:anywhere; }
+[data-theme="light"] section.card.session-continuation .session-preview-panel { background:var(--panel); box-shadow:0 2px 8px color-mix(in srgb,var(--text) 5%,transparent); }
+@media(max-width:760px) { section.card.session-continuation .session-preview-columns { grid-template-columns:minmax(0,1fr); } section.card.session-continuation .session-preview-panel { padding:20px; } }
+
+@container session-message-preview (max-width:720px) { section.card.session-continuation .session-preview-columns { grid-template-columns:minmax(0,1fr); } }

@@ -2,6 +2,8 @@
 import asyncio
 import hashlib
 import json
+import os
+import socket
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,18 +34,43 @@ def staged(tmp_path, raw):
                 fabric_bridge_armed=False)
 
 
-def compose(tmp_path, monkeypatch, raw, **kwargs):
+def compose(tmp_path, monkeypatch, raw, *, workspace_listener=None, workspace_socket_path=None, **kwargs):
     runtime = Runtime.at(tmp_path / "fixture-runtime")
     captured = {}
     client = object()
     monkeypatch.setattr(broker, "WorkerBrokerClient", lambda *args, **kwargs: client)
-    monkeypatch.setattr(cli, "activate_launchd_socket", lambda name: object())
+    monkeypatch.setattr(cli, "activate_launchd_socket", _workspace_aware_listener(raw, workspace_listener=workspace_listener, workspace_socket_path=workspace_socket_path))
     def service(config, **bindings):
+        from control_plane.executive_service import ExecutiveControlService
+        value = object.__new__(ExecutiveControlService)
+        value.config, value.runtime = config, runtime
+        value._namespace_custody = SimpleNamespace(bound_runtime=lambda actual: actual)
         captured.update(bindings)
-        return SimpleNamespace(config=config)
+        return value
     monkeypatch.setattr(cli, "ExecutiveControlService", service)
     service = cli._service_from_config(raw, **kwargs)
     return service, captured["supervisor_factory"](runtime), client
+
+
+def _workspace_aware_listener(raw, *, workspace_listener=None, workspace_socket_path=None):
+    """Use only the caller's preallocated private listener; never inspect/adopt a host path."""
+    canonical = ("/var/run/mastermind-executive/", "/private/var/run/mastermind-executive/")
+
+    def factory(name):
+        if name == "WorkspaceControlRoom" and "workspace_control_room" in raw:
+            selected = str(raw["workspace_control_room"]["socket_path"])
+            expected = str(workspace_socket_path) if workspace_socket_path is not None else None
+            # This guard precedes filesystem and listener access, including on
+            # hosts where the actual installed Control Room socket exists.
+            if (expected is None or selected != expected
+                    or any(os.path.normpath(value).startswith(canonical) for value in (selected, expected))):
+                raise AssertionError("private preallocated Workspace fixture listener required")
+            if type(workspace_listener) is not socket.socket or workspace_listener.getsockname() != expected:
+                raise AssertionError("owned Workspace fixture listener required")
+            return workspace_listener
+        return object()
+
+    return factory
 
 
 def test_cleanup_policy_is_shared_contract_and_supervisor_reexport():
@@ -244,3 +271,16 @@ def test_serve_validates_staged_file_before_canary_or_service(tmp_path, monkeypa
     monkeypatch.setattr(cli, "_load_control_environment_attestation", lambda *args, **kwargs: pytest.fail("Changed staged source reached attestation"))
     with pytest.raises(cli.ServiceError, match="Staged Fabric binding source refused"):
         asyncio.run(cli._serve_from_config(tmp_path / "control.json"))
+
+
+def test_workspace_fixture_never_inspects_or_binds_canonical_host_socket(monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("canonical path must be rejected before filesystem/socket access")
+    monkeypatch.setattr(os.path, "exists", forbidden)
+    monkeypatch.setattr(socket, "socket", forbidden)
+    for path in ("/var/run/mastermind-executive/workspace-control-room.sock",
+                 "/private/var/run/mastermind-executive/workspace-control-room.sock"):
+        raw = {"workspace_control_room": {"socket_path": path}}
+        factory = _workspace_aware_listener(raw, workspace_listener=object(), workspace_socket_path=path)
+        with pytest.raises(AssertionError, match="private preallocated"):
+            factory("WorkspaceControlRoom")

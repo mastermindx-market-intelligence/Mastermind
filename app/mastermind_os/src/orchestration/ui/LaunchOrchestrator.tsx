@@ -1,4 +1,6 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { registerUnsavedNavigationHold } from "../../auth-navigation-guard";
+import { LaunchRequestPreview, type LaunchRequestPreviewRead } from "../../activation/LaunchRequestPreview";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -10,10 +12,18 @@ export interface LaunchChoice {
   unavailableReason?: string;
 }
 
+export interface LaunchWorkstreamChoice extends LaunchChoice {
+  readonly projects: readonly LaunchChoice[];
+  readonly profiles: readonly LaunchChoice[];
+  readonly frontierModels?: readonly LaunchChoice[];
+}
+
 export interface LaunchForm {
+  workstreamRef?: string;
   goal: string;
   projectRef: string;
   profileRef: string;
+  frontierModelAlias?: string;
 }
 
 /** Explicit terminal outcome of one dispatched launch. */
@@ -47,14 +57,28 @@ export type LaunchOutcome = { status: "accepted" } | { status: "refused" };
 export type LaunchCompletion = (outcome: LaunchOutcome) => void;
 
 export interface LaunchOrchestratorProps {
+  locale?: "en" | "zh-CN";
+  /** Presentation only; all original selection and submission guards remain shared. */
+  presentation?: "standard" | "composer";
+  workstreams?: readonly LaunchWorkstreamChoice[];
+  defaultWorkstream?: string;
+  workstreamRef?: string;
+  onWorkstreamChange?: (ref: string) => void;
+  lockWorkstream?: boolean;
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
+  frontierModels?: readonly LaunchChoice[];
   /** Owner-side pending signal. Disables the form; never releases the guard. */
   submitting: boolean;
   /** A retained operation or unreadable store prevents a new submission. */
   blocked?: boolean;
   unavailableReason?: string;
   error?: string;
+  /** Optional App-owned presentation draft, never a credential or host state. */
+  initialDraft?: string;
+  onDraftChange?: (text: string) => void;
+  /** Explicit, effect-free owner mapper. Preview never prepares or submits an operation. */
+  previewRequest?: (intent: LaunchForm) => LaunchRequestPreviewRead;
   onSubmit: (intent: LaunchForm, onComplete: LaunchCompletion) => void;
   onCancel: () => void;
 }
@@ -98,24 +122,63 @@ function readTerminalStatus(outcome: unknown): "accepted" | "refused" | null {
 // ---------------------------------------------------------------------------
 
 export function LaunchOrchestrator({
-  projects,
-  profiles,
+  locale = "en",
+  presentation = "standard",
+  projects: defaultProjects,
+  profiles: defaultProfiles,
+  frontierModels: defaultFrontierModels,
+  workstreams,
+  defaultWorkstream,
+  workstreamRef,
+  onWorkstreamChange,
+  lockWorkstream = false,
   submitting,
   blocked = false,
   unavailableReason,
   error,
+  initialDraft = "",
+  onDraftChange,
+  previewRequest,
   onSubmit,
   onCancel,
 }: LaunchOrchestratorProps) {
   const formId = useId();
   const goalId = `${formId}-goal`;
+  const workstreamId = `${formId}-workstream`;
   const projectId = `${formId}-project`;
   const profileId = `${formId}-profile`;
+  const frontierId = `${formId}-frontier`;
 
   // Draft state — preserved across error and rerender
-  const [draftGoal, setDraftGoal] = useState("");
-  const [draftProject, setDraftProject] = useState("");
-  const [draftProfile, setDraftProfile] = useState("");
+  const [draftGoal, setDraftGoal] = useState(initialDraft);
+  const [draftWorkstream, setDraftWorkstream] = useState("");
+  const selectedWorkstream = workstreamRef ?? (draftWorkstream || defaultWorkstream);
+  const selectedBinding = workstreams?.find(choice => choice.ref === selectedWorkstream);
+  // A missing enrollment is unavailable; it never falls back to default choices.
+  const projects = workstreams ? selectedBinding?.projects ?? [] : defaultProjects;
+  const profiles = workstreams ? selectedBinding?.profiles ?? [] : defaultProfiles;
+  const frontierModels = workstreams ? selectedBinding?.frontierModels : defaultFrontierModels;
+  const workstreamUnavailable = workstreams !== undefined &&
+    (!selectedBinding || !!selectedBinding.unavailableReason);
+  const [draftChoices, setDraftChoices] = useState({
+    workstream: selectedWorkstream, project: "", profile: "", frontier: "",
+  });
+  const choices = draftChoices.workstream === selectedWorkstream ? draftChoices :
+    { workstream: selectedWorkstream, project: "", profile: "", frontier: "" };
+  const draftProject = choices.project;
+  const draftProfile = choices.profile;
+  const draftFrontier = choices.frontier;
+  const setDraftProject = (project: string) => setDraftChoices({ ...choices, project });
+  const setDraftProfile = (profile: string) => setDraftChoices({ ...choices, profile });
+  const setDraftFrontier = (frontier: string) => setDraftChoices({ ...choices, frontier });
+  const [requestPreview, setRequestPreview] = useState<{
+    read: LaunchRequestPreviewRead;
+    formKey: string;
+    mapper: NonNullable<LaunchOrchestratorProps["previewRequest"]>;
+    projects: readonly LaunchChoice[];
+    profiles: readonly LaunchChoice[];
+    frontierModels: readonly LaunchChoice[] | undefined;
+  } | null>(null);
 
   // In-flight launch owned by this component: armed synchronously when
   // onSubmit is dispatched, resolved only by its correlated completion.
@@ -126,6 +189,13 @@ export function LaunchOrchestrator({
   // the guard — a stale or duplicated completion is a no-op.
   const launchTokenRef = useRef<number | null>(null);
   const tokenSeqRef = useRef(0);
+
+  // Draft goals and exact pending-command handles must survive automatic
+  // identity renewal. No form content enters browser credential storage.
+  useEffect(() => registerUnsavedNavigationHold(() =>
+    draftGoal.length > 0 || draftWorkstream.length > 0 || draftProject.length > 0 || draftProfile.length > 0 ||
+    launchTokenRef.current !== null || submitting || launchInFlight
+  ), [draftGoal, draftWorkstream, draftProject, draftProfile, submitting, launchInFlight]);
 
   const launchPending = submitting || launchInFlight;
 
@@ -139,6 +209,7 @@ export function LaunchOrchestrator({
       // Success consumes the goal so the same intent cannot be launched twice
       // by a parent that stays mounted. A refusal keeps the draft.
       setDraftGoal("");
+      onDraftChange?.("");
     }
   };
 
@@ -166,6 +237,16 @@ export function LaunchOrchestrator({
       : "No profiles are currently available."
     : selectedProfileChoice.unavailableReason;
 
+  const frontierRequired = selectedProfile !== "native_research_only" &&
+    (frontierModels !== undefined || draftFrontier !== "");
+  const selectedFrontier = draftFrontier ||
+    frontierModels?.find((choice) => !choice.unavailableReason)?.ref ||
+    frontierModels?.[0]?.ref || "";
+  const frontierChoice = frontierModels?.find((choice) => choice.ref === selectedFrontier);
+  const frontierError = frontierRequired
+    ? (!frontierChoice ? (locale === "zh-CN" ? "请选择可用的 CEO 以继续。" : "Select an available CEO choice to continue.") : frontierChoice.unavailableReason)
+    : undefined;
+
   const goalBytes = utf8ByteLength(draftGoal);
   const goalTooLong = goalBytes > MAX_GOAL_BYTES;
   const goalBlank = draftGoal.trim().length === 0;
@@ -173,13 +254,34 @@ export function LaunchOrchestrator({
   const canSubmit =
     !blocked &&
     !unavailableReason &&
+    !workstreamUnavailable &&
     !launchPending &&
     !projectStale &&
     !profileStale &&
+    !frontierError &&
     !selectedProjectChoice?.unavailableReason &&
     !selectedProfileChoice?.unavailableReason &&
     !goalBlank &&
     !goalTooLong;
+
+  const previewForm: LaunchForm = {
+    goal: draftGoal, projectRef: selectedProject, profileRef: selectedProfile,
+    ...(selectedWorkstream !== undefined ? { workstreamRef: selectedWorkstream } : {}),
+    ...(frontierRequired ? { frontierModelAlias: selectedFrontier } : {}),
+  };
+  const previewFormKey = JSON.stringify(previewForm);
+  const visiblePreview = canSubmit && requestPreview?.formKey === previewFormKey &&
+    requestPreview.mapper === previewRequest && requestPreview.projects === projects &&
+    requestPreview.profiles === profiles && requestPreview.frontierModels === frontierModels
+      ? requestPreview.read : null;
+  const previewCurrentRequest = () => {
+    if (!canSubmit || !previewRequest || launchTokenRef.current !== null) return;
+    let read: LaunchRequestPreviewRead;
+    try { read = previewRequest(previewForm); }
+    catch { read = { state: "UNAVAILABLE" }; }
+    setRequestPreview({ read, formKey: previewFormKey, mapper: previewRequest,
+      projects, profiles, frontierModels });
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -193,6 +295,8 @@ export function LaunchOrchestrator({
           goal: draftGoal,
           projectRef: selectedProject,
           profileRef: selectedProfile,
+          ...(selectedWorkstream !== undefined ? { workstreamRef: selectedWorkstream } : {}),
+          ...(frontierRequired ? { frontierModelAlias: selectedFrontier } : {}),
         },
         (outcome) => {
           try {
@@ -216,10 +320,10 @@ export function LaunchOrchestrator({
       : undefined;
 
   return (
-    <section className="card">
+    <section className={`card launch-orchestrator${presentation === "composer" ? " launch-orchestrator-composer" : ""}`}>
       <div className="section-title">
         <div>
-          <h2>Launch Orchestrator</h2>
+          <h2>{selectedProfile === "native_research_only" ? (locale === "zh-CN" ? "启动单个原生任务" : "Launch one native task") : (locale === "zh-CN" ? "开始工作" : "Start work")}</h2>
         </div>
       </div>
 
@@ -230,9 +334,9 @@ export function LaunchOrchestrator({
       ) : (
         <form onSubmit={handleSubmit} noValidate>
           {/* Goal textarea */}
-          <div className="form-field">
+          <div className="form-field launch-goal">
             <label htmlFor={goalId}>
-              <span>Goal</span>
+              <span>{locale === "zh-CN" ? "目标" : "Goal"}</span>
               {goalTooLong && (
                 <span className="field-error">
                   {" "}
@@ -243,9 +347,9 @@ export function LaunchOrchestrator({
             <textarea
               id={goalId}
               value={draftGoal}
-              onChange={(e) => setDraftGoal(e.target.value)}
-              rows={4}
-              placeholder="Describe the objective for this launch…"
+              onChange={(e) => { setRequestPreview(null); setDraftGoal(e.target.value); onDraftChange?.(e.target.value); }}
+              rows={presentation === "composer" ? 2 : 4}
+              placeholder={locale === "zh-CN" ? "描述你希望完成的目标…" : "Describe the objective for this launch…"}
               disabled={launchPending}
               aria-describedby={goalTooLong ? `${goalId}-length` : undefined}
               aria-invalid={!!goalError}
@@ -257,13 +361,37 @@ export function LaunchOrchestrator({
             )}
           </div>
 
+          {workstreams !== undefined && <div className="form-field">
+            <label htmlFor={workstreamId}>{locale === "zh-CN" ? "工作流" : "Workstream"}</label>
+            <select id={workstreamId} value={selectedWorkstream ?? ""}
+              disabled={launchPending || lockWorkstream}
+              aria-invalid={workstreamUnavailable}
+              aria-describedby={workstreamUnavailable ? `${workstreamId}-error` : undefined}
+              onChange={event => {
+                const ref = event.target.value;
+                setRequestPreview(null);
+                setDraftWorkstream(ref);
+                setDraftChoices({ workstream: ref, project: "", profile: "", frontier: "" });
+                onWorkstreamChange?.(ref);
+              }}>
+              {!selectedBinding && <option value={selectedWorkstream ?? ""} disabled>
+                {locale === "zh-CN" ? "工作流不可用" : "Workstream unavailable"}
+              </option>}
+              {workstreams.map(choice => <option key={choice.ref} value={choice.ref}
+                disabled={!!choice.unavailableReason}>{choice.label}</option>)}
+            </select>
+            {workstreamUnavailable && <p id={`${workstreamId}-error`} className="field-error" role="alert">
+              {locale === "zh-CN" ? "此工作流未登记。请选择可用的工作流。" : "This workstream is not enrolled. Select an available workstream."}
+            </p>}
+          </div>}
+
           {/* Project select */}
           <div className="form-field">
-            <label htmlFor={projectId}>Project</label>
+            <label htmlFor={projectId}>{locale === "zh-CN" ? "项目" : "Project"}</label>
             <select
               id={projectId}
               value={selectedProject}
-              onChange={(e) => setDraftProject(e.target.value)}
+              onChange={(e) => { setRequestPreview(null); setDraftProject(e.target.value); }}
               disabled={launchPending}
               aria-invalid={!!projectError}
               aria-describedby={projectError ? `${projectId}-error` : undefined}
@@ -288,14 +416,14 @@ export function LaunchOrchestrator({
 
           {/* Profile select */}
           <div className="form-field">
-            <label htmlFor={profileId}>Profile</label>
+            <label htmlFor={profileId}>{locale === "zh-CN" ? "执行方式" : "Profile"}</label>
             <select
               id={profileId}
               value={selectedProfile}
-              onChange={(e) => setDraftProfile(e.target.value)}
+              onChange={(e) => { setRequestPreview(null); setDraftProfile(e.target.value); }}
               disabled={launchPending}
               aria-invalid={!!profileError}
-              aria-describedby={profileError ? `${profileId}-error` : undefined}
+              aria-describedby={[profileError ? `${profileId}-error` : "",selectedProfile === "native_research_only" ? `${profileId}-meaning` : ""].filter(Boolean).join(" ") || undefined}
             >
               {profileStale && (
                 <option value={selectedProfile} disabled>
@@ -313,7 +441,33 @@ export function LaunchOrchestrator({
                 {profileError}
               </p>
             )}
+            {selectedProfile === "native_research_only" ? <p id={`${profileId}-meaning`} className="muted">
+              {locale === "zh-CN" ? "直接运行一个只读任务，不创建规划或子任务。" : "Run one read-only task directly, without planning or child tasks."}
+            </p> : null}
           </div>
+
+          {frontierRequired && (
+            <div className="form-field">
+              <label htmlFor={frontierId}>{locale === "zh-CN" ? "指定 CEO" : "Requested CEO"}</label>
+              <select
+                id={frontierId}
+                value={selectedFrontier}
+                onChange={(e) => { setRequestPreview(null); setDraftFrontier(e.target.value); }}
+                disabled={launchPending}
+                aria-invalid={!!frontierError}
+                aria-describedby={frontierError ? `${frontierId}-error` : `${frontierId}-help`}
+              >
+                {!frontierChoice && <option value={selectedFrontier} disabled>{locale === "zh-CN" ? "CEO 选项不可用" : "CEO choice unavailable"}</option>}
+                {frontierModels?.map((choice) => (
+                  <option key={choice.ref} value={choice.ref} disabled={!!choice.unavailableReason}>
+                    {choice.unavailableReason ? `${choice.label} — ${choice.unavailableReason}` : choice.label}
+                  </option>
+                ))}
+              </select>
+              <p id={`${frontierId}-help`}>{locale === "zh-CN" ? "记录此项目指定的 CEO。" : "Records your requested CEO for this project."}</p>
+              {frontierError && <p id={`${frontierId}-error`} className="field-error" role="alert">{frontierError}</p>}
+            </div>
+          )}
 
           {/* Error message */}
           {error && (
@@ -329,12 +483,18 @@ export function LaunchOrchestrator({
           )}
 
           {/* Actions */}
+          {visiblePreview ? <LaunchRequestPreview preview={visiblePreview}
+            projects={projects} profiles={profiles} frontierModels={frontierModels} locale={locale} /> : null}
           <div className="form-actions">
+            {previewRequest ? <button type="button" disabled={!canSubmit}
+              onClick={previewCurrentRequest}>
+              {locale === "zh-CN" ? "预览请求范围" : "Preview requested scope"}
+            </button> : null}
             <button type="submit" disabled={!canSubmit} className="primary">
-              {launchPending ? "Launching…" : "Launch"}
+              {launchPending ? (locale === "zh-CN" ? "正在启动…" : "Launching…") : (locale === "zh-CN" ? "启动" : "Launch")}
             </button>
             <button type="button" onClick={onCancel} disabled={launchPending}>
-              Cancel
+              {locale === "zh-CN" ? "取消" : "Cancel"}
             </button>
           </div>
         </form>

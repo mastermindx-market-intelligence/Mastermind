@@ -8,7 +8,9 @@ mode. No accounts, authority, runtime effects or file-wide exemption are added.
 The unflagged broker SockPathMode432 (octal0o660) remains unmasked.
 
 Source R4 SHA256 0c9711aed7695adc4928d91ea49ec67dd5f3edcc03d530f31b22a4c4d29b1b50.
-R5 changes only _parse_service; all four owning ASTs here are unchanged.
+The V3 observation compatibility repair changes only the _config_join profile
+selector. Its five identity literals and their exact sites remain unchanged;
+the new owning AST hash is submitted with the scoped boundary review.
 These static data require independent source review, which is still pending.
 Tests never generate or learn replacement pins from current source.
 """
@@ -46,7 +48,7 @@ REVIEWED_ANCHORS = {'_SPECS': {'node_type': 'Assign',
                       (('value', 'elts', 3, 'args', 4), 'int', 458, '458'),
                       (('value', 'elts', 3, 'args', 7), 'int', 420, '0o644'))},
  '_config_join': {'node_type': 'FunctionDef',
-                  'ast_sha256': '97bbb33bf9988360b37cc4acf8dd5227f6b9ea21ea881b65a5bbf8914c479454',
+                  'ast_sha256': 'e054ca55be6336808aa7b050e9911631fb5a22c5dc943cee82b5cee5e1b4ece5',
                   'sites': ((('body', 0, 'body', 0, 'value', 'values', 2, 'comparators', 0),
                              'int',
                              450,

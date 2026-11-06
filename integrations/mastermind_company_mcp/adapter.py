@@ -311,15 +311,28 @@ class CompanyDialogueGateway:
                         )
                         message = prepared.message
                     except ProductAcceptanceRequestUnavailable as exc:
-                        if (exc.code == "PRODUCT_REQUEST_RECONCILIATION_REQUIRED"
-                            and self._product_acceptance_owner.ruling_owner is not None):
+                        if exc.code == "PRODUCT_REQUEST_RECONCILIATION_REQUIRED":
                             try:
-                                qualified = await self._product_acceptance_owner.ruling_owner.qualify(
-                                    binding=binding, message_key=exc.message_key
-                                )
+                                ruling_owner = self._product_acceptance_owner.ruling_owner
+                                if ruling_owner is not None:
+                                    qualified = await ruling_owner.qualify(
+                                        binding=binding, message_key=exc.message_key
+                                    )
+                                else:
+                                    from integrations.product_acceptance_ruling_owner import (
+                                        ProductAcceptanceRulingReceiptReader,
+                                    )
+                                    qualified = ProductAcceptanceRulingReceiptReader(
+                                        self._product_acceptance_owner
+                                    ).observe_qualified(binding=binding, message_key=exc.message_key)
                                 return result_envelope(tool_name, data=qualified)
                             except (ProductAcceptanceRequestUnavailable, ProductAcceptanceBasisUnavailable) as unavailable:
-                                return _error(tool_name, "DIALOGUE_REFUSED", detail_code=unavailable.code,
+                                detail = unavailable.code
+                                if ruling_owner is None and detail == "PRODUCT_RULING_UNQUALIFIED":
+                                    # Absence of a qualified receipt says nothing
+                                    # about the original send's delivery state.
+                                    detail = "PRODUCT_REQUEST_RECONCILIATION_REQUIRED"
+                                return _error(tool_name, "DIALOGUE_REFUSED", detail_code=detail,
                                     reconciliation_message_key=exc.message_key)
                             except Exception:
                                 return _error(tool_name, "DIALOGUE_REFUSED", detail_code="PRODUCT_RULING_UNAVAILABLE",

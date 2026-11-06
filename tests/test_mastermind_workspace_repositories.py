@@ -388,3 +388,554 @@ def test_reinstall_refuses_untrusted_previous_wrapper_before_overwrite(tmp_path,
     assert result.returncode != 0, result.stdout
     assert launcher.read_bytes() == before
     assert launcher.is_symlink() is (fault == "symlink")
+
+
+def test_exact_registration_status_skips_fleet_worktree_enumeration(fleet, monkeypatch):
+    """Publisher's status identifies one locked worktree without scanning peers.
+
+    The release path must continue to use its original complete enumeration.
+    """
+    from control_plane import executive_workspace as workspace
+
+    repos, _, root, env = fleet
+    code, created = acquire(fleet, "macro", "status-fast-fixture")
+    assert code == 0, created
+    destination = Path(created["receipt"]["workspace_path"])
+    source = repos["macro"][0]
+    scoped_root = root / "macro"
+
+    def fleet_scan_forbidden(*args, **kwargs):
+        raise AssertionError("status must not enumerate other worktrees")
+
+    monkeypatch.setattr(workspace, "_worktree_records", fleet_scan_forbidden)
+    status = workspace.inspect_linked_worktree(
+        source, scoped_root, destination,
+        expected_operation_id="status-fast-fixture",
+        status_direct_registration=True,
+    )
+    assert status.head_sha == repos["macro"][1]
+    assert status.branch == "sol/web-status-fast-fixture"
+    assert status.dirty is False
+    assert status.removed is False
+    with pytest.raises(AssertionError, match="must not enumerate"):
+        workspace.inspect_linked_worktree(
+            source, scoped_root, destination,
+            expected_operation_id="status-fast-fixture",
+        )
+
+
+def test_exact_registration_status_refuses_wrong_lock_or_git_backref(fleet):
+    """A synthetic or displaced .git file is never an authorized registration."""
+    from control_plane import executive_workspace as workspace
+
+    repos, _, root, _ = fleet
+    code, created = acquire(fleet, "macro", "status-spoof-guard")
+    assert code == 0, created
+    destination = Path(created["receipt"]["workspace_path"])
+    source = repos["macro"][0]
+    scoped_root = root / "macro"
+    admin = Path((destination / ".git").read_text().split("gitdir: ", 1)[1].strip())
+    lock = admin / "locked"
+    backref = admin / "gitdir"
+
+    def must_fail():
+        with pytest.raises(workspace.WorkspaceError):
+            workspace.inspect_linked_worktree(
+                source, scoped_root, destination,
+                expected_operation_id="status-spoof-guard",
+                status_direct_registration=True,
+            )
+
+    original_lock = lock.read_text()
+    try:
+        lock.write_text(original_lock.replace(
+            "operation=status-spoof-guard", "operation=another-operation"
+        ))
+        must_fail()
+    finally:
+        lock.write_text(original_lock)
+
+    original_backref = backref.read_text()
+    try:
+        backref.write_text(str(destination / "not-the-gitfile") + "\n")
+        must_fail()
+    finally:
+        backref.write_text(original_backref)
+
+    # The real registration remains usable; no source or fixture was deleted.
+    accepted = workspace.inspect_linked_worktree(
+        source, scoped_root, destination,
+        expected_operation_id="status-spoof-guard",
+        status_direct_registration=True,
+    )
+    assert accepted.head_sha == repos["macro"][1]
+
+
+def test_registered_cli_status_preserves_existing_receipt_contract(fleet):
+    _, _, _, env = fleet
+    code, created = acquire(fleet, "macro", "status-cli-contract")
+    assert code == 0, created
+    code, observed = invoke(
+        env, "status", "--repository", "macro",
+        "--operation-id", "status-cli-contract", "--lane", "web",
+    )
+    assert code == 0, observed
+    assert observed["schema_version"] == "mastermind.workspace_cli/v2"
+    assert observed["effect"] == "NOT_APPLIED"
+    assert observed["repository"] == "macro"
+    receipt = observed["receipt"]
+    assert receipt["branch"] == "sol/web-status-cli-contract"
+    assert receipt["workspace_path"] == created["receipt"]["workspace_path"]
+    assert receipt["dirty"] is False and receipt["removed"] is False
+
+
+# Storage admission belongs to the existing attended workspace route.  A
+# verified existing operation workspace may be re-used below the creation
+# reserve because re-use allocates nothing, but the enrolled storage policy
+# and volume identity are still observed on every acquisition.  The reserve
+# itself is never weakened and no new allocation is admitted at low space.
+
+
+def _load_cli(monkeypatch, env, module_name):
+    """Load the installed CLI in-process so synthetic stand-ins are honoured."""
+    for name, value in env.items():
+        if name.startswith("MASTERMIND_"):
+            monkeypatch.setenv(name, value)
+    spec = importlib.util.spec_from_file_location(module_name, SCRIPT)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    return cli
+
+
+@pytest.fixture
+def enrolled_volume(tmp_path, fleet, monkeypatch):
+    """Synthetic enrolled volume: real policy reader, synthetic volume probe.
+
+    No real disk probing and no host volume dependency.  The policy file is a
+    synthetic fixture read by the real policy reader; only the volume identity
+    and the free-byte observation are stand-ins for the enrolled host volume.
+    """
+    repos, config, _, _ = fleet
+    mount = (tmp_path / "volume").resolve()
+    mount.mkdir()
+    root = mount / "workspaces"
+    policy = tmp_path / "worktree-storage.json"
+    data = {
+        "version": 1, "mount_point": str(mount), "root": str(root),
+        "volume_uuid": "7EE5D196-8BB6-4E6D-B1D7-AFEA5DEB172A", "min_free_bytes": 100,
+    }
+    policy.write_text(json.dumps(data))
+    policy.chmod(0o600)
+    env = dict(os.environ)
+    env.update(MASTERMIND_SOURCE_REPO=str(repos["mastermind"][0]),
+               MASTERMIND_AGENT_WORKSPACE_ROOT=str(root),
+               MASTERMIND_WORKSPACE_STORAGE_POLICY=str(policy),
+               MASTERMIND_WORKSPACE_REPOSITORIES=json.dumps(config))
+    cli = _load_cli(monkeypatch, env, "enrolled_volume_cli_test")
+    state = {
+        "free": 100,
+        "volume": {"Mounted": True, "Writable": True, "MountPoint": str(mount),
+                   "VolumeUUID": data["volume_uuid"]},
+    }
+    monkeypatch.setattr(cli, "_volume_identity", lambda path: dict(state["volume"]))
+    monkeypatch.setattr(cli, "_storage_free_bytes", lambda path: state["free"])
+    return cli, repos, root, state, policy, data
+
+
+def test_existing_workspace_reuse_survives_low_storage_without_new_allocation(fleet, monkeypatch, capsys):
+    """A verified existing operation workspace is re-used below the reserve.
+
+    The storage observation itself is never skipped: the enrolled host root is
+    still checked on the re-use, and a new operation is still refused.
+    """
+    repos, _, root, env = fleet
+    code, created = acquire(fleet, "mastermind", "reuse-low-storage")
+    assert code == 0 and created["effect"] == "APPLIED"
+    original = Path(created["receipt"]["workspace_path"])
+    registered = git(repos["mastermind"][0], "worktree", "list", "--porcelain")
+    cli = _load_cli(monkeypatch, env, "reuse_storage_cli_test")
+    observed = []
+
+    def storage(path):
+        observed.append(path)
+        return {"admission_allowed": False}
+
+    monkeypatch.setattr(cli, "_storage_status", storage)
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "reuse-low-storage", "--base-sha", repos["mastermind"][1]])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["effect"] == "NOT_APPLIED"
+    assert payload["receipt"]["reused"] is True
+    assert payload["receipt"]["workspace_path"] == str(original)
+    # The storage observation is NOT skipped for an existing path.
+    assert observed == [root]
+    assert git(original, "status", "--porcelain=v1") == ""
+    assert git(repos["mastermind"][0], "worktree", "list", "--porcelain") == registered
+
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "new-low-storage", "--base-sha", repos["mastermind"][1]])
+    payload = json.loads(capsys.readouterr().err)
+    assert code == 2 and payload["effect"] == "NOT_APPLIED"
+    assert "STORAGE_LOW_SPACE" in payload["error"]
+    assert observed == [root, root]
+    assert not (root / "web" / "new-low-storage").exists()
+
+
+def test_verified_existing_workspace_is_reused_below_the_creation_reserve(enrolled_volume, capsys):
+    """The real storage reader observes LOW_SPACE and still permits re-use."""
+    cli, repos, root, state, _policy, _data = enrolled_volume
+    base = repos["mastermind"][1]
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "reuse-below-reserve", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["effect"] == "APPLIED"
+    assert payload["receipt"]["reused"] is False
+    original = Path(payload["receipt"]["workspace_path"])
+
+    state["free"] = 99
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "reuse-below-reserve", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["effect"] == "NOT_APPLIED"
+    assert payload["receipt"]["reused"] is True
+    assert payload["receipt"]["workspace_path"] == str(original)
+    assert payload["receipt"]["base_sha"] == base
+    assert git(original, "status", "--porcelain=v1") == ""
+
+
+def test_new_allocation_remains_blocked_below_the_creation_reserve(enrolled_volume, capsys):
+    """The reserve still refuses a new allocation; nothing is allocated."""
+    cli, repos, root, state, _policy, _data = enrolled_volume
+    base = repos["mastermind"][1]
+    state["free"] = 99
+    registered = git(repos["mastermind"][0], "worktree", "list", "--porcelain")
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "new-below-reserve", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().err)
+    assert code == 2 and payload["effect"] == "NOT_APPLIED"
+    assert "STORAGE_LOW_SPACE" in payload["error"]
+    assert not (root / "web" / "new-below-reserve").exists()
+    assert git(repos["mastermind"][0], "worktree", "list", "--porcelain") == registered
+    assert "sol/web-new-below-reserve" not in git(repos["mastermind"][0], "branch", "--list")
+
+
+@pytest.mark.parametrize("failure,expected", [
+    ("identity", "STORAGE_VOLUME_IDENTITY_MISMATCH"),
+    ("read_only", "STORAGE_VOLUME_READ_ONLY"),
+    ("policy", "STORAGE_POLICY_INVALID"),
+])
+def test_storage_identity_read_only_and_policy_errors_refuse_even_an_existing_workspace(
+    enrolled_volume, capsys, failure, expected,
+):
+    """A failing storage observation is never skipped for an existing path."""
+    cli, repos, root, state, policy, data = enrolled_volume
+    base = repos["mastermind"][1]
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "guarded-reuse", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["effect"] == "APPLIED"
+    original = Path(payload["receipt"]["workspace_path"])
+
+    if failure == "identity":
+        state["volume"]["VolumeUUID"] = "BDB7D9BA-7145-4115-B6BA-EB9B54896B67"
+    elif failure == "read_only":
+        state["volume"]["Writable"] = False
+    else:
+        data["version"] = 2
+        policy.write_text(json.dumps(data))
+
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "guarded-reuse", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().err)
+    assert code == 2 and payload["effect"] == "NOT_APPLIED"
+    assert expected in payload["error"]
+    # The refused re-use left the existing workspace registered and untouched.
+    assert original.is_dir()
+    assert git(original, "status", "--porcelain=v1") == ""
+
+
+def test_invalid_or_mismatched_existing_workspace_is_refused_below_the_creation_reserve(
+    enrolled_volume, capsys,
+):
+    """Existing-path reuse still requires a verified managed linked workspace."""
+    cli, repos, root, state, _policy, _data = enrolled_volume
+    base = repos["mastermind"][1]
+    source = repos["mastermind"][0]
+
+    # A directory that is not a managed linked worktree is never re-used.
+    decoy = root / "web" / "not-a-workspace"
+    decoy.mkdir(parents=True)
+    state["free"] = 99
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "not-a-workspace", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().err)
+    assert code == 2 and payload["effect"] == "NOT_APPLIED"
+    assert "not registered to the source repository" in payload["error"]
+    assert list(decoy.iterdir()) == []
+
+    # A workspace bound to another base is not re-used for this operation.
+    state["free"] = 100
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "bound-workspace", "--base-sha", base])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["effect"] == "APPLIED"
+    original = Path(payload["receipt"]["workspace_path"])
+    (source / "second.txt").write_text("second\n")
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "second fixture")
+    second = git(source, "rev-parse", "HEAD")
+    state["free"] = 99
+    code = cli.main(["acquire", "--repository", "mastermind", "--lane", "web",
+                     "--operation-id", "bound-workspace", "--base-sha", second])
+    payload = json.loads(capsys.readouterr().err)
+    assert code == 2 and payload["effect"] == "NOT_APPLIED"
+    assert "lock identity does not match" in payload["error"]
+    assert original.is_dir()
+    assert git(original, "status", "--porcelain=v1") == ""
+
+
+def _shell_literal(value: str) -> str:
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _install_pool_fixture(tmp_path, fleet):
+    repos, _, _, _ = fleet
+    source, launcher, payload, env = install_fixture(tmp_path, fleet)
+    installer = ["/bin/sh", str(source / "scripts/install_mastermind_workspace_cli.sh")]
+    first = subprocess.run(
+        [*installer, "--repository-source", "macro=" + str(repos["macro"][0]),
+         "--repository-source", "terminal=" + str(repos["terminal"][0])],
+        env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert first.returncode == 0, first.stderr
+    routed_root = tmp_path / "selected-pool-root"
+    router = Path(env["HOME"]) / ".local/lib/mastermind/worktree-storage/mmx_workspace_router.py"
+    router.parent.mkdir(parents=True)
+    router.write_text(
+        "import sys\nsys.stdout.write(" + repr(str(routed_root) + "|") + ")\n"
+    )
+    preamble = (
+        "#!/bin/sh\nset -eu\n"
+        "pool_selection=\"$(/usr/bin/python3 "
+        + _shell_literal(str(router)) + " \"$@\")\" || exit 66\n"
+        "case \"$pool_selection\" in *'|'*) ;; *) echo 'pool router returned no volume' >&2; exit 66;; esac\n"
+        "export MASTERMIND_AGENT_WORKSPACE_ROOT=\"\x24{pool_selection%%|*}\"\n"
+        "export MASTERMIND_WORKSPACE_STORAGE_POLICY=\"\x24{pool_selection#*|}\"\n"
+    )
+    old_wrapper = launcher.read_text()
+    tail = old_wrapper[old_wrapper.index("export MASTERMIND_SOURCE_REPO="):]
+    tail = "".join(line for line in tail.splitlines(keepends=True)
+                   if not line.startswith(("export MASTERMIND_AGENT_WORKSPACE_ROOT=",
+                                           "export MASTERMIND_WORKSPACE_STORAGE_POLICY=")))
+    launcher.write_text(preamble + tail)
+    return source, launcher, payload, env, routed_root, router
+
+
+def test_pool_upgrade_keeps_routing_bindings_and_old_payload(tmp_path, fleet):
+    source, launcher, payload, env, routed_root, router = _install_pool_fixture(tmp_path, fleet)
+    before = launcher.read_bytes()
+    old_payload = (payload / "scripts/mastermind_workspace.py").read_bytes()
+    router_before = router.read_bytes()
+    successor = tmp_path / "successor O'Brien $HOME"
+    result = subprocess.run(
+        ["/bin/sh", str(source / "scripts/install_mastermind_workspace_cli.sh")],
+        env={**env, "MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT": str(successor)},
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    old_ref = _shell_literal(str(payload / "scripts/mastermind_workspace.py")).encode()
+    new_ref = _shell_literal(str(successor / "scripts/mastermind_workspace.py")).encode()
+    assert before.count(old_ref) == 3
+    assert launcher.read_bytes() == before.replace(old_ref, new_ref)
+    assert (payload / "scripts/mastermind_workspace.py").read_bytes() == old_payload
+    assert router.read_bytes() == router_before
+    observed = subprocess.run(
+        [str(launcher), "repositories"], env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert observed.returncode == 0, observed.stderr
+    rows = {row["alias"]: row for row in json.loads(observed.stdout)["receipt"]["repositories"]}
+    assert {alias for alias, row in rows.items() if row["state"] == "READY"} == set(IDENTITIES)
+    assert rows["mastermind"]["workspace_root"] == str(routed_root)
+    assert not routed_root.exists()
+
+
+@pytest.mark.parametrize("fault", [
+    "mixed", "missing", "extra", "executable", "structure", "duplicate_root",
+    "missing_policy", "wrong_router", "comment_only", "conditional",
+])
+def test_pool_upgrade_refuses_ambiguous_selectors(tmp_path, fleet, fault):
+    source, launcher, payload, env, _, _ = _install_pool_fixture(tmp_path, fleet)
+    before = launcher.read_text()
+    reference = _shell_literal(str(payload / "scripts/mastermind_workspace.py"))
+    if fault == "mixed":
+        before = before.replace(reference, _shell_literal("/foreign/scripts/mastermind_workspace.py"), 1)
+    elif fault == "missing":
+        before = before.replace("  exec python3 " + reference + ' "$@"\n', "")
+    elif fault == "extra":
+        before += "exec python3 " + reference + ' "$@"\n'
+    elif fault == "executable":
+        before = before.replace("exec python3 ", "exec /unapproved/python3 ", 1)
+    elif fault == "structure":
+        before = before.replace(reference, _shell_literal("/foreign/mastermind_workspace.py"))
+    elif fault == "duplicate_root":
+        before = before.replace("export MASTERMIND_SOURCE_REPO=",
+                                "export MASTERMIND_AGENT_WORKSPACE_ROOT='/unapproved'\n"
+                                "export MASTERMIND_SOURCE_REPO=")
+    elif fault == "missing_policy":
+        before = "".join(line for line in before.splitlines(keepends=True)
+                         if not line.startswith("export MASTERMIND_WORKSPACE_STORAGE_POLICY="))
+    elif fault == "wrong_router":
+        before = before.replace("mmx_workspace_router.py", "other_router.py")
+    elif fault == "comment_only":
+        before = "".join("# mmx_workspace_router.py\n" if line.startswith("pool_selection=") else line
+                         for line in before.splitlines(keepends=True))
+    else:
+        before = before.replace('if [ -n "' + "$" + '{MASTERMIND_PYTHON:-}" ]; then', "if true; then")
+    launcher.write_text(before)
+    result = subprocess.run(
+        ["/bin/sh", str(source / "scripts/install_mastermind_workspace_cli.sh")],
+        env={**env, "MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT": str(tmp_path / "successor")},
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode != 0
+    assert launcher.read_text() == before
+
+
+@pytest.mark.parametrize("fault", ["changed_bytes", "same_bytes_new_inode", "staged_race"])
+def test_launcher_publication_preserves_changed_custody(tmp_path, monkeypatch, fault):
+    spec = importlib.util.spec_from_file_location("workspace_selector_preimage", SCRIPT)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    target, generated = tmp_path / "launcher", tmp_path / "candidate"
+    before = b"#!/bin/sh\nexec python3 '/old/scripts/mastermind_workspace.py' \"$@\"\n"
+    candidate = b"#!/bin/sh\nexec python3 '/new/scripts/mastermind_workspace.py' \"$@\"\n"
+    target.write_bytes(before)
+    target.chmod(0o755)
+    generated.write_bytes(candidate)
+    generated.chmod(0o755)
+    snapshot = cli.installation_launcher_snapshot(target)
+    changed = before + b"# newer owner\n"
+    if fault == "changed_bytes":
+        target.write_bytes(changed)
+    elif fault == "same_bytes_new_inode":
+        target.rename(tmp_path / "retained")
+        target.write_bytes(before)
+        target.chmod(0o755)
+        changed = before
+    else:
+        original_mkstemp = cli.tempfile.mkstemp
+
+        def raced_mkstemp(*args, **kwargs):
+            result = original_mkstemp(*args, **kwargs)
+            target.write_bytes(changed)
+            return result
+
+        monkeypatch.setattr(cli.tempfile, "mkstemp", raced_mkstemp)
+    with pytest.raises(cli.WorkspaceError, match="LAUNCHER_CHANGED"):
+        cli.publish_installation_launcher(target, generated, snapshot)
+    assert target.read_bytes() == changed
+    assert generated.read_bytes() == candidate
+
+
+def test_pool_upgrade_refuses_repository_rebinding(tmp_path, fleet):
+    source, launcher, _, env, _, _ = _install_pool_fixture(tmp_path, fleet)
+    replacement, _ = repository(tmp_path / "new-sources", "macro")
+    before = launcher.read_bytes()
+    result = subprocess.run(
+        ["/bin/sh", str(source / "scripts/install_mastermind_workspace_cli.sh"),
+         "--repository-source", "macro=" + str(replacement)],
+        env={**env, "MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT": str(tmp_path / "successor")},
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode != 0
+    assert "LAUNCHER_UPGRADE_REFUSED" in result.stderr
+    assert launcher.read_bytes() == before
+
+
+def test_contending_installer_cannot_overwrite_between_check_and_replace(tmp_path):
+    import select
+
+    spec = importlib.util.spec_from_file_location("workspace_publication_contender", SCRIPT)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    target, candidate_a, candidate_b = (tmp_path / name for name in ("launcher", "a", "b"))
+    before = b"#!/bin/sh\nexec python3 '/old/scripts/mastermind_workspace.py' \"$@\"\n"
+    value_a = before.replace(b"/old/", b"/a/")
+    value_b = before.replace(b"/old/", b"/b/")
+    for path, value in ((target, before), (candidate_a, value_a), (candidate_b, value_b)):
+        path.write_bytes(value)
+        path.chmod(0o755)
+    snapshot = cli.installation_launcher_snapshot(target)
+    ready_read, ready_write = os.pipe()
+    release_read, release_write = os.pipe()
+    worker = """
+import importlib.util, json, os, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("workspace_publication_holder", Path(sys.argv[1]))
+cli = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(cli)
+replace = cli.os.replace
+def paused_replace(source, target):
+    os.write(int(sys.argv[5]), b"r")
+    if os.read(int(sys.argv[6]), 1) != b"g":
+        raise RuntimeError("publication barrier was not released")
+    replace(source, target)
+cli.os.replace = paused_replace
+cli.publish_installation_launcher(Path(sys.argv[2]), Path(sys.argv[3]), json.loads(sys.argv[4]))
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", worker, str(SCRIPT), str(target), str(candidate_a),
+         json.dumps(snapshot), str(ready_write), str(release_read)],
+        pass_fds=(ready_write, release_read), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True,
+    )
+    os.close(ready_write)
+    os.close(release_read)
+    try:
+        assert select.select([ready_read], [], [], 15)[0], "first installer did not reach publication"
+        assert os.read(ready_read, 1) == b"r"
+        with pytest.raises(cli.WorkspaceError, match="LAUNCHER_INSTALL_BUSY"):
+            cli.publish_installation_launcher(target, candidate_b, snapshot)
+        assert target.read_bytes() == before
+    finally:
+        os.write(release_write, b"g")
+        os.close(release_write)
+        os.close(ready_read)
+        try:
+            output, errors = process.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+            raise
+    assert process.returncode == 0, errors
+    assert target.read_bytes() == value_a
+
+
+def test_reinstall_verifies_existing_payload_without_rewriting_it(tmp_path, fleet):
+    source, launcher, payload, env = install_fixture(tmp_path, fleet)
+    installer = ["/bin/sh", str(source / "scripts/install_mastermind_workspace_cli.sh")]
+    first = subprocess.run(installer, env=env, capture_output=True, text=True, timeout=30)
+    assert first.returncode == 0, first.stderr
+    before = {path: (path.stat().st_ino, path.stat().st_mtime_ns, path.read_bytes())
+              for path in payload.rglob("*.py")}
+    wrapper = launcher.stat().st_ino
+    second = subprocess.run(installer, env=env, capture_output=True, text=True, timeout=30)
+    assert second.returncode == 0, second.stderr
+    assert {path: (path.stat().st_ino, path.stat().st_mtime_ns, path.read_bytes())
+            for path in payload.rglob("*.py")} == before
+    assert launcher.stat().st_ino == wrapper
+
+
+def test_reinstall_refuses_changed_payload_without_overwrite(tmp_path, fleet):
+    source, launcher, payload, env = install_fixture(tmp_path, fleet)
+    installer = ["/bin/sh", str(source / "scripts/install_mastermind_workspace_cli.sh")]
+    first = subprocess.run(installer, env=env, capture_output=True, text=True, timeout=30)
+    assert first.returncode == 0, first.stderr
+    changed = payload / "common/__init__.py"
+    changed.write_bytes(b"# different generation bytes\n")
+    before = launcher.read_bytes()
+    second = subprocess.run(installer, env=env, capture_output=True, text=True, timeout=30)
+    assert second.returncode != 0
+    assert "PAYLOAD_MISMATCH" in second.stderr
+    assert launcher.read_bytes() == before
+    assert changed.read_bytes() == b"# different generation bytes\n"

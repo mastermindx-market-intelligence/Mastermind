@@ -109,6 +109,12 @@ def project_dsh_mcp_tools(profile: ExecutionCapabilityProfile, *, capability_id:
         by_name[name] = row
     if not set(enabled) <= set(by_name): raise DshMcpProjectionError('granted tool missing')
     selected = {name: by_name[name] for name in sorted(enabled)}
+    # The canonical schema digest covers input/output schemas and annotations,
+    # NOT execution metadata. Never forward executable catalog metadata that
+    # was not sealed into the selected source grant. Ungranted catalog rows
+    # remain irrelevant, including their execution metadata.
+    if any(row.get('execution') is not None for row in selected.values()):
+        raise DshMcpProjectionError('undigested execution metadata refused')
     # Deliberately reuse the canonical Python owner; no JS digest clone.
     if observed_mcp_tool_schema_digest({'tools': selected}) != grant.tool_schema_digest:
         raise DshMcpProjectionError('granted tool schema drift')

@@ -168,11 +168,18 @@ def _repository(tmp_path: Path) -> tuple[Path, str, tuple[str, ...]]:
             path.chmod(0o755)
     ignored = root / "ignored-secret.txt"
     ignored.write_text("must-not-cross\n", encoding="utf-8")
-    (root / ".gitignore").write_text("ignored-secret.txt\n", encoding="utf-8")
+    # Keep the ignore rule source-local: a tracked .gitignore would be an
+    # intentionally omitted blob in this sparse v1 transport, and Git status
+    # would try to lazily fetch it. Keep a tracked nonmaterial payload below
+    # so this fixture still tests exclusion of reviewed-out source content.
+    (root / ".git" / "info" / "exclude").write_text(
+        "ignored-secret.txt\n", encoding="utf-8"
+    )
+    (root / "source-only.txt").write_bytes(b"tracked-source-only-must-not-cross\n")
     hook = root / ".git" / "hooks" / "post-checkout"
     hook.write_text("#!/bin/sh\nprintf operator-hook-secret\n", encoding="utf-8")
     hook.chmod(0o700)
-    _git(root, "add", ".gitignore", *paths)
+    _git(root, "add", "source-only.txt", *paths)
     _git(root, "commit", "-qm", "fixture")
     return root, _git(root, "rev-parse", "HEAD"), paths
 
@@ -189,6 +196,8 @@ def test_source_transport_contains_only_manifest_and_git_pack(tmp_path: Path) ->
         encoded = b"".join(archive.read(name) for name in archive.namelist())
     assert b"must-not-cross" not in encoded
     assert b"operator-hook-secret" not in encoded
+    assert "source-only.txt" in _git(source, "ls-files").splitlines()
+    assert b"tracked-source-only-must-not-cross" not in encoded
     extracted = tmp_path / "extracted"
     assert artifacts.extract_source_transport(
         output, extracted, expected_commit=commit, material_paths=paths
@@ -3289,14 +3298,18 @@ def test_primary_ci_checkout_retains_full_history_for_trusted_release_identity()
             encoding="utf-8"
         )
     )
-    steps = workflow["jobs"]["test"]["steps"]
+    # Trusted history is consumed by the actual pytest workers; the fan-in
+    # `test` status job validates the matrix result and canonical coverage.
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
     primary = next(
         step
         for step in steps
         if isinstance(step, dict)
+        and step.get("name") == "Checkout event source"
         and step.get("uses") == "actions/checkout@v4"
         and "repository" not in step.get("with", {})
     )
+    assert steps.index(primary) == 1
     assert primary.get("with", {}).get("fetch-depth") == 0
 
 

@@ -35,6 +35,20 @@ KEY="${MASTERMIND_VPS_KEY:-/Users/chriswong/.ssh/macro_dashboard_deploy_v2}"
 SVC="${MASTERMIND_VPS_SERVICE:-mastermind.service}"
 HEALTH="${MASTERMIND_VPS_HEALTH:-http://127.0.0.1:8001/health}"
 
+# Remote command parameters are literal identifiers/absolute paths in this helper.
+# Refuse ambiguous override text rather than interpolate it into privileged shell commands.
+for path in "$DPATH" "$LIVE_DATA_PATH"; do
+  if [[ ! "$path" =~ ^/[a-zA-Z0-9_./:-]+$ || "$path" == / || "$path" == *'/../'* || "$path" == */.. ]]; then
+    log "deploy refused: ambiguous remote root"
+    exit 2
+  fi
+done
+if [[ "$DPATH" == "$LIVE_DATA_PATH" || "$LIVE_DATA_PATH" == "$DPATH/"* || "$DPATH" == "$LIVE_DATA_PATH/"* ]] \
+    || [[ ! "$SVC" =~ ^[a-zA-Z0-9_.@-]+$ ]]; then
+  log "deploy refused: overlapping remote roots or invalid service identity"
+  exit 2
+fi
+
 if [[ ! -f "$KEY" ]]; then
   log "deploy failed: SSH key is missing at $KEY"
   exit 1
@@ -86,9 +100,7 @@ probe_forward_evaluation() {
     >>"$LOG" 2>&1
 }
 
-# Whole-source rsync also ships these shared Python packages; rollback must restore them.
-DIRS="app brain bot portfolio data_layer loop bridge control_plane scripts config ops common integrations .claude .codex"
-FILES="pyproject.toml DOCTRINE.md README.md AGENTS.md .deployed_git_sha"
+# One filter policy for transfer, complete snapshot and restoration.
 EXC=(
   --exclude='.git' --exclude='.github'
   --exclude='.worktrees' --exclude='.venv' --exclude='venv'
@@ -102,7 +114,15 @@ EXC=(
   --exclude='.deployed_git_sha'
 )
 
-RAW="$(rsync -azn --delete --out-format='%n' -e "$RSYNC_SSH" \
+if ! "${SSH[@]}" "$BOXHOST" \
+  "[ -d '$DPATH' ] && [ -d '$LIVE_DATA_PATH' ] &&
+   [ \"\$(cd '$DPATH' && pwd -P)\" = '$DPATH' ] &&
+   [ \"\$(cd '$LIVE_DATA_PATH' && pwd -P)\" = '$LIVE_DATA_PATH' ]"; then
+  log "deploy refused: remote roots are missing or noncanonical"
+  exit 2
+fi
+
+RAW="$(rsync -azcn --delete --out-format='%n' -e "$RSYNC_SSH" \
   "${EXC[@]}" "$SRC" "$BOXHOST:$DPATH/")" || {
     log "deploy failed: VPS dry-run/SSH check failed"
     exit 1
@@ -129,109 +149,157 @@ if [[ ! "$PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ ]]; then
   PREVIOUS_SHA=""
 fi
 
-FORWARD_START_STATE="$("${SSH[@]}" "$BOXHOST" \
-  "if [ -e '$LIVE_DATA_PATH/portfolio_forward_evaluation/start.json' ]; then printf present; else printf missing; fi" \
-  2>/dev/null || true)"
-if [[ "$FORWARD_START_STATE" != "present" && "$FORWARD_START_STATE" != "missing" ]]; then
-  log "deploy failed: could not resolve forward evaluation marker state"
-  exit 1
-fi
-FORWARD_START_CREATED=0
+# The same filters govern live replacement, snapshot and restoration. In particular,
+# --delete must never remove excluded live data, including excluded descendants.
+printf -v REMOTE_EXCLUDES ' %q' "${EXC[@]}"
+SNAPSHOT_PATH=""
+SNAPSHOT_READY=0
+TREE_MUTATION_STARTED=0
+RECOVERY_NEEDED=0
+RELEASE_COMMITTED=0
+FAILURE_REASON="unexpected shell failure"
+FORWARD_START_ACTIVE=0
+FORWARD_VERIFICATION_FAILED=0
 
-"${SSH[@]}" "$BOXHOST" \
-  "cd '$DPATH' &&
-   rm -rf .deploy_prev &&
-   mkdir -p .deploy_prev &&
-   for d in $DIRS; do [ ! -e \"\$d\" ] || cp -a \"\$d\" .deploy_prev/; done &&
-   for f in $FILES; do [ ! -e \"\$f\" ] || cp -a \"\$f\" .deploy_prev/; done"
+read_forward_marker_identity() {
+  "${SSH[@]}" "$BOXHOST" \
+    "path='$LIVE_DATA_PATH/portfolio_forward_evaluation/start.json'
+     if [ -f \"\$path\" ] && [ ! -L \"\$path\" ]; then
+       sha256sum -- \"\$path\" | awk '{print \$1}'
+     elif [ ! -e \"\$path\" ] && [ ! -L \"\$path\" ]; then
+       printf missing
+     else
+       exit 1
+     fi"
+}
 
-# From this point forward the remote release tree is mutable. Every failure—including a partial
-# rsync, marker write, or restart transport error—must take the identical bounded restore path.
-# Otherwise the next service restart could boot a mixture of old and new code that never reached a
-# health probe. The backup directory itself is excluded from rsync, so it survives partial copies.
+# Observe before retrying a stop whose reply was lost. Always issue the explicit
+# stop as well: Restart=always may have a queued restart even when no PID is live.
+# This covers the configured service, not detached writers or another deployer.
+stop_service() {
+  "${SSH[@]}" "$BOXHOST" \
+    "set -e
+     before=\$(systemctl show '$SVC' --property=ActiveState --property=MainPID)
+     [ -n \"\$before\" ]
+     systemctl stop '$SVC'
+     state=\$(systemctl show '$SVC' --property=ActiveState --property=MainPID)
+     printf '%s\\n' \"\$state\" | grep -Eq '^ActiveState=(inactive|failed)$' &&
+     printf '%s\\n' \"\$state\" | grep -Eq '^MainPID=0$'" >>"$LOG" 2>&1
+}
+
 rollback_release() {
   local reason="$1"
-  local restore_status=0
+  local current_marker=""
+  local forward_state_changed=0
   log "deploy failed: $reason; rolling back"
-  if [[ "$FORWARD_START_CREATED" -eq 1 ]]; then
-    if ! "${SSH[@]}" "$BOXHOST" \
-      "rm -f '$LIVE_DATA_PATH/portfolio_forward_evaluation/start.json'"; then
-      restore_status=1
-      log "rollback could not remove the pending forward evaluation marker"
-    fi
+  if ! stop_service; then
+    log "recovery incomplete: service stop is unverified; source was not restored"
+    return 1
   fi
-  if ! "${SSH[@]}" "$BOXHOST" \
-    "cd '$DPATH' &&
-     restore_failed=0
-     for d in $DIRS; do
-       if [ -e \".deploy_prev/\$d\" ]; then
-         rm -rf \"\$d\" && cp -a \".deploy_prev/\$d\" \"\$d\" || restore_failed=1
+  if [[ "$TREE_MUTATION_STARTED" -eq 1 ]]; then
+    if [[ "$SNAPSHOT_READY" -ne 1 ]]; then
+      log "recovery incomplete: no verified snapshot; leaving service stopped"
+      return 1
+    fi
+    # Checksum comparison avoids the size+mtime quick-check collision. Verification
+    # must succeed before restarting; an incomplete restore never boots a mixed tree.
+    if ! "${SSH[@]}" "$BOXHOST" \
+      "set -e
+       rsync -ac --delete $REMOTE_EXCLUDES '$SNAPSHOT_PATH/tree/' '$DPATH/'
+       difference=\$(rsync -acn --delete --itemize-changes $REMOTE_EXCLUDES '$SNAPSHOT_PATH/tree/' '$DPATH/')
+       [ -z \"\$difference\" ]
+       if [ -f '$SNAPSHOT_PATH/deployed_git_sha' ]; then
+         cp -a '$SNAPSHOT_PATH/deployed_git_sha' '$DPATH/.deployed_git_sha'
+       elif [ -f '$SNAPSHOT_PATH/deployed_git_sha.absent' ]; then
+         rm -f '$DPATH/.deployed_git_sha'
        else
-         # A directory introduced by the failed release has no previous snapshot. Remove that
-         # bounded release path so rolled-back code cannot observe a mismatched agent policy.
-         rm -rf \"\$d\" || restore_failed=1
+         exit 1
        fi
-     done
-     for f in $FILES; do
-       if [ -e \".deploy_prev/\$f\" ]; then
-         cp -a \".deploy_prev/\$f\" \"\$f\" || restore_failed=1
-       else
-         rm -f \"\$f\" || restore_failed=1
-       fi
-     done
-     if [ -f "/etc/systemd/system/$SVC.d/80-datadog.conf" ]; then
-       if [ -n '$PREVIOUS_SHA' ]; then
-         printf '[Service]\nEnvironment=DD_VERSION=%s\n' '$PREVIOUS_SHA' > "/etc/systemd/system/$SVC.d/81-datadog-version.conf" || restore_failed=1
-       else
-         rm -f "/etc/systemd/system/$SVC.d/81-datadog-version.conf" || restore_failed=1
-       fi
-       systemctl daemon-reload || restore_failed=1
-     fi
-     systemctl restart '$SVC'
-     restart_status=\$?
-     [ \"\$restore_failed\" -eq 0 ] && [ \"\$restart_status\" -eq 0 ]"; then
-    restore_status=1
-    log "rollback transport or restore command failed"
+       if [ -f '$SNAPSHOT_PATH/datadog.enabled' ]; then
+         tag='/etc/systemd/system/$SVC.d/81-datadog-version.conf'
+         if [ -f '$SNAPSHOT_PATH/datadog_version' ]; then
+           cp -a '$SNAPSHOT_PATH/datadog_version' \"\$tag\"
+         elif [ -f '$SNAPSHOT_PATH/datadog_version.absent' ]; then
+           rm -f \"\$tag\"
+         else
+           exit 1
+         fi
+         systemctl daemon-reload
+       fi" >>"$LOG" 2>&1; then
+      log "recovery incomplete: source/metadata restoration failed verification; leaving service stopped"
+      return 1
+    fi
+  else
+    log "recovery: live tree was not changed; incomplete snapshots are not used"
+  fi
+  # Never delete or rewind start.json: earlier absence, a matching release SHA,
+  # and even a lost init response do not establish exclusive transition ownership.
+  if ! current_marker="$(read_forward_marker_identity 2>>"$LOG")"; then
+    current_marker="unknown"
+  fi
+  if [[ "$current_marker" != "$FORWARD_START_IDENTITY" ]]; then
+    forward_state_changed=1
+    log "forward evaluation state reconciliation required (marker retained)"
+  fi
+  if [[ "$FORWARD_VERIFICATION_FAILED" -eq 1 ]]; then
+    forward_state_changed=1
+    log "forward evaluation authority/state reconciliation required (runtime data retained)"
+  fi
+  if ! "${SSH[@]}" "$BOXHOST" "systemctl restart '$SVC'" >>"$LOG" 2>&1; then
+    log "recovery incomplete: restored service restart failed"
+    return 1
   fi
   sleep 4
-  CODE="$(probe_health "$PREVIOUS_SHA" 0)"
-  log "rollback complete; health returned $CODE"
-  return "$restore_status"
+  CODE="$(probe_health "$PREVIOUS_SHA")"
+  if [[ "$CODE" != "200" ]]; then
+    log "recovery incomplete: restored health returned $CODE"
+    return 1
+  fi
+  if [[ "$forward_state_changed" -eq 1 ]]; then
+    log "recovery incomplete: code health restored; forward evaluation authority/state reconciliation required (runtime data retained)"
+    return 1
+  fi
+  log "code rollback verified; health returned $CODE; runtime data retained"
 }
 
+finish_release() {
+  local status="$1"
+  trap - EXIT INT TERM
+  if [[ "$RELEASE_COMMITTED" -ne 1 && "$RECOVERY_NEEDED" -eq 1 ]]; then
+    rollback_release "$FAILURE_REASON" || true
+    [[ "$status" -ne 0 ]] || status=1
+  fi
+  exit "$status"
+}
 fail_release() {
-  rollback_release "$1" || true
+  FAILURE_REASON="$1"
   exit 1
 }
+trap 'finish_release $?' EXIT
+trap 'FAILURE_REASON="interrupted by SIGINT"; exit 130' INT
+trap 'FAILURE_REASON="interrupted by SIGTERM"; exit 143' TERM
 
-if ! rsync -az --delete --out-format='%n' -e "$RSYNC_SSH" \
-  "${EXC[@]}" "$SRC" "$BOXHOST:$DPATH/" >>"$LOG" 2>&1; then
-  fail_release "rsync did not complete"
+FORWARD_START_IDENTITY="$(read_forward_marker_identity)" || {
+  log "deploy failed: could not resolve forward evaluation marker identity"
+  exit 1
+}
+if [[ "$FORWARD_START_IDENTITY" != "missing" && ! "$FORWARD_START_IDENTITY" =~ ^[0-9a-f]{64}$ ]]; then
+  log "deploy failed: invalid forward evaluation marker identity"
+  exit 1
 fi
-
-# The application resolves this marker once at startup. Write it before the restart so the
-# first health response can attest the exact code archive that was just synchronized.
-if ! "${SSH[@]}" "$BOXHOST" \
-  "printf '%s\n' '$EXPECTED_SHA' > '$DPATH/.deployed_git_sha'"; then
-  fail_release "release marker write failed"
+if [[ "$FORWARD_START_IDENTITY" != "missing" ]] && probe_forward_evaluation; then
+  FORWARD_START_ACTIVE=1
 fi
-if ! "${SSH[@]}" "$BOXHOST" \
-  "if [ -x '$DPATH/scripts/refresh_datadog_release_tag.sh' ]; then
-     '$DPATH/scripts/refresh_datadog_release_tag.sh' '$EXPECTED_SHA';
-   fi"; then
-  fail_release "Datadog release tag refresh failed"
-fi
-
-# Freeze durable portfolio writers before taking the one-time legacy baseline.  pending_health is
-# deliberately inert, so target schedulers may start for the health probe without emitting an
-# evaluation snapshot.  Exact-SHA health below is the only operation that activates the cohort.
-if ! "${SSH[@]}" "$BOXHOST" "systemctl stop '$SVC'"; then
-  fail_release "service stop before forward evaluation baseline failed"
+RECOVERY_NEEDED=1
+if ! stop_service; then
+  fail_release "service stop before source replacement failed"
 fi
 
 # Receipt v2 strengthens the immutable settlement preimage.  A pre-release WAL or older receipt
 # must be finalized by the currently deployed code before the runtime reader changes; deploying
 # across one would strand a committed book behind an intentionally fail-closed schema boundary.
+# Match the reader's top-level *.json glob, including invalid directories or symlinks;
+# an unreadable receipt entry is a refusal, not evidence of an empty outbox.
 SETTLEMENT_STATE_GATE=""
 if ! SETTLEMENT_STATE_GATE="$("${SSH[@]}" "$BOXHOST" \
   "set -e
@@ -241,11 +309,16 @@ if ! SETTLEMENT_STATE_GATE="$("${SSH[@]}" "$BOXHOST" \
        printf 'unresolved_wal:%s\\n' \"\$book\"
        exit 21
      fi
-     if [ -d \"\$book_dir/settlement_receipts\" ] \
-        && find \"\$book_dir/settlement_receipts\" -maxdepth 1 -type f -name '*.json' \
-             -print -quit | grep -q .; then
-       printf 'unfinalized_receipt:%s\\n' \"\$book\"
-       exit 22
+     if [ -d \"\$book_dir/settlement_receipts\" ]; then
+       if ! receipt_entry=\$(find -H \"\$book_dir/settlement_receipts\" -mindepth 1 -maxdepth 1 \
+                              -name '*.json' -print -quit); then
+         printf 'receipt_scan_failed:%s\\n' \"\$book\"
+         exit 23
+       fi
+       if [ -n \"\$receipt_entry\" ]; then
+         printf 'unfinalized_receipt:%s\\n' \"\$book\"
+         exit 22
+       fi
      fi
    done
    printf 'clean\\n'" 2>&1)"; then
@@ -257,8 +330,8 @@ if [[ "$SETTLEMENT_STATE_GATE" != "clean" ]]; then
   fail_release "paper settlement state gate returned an invalid result"
 fi
 
-# Bind the pending cohort to the exact canonical US account/fill bytes observed while no service
-# writer can run.  Missing or unreadable authority artifacts are a release failure, never an empty
+# Bind the pending cohort to the exact canonical US account/fill bytes observed while the configured
+# service is stopped. Missing or unreadable authority artifacts are a release failure, never an empty
 # baseline.  The hashes stay in the deploy process only; runtime state remains on the VPS.
 FORWARD_BASELINE_HASHES=""
 if ! FORWARD_BASELINE_HASHES="$("${SSH[@]}" "$BOXHOST" \
@@ -278,24 +351,86 @@ if [[ ! "$FORWARD_ACCOUNT_SHA" =~ ^[0-9a-f]{64}$ ]] \
     || [[ ! "$FORWARD_FILLS_SHA" =~ ^[0-9a-f]{64}$ ]]; then
   fail_release "forward evaluation authority-byte baseline was invalid"
 fi
-if [[ "$FORWARD_START_STATE" == "missing" ]]; then
-  FORWARD_START_CREATED=1
+# Preserve the previous complete backup until this attempt has a verified snapshot.
+# These directories are ordinary artifacts of the existing helper, not a release queue.
+if ! SNAPSHOT_PATH="$("${SSH[@]}" "$BOXHOST" \
+  "[ ! -L '$DPATH/.deploy_prev' ] && mkdir -p '$DPATH/.deploy_prev' && mktemp -d '$DPATH/.deploy_prev/snapshot.XXXXXX'")"; then
+  fail_release "snapshot directory creation failed"
 fi
-FORWARD_INIT_OUTPUT=""
-if ! FORWARD_INIT_OUTPUT="$("${SSH[@]}" "$BOXHOST" \
-  "cd '$DPATH' &&
-   MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT='$LIVE_DATA_PATH' \
-     python3 -m portfolio.forward_evaluation init \
-       --deployment-sha '$EXPECTED_SHA' --asof \"\$(date -u +%F)\"" 2>&1)"; then
+if [[ "$SNAPSHOT_PATH" != "$DPATH/.deploy_prev/snapshot."* ]] \
+    || [[ ! "$SNAPSHOT_PATH" =~ ^/[a-zA-Z0-9_./:-]+$ ]]; then
+  fail_release "snapshot directory identity was invalid"
+fi
+if ! "${SSH[@]}" "$BOXHOST" \
+  "set -e
+   mkdir '$SNAPSHOT_PATH/tree'
+   rsync -ac --delete $REMOTE_EXCLUDES '$DPATH/' '$SNAPSHOT_PATH/tree/'
+   difference=\$(rsync -acn --delete --itemize-changes $REMOTE_EXCLUDES '$DPATH/' '$SNAPSHOT_PATH/tree/')
+   [ -z \"\$difference\" ]
+   if [ -f '$DPATH/.deployed_git_sha' ] && [ ! -L '$DPATH/.deployed_git_sha' ]; then
+     cp -a '$DPATH/.deployed_git_sha' '$SNAPSHOT_PATH/deployed_git_sha'
+   elif [ ! -e '$DPATH/.deployed_git_sha' ] && [ ! -L '$DPATH/.deployed_git_sha' ]; then
+     touch '$SNAPSHOT_PATH/deployed_git_sha.absent'
+   else
+     exit 1
+   fi
+   if [ -f '/etc/systemd/system/$SVC.d/80-datadog.conf' ]; then
+     touch '$SNAPSHOT_PATH/datadog.enabled'
+     tag='/etc/systemd/system/$SVC.d/81-datadog-version.conf'
+     if [ -f \"\$tag\" ] && [ ! -L \"\$tag\" ]; then
+       cp -a \"\$tag\" '$SNAPSHOT_PATH/datadog_version'
+     elif [ ! -e \"\$tag\" ] && [ ! -L \"\$tag\" ]; then
+       touch '$SNAPSHOT_PATH/datadog_version.absent'
+     else
+       exit 1
+     fi
+   fi
+   touch '$SNAPSHOT_PATH/complete'" >>"$LOG" 2>&1; then
+  fail_release "complete code snapshot failed"
+fi
+SNAPSHOT_READY=1
+
+# Mark possible mutation before rsync; failure or transport loss may be partial.
+TREE_MUTATION_STARTED=1
+if ! rsync -azc --delete --out-format='%n' -e "$RSYNC_SSH" \
+  "${EXC[@]}" "$SRC" "$BOXHOST:$DPATH/" >>"$LOG" 2>&1; then
+  fail_release "rsync did not complete"
+fi
+if ! "${SSH[@]}" "$BOXHOST" \
+  "set -e
+   tmp=\$(mktemp '$DPATH/.deployed_git_sha.tmp.XXXXXX')
+   trap 'rm -f \"\$tmp\"' EXIT
+   printf '%s\n' '$EXPECTED_SHA' > \"\$tmp\"
+   chmod 0644 \"\$tmp\"
+   mv -f \"\$tmp\" '$DPATH/.deployed_git_sha'"; then
+  fail_release "release marker write failed"
+fi
+if ! "${SSH[@]}" "$BOXHOST" \
+  "if [ -x '$DPATH/scripts/refresh_datadog_release_tag.sh' ]; then
+     MASTERMIND_SERVICE='$SVC' '$DPATH/scripts/refresh_datadog_release_tag.sh' '$EXPECTED_SHA'
+   fi"; then
+  fail_release "Datadog release tag refresh failed"
+fi
+
+# An established cohort is immutable across upgrades. Do not silently recreate it
+# if it disappears after the preimage was observed; init/finalize are no-ops for it.
+if [[ "$FORWARD_START_ACTIVE" -eq 1 ]]; then
+  if [[ "$(read_forward_marker_identity 2>>"$LOG" || true)" != "$FORWARD_START_IDENTITY" ]]; then
+    fail_release "established forward evaluation marker changed; reconciliation required"
+  fi
+else
+  FORWARD_INIT_OUTPUT=""
+  if ! FORWARD_INIT_OUTPUT="$("${SSH[@]}" "$BOXHOST" \
+    "cd '$DPATH' &&
+     MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT='$LIVE_DATA_PATH' \
+       python3 -m portfolio.forward_evaluation init \
+         --deployment-sha '$EXPECTED_SHA' --asof \"\$(date -u +%F)\"" 2>&1)"; then
+    printf '%s\n' "$FORWARD_INIT_OUTPUT" >>"$LOG"
+    fail_release "forward evaluation pending start initialization failed"
+  fi
   printf '%s\n' "$FORWARD_INIT_OUTPUT" >>"$LOG"
-  fail_release "forward evaluation pending start initialization failed"
 fi
-printf '%s\n' "$FORWARD_INIT_OUTPUT" >>"$LOG"
-if [[ "$FORWARD_START_CREATED" -eq 1 ]] \
-    && ! printf '%s' "$FORWARD_INIT_OUTPUT" | grep -Eq '"initialized"[[:space:]]*:[[:space:]]*true'; then
-  # A concurrent valid initializer won the create-once race; it is not ours to remove on rollback.
-  FORWARD_START_CREATED=0
-fi
+
 if ! "${SSH[@]}" "$BOXHOST" "systemctl restart '$SVC'"; then
   fail_release "service restart failed"
 fi
@@ -308,8 +443,8 @@ done
 
 if [[ "$CODE" == "200" ]]; then
   # Activate only after the exact commit, provider policy, and scheduled runtime pass health.
-  # The canonical book lock spans compare -> finalize -> status, preventing a service writer from
-  # slipping between byte verification and activation. finalize is idempotent for an active marker.
+  # The canonical book lock spans compare -> finalize -> status for cooperating book writers.
+  # finalize is idempotent for an active marker; unrelated writers remain outside this lock.
   if ! "${SSH[@]}" "$BOXHOST" \
     "set -e
      cd '$DPATH'
@@ -325,14 +460,22 @@ if [[ "$CODE" == "200" ]]; then
      fills_sha=\$(sha256sum -- \"\$fills_path\" | awk '{print \$1}')
      [ \"\$account_sha\" = '$FORWARD_ACCOUNT_SHA' ]
      [ \"\$fills_sha\" = '$FORWARD_FILLS_SHA' ]
-     MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT='$LIVE_DATA_PATH' \
-       python3 -m portfolio.forward_evaluation finalize --deployment-sha '$EXPECTED_SHA' &&
+     if [ '$FORWARD_START_ACTIVE' != '1' ]; then
+       MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT='$LIVE_DATA_PATH' \
+         python3 -m portfolio.forward_evaluation finalize --deployment-sha '$EXPECTED_SHA'
+     fi
      MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT='$LIVE_DATA_PATH' \
        python3 -m portfolio.forward_evaluation status >/dev/null" \
     >>"$LOG" 2>&1; then
+    FORWARD_VERIFICATION_FAILED=1
     log "forward evaluation authority bytes changed, missing, unreadable, or lock verification failed"
     fail_release "forward evaluation activation/status verification failed"
   fi
+  if [[ "$FORWARD_START_ACTIVE" -eq 1 ]] \
+      && [[ "$(read_forward_marker_identity 2>>"$LOG" || true)" != "$FORWARD_START_IDENTITY" ]]; then
+    fail_release "established forward evaluation marker changed; reconciliation required"
+  fi
+  RELEASE_COMMITTED=1
   log "deploy OK: $SVC healthy at commit $EXPECTED_SHA"
   exit 0
 fi

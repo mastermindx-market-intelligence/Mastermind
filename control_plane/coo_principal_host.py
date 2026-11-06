@@ -116,6 +116,25 @@ class CooHostProvider:
             _refuse()
         self.source, self.workspace = source, workspace
 
+    async def read_workspace_resource_capacity(self, frame):
+        from control_plane.workspace_resource_capacity_read import handle_from_original_coo
+        return await handle_from_original_coo(self.workspace, frame, self.source)
+
+    async def read_workspace_retained_activity(self, frame):
+        """Delegate one *read-only* original Executive OHF observation.
+
+        The installed COO provider already owns this source and its existing
+        Workspace reader. No new grant registry, new host or action token.
+        """
+        from common.executive_workspace_activity_contract import validate_frame
+        validate_frame(frame)
+        return await self.workspace.handle_activity_from_original_coo(frame, self.source)
+
+    async def read_workspace_fabric(self, frame, paid_source):
+        """Join this actual installed COO source to the original paid owner."""
+        from control_plane.workspace_fabric_read import handle_fabric_frame
+        return await handle_fabric_frame(self.workspace, frame, self.source, paid_source)
+
     def facts(self, frame):
         validate_facts_frame(frame)
         before = self.source.for_principal(frame["principal"], frame["work_ref"])
