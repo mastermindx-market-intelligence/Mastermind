@@ -74,3 +74,38 @@ unknown-family discriminators are recorded separately.
 All five verification flags, scientific admission and adjudicator access remain
 false/refused. No actual dual-original-rating/disagreement issuer exists in this
 source component. No narrative or generic COMPLETE result can substitute for it.
+
+## Protected pre-input intent extension (source in progress)
+
+The new Runtime optional `native_memory` constraint is closed public correlation:
+`{schema: mastermind.native_memory_runtime_intent.v1, operation_id, intent}`.
+Its `intent` has ONLY study_id/root_id/operator_run_id/child_run_id. A supplied
+participant binding hash, packet, role, task, slot or authority flag is refused
+by the canonical Job normalizer. Other Job constraints retain their old path.
+
+`capture_memory_runtime_claim(actual Runtime, actual AttemptLease)` reads the
+incumbent opaque lease, current authority/assignment/claim status and original
+JOB_CLAIMED Event. Its private nominal handle is reread on each use. It does not
+authenticate a protected service or issue source/paid permission. Native source
+locator IDs remain distinct from actual Runtime Job/root/parent/Attempt IDs.
+
+`capture_protected_memory_intent(claim, actual Control socket)` additionally
+requires the root helper, actual kernel peer and fresh fixed installed-Control
+qualification before/after the Runtime read. The new canonical object has schema
+`mastermind.protected_memory_pre_input_intent.v1`, protected owner/mode identity,
+current Runtime admission and its original claim Event ref, original operation,
+and native source locator. It excludes future input/capability/result bytes.
+`require_protected_memory_intent` freshly rechecks the same context and emits
+prepare_case plus `{schema,sha256,bytes}` referring to that exact new object.
+
+The wire spelling participant_binding_sha256 is the derived SHA of THIS NEW
+pre-input object, never c82 participant_binding.v1 (whose digest already depends
+on future input). A caller cannot supply it on the Job. Linux's current enrolled
+service/recipient/source grant must join this exact new schema/ref and prove the
+native source provenance. The M2 locator itself remains untrusted until that
+independent join. No digest, nominal handle or fixture substitutes for the grant.
+
+These new source primitives have explicit installed/kernel fixture premises and
+real temporary Runtime/token/Event tests. They do not yet constitute the fixed
+Linux exchange, protected paid execution mode, installed dispatcher or final
+recipient result renderer. Those remain the current composition work.
