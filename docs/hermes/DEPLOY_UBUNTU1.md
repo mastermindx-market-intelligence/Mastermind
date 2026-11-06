@@ -706,3 +706,51 @@ the UI remains honestly unavailable even when the transport is connected.
 Office refresh updates this observation without changing the direction draft,
 frozen preview or existing launch owner. Configuration observed is not proof of
 credential enrollment, service health, served model, useful turn or usage.
+
+
+## Current installed-source binding for read-only role observations
+
+The MH1 gateway uses the existing root-custodied release entry for a bounded
+`hermes-observation` subprocess. Ordinary imports of the observer remain unbound.
+The entry requires CPython3.12 `-I -S -B`, held manifest-matched first-party
+imports, and the root installation owner's current
+`/etc/mastermind-executive/hermes-role-observation.json`. A configured SHA or
+publisher StatusText does not supply that record or prove installation.
+
+The existing root release/unit installer may prepare candidate bytes, without
+installing or querying a unit, through this exact released entry:
+
+```text
+/usr/bin/python3.12 -I -S -B /opt/mastermind-executive/releases/<S>/ops/executive_os/release_manifest.py hermes-observation-prepare <gateway-config-sha256> <installation-epoch-sha256> <observer-uid> <observer-gid>
+```
+
+Its bounded stdin is the two existing unit operands, each with `role`, numeric
+`uid`/`gid`, exact `argv`, and the normalized effective system-manager `exec_start`
+value. These are explicit root-installer inputs, not caller proof. The command
+derives interpreter/module/unit hashes from actual held root-owned files and
+returns candidate JSON only. It does not generate an epoch, change a file,
+install a unit, query PID1, inspect a process, read a role profile/secret, or
+certify a live service. A new or replaced epoch is a consequential installation
+fact owned by that same root installer, not a monotonic counter invented here.
+
+Normal reviewed root installation must bind the actual release, selected gateway
+configuration, current observer identity, distinct existing role identities,
+root-managed units and runtime import closure before installing those bytes as
+its root-owned current record. This source change does not perform that step.
+Missing/foreign/changed record, runtime, unit, rights or import roots refuse.
+The source preparation output and synthetic tests are not installed evidence.
+
+At acquisition, the actual held loader supplies the source identity and checks
+the current record/epoch and runtime around both fixed unit reads. Effective
+unit FragmentPath, absence of drop-ins, no pending daemon reload, role User/Group
+and exact ExecStart must match. Only then does the existing owner inspect fixed
+public kernel metadata for the two PID1-selected main processes: executable,
+argv, numeric UID/GID, system cgroup and start epoch. It never reads environ,
+role-private state, profile, credential or model output. The existing boot,
+InvocationID, two-snapshot identity, dual-clock age and single request deadline
+still apply. Replacement, drift or expiry withholds the observation.
+
+This enables only the existing authenticated read-only metadata projection.
+Credential enrollment, served model, provider authentication, service health and
+useful model turns remain unproved by that projection. No H1/H8, network canary,
+service activation or installation is implied.

@@ -1,10 +1,4 @@
-"""Fixed PID1 observation for the two Hermes roles on the existing MH1 host.
-
-Pure qualification is separate from acquisition. The installed source owner
-does not yet expose the required root-custodied producer/interpreter binding;
-the production acquisition boundary therefore refuses before reading a unit.
-An implementation SHA in configuration or StatusText cannot clear that gate.
-"""
+"""Fixed PID1 observation under the existing held Linux release owner."""
 from __future__ import annotations
 
 import asyncio
@@ -27,19 +21,26 @@ _ROW_KEYS = frozenset({"role", "unit", "main_pid", "main_start_monotonic_us",
                       "invocation_id", "status", "notify_access", "active_state", "sub_state"})
 _PROPERTIES = ("Id", "MainPID", "ExecMainStartTimestampMonotonic", "InvocationID",
                "NotifyAccess", "ActiveState", "SubState", "StatusText")
-_MAX_PID1_BYTES = 16_384
+_SOURCE_PROPERTIES = ('FragmentPath', 'DropInPaths', 'NeedDaemonReload', 'User', 'Group', 'ExecStart')
+_MAX_PID1_BYTES = 32_768
 
 
 def _installed_source_identity(expected_implementation_sha: str) -> str | None:
-    """Reserved seam for the existing Linux release/unit custody owner.
-
-    No configured claim, publisher field, mutable checkout HEAD, bare release
-    manifest or caller boolean is accepted as this identity. Packaging the
-    first-party modules alone does not qualify the interpreter, import roots
-    and effective root unit. That incumbent-owner integration remains owed.
-    No role-private directory or credential is accessed to fill the gap.
-    """
-    return None
+    """Only the actual isolated entry's held loader may supply this fact."""
+    module = sys.modules.get(__name__)
+    loader = globals().get('__loader__')
+    # A source-path import, configured label or arbitrary callable is not the
+    # root installation owner. The entry owns all first-party imports.
+    entry = sys.modules.get('__main__')
+    trusted_type = getattr(entry, '_ReleaseSourceFinder', None)
+    if (trusted_type is None or type(loader) is not trusted_type
+            or getattr(module, '__loader__', None) is not loader
+            or getattr(entry, '__file__', None) != str(loader.owner.root / 'ops/executive_os/release_manifest.py')):
+        return None
+    try:
+        return loader.installed_hermes_identity(module, expected_implementation_sha)
+    except (OSError, ValueError, RuntimeError):
+        return None
 
 
 def _boot_id() -> str:
@@ -63,7 +64,7 @@ def _number(value: str) -> int:
     return number
 
 
-def _decode_pid1(raw: bytes) -> list[dict]:
+def _decode_pid1(raw: bytes, *, source_bound=False) -> list[dict]:
     if type(raw) is not bytes or not 0 < len(raw) <= _MAX_PID1_BYTES:
         raise RoleStatusError()
     try:
@@ -75,10 +76,11 @@ def _decode_pid1(raw: bytes) -> list[dict]:
         document = {}
         for line in block.split("\n"):
             key, separator, value = line.partition("=")
-            if not separator or key not in _PROPERTIES or key in document:
+            properties = _PROPERTIES + (_SOURCE_PROPERTIES if source_bound else ())
+            if not separator or key not in properties or key in document:
                 raise RoleStatusError()
             document[key] = value
-        if set(document) != set(_PROPERTIES) or document["Id"] in records:
+        if set(document) != set(properties) or document["Id"] in records:
             raise RoleStatusError()
         records[document["Id"]] = document
     if set(records) != set(UNITS):
@@ -92,6 +94,8 @@ def _decode_pid1(raw: bytes) -> list[dict]:
                      "status": decode_status_text(value["StatusText"], expected_role=role),
                      "notify_access": value["NotifyAccess"], "active_state": value["ActiveState"],
                      "sub_state": value["SubState"]})
+        if source_bound:
+            rows[-1]['effective_source'] = {k: value[k] for k in _SOURCE_PROPERTIES}
     return rows
 
 
@@ -99,7 +103,7 @@ async def _query_fixed_pid1() -> list[dict]:
     """Only the two fixed units and explicit property allowlist; no shell."""
     process = await asyncio.create_subprocess_exec(
         "/usr/bin/systemctl", "show", "--no-pager",
-        *("--property=" + name for name in _PROPERTIES), "--", *UNITS,
+        *("--property=" + name for name in _PROPERTIES + _SOURCE_PROPERTIES), "--", *UNITS,
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
         env={"PATH": "/usr/bin:/bin", "LC_ALL": "C", "LANG": "C", "SYSTEMD_PAGER": ""},
@@ -114,7 +118,7 @@ async def _query_fixed_pid1() -> list[dict]:
             chunks.extend(block)
         if len(chunks) > _MAX_PID1_BYTES or await process.wait() != 0:
             raise RoleStatusError()
-        return _decode_pid1(bytes(chunks))
+        return _decode_pid1(bytes(chunks), source_bound=True)
     finally:
         if process.returncode is None:
             # Kill only this owned, read-only query. Do not reset the caller's
@@ -199,6 +203,12 @@ class HermesRoleMetadataObserver:
             raise RoleStatusError()
         boot = _boot_id()
         rows = await _query_fixed_pid1()
+        # This branch is reachable only through the actual held loader above.
+        # Effective unit and kernel main-process facts must qualify too.
+        try:
+            rows = __loader__.hermes_observation.qualify_rows(rows)
+        except (AttributeError, OSError, ValueError, RuntimeError):
+            raise RoleStatusError() from None
         if boot != _boot_id() or source != _installed_source_identity(self.implementation_sha):
             raise RoleStatusError("SOURCE_CHANGED")
         return {"host_boot_id": boot, "implementation_sha": self.implementation_sha,
@@ -221,3 +231,44 @@ class HermesRoleMetadataObserver:
                 return result
         except (OSError, asyncio.TimeoutError):
             raise RoleStatusError() from None
+
+
+class InstalledHermesRoleMetadataObserver:
+    """Gateway composition: one bounded isolated read through existing entry.
+
+    It cannot accept a caller executable/path or use ambient role imports.
+    Root installation/source qualification precedes this owned subprocess.
+    """
+    def __init__(self, *, host_binding_sha256, implementation_sha):
+        validate_source_pins(host_binding_sha256, implementation_sha)
+        self.host_binding_sha256 = host_binding_sha256
+        self.implementation_sha = implementation_sha
+
+    async def read_pair(self):
+        if sys.platform != 'linux':
+            raise RoleStatusError()
+        from ops.executive_os import release_manifest as release
+        process = None
+        try:
+            with release.hermes_observation_command(self.implementation_sha, self.host_binding_sha256) as command:
+                async with asyncio.timeout(4.0):
+                    process = await asyncio.create_subprocess_exec(*command,
+                        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.DEVNULL,
+                        env={'PATH': '/usr/bin:/bin', 'LC_ALL': 'C', 'LANG': 'C'})
+                    assert process.stdout is not None
+                    raw = await process.stdout.read(8193)
+                    if len(raw) > 8192 or await process.wait() != 0:
+                        raise RoleStatusError()
+                    from common.hermes_role_status_contract import closed_json
+                    value = validate_observation(closed_json(raw, limit=8192))
+                    if (value['host_binding_sha256'] != self.host_binding_sha256
+                            or value['implementation_sha'] != self.implementation_sha):
+                        raise RoleStatusError('SOURCE_CHANGED')
+                    return value
+        except (OSError, ValueError, RuntimeError, asyncio.TimeoutError):
+            raise RoleStatusError() from None
+        finally:
+            if process is not None and process.returncode is None:
+                try: process.kill()
+                except ProcessLookupError: pass

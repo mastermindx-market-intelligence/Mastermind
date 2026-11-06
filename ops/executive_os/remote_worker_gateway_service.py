@@ -620,9 +620,9 @@ async def serve_remote_worker_gateway(
     broker_identity = endpoint_identity(config.broker_socket_path)
     gateway = gateway_factory(config)
     if config.hermes_role_metadata_read is not None:
-        from ops.executive_os.hermes_role_metadata_observer import HermesRoleMetadataObserver
+        from ops.executive_os.hermes_role_metadata_observer import InstalledHermesRoleMetadataObserver
 
-        gateway._host_observer = HermesRoleMetadataObserver(
+        gateway._host_observer = InstalledHermesRoleMetadataObserver(
             host_binding_sha256=remote_worker_gateway_config_digest(config),
             implementation_sha=config.hermes_role_metadata_read.implementation_sha,
         )

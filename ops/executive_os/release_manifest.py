@@ -189,6 +189,7 @@ _LINUX_RELEASES = Path("/opt/mastermind-executive/releases")
 _FIRST_PARTY = ("common", "control_plane", "integrations", "ops", "scripts")
 _YAML_ROOT = "ops/native_fabric/quota_continuity/candidate"
 _MAX_SOURCE = 4 * 1024 * 1024
+_HERMES_OBSERVATION_INSTALL = Path('/etc/mastermind-executive/hermes-role-observation.json')
 
 
 def _held_identity(info: os.stat_result, directory: bool) -> tuple:
@@ -380,6 +381,17 @@ class _ReleaseSourceFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         self.baseline = tuple(sys.meta_path)
         self.paths = tuple(sys.path)
         self.predecessor = None
+        self.hermes_observation = None
+
+    def installed_hermes_identity(self, module, implementation_sha):
+        # The actual held loader owns the module, not a configured digest or
+        # callback supplied by a request. Ordinary gateway imports have no owner.
+        self.check()
+        if (self.owned.get('ops.executive_os.hermes_role_metadata_observer') is not module
+                or module.__loader__ is not self or self.hermes_observation is None
+                or self.owner.root.name != implementation_sha):
+            raise ReleaseManifestError('Hermes observation loader is unbound')
+        return self.hermes_observation.identity()
 
     def check(self):
         prefix = [] if self.predecessor is None else [self.predecessor]
@@ -430,6 +442,197 @@ class _ReleaseSourceFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
             self.owner.check()
             exec(compile(raw, module.__file__, "exec", dont_inherit=True), module.__dict__)
         self.check()
+
+
+class _HermesObservationInstallation:
+    """Current root installation facts through the existing held-FD owner.
+
+    No receipt is installed, inferred or repaired here. Its producer is the
+    existing root release/unit installer; root custody is the authority, not
+    an environment label, caller dictionary or publisher's StatusText.
+    """
+    def __init__(self, owner, binding):
+        self.owner = owner
+        raw = owner.read(_HERMES_OBSERVATION_INSTALL, 262144)
+        document = _closed_json(raw)
+        required = {'schema', 'implementation_sha', 'host_binding_sha256', 'epoch',
+                    'observer_uid', 'observer_gid', 'runtime', 'units'}
+        if (type(document) is not dict or set(document) != required
+                or document['schema'] != 'mastermind.hermes_observation_installation.v1'
+                or document['implementation_sha'] != owner.root.name
+                or document['host_binding_sha256'] != binding
+                or type(binding) is not str or re.fullmatch('[0-9a-f]{64}', binding) is None
+                or type(document['epoch']) is not str
+                or re.fullmatch('[0-9a-f]{64}', document['epoch']) is None
+                or any(type(document[k]) is not int or document[k] <= 0
+                       for k in ('observer_uid', 'observer_gid'))
+                or os.getuid() != os.geteuid() or os.getgid() != os.getegid()
+                or os.geteuid() != document['observer_uid'] or os.getegid() != document['observer_gid']):
+            raise ReleaseManifestError('Hermes installation identity is unqualified')
+        runtime = document['runtime']
+        if (type(runtime) is not dict or set(runtime) != {'executable', 'sha256', 'import_paths', 'module_files'}
+                or type(runtime['executable']) is not str
+                or Path(runtime['executable']) != Path(sys.executable).resolve(strict=True)
+                or type(runtime['sha256']) is not str or re.fullmatch('[0-9a-f]{64}', runtime['sha256']) is None
+                or type(runtime['import_paths']) is not list or runtime['import_paths'] != sys.path
+                or not 1 <= len(runtime['import_paths']) <= 16
+                or type(runtime['module_files']) is not dict or not 1 <= len(runtime['module_files']) <= 1024):
+            raise ReleaseManifestError('Hermes runtime identity is unqualified')
+        self.document, self.raw = document, raw
+        self.units = {}
+        for row in document['units'] if type(document['units']) is list else ():
+            if (type(row) is not dict or set(row) != {'role', 'sha256', 'uid', 'gid', 'argv', 'exec_start'}
+                    or row.get('role') not in {'mmsecretary', 'mmmeta'} or row['role'] in self.units
+                    or any(type(row[k]) is not int or row[k] <= 0 for k in ('uid', 'gid'))
+                    or type(row['sha256']) is not str or re.fullmatch('[0-9a-f]{64}', row['sha256']) is None
+                    or type(row['argv']) is not list or len(row['argv']) != 11
+                    or any(type(v) is not str or not v or '\x00' in v for v in row['argv'])
+                    or row['argv'][:7] != [runtime['executable'], '-I', '-S', '-B',
+                        str(owner.root / 'ops/executive_os/release_manifest.py'), 'hermes-runtime', 'supervise']
+                    or row['argv'][7] != '--profile' or row['argv'][9] != '--hermes-bin'
+                    or type(row['exec_start']) is not str or not 1 <= len(row['exec_start']) <= 8192):
+                raise ReleaseManifestError('Hermes unit identity is unqualified')
+            self.units[row['role']] = row
+        if (set(self.units) != {'mmsecretary', 'mmmeta'}
+                or len({r['uid'] for r in self.units.values()}) != 2
+                or len({r['gid'] for r in self.units.values()}) != 2):
+            raise ReleaseManifestError('Hermes role identity is unqualified')
+        self.identity()
+
+    def _runtime(self):
+        runtime = self.document['runtime']
+        executable = self.owner.read(Path(runtime['executable']), 64 * 1024 * 1024)
+        if hashlib.sha256(executable).hexdigest() != runtime['sha256']:
+            raise ReleaseManifestError('Hermes interpreter changed')
+        if sys.path != runtime['import_paths']:
+            raise ReleaseManifestError('Hermes import roots changed')
+        for name in runtime['import_paths']:
+            path = Path(name)
+            if not path.is_absolute() or '..' in path.parts:
+                raise ReleaseManifestError('Hermes import root is unqualified')
+            # The standard absent python312.zip entry is pinned as absent;
+            # its protected parent must stay held and the path stay absent.
+            if not path.exists():
+                self.owner.hold(path.parent, directory=True)
+                if path.suffix != '.zip' or path.is_symlink():
+                    raise ReleaseManifestError('Hermes import root is unavailable')
+            else:
+                self.owner.hold(path, directory=path.is_dir())
+                if path.is_file() and str(path) not in runtime['module_files']:
+                    raise ReleaseManifestError('Hermes import archive is not pinned')
+        for name, expected in runtime['module_files'].items():
+            if (type(name) is not str or not Path(name).is_absolute() or '..' in Path(name).parts
+                    or not (name.startswith('/usr/lib/') or name.startswith('/usr/local/lib/'))
+                    or type(expected) is not str or re.fullmatch('[0-9a-f]{64}', expected) is None
+                    or hashlib.sha256(self.owner.read(Path(name), _MAX_SOURCE)).hexdigest() != expected):
+                raise ReleaseManifestError('Hermes runtime module changed')
+        for name, module in tuple(sys.modules.items()):
+            if any(name == root or name.startswith(root + '.') for root in _FIRST_PARTY):
+                continue
+            origin = getattr(getattr(module, '__spec__', None), 'origin', None)
+            if origin is None:
+                if (name == '__main__' and getattr(module, '__file__', None)
+                        == str(self.owner.root / 'ops/executive_os/release_manifest.py')):
+                    self.owner.source('ops/executive_os/release_manifest.py')
+                elif (name in {'typing.io', 'typing.re'} and module is
+                      getattr(sys.modules.get('typing'), name.split('.')[1], None)):
+                    pass  # CPython's two non-module deprecated typing aliases.
+                else:
+                    raise ReleaseManifestError('Hermes ambient runtime module is unqualified')
+                continue
+            if origin in ('built-in', 'frozen'):
+                continue
+            path = getattr(module, '__file__', None)
+            if path == str(self.owner.root / 'ops/executive_os/release_manifest.py'):
+                self.owner.source('ops/executive_os/release_manifest.py')
+                continue
+            if type(path) is not str or path not in runtime['module_files']:
+                raise ReleaseManifestError('Hermes runtime module is not installed')
+            cached = getattr(module, '__cached__', None)
+            if (type(cached) is str and Path(cached).exists()
+                    and cached not in runtime['module_files']):
+                raise ReleaseManifestError('Hermes runtime bytecode is not installed')
+
+    def identity(self):
+        if self.owner.read(_HERMES_OBSERVATION_INSTALL, 262144) != self.raw:
+            raise ReleaseManifestError('Hermes installation epoch changed')
+        if (os.geteuid() != self.document['observer_uid'] or os.getegid() != self.document['observer_gid']
+                or os.getuid() != os.geteuid() or os.getgid() != os.getegid()):
+            raise ReleaseManifestError('Hermes observation rights changed')
+        self._runtime()
+        for role, row in self.units.items():
+            unit = self.owner.read(Path('/etc/systemd/system') / ('hermes-runtime-' + role + '.service'), 32768)
+            if hashlib.sha256(unit).hexdigest() != row['sha256']:
+                raise ReleaseManifestError('Hermes installed unit changed')
+            lines = unit.decode('utf-8').splitlines()
+            if [v for v in lines if v.startswith('ExecStart=')] != ['ExecStart=' + ' '.join(row['argv'])]:
+                raise ReleaseManifestError('Hermes installed entry changed')
+        self.owner.check()
+        return hashlib.sha256(self.raw).hexdigest()
+
+    def qualify_rows(self, rows):
+        self.identity()
+        for row in rows:
+            expected = self.units[row['role']]
+            effective = row.pop('effective_source')
+            if effective != {'FragmentPath': '/etc/systemd/system/' + row['unit'],
+                             'DropInPaths': '', 'NeedDaemonReload': 'no',
+                             'User': row['role'], 'Group': row['role'],
+                             'ExecStart': expected['exec_start']}:
+                raise ReleaseManifestError('Hermes effective unit differs')
+            _qualify_hermes_process(row, expected)
+        self.identity()
+        return rows
+
+
+def _qualify_hermes_process(row, expected):
+    """Fixed public kernel metadata for the actual two PID1-selected mains.
+
+    Never read environ, role state, profile, private home or credentials.
+    PID1 start time + invocation + boot are independently paired by observer.
+    """
+    pid = row['main_pid']
+    if type(pid) is not int or not 0 < pid <= 4194304:
+        raise ReleaseManifestError('Hermes main process is unqualified')
+    root = Path('/proc') / str(pid)
+    def read(name, maximum):
+        fd = os.open(root / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise ReleaseManifestError('Hermes process metadata type')
+            raw = os.read(fd, maximum + 1)
+            if len(raw) > maximum:
+                raise ReleaseManifestError('Hermes process metadata bound')
+            return raw
+        finally:
+            os.close(fd)
+    before = read('stat', 8192)
+    fields = before.rsplit(b') ', 1)
+    if len(fields) != 2:
+        raise ReleaseManifestError('Hermes process epoch unavailable')
+    parts = fields[1].split()
+    if len(parts) < 20 or not parts[19].isdigit():
+        raise ReleaseManifestError('Hermes process epoch unavailable')
+    ticks = int(parts[19]); hz = os.sysconf('SC_CLK_TCK')
+    if hz <= 0 or abs(ticks * 1_000_000 // hz - row['main_start_monotonic_us']) > 2_000_000 // hz:
+        raise ReleaseManifestError('Hermes process epoch changed')
+    if os.readlink(root / 'exe') != expected['argv'][0]:
+        raise ReleaseManifestError('Hermes process interpreter differs')
+    if read('cmdline', 32768).split(b'\0') != [v.encode() for v in expected['argv']] + [b'']:
+        raise ReleaseManifestError('Hermes process entry differs')
+    status = read('status', 16384).decode('ascii')
+    for key, ident in (('Uid:', expected['uid']), ('Gid:', expected['gid'])):
+        values = [line.split()[1:] for line in status.splitlines() if line.startswith(key)]
+        if values != [[str(ident)] * 4]:
+            raise ReleaseManifestError('Hermes process rights differ')
+    if read('cgroup', 4096) != ('0::/system.slice/' + row['unit'] + '\n').encode():
+        raise ReleaseManifestError('Hermes process unit differs')
+    after = read('stat', 8192).rsplit(b') ', 1)
+    if (len(after) != 2 or len(after[1].split()) < 20 or after[0] != fields[0]
+            or after[1].split()[19] != parts[19]
+            or os.readlink(root / 'exe') != expected['argv'][0]):
+        raise ReleaseManifestError('Hermes process changed')
 
 
 @contextmanager
@@ -500,7 +703,176 @@ def _hermes_runtime(argv: list[str]) -> int:
         owner.close()
 
 
+def prepare_hermes_observation_installation(owner, *, binding, epoch, observer_uid,
+                                           observer_gid, units):
+    """Prepare bytes for the existing ROOT release/unit installer, never install.
+
+    Root derives file/interpreter/module hashes from its held actual operands.
+    Unit runtime UID/argv and normalized effective ExecStart are normal installer
+    inputs, not runtime attestation. Only a subsequently root-custodied current
+    record plus the observer's effective-unit/process checks can enable a read.
+    No environment, credential, private role file, PID or service is read here.
+    """
+    if (os.getuid() != 0 or os.geteuid() != 0 or sys.platform != 'linux'
+            or sys.implementation.name != 'cpython' or sys.version_info[:2] != (3, 12)
+            or not sys.flags.isolated or not sys.flags.no_site or not sys.flags.dont_write_bytecode
+            or any(type(v) is not str or re.fullmatch('[0-9a-f]{64}', v) is None for v in (binding, epoch))
+            or any(type(v) is not int or v <= 0 for v in (observer_uid, observer_gid))
+            or type(units) is not list or len(units) != 2):
+        raise ReleaseManifestError('Hermes installation preparation requires root recipe')
+    exe = Path('/usr/bin/python3.12')
+    if Path(sys.executable).resolve(strict=True) != exe:
+        raise ReleaseManifestError('Hermes installation interpreter is not fixed')
+    executable = owner.read(exe, 64 * 1024 * 1024)
+    # Qualify the observation recipe's standard-library dependency imports
+    # during preparation, not by letting an unlisted later module opt in.
+    import asyncio
+    module_files = {}
+    for name, module in tuple(sys.modules.items()):
+        if any(name == root or name.startswith(root + '.') for root in _FIRST_PARTY):
+            continue
+        origin = getattr(getattr(module, '__spec__', None), 'origin', None)
+        path = getattr(module, '__file__', None)
+        if origin is None:
+            if not (name == '__main__' and path == str(owner.root / 'ops/executive_os/release_manifest.py')) and not (
+                    name in {'typing.io', 'typing.re'} and module is
+                    getattr(sys.modules.get('typing'), name.split('.')[1], None)):
+                raise ReleaseManifestError('Hermes preparation has an ambient runtime module')
+            continue
+        if origin in ('built-in', 'frozen') or path == str(owner.root / 'ops/executive_os/release_manifest.py'):
+            continue
+        if type(path) is not str or not (path.startswith('/usr/lib/') or path.startswith('/usr/local/lib/')):
+            raise ReleaseManifestError('Hermes installation runtime path is unqualified')
+        module_files[path] = hashlib.sha256(owner.read(Path(path), _MAX_SOURCE)).hexdigest()
+        cached = getattr(module, '__cached__', None)
+        if type(cached) is str and Path(cached).exists():
+            if not (cached.startswith('/usr/lib/') or cached.startswith('/usr/local/lib/')):
+                raise ReleaseManifestError('Hermes runtime bytecode path is unqualified')
+            module_files[cached] = hashlib.sha256(owner.read(Path(cached), _MAX_SOURCE)).hexdigest()
+    for path in sys.path:
+        if type(path) is str and Path(path).is_file():
+            module_files[path] = hashlib.sha256(owner.read(Path(path), _MAX_SOURCE)).hexdigest()
+    rows = []
+    for row in units:
+        if (type(row) is not dict or set(row) != {'role', 'uid', 'gid', 'argv', 'exec_start'}
+                or row.get('role') not in {'mmsecretary', 'mmmeta'}):
+            raise ReleaseManifestError('Hermes installation unit inputs are unqualified')
+        raw = owner.read(Path('/etc/systemd/system') / ('hermes-runtime-' + row['role'] + '.service'), 32768)
+        rows.append(dict(row, sha256=hashlib.sha256(raw).hexdigest()))
+    value = dict(schema='mastermind.hermes_observation_installation.v1',
+        implementation_sha=owner.root.name, host_binding_sha256=binding, epoch=epoch,
+        observer_uid=observer_uid, observer_gid=observer_gid,
+        runtime=dict(executable=str(exe), sha256=hashlib.sha256(executable).hexdigest(),
+                     import_paths=list(sys.path), module_files=module_files), units=rows)
+    owner.check()
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+
+
+@contextmanager
+def hermes_observation_command(implementation_sha, binding):
+    """Derive one command from existing root release/installation custody.
+
+    No root configuration or executable path comes from the HTTP caller.
+    Missing root enrollment refuses before creating an observation process.
+    The child independently qualifies the whole runtime/import/unit binding.
+    """
+    if (sys.platform != 'linux' or type(implementation_sha) is not str
+            or re.fullmatch('[0-9a-f]{40}', implementation_sha) is None
+            or type(binding) is not str or re.fullmatch('[0-9a-f]{64}', binding) is None):
+        raise ReleaseManifestError('Hermes observation command is unqualified')
+    owner = _HeldReleaseSources(_LINUX_RELEASES / implementation_sha)
+    try:
+        entry = owner.root / 'ops/executive_os/release_manifest.py'
+        owner.source('ops/executive_os/release_manifest.py')
+        raw = owner.read(_HERMES_OBSERVATION_INSTALL, 262144)
+        value = _closed_json(raw)
+        runtime = value.get('runtime') if type(value) is dict else None
+        if (type(value) is not dict
+                or value.get('schema') != 'mastermind.hermes_observation_installation.v1'
+                or value.get('implementation_sha') != implementation_sha
+                or value.get('host_binding_sha256') != binding
+                or type(value.get('observer_uid')) is not int or value['observer_uid'] != os.geteuid()
+                or type(value.get('observer_gid')) is not int or value['observer_gid'] != os.getegid()
+                or type(runtime) is not dict or runtime.get('executable') != '/usr/bin/python3.12'
+                or hashlib.sha256(owner.read(Path('/usr/bin/python3.12'), 64 * 1024 * 1024)).hexdigest()
+                   != runtime.get('sha256')):
+            raise ReleaseManifestError('Hermes installed command is unqualified')
+        owner.check()
+        yield ['/usr/bin/python3.12', '-I', '-S', '-B', str(entry),
+               'hermes-observation', binding]
+        if owner.read(_HERMES_OBSERVATION_INSTALL, 262144) != raw:
+            raise ReleaseManifestError('Hermes installation changed during read')
+        owner.check()
+    finally:
+        owner.close()
+
+
+def _hermes_observation(argv):
+    if (len(argv) != 1 or type(argv[0]) is not str or re.fullmatch('[0-9a-f]{64}', argv[0]) is None
+            or sys.implementation.name != 'cpython' or sys.version_info[:2] != (3, 12)
+            or sys.platform != 'linux' or not sys.flags.isolated or not sys.flags.no_site
+            or not sys.flags.no_user_site or not sys.flags.dont_write_bytecode or not sys.flags.safe_path):
+        raise ReleaseManifestError('Hermes requires the fixed isolated observation recipe')
+    entry = Path(__file__)
+    root = entry.parents[2]
+    if (not entry.is_absolute() or root.parent != _LINUX_RELEASES
+            or entry != root / 'ops/executive_os/release_manifest.py'):
+        raise ReleaseManifestError('Hermes observation entry is unqualified')
+    owner = _HeldReleaseSources(root)
+    try:
+        owner.source('ops/executive_os/release_manifest.py')
+        installation = _HermesObservationInstallation(owner, argv[0])
+        with _held_release_imports(owner) as finder:
+            finder.hermes_observation = installation
+            from ops.executive_os.hermes_role_metadata_observer import HermesRoleMetadataObserver
+            import asyncio
+            result = asyncio.run(HermesRoleMetadataObserver(
+                host_binding_sha256=argv[0], implementation_sha=root.name).read_pair())
+            finder.check()
+            installation.identity()
+            print(json.dumps(result, sort_keys=True, separators=(',', ':'), allow_nan=False))
+            return 0
+    finally:
+        owner.close()
+
+
+def _hermes_observation_prepare(argv):
+    """Root installer's source-only measurement; stdout is NOT installation."""
+    if (len(argv) != 4 or any(type(v) is not str for v in argv)
+            or re.fullmatch('[0-9a-f]{64}', argv[0]) is None
+            or re.fullmatch('[0-9a-f]{64}', argv[1]) is None
+            or any(re.fullmatch('[1-9][0-9]{0,9}', v) is None for v in argv[2:])):
+        raise ReleaseManifestError('Hermes installation preparation arguments')
+    root = Path(__file__).parents[2]
+    owner = _HeldReleaseSources(root)
+    try:
+        owner.source('ops/executive_os/release_manifest.py')
+        raw = sys.stdin.buffer.read(32769)
+        if not 0 < len(raw) <= 32768:
+            raise ReleaseManifestError('Hermes installation unit inputs bound')
+        units = _closed_json(raw)
+        result = prepare_hermes_observation_installation(owner, binding=argv[0], epoch=argv[1],
+            observer_uid=int(argv[2]), observer_gid=int(argv[3]), units=units)
+        owner.check()
+        sys.stdout.buffer.write(result + b'\n')
+        return 0
+    finally:
+        owner.close()
+
+
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == 'hermes-observation-prepare':
+        try:
+            return _hermes_observation_prepare(sys.argv[2:])
+        except (ReleaseManifestError, OSError, ValueError, ImportError, SyntaxError):
+            print('HERMES_OBSERVATION_INSTALLATION_UNQUALIFIED', file=sys.stderr)
+            return 78
+    if len(sys.argv) > 1 and sys.argv[1] == 'hermes-observation':
+        try:
+            return _hermes_observation(sys.argv[2:])
+        except (ReleaseManifestError, OSError, ValueError, ImportError, SyntaxError):
+            print('HERMES_OBSERVATION_SOURCE_UNQUALIFIED', file=sys.stderr)
+            return 78
     if len(sys.argv) > 1 and sys.argv[1] == "hermes-runtime":
         try:
             return _hermes_runtime(sys.argv[2:])
