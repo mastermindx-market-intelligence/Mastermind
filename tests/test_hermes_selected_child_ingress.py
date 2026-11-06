@@ -51,7 +51,7 @@ from integrations.hermes_delegate.executive import (
     SELECTED_CHILD_FRAME_SCHEMA as INTEGRATION_FRAME_SCHEMA,
 )
 from integrations.mastermind_executive_app.app import AppSettings
-from integrations.mastermind_executive_app.coo import CooAppSettings, create_coo_app
+from integrations.mastermind_executive_app.coo import CooApp, CooAppSettings, create_coo_app
 from integrations.mastermind_executive_app.coo_binding import (
     BINDING_SCHEMA, COO_SCOPES, principal_frame,
 )
@@ -296,7 +296,11 @@ def test_a_lost_post_send_response_keeps_the_original_command_as_unknown(rsa_key
     assert len(sends) == 1
 
 
-@pytest.mark.parametrize("outcome", ["malformed", "foreign_command", "oversized"])
+@pytest.mark.parametrize("outcome", [
+    "malformed", "foreign_command", "foreign_job", "oversized",
+    "missing_live_submit", "missing_digest", "wrong_digest",
+    "active_without_attempt", "false_live_attempt", "unhashable_state",
+])
 def test_a_malformed_post_send_return_keeps_the_original_command_as_unknown(outcome, rsa_key):
     settings, _current, token = _app_settings(rsa_key, _target())
     app = create_coo_app(settings, audit_sink=app_fixture.Sink())
@@ -306,19 +310,33 @@ def test_a_malformed_post_send_return_keeps_the_original_command_as_unknown(outc
         sends.append(frame)
         if outcome == "malformed":
             return CeoIngressResponse("sent_ok", ok=True, result={"schema": "wrong.v1"})
-        if outcome == "foreign_command":
-            return CeoIngressResponse("sent_ok", ok=True, result={
-                "schema": "mastermind.hermes_delegate.selected_child/v1",
-                "state": "ACTIVE", "reason": None,
-                "command_id": "coo-cycle:JOB-001:dispatch:JOB-999:attempt:1",
-                "job_id": CHILD_JOB, "attempt_id": "attempt-0001",
-                "attempt_status": "CLAIMED", "job_status": "RUNNING",
-                "live_submit": True})
-        return CeoIngressResponse("sent_ok", ok=True, result={
+        body = {
             "schema": "mastermind.hermes_delegate.selected_child/v1",
-            "state": "ACTIVE", "reason": "x" * 300000,
+            "state": "ACTIVE", "reason": None,
             "command_id": COMMAND, "job_id": CHILD_JOB, "attempt_id": "attempt-0001",
-            "attempt_status": "CLAIMED", "job_status": "RUNNING", "live_submit": True})
+            "attempt_status": "CLAIMED", "job_status": "RUNNING",
+            "live_submit": True, "target_digest": frame["target_digest"],
+        }
+        if outcome == "foreign_command":
+            body["command_id"] = "coo-cycle:JOB-001:dispatch:JOB-999:attempt:1"
+        elif outcome == "foreign_job":
+            body["job_id"] = "JOB-999"
+        elif outcome == "oversized":
+            body["reason"] = "x" * 300000
+        elif outcome == "missing_live_submit":
+            body.pop("live_submit")
+        elif outcome == "missing_digest":
+            body.pop("target_digest")
+        elif outcome == "wrong_digest":
+            body["target_digest"] = "0" * 64
+        elif outcome == "active_without_attempt":
+            body["attempt_id"] = None
+            body["attempt_status"] = None
+        elif outcome == "false_live_attempt":
+            body["live_submit"] = False
+        else:
+            body["state"] = []
+        return CeoIngressResponse("sent_ok", ok=True, result=body)
 
     app._client.send_frame = send
     result = asyncio.run(_call(app, token, "mmx_delegate",
@@ -376,7 +394,8 @@ def test_the_private_frame_carries_only_host_authority(rsa_key):
             "schema": "mastermind.hermes_delegate.selected_child/v1",
             "state": "NOT_CLAIMED", "reason": "EXECUTIVE_SELECTED_CHILD_NOT_CLAIMED",
             "command_id": COMMAND, "job_id": CHILD_JOB, "attempt_id": None,
-            "attempt_status": None, "job_status": "QUEUED", "live_submit": False})
+            "attempt_status": None, "job_status": "QUEUED", "live_submit": False,
+            "target_digest": frame["target_digest"]})
 
     app._client.send_frame = send
     result = asyncio.run(_call(app, token, "mmx_delegate",
@@ -604,7 +623,9 @@ async def _installed_app(host, rsa_key, *, socket_path):
         policy=coo_policy, jwks_cache=cache).verify_token(token, now=fixture.NOW)
     binding = {"schema": BINDING_SCHEMA, "enabled": True,
                "binding": {**principal_frame(principal), "permission_digest": "a" * 64}}
-    # The installed binding is exactly the App's binding.
+    # Both receivers enroll the same signed disposable principal under
+    # the same exact policy; neither bypasses subject/binding validation.
+    host.authority_config["policy"] = dict(raw)
     host.authority_config["binding"] = binding
     host.authority_config["missions"][0]["principal_binding_digest"] = \
         _digest(binding["binding"])
@@ -649,6 +670,7 @@ def test_a_signed_mcp_request_reaches_the_control_and_claims_one_frozen_child(
                         assert envelope["state"] in {"ACTIVE", "COMPLETED"}, envelope
                         assert envelope["command_id"] == command, envelope
                         assert envelope["job_id"] == host.work.job_id, envelope
+                        assert envelope["target_digest"] == host.target.material_digest()
                         attempt_id = envelope["attempt_id"]
                         assert isinstance(attempt_id, str) and attempt_id
                         assert envelope["live_submit"] is True, envelope
@@ -667,6 +689,7 @@ def test_a_signed_mcp_request_reaches_the_control_and_claims_one_frozen_child(
                             "action": "selected_child_status", "command": command})
                         assert observed["attempt_id"] == attempt_id, observed
                         assert observed["command_id"] == command, observed
+                        assert observed["target_digest"] == host.target.material_digest()
                         assert service.runtime.jobs.get_job(
                             host.work.job_id).attempt_count == 1
 
@@ -686,10 +709,16 @@ def test_an_app_target_that_differs_from_the_control_target_refuses(tmp_path, rs
                 settings, token = await _installed_app(host, rsa_key,
                                                        socket_path=host.socket)
                 # The App holds a different frozen material than the Control.
+                original_child = host.target.children[0]
+                other_child = dataclasses.replace(
+                    original_child,
+                    selection=dataclasses.replace(
+                        original_child.selection, plan_digest="f" * 64))
                 other = ExecutiveSelectedChildTarget(
-                    work_ref=WORK_REF,
-                    children=host.target.children,
+                    work_ref=WORK_REF, children=(other_child,),
                     currentness_guard=lambda: None)
+                assert other_child.command_id == command
+                assert other.material_digest() != host.target.material_digest()
                 settings = dataclasses.replace(settings, selected_child_target=other)
                 app = server.build_web_ceo_v2_with_coo_mcp_app(
                     settings.executive, coo_settings=settings,
@@ -700,15 +729,18 @@ def test_an_app_target_that_differs_from_the_control_target_refuses(tmp_path, rs
                         base_url="http://127.0.0.1") as client:
                         envelope = await _mcp_call(client, token, "mmx_delegate", {
                             "action": "selected_child_submit", "command": command})
-                        assert envelope["state"] == "REFUSED", envelope
+                        # A generic post-send error cannot prove a no-effect
+                        # result at the App, even when this fixture proves it.
+                        assert envelope["state"] == "EFFECT_UNKNOWN", envelope
+                        assert envelope["live_submit"] is None, envelope
                         assert service.runtime.jobs.get_job(
                             host.work.job_id).attempt_count == 0
 
     asyncio.run(exercise())
 
 
-def test_a_signed_mcp_request_reaches_the_control_and_claims_one_frozen_child(tmp_path):
-    """The real MCP edge, the real Unix socket and the real C17 composition."""
+def test_private_selected_child_frame_reaches_control_and_claims_one_child(tmp_path):
+    """The private Unix ingress and the real C17 composition."""
 
     from tests.test_executive_coo_host import setup as host_setup
 
@@ -731,6 +763,7 @@ def test_a_signed_mcp_request_reaches_the_control_and_claims_one_frozen_child(tm
                 assert envelope["state"] in {"ACTIVE", "COMPLETED"}, envelope
                 assert envelope["command_id"] == command, envelope
                 assert envelope["job_id"] == host.work.job_id, envelope
+                assert envelope["target_digest"] == host.target.material_digest()
                 attempt_id = envelope["attempt_id"]
                 assert isinstance(attempt_id, str) and attempt_id
                 assert service.runtime.jobs.get_job(host.work.job_id).attempt_count == 1
@@ -846,6 +879,205 @@ def test_status_reports_the_original_without_a_fresh_new_effect_grant(tmp_path):
                 assert replay["ok"] is True, replay
                 assert replay["result"]["attempt_id"] == attempt_id, replay
                 assert service.runtime.jobs.get_job(host.work.job_id).attempt_count == 1
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("action,state", [
+    ("selected_child_submit", "EFFECT_UNKNOWN"),
+    ("selected_child_status", "UNAVAILABLE"),
+])
+@pytest.mark.parametrize("fault", ["authority_refused", "invalid_input", "internal_error"])
+def test_generic_post_send_errors_never_prove_no_effect(action, state, fault, rsa_key):
+    settings, _current, token = _app_settings(rsa_key, _target())
+    app = create_coo_app(settings, audit_sink=app_fixture.Sink())
+    sends = []
+
+    async def send(path, frame):
+        sends.append(frame)
+        return CeoIngressResponse("sent_ok", ok=False,
+                                  error={"code": fault, "message": "PRIVATE"})
+
+    app._client.send_frame = send
+    response = asyncio.run(_call(
+        app, token, "mmx_delegate", {"action": action, "command": COMMAND}))
+    body = response.json()
+    assert body["state"] == state
+    assert body["command_id"] == COMMAND
+    assert body["live_submit"] is None
+    assert body["attempt_id"] is None
+    assert "target_digest" not in body
+    assert "PRIVATE" not in response.text
+    assert len(sends) == 1
+
+
+@pytest.mark.parametrize("action,state", [
+    ("selected_child_submit", "EFFECT_UNKNOWN"),
+    ("selected_child_status", "UNAVAILABLE"),
+])
+@pytest.mark.parametrize("fault", ["malformed", "http_failure"])
+def test_mcp_lost_app_reply_preserves_possible_effect(
+        tmp_path, rsa_key, monkeypatch, action, state, fault):
+    from starlette.responses import JSONResponse
+
+    calls = []
+    original = CooApp._selected_child
+
+    async def lose_reply(self, request, authenticated, validated):
+        calls.append(validated["command"])
+        reply = await original(self, request, authenticated, validated)
+        if fault == "http_failure":
+            return JSONResponse(json.loads(reply.body), status_code=503)
+        return JSONResponse({"schema": "wrong.v1"})
+
+    monkeypatch.setattr(CooApp, "_selected_child", lose_reply)
+
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-c38-", dir="/tmp") as directory:
+            async with _control(tmp_path, Path(directory), name="selected-lost-app") as host:
+                command = _real_command(host.work)
+                settings, token = await _installed_app(host, rsa_key, socket_path=host.socket)
+                if action == "selected_child_status":
+                    seeded = await _send_frame(
+                        host.socket, _frame_for(_control_context(host), command=command))
+                    assert seeded["ok"] is True
+                    assert seeded["result"]["attempt_id"]
+                app = server.build_web_ceo_v2_with_coo_mcp_app(
+                    settings.executive, coo_settings=settings, audit_sink=app_fixture.Sink())
+                async with app._app.router.lifespan_context(app._app):
+                    async with httpx.AsyncClient(
+                            transport=httpx.ASGITransport(app=app),
+                            base_url="http://127.0.0.1") as client:
+                        result = await _mcp_call(client, token, "mmx_delegate",
+                                                 {"action": action, "command": command})
+                assert result["state"] == state
+                assert result["command_id"] == command
+                assert result["live_submit"] is None
+                assert result["attempt_id"] is None
+                assert "target_digest" not in result
+                assert host.service.runtime.jobs.get_job(host.work.job_id).attempt_count == 1
+                assert calls == [command]
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("action,state", [
+    ("selected_child_submit", "EFFECT_UNKNOWN"),
+    ("selected_child_status", "UNAVAILABLE"),
+])
+@pytest.mark.parametrize("movement", ["binding_generation", "principal_revoked", "authority_context"])
+def test_control_rechecks_read_authority_after_await_before_disclosure(
+        tmp_path, rsa_key, action, state, movement):
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-c38-", dir="/tmp") as directory:
+            async with _control(tmp_path, Path(directory), name="selected-late-read") as host:
+                service = host.service
+                command = _real_command(host.work)
+                settings, token = await _installed_app(host, rsa_key, socket_path=host.socket)
+                seeded = await _send_frame(
+                    host.socket, _frame_for(_control_context(host), command=command))
+                assert seeded["ok"] is True
+                attempt_id = seeded["result"]["attempt_id"]
+                assert attempt_id
+                entered, release = asyncio.Event(), asyncio.Event()
+                original_status = service.selected_child_status
+                original_response = service._send_ceo_ingress_response
+                private_replies = []
+
+                async def paused_status(**kwargs):
+                    result = await original_status(**kwargs)
+                    entered.set()
+                    await release.wait()
+                    return result
+
+                async def capture_response(writer, body):
+                    private_replies.append(body)
+                    return await original_response(writer, body)
+
+                service.selected_child_status = paused_status
+                service._send_ceo_ingress_response = capture_response
+                app = server.build_web_ceo_v2_with_coo_mcp_app(
+                    settings.executive, coo_settings=settings, audit_sink=app_fixture.Sink())
+                async with app._app.router.lifespan_context(app._app):
+                    async with httpx.AsyncClient(
+                            transport=httpx.ASGITransport(app=app),
+                            base_url="http://127.0.0.1") as client:
+                        task = asyncio.create_task(_mcp_call(
+                            client, token, "mmx_delegate", {"action": action, "command": command}))
+                        try:
+                            await asyncio.wait_for(entered.wait(), timeout=5)
+                            if movement == "binding_generation":
+                                service._ceo_ingress_app_binding = dataclasses.replace(
+                                    service._ceo_ingress_app_binding)
+                            elif movement == "principal_revoked":
+                                # Replace the Control's binding; the App keeps
+                                # its original object, isolating the late guard.
+                                host.authority_config["binding"] = {
+                                    "schema": BINDING_SCHEMA, "enabled": False, "binding": None}
+                            else:
+                                host.authority_config["missions"][0]["mission_authority_ref"] = \
+                                    "mission-authority:replacement"
+                        finally:
+                            release.set()
+                        result = await asyncio.wait_for(task, timeout=5)
+                # Assert the private boundary too: an App-side recheck must
+                # not conceal a missing Control-side currentness check.
+                assert len(private_replies) == 1
+                assert private_replies[0]["ok"] is False
+                assert private_replies[0]["error"]["code"] == "internal_error"
+                assert "result" not in private_replies[0]
+                assert result["state"] == state
+                assert result["command_id"] == command
+                assert result["attempt_id"] is None
+                assert result["live_submit"] is None
+                assert "target_digest" not in result
+                assert service.runtime.jobs.get_job(host.work.job_id).attempt_count == 1
+                assert service.runtime.attempts.get_attempt(attempt_id) is not None
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("code", [
+    "authorization_missing", "token_expired", "token_signature_refused",
+    "issuer_refused", "resource_refused", "subject_refused",
+    "jwks_unavailable", "scope_refused",
+])
+def test_mcp_preserves_inner_authentication_preflight_and_challenge(rsa_key, monkeypatch, code):
+    from starlette.responses import JSONResponse
+
+    settings, _current, token = _app_settings(rsa_key, None)
+    challenge = 'Bearer resource_metadata="https://example.test/protected-resource"'
+
+    async def refuse_inner(self, request):
+        return JSONResponse(
+            {"ok": False, "error": {"code": code, "message": "Authorization required"}},
+            status_code=403 if code == "scope_refused" else 401,
+            headers={"www-authenticate": challenge})
+
+    monkeypatch.setattr(CooApp, "_auth", refuse_inner)
+
+    async def exercise():
+        app = server.build_web_ceo_v2_with_coo_mcp_app(
+            settings.executive, coo_settings=settings, audit_sink=app_fixture.Sink())
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://127.0.0.1") as client:
+                response = await client.post("/mcp/coo", headers={
+                    "authorization": "Bearer " + token,
+                    "accept": "application/json, text/event-stream",
+                    "mcp-protocol-version": "2025-06-18",
+                }, json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                         "params": {"name": "mmx_delegate", "arguments": {
+                             "action": "selected_child_submit", "command": COMMAND}}})
+        assert response.status_code == 200
+        result = response.json()["result"]
+        assert result["isError"] is True
+        assert result["_meta"]["mcp/www_authenticate"] == [challenge]
+        payload = json.loads(result["content"][0]["text"])
+        assert payload["error"]["code"] == code
+        assert payload["ok"] is False
+        assert "target_digest" not in payload
 
     asyncio.run(exercise())
 

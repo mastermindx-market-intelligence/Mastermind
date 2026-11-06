@@ -451,13 +451,14 @@ def plan(*, old_source: str, new_source: str, fullconfig: object, current_manife
         },
         "post_routes": list(POST_ROUTES),
         "source_post_routes": list(SOURCE_POST_ROUTES),
-        # The public-MCP route matrix. The observed profile names which of the
-        # two coherent pairs the installed config carried; both planned
-        # configurations carry the complete CEO+COO pair.
+        # Existing MCP profiles upgrade to the complete CEO+COO pair.
+        # An absent MCP family stays absent in both planned configurations.
         "mcp_routes": {
             "observed_profile": data["mcp_profile"],
-            "metadata": list(COMPLETE_MCP_METADATA_ROUTES),
-            "transport": list(COMPLETE_MCP_ROUTES),
+            "metadata": ([] if data["mcp_profile"] == "absent"
+                         else list(COMPLETE_MCP_METADATA_ROUTES)),
+            "transport": ([] if data["mcp_profile"] == "absent"
+                          else list(COMPLETE_MCP_ROUTES)),
         },
         "shared_assets_verified": data["shared"],
         "installed": False,

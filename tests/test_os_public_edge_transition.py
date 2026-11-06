@@ -1314,7 +1314,8 @@ def test_plan_records_the_public_mcp_route_matrix():
     assert already["mcp_routes"] == {"observed_profile": "complete", **complete}
     absent = plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=fullconfig(),
                   current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
-    assert absent["mcp_routes"] == {"observed_profile": "absent", **complete}
+    assert absent["mcp_routes"] == {"observed_profile": "absent",
+                                    "metadata": [], "transport": []}
     # The plan still binds both planned configurations by their exact bytes.
     for value in (ceo_only, already, absent):
         assert value["bindings"]["prepare_fullconfig_sha256"] == module._sha256(

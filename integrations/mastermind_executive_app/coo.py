@@ -34,7 +34,7 @@ from integrations.executive_mcp.schemas import RESULT_SCHEMA, GatewayError, cano
 from integrations.executive_mcp.e1_http import BoundedE1App, MAX_RESPONSE_BYTES
 from integrations.hermes_delegate.executive import (
     ExecutiveSelectedChildTarget, SELECTED_CHILD_FRAME_SCHEMA,
-    selected_child_response, validate_selected_child_envelope,
+    selected_child_response, validate_selected_child_ingress_envelope,
     validate_selected_child_frame,
 )
 from integrations.hermes_delegate.schema import SubmissionError
@@ -328,10 +328,13 @@ class CooApp:
             return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_TARGET_UNAVAILABLE", job_id=job_id)
         if not await self._same_auth(request, authenticated):
             return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_AUTHORITY_REFUSED", job_id=job_id)
+        target_digest = target.material_digest()
+        if self.settings.selected_child_target is not target:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_TARGET_UNAVAILABLE", job_id=job_id)
         frame = {
             "schema": SELECTED_CHILD_FRAME_SCHEMA,
             "request": {"action": action, "command": command},
-            "target_digest": target.material_digest(),
+            "target_digest": target_digest,
             "principal": principal_frame(principal),
             "principal_context": dataclasses.asdict(context),
             "capability_profile_digest": authority.capability_profile_digest,
@@ -354,28 +357,33 @@ class CooApp:
             return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_NOT_SENT", job_id=job_id)
         if response.transport != TRANSPORT_SENT_OK:
             return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
-        if response.ok is False:
-            code = (response.error or {}).get("code")
-            if not is_submit:
-                # A failed status observation keeps its original command.
-                return uncertain("EXECUTIVE_SELECTED_CHILD_UNAVAILABLE")
-            if (code not in ingress.ERROR_CODES or code in {
-                    "backend_unavailable", "backend_refused", "internal_error",
-                    "response_too_large"}):
-                # A backend failure may follow a committed effect.
-                return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
-            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_REFUSED", job_id=job_id)
+        if response.ok is not True:
+            # A generic ingress error does not establish where an effect
+            # stopped. Only NOT_SENT or a qualified canonical envelope can
+            # establish a negative result after this transport boundary.
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
         try:
-            envelope = validate_selected_child_envelope(response.result, command_id=command)
+            envelope = validate_selected_child_ingress_envelope(
+                response.result, command_id=command, job_id=job_id,
+                target_digest=target_digest)
         except (TypeError, ValueError):
             # A malformed return after a possible submit is not a no-effect
             # receipt. Retain the original command.
             return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
-        # Recheck the authentication and the target before disclosure.
-        if not await self._same_auth(request, authenticated):
-            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        # Recheck this same principal's source facts and held target after
+        # the transport await. A closed fresh mandate alone does not deny
+        # observation of an already claimed original command.
         try:
+            current_authority, current_context = await self._authority(principal, work_ref, stamp)
+            if (current_context != context
+                    or current_authority.capability_profile_digest
+                    != authority.capability_profile_digest
+                    or not await self._same_auth(request, authenticated)):
+                raise ValueError("selected child principal changed")
             target.require_current()
+            if (self.settings.selected_child_target is not target
+                    or target.material_digest() != target_digest):
+                raise ValueError("selected child target changed")
         except Exception:
             return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
         try:

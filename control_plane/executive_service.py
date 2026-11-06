@@ -6705,31 +6705,46 @@ class ExecutiveControlService:
                 "the selected-child source is unavailable",
             )
             return
-        try:
-            row, fact, authority = provider.source.for_principal(
-                parsed["principal"], target.work_ref
-            )
+        source = provider.source
+        workspace = provider.workspace
+        frame_context = PrincipalAdmissionContext(**parsed["principal_context"])
+
+        def require_read_current():
+            # Read authority is independent of fresh READY/arming/mandate
+            # gates. Re-prove the same owner, source and principal around
+            # the Workspace read, including after an awaited observation.
+            require_current()
+            if (self._require_runtime() is not runtime
+                    or app_binding.principal_facts_factory is not factory
+                    or provider.source is not source or provider.workspace is not workspace):
+                raise ValueError("selected-child receiving source changed")
+            before = source.for_principal(parsed["principal"], target.work_ref)
+            row, fact, authority = before
             actual_context = PrincipalAdmissionContext(
                 row["work_ref"], fact.principal_binding_digest,
                 authority.mission_authority_ref, authority.authority_generation_digest,
             )
-            frame_context = PrincipalAdmissionContext(**parsed["principal_context"])
-            mission = provider.workspace.read_mission_for_work_ref(target.work_ref)
             projection = project_coo_principal_mandate(
-                principal=fact, authority=authority, mission_workspace=mission,
+                principal=fact, authority=authority,
+                mission_workspace=workspace.read_mission_for_work_ref(target.work_ref),
             )
+            if (actual_context != frame_context
+                    or authority.work_ref != target.work_ref
+                    or authority.capability_profile_digest != parsed["capability_profile_digest"]
+                    or projection["mission"]["work_ref"] != target.work_ref
+                    or projection["mission"]["root_job_id"] != child.selection.root_job_id
+                    or source.for_principal(parsed["principal"], target.work_ref) != before):
+                raise ValueError("selected-child principal is not current")
+            require_current()
+            if (self._require_runtime() is not runtime
+                    or app_binding.principal_facts_factory is not factory
+                    or provider.source is not source or provider.workspace is not workspace):
+                raise ValueError("selected-child receiving source changed")
+            return actual_context, authority
+
+        try:
+            actual_context, authority = require_read_current()
         except Exception:
-            await self._send_ceo_ingress_error(
-                writer, "authority_refused",
-                "the selected-child principal is not current",
-            )
-            return
-        if (actual_context != frame_context
-                or authority.work_ref != target.work_ref
-                or authority.capability_profile_digest
-                != parsed["capability_profile_digest"]
-                or projection["mission"]["work_ref"] != target.work_ref
-                or projection["mission"]["root_job_id"] != child.selection.root_job_id):
             await self._send_ceo_ingress_error(
                 writer, "authority_refused",
                 "the selected-child principal is not current",
@@ -6757,6 +6772,11 @@ class ExecutiveControlService:
             else:
                 result = await await_owned(asyncio.create_task(
                     composition.status_async(command)))
+            # Never disclose an original observation through a moved owner
+            # or revoked principal. A post-await refusal is not a no-effect
+            # receipt, even when this request was a replay.
+            require_read_current()
+            result = {**result, "target_digest": target.material_digest()}
         except Exception:
             # The original owner may already hold an effect. A refusal here
             # is never read as proof that no effect happened.

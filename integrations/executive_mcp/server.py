@@ -67,9 +67,11 @@ from integrations.executive_mcp.schemas import (
     validate_tool_arguments,
 )
 from integrations.hermes_delegate.executive import (
+    ExecutiveSelectedChildTarget,
     SELECTED_CHILD_SCHEMA,
     selected_child_response,
-    validate_selected_child_envelope,
+    validate_selected_child_ingress_envelope,
+    validate_selected_child_local_envelope,
 )
 
 #: Three fixed POST routes served by the OS Executive transport.  These are
@@ -2330,11 +2332,18 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
             # The selected-child branch never answers with an E1 envelope.
             # An unusable answer keeps the original command and reports the
             # effect as unknown.
+            submitting = validated.get("action") == "selected_child_submit"
             return selected_child_response(
-                "UNAVAILABLE", "EXECUTIVE_SELECTED_CHILD_UNAVAILABLE",
-                command_id=validated.get("command"))
+                "EFFECT_UNKNOWN" if submitting else "UNAVAILABLE",
+                "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN" if submitting
+                else "EXECUTIVE_SELECTED_CHILD_UNAVAILABLE",
+                command_id=validated.get("command"), live_submit=None)
         challenge = None
+        held_target = getattr(settings, "selected_child_target", None)
+        held_digest = None
         try:
+            if is_selected_child and type(held_target) is ExecutiveSelectedChildTarget:
+                held_digest = held_target.material_digest()
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=inner),
                     base_url="http://127.0.0.1", trust_env=False, follow_redirects=False) as client:
                 response = await client.post("/v1/tools/" + name,
@@ -2348,11 +2357,42 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
                 and payload["error"].get("code") in {"invalid_input", "authority_refused", "scope_refused",
                     "authorization_missing", "authorization_malformed", "identity_unverified", "grounding_unavailable"})
             if is_selected_child:
-                # A dedicated classification: the C17 envelope is the answer.
-                # It is never an E1 envelope and never a principal receipt.
+                # The inner App's auth/input refusals occur before dispatch.
+                # Use its exact error shape and status mapping, independently
+                # of generic Control errors after a possible frame send.
+                detail = payload.get("error") if type(payload) is dict else None
+                code = detail.get("code") if type(detail) is dict else None
+                preflight = (
+                    type(payload) is dict and set(payload) == {"ok", "error"}
+                    and payload["ok"] is False and type(detail) is dict
+                    and set(detail) == {"code", "message"}
+                    and type(code) is str and type(detail["message"]) is str
+                    and (
+                        (code in {item.value for item in AuthErrorCode}
+                         and response.status_code == (403 if code == "scope_refused" else 401))
+                        or (code == "authority_refused" and response.status_code == 403)
+                        or (code == "invalid_input" and response.status_code in (400, 413))
+                    )
+                )
+            if is_selected_child and not preflight:
                 try:
-                    validate_selected_child_envelope(
-                        payload, command_id=validated["command"])
+                    if response.status_code != 200:
+                        raise ValueError("selected child response status is invalid")
+                    if isinstance(payload, dict) and "target_digest" in payload:
+                        if (type(held_target) is not ExecutiveSelectedChildTarget
+                                or settings.selected_child_target is not held_target):
+                            raise ValueError("selected child target changed")
+                        held_target.require_current()
+                        child = held_target.child_for(validated["command"])
+                        if child is None or held_target.material_digest() != held_digest:
+                            raise ValueError("selected child target changed")
+                        payload = validate_selected_child_ingress_envelope(
+                            payload, command_id=validated["command"],
+                            job_id=child.selection.job_id, target_digest=held_digest)
+                    else:
+                        payload = validate_selected_child_local_envelope(
+                            payload, command_id=validated["command"],
+                            action=validated["action"])
                 except (TypeError, ValueError):
                     payload = selected_child_failed()
             elif not preflight and has_receipt:

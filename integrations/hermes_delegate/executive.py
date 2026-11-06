@@ -472,7 +472,7 @@ def validate_selected_child_envelope(body: Any, *, command_id: str) -> dict[str,
         raise ValueError("selected child envelope has a foreign schema")
     if not set(body) <= SELECTED_CHILD_ENVELOPE_KEYS:
         raise ValueError("selected child envelope has unknown fields")
-    if body.get("state") not in SELECTED_CHILD_STATES:
+    if type(body.get("state")) is not str or body["state"] not in SELECTED_CHILD_STATES:
         raise ValueError("selected child envelope has an unknown state")
     if body.get("command_id") != command_id:
         raise ValueError("selected child envelope does not describe its original command")
@@ -496,6 +496,91 @@ def validate_selected_child_envelope(body: Any, *, command_id: str) -> dict[str,
         if value is not None and type(value) is not str:
             raise ValueError("selected child envelope field is invalid")
     return dict(body)
+
+
+# The authenticated ingress adds one equality witness to the legacy C17
+# envelope. Local preflight/uncertainty answers deliberately carry no witness.
+SELECTED_CHILD_CORE_KEYS = frozenset({
+    "schema", "state", "reason", "command_id", "job_id", "attempt_id",
+    "attempt_status", "job_status", "live_submit",
+})
+_SELECTED_CHILD_LOCAL_REFUSALS = frozenset({
+    "EXECUTIVE_SELECTED_CHILD_NOT_BOUND",
+    "EXECUTIVE_SELECTED_CHILD_TARGET_UNAVAILABLE",
+    "EXECUTIVE_SELECTED_CHILD_UNKNOWN_COMMAND",
+    "EXECUTIVE_SELECTED_CHILD_AUTHORITY_REFUSED",
+    "EXECUTIVE_SELECTED_CHILD_FRAME_INVALID",
+    "EXECUTIVE_SELECTED_CHILD_NOT_SENT",
+})
+
+
+def validate_selected_child_ingress_envelope(
+    body: Any, *, command_id: str, job_id: str, target_digest: str,
+) -> dict[str, Any]:
+    """Join a Control answer to the exact target held by its receiver.
+
+    The digest is a non-authorizing equality witness derived by the receiving
+    Control from its own target. It is never accepted as a credential, a
+    principal, a new command identity, or evidence that a submit did not run.
+    Legacy C17 adapters retain their original envelope contract.
+    """
+
+    if (type(body) is not dict
+            or not (SELECTED_CHILD_CORE_KEYS | {"target_digest"}) <= set(body)
+            or type(target_digest) is not str
+            or SHA_RE.fullmatch(target_digest) is None
+            or body.get("target_digest") != target_digest):
+        raise ValueError("selected child ingress witness is unavailable")
+    projected = dict(body)
+    projected.pop("target_digest")
+    envelope = validate_selected_child_envelope(projected, command_id=command_id)
+    if envelope["job_id"] != job_id:
+        raise ValueError("selected child ingress describes another Job")
+    attempt = envelope["attempt_id"]
+    state = envelope["state"]
+    if attempt is None:
+        if state not in {"NOT_CLAIMED", "EFFECT_UNKNOWN", "REFUSED", "UNAVAILABLE"}:
+            raise ValueError("selected child ingress lacks its canonical Attempt")
+        expected_live = None if state in {"EFFECT_UNKNOWN", "UNAVAILABLE"} else False
+    else:
+        if state == "NOT_CLAIMED":
+            raise ValueError("selected child ingress contradicts its canonical Attempt")
+        expected_live = True
+    if envelope["live_submit"] is not expected_live:
+        raise ValueError("selected child ingress contradicts its effect evidence")
+    return {**envelope, "target_digest": target_digest}
+
+
+def validate_selected_child_local_envelope(
+    body: Any, *, command_id: str, action: str,
+) -> dict[str, Any]:
+    """Accept only the App's finite, digest-free local outcomes at MCP.
+
+    This is never used to validate a Control result. A malformed post-send
+    result cannot enter this class through the App's strict ingress decoder.
+    """
+
+    envelope = validate_selected_child_envelope(body, command_id=command_id)
+    if (set(envelope) != SELECTED_CHILD_CORE_KEYS
+            or envelope["attempt_id"] is not None
+            or envelope["attempt_status"] is not None
+            or envelope["job_status"] is not None):
+        raise ValueError("selected child local outcome has foreign evidence")
+    if envelope["state"] == "REFUSED":
+        if (envelope["reason"] not in _SELECTED_CHILD_LOCAL_REFUSALS
+                or envelope["live_submit"] is not False):
+            raise ValueError("selected child local refusal is unqualified")
+    else:
+        expected = ("EFFECT_UNKNOWN" if action == "selected_child_submit"
+                    else "UNAVAILABLE" if action == "selected_child_status" else None)
+        if (envelope["state"] != expected
+                or envelope["reason"] not in {
+                    "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN",
+                    "EXECUTIVE_SELECTED_CHILD_UNAVAILABLE"}
+                or envelope["live_submit"] is not None
+                or envelope["job_id"] is not None):
+            raise ValueError("selected child local uncertainty is invalid")
+    return envelope
 
 
 def _selected_child_refusal(
