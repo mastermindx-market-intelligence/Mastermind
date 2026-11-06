@@ -68,7 +68,8 @@ Starting at protected source `58e319d26195e01d1b9c0edc06fe50006a9c9d65`:
   a missing-capability refusal on the Ubuntu4 route. The original exact source-edit
   command was rejected with “Command not allowed”; same-target readback proved unchanged
   bytes. That mutation was not replayed. Independently permitted qualification/controller
-  edits do not clear this fence. An inert repair artifact is being prepared separately.
+  edits do not clear this fence. The [inert repair artifact](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2119#issuecomment-6675182036)
+  is accepted and passed all eight parent-run GNU/Linux wrapper tests, but remains unapplied.
 
 The [executor finding and source-effect receipt](https://github.com/mastermindx-market-intelligence/Mastermind/issues/539#issuecomment-6674712011)
 and [unaccepted worker proposal](https://github.com/mastermindx-market-intelligence/Mastermind/issues/539#issuecomment-6674751268)
@@ -95,8 +96,27 @@ to the protected base (SHA256
 A bounded diagnostic confirmed the unchanged bytes and different installed Git versions,
 but the ephemeral fixture had already been removed; the exact failure cause is unproven.
 No test or source guard was weakened to hide it. The source remains a held candidate;
-Linux CI, the separate ordinary-routing return, actual-wrapper repair and live proof remain
+exact-head Linux CI, application of the accepted executor repair and live proof remain
 distinct outstanding evidence.
+
+The separate ordinary-routing module passed all 13 cases on the managed source. It uses the
+actual request/router/economic/host-gate code with synthetic provider observations and an
+inert transport. C1 census/mechanical and C2 fix_build are selectable when admitted; held,
+stale or full Ubuntu4 is excluded; alternate eligible hosts remain usable; original lineage
+and sparse-mode forwarding survive. The C2 build escalation and declared class-policy
+refusal remain enforced. These fixtures do not promote live Ubuntu4 or override pool policy.
+
+`tests/test_ubuntu4_central_glm_ci.py` makes both canonical native regression modules
+discoverable by hosted CI and runs them in isolated interpreters. Both CI entry-point cases
+passed on the managed workspace (36.46seconds). No test body or runtime router is duplicated.
+
+A read-only incumbent runtime preview for C2 fix_build / pool glm returned
+`PREVIEW_ONLY`, `reserved=false`, host ubuntu2, mode glm, model glm-5.3-flash.
+This confirms current class eligibility, not central GLM-Codex or Ubuntu4 execution.
+The executor proposal separately passed8 parent-run Linux tests; its two key regressions
+failed against the exact current wrapper. Proposed wrapper SHA256
+`58d88481dbc54bff84bbe0edd57c2a29d84b6261a53bd908ddaa1ca57f4077f0`
+is evidence for a future authorized edit, not an installed/source-head claim.
 
 ### Remaining acceptance sequence
 
