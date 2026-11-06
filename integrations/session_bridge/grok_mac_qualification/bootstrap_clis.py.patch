@@ -1,0 +1,30 @@
+--- a/ext/bootstrap_clis.py
++++ b/ext/bootstrap_clis.py
+@@ -22,6 +22,7 @@
+     p=argparse.ArgumentParser(description=__doc__)
+     p.add_argument('host')
+     p.add_argument('--install-missing', action='store_true')
++    p.add_argument('--tool', choices=tuple(PACKAGES) + ('cursor-agent',), action='append')
+     a=p.parse_args()
+     registry=json.loads((Path(__file__).resolve().parent/'hosts.json').read_text())
+     host=registry.get(a.host)
+@@ -31,13 +32,17 @@
+     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*',alias):
+         p.error('invalid registered SSH alias')
+     script=['set -euo pipefail','export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:$PATH"']
++    selected = set(a.tool or [*PACKAGES, "cursor-agent"])
+     for tool,package in PACKAGES.items():
++        if tool not in selected:
++            continue
+         if a.install_missing:
+             script.append(f'if ! command -v {tool} >/dev/null 2>&1; then npm install --global --prefix "$HOME/.local" --allow-scripts={shlex.quote(package.rsplit("@",1)[0])} {shlex.quote(package)} >&2; fi')
+         script.append(f'if command -v {tool} >/dev/null 2>&1; then printf "{tool}=installed\\n"; else printf "{tool}=missing\\n"; fi')
+-    if a.install_missing:
++    if a.install_missing and "cursor-agent" in selected:
+         script.append('if ! command -v cursor-agent >/dev/null 2>&1; then curl --fail --silent --show-error https://cursor.com/install | bash >&2; fi')
+-    script.append('if command -v cursor-agent >/dev/null 2>&1; then printf "cursor-agent=installed\\n"; else printf "cursor-agent=missing\\n"; fi')
++    if "cursor-agent" in selected:
++        script.append('if command -v cursor-agent >/dev/null 2>&1; then printf "cursor-agent=installed\\n"; else printf "cursor-agent=missing\\n"; fi')
+     result=subprocess.run(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=8',alias,'bash -s'],input='\n'.join(script)+'\n',text=True,capture_output=True,timeout=180)
+     # Only emit our fixed inventory vocabulary. Vendor output can contain account details.
+     tools=dict(line.split('=',1) for line in result.stdout.splitlines()

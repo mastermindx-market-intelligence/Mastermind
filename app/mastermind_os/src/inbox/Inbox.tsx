@@ -1,15 +1,18 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { MissionSelection } from "../mission";
 import type { OfficeProjection } from "../meta-ceo/projection";
 import "./inbox.css";
 
 export interface InboxProps {
   projection: OfficeProjection;
+  /** Independent Terminal request owner; never derived from Mission attention. */
+  sharingRequests?: ReactNode;
+  locale?: "en" | "zh-CN";
   /** Read navigation, owned by the existing shell; never starts or retargets work. */
   onNavigateMission?: (selection: MissionSelection, mode: "current" | "history") => void;
 }
 
-function InboxBody({ projection, onNavigateMission }: InboxProps) {
+function MissionOwnerContext({ projection, onNavigateMission }: InboxProps) {
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const evidenceButton = useRef<HTMLButtonElement>(null);
   const evidencePanel = useRef<HTMLElement>(null);
@@ -40,12 +43,7 @@ function InboxBody({ projection, onNavigateMission }: InboxProps) {
   useEffect(() => { if (showEvidence) evidencePanel.current?.focus(); }, [showEvidence]);
   const closeEvidence = () => { setEvidenceOpen(false); evidenceButton.current?.focus(); };
 
-  return <section className="atelier-inbox" aria-label="Inbox">
-    <header className="inbox-heading">
-      <p className="inbox-eyebrow">Your attention, well spent</p>
-      <h1>A little attention.<br />A meaningful difference.</h1>
-      <p>Owner-defined requests and exceptions, with their context intact.</p>
-    </header>
+  const missionContext = (<>
     <div className="inbox-source-state"><span className="inbox-state" data-state={source.state}>{source.state}</span>
       <p>Supplied Mission scope · {source.coverage}</p></div>
     {unknownEffect && <div className="inbox-exception" role="alert"><strong>EFFECT_UNKNOWN</strong>
@@ -110,13 +108,43 @@ function InboxBody({ projection, onNavigateMission }: InboxProps) {
     </details>}
     <footer className="inbox-footer"><p className="inbox-eyebrow">Accountable ownership</p>
       <p>Routine work remains with its current owners.</p></footer>
-  </section>;
+  </>);
+
+  return missionContext;
 }
 
 /** Pure presentation of the existing product projection; no queue, read or action port. */
 export function Inbox(props: InboxProps) {
-  // A new identity/revision unmounts inspection state before any old protected panel renders.
+  const missionDetails = useRef<HTMLDetailsElement>(null);
+  const missionSummary = useRef<HTMLElement>(null);
   const { context, mission } = props.projection;
-  return <InboxBody key={JSON.stringify([context.authGeneration, context.selection, context.sessionRef,
-    context.bindingGeneration, context.revisions.mission, mission.source.state])} {...props} />;
+  const locale = props.locale ?? "en";
+  // Only legacy Mission inspection state follows the Office identity boundary.
+  // The Terminal slot remains mounted under its own independent session epoch.
+  const missionContext = <MissionOwnerContext key={JSON.stringify([context.authGeneration,
+    context.selection, context.sessionRef, context.bindingGeneration,
+    context.revisions.mission, mission.source.state])} {...props} />;
+  const unknownEffect = mission.source.state === "CURRENT" && !!mission.value &&
+    props.projection.receipts.effect === "EFFECT_UNKNOWN";
+  return <section className="atelier-inbox" data-sharing-inbox={props.sharingRequests ? "true" : undefined} aria-label="Inbox">
+    <header className="inbox-heading">
+      {props.sharingRequests ? <h1>{locale === "zh-CN" ? "需要你" : "Needs you"}</h1> : <>
+        <p className="inbox-eyebrow">Your attention, well spent</p>
+        <h1>A little attention.<br />A meaningful difference.</h1>
+        <p>Owner-defined requests and exceptions, with their context intact.</p>
+      </>}
+    </header>
+    {props.sharingRequests && unknownEffect && <p className="inbox-workspace-warning" role="status">
+      {locale === "zh-CN" ? "工作区有一项操作结果尚未确认，请查看工作区详情。" : "A workspace operation is unresolved. See workspace details."}
+      <button type="button" onClick={() => {
+        if (missionDetails.current) missionDetails.current.open = true;
+        missionSummary.current?.focus();
+      }}>{locale === "zh-CN" ? "工作区详情" : "Workspace details"}</button>
+    </p>}
+    {props.sharingRequests}
+    {props.sharingRequests ? <details ref={missionDetails} className="inbox-mission-context">
+      <summary ref={missionSummary}>{locale === "zh-CN" ? "任务负责人上下文" : "Mission owner context"}</summary>
+      {missionContext}
+    </details> : missionContext}
+  </section>;
 }

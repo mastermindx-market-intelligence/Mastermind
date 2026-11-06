@@ -21,6 +21,7 @@ from control_plane.remote_attempt_transport import (
     RemoteWorkerHostBinding,
     build_attempt_bound_worker_fleet,
     resolve_remote_attempt_transport,
+    _physical_identity_digest,
 )
 from control_plane.remote_worker_transport import BrokerTransportBinding
 from control_plane.worker_adapter import WorkerExecutionAdapter
@@ -88,8 +89,22 @@ def _claimed_runtime(
     return runtime, job, lease
 
 
+def _pin_remote_claim(runtime, lease, binding):
+    """Set up the same canonical pre-start boundary without issuing remote I/O."""
+    resolved = resolve_remote_attempt_transport(
+        runtime, job_id=lease.attempt.job_id, attempt_id=lease.attempt.attempt_id,
+        binding_source=lambda h, w: binding,
+    )
+    return runtime.attempts.pin_remote_launch_identity(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token, expected_version=lease.attempt.version,
+        identity_digest=_physical_identity_digest(resolved.client, resolved.endpoint),
+    )
+
+
 def _lost_requeued_runtime(tmp_path: Path):
     runtime, job, lease = _claimed_runtime(tmp_path, attempt_limit=2)
+    _pin_remote_claim(runtime, lease, _host_binding(tmp_path))
     runtime.attempts.record_process(
         lease.attempt.attempt_id,
         fence_generation=lease.attempt.fence_generation,
@@ -472,7 +487,7 @@ async def test_static_facade_resolves_only_after_claim_and_sticks_ambiguous_star
     assert built == []
 
     with pytest.raises(RuntimeError, match="simulated ambiguous start"):
-        await adapter.start(spec)
+        await adapter.start(spec, lease=lease)
 
     assert len(built) == 1
     resolution, fleet = built[0]
@@ -521,6 +536,7 @@ def test_static_facade_recovery_uses_recovery_only_transport(
         ),
         fleet_factory=fleet_factory,
     )
+    _pin_remote_claim(runtime, lease, _host_binding(tmp_path))
     recovered = adapter.reattach(spec, outer)
 
     assert recovered == ref
@@ -636,6 +652,7 @@ def test_attempt_bound_controller_binds_worker_uid_for_active_and_lost_recovery(
         tmp_path / "active", host_ref=host_ref, worker_id=worker_id
     )
     adapter = AttemptBoundRemoteWorkerAdapter(runtime, source)
+    _pin_remote_claim(runtime, lease, _host_binding(tmp_path / "active"))
     active_controller = adapter._controller_for_attempt(lease.attempt)
     assert active_controller.expected_worker_uid == 451
 
@@ -807,6 +824,7 @@ def test_claim_movement_during_host_resolution_refuses_before_client_return(
 
 def test_recovery_resolution_cannot_relaunch_the_attempt(tmp_path: Path) -> None:
     runtime, job, lease = _claimed_runtime(tmp_path)
+    _pin_remote_claim(runtime, lease, _host_binding(tmp_path))
 
     resolved = resolve_remote_attempt_transport(
         runtime,

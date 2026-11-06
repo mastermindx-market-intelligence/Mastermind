@@ -503,6 +503,7 @@ def _complete_ohf_role(
     role_result: dict[str, Any],
     *,
     identity_seed: int,
+    principal_identity_seed: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Complete one typed role entirely through inert OHF Runtime boundaries."""
 
@@ -538,6 +539,7 @@ def _complete_ohf_role(
         provider_session_id=provider_session,
         process=process,
     )
+    principal_seed = identity_seed if principal_identity_seed is None else principal_identity_seed
     principal = OperatorPrincipalObservation(
         attempt_id=sealed.attempt_id,
         worker_id=str(sealed.worker_id),
@@ -549,14 +551,14 @@ def _complete_ohf_role(
             "process_start_identity": process.process_start_identity,
             "boot_id": process.boot_id,
         },
-        os_principal_name=f"fixture-principal-{identity_seed}",
-        os_principal_uid=identity_seed,
+        os_principal_name=f"fixture-principal-{principal_seed}",
+        os_principal_uid=(principal_seed),
         provider_home_identity={
-            "path": f"/tmp/phase1fc-codex-home-{identity_seed}",
-            "device": identity_seed,
-            "inode": identity_seed + 1,
-            "uid": identity_seed,
-            "gid": identity_seed,
+            "path": f"/tmp/phase1fc-codex-home-{principal_seed}",
+            "device": principal_seed,
+            "inode": (principal_seed) + 1,
+            "uid": principal_seed,
+            "gid": principal_seed,
             "mode": 0o700,
         },
         observed_at_ms=runtime.store.now_ms(),
@@ -726,9 +728,11 @@ def test_fresh_schema_v4_has_exact_additive_columns_and_migration(tmp_path):
             row[1] for row in connection.execute("PRAGMA table_info(attempts)")
         ]
 
-    assert [tuple(row) for row in migrations][3:5] == [
+    assert [tuple(row) for row in migrations][3:] == [
         (4, "executive_phase1fc_orchestration_contract"),
         (5, "executive_finite_drive_arm_contract"),
+        (6, "executive_nested_coordinator_contract"),
+        (7, "executive_physical_resource_contract"),
     ]
     assert job_columns[-8:] == [
         "orchestration_role",
@@ -2897,7 +2901,7 @@ def test_void_review_replacement_approval_reaches_handoff(tmp_path: Path) -> Non
         _cycle_through_completed_work(
             tmp_path,
             intent_id="CEO-CYCLE-VOID-REPLACEMENT",
-            review_workers=["worker-a", "worker-b"],
+            review_workers=["worker-b", "worker-b"],
         )
     )
     assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
@@ -2914,7 +2918,8 @@ def test_void_review_replacement_approval_reaches_handoff(tmp_path: Path) -> Non
         repair_round=0,
         verdict="approve",
     )
-    _complete_ohf_role(runtime, void_review, void_body, identity_seed=3203)
+    # Placement is distinct, but a shared physical principal must still void it.
+    _complete_ohf_role(runtime, void_review, void_body, identity_seed=3203, principal_identity_seed=3202)
 
     replacement = cycle.run_once(root.job_id)
     assert replacement.action == "REVIEW_CREATED"
@@ -3583,7 +3588,8 @@ def test_run_once_cycle_persists_reviewed_policy_digest_when_policy_is_invalid(
     root = runtime.jobs.get_job(receipt["job_id"])
     assert root is not None
 
-    def invalid_policy():
+    def invalid_policy(*, version):
+        assert version == 1
         raise executive_coo_cycle.CooCyclePolicyError("fixture policy drift")
 
     monkeypatch.setattr(
@@ -3599,11 +3605,11 @@ def test_run_once_cycle_persists_reviewed_policy_digest_when_policy_is_invalid(
 
 def test_five_role_schema_golden_digests_are_frozen():
     assert GOLDEN_ROLE_SCHEMA_DIGESTS == {
-        "plan": "51e4882f72b8b09af05beb237caad9bc01c1060b113ccc3afbb0fef79a149148",
+        "plan": "8413f6b0777e2adceff2a9fd262760bf1d01c5cc92314e6abb5f8dc1079bbbe4",
         "work": "cc4953a932c9e4031dbdcdc6e444a77381cce12acf6a06f33b095f626d3b5f89",
         "review": "a0e853358f325d95b9d94c61161c40e7e7bae67e44679614b5ebea229b3d102c",
         "repair": "2f105a0b3c3bd55c0118fb003b13dd25e7074402d8d963d294944341ea47f90f",
-        "aggregation": "fc95c7a907777e747e4b94b096d5bbbd662e06c6f219c9a4cec4799e3b5a724a",
+        "aggregation": "7a042278d90f4d3e477c5f9d4c51a8553c64ac53947a70ccb40e96fea55ca933",
     }
 
 
@@ -3670,11 +3676,11 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
     assert exhaustion["second_terminal_status"] == "LOST"
     assert exhaustion["blocked_reason"] == "plan_terminal_adverse"
     assert len(exhaustion["supervisor_dispatch_calls"]) == 2
-    # The additive plan-v5/aggregation-v2 executable schemas change sealed
-    # contract digests. The legacy scenarios and their non-digest assertions
-    # remain unchanged; these pins identify the expanded schema contract.
+    # Fresh review placement now excludes the reviewed worker/account.
+    # The V2 void scenario proves shared physical identity is still rejected;
+    # only that fixture digest and the derived outer receipt change.
     assert receipt["receipt_digest"] == (
-        "efd4065c357dc87e7d79333af04a9f2da29e6dc3ffeb183eb4ab25bc4eb71a59"
+        "8c117de85226ebd57ff9243ef443143c73d5ed0167d9d6c76e87169b647e12b9"
     )
     assert receipt["dispatch_boundary"]["acceptance_digest"] == (
         "02af618a1a926bde4b6a92fb2e697aa3b2d41538ae81350dbd954891a5dd2bcc"
@@ -3688,8 +3694,9 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
     assert receipt["repair_path"]["acceptance_digest"] == (
         "235fd205730dc7c76f3b52519e89e4971d508d3c13fc765488813c4dd134b851"
     )
+    assert receipt["void_replacement"]["acceptance_id"] == "P1FC-VOID-REPLACEMENT-INDEPENDENCE-V2"
     assert receipt["void_replacement"]["acceptance_digest"] == (
-        "52c4c2820c7db353380965544480c65d057d5ca8566584c880222a7b36419fb8"
+        "747f6385fee5b4a9cd290d28b541e33fe35fd85c336720fdd098df265d1bcc40"
     )
     assert receipt["cycle"]["acceptance_digest"] == (
         "de01a0e61bd21db927684ccf5622e856bd5a18306a7fd45b8769e7c8b9dbb89a"
@@ -4247,7 +4254,7 @@ def test_fph0_v3_refuses_caller_union_collision(
 
 
 def test_fph0_d7_composition_and_v2_constant_are_byte_preserved():
-    assert executive_runtime.SCHEMA_VERSION == 6
+    assert executive_runtime.SCHEMA_VERSION == 7
     assert executive_runtime.V3_HOST_EXECUTION_BINDING_KEYS == (
         executive_runtime.V2_HOST_EXECUTION_BINDING_KEYS
         | {"work_placement_union"}

@@ -16,6 +16,11 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
 from scripts.ohf.redaction import evidence_contains_secret, redact_evidence
+from common.product_acceptance_contract import (
+    PRODUCT_ACCEPTANCE_REVIEW_PROOF_SCHEMA,
+    ProductAcceptanceContractError,
+    validate_product_acceptance_review_proof,
+)
 
 
 RESULT_SCHEMA = "mastermind.executive_orchestration_result/v1"
@@ -25,6 +30,8 @@ PLAN_SCHEMA_V2 = "mastermind.execution_plan/v2"
 PLAN_SCHEMA_V3 = "mastermind.execution_plan/v3"
 PLAN_SCHEMA_V4 = "mastermind.execution_plan/v4"
 PLAN_SCHEMA_V5 = "mastermind.execution_plan/v5"
+AGGREGATION_SCHEMA_V1 = "mastermind.aggregation_result/v1"
+AGGREGATION_SCHEMA_V2 = "mastermind.aggregation_result/v2"
 MAX_CANONICAL_RESULT_BYTES = 8_388_608
 ROLES = frozenset({"plan", "work", "review", "repair", "aggregation"})
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -93,7 +100,9 @@ def _lineage_schema_properties() -> dict[str, dict[str, Any]]:
     }
 
 
-def _role_body_schema(role: str) -> dict[str, Any]:
+def _role_body_schema(
+    role: str, *, aggregation_schema_version: str = AGGREGATION_SCHEMA_V1,
+) -> dict[str, Any]:
     """Executable JSON Schema 2020-12 body for one frozen role.
 
     Relational checks (for example, a review target matching the persisted
@@ -105,6 +114,12 @@ def _role_body_schema(role: str) -> dict[str, Any]:
 
     if role not in ROLES:
         raise OrchestrationResultError("role is not in the closed orchestration set")
+    if (
+        type(aggregation_schema_version) is not str
+        or aggregation_schema_version not in {AGGREGATION_SCHEMA_V1, AGGREGATION_SCHEMA_V2}
+        or (role != "aggregation" and aggregation_schema_version != AGGREGATION_SCHEMA_V1)
+    ):
+        raise OrchestrationResultError("aggregation producer schema version is not admitted")
     text = _schema_string()
     digest = _schema_digest()
     identifier = _schema_identifier()
@@ -297,7 +312,7 @@ def _role_body_schema(role: str) -> dict[str, Any]:
     )
     legacy = _schema_object(
         {
-            "schema_version": {"const": "mastermind.aggregation_result/v1"},
+            "schema_version": {"const": AGGREGATION_SCHEMA_V1},
             "root_job_id": identifier,
             "handoff_digest": digest,
             "policy_sha": digest,
@@ -308,13 +323,15 @@ def _role_body_schema(role: str) -> dict[str, Any]:
             "evidence_digests": evidence,
         }
     )
+    if aggregation_schema_version == AGGREGATION_SCHEMA_V1:
+        return legacy
     nested = copy.deepcopy(legacy)
-    nested["properties"]["schema_version"] = {"const": "mastermind.aggregation_result/v2"}
+    nested["properties"]["schema_version"] = {"const": AGGREGATION_SCHEMA_V2}
     nested["properties"]["coordinator_job_id"] = identifier
     nested["required"].append("coordinator_job_id")
     nested["properties"]["revisions"]["maxItems"] = 16
     nested["properties"]["revisions"]["items"]["properties"]["ordinal"]["maximum"] = 15
-    return {"oneOf": [legacy, nested]}
+    return nested
 
 
 def orchestration_result_schema(
@@ -324,17 +341,35 @@ def orchestration_result_schema(
     run_id: str | None = None,
     worker_id: str | None = None,
     root_job_id: str | None = None,
+    plan_schema_version: str = PLAN_SCHEMA_V1,
+    aggregation_schema_version: str = AGGREGATION_SCHEMA_V1,
+    coordinator_job_id: str | None = None,
 ) -> dict[str, Any]:
     """Return the closed executable envelope schema for ``role``.
 
     The unbound form is the stable golden schema.  The supervisor supplies the
     four optional constants so a provider cannot swap Job, Attempt, worker, or
     root identity while still satisfying the same role shape.
+
+    The default planner and aggregator remain V1. Selecting a newer closed
+    schema does not select a native adapter or grant Runtime admission for it.
     """
 
     if role not in ROLES:
         raise OrchestrationResultError("role is not in the closed orchestration set")
+    admitted_plan_versions = {
+        PLAN_SCHEMA_V1: 0, PLAN_SCHEMA_V3: 2, PLAN_SCHEMA_V4: 3, PLAN_SCHEMA_V5: 4,
+    }
+    if (
+        type(plan_schema_version) is not str
+        or plan_schema_version not in admitted_plan_versions
+        or (role != "plan" and plan_schema_version != PLAN_SCHEMA_V1)
+    ):
+        raise OrchestrationResultError("plan producer schema version is not admitted")
+    if coordinator_job_id is not None and (role != "plan" or plan_schema_version != PLAN_SCHEMA_V5):
+        raise OrchestrationResultError("coordinator binding requires the V5 planner role")
     for name, value in {
+        "coordinator_job_id": coordinator_job_id,
         "job_id": job_id,
         "run_id": run_id,
         "worker_id": worker_id,
@@ -346,14 +381,22 @@ def orchestration_result_schema(
     def bound_identifier(value: str | None) -> dict[str, Any]:
         return {"const": value} if value is not None else _schema_identifier()
 
-    role_body = _role_body_schema(role)
+    role_body = _role_body_schema(role, aggregation_schema_version=aggregation_schema_version)
     if role == "plan":
-        # The public provider contract remains the frozen V1-only schema.
+        # Project one closed version; removing conditional guards alone leaks
+        # the union's V5 properties and array limit into the frozen V1 wire.
         role_body.pop("allOf")
-        role_body["properties"]["schema_version"] = {"const": PLAN_SCHEMA_V1}
+        role_body["properties"]["schema_version"] = {"const": plan_schema_version}
         role_body["properties"]["steps"]["items"] = role_body["properties"][
             "steps"
-        ]["items"]["anyOf"][0]
+        ]["items"]["anyOf"][admitted_plan_versions[plan_schema_version]]
+        role_body["properties"]["steps"]["maxItems"] = 16 if plan_schema_version == PLAN_SCHEMA_V5 else 8
+        if plan_schema_version == PLAN_SCHEMA_V5:
+            role_body["required"].append("coordinator_job_id")
+            if coordinator_job_id is not None:
+                role_body["properties"]["coordinator_job_id"] = {"const": coordinator_job_id}
+        else:
+            del role_body["properties"]["coordinator_job_id"]
     if root_job_id is not None:
         role_body = json.loads(json.dumps(role_body))
         role_body["properties"]["root_job_id"] = {"const": root_job_id}
@@ -379,10 +422,71 @@ def orchestration_result_schema(
     }
 
 
-def role_schema_digest(role: str) -> str:
+def role_schema_digest(
+    role: str, *, plan_schema_version: str = PLAN_SCHEMA_V1,
+    aggregation_schema_version: str = AGGREGATION_SCHEMA_V1,
+) -> str:
     """Content identity of the unbound executable schema for one role."""
 
-    return canonical_digest(orchestration_result_schema(role))
+    return canonical_digest(orchestration_result_schema(
+        role, plan_schema_version=plan_schema_version,
+        aggregation_schema_version=aggregation_schema_version,
+    ))
+
+
+def product_acceptance_review_result_schema(
+    *, job_id: str, run_id: str, worker_id: str, root_job_id: str,
+    expected_basis_digest: str, expected_criterion_digests: tuple[str, ...],
+    expected_obligation_digests: tuple[str, ...],
+) -> dict[str, Any]:
+    """Opt-in review output bound to the actual source basis and every row.
+
+    Only the verified commissioning owner selects this provider contract. The
+    ordinary role schema and its golden digest remain byte-for-byte unchanged.
+    UNPROVEN is valid truthful review data, and cannot satisfy product proof.
+    """
+    if (type(expected_criterion_digests) is not tuple or type(expected_obligation_digests) is not tuple
+        or not 1 <= len(expected_criterion_digests) <= 6
+        or not 1 <= len(expected_obligation_digests) <= 64):
+        raise OrchestrationResultError("product review expected identities are invalid")
+    try:
+        validate_product_acceptance_review_proof({
+            "schema": PRODUCT_ACCEPTANCE_REVIEW_PROOF_SCHEMA,
+            "acceptance_basis_digest": expected_basis_digest,
+            "criteria": [{"criterion_digest": digest, "state": "UNPROVEN", "evidence_digests": []}
+                for digest in expected_criterion_digests],
+            "obligations": [{"obligation_digest": digest, "state": "UNPROVEN", "evidence_digests": []}
+                for digest in expected_obligation_digests],
+        })
+    except ProductAcceptanceContractError as exc:
+        raise OrchestrationResultError("product review expected identities are invalid") from exc
+
+    def bound_rows(expected: tuple[str, ...], identity: str) -> dict[str, Any]:
+        # Provider Structured Outputs is a subset of JSON Schema: do not send
+        # tuple items or allOf/if/then. The canonical proof codec rejects duplicate
+        # identities/evidence, and the request owner checks the full ordered
+        # expected tuple before any decision request can be issued.
+        variants = []
+        for states, minimum_evidence in ((["SATISFIED"], 1), (["UNSATISFIED", "UNPROVEN"], 0)):
+            variants.append(_schema_object({
+                identity: {"type": "string", "enum": list(expected)},
+                "state": {"type": "string", "enum": states},
+                "evidence_digests": _schema_array(_schema_digest(), minimum=minimum_evidence),
+            }))
+        return _schema_array({"anyOf": variants}, minimum=len(expected), maximum=len(expected))
+
+    schema = orchestration_result_schema("review", job_id=job_id, run_id=run_id,
+        worker_id=worker_id, root_job_id=root_job_id)
+    body = schema["properties"]["role_result"]
+    body["properties"]["schema_version"] = {"const": "mastermind.review_result/v2"}
+    body["properties"]["product_acceptance_proof"] = _schema_object({
+        "schema": {"const": PRODUCT_ACCEPTANCE_REVIEW_PROOF_SCHEMA},
+        "acceptance_basis_digest": {"const": expected_basis_digest},
+        "criteria": bound_rows(expected_criterion_digests, "criterion_digest"),
+        "obligations": bound_rows(expected_obligation_digests, "obligation_digest"),
+    })
+    body["required"].append("product_acceptance_proof")
+    return schema
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -773,10 +877,13 @@ def _validate_review(value: Any, *, outer_errors: list[Any]) -> dict[str, Any]:
         "reviewed_result_digest", "repair_round", "verdict", "evidence_digests",
         "findings",
     }
+    version = value.get("schema_version") if isinstance(value, Mapping) else None
+    if version == "mastermind.review_result/v2":
+        keys = keys | {"product_acceptance_proof"}
     raw = _closed(value, name="review role_result", keys=keys)
-    if raw["schema_version"] != "mastermind.review_result/v1":
+    if type(raw["schema_version"]) is not str or raw["schema_version"] not in {"mastermind.review_result/v1", "mastermind.review_result/v2"}:
         raise OrchestrationResultError("unsupported review schema")
-    result = {"schema_version": "mastermind.review_result/v1", **_lineage(raw)}
+    result = {"schema_version": raw["schema_version"], **_lineage(raw)}
     result.update(
         {
             "reviewed_job_id": _identifier(raw["reviewed_job_id"], name="reviewed_job_id"),
@@ -812,6 +919,11 @@ def _validate_review(value: Any, *, outer_errors: list[Any]) -> dict[str, Any]:
     if raw["verdict"] == "reject" and not blocking:
         raise OrchestrationResultError("reject requires at least one blocking finding")
     result["findings"] = findings
+    if raw["schema_version"] == "mastermind.review_result/v2":
+        try:
+            result["product_acceptance_proof"] = validate_product_acceptance_review_proof(raw["product_acceptance_proof"])
+        except ProductAcceptanceContractError as exc:
+            raise OrchestrationResultError("product acceptance review proof is invalid") from exc
     return result
 
 
@@ -1037,6 +1149,8 @@ GOLDEN_ROLE_SCHEMA_DIGESTS = {
 
 
 __all__ = [
+    "AGGREGATION_SCHEMA_V1",
+    "AGGREGATION_SCHEMA_V2",
     "GOLDEN_ROLE_SCHEMA_DIGESTS",
     "MAX_CANONICAL_RESULT_BYTES",
     "OrchestrationResultError",

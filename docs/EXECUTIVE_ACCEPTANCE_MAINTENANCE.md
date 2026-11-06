@@ -97,87 +97,108 @@ The normal selector validates and skips its canonical block before checking
 current dispatch policy. A subsequent capability-policy rotation can therefore
 preserve terminal history without re-enabling that operation.
 
-## V3: explicit, offline schema 5 to 6 maintenance
+## Accepted V2/schema 5 to current schema 7
 
-This path consumes the existing `upgrade_v5_to_v6` owner's completed operation.
-It never invokes migration, starts a service, clears quarantine, restores a
-database, issues an Attempt or publishes acceptance PASS. It is deliberately
-limited to an **actually accepted v2 predecessor on exact schema 5**, carrying
-the same terminal dispatch/root. It is not a generic schema-version exception.
-An unstarted predecessor acceptance (including the retained exact-326c operation)
-does not qualify and is not retired by preparing this source change.
+An ordinary V2 preparation cannot adopt a new schema or migration history by
+sealing a replacement baseline. Both preparation and admission compare the
+accepted predecessor's original schema and migration rows, including their
+JSON types. A schema transition uses the explicit route below.
 
-The approved cutover plan must bind these phases before execution:
+This route starts from an **actually accepted V2 release on schema 5**. It
+keeps three distinct states:
 
-1. Reconcile the predecessor acceptance owner and consume its genuine acceptance
-   summary and matching PASS carry. Quiesce through the existing service owner,
-   with all arms and the worker harness closed. With that predecessor still
-   selected in `control.json`, invoke the reviewed maintenance preparation owner
-   with the predecessor/successor/root selectors, `--carry-terminal-dispatch`
-   and `--seal-v5-source`. No recovery selectors are permitted. This phase must
-   precede migration; existing 5-to-6 preflight/completion receipts refuse a
-   retrospective baseline. The current database must be offline with no SQLite
-   sidecars. Maintenance does not checkpoint or remove them; that remains an
-   existing database-owner/quiescence prerequisite.
-2. Retain the exclusive root-owned `schema-source-<successor>` evidence directory
-   under `acceptance-maintenance`. Its immutable intent binds the accepted
-   predecessor chain/root, exact database path/device/inode/bytes, full schema-5
-   snapshot and backup/drill proof, configuration and old artifact inventory.
-   It verifies the real predecessor proof delta against the predecessor's
-   original sealed baseline. A summary alone, an unaccepted descriptor, or
-   unchanged-looking rows cannot replace PASS. The source baseline is never
-   overwritten or promoted into a target baseline.
-3. Install/seal the reviewed target through the existing owner, preserving the
-   qualified namespace, principals and disarmed configuration. Only
-   `proof_base_sha` may change in the bound control configuration; any other
-   change needs an explicit source/plan reconciliation, not a whitelist override.
-   The permitted database principal then runs the existing installed-release
-   migration owner once, explicitly from version 5. Maintenance does not supply
-   a privilege wrapper, migration implementation, lock or retry path.
-4. Consume that same operation's exact owner-return `operation_id`,
-   `preflight_receipt_digest` and `completion_receipt_digest`. With the successor
-   selected and services still stopped, invoke maintenance with the same
-   selectors and `--carry-terminal-dispatch`, plus
-   `--schema-transition-operation`, `--migration-preflight-sha256` and
-   `--migration-completion-sha256`. These digests use the migration owner's
-   canonical JSON encoding. No completion means no target descriptor.
-5. Consumption captures private control-owned receipts and both backup/manifest
-   pairs through stable, no-follow reads into exclusive root-owned evidence;
-   original ownership/permissions remain unchanged. The existing backup owner
-   verifies both copies, exact known schema/migration checksums and restore
-   drills. Completion must bind preflight, operation, release, namespace,
-   source/target schemas, full-v4 history and the migration-5 receipt. Every
-   pre-existing table row and migration receipt remains exact; the only history
-   addition is M6. No changed root, event, lease, grant, quota or arbitrary
-   schema object is admitted. The actual target must match the completed
-   operation and verified target backup.
-6. Only then prepare a distinct, root-sealed **v3 target acceptance baseline**.
-   Its descriptor binds the retained transition-chain digest. It also retains
-   every v2 terminal-dispatch/assignment/PASS requirement. Acceptance rechecks
-   the immutable source chain, verified backup/drill evidence and target
-   namespace/baseline before creating its ordinary one-run marker. Normal
-   Runtime reads can materialize an empty WAL/SHM pair; acceptance compares the
-   full logical snapshot including WAL. Raw offline evidence capture requires
-   no sidecars and uses immutable reads so it does not create them.
-7. Run the existing separate successor acceptance with the printed descriptor
-   digest. V3 grants no predecessor recovery, uses the same two fresh proof
-   jobs/three terminal Attempts as v2, and retains strict target-schema/history
-   equality throughout acceptance. Only the existing successful acceptance
-   owner can publish the matching summary and carry-forward PASS. Migration
-   completion is not that PASS or original-parent/live-provider acceptance.
+| State | Immutable evidence |
+| --- | --- |
+| Accepted predecessor | Its original V2 baseline, backup, descriptor, PASS summary and carry |
+| Post-acceptance schema-5 source | A separate seal including that predecessor's two completed proof jobs |
+| New schema-7 working preparation | The exact C67 target, a fresh backup, descriptor and migration evidence |
 
-Ordinary v1/v2 preservation remains strict. An ordinary v2 preparation or
-acceptance entry cannot silently rebaseline across a changed predecessor schema
-or migration history; it must use the explicit verified transition. Unknown
-versions, missing/foreign/partial receipts, replaced database identity, altered
-backups or old history, and mismatched predecessor evidence all refuse.
+The new preparation schema is
+`mastermind.executive_acceptance_maintenance/accepted_v2_v5_to_v7_v1`.
+The schema-source adapter is subordinate to Maintenance. It does not read a
+second copy of migration receipts or run migrations. The existing
+`schema_upgrade_evidence` owner authenticates P56/C56/P67/C67, their backup,
+verification and restore-drill chains, the exact executor, and the original
+database identity.
 
-Consumption is single-use. Partial evidence directories are retained, never
-deleted or overwritten by retry. If migration committed but completion is
-uncertain, preserve the owner's quarantine/barrier and all evidence, reconcile
-the same operation, and do not restart the v5 binary, replay migration, copy a
-backup over the runtime or synthesize an acceptance receipt. This source contract
-does not itself authorize an installed cutover or resolve any human-only gate.
+### Cutover order
+
+Use this sequence only within an authorized host acceptance operation. An
+unknown prior operation, pending quarantine, or denied host action must be
+reconciled through its existing owner before any cutover action.
+
+1. Qualify the actually accepted V2 predecessor, untouched queued root and
+   terminal dispatch history. All arms and the worker harness must be closed,
+   both services stopped, all Attempts terminal and all quotas unheld. The
+   canonical service admission lock must be available. The authoritative
+   schema-5 database must have no WAL, SHM or journal sidecars. No P56, C56, P67
+   or C67 receipt may already exist.
+2. While that predecessor is still the selected installed release, run the
+   reviewed, staged successor's Maintenance entry point with the existing
+   predecessor, successor and root selectors, `--carry-terminal-dispatch`,
+   and **`--seal-accepted-v2-v5-source`**. Omit both recovery selectors and all
+   other transition selectors. The staged successor must pass the existing
+   exact-release proof. Record the returned `accepted_v2_source_sha256`.
+3. Install the exact reviewed successor through the existing installer and
+   normal control-config promotion. Preserve all disarmed settings and the
+   original Macro source coordinate. Under the existing migration owner's
+   separately authorized procedure, complete the closed schema **5→6→7**
+   chain exactly once with that same successor as executor.
+4. Run the same Maintenance entry point with the same predecessor, successor
+   and root selectors, `--carry-terminal-dispatch`,
+   **`--accepted-v2-v5-to-v7`**, and
+   **`--accepted-v2-source-sha256 <recorded-source-digest>`**. Omit the source
+   sealing flag and both recovery selectors. This authenticates the retained
+   source against the actual P56 identity and snapshot, requires the source
+   seal to precede P56, verifies the complete canonical chain, and publishes
+   a separate schema-7 working preparation.
+5. Run the existing current-release acceptance with its printed
+   `--maintenance-descriptor-sha256`. Admission rechecks the exact INITIAL
+   target under the canonical service lock and creates one exclusive run
+   marker. It grants no predecessor recovery. The existing proof jobs,
+   backup/verification/drill/restore sequence, closed PASS summary and first
+   finish remain required.
+
+The source seal is stored under
+`acceptance-maintenance/schema-source-<successor>`. Its closed namespace is
+`preparing.json`, `intent.json`, `baseline.json`, `prestate.sqlite3`,
+`inventory.json`, `prior-secret-canary.json`, and `source-control.json`.
+The intent pins the accepted ancestry, actual source database path/device/
+inode/size/hash, full schema-5 content, artifacts, prior canary and exact raw
+control configuration. It does not overwrite the accepted predecessor.
+The working preparation remains at `acceptance-maintenance/<successor>`.
+
+The source and working commands hold their accepted ancestry, configuration,
+database, canary and namespace identities through publication. A source
+whose ordinary logical rows happen to match is insufficient: the canonical
+P56 source identity and full content must also match. A source seal created
+after migration cannot repair a missing pre-migration seal. Historical DATA
+cannot authorize a fresh descriptor or run marker.
+
+### Finish, future carry and failure
+
+Normal acceptance may restore the live database and restart the Service.
+Finish uses the actual acceptance backup and retained HISTORICAL migration
+evidence; it does not require the live inode to remain the initial migration
+target, demand offline sidecar absence, or take the running Service's lock.
+The working baseline must still be the original C67 target. Future carry
+reopens the same canonical history and accepted-source provenance, even when
+later unrelated rows exist in the current live database.
+
+A failure retains its exact evidence. Existing source seals, source partials,
+working partials, descriptors and run markers are never silently replaced or
+removed. If restore evidence is sealed but a later source check refuses,
+there is no carry PASS and another finish refuses the existing partial
+operation. Do not remove that evidence, repeat the old migration, restart an
+old schema binary, or fabricate PREPROOF ancestry to continue.
+
+Existing PREPROOF and prepared-successor routes keep their own selectors,
+closed material forms and ancestry checks. This accepted-V2 route accepts
+only the normal canonical migration chain; it does not convert recovered
+pre-census variants or prepared-successor evidence into accepted provenance.
+Source qualification and merge establish the implementation only. Installed
+host acceptance, original-parent consumption, SUMMON and terminal return
+remain separate evidence.
 
 ## Continuing the preserved root
 

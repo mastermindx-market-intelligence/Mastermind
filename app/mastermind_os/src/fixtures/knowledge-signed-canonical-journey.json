@@ -1,0 +1,852 @@
+{
+  "schema": "mastermind.knowledge_signed_journey_fixture.v1",
+  "scope": "DISPOSABLE_SOURCE_ONLY_CREDENTIAL_CONFIG_SEAL_AND_PR_SEAMS_INERT",
+  "context": {
+    "schema": "mastermind.workspace_source_operation_context.v1",
+    "selection": {
+      "action": "add_project_file",
+      "work_ref": "WS:ALPHA"
+    },
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "can_inspect": true
+  },
+  "request": {
+    "schema": "mastermind.project_file_add_request.v1",
+    "request_id": "mmos-project-file-add-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "work_ref": "WS:ALPHA",
+    "source_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+    "base_revision": "c95b76465d1e0fde1c9882ba705343ccf72eec9d33919dd2844df7daea31045a",
+    "file": {
+      "display_name": "Notes.md",
+      "media_type": "text/markdown",
+      "content_utf8": "Keep literal 中文\nline two.\n"
+    }
+  },
+  "before": {
+    "availability": "AVAILABLE",
+    "code_context": {
+      "executable_macro_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "reader_source_commit": "7460a9939c716a50cae991fbaa5a45fae86e0393",
+      "schema": "mastermind.project_knowledge_code_context.v1",
+      "work_ref": "WS:ALPHA"
+    },
+    "data_observation": {
+      "authority": "OBSERVATION_ONLY",
+      "canonical_commit_at": "2026-11-04T10:02:23-07:00",
+      "canonical_data_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "canonical_observed_at_ms": 1793811744691,
+      "code_config_relation": "IDENTICAL_READER_CLOSURE",
+      "default_ref": "main",
+      "executable_macro_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "publication_recorded_at_ms": null,
+      "publication_time": null,
+      "reader_closure_sha256": "81bb6e9df781c267ad2da39b788a6c04d44c2a3992b0995ae8116deba8552047",
+      "repository": "mastermindx-market-intelligence/macro",
+      "schema": "mastermind.canonical_project_data_observation.v1",
+      "source_operation": null
+    },
+    "project": {
+      "coverage": {
+        "files": {
+          "declared": 1,
+          "listed": 1,
+          "omitted": 0,
+          "state": "COMPLETE"
+        },
+        "records": {
+          "invalid": 0,
+          "matched": 1,
+          "omitted": 0,
+          "scanned": 2,
+          "state": "BOUNDED_SAMPLE"
+        }
+      },
+      "files": [
+        {
+          "content_sha256": null,
+          "display_name": "notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": null,
+            "kind": "DECLARED_ARTIFACT",
+            "request_sha256": null
+          },
+          "path": "research/notes.md",
+          "repository": "macro",
+          "revision": null,
+          "source_ref": "project-file.v1.d5ca12a51596e857faed3891868d10badb6ea05127b282ec10ffd2d4230408f7",
+          "state": "SOURCE_MISSING",
+          "viewer_relation": "UNKNOWN"
+        }
+      ],
+      "memory": {
+        "revision": null,
+        "source_ref": null,
+        "state": "EMPTY"
+      },
+      "records": [
+        {
+          "authored_at": null,
+          "committed_at": "2026-11-04T17:02:23Z",
+          "kind": "WORKSTREAM",
+          "path": "agentos/workstreams/WS-ALPHA.md",
+          "revision": "d7d972832c111e83cd98a88c2b35a2116ee4c329",
+          "source_ref": "project-record.v1.7ca7b5a12b2fd2db7ab951bcfb339f5caa0bc3daa6ac0d1edfbb3fdab1b1d8c9",
+          "title": "Project knowledge capture"
+        }
+      ],
+      "title": "Project knowledge capture"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_knowledge.v1",
+    "selection": {
+      "work_ref": "WS:ALPHA"
+    },
+    "source": {
+      "commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "repository": "mastermindx-market-intelligence/macro",
+      "workstream_sha256": "c95b76465d1e0fde1c9882ba705343ccf72eec9d33919dd2844df7daea31045a"
+    }
+  },
+  "preview": {
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "preview": {
+      "action": "add_project_file",
+      "change": {
+        "display_name": "Notes.md",
+        "kind": "FILE_ADD",
+        "size_bytes": 30
+      },
+      "postimages": [
+        {
+          "content_sha256": "f29d63caaf6b4f78fd6c7b169921f6a535351a3cbcebc6d3a10767ccfb2da0cb",
+          "expected_preimage_sha256": null,
+          "path": "agentos/project-files/WS-ALPHA/28ae3028c8dc4141ca4fcf77b5df883b493f3b146a0677932627b044561b8d1d.md"
+        },
+        {
+          "content_sha256": "c10def346297f3776c3c0ae2c40d79db09acb047716653d933bafcb40aa548d1",
+          "expected_preimage_sha256": "c95b76465d1e0fde1c9882ba705343ccf72eec9d33919dd2844df7daea31045a",
+          "path": "agentos/workstreams/WS-ALPHA.md"
+        }
+      ],
+      "schema": "mastermind.project_knowledge_preview.v1",
+      "source_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "state": "DRAFT_ONLY",
+      "work_ref": "WS:ALPHA"
+    },
+    "preview_witness": {
+      "original_input": {
+        "artifact_sha256": "770e5b4dbdc83ab2fe55ee93368feb788d14d4473ea5b4e5ce83bac263c10d5b",
+        "input_ref": "terminal-input:43f71d175c1efde1245b0693748e99ddd026aa69bc049a1772b2f82a74858f29",
+        "payload_sha256": "a013289f585e091c7673c2721cb394f100091f21cd1f43c848dac2f96695a869",
+        "schema": "mastermind.terminal_original_input_reference.v1"
+      },
+      "recipe_fingerprint_sha256": "73962453d1443bde7877ae1c93d63fd6f21be0084ab7bdf03c05c76733b00907"
+    },
+    "recipe_fingerprint_sha256": "73962453d1443bde7877ae1c93d63fd6f21be0084ab7bdf03c05c76733b00907",
+    "request_sha256": "6523ff010f1c0ffa30d51f7160a5a0becf272e473a076ea369e5034978065504",
+    "schema": "mastermind.workspace_source_operation_preview.v1",
+    "selection": {
+      "action": "add_project_file",
+      "request_id": "mmos-project-file-add-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "work_ref": "WS:ALPHA"
+    }
+  },
+  "proposal_status": {
+    "advance": null,
+    "disposition": "unknown",
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "phase": "PUBLICATION",
+    "reason": "IN_PROGRESS",
+    "receipt": {
+      "event_id": 3,
+      "kind": "PROPOSAL_OBSERVED",
+      "proposal": {
+        "head_branch": "mmos/knowledge-8ab68f45c9525f2d60f942723cc01cca611135d4a10ee4641aa018f660782579",
+        "head_commit": "1cce1db0d334a755047969b422833ca4c17e1beb",
+        "number": 401,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"
+      },
+      "receipt_sha256": "1150d874379b71444a0b148a96758d419252cfc3ed267164d7cb6ab3f653e8c7",
+      "recorded_at_ms": 1793811753000,
+      "sources": []
+    },
+    "recipe_fingerprint_sha256": "73962453d1443bde7877ae1c93d63fd6f21be0084ab7bdf03c05c76733b00907",
+    "request_sha256": "6523ff010f1c0ffa30d51f7160a5a0becf272e473a076ea369e5034978065504",
+    "schema": "mastermind.workspace_source_operation_status.v1",
+    "selection": {
+      "action": "add_project_file",
+      "request_id": "mmos-project-file-add-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "work_ref": "WS:ALPHA"
+    }
+  },
+  "pr_only_catalogue": {
+    "availability": "AVAILABLE",
+    "code_context": {
+      "executable_macro_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "reader_source_commit": "7460a9939c716a50cae991fbaa5a45fae86e0393",
+      "schema": "mastermind.project_knowledge_code_context.v1",
+      "work_ref": "WS:ALPHA"
+    },
+    "data_observation": {
+      "authority": "OBSERVATION_ONLY",
+      "canonical_commit_at": "2026-11-04T10:02:23-07:00",
+      "canonical_data_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "canonical_observed_at_ms": 1793811754317,
+      "code_config_relation": "IDENTICAL_READER_CLOSURE",
+      "default_ref": "main",
+      "executable_macro_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "publication_recorded_at_ms": null,
+      "publication_time": null,
+      "reader_closure_sha256": "81bb6e9df781c267ad2da39b788a6c04d44c2a3992b0995ae8116deba8552047",
+      "repository": "mastermindx-market-intelligence/macro",
+      "schema": "mastermind.canonical_project_data_observation.v1",
+      "source_operation": null
+    },
+    "project": {
+      "coverage": {
+        "files": {
+          "declared": 1,
+          "listed": 1,
+          "omitted": 0,
+          "state": "COMPLETE"
+        },
+        "records": {
+          "invalid": 0,
+          "matched": 1,
+          "omitted": 0,
+          "scanned": 2,
+          "state": "BOUNDED_SAMPLE"
+        }
+      },
+      "files": [
+        {
+          "content_sha256": null,
+          "display_name": "notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": null,
+            "kind": "DECLARED_ARTIFACT",
+            "request_sha256": null
+          },
+          "path": "research/notes.md",
+          "repository": "macro",
+          "revision": null,
+          "source_ref": "project-file.v1.d5ca12a51596e857faed3891868d10badb6ea05127b282ec10ffd2d4230408f7",
+          "state": "SOURCE_MISSING",
+          "viewer_relation": "UNKNOWN"
+        }
+      ],
+      "memory": {
+        "revision": null,
+        "source_ref": null,
+        "state": "EMPTY"
+      },
+      "records": [
+        {
+          "authored_at": null,
+          "committed_at": "2026-11-04T17:02:23Z",
+          "kind": "WORKSTREAM",
+          "path": "agentos/workstreams/WS-ALPHA.md",
+          "revision": "d7d972832c111e83cd98a88c2b35a2116ee4c329",
+          "source_ref": "project-record.v1.7ca7b5a12b2fd2db7ab951bcfb339f5caa0bc3daa6ac0d1edfbb3fdab1b1d8c9",
+          "title": "Project knowledge capture"
+        }
+      ],
+      "title": "Project knowledge capture"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_knowledge.v1",
+    "selection": {
+      "work_ref": "WS:ALPHA"
+    },
+    "source": {
+      "commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "repository": "mastermindx-market-intelligence/macro",
+      "workstream_sha256": "c95b76465d1e0fde1c9882ba705343ccf72eec9d33919dd2844df7daea31045a"
+    }
+  },
+  "accepted_status": {
+    "advance": null,
+    "disposition": "accepted",
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "phase": "PUBLICATION",
+    "reason": null,
+    "receipt": {
+      "event_id": 4,
+      "kind": "SOURCE_OBSERVED",
+      "proposal": null,
+      "receipt_sha256": "58d7b10ce559c9806e8c789bcfbda71a3721581fa37941bcb329bc26bdcdc112",
+      "recorded_at_ms": 1793811757000,
+      "sources": [
+        {
+          "commit": "1fa9820aa81fbf916cc3fdab6fa8641d19f79c49",
+          "content_sha256": "f29d63caaf6b4f78fd6c7b169921f6a535351a3cbcebc6d3a10767ccfb2da0cb",
+          "path": "agentos/project-files/WS-ALPHA/28ae3028c8dc4141ca4fcf77b5df883b493f3b146a0677932627b044561b8d1d.md",
+          "repository": "macro"
+        },
+        {
+          "commit": "1fa9820aa81fbf916cc3fdab6fa8641d19f79c49",
+          "content_sha256": "c10def346297f3776c3c0ae2c40d79db09acb047716653d933bafcb40aa548d1",
+          "path": "agentos/workstreams/WS-ALPHA.md",
+          "repository": "macro"
+        }
+      ]
+    },
+    "recipe_fingerprint_sha256": "73962453d1443bde7877ae1c93d63fd6f21be0084ab7bdf03c05c76733b00907",
+    "request_sha256": "6523ff010f1c0ffa30d51f7160a5a0becf272e473a076ea369e5034978065504",
+    "schema": "mastermind.workspace_source_operation_status.v1",
+    "selection": {
+      "action": "add_project_file",
+      "request_id": "mmos-project-file-add-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "work_ref": "WS:ALPHA"
+    }
+  },
+  "after": {
+    "availability": "AVAILABLE",
+    "code_context": {
+      "executable_macro_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "reader_source_commit": "7460a9939c716a50cae991fbaa5a45fae86e0393",
+      "schema": "mastermind.project_knowledge_code_context.v1",
+      "work_ref": "WS:ALPHA"
+    },
+    "data_observation": {
+      "authority": "OBSERVATION_ONLY",
+      "canonical_commit_at": "2026-11-04T10:02:36-07:00",
+      "canonical_data_commit": "1fa9820aa81fbf916cc3fdab6fa8641d19f79c49",
+      "canonical_observed_at_ms": 1793811758480,
+      "code_config_relation": "IDENTICAL_READER_CLOSURE",
+      "default_ref": "main",
+      "executable_macro_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "publication_recorded_at_ms": 1793811757000,
+      "publication_time": null,
+      "reader_closure_sha256": "81bb6e9df781c267ad2da39b788a6c04d44c2a3992b0995ae8116deba8552047",
+      "repository": "mastermindx-market-intelligence/macro",
+      "schema": "mastermind.canonical_project_data_observation.v1",
+      "source_operation": {
+        "event_id": 4,
+        "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda",
+        "receipt_sha256": "58d7b10ce559c9806e8c789bcfbda71a3721581fa37941bcb329bc26bdcdc112",
+        "recipe_fingerprint_sha256": "73962453d1443bde7877ae1c93d63fd6f21be0084ab7bdf03c05c76733b00907",
+        "recorded_at_ms": 1793811757000,
+        "request_sha256": "6523ff010f1c0ffa30d51f7160a5a0becf272e473a076ea369e5034978065504",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "work_ref": "WS:ALPHA"
+        },
+        "sources": [
+          {
+            "commit": "1fa9820aa81fbf916cc3fdab6fa8641d19f79c49",
+            "content_sha256": "f29d63caaf6b4f78fd6c7b169921f6a535351a3cbcebc6d3a10767ccfb2da0cb",
+            "path": "agentos/project-files/WS-ALPHA/28ae3028c8dc4141ca4fcf77b5df883b493f3b146a0677932627b044561b8d1d.md",
+            "repository": "macro"
+          },
+          {
+            "commit": "1fa9820aa81fbf916cc3fdab6fa8641d19f79c49",
+            "content_sha256": "c10def346297f3776c3c0ae2c40d79db09acb047716653d933bafcb40aa548d1",
+            "path": "agentos/workstreams/WS-ALPHA.md",
+            "repository": "macro"
+          }
+        ]
+      }
+    },
+    "project": {
+      "coverage": {
+        "files": {
+          "declared": 2,
+          "listed": 2,
+          "omitted": 0,
+          "state": "COMPLETE"
+        },
+        "records": {
+          "invalid": 0,
+          "matched": 1,
+          "omitted": 0,
+          "scanned": 2,
+          "state": "BOUNDED_SAMPLE"
+        }
+      },
+      "files": [
+        {
+          "content_sha256": null,
+          "display_name": "notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": null,
+            "kind": "DECLARED_ARTIFACT",
+            "request_sha256": null
+          },
+          "path": "research/notes.md",
+          "repository": "macro",
+          "revision": null,
+          "source_ref": "project-file.v1.46851f565ef31f303ed529c3d012de5bb009be90bddb9a794917ce0ac5e99df3",
+          "state": "SOURCE_MISSING",
+          "viewer_relation": "UNKNOWN"
+        },
+        {
+          "content_sha256": "f29d63caaf6b4f78fd6c7b169921f6a535351a3cbcebc6d3a10767ccfb2da0cb",
+          "display_name": "Notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": "workspace:86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda",
+            "kind": "PRINCIPAL_UPLOAD",
+            "request_sha256": "73962453d1443bde7877ae1c93d63fd6f21be0084ab7bdf03c05c76733b00907"
+          },
+          "path": "agentos/project-files/WS-ALPHA/28ae3028c8dc4141ca4fcf77b5df883b493f3b146a0677932627b044561b8d1d.md",
+          "repository": "macro",
+          "revision": "39e195f643fcd306d01df5c3581051c2194b089d",
+          "source_ref": "project-file.v1.d33243082b9b62cb3d4fe0e08afbf8987b570225a1bb0b1515b7b5441d2c59f4",
+          "state": "READABLE",
+          "viewer_relation": "UNKNOWN"
+        }
+      ],
+      "memory": {
+        "revision": null,
+        "source_ref": null,
+        "state": "EMPTY"
+      },
+      "records": [
+        {
+          "authored_at": null,
+          "committed_at": "2026-11-04T17:02:32Z",
+          "kind": "WORKSTREAM",
+          "path": "agentos/workstreams/WS-ALPHA.md",
+          "revision": "7c51dd433141c5de0a7920556e5fcee515eaeab0",
+          "source_ref": "project-record.v1.6645f4cfeb6fa663f23891683ef2c0346dcb173a0a0a58d050bdf0cbd27521c8",
+          "title": "Project knowledge capture"
+        }
+      ],
+      "title": "Project knowledge capture"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_knowledge.v1",
+    "selection": {
+      "work_ref": "WS:ALPHA"
+    },
+    "source": {
+      "commit": "1fa9820aa81fbf916cc3fdab6fa8641d19f79c49",
+      "repository": "mastermindx-market-intelligence/macro",
+      "workstream_sha256": "c10def346297f3776c3c0ae2c40d79db09acb047716653d933bafcb40aa548d1"
+    }
+  },
+  "source": {
+    "availability": "AVAILABLE",
+    "code_context": {
+      "executable_macro_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "reader_source_commit": "7460a9939c716a50cae991fbaa5a45fae86e0393",
+      "schema": "mastermind.project_knowledge_code_context.v1",
+      "work_ref": "WS:ALPHA"
+    },
+    "data_observation": {
+      "authority": "OBSERVATION_ONLY",
+      "canonical_commit_at": "2026-11-04T10:02:36-07:00",
+      "canonical_data_commit": "1fa9820aa81fbf916cc3fdab6fa8641d19f79c49",
+      "canonical_observed_at_ms": 1793811761756,
+      "code_config_relation": "IDENTICAL_READER_CLOSURE",
+      "default_ref": "main",
+      "executable_macro_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "publication_recorded_at_ms": 1793811757000,
+      "publication_time": null,
+      "reader_closure_sha256": "81bb6e9df781c267ad2da39b788a6c04d44c2a3992b0995ae8116deba8552047",
+      "repository": "mastermindx-market-intelligence/macro",
+      "schema": "mastermind.canonical_project_data_observation.v1",
+      "source_operation": {
+        "event_id": 4,
+        "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda",
+        "receipt_sha256": "58d7b10ce559c9806e8c789bcfbda71a3721581fa37941bcb329bc26bdcdc112",
+        "recipe_fingerprint_sha256": "73962453d1443bde7877ae1c93d63fd6f21be0084ab7bdf03c05c76733b00907",
+        "recorded_at_ms": 1793811757000,
+        "request_sha256": "6523ff010f1c0ffa30d51f7160a5a0becf272e473a076ea369e5034978065504",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "work_ref": "WS:ALPHA"
+        },
+        "sources": [
+          {
+            "commit": "1fa9820aa81fbf916cc3fdab6fa8641d19f79c49",
+            "content_sha256": "f29d63caaf6b4f78fd6c7b169921f6a535351a3cbcebc6d3a10767ccfb2da0cb",
+            "path": "agentos/project-files/WS-ALPHA/28ae3028c8dc4141ca4fcf77b5df883b493f3b146a0677932627b044561b8d1d.md",
+            "repository": "macro"
+          },
+          {
+            "commit": "1fa9820aa81fbf916cc3fdab6fa8641d19f79c49",
+            "content_sha256": "c10def346297f3776c3c0ae2c40d79db09acb047716653d933bafcb40aa548d1",
+            "path": "agentos/workstreams/WS-ALPHA.md",
+            "repository": "macro"
+          }
+        ]
+      }
+    },
+    "document": {
+      "content_sha256": "f29d63caaf6b4f78fd6c7b169921f6a535351a3cbcebc6d3a10767ccfb2da0cb",
+      "content_utf8": "Keep literal 中文\nline two.\n",
+      "media_type": "text/markdown",
+      "title": "Notes.md"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_source.v1",
+    "selection": {
+      "source_ref": "project-file.v1.d33243082b9b62cb3d4fe0e08afbf8987b570225a1bb0b1515b7b5441d2c59f4",
+      "work_ref": "WS:ALPHA"
+    },
+    "source": {
+      "commit": "1fa9820aa81fbf916cc3fdab6fa8641d19f79c49",
+      "committed_at": "2026-11-04T17:02:32Z",
+      "content_sha256": "f29d63caaf6b4f78fd6c7b169921f6a535351a3cbcebc6d3a10767ccfb2da0cb",
+      "path": "agentos/project-files/WS-ALPHA/28ae3028c8dc4141ca4fcf77b5df883b493f3b146a0677932627b044561b8d1d.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "39e195f643fcd306d01df5c3581051c2194b089d"
+    }
+  },
+  "second_request": {
+    "schema": "mastermind.project_file_add_request.v1",
+    "request_id": "mmos-project-file-add-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "work_ref": "WS:ALPHA",
+    "source_commit": "1fa9820aa81fbf916cc3fdab6fa8641d19f79c49",
+    "base_revision": "c10def346297f3776c3c0ae2c40d79db09acb047716653d933bafcb40aa548d1",
+    "file": {
+      "display_name": "Second.md",
+      "media_type": "text/markdown",
+      "content_utf8": "Second genuine edit from DATA N. 中文"
+    }
+  },
+  "second_preview": {
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "preview": {
+      "action": "add_project_file",
+      "change": {
+        "display_name": "Second.md",
+        "kind": "FILE_ADD",
+        "size_bytes": 39
+      },
+      "postimages": [
+        {
+          "content_sha256": "9553567ab45afd18e38b4e7b000e79719bd2e4509bfb8e730bdb2ebb5b7044b3",
+          "expected_preimage_sha256": null,
+          "path": "agentos/project-files/WS-ALPHA/cbd0bbb283f83e7ef75f71e2832fdecca830ed79663b4c7124e7905734f24907.md"
+        },
+        {
+          "content_sha256": "7cb046ddfa023e6a647a8bd1927921c19569189dd936f78554429f3643a12d25",
+          "expected_preimage_sha256": "c10def346297f3776c3c0ae2c40d79db09acb047716653d933bafcb40aa548d1",
+          "path": "agentos/workstreams/WS-ALPHA.md"
+        }
+      ],
+      "schema": "mastermind.project_knowledge_preview.v1",
+      "source_commit": "1fa9820aa81fbf916cc3fdab6fa8641d19f79c49",
+      "state": "DRAFT_ONLY",
+      "work_ref": "WS:ALPHA"
+    },
+    "preview_witness": {
+      "original_input": {
+        "artifact_sha256": "1bd5ae3ceca4a67ebee55c113fcdc90da1fa686c5de18af2adb9a86434b50a75",
+        "input_ref": "terminal-input:bcb971fb61de6c2f8b9fbc97ad14b3de5c9d13f4c21064c5d99ce17558e758cf",
+        "payload_sha256": "dd65fc6bb75317096bf8ea4f8519fc09f6bdabc93a33aa15b4b9a5ee03feb2e2",
+        "schema": "mastermind.terminal_original_input_reference.v1"
+      },
+      "recipe_fingerprint_sha256": "02d1475cddbe1ffaba88fd63d639b2231abc626c30dbf86429a2a9826c9aaaab"
+    },
+    "recipe_fingerprint_sha256": "02d1475cddbe1ffaba88fd63d639b2231abc626c30dbf86429a2a9826c9aaaab",
+    "request_sha256": "cf58a2c392f481a9ae86fef2fa57b7d676934c6a23c8af87aefff85874a60052",
+    "schema": "mastermind.workspace_source_operation_preview.v1",
+    "selection": {
+      "action": "add_project_file",
+      "request_id": "mmos-project-file-add-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "work_ref": "WS:ALPHA"
+    }
+  },
+  "second_proposal_status": {
+    "advance": null,
+    "disposition": "unknown",
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "phase": "PUBLICATION",
+    "reason": "IN_PROGRESS",
+    "receipt": {
+      "event_id": 7,
+      "kind": "PROPOSAL_OBSERVED",
+      "proposal": {
+        "head_branch": "mmos/knowledge-e1b29c33fb25bfc5e644045b613858d59fa97d986fa09b0244cb811a0c55c351",
+        "head_commit": "fb4c3aafe93ec368bdcb34b5e97427ae89d897ea",
+        "number": 402,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"
+      },
+      "receipt_sha256": "ac1f23c6dce938ba7fbcbd96ee24de335266710aad7110b3e47f9987e55f642c",
+      "recorded_at_ms": 1793811774000,
+      "sources": []
+    },
+    "recipe_fingerprint_sha256": "02d1475cddbe1ffaba88fd63d639b2231abc626c30dbf86429a2a9826c9aaaab",
+    "request_sha256": "cf58a2c392f481a9ae86fef2fa57b7d676934c6a23c8af87aefff85874a60052",
+    "schema": "mastermind.workspace_source_operation_status.v1",
+    "selection": {
+      "action": "add_project_file",
+      "request_id": "mmos-project-file-add-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "work_ref": "WS:ALPHA"
+    }
+  },
+  "second_accepted_status": {
+    "advance": null,
+    "disposition": "accepted",
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "phase": "PUBLICATION",
+    "reason": null,
+    "receipt": {
+      "event_id": 8,
+      "kind": "SOURCE_OBSERVED",
+      "proposal": null,
+      "receipt_sha256": "15930e7aeb06e8920256a2649c8133c7b56a478088967a5a437c356622df5736",
+      "recorded_at_ms": 1793811775000,
+      "sources": [
+        {
+          "commit": "4defdb43a2fb45f46e397c70f2bb9f11f7f7801e",
+          "content_sha256": "9553567ab45afd18e38b4e7b000e79719bd2e4509bfb8e730bdb2ebb5b7044b3",
+          "path": "agentos/project-files/WS-ALPHA/cbd0bbb283f83e7ef75f71e2832fdecca830ed79663b4c7124e7905734f24907.md",
+          "repository": "macro"
+        },
+        {
+          "commit": "4defdb43a2fb45f46e397c70f2bb9f11f7f7801e",
+          "content_sha256": "7cb046ddfa023e6a647a8bd1927921c19569189dd936f78554429f3643a12d25",
+          "path": "agentos/workstreams/WS-ALPHA.md",
+          "repository": "macro"
+        }
+      ]
+    },
+    "recipe_fingerprint_sha256": "02d1475cddbe1ffaba88fd63d639b2231abc626c30dbf86429a2a9826c9aaaab",
+    "request_sha256": "cf58a2c392f481a9ae86fef2fa57b7d676934c6a23c8af87aefff85874a60052",
+    "schema": "mastermind.workspace_source_operation_status.v1",
+    "selection": {
+      "action": "add_project_file",
+      "request_id": "mmos-project-file-add-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "work_ref": "WS:ALPHA"
+    }
+  },
+  "reopened": {
+    "availability": "AVAILABLE",
+    "code_context": {
+      "executable_macro_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "reader_source_commit": "7460a9939c716a50cae991fbaa5a45fae86e0393",
+      "schema": "mastermind.project_knowledge_code_context.v1",
+      "work_ref": "WS:ALPHA"
+    },
+    "data_observation": {
+      "authority": "OBSERVATION_ONLY",
+      "canonical_commit_at": "2026-11-04T10:02:54-07:00",
+      "canonical_data_commit": "4defdb43a2fb45f46e397c70f2bb9f11f7f7801e",
+      "canonical_observed_at_ms": 1793811776477,
+      "code_config_relation": "IDENTICAL_READER_CLOSURE",
+      "default_ref": "main",
+      "executable_macro_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "publication_recorded_at_ms": 1793811775000,
+      "publication_time": null,
+      "reader_closure_sha256": "81bb6e9df781c267ad2da39b788a6c04d44c2a3992b0995ae8116deba8552047",
+      "repository": "mastermindx-market-intelligence/macro",
+      "schema": "mastermind.canonical_project_data_observation.v1",
+      "source_operation": {
+        "event_id": 8,
+        "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda",
+        "receipt_sha256": "15930e7aeb06e8920256a2649c8133c7b56a478088967a5a437c356622df5736",
+        "recipe_fingerprint_sha256": "02d1475cddbe1ffaba88fd63d639b2231abc626c30dbf86429a2a9826c9aaaab",
+        "recorded_at_ms": 1793811775000,
+        "request_sha256": "cf58a2c392f481a9ae86fef2fa57b7d676934c6a23c8af87aefff85874a60052",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "work_ref": "WS:ALPHA"
+        },
+        "sources": [
+          {
+            "commit": "4defdb43a2fb45f46e397c70f2bb9f11f7f7801e",
+            "content_sha256": "9553567ab45afd18e38b4e7b000e79719bd2e4509bfb8e730bdb2ebb5b7044b3",
+            "path": "agentos/project-files/WS-ALPHA/cbd0bbb283f83e7ef75f71e2832fdecca830ed79663b4c7124e7905734f24907.md",
+            "repository": "macro"
+          },
+          {
+            "commit": "4defdb43a2fb45f46e397c70f2bb9f11f7f7801e",
+            "content_sha256": "7cb046ddfa023e6a647a8bd1927921c19569189dd936f78554429f3643a12d25",
+            "path": "agentos/workstreams/WS-ALPHA.md",
+            "repository": "macro"
+          }
+        ]
+      }
+    },
+    "project": {
+      "coverage": {
+        "files": {
+          "declared": 3,
+          "listed": 3,
+          "omitted": 0,
+          "state": "COMPLETE"
+        },
+        "records": {
+          "invalid": 0,
+          "matched": 1,
+          "omitted": 0,
+          "scanned": 2,
+          "state": "BOUNDED_SAMPLE"
+        }
+      },
+      "files": [
+        {
+          "content_sha256": null,
+          "display_name": "notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": null,
+            "kind": "DECLARED_ARTIFACT",
+            "request_sha256": null
+          },
+          "path": "research/notes.md",
+          "repository": "macro",
+          "revision": null,
+          "source_ref": "project-file.v1.377ddeba85395ffa7efdaba31e735a95d17aa5e1f0b0a6e039bd10eb1eb6023d",
+          "state": "SOURCE_MISSING",
+          "viewer_relation": "UNKNOWN"
+        },
+        {
+          "content_sha256": "f29d63caaf6b4f78fd6c7b169921f6a535351a3cbcebc6d3a10767ccfb2da0cb",
+          "display_name": "Notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": "workspace:86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda",
+            "kind": "PRINCIPAL_UPLOAD",
+            "request_sha256": "73962453d1443bde7877ae1c93d63fd6f21be0084ab7bdf03c05c76733b00907"
+          },
+          "path": "agentos/project-files/WS-ALPHA/28ae3028c8dc4141ca4fcf77b5df883b493f3b146a0677932627b044561b8d1d.md",
+          "repository": "macro",
+          "revision": "39e195f643fcd306d01df5c3581051c2194b089d",
+          "source_ref": "project-file.v1.799cd176213761c6a2eb26cda1a0db02ef7b2686c7fae12e4df9c3617542a0a8",
+          "state": "READABLE",
+          "viewer_relation": "UNKNOWN"
+        },
+        {
+          "content_sha256": "9553567ab45afd18e38b4e7b000e79719bd2e4509bfb8e730bdb2ebb5b7044b3",
+          "display_name": "Second.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": "workspace:86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda",
+            "kind": "PRINCIPAL_UPLOAD",
+            "request_sha256": "02d1475cddbe1ffaba88fd63d639b2231abc626c30dbf86429a2a9826c9aaaab"
+          },
+          "path": "agentos/project-files/WS-ALPHA/cbd0bbb283f83e7ef75f71e2832fdecca830ed79663b4c7124e7905734f24907.md",
+          "repository": "macro",
+          "revision": "bb3015de14cedc00a295f4ecd4d58c29626e9058",
+          "source_ref": "project-file.v1.7a75c1c220e6edb3ee50b2741d32c199d2aa62759a54d1c32cda093347b7e4c6",
+          "state": "READABLE",
+          "viewer_relation": "UNKNOWN"
+        }
+      ],
+      "memory": {
+        "revision": null,
+        "source_ref": null,
+        "state": "EMPTY"
+      },
+      "records": [
+        {
+          "authored_at": null,
+          "committed_at": "2026-11-04T17:02:53Z",
+          "kind": "WORKSTREAM",
+          "path": "agentos/workstreams/WS-ALPHA.md",
+          "revision": "42a01ca4367aea260cb426de07df4b98eb4f3a54",
+          "source_ref": "project-record.v1.b63013e2fd0d2fa472aeb644acb5d9a37e7cf0f3f36c9cfb10210385017f4266",
+          "title": "Project knowledge capture"
+        }
+      ],
+      "title": "Project knowledge capture"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_knowledge.v1",
+    "selection": {
+      "work_ref": "WS:ALPHA"
+    },
+    "source": {
+      "commit": "4defdb43a2fb45f46e397c70f2bb9f11f7f7801e",
+      "repository": "mastermindx-market-intelligence/macro",
+      "workstream_sha256": "7cb046ddfa023e6a647a8bd1927921c19569189dd936f78554429f3643a12d25"
+    }
+  },
+  "second_source": {
+    "availability": "AVAILABLE",
+    "code_context": {
+      "executable_macro_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "reader_source_commit": "7460a9939c716a50cae991fbaa5a45fae86e0393",
+      "schema": "mastermind.project_knowledge_code_context.v1",
+      "work_ref": "WS:ALPHA"
+    },
+    "data_observation": {
+      "authority": "OBSERVATION_ONLY",
+      "canonical_commit_at": "2026-11-04T10:02:54-07:00",
+      "canonical_data_commit": "4defdb43a2fb45f46e397c70f2bb9f11f7f7801e",
+      "canonical_observed_at_ms": 1793811780196,
+      "code_config_relation": "IDENTICAL_READER_CLOSURE",
+      "default_ref": "main",
+      "executable_macro_commit": "2e99f70510fa9149a1f852e648e85c9844dba31e",
+      "publication_recorded_at_ms": 1793811775000,
+      "publication_time": null,
+      "reader_closure_sha256": "81bb6e9df781c267ad2da39b788a6c04d44c2a3992b0995ae8116deba8552047",
+      "repository": "mastermindx-market-intelligence/macro",
+      "schema": "mastermind.canonical_project_data_observation.v1",
+      "source_operation": {
+        "event_id": 8,
+        "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda",
+        "receipt_sha256": "15930e7aeb06e8920256a2649c8133c7b56a478088967a5a437c356622df5736",
+        "recipe_fingerprint_sha256": "02d1475cddbe1ffaba88fd63d639b2231abc626c30dbf86429a2a9826c9aaaab",
+        "recorded_at_ms": 1793811775000,
+        "request_sha256": "cf58a2c392f481a9ae86fef2fa57b7d676934c6a23c8af87aefff85874a60052",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "work_ref": "WS:ALPHA"
+        },
+        "sources": [
+          {
+            "commit": "4defdb43a2fb45f46e397c70f2bb9f11f7f7801e",
+            "content_sha256": "9553567ab45afd18e38b4e7b000e79719bd2e4509bfb8e730bdb2ebb5b7044b3",
+            "path": "agentos/project-files/WS-ALPHA/cbd0bbb283f83e7ef75f71e2832fdecca830ed79663b4c7124e7905734f24907.md",
+            "repository": "macro"
+          },
+          {
+            "commit": "4defdb43a2fb45f46e397c70f2bb9f11f7f7801e",
+            "content_sha256": "7cb046ddfa023e6a647a8bd1927921c19569189dd936f78554429f3643a12d25",
+            "path": "agentos/workstreams/WS-ALPHA.md",
+            "repository": "macro"
+          }
+        ]
+      }
+    },
+    "document": {
+      "content_sha256": "9553567ab45afd18e38b4e7b000e79719bd2e4509bfb8e730bdb2ebb5b7044b3",
+      "content_utf8": "Second genuine edit from DATA N. 中文",
+      "media_type": "text/markdown",
+      "title": "Second.md"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_source.v1",
+    "selection": {
+      "source_ref": "project-file.v1.7a75c1c220e6edb3ee50b2741d32c199d2aa62759a54d1c32cda093347b7e4c6",
+      "work_ref": "WS:ALPHA"
+    },
+    "source": {
+      "commit": "4defdb43a2fb45f46e397c70f2bb9f11f7f7801e",
+      "committed_at": "2026-11-04T17:02:53Z",
+      "content_sha256": "9553567ab45afd18e38b4e7b000e79719bd2e4509bfb8e730bdb2ebb5b7044b3",
+      "path": "agentos/project-files/WS-ALPHA/cbd0bbb283f83e7ef75f71e2832fdecca830ed79663b4c7124e7905734f24907.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "bb3015de14cedc00a295f4ecd4d58c29626e9058"
+    }
+  },
+  "stale_status": 503
+}

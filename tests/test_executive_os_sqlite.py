@@ -111,6 +111,7 @@ def test_sqlite_defaults_pragmas_migration_and_five_durable_objects(tmp_path):
         (4, "executive_phase1fc_orchestration_contract"),
         (5, "executive_finite_drive_arm_contract"),
         (6, "executive_nested_coordinator_contract"),
+        (7, "executive_physical_resource_contract"),
     ]
     assert all(len(row[2]) == 64 for row in migrations)
 
@@ -810,7 +811,7 @@ def test_v4_runtime_normal_open_refuses_existing_v2_without_v3_artifacts(
     assert "execution_mode" not in columns
 
 
-def test_v6_fresh_schema_preserves_v5_finite_arm_and_pins_new_fingerprint(tmp_path):
+def test_v7_fresh_schema_preserves_hierarchy_finite_arm_and_pins_current_ddl(tmp_path):
     runtime = _runtime(tmp_path)
     with runtime.store.read() as connection:
         vector = connection.execute(
@@ -835,7 +836,7 @@ def test_v6_fresh_schema_preserves_v5_finite_arm_and_pins_new_fingerprint(tmp_pa
             "ON events(job_id) WHERE event_type='COO_FINITE_DRIVE_ARMED'"
         )
     )
-    assert fresh_digest == executive_runtime._NORMALIZED_V6_SCHEMA_DIGEST
+    assert fresh_digest == executive_runtime._NORMALIZED_V7_SCHEMA_DIGEST
     # The historical v4 fingerprint stays frozen for prior-version verification.
     assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == (
         "56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4"
@@ -1948,11 +1949,9 @@ def test_c2_r1a_second_root_refuses_existing_generation_one_carrier_before_c1(
     ).carrier_job_id == (first.carrier_job_id)
     assert second_runtime.current_capacity_commitment(second_root.job_id) is None
 
-# M2 is deliberately absent from the production migration vector. Production
-# schema v6 includes bounded coordinator hierarchy; this synthetic fixture defers
-# the inactive candidate to the next synthetic version 7 and changes the three
-# coupled expectations, with real verifiers.
-_M2_V6_VECTOR = executive_runtime._MIGRATIONS
+# The reviewed physical DDL is now production migration 7. These fixtures use
+# the real schema and verifiers; only admission observations remain synthetic.
+_M2_V6_VECTOR = executive_runtime._MIGRATIONS[:6]
 _M2_V6_DIGEST = getattr(executive_runtime, '_NORMALIZED_V6_SCHEMA_DIGEST', None)
 _M2_V7_CANDIDATE_DIGEST = '7692d62bd4126dd6fcaec2873ee9506a1faac96b3246684366e1dfa6e34c6a87'
 _M2_CANDIDATE_CHECKSUM = '9bee01a6ee1f129a9c6b6fb24f52012d2cb790c39057722c5a6867163055b3d8'
@@ -1969,10 +1968,7 @@ def m2_store(tmp_path, monkeypatch):
     import copy
     candidate = executive_runtime._PHYSICAL_RESOURCE_SCHEMA_CANDIDATE
     assert executive_runtime._migration_checksum(candidate) == _M2_CANDIDATE_CHECKSUM
-    monkeypatch.setattr(executive_runtime, '_MIGRATIONS', _M2_V6_VECTOR + (
-        (7, 'synthetic_m2_physical_resources', candidate),))
-    monkeypatch.setattr(executive_runtime, 'SCHEMA_VERSION', 7)
-    monkeypatch.setattr(executive_runtime, '_NORMALIZED_V6_SCHEMA_DIGEST', _M2_V7_CANDIDATE_DIGEST)
+    assert executive_runtime._MIGRATIONS[6] == (7, "executive_physical_resource_contract", candidate)
     contexts = {}
     def admission(self, request, caller_context, *, connection=None, stage='entry'):
         context = contexts[str(self.store.path)]
@@ -2017,17 +2013,19 @@ def _m2_reserve(runtime, request):
     return runtime.broker.reserve_physical(request, caller_context=None)
 
 
-def test_m2_default_runtime_keeps_exact_v6_vector_and_has_no_candidate_tables(tmp_path):
+def test_m2_default_runtime_has_exact_v7_with_empty_physical_tables(tmp_path):
     runtime = Runtime.at(tmp_path)
-    assert executive_runtime.SCHEMA_VERSION == 6
-    assert executive_runtime._MIGRATIONS == _M2_V6_VECTOR
+    assert executive_runtime.SCHEMA_VERSION == 7
+    assert executive_runtime._MIGRATIONS[:6] == _M2_V6_VECTOR
     assert executive_runtime._NORMALIZED_V6_SCHEMA_DIGEST == _M2_V6_DIGEST
     assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == (
         '56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4'
     )
     with runtime.store.read() as connection:
-        assert connection.execute("SELECT name FROM sqlite_master WHERE name LIKE 'physical_resource_%'").fetchall() == []
-        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 6
+        for table in ('physical_resource_commitments', 'physical_resource_demands'):
+            assert connection.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0] == 0
+        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 7
+        assert executive_runtime._normalized_schema_digest(connection) == _M2_V7_CANDIDATE_DIGEST
 
 
 def test_m2_default_resource_entry_refuses_before_database_open(tmp_path):
@@ -3728,19 +3726,11 @@ def _c2_physical_package(runtime, source_root, source_revision):
 
 
 def _c2_enable_physical_candidate_schema(monkeypatch):
+    # Compatibility helper for the existing admission fixtures: no schema patch.
     candidate = executive_runtime._PHYSICAL_RESOURCE_SCHEMA_CANDIDATE
     assert executive_runtime._migration_checksum(candidate) == _M2_CANDIDATE_CHECKSUM
-    monkeypatch.setattr(
-        executive_runtime,
-        "_MIGRATIONS",
-        _M2_V6_VECTOR + ((7, "synthetic_m2_physical_resources", candidate),),
-    )
-    monkeypatch.setattr(executive_runtime, "SCHEMA_VERSION", 7)
-    monkeypatch.setattr(
-        executive_runtime,
-        "_NORMALIZED_V6_SCHEMA_DIGEST",
-        _M2_V7_CANDIDATE_DIGEST,
-    )
+    assert executive_runtime._MIGRATIONS[6] == (7, "executive_physical_resource_contract", candidate)
+    assert executive_runtime._NORMALIZED_V7_SCHEMA_DIGEST == _M2_V7_CANDIDATE_DIGEST
 
 
 def _physical_rows(runtime):
