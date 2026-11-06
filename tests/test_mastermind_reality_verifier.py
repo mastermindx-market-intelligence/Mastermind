@@ -802,3 +802,68 @@ def test_healed_not_exercised_control_remains_honest_partial_data(tmp_path):
     r['negative_controls']['wrong_target'].update(status='NOT_EXERCISED',evidence_refs=[])
     result=verify_record(root,r)
     assert result['verdict']=='VALID' and result['errors']==[]
+
+
+@pytest.mark.parametrize('invalid', [
+    '2026-02-30T12:00:00Z',
+    '2026-09-08T12:61:00Z',
+    '2026-09-08T12:00:00Z\n',
+])
+def test_healed_consumption_timestamps_require_real_utc_calendar(tmp_path, invalid):
+    r,root,_=fixture(tmp_path)
+    r['capture']['screenshots'][0]['consumption'].update(consumed_at=invalid,limitation=None)
+    result=verify_record(root,r)
+    assert 'TIMESTAMP_INVALID' in codes(result)
+    assert_closed_invalid(result)
+
+
+@pytest.mark.parametrize('valid', [
+    '2026-09-08T12:00:00Z', '2026-09-08T12:00:00.123456789Z',
+])
+def test_healed_valid_provider_consumption_time_remains_valid(tmp_path, valid):
+    r,root,_=fixture(tmp_path)
+    r['capture']['screenshots'][0]['consumption'].update(consumed_at=valid,limitation=None)
+    result=verify_record(root,r)
+    assert result['verdict']=='VALID' and result['errors']==[]
+
+
+@pytest.mark.parametrize('site,code', [
+    ('recorded_at','TIMESTAMP_INVALID'),
+    ('negative_control','NEGATIVE_CONTROL_INVALID'),
+    ('cleanup','CLEANUP_CLAIM_INVALID'),
+])
+@pytest.mark.parametrize('variant',['trailing_newline','non_ascii'])
+def test_healed_utc_spelling_is_strict_for_record_and_witness(tmp_path,site,code,variant):
+    r,root,_=fixture(tmp_path)
+    instant='2026-09-08T11:59:05Z'
+    malformed=instant+'\n' if variant=='trailing_newline' else instant.replace('2026','\uff12\uff10\uff12\uff16')
+    if site=='recorded_at':
+        r['recorded_at']=malformed
+    elif site=='negative_control':
+        ref='private-evidence/effect.json';payload=json.loads((root/ref).read_text())
+        payload['negative_controls']['wrong_target']['observed_at']=malformed
+        replace_payload(root,r,ref,payload)
+    else:
+        payload=positive_cleanup(root,r)
+        payload['post_removal']['observed_at']=malformed.replace('11:59:05','11:59:11')
+        replace_payload(root,r,'private-evidence/cleanup.json',payload)
+    result=verify_record(root,r)
+    assert code in codes(result)
+    assert_closed_invalid(result)
+
+
+def test_healed_renaming_old_effect_bytes_cannot_support_a_state_change(tmp_path):
+    r,root=correction_record(tmp_path)
+    rewrite_predecessor(root,r,lambda value:value['effect'].update(state='EFFECT_UNKNOWN'))
+    old_ref='private-evidence/effect.json';new_ref='private-evidence/renamed-effect.json'
+    original_bytes=(root/old_ref).read_bytes()
+    (root/new_ref).write_bytes(original_bytes)
+    r['effect']['evidence'][0]['artifact_ref']=new_ref
+    for control_value in r['negative_controls'].values():
+        control_value['evidence_refs']=[new_ref if ref==old_ref else ref for ref in control_value['evidence_refs']]
+    r['revision']['changed_input_refs'].append(new_ref)
+    result=verify_record(root,r)
+    assert 'CORRECTION_INVALID' in codes(result)
+    assert 'EFFECT_INVALID' not in codes(result)
+    assert 'ARTIFACT_DIGEST_MISMATCH' not in codes(result)
+    assert sha((root/new_ref).read_bytes())==sha(original_bytes)

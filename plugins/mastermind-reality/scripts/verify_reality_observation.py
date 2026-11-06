@@ -125,7 +125,7 @@ SAFE_REF_PATTERN = (
 )
 
 _UTC_RE = re.compile(
-    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?Z$"
+    r"^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?Z$"
 )
 
 # Secret shapes are matched without embedding any literal credential prefix.
@@ -207,7 +207,7 @@ def _utc_epoch_ns(text):
     """
     if not isinstance(text, str):
         return None
-    match = _UTC_RE.match(text)
+    match = _UTC_RE.fullmatch(text)
     if match is None:
         return None
     year, month, day, hour, minute, second = (int(g) for g in match.groups()[:6])
@@ -806,6 +806,11 @@ def _check_timestamps(record, add):
         ("capture.started_at", (record.get("capture") or {}).get("started_at")),
         ("capture.completed_at", (record.get("capture") or {}).get("completed_at")),
     )
+    checks += tuple(
+        ("capture.screenshots[%d].consumption.consumed_at" % index,
+         screenshot["consumption"].get("consumed_at"))
+        for index, screenshot in enumerate(record["capture"]["screenshots"])
+    )
     relationship = record.get("source_relationship") or {}
     checks = checks + (
         ("source_relationship.observed_at", relationship.get("observed_at")),
@@ -1370,6 +1375,7 @@ def _check_revision(record, declared_refs, reader, resolved, validator, add):
             reference in changed_refs
             and digest is not None
             and digest != before_effect.get(reference)
+            and digest not in before_effect.values()
             and resolved.get(reference, {}).get("sha256") == digest
             and _effect_payload_matches(_payload(resolved.get(reference)), current_effect)
             for reference, digest in after_effect.items()
