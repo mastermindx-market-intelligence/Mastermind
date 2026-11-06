@@ -34,7 +34,9 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
         # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": "625374a65b885101ad90fb490fdcfc5cfd8e1a51cbdf59c596d4b4a7b14c684d",
+        # C1 combines accepted model READ with protected selected-child dispatch.
+        # Ingress/listener ASTs and original HTTP/mode operands remain exact.
+        "source_sha256": "d018a46a28cee713a032b1090495c4e7fed003fc33925492c14be00f6b98e8cd",
         "ast_sha256": "170f64c7d11e88cb87736aa688b9e0a376ddd0e44ca6e739ff3beb4aff30f709",
         "sites": (
             (("body", 3, "body", 58, "body", 3, "orelse", 0, "body", 2,
@@ -61,3 +63,5 @@ REVIEWED_ANCHORS = {
 # Fabric response branch are unchanged; only the enclosing ingress composition
 # and mapped sites change. These fixed pins are a new source-drift qualification,
 # not inherited native SEND approval or installation/release authority.
+
+# Parent C17 dispatch composition retains the protected821 ingress AST and exact operands.

@@ -61,6 +61,7 @@ class RuntimeProfile:
     source_path: Path
     service_name: str
     native_provider_id: str | None = None
+    gateway_backend: str = "standalone"
 
     @property
     def hermes_allowlist(self) -> frozenset[str]:
@@ -135,6 +136,8 @@ def dump_profile(profile: RuntimeProfile) -> str:
         f"  host: {profile.gateway_host}",
         f"  port: {profile.gateway_port}",
         f"  backend_port: {profile.backend_port}",
+        *([f"  backend: {profile.gateway_backend}"]
+          if profile.gateway_backend != "standalone" else []),
         "  auth: required",
         "service:",
         f"  restart: {profile.restart}",
@@ -245,7 +248,8 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
     host = ""
     gateway_port = 0
     backend_port = 0
-    if not isinstance(gateway, dict) or set(gateway) - {"host", "port", "backend_port", "auth"}:
+    backend = "standalone"
+    if not isinstance(gateway, dict) or set(gateway) - {"host", "port", "backend_port", "auth", "backend"}:
         issues.add("GATEWAY_INVALID")
     else:
         host = gateway.get("host")
@@ -256,6 +260,16 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
             issues.add("AUTH_REQUIRED")
         gateway_port = _port(gateway.get("port"), issues, allow_zero=True)
         backend_port = _port(gateway.get("backend_port"), issues, allow_zero=True)
+        backend = gateway.get("backend", "standalone")
+        if backend not in ("standalone", "native-session-authority"):
+            issues.add("GATEWAY_BACKEND_UNQUALIFIED")
+        if backend == "native-session-authority":
+            if host != ROLE_PROXY_HOST.get(role):
+                issues.add("NATIVE_GATEWAY_ROLE_ADDRESS_REQUIRED")
+            if not gateway_port or not backend_port or gateway_port == backend_port:
+                issues.add("NATIVE_GATEWAY_FIXED_PORTS_REQUIRED")
+            if native_id is None:
+                issues.add("NATIVE_GATEWAY_MODEL_SELECTION_REQUIRED")
 
     service = config.get("service")
     restart = "on-failure"
@@ -323,6 +337,7 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
         source_path=source_path,
         service_name=f"hermes-runtime-{role}",
         native_provider_id=native_id,
+        gateway_backend=backend,
     )
 
 

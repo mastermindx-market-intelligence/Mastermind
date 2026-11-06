@@ -46,6 +46,11 @@ import { validActivitySelection } from "./planning/retained-activity";
 import { planningArguments, type PlanningOperation } from "./planning/project-planning-transport";
 import { projectExecutionArguments, projectExecutionResult, type ProjectExecutionOperation } from "./planning/project-execution-transport";
 import { attendedSelection } from "./fabric/attended-status";
+import {
+  normalizeExecutiveSessionSelection,
+  sessionSelectionWire,
+  type ExecutiveSessionTransport,
+} from "./orchestration/executive-session-command-port";
 import type { ProjectConversationHistoryTransport } from "./conversations/project-conversation-history-owner";
 import { projectHistorySelection } from "./conversations/project-history-selection";
 import type { AuthState, RawClient } from "./host";
@@ -1255,11 +1260,11 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           : Promise.reject(new Error("SESSION_HISTORY_SELECTION_INVALID"));
       },
       context: (selection, signal) => {
-        const normalized = normalizeSelection(selection);
+        const normalized = normalizeExecutiveSessionSelection(selection);
         if (!normalized) return Promise.reject(new Error("SELECTION_INVALID"));
         return executivePost(
           "session/context",
-          { selection: { work_ref: normalized.workRef, root_job_id: normalized.rootJobId } },
+          { selection: sessionSelectionWire(normalized) },
           signal,
         );
       },

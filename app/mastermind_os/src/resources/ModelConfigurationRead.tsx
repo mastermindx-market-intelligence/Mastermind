@@ -51,7 +51,13 @@ export function ModelConfigurationRead({ host, locale = "en" }: {
     setValue({ ...owned, read: { state: "PENDING" } });
     try {
       const read = await reader.call(host, { signal: controller.signal });
-      if (stillOwned()) { setValue({ ...owned, read }); setLimit(20); }
+      if (stillOwned()) {
+        setValue({ ...owned, read });
+        if (read.state === "AVAILABLE") {
+          setProvider(selected => Object.hasOwn(read.configuration.providers, selected) ? selected : "");
+        }
+        setLimit(20);
+      }
     } catch {
       if (stillOwned()) setValue({ ...owned, read: { state: "UNAVAILABLE", reason: "SOURCE_UNAVAILABLE" } });
     }

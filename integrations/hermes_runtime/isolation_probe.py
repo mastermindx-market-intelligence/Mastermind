@@ -55,7 +55,6 @@ import grp
 import hashlib
 import json
 import math
-import marshal
 import os
 from pathlib import Path
 import pwd
@@ -63,6 +62,7 @@ import select
 import signal
 import socket
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -70,6 +70,7 @@ import uuid
 import re
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
+from types import CodeType
 
 from .constants import CONFIG_EXIT, IO_EXIT, POLICY_EXIT
 from .egress import ROLE_PROXY_HOST, ROLE_PROXY_PORT
@@ -405,24 +406,32 @@ def _listener_current(listener: dict[str, Any], host: str, port: int) -> dict[st
     identity = _process_identity(pid)
     if identity != {'pid': pid, 'ppid': os.getpid(), 'start_ticks': start}:
         return {**no, 'reason': 'owned child missing or changed'}
-    try:
-        fds = list(Path(f'/proc/{pid}/fd').iterdir())
-        if len(fds) > 1024 or not any(os.readlink(fd) == f'socket:[{inode}]' for fd in fds):
-            return {**no, 'reason': 'owned socket FD missing'}
-    except OSError:
-        return {**no, 'reason': 'owned socket FD unavailable'}
+    channel = listener.get('_witness_channel')
+    socket_fd = listener.get('socket_fd')
+    if (type(socket_fd) is not int or socket_fd < 0 or type(channel) is not _ListenerChannel
+            or channel.parent_pid != os.getpid() or channel.child_pid != pid):
+        return {**no, 'reason': 'owned socket witness channel unavailable'}
+    # A parent restricted after fork cannot ptrace the older child's FD table.
+    # Ask that same finite child for fresh facts over its exclusive pipe writer;
+    # never retain a TCP socket in the parent or reuse startup FD facts as proof.
+    witnessed = channel.observe()
+    expected = {'pid': pid, 'start_ticks': start, 'socket_fd': socket_fd,
+                'socket_inode': inode, 'host': host, 'port': port, 'accepting': True}
+    if witnessed != expected:
+        return {**no, 'reason': 'owned socket current witness unavailable'}
     matches = [row for row in _kernel_listeners(port)
                if row == {'host': host, 'port': port, 'inode': inode}]
     if len(matches) != 1 or _process_identity(pid) != identity:
         return {**no, 'reason': 'exact current kernel listener missing'}
     return {**no, 'sufficient': True, 'pid': pid, 'start_ticks': start,
-            'socket_inode': inode, 'host': host, 'port': port}
+            'socket_fd': socket_fd, 'socket_inode': inode, 'host': host, 'port': port}
 
 
 def _same_listener(before, after) -> bool:
-    fields = ('pid', 'start_ticks', 'socket_inode', 'host', 'port')
+    fields = ('pid', 'start_ticks', 'socket_fd', 'socket_inode', 'host', 'port')
     return (before.get('sufficient') is True and after.get('sufficient') is True
             and all(type(before.get(k)) is int and before[k] > 0 for k in ('pid', 'start_ticks', 'socket_inode', 'port'))
+            and type(before.get('socket_fd')) is int and before['socket_fd'] >= 0
             and isinstance(before.get('host'), str) and before['host'].startswith('127.')
             and all(before.get(k) == after.get(k) for k in fields))
 
@@ -469,69 +478,216 @@ def _connect(host: str, port: int, timeout: float) -> tuple[int | None, str]:
 
 
 
-def _spawn_listener(bind_host: str, bind_port: int) -> tuple[int, dict[str, Any]]:
-    """An owned finite child; only the denied-port fixture precedes Landlock."""
-    read_fd, write_fd = os.pipe()
-    parent_pid = os.getpid()
-    sys.stdout.flush()
-    sys.stderr.flush()
-    pid = os.fork()
-    if pid == 0:  # pragma: no cover - exercised only by bounded Linux fixture tests
-        os.close(read_fd)
+def _read_pipe_frame(fd: int, *, timeout: float) -> dict[str, Any]:
+    """One bounded newline frame; an old/extra/partial frame is never a reply."""
+    deadline = time.monotonic() + timeout
+    raw = bytearray()
+    while len(raw) <= 2048:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([fd], [], [], remaining)[0]:
+            raise ValueError('owned witness timed out')
+        part = os.read(fd, 2049 - len(raw))
+        if not part:
+            raise ValueError('owned witness closed')
+        raw.extend(part)
+        if b'\n' in raw:
+            if len(raw) > 2048 or not raw.endswith(b'\n') or raw.count(b'\n') != 1:
+                raise ValueError('owned witness framing differs')
+            value = json.loads(raw[:-1].decode('ascii'), object_pairs_hook=_json_unique)
+            if type(value) is not dict:
+                raise ValueError('owned witness is not an object')
+            return value
+    raise ValueError('owned witness exceeds bound')
+
+
+def _write_pipe_frame(fd: int, value: dict[str, Any]) -> None:
+    raw = json.dumps(value, separators=(',', ':'), allow_nan=False).encode('ascii') + b'\n'
+    if len(raw) > 2048 or os.write(fd, raw) != len(raw):
+        raise ValueError('owned witness write incomplete')
+
+
+@dataclass
+class _ListenerChannel:
+    """Private descriptors of one already-owned finite fixture, not a server."""
+    request_fd: int
+    response_fd: int
+    parent_pid: int
+    child_pid: int
+    request_identity: tuple[int, int]
+    response_identity: tuple[int, int]
+    _close_complete: bool = field(default=True, init=False, repr=False)
+
+    def _current(self, fd, identity):
+        try:
+            info = os.fstat(fd)
+            return stat.S_ISFIFO(info.st_mode) and (info.st_dev, info.st_ino) == identity
+        except OSError:
+            return False
+
+    def observe(self):
+        if (self.parent_pid != os.getpid()
+                or not self._current(self.request_fd, self.request_identity)
+                or not self._current(self.response_fd, self.response_identity)):
+            return None
+        nonce = uuid.uuid4().hex
+        try:
+            raw = nonce.encode('ascii') + b'\n'
+            if os.write(self.request_fd, raw) != len(raw):
+                raise ValueError('owned witness request incomplete')
+            reply = _read_pipe_frame(self.response_fd, timeout=LISTENER_TIMEOUT)
+            fields = {'nonce', 'pid', 'start_ticks', 'socket_fd', 'socket_inode', 'host', 'port', 'accepting'}
+            if (set(reply) != fields or reply['nonce'] != nonce
+                    or any(type(reply[k]) is not int for k in ('pid', 'start_ticks', 'socket_fd', 'socket_inode', 'port'))
+                    or type(reply['host']) is not str or reply['accepting'] is not True):
+                raise ValueError('owned witness response differs')
+            return {k: v for k, v in reply.items() if k != 'nonce'}
+        except (OSError, ValueError, UnicodeError):
+            self.close()
+            return None
+
+    def close(self):
+        complete = self._close_complete
+        for name, identity in (('request_fd', self.request_identity), ('response_fd', self.response_identity)):
+            fd = getattr(self, name)
+            if fd < 0:
+                continue
+            if self._current(fd, identity):
+                try:
+                    os.close(fd)
+                except OSError:
+                    complete = False
+            else:
+                # Never close a descriptor that has been replaced by another owner.
+                complete = False
+            setattr(self, name, -1)
+        # A later idempotent close cannot erase an earlier custody/close
+        # failure merely because the original descriptor fields are cleared.
+        self._close_complete = complete
+        return self._close_complete
+
+
+def _listener_socket_facts(sock):
+    fd = sock.fileno()
+    identity = _process_identity(os.getpid())
+    info = os.fstat(fd)
+    host, port = sock.getsockname()
+    if (identity is None or not stat.S_ISSOCK(info.st_mode)
+            or sock.family != socket.AF_INET or sock.type != socket.SOCK_STREAM
+            or sock.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) != 1):
+        raise ValueError('owned listening socket unavailable')
+    return {'pid': os.getpid(), 'start_ticks': identity['start_ticks'],
+            'socket_fd': fd, 'socket_inode': info.st_ino,
+            'host': host, 'port': port, 'accepting': True}
+
+
+def _listener_child(bind_host, bind_port, request_fd, response_fd, parent_pid):
+    """Answer only fresh witness nonces; accept only synthetic loopback traffic."""
+    sock = None
+    try:
+        # Later fixture children must not keep earlier children's control ends.
+        # No caller-chosen descriptor or target is accepted by this finite child.
+        inherited = os.listdir('/proc/self/fd')
+        if len(inherited) > 1024:
+            raise ValueError('owned fixture inherited descriptor bound exceeded')
+        for value in inherited:
+            fd = int(value)
+            if fd > 2 and fd not in {request_fd, response_fd}:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        os.set_blocking(request_fd, False)
+        os.set_blocking(response_fd, False)
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         signal.signal(signal.SIGALRM, signal.SIG_DFL)
         signal.alarm(int(LISTENER_LIFETIME) + 1)
         receipt = {'bind_host': bind_host, 'bind_port': bind_port, 'pid': os.getpid()}
-        sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.bind((bind_host, bind_port))  # no reuse: collision is unavailable
             sock.listen(16)
-            sock.settimeout(0.25)
-            identity = _process_identity(os.getpid()) or {}
-            receipt.update(bound=True, listen_port=sock.getsockname()[1],
-                           socket_inode=os.fstat(sock.fileno()).st_ino,
-                           start_ticks=identity.get('start_ticks'))
+            sock.setblocking(False)
+            facts = _listener_socket_facts(sock)
+            receipt.update(bound=True, listen_port=facts['port'], socket_fd=facts['socket_fd'],
+                           socket_inode=facts['socket_inode'], start_ticks=facts['start_ticks'])
         except OSError as exc:
             receipt.update(bound=False, errno=exc.errno or errno.EIO,
                            errno_name=_errno_name(exc.errno or errno.EIO))
-        try:
-            os.write(write_fd, json.dumps(receipt).encode('ascii') + b'\n')
-        except OSError:
-            pass
-        os.close(write_fd)
+        _write_pipe_frame(response_fd, receipt)
         deadline = time.monotonic() + LISTENER_LIFETIME
-        while receipt.get('bound') and sock is not None and time.monotonic() < deadline and os.getppid() == parent_pid:
-            try:
-                connection, _ = sock.accept()
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            try:
-                connection.settimeout(0.25)
-                connection.sendall(b'HERMES-ISO-SYNTHETIC\n')
-            except OSError:
-                pass
-            finally:
-                connection.close()
-        if sock is not None:
-            sock.close()
-        os._exit(0)
-    os.close(write_fd)
-    receipt = {'bind_host': bind_host, 'bind_port': bind_port, 'pid': pid, 'bound': False}
-    try:
-        ready, _, _ = select.select([read_fd], [], [], LISTENER_TIMEOUT)
-        if ready:
-            raw = os.read(read_fd, 8193)
-            decoded = json.loads(raw.decode('ascii')) if len(raw) <= 8192 else {}
-            if (type(decoded) is dict and decoded.get('pid') == pid
-                    and decoded.get('bind_host') == bind_host and decoded.get('bind_port') == bind_port):
-                receipt.update(decoded)
+        while (receipt.get('bound') and sock is not None and time.monotonic() < deadline
+                and os.getppid() == parent_pid):
+            ready = select.select([request_fd, sock], [], [], min(0.25, max(0, deadline-time.monotonic())))[0]
+            if request_fd in ready:
+                request = os.read(request_fd, 34)
+                if not re.fullmatch(rb'[0-9a-f]{32}\n', request):
+                    break  # EOF, malformed, extra or partial requests stop the fixture.
+                _write_pipe_frame(response_fd,
+                    {'nonce': request[:-1].decode('ascii'), **_listener_socket_facts(sock)})
+            if sock in ready:
+                try:
+                    connection, _ = sock.accept()
+                except BlockingIOError:
+                    continue
+                try:
+                    connection.settimeout(0.25)
+                    connection.sendall(b'HERMES-ISO-SYNTHETIC\n')
+                except OSError:
+                    pass
+                finally:
+                    connection.close()
     except (OSError, ValueError, UnicodeError):
         pass
     finally:
+        if sock is not None:
+            sock.close()
+        for fd in (request_fd, response_fd):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        os._exit(0)
+
+
+def _spawn_listener(bind_host: str, bind_port: int) -> tuple[int, dict[str, Any]]:
+    """The same finite fixture with exclusive request/reply pipes and no shared TCP FD."""
+    read_fd, write_fd = os.pipe()
+    try:
+        request_fd, send_fd = os.pipe()
+    except OSError:
         os.close(read_fd)
+        os.close(write_fd)
+        raise
+    parent_pid = os.getpid()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        pid = os.fork()
+    except OSError:
+        for fd in (read_fd, write_fd, request_fd, send_fd):
+            os.close(fd)
+        raise
+    if pid == 0:  # pragma: no cover - bounded Linux fixture tests exercise the child
+        os.close(read_fd)
+        os.close(send_fd)
+        _listener_child(bind_host, bind_port, request_fd, write_fd, parent_pid)
+    os.close(write_fd)
+    os.close(request_fd)
+    req, res = os.fstat(send_fd), os.fstat(read_fd)
+    channel = _ListenerChannel(send_fd, read_fd, parent_pid, pid,
+                               (req.st_dev, req.st_ino), (res.st_dev, res.st_ino))
+    receipt = {'bind_host': bind_host, 'bind_port': bind_port, 'pid': pid, 'bound': False,
+               '_witness_channel': channel}
+    try:
+        os.set_blocking(send_fd, False)
+        os.set_blocking(read_fd, False)
+        decoded = _read_pipe_frame(read_fd, timeout=LISTENER_TIMEOUT)
+        if (decoded.get('pid') != pid or decoded.get('bind_host') != bind_host
+                or decoded.get('bind_port') != bind_port or '_witness_channel' in decoded):
+            raise ValueError('owned fixture startup differs')
+        receipt.update(decoded)
+    except (OSError, ValueError, UnicodeError):
+        channel.close()
     return pid, receipt
 
 
@@ -541,6 +697,9 @@ def _terminate_children(children: list[dict[str, Any]]) -> bool:
     pending = {}
     complete = True
     for child in children:
+        channel = child.get('_witness_channel')
+        if type(channel) is _ListenerChannel:
+            complete = channel.close() and complete
         pid = child.get('pid')
         if type(pid) is not int or pid <= 0:
             complete = False
@@ -806,6 +965,78 @@ def _load_peer_report(path: Path | None, peer_role: str, *, qualification_id=Non
         return None, 'peer report unavailable or malformed'
 
 
+def _loaded_code_fingerprint(code: CodeType) -> str:
+    """Stable loaded-code structure, excluding marshal reference-count flags.
+
+    This preserves exposed bytecode and all constructor metadata. It does not
+    attest globals/defaults/closure values or mutable interpreter quickening.
+    Source and interpreter custody remain separate existing qualifications.
+    """
+    fields = ('co_argcount', 'co_posonlyargcount', 'co_kwonlyargcount', 'co_nlocals',
+              'co_stacksize', 'co_flags', 'co_code', 'co_consts', 'co_names', 'co_varnames',
+              'co_freevars', 'co_cellvars', 'co_filename', 'co_name', 'co_qualname',
+              'co_firstlineno', 'co_linetable', 'co_exceptiontable')
+    remaining, nodes, active = 1024 * 1024, 100_000, set()
+    def refuse():
+        raise RuntimeRefusal('PROBE_LOADED_CODE_UNAVAILABLE')
+    def canonical(value):
+        return json.dumps(value, ensure_ascii=True, separators=(',', ':'), allow_nan=False).encode('ascii')
+    def encode(value, depth=0):
+        nonlocal remaining, nodes
+        nodes -= 1
+        if nodes < 0 or depth > 64:
+            refuse()
+        kind = type(value)
+        if value is None:
+            result = ['none']
+        elif value is Ellipsis:
+            result = ['ellipsis']
+        elif kind is bool:
+            result = ['bool', value]
+        elif kind is int:
+            if value.bit_length() > remaining * 4:
+                refuse()
+            result = ['int', format(value, 'x')]
+        elif kind is float:
+            result = ['float', struct.pack('>d', value).hex()]
+        elif kind is complex:
+            result = ['complex', struct.pack('>dd', value.real, value.imag).hex()]
+        elif kind in {str, bytes}:
+            if len(value) > remaining:
+                refuse()
+            result = ['str', value] if kind is str else ['bytes', value.hex()]
+        elif kind in {CodeType, tuple, frozenset}:
+            if id(value) in active:
+                refuse()
+            active.add(id(value))
+            remaining -= 16
+            if remaining < 0:
+                refuse()
+            try:
+                if kind is CodeType:
+                    result = ['code', [[name, encode(getattr(value, name), depth+1)] for name in fields]]
+                else:
+                    items = [encode(item, depth+1) for item in value]
+                    result = ['tuple', items] if kind is tuple else ['frozenset', sorted(items, key=canonical)]
+            except AttributeError:
+                refuse()
+            finally:
+                active.remove(id(value))
+            return result
+        else:
+            refuse()
+        remaining -= len(canonical(result))
+        if remaining < 0:
+            refuse()
+        return result
+    if type(code) is not CodeType:
+        refuse()
+    encoded = canonical(['mastermind.loaded_code/cpython-v1', encode(code)])
+    if len(encoded) > 1024 * 1024:
+        refuse()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _capture_provenance(profile_path: Path, qualification_id: str) -> dict[str, Any]:
     # These are non-secret Linux identity and imported source/profile bytes.
     def small_text(path, limit):
@@ -828,8 +1059,10 @@ def _capture_provenance(profile_path: Path, qualification_id: str) -> dict[str, 
         sources[name] = hashlib.sha256(raw).hexdigest()
     for function in (assert_root_service_cgroup, assert_role_network_profile,
                      assert_role_credential_isolation, enforce_role_tcp_ports, load_profile, _run_probe):
-        sources[function.__module__ + '.' + function.__name__ + ':loaded_code'] = hashlib.sha256(
-            marshal.dumps(function.__code__)).hexdigest()
+        loaded = function.__code__
+        sources[function.__module__ + '.' + function.__name__ + ':loaded_code'] = _loaded_code_fingerprint(loaded)
+        if function.__code__ is not loaded:
+            raise RuntimeRefusal('PROBE_LOADED_CODE_CHANGED')
     resolved = profile_path.resolve(strict=True)
     profile_bytes, facts = _read_regular(resolved, 65536)
     if profile_path.resolve(strict=True) != resolved:
@@ -1640,7 +1873,8 @@ def _build_report(profile: RuntimeProfile, role: str, peer_role: str,
             "secrets_parent": _path_facts(profile.secrets_file.parent),
             "secrets_file": _path_facts(profile.secrets_file),
         },
-        "listeners": listeners,
+        "listeners": {name: {key: value for key, value in receipt.items() if not key.startswith('_')}
+                      for name, receipt in listeners.items()},
         "witnesses": witnesses,
         "matrix": matrix,
         "counts": counts,
