@@ -2477,6 +2477,35 @@ def _d8_lowlevel_mkdir_chain_source(mkdir_line: str) -> str:
     ])
 
 
+def test_d8_js_mkdir_private_directory_mode_is_not_an_identity():
+    """The Studio publisher's exact private receipt mkdir uses an octal mode."""
+    path = "integrations/studio_direct_mcp/git-publish.mjs"
+    source = "    await mkdir(dir, {recursive:true, mode:0o700});\n"
+    assert _scan_added_identity_diff(_d8_frozen_source_diff(path, source)) == []
+
+
+@pytest.mark.parametrize("source", [
+    "await mkdir(peer_uid, {recursive:true, mode:0o700});",
+    "await makedir(dir, {recursive:true, mode:0o700});",
+    "await mkdir(dir, {recursive:false, mode:0o700});",
+    "await mkdir(dir, {recursive:true, mode:0o700, peer_uid:501});",
+    "await mkdir(dir, {recursive:true, mode:0o700}); peer_uid = 501;",
+    "await mkdir(dir, {recursive:true, mode:0o700}); anotherEffect();",
+    "await mkdir(dir, {recursive:true, mode:0o700});\npeer_uid = 501;",
+])
+def test_d8_js_mkdir_near_misses_remain_guarded(source):
+    path = "integrations/studio_direct_mcp/git-publish.mjs"
+    assert not _is_js_mkdir_mode_literal(source, "0o700")
+    findings = _scan_added_identity_diff(_d8_frozen_source_diff(path, source))
+    # The D8 scanner is contextual; a shape alone is not an identity. Actual
+    # identity-bearing text remains guarded even beside a mkdir mode token.
+    if "peer_uid:501" in source or "peer_uid = 501" in source:
+        assert "501" in findings
+    if "mkdir(peer_uid" in source:
+        assert "0o700" in findings
+
+
+
 def test_d8_lowlevel_mkdir_mode_slot_with_dir_fd_is_not_identity():
     """RED before the repair: the f904 os.mkdir mode slot was misclassified.
 
@@ -3178,31 +3207,3 @@ def test_d8_hermes_https_port_rejects_false_postimage():
             _d8_frozen_source_diff(_HERMES_TAB_SWEEP_PATH, source),
             source_postimages={_HERMES_TAB_SWEEP_PATH: source.replace("else 443", "else 444")},
         )
-
-
-def test_d8_js_mkdir_private_directory_mode_is_not_an_identity():
-    """The Studio publisher's exact private receipt mkdir uses an octal mode."""
-    path = "integrations/studio_direct_mcp/git-publish.mjs"
-    source = "    await mkdir(dir, {recursive:true, mode:0o700});\n"
-    assert _scan_added_identity_diff(_d8_frozen_source_diff(path, source)) == []
-
-
-@pytest.mark.parametrize("source", [
-    "await mkdir(peer_uid, {recursive:true, mode:0o700});",
-    "await makedir(dir, {recursive:true, mode:0o700});",
-    "await mkdir(dir, {recursive:false, mode:0o700});",
-    "await mkdir(dir, {recursive:true, mode:0o700, peer_uid:501});",
-    "await mkdir(dir, {recursive:true, mode:0o700}); peer_uid = 501;",
-    "await mkdir(dir, {recursive:true, mode:0o700}); anotherEffect();",
-    "await mkdir(dir, {recursive:true, mode:0o700});\npeer_uid = 501;",
-])
-def test_d8_js_mkdir_near_misses_remain_guarded(source):
-    path = "integrations/studio_direct_mcp/git-publish.mjs"
-    assert not _is_js_mkdir_mode_literal(source, "0o700")
-    findings = _scan_added_identity_diff(_d8_frozen_source_diff(path, source))
-    # The D8 scanner is contextual; a shape alone is not an identity. Actual
-    # identity-bearing text remains guarded even beside a mkdir mode token.
-    if "peer_uid:501" in source or "peer_uid = 501" in source:
-        assert "501" in findings
-    if "mkdir(peer_uid" in source:
-        assert "0o700" in findings
