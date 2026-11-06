@@ -1336,6 +1336,24 @@ describe("acceptance criteria with current draft and preview owners", () => {
     diffCheck: true, projectRef: "", profileRef: "",
   });
 
+  it.each(["", " \n\t "])("preserves an untagged project objective exactly through preview and submit (criteria=%j)", criteria => {
+    const goal = "  First\tparagraph\n保持原文  ";
+    const previewRequest = vi.fn((form: LaunchForm) => ({ state: "PREPARED" as const,
+      goal: form.goal, projectRef: form.projectRef, profileRef: form.profileRef,
+      frontierModelAlias: null, targetKey: "workstream" }));
+    const props = makeProps({ projectExecution: true, previewRequest });
+    render(<LaunchOrchestrator {...props} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: goal } });
+    fireEvent.change(criteriaBox(), { target: { value: criteria } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview requested scope" }));
+    expect(previewRequest).toHaveBeenCalledTimes(1);
+    expect(previewRequest.mock.calls[0][0].goal).toBe(goal);
+    fireEvent.click(launchButton());
+    expect(props.onSubmit).toHaveBeenCalledTimes(1);
+    expect(props.onSubmit.mock.calls[0][0]).toEqual(previewRequest.mock.calls[0][0]);
+    expect(props.onSubmit.mock.calls[0][0].goal).toBe(goal);
+  });
+
   it("uses UTF-16 criterion bounds and the tagged UTF-8 ceiling without shrinking ordinary Unicode goals", () => {
     expect(composeAcceptanceGoal("Goal", "😀".repeat(250))).not.toBeNull();
     expect(composeAcceptanceGoal("Goal", "😀".repeat(251))).toBeNull();
