@@ -94,7 +94,7 @@ it('joins explicit project file Search Open to exact Library reread and preserve
  fireEvent.submit(input.closest('form')!);
  const open=await screen.findAllByRole('button',{name:'Open'});fireEvent.click(open[0]);
  await screen.findByRole('button',{name:'Back'});
- expect(screen.getAllByRole('heading',{level:1})).toHaveLength(1);
+ await waitFor(()=>expect(screen.getAllByRole('heading',{level:1})).toHaveLength(1));
  fireEvent.click(screen.getByRole('button',{name:'Back'}));
  expect((screen.getByLabelText('Search this project') as HTMLInputElement).value).toBe('中文');
  expect(e.invoke.mock.calls.some(([name])=>name==='read_project_knowledge_source')).toBe(true);
