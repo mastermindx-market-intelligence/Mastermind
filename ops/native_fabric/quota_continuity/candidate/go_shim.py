@@ -163,7 +163,8 @@ class ApplicationServiceBinding:
                 self.pool != "go" or self.selection_purpose is None):
             raise ValueError("invalid application metadata permission")
         if self.selection_purpose is not None and (
-                type(self.selection_purpose) is not ApplicationSelectionPurpose or self.pool != "go"):
+                type(self.selection_purpose) is not ApplicationSelectionPurpose
+                or self.pool not in ({"go", "bailian"} | NATIVE_APPLICATION_POOLS)):
             raise ValueError("invalid application selection purpose")
 
 
@@ -368,20 +369,30 @@ class ApplicationNativeBinding:
     _recipe_json: str = field(repr=False)
     preflight: Any = field(repr=False)
     execute: Any = field(repr=False)
+    selection: Any = None
 
-    def __init__(self, *, recipe, accounts, preflight, execute):
+    def __init__(self, *, recipe, accounts, preflight, execute, selection=None):
         from lease_broker import _application_native_recipe, _application_id
+        from go_lease_gateway import ApplicationNativeSelection
         if (type(recipe) is not dict or type(accounts) is not frozenset or not accounts
                 or not callable(preflight) or not callable(execute)):
             raise ValueError("invalid native startup binding")
         for account in accounts:
             _application_id(account)
         encoded, digest = _application_native_recipe(recipe, pool=recipe.get("pool"), model=recipe.get("model"))
+        if selection is not None:
+            if type(selection) is not ApplicationNativeSelection:
+                raise ValueError("invalid native startup selection")
+            stated = selection.document
+            if (stated["pool"] != recipe["pool"] or stated["model"] != recipe["model"]
+                    or stated["source_generation"] != recipe["source_generation"]):
+                raise ValueError("native startup selection conflicts with recipe")
         object.__setattr__(self, "accounts", accounts)
         object.__setattr__(self, "recipe_digest", digest)
         object.__setattr__(self, "_recipe_json", encoded)
         object.__setattr__(self, "preflight", preflight)
         object.__setattr__(self, "execute", execute)
+        object.__setattr__(self, "selection", selection)
 
     @property
     def recipe(self):
@@ -394,8 +405,10 @@ class ApplicationNativeBinding:
             raise ValueError("actual native admission owner required")
         recipe = self.recipe
         actual, digest = gateway.application_recipe(recipe["pool"], recipe["model"])
+        projection = None if self.selection is None else self.selection.encoded
         if (actual != recipe or digest != self.recipe_digest
-                or gateway._application_native_accounts.get(recipe["pool"]) != self.accounts):
+                or gateway._application_native_accounts.get(recipe["pool"]) != self.accounts
+                or gateway._application_native_selection.get((recipe["pool"], recipe["model"])) != projection):
             raise ValueError("native startup projection conflicts with admission")
 
     def compile(self, account, payload):
@@ -2550,10 +2563,30 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             with open(path, "rb") as source:
                 source_sha256[name] = hashlib.sha256(source.read()).hexdigest()
     if application_services and any(s.selection_purpose is not None for s in application_services):
-        profile = lease_gateway._application_selection_profile
-        if (profile is None or profile.document["ingress_digest"] != source_sha256.get("go_shim.py")
-                or profile.document["account_owner_digest"] != hashlib.sha256(router.accounts_path.encode()).hexdigest()):
-            raise ValueError("application selection source conflicts with startup")
+        # Only the Go selection profile is bound to this handler's exact source
+        # and account owner. Other pools are admitted on their own registered
+        # recipes, grants and (for native) startup selection projections.
+        go_services = [s for s in application_services
+                       if s.selection_purpose is not None and s.pool == "go"]
+        if go_services:
+            profile = lease_gateway._application_selection_profile
+            if (profile is None or profile.document["ingress_digest"] != source_sha256.get("go_shim.py")
+                    or profile.document["account_owner_digest"] != hashlib.sha256(router.accounts_path.encode()).hexdigest()):
+                raise ValueError("application selection source conflicts with startup")
+        for service in application_services:
+            purpose = service.selection_purpose
+            if purpose is None or service.pool == "go":
+                continue
+            if service.pool == "bailian":
+                if application_http_binding is None:
+                    raise ValueError("application selection transport required")
+            elif (any(key[0] == service.pool for key in native_bindings)
+                  and not any(key[0] == service.pool and binding.selection is not None
+                              for key, binding in native_bindings.items())):
+                raise ValueError("application selection transport required")
+            # An absent native executor does not invalidate a stable service's
+            # authority to recover or close its original requests. Supplied
+            # bindings were validated above; fresh dispatch requires one below.
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -2673,7 +2706,51 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             state = result.get("disposition")
             self._application_reply(state, status=200 if state == "closed" else 409)
 
-        def _application_native_post(self, service, scope, recovery_args, payload, recipe_digest):
+        def _application_select(self, service, scope, recovery_args, payload, recovered):
+            """Select once for an absent turn only; a recovered original never repicks.
+
+            Returns (selection, purpose), or None when this request was already
+            answered from a concurrently admitted original turn. Selection is a
+            read-only owner observation: it performs no admission, send, quota
+            or ledger write, so a refusal here has no effect to reconcile.
+            """
+            if service.selection_purpose is None:
+                return None, None
+            purpose = service.selection_purpose.document
+            if recovered["kind"] != "turn_absent":
+                return None, purpose
+            selection = None
+            try:
+                selection = lease_gateway.select_application(scope, principal_id=service.principal_id,
+                    host=service.host, credential_ref=service.credential_ref, purpose=purpose, payload=payload)
+            except Exception:
+                # The initial absence snapshot may have raced another request
+                # for this turn. Its own new lease can consume the last slot.
+                # Reconcile that original identity before reporting a no-admission
+                # refusal; never select again.
+                try:
+                    recovered = lease_gateway.recover_application(scope, **recovery_args)
+                    if type(recovered) is not dict or recovered.get("kind") not in {
+                            "turn_absent", "request_present", "turn_present_new_step"}:
+                        raise ValueError("unqualified original recovery")
+                except Exception:
+                    self._application_reply("effect_unknown", code="application_recovery_unavailable", status=503)
+                    return None
+                if recovered["kind"] == "request_present":
+                    self._application_recovered(recovered["request"])
+                    return None
+                if recovered["kind"] == "turn_absent":
+                    self._application_reply("refused", code="application_selection_refused", status=409)
+                    return None
+                if recovered["turn"]["disposition"] != "existing":
+                    self._application_recovered(recovered["turn"])
+                    return None
+                if recovered["turn"]["pool"] != scope["pool"]:
+                    self._application_reply("refused", code="application_turn_scope_changed", status=409)
+                    return None
+            return selection, purpose
+
+        def _application_native_post(self, service, scope, recovery_args, payload, recipe_digest, recovered):
             """Fixed-recipe path through A; no Router capacity, proxy or usage owner."""
             native = native_bindings.get((service.pool, payload["model"]))
             if native is None:
@@ -2688,13 +2765,24 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             except Exception:
                 self._application_reply("refused", code="application_native_contract_refused", status=400)
                 return
+            selected = self._application_select(service, scope, recovery_args, payload, recovered)
+            if selected is None:
+                return
+            selection, purpose = selected
             turn_id, request_id = self.application_turn_id, self.application_request_id
             try:
                 binding = lease_gateway.begin_application(scope, principal_id=service.principal_id,
                     host=service.host, expected_credential_ref=service.credential_ref,
                     deadline_ns=time.monotonic_ns() + 5_000_000_000,
-                    expected_recipe_digest=native.recipe_digest)
-            except BaseException:
+                    expected_recipe_digest=native.recipe_digest,
+                    expected_selection=selection, selection_purpose=purpose, selection_payload=payload)
+            except BaseException as error:
+                from go_lease_gateway import ApplicationSelectionRefused
+                if isinstance(error, ApplicationSelectionRefused):
+                    # A known selection-condition refusal happens before any
+                    # lease, intent or send, so there is no effect to recover.
+                    self._application_reply("refused", code="application_selection_changed", status=409)
+                    return
                 # A committed turn can outlive its ACK. Never call begin again
                 # or compile using an inferred account in this request.
                 try:
@@ -2854,7 +2942,7 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 self._application_reply("refused", code="application_request_invalid", status=400)
                 return
             if service.pool in NATIVE_APPLICATION_POOLS:
-                self._application_native_post(service, scope, recovery_args, payload, recipe_digest)
+                self._application_native_post(service, scope, recovery_args, payload, recipe_digest, recovered)
                 return
             model = payload["model"]
             compiled, account_binding, commitment = None, None, None
@@ -2875,38 +2963,10 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             elif not router.application_model_supported(model, path):
                 self._application_reply("refused", code="application_model_unavailable", status=400)
                 return
-            selection, purpose = None, None
-            if service.selection_purpose is not None:
-                purpose = service.selection_purpose.document
-                if recovered["kind"] == "turn_absent":
-                    try:
-                        selection = lease_gateway.select_application(scope, principal_id=service.principal_id,
-                            host=service.host, credential_ref=service.credential_ref, purpose=purpose, payload=payload)
-                    except Exception:
-                        # The initial absence snapshot may have raced another
-                        # request for this turn. Its own new lease can consume
-                        # the last slot. Reconcile that original identity before
-                        # reporting a no-admission refusal; never select again.
-                        try:
-                            recovered = lease_gateway.recover_application(scope, **recovery_args)
-                            if type(recovered) is not dict or recovered.get("kind") not in {
-                                    "turn_absent", "request_present", "turn_present_new_step"}:
-                                raise ValueError("unqualified original recovery")
-                        except Exception:
-                            self._application_reply("effect_unknown", code="application_recovery_unavailable", status=503)
-                            return
-                        if recovered["kind"] == "request_present":
-                            self._application_recovered(recovered["request"])
-                            return
-                        if recovered["kind"] == "turn_absent":
-                            self._application_reply("refused", code="application_selection_refused", status=409)
-                            return
-                        if recovered["turn"]["disposition"] != "existing":
-                            self._application_recovered(recovered["turn"])
-                            return
-                        if recovered["turn"]["pool"] != scope["pool"]:
-                            self._application_reply("refused", code="application_turn_scope_changed", status=409)
-                            return
+            selected = self._application_select(service, scope, recovery_args, payload, recovered)
+            if selected is None:
+                return
+            selection, purpose = selected
             try:
                 binding = lease_gateway.begin_application(scope, principal_id=service.principal_id,
                     host=service.host, expected_credential_ref=service.credential_ref,
@@ -3295,12 +3355,18 @@ def main(*, application_broker=None,
         raise ValueError("application native startup binding incomplete")
     native_accounts = {}
     native_recipes = []
+    native_selection = {}
     for binding in application_native_bindings:
         recipe = binding.recipe
         if recipe["pool"] in native_accounts and native_accounts[recipe["pool"]] != binding.accounts:
             raise ValueError("application native account projections conflict")
         native_accounts[recipe["pool"]] = binding.accounts
         native_recipes.append(recipe)
+        if binding.selection is not None:
+            key = (recipe["pool"], recipe["model"])
+            if key in native_selection:
+                raise ValueError("application native selection projections conflict")
+            native_selection[key] = binding.selection
     if "--check" in sys.argv:
         state_dir = os.environ.get("GO_STATE_DIR", DEFAULTS["GO_STATE_DIR"])
         try:
@@ -3327,7 +3393,8 @@ def main(*, application_broker=None,
                     for model in sorted(application_http_binding.driver.identity.allowed_models))}
                if application_http_binding is not None else {}),
             **({"application_native_accounts": native_accounts, "application_native_recipes": tuple(native_recipes)}
-               if application_native_bindings else {}))
+               if application_native_bindings else {}),
+            **({"application_native_selection": native_selection} if native_selection else {}))
     server = make_server(router, int(os.environ.get("GO_SHIM_PORT", DEFAULTS["GO_SHIM_PORT"])),
         lease_gateway=gateway, application_services=application_services,
         worker_capabilities_enabled=worker_enabled,

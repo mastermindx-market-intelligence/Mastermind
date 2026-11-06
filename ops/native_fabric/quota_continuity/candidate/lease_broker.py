@@ -2251,25 +2251,36 @@ class Broker:
         return document, grant, digest
 
     def application_selection_facts(self, conn, *, principal_id, caller_host,
-                                    workload, pool, model, credential_ref, transport_accounts):
-        """Read existing Go ledger room; no admission, GC, secret or provider I/O.
+                                    workload, pool, model, credential_ref, transport_accounts,
+                                    mode, expected_recipe_digest=None, document=None):
+        """Read one registered route's ledger room; no admission, GC, secret or provider I/O.
 
         This is concurrency evidence, not a provider-quota observation. B keeps
         its existing post-admission quota/auth/frontier reservation unchanged.
-        The supplied read-only snapshot also owns every cooldown lookup.
+        The supplied read-only snapshot also owns every cooldown lookup, and one
+        validated accounts reading serves every route inside the same selection.
+        An unobserved inventory reports no room value at all, never zero.
         """
-        if pool != "go":
-            raise ApplicationSelectionError("selection_transport_unqualified")
-        document, grant, digest = self._application_grant(
-            principal_id, caller_host, workload, pool, model, credential_ref)
-        room = self._application_go_room(conn, document, grant, model, transport_accounts)
+        if document is None:
+            document = _read_application_accounts(self.accounts_path)
+        _, grant, digest = self._application_grant_from_document(
+            document, principal_id, caller_host, workload, pool, model,
+            credential_ref, expected_recipe_digest)
+        room = self._application_room(conn, document, grant, pool, model, transport_accounts)
         return grant, digest, {"source": "broker-ledger-room", "observed_at": self.now(),
-            "fresh_s": 5.0, "cooldown": False, "model_room": {model: room},
-            "host": caller_host, "mode": "go"}
+            "fresh_s": 5.0, "cooldown": False,
+            "model_room": {model: room} if room is not None else {},
+            "host": caller_host, "mode": mode}
 
-    def _application_go_room(self, conn, document, grant, model, transport_accounts):
-        """The incumbent exact-model Go room calculation on one ledger snapshot."""
-        pool = "go"
+    def _application_room(self, conn, document, grant, pool, model, transport_accounts):
+        """The incumbent exact-model room calculation on one ledger snapshot.
+
+        None means the canonical inventory has no entry for this pool and is
+        therefore unknown; it never reports an empty or granted room.
+        """
+        spec = document["providers"].get(pool)
+        if type(spec) is not dict or type(spec.get("accounts")) is not list:
+            return None
         allowed = frozenset(grant["accounts"]) & frozenset(transport_accounts)
         token = _APPLICATION_ACCOUNTS.set(document)
         try:
@@ -2294,9 +2305,10 @@ class Broker:
         """Bounded metadata over the retained owner, never snapshot()/GC/admission.
 
         The gateway supplies its read-only transaction and source-bound transport
-        declarations. Unknown application effects remain counted as held. Only Go
-        has a qualified no-effect room observer here; external quota, host lanes
-        and provider health are deliberately not inferred from configured caps.
+        declarations. Unknown application effects remain counted as held. Every
+        declared route uses the same no-effect ledger-room observer here;
+        external quota, host lanes and provider health are deliberately not
+        inferred from configured caps.
         """
         from pick import _APPLICATION_POOL_ORDER
 
@@ -2360,9 +2372,8 @@ class Broker:
                         if not set(grant["accounts"]) & set(declaration["accounts"]):
                             raise ApplicationAdmissionError("transport_accounts_unavailable")
                         state = "configured"
-                        if pool == "go":
-                            room = self._application_go_room(conn, document, grant,
-                                model, declaration["accounts"])
+                        room = self._application_room(conn, document, grant,
+                            pool, model, declaration["accounts"])
                     except ApplicationAdmissionError as exc:
                         state = "held"
                         model_blockers.append(exc.code if exc.code in {
@@ -2404,8 +2415,7 @@ class Broker:
             fields = {"schema", "purpose", "purpose_digest", "profile", "profile_digest",
                       "identity", "commitments", "quality_records_sha256", "fresh_s"}
             if (type(record) is not dict or set(record) != fields
-                    or record["schema"] != "mastermind.application_turn_selection.v1"
-                    or pool != "go"):
+                    or record["schema"] != "mastermind.application_turn_selection.v1"):
                 raise ValueError("invalid selection")
             encoded = _application_json(record)
             if len(encoded.encode()) > 32768:

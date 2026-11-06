@@ -54,11 +54,54 @@ class ApplicationSelectionProfile:
         return json.loads(self._encoded)
 
 
+_APPLICATION_NATIVE_PICKER_MODES = {
+    "codex-native": ("codex-native",), "claude-native": ("claude-native",),
+    "ocfree": ("oc-free",), "glm": ("glm", "glm-codex"),
+    "minimax": ("minimax",), "grok": ("grok",), "cursor": ("cursor",)}
+
+
+class ApplicationNativeSelection:
+    """Closed immutable picker projection for one actual native recipe.
+
+    A native recipe carries no picker mode, so verified startup supplies this
+    optional projection bound to that exact recipe's pool, model and source
+    generation. Absence only excludes the route from selection; fixed native
+    transport and recovery are unchanged. This is a name projection: it never
+    infers a pool, mode, qualification, credential or provider read.
+    """
+    __slots__ = ("_encoded",)
+
+    def __init__(self, *, pool, model, mode, source_generation):
+        from pick import _APPLICATION_MODES
+        modes = _APPLICATION_NATIVE_PICKER_MODES.get(pool)
+        if (modes is None or pool not in NATIVE_APPLICATION_POOLS
+                or mode not in _APPLICATION_MODES or mode not in modes
+                or type(model) is not str or not model or len(model) > 128
+                or type(source_generation) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", source_generation) is None):
+            raise LeaseGatewayError("native selection projection refused")
+        document = {"pool": pool, "model": model, "mode": mode, "protocol": "harness",
+            "streaming": False, "capabilities": {"text": True, "tools": False, "vision": False},
+            "source": "native-" + source_generation, "source_generation": source_generation}
+        object.__setattr__(self, "_encoded", json.dumps(document, sort_keys=True, separators=(",", ":")))
+
+    def __setattr__(self, name, value):
+        raise AttributeError("native selection projection is immutable")
+
+    @property
+    def document(self):
+        return json.loads(self._encoded)
+
+    @property
+    def encoded(self):
+        return self._encoded
+
+
 class GoLeaseGateway:
     def __init__(self, db_path, accounts, models, *, clock=time.time, signing_key=None,
                  application_broker=None, application_http_recipes=(), application_http_accounts=(),
                  application_selection_profile=None, application_native_recipes=(),
-                 application_native_accounts=None):
+                 application_native_accounts=None, application_native_selection=None):
         db_path = Path(db_path)
         if not db_path.is_absolute():
             raise LeaseGatewayError("lease capability refused")
@@ -86,6 +129,7 @@ class GoLeaseGateway:
             raise LeaseGatewayError("application transport refused")
         self._application_native_recipes = {}
         self._application_native_accounts = {}
+        self._application_native_selection = {}
         try:
             from lease_broker import _application_native_recipe, _application_id
             for recipe in application_native_recipes:
@@ -103,6 +147,22 @@ class GoLeaseGateway:
                 self._application_native_accounts[pool] = frozenset(_application_id(name) for name in names)
             if self._application_native_recipes and type(self) is not GoLeaseGateway:
                 raise ValueError("native owner context unavailable")
+            # Selection projections are optional per registered route and are
+            # bound to that recipe's exact pool, model and source generation.
+            projections = {} if application_native_selection is None else application_native_selection
+            if type(projections) is not dict:
+                raise ValueError("native selection envelope invalid")
+            for key, projection in projections.items():
+                if (type(key) is not tuple or len(key) != 2
+                        or key not in self._application_native_recipes
+                        or type(projection) is not ApplicationNativeSelection):
+                    raise ValueError("native selection projection invalid")
+                document = projection.document
+                encoded, _ = self._application_native_recipes[key]
+                if (document["pool"] != key[0] or document["model"] != key[1]
+                        or document["source_generation"] != json.loads(encoded)["source_generation"]):
+                    raise ValueError("native selection projection conflicts with recipe")
+                self._application_native_selection[key] = projection.encoded
         except Exception:
             raise LeaseGatewayError("application native transport refused") from None
         self._clock = clock
@@ -269,6 +329,47 @@ class GoLeaseGateway:
         accounts = self._application_native_accounts[pool] if pool in NATIVE_APPLICATION_POOLS else self._application_http_accounts
         return accounts, recipe, digest
 
+    def _application_route(self, pool, model):
+        """The one actual registered route for a pool and model, or None.
+
+        Registered startup transport only: configuration, inventory or any
+        catalogue alone never offers a route. The returned projection is the
+        immutable transport identity that atomic admission later compares, and
+        the picker grammar stays inside what that transport actually accepts.
+        """
+        if pool == "go":
+            if self._application_selection_profile is None or model not in self._models:
+                return None, None, None
+            return self._accounts, None, self._application_selection_profile.document
+        if pool == "bailian":
+            try:
+                recipe, digest = self.application_recipe(pool, model)
+            except LeaseGatewayError:
+                return None, None, None
+            # The H driver accepts chat tool declarations and results over its
+            # responses protocol; no media, no upstream streaming.
+            projection = {"pool": pool, "model": model, "mode": "bailian",
+                "protocol": recipe["protocol"], "streaming": False,
+                "driver": recipe["driver_id"], "profile": recipe["realm_id"],
+                "source": "bailian-" + recipe["source_projection_sha256"],
+                "capabilities": {"text": True, "tools": True, "vision": False}}
+            return self._application_http_accounts, digest, projection
+        if pool in NATIVE_APPLICATION_POOLS:
+            encoded = self._application_native_selection.get((pool, model))
+            if encoded is None:
+                return None, None, None
+            try:
+                recipe, digest = self.application_recipe(pool, model)
+            except LeaseGatewayError:
+                return None, None, None
+            stated = json.loads(encoded)
+            projection = {"pool": pool, "model": model, "mode": stated["mode"],
+                "protocol": stated["protocol"], "streaming": False,
+                "driver": recipe["driver_id"], "profile": recipe["profile"],
+                "source": stated["source"], "capabilities": dict(stated["capabilities"])}
+            return self._application_native_accounts[pool], digest, projection
+        return None, None, None
+
     def application_pool_view(self, *, principal_id, host, workload, credential_ref,
                               bound_pool, source, go_models):
         """Observe the original DB inode through mode=ro; never construct an owner."""
@@ -283,12 +384,23 @@ class GoLeaseGateway:
                 "qualified": profile is not None and model in go_models, "accounts": self._accounts}
                 for model in sorted(self._models)]}
             for (pool, model), (_, digest) in sorted(self._application_http_recipes.items()):
-                recipe, _ = self.application_recipe(pool, model)
+                accounts, route_digest, projection = self._application_route(pool, model)
+                if projection is None or route_digest != digest:
+                    raise LeaseGatewayError("application metadata transport unavailable")
                 transports.setdefault(pool, []).append({"model": model,
-                    "protocol": recipe["protocol"], "qualified": True,
+                    "protocol": projection["protocol"], "qualified": True,
+                    "capabilities": {**projection["capabilities"],
+                                     "upstream_streaming": projection["streaming"]},
+                    "accounts": accounts, "recipe_digest": digest})
+            for (pool, model), (_, digest) in sorted(self._application_native_recipes.items()):
+                # A native row stays unqualified without its optional startup
+                # selection projection; the fixed transport itself is unchanged.
+                route = self._application_route(pool, model)
+                transports.setdefault(pool, []).append({"model": model,
+                    "protocol": "harness", "qualified": route[0] is not None,
                     "capabilities": {"text": True, "tools": False, "vision": False,
                                      "upstream_streaming": False},
-                    "accounts": self._application_http_accounts, "recipe_digest": digest})
+                    "accounts": self._application_native_accounts[pool], "recipe_digest": digest})
             if sum(len(rows) for rows in transports.values()) > 128:
                 raise LeaseGatewayError("application metadata bound exceeded")
             connection = self._connection()
@@ -336,42 +448,67 @@ class GoLeaseGateway:
         try:
             import pick
             import pool_ledger
-            from lease_broker import _application_json, _application_selection_purpose
+            from lease_broker import (_application_json, _application_selection_purpose,
+                                      _read_application_accounts)
             broker = self._application_owner()
-            if request["pool"] != "go" or self._application_selection_profile is None:
-                raise ValueError("unqualified selection transport")
-            profile = self._application_selection_profile.document
+            model = request["model"]
+            # Exact service pool and payload model: the selector may only pick
+            # routes that already name both, and admission re-checks the same
+            # identity against this pool and model inside its own transaction.
             task = self.application_selection_task(purpose, payload)
             policy = pick.read_application_policy()
             quality = pool_ledger.read_recent(limit=10000, strict=True)
+            document = _read_application_accounts(broker.accounts_path)
+            pools, observations, bound = {}, {}, None
             connection = self._connection()
             try:
                 connection.row_factory = sqlite3.Row
                 connection.execute("BEGIN")
-                grant, grant_digest, observation = broker.application_selection_facts(connection,
-                    principal_id=principal_id, caller_host=host, workload=request["workload"],
-                    pool=request["pool"], model=request["model"], credential_ref=credential_ref,
-                    transport_accounts=self._accounts)
+                for pool in pick._APPLICATION_POOL_ORDER:
+                    # A fixed service's execution catalogue is scoped before
+                    # ranking: another pool can expose the same model name.
+                    # The Admin metadata view still observes every pool.
+                    if pool != request["pool"]:
+                        continue
+                    accounts, digest, projection = self._application_route(pool, model)
+                    if accounts is None:
+                        continue
+                    if pool == request["pool"]:
+                        bound = projection
+                    try:
+                        grant, grant_digest, observation = broker.application_selection_facts(
+                            connection, principal_id=principal_id, caller_host=host,
+                            workload=request["workload"], pool=pool, model=model,
+                            credential_ref=credential_ref, transport_accounts=accounts,
+                            mode=projection["mode"], expected_recipe_digest=digest,
+                            document=document)
+                    except Exception:
+                        continue  # no fresh grant or room for this route: not offered
+                    recipe = {key: projection[key] for key in
+                        ("mode", "protocol", "streaming", "driver", "profile", "source", "capabilities")}
+                    recipe.update(model=model, order_rank=0,
+                        max_turn_seconds=grant["max_turn_seconds"], max_steps=grant["max_steps"],
+                        qualification_ref=grant["qualification_ref"],
+                        application_permission_ref=grant["application_permission_ref"],
+                        grant_ref={"grant_id": grant["grant_id"], "digest": grant_digest})
+                    pools[pool] = {"enabled": True, "recipes": [recipe]}
+                    observations[pool] = observation
             finally:
                 connection.close()
-            recipe = {key: profile[key] for key in
-                ("mode", "protocol", "streaming", "driver", "profile", "source", "capabilities")}
-            recipe.update(model=request["model"], order_rank=0,
-                max_turn_seconds=grant["max_turn_seconds"], max_steps=grant["max_steps"],
-                qualification_ref=grant["qualification_ref"],
-                application_permission_ref=grant["application_permission_ref"],
-                grant_ref={"grant_id": grant["grant_id"], "digest": grant_digest})
-            catalogue = {"schema": "mastermind.fabric_application_catalogue.v1", "pool_order": ["go"],
-                "pools": {"go": {"enabled": True, "recipes": [recipe]}}}
+            if bound is None:
+                raise ValueError("unqualified selection transport")
+            catalogue = {"schema": "mastermind.fabric_application_catalogue.v1",
+                "pool_order": list(pick._APPLICATION_POOL_ORDER), "pools": pools}
             selected = pick.select_application(task, policy=policy, catalogue=catalogue,
-                observations={"go": observation}, quality_records=quality, now=self._clock(),
-                expected_identity={"pool": "go", "model": request["model"], "source": profile["source"]})
+                observations=observations, quality_records=quality, now=self._clock(),
+                expected_identity={"pool": request["pool"], "model": model,
+                                   "source": bound["source"]})
             if not selected["ok"]:
                 raise ValueError("selection refused")
             purpose_json, purpose_digest = _application_selection_purpose(purpose)
             return {"schema": "mastermind.application_turn_selection.v1",
                 "purpose": json.loads(purpose_json), "purpose_digest": purpose_digest,
-                "profile": profile, "profile_digest": hashlib.sha256(_application_json(profile).encode()).hexdigest(),
+                "profile": bound, "profile_digest": hashlib.sha256(_application_json(bound).encode()).hexdigest(),
                 "identity": selected["identity"], "commitments": selected["commitments"],
                 "quality_records_sha256": hashlib.sha256(_application_json(quality).encode()).hexdigest(),
                 "fresh_s": 5.0}
@@ -391,9 +528,11 @@ class GoLeaseGateway:
                 raise LeaseGatewayError("application recipe refused")
             selection_args = {}
             if expected_selection is not None or selection_purpose is not None:
+                route = self._application_route(request["pool"], request["model"])
+                if route is None:
+                    raise ApplicationSelectionRefused("application selection condition refused")
                 selection_args = dict(expected_selection=expected_selection, selection_purpose=selection_purpose,
-                    selection_profile=(self._application_selection_profile.document
-                        if self._application_selection_profile is not None else None),
+                    selection_profile=route[2],
                     selection_task=self.application_selection_task(selection_purpose, selection_payload))
             result = broker.begin_application_turn(principal_id=principal_id, caller_host=host,
                 workload=request["workload"], turn_id=request["turn_id"], pool=request["pool"],
