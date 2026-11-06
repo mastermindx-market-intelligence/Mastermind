@@ -89,10 +89,14 @@ class FabricOwnerPort(Protocol):
 
 
 def run_id_for(grant: SessionGrant, task_key: str) -> str:
-    """Stable correlation within the true native origin; never authentication."""
+    """Stable original-run identity across an authorized session reconnect.
+
+    Generation is a currentness fence, not part of the logical job key:
+    a refreshed native owner cannot accidentally mint a replacement worker.
+    """
     if type(task_key) is not str or KEY.fullmatch(task_key) is None:
         raise FabricNativeRefusal("TASK_KEY_INVALID")
-    data = json.dumps([grant.profile_id, grant.session_id, grant.generation,
+    data = json.dumps([grant.profile_id, grant.session_id,
                        task_key], separators=(",", ":")).encode("utf-8")
     return "hermes-native-" + hashlib.sha256(data).hexdigest()[:40]
 
@@ -120,12 +124,22 @@ def _attest_reply(raw: Any, grant: SessionGrant, run_id: str) -> dict[str, Any]:
     state = raw.get("state")
     if type(state) is not str or not 0 < len(state) <= 64:
         raise FabricNativeRefusal("FABRIC_OWNER_STATE_INVALID")
-    return {"state": state,
-            "reason": str(raw.get("reason"))[:120] if raw.get("reason") else None,
-            "result_digest": raw.get("result_digest") if
-              isinstance(raw.get("result_digest"), str) and
-              re.fullmatch(r"[0-9a-f]{64}", raw["result_digest"]) else None,
-            "worker_started": raw.get("worker_started") is True}
+    digest = raw.get("result_digest")
+    if digest is not None and (type(digest) is not str or
+                               re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+        raise FabricNativeRefusal("FABRIC_OWNER_RESULT_DIGEST_INVALID")
+    projected = {"state": state,
+                 "reason": str(raw.get("reason"))[:120] if raw.get("reason") else None,
+                 "result_digest": digest,
+                 "worker_started": raw.get("worker_started") is True}
+    body = raw.get("result_text")
+    if body is not None:
+        if (state != "TERMINAL" or type(body) is not str or digest is None
+                or len(body.encode("utf-8")) > 8192
+                or hashlib.sha256(body.encode("utf-8")).hexdigest() != digest):
+            raise FabricNativeRefusal("FABRIC_OWNER_RESULT_INVALID")
+        projected["result_text"] = body
+    return projected
 
 
 def native_handler(
