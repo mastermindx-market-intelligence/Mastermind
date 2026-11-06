@@ -16,9 +16,21 @@ import ssl
 from pathlib import Path
 from typing import Any, Mapping
 
+from common.hermes_role_status_contract import (
+    RoleStatusError, closed_json, validate_observation,
+)
+
 REMOTE_BROKER_REQUEST_SCHEMA = "mastermind.remote_worker_broker_request/v1"
 REMOTE_BROKER_RESPONSE_SCHEMA = "mastermind.remote_worker_broker_response/v1"
 MAX_FRAME_BYTES = 1024 * 1024
+REMOTE_HOST_OBSERVATION_REQUEST_SCHEMA = "mastermind.remote_host_observation_request/v1"
+REMOTE_HOST_OBSERVATION_RESPONSE_SCHEMA = "mastermind.remote_host_observation_response/v1"
+HERMES_ROLE_OBSERVATION_OPERATION = "hermes-role-metadata-read/v1"
+MAX_HOST_OBSERVATION_REQUEST_BYTES = 1024
+MAX_HOST_OBSERVATION_RESPONSE_BYTES = 8192
+_HOST_REQUEST_KEYS = frozenset({"schema", "host_ref", "operation", "nonce", "request_sha256"})
+_HOST_RESPONSE_KEYS = _HOST_REQUEST_KEYS | {"state", "reason_code", "observation"}
+_HOST_UNAVAILABLE_REASONS = frozenset({"SOURCE_UNAVAILABLE", "SOURCE_CHANGED", "SOURCE_STALE"})
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
 _BROKER_OPERATION_RE = re.compile(
@@ -329,3 +341,82 @@ def build_client_ssl_context(binding: BrokerTransportBinding) -> ssl.SSLContext:
         return context
     except (OSError, ssl.SSLError) as exc:
         raise TransportValidationError("transport binding TLS material is invalid") from exc
+
+
+def decode_request_document(raw: bytes) -> dict[str, Any]:
+    """Strictly decode a bounded frame after the incumbent peer authentication."""
+    try:
+        value = closed_json(raw, limit=MAX_FRAME_BYTES)
+    except RoleStatusError:
+        raise TransportValidationError("remote request JSON is invalid") from None
+    if type(value) is not dict:
+        raise TransportValidationError("remote request JSON is invalid")
+    return value
+
+
+def build_host_observation_request(host_ref: str, nonce: str) -> dict[str, Any]:
+    value = {"schema": REMOTE_HOST_OBSERVATION_REQUEST_SCHEMA,
+             "host_ref": validate_host_ref(host_ref),
+             "operation": HERMES_ROLE_OBSERVATION_OPERATION, "nonce": nonce}
+    value["request_sha256"] = request_sha256(value)
+    return validate_host_observation_request(value, expected_host_ref=host_ref)
+
+
+def validate_host_observation_request(value, *, expected_host_ref: str) -> dict[str, Any]:
+    validate_host_ref(expected_host_ref)
+    if (type(value) is not dict or set(value) != _HOST_REQUEST_KEYS
+            or value["schema"] != REMOTE_HOST_OBSERVATION_REQUEST_SCHEMA
+            or value["host_ref"] != expected_host_ref
+            or value["operation"] != HERMES_ROLE_OBSERVATION_OPERATION
+            or type(value["nonce"]) is not str or _HEX64_RE.fullmatch(value["nonce"]) is None
+            or type(value["request_sha256"]) is not str
+            or _HEX64_RE.fullmatch(value["request_sha256"]) is None
+            or value["request_sha256"] != request_sha256(value)
+            or len(_canonical_bytes(value)) > MAX_HOST_OBSERVATION_REQUEST_BYTES):
+        raise TransportValidationError("remote host observation request is invalid")
+    return dict(value)
+
+
+def decode_host_observation_request(raw: bytes, *, expected_host_ref: str) -> dict[str, Any]:
+    if len(raw) > MAX_HOST_OBSERVATION_REQUEST_BYTES:
+        raise TransportValidationError("remote host observation request exceeds ceiling")
+    return validate_host_observation_request(decode_request_document(raw), expected_host_ref=expected_host_ref)
+
+
+def validate_host_observation_response(value, request) -> dict[str, Any]:
+    validate_host_observation_request(request, expected_host_ref=request.get("host_ref"))
+    if (type(value) is not dict or set(value) != _HOST_RESPONSE_KEYS
+            or value["schema"] != REMOTE_HOST_OBSERVATION_RESPONSE_SCHEMA
+            or any(value[key] != request[key] for key in ("host_ref", "operation", "nonce", "request_sha256"))):
+        raise TransportValidationError("remote host observation response is invalid")
+    if value["state"] == "OBSERVED":
+        if value["reason_code"] != "OBSERVED":
+            raise TransportValidationError("remote host observation response is invalid")
+        try:
+            validate_observation(value["observation"])
+        except RoleStatusError:
+            raise TransportValidationError("remote host observation response is invalid") from None
+    elif (value["state"] != "UNAVAILABLE" or type(value["reason_code"]) is not str
+          or value["reason_code"] not in _HOST_UNAVAILABLE_REASONS or value["observation"] is not None):
+        raise TransportValidationError("remote host observation response is invalid")
+    raw = _canonical_bytes(value)
+    if len(raw) > MAX_HOST_OBSERVATION_RESPONSE_BYTES:
+        raise TransportValidationError("remote host observation response exceeds ceiling")
+    return json.loads(raw)
+
+
+def build_host_observation_response(request, *, observation=None, reason_code="SOURCE_UNAVAILABLE") -> dict[str, Any]:
+    value = {key: request[key] for key in ("host_ref", "operation", "nonce", "request_sha256")}
+    value.update({"schema": REMOTE_HOST_OBSERVATION_RESPONSE_SCHEMA,
+                  "state": "OBSERVED" if observation is not None else "UNAVAILABLE",
+                  "reason_code": "OBSERVED" if observation is not None else reason_code,
+                  "observation": observation})
+    return validate_host_observation_response(value, request)
+
+
+def decode_host_observation_response(raw: bytes, request) -> dict[str, Any]:
+    try:
+        value = closed_json(raw, limit=MAX_HOST_OBSERVATION_RESPONSE_BYTES)
+    except RoleStatusError:
+        raise TransportValidationError("remote host observation response JSON is invalid") from None
+    return validate_host_observation_response(value, request)

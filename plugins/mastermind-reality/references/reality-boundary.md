@@ -156,3 +156,47 @@ One successful journey does not prove every product, viewport, account, data sta
 Before installation, rollback closes or reverts only the source carrier. After installation, rollback removes only the package mapping or generation owned by that operation. Do not delete historical evidence, disable shared browser or observability services, close unrelated sessions, or modify another plugin.
 
 Temporary capture processes and isolated profiles must be absent at return. Cleanup failure is reported explicitly and never converted into permission for a retry, broader shutdown, or false terminal state.
+
+
+## Qualified bytes and explicit witness facts
+
+Verification uses one call-local byte snapshot per distinct declared reference. Observation, schema, predecessor and artifact files must be bounded regular files. Descriptor-relative, no-follow directory walks and before/after descriptor and pathname identities refuse symlink traversal, file replacement and mutation during a read. Digest, byte count, PNG interpretation and JSON facts all use the same captured buffer; a helper does not reopen a pathname after qualification. This cache exists only for the invocation and is not an evidence store.
+
+The existing per-input limits remain: observation 8 MiB, schema 4 MiB, artifact 32 MiB, PNG compressed image data 16 MiB and decoded raster 64 MiB. Retained artifact buffers additionally have a 128 MiB aggregate limit. Strict JSON traversal is limited to 64 levels and 100,000 nodes; receipts contain at most 256 bounded errors. An unreadable, changing or oversized observation has a null observation digest; a truncated prefix is never identified as the complete observation.
+
+The supplied schema must use the packaged Draft 2020-12 dialect and closed observation envelope. Reference-bearing schemas, including nested `$ref`, `$dynamicRef` and `$recursiveRef`, are refused before schema validation. The `$id` URI identifies the schema and grants no permission to retrieve it. Malformed nested records return closed errors before semantic traversal. Secret-shaped keys and values are scanned; output paths do not reproduce untrusted keys or artifact references, and redaction precedes truncation. An invalid or secret-shaped observation identity is returned as null.
+
+PNG verification checks critical chunk order and CRCs, legal color/depth combinations, palette rules, exact bounded raster length, filters 0–4 and all Adam7 pass dimensions, including empty passes. Indexed pixels are checked against the actual palette after reversing their filters. Valid ancillary chunks, split or empty consecutive IDAT chunks, unused packed-sample padding bits and permitted padding after the zlib stream remain representable. Unknown critical chunks, an unfinished stream, extra decoded raster data and bytes after IEND are refused. This verifies the default PNG image; it does not claim interpretation of ancillary metadata or animation frames. Format references: [W3C PNG3](https://www.w3.org/TR/2025/REC-png-3-20250624/) and [Python 3.14 zlib](https://docs.python.org/3.14/library/zlib.html).
+
+### Negative-case witness format
+
+An exercised method/signal label must agree with identity-qualified evidence bytes. A JSON witness places its facts under `negative_controls.<control_name>` inside a referenced artifact, leaving the closed observation evidence descriptor unchanged. Each such fact object identifies:
+
+- `control` and a nonempty `case_ref`;
+- the original `operation_ref` and `carrier_ref`;
+- `observed_at` within the original capture interval;
+- the specifically attempted `target_ref`.
+
+These describe a deliberate negative case. A negative target or build cannot replace the primary journey's identity or result. A correction may change the observation wrapper identity while retaining its original operation, carrier and capture instants.
+
+| Control | Required underlying facts |
+| --- | --- |
+| Wrong target | An explicit negative target distinct from the primary locator and an integer `http_status` of 404. |
+| Stale capture | A named `input_ref` and SHA-256, an `input_captured_at` earlier than the explicitly stated `required_not_before` comparison, and `stale_disclosed: true`. The comparison cannot be later than the witness observation. The old input time is intentionally outside the newer interval; no universal freshness TTL is invented. |
+| Different build | An explicit negative target, an expected `protected_sha` equal to the primary observation's protected SHA, and a well-formed, distinct `observed_deployed_sha` for the negative case. The primary journey may correctly have a MATCH relationship. |
+| Different viewport or data state | Two referenced screenshots from the supplied capture with actually decoded, different dimensions; alternatively a bound JSON witness identifying `first_artifact_ref` and `second_artifact_ref` among its references, whose qualified JSON snapshots contain distinct `data_state` values and distinct digests. |
+| Missing screenshot bytes | A safe `attempted_artifact_ref` absent from the resolved evidence, `screenshot_bytes_present: false`, and `refusal_code: SCREENSHOT_BYTES_REQUIRED`. The verifier does not probe undeclared paths. |
+| Broken browser connection | A named `provider_ref` relevant to the primary target and `connection_state: DISCONNECTED`. A generic degraded runtime label is insufficient. |
+| Excluded account surface | An explicit refused proposal for the existing `MANAGED_CHAIRMAN_ACCOUNT` class, a distinct target, `refusal_code: TARGET_CLASS_EXCLUDED`, and `access_attempted: false`. This is refusal before access and grants no account interaction. |
+
+OWNER_EVIDENCE controls report DETECTED; CONTRACT_REFUSAL controls report REFUSED. Conflicting relevant witness facts invalidate a control even if another cited artifact supports its label. NOT_EXERCISED remains honest representable partial data and cannot establish PROVEN_LIVE. Historical empty evidence references remain representable but cannot verify an exercised control.
+
+### Effect, correction and cleanup witnesses
+
+Every cited ordinary effect JSON receipt must agree with the observation's state, operation and carrier. A CORRECTION's predecessor must itself have a closed, safely traversable record shape, valid times and consistent declared identities. Both parsed capture instants are preserved. The verifier compares predecessor declarations without reopening historical artifact paths, which may now hold the newly declared current evidence.
+
+Changing an effect state requires an actually added or changed, currently qualified effect receipt that supports the new state and appears in `changed_input_refs`. Deleting an older receipt is insufficient. The original operation and carrier remain fixed. These checks do not create fresh authority or authenticate the purported owner.
+
+A positive REMOVED or NOT_CREATED profile claim names an optional observation field, `cleanup.temporary_profile_id`, which is semantically required for that positive claim. The referenced cleanup JSON must bind the same intended identity. A REMOVED witness carries `pre_removal` and `post_removal` objects with that identity, typed `present: true` then `present: false`, and ordered UTC `observed_at` values. Empty objects or string booleans are insufficient.
+
+A NOT_CREATED witness carries a before-state with typed absence plus a `creation` object naming the same profile, `created: false`, an explicit `owner_ref` and an ordered observation time. Positive CLEAN claims also require absent temporary processes and unchanged shared resources in the supplied witness. Any stated operation/carrier binding must agree with the original operation. Contradictory profile or disposition facts invalidate the claim. Historical UNKNOWN/INCOMPLETE records may omit the new identity field and retain their original limitations.

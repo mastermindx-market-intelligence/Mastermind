@@ -812,6 +812,24 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
     return modes == 1
 
 
+def _is_js_mkdir_mode_literal(line: str, token_text: str) -> bool:
+    """Admit only an exact JS mkdir(directory, {recursive:true, mode:octal}) statement.
+
+    Like the Python mkdir keyword-mode exemption, this is a permission, not a
+    UID/GID or service-port literal. The exact closed one-statement shape
+    prevents unrelated identities, extra properties, callees or operations
+    from being smuggled through the exemption.
+    """
+    if not re.fullmatch(r"0o[0-7]{3,4}", token_text):
+        return False
+    matched = re.fullmatch(
+        r"\s*await\s+mkdir\(\s*dir\s*,\s*\{\s*recursive\s*:\s*true"
+        r"\s*,\s*mode\s*:\s*(0o[0-7]{3,4})\s*\}\s*\)\s*;\s*",
+        line,
+    )
+    return matched is not None and matched.group(1) == token_text
+
+
 def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
     stripped = line.lstrip()
     if stripped.startswith(_COMMENT_PREFIXES):
@@ -823,6 +841,8 @@ def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bo
         return True
     if _line_mentions_identity_name(line):
         return False
+    if _is_js_mkdir_mode_literal(line, token_text):
+        return True
     # Recognize only the mode slot of this closed shell statement shape.
     # Additional commands, substitutions and unquoted operands stay guarded.
     chmod = re.fullmatch(
@@ -1556,7 +1576,8 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 356)]
+    # Pin the sole transport owner, not a line displaced by closed wire constants.
+    assert [path for path, _line in clients] == ["integrations/mastermind_executive_app/gateway.py"]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
@@ -1571,13 +1592,18 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # Return plus attention composition changes the module; the installed entry
     # AST below remains identical to protected d65414e. This static literal
     # freezes the combined candidate, not independent review or release authority.
-    # P16 READ composition adds only the qualified Plan/Journal reader factories;
-    # the exact installed event-loop AST below and all dispatch guards stay fixed.
+    # The accepted current Knowledge/Instructions owner composition changes this
+    # module; the exact installed event-loop AST and closed call below stay fixed.
+    # 2026-11-06 source audit: project input custody and paired canonical READ
+    # composition retain protected c571acc9's exact 060525... wrapper AST. This
+    # composed-file pin grants no native SEND or installed-release approval.
+    # d3f observation-only Fabric coexistence adds no event loop: the exact
+    # installed wrapper AST below and paid/attended non-mixing guards remain.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'a81cdea9e79374fa3e95c10c3dcf6922f92fdf816e899c8c9abff0aab018f57c'):
+            '4d6e98524f460ae9a0dbb38ed35b95b80e27979563c7043deed37df9b61564ab'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -2457,6 +2483,35 @@ def _d8_lowlevel_mkdir_chain_source(mkdir_line: str) -> str:
     ])
 
 
+def test_d8_js_mkdir_private_directory_mode_is_not_an_identity():
+    """The Studio publisher's exact private receipt mkdir uses an octal mode."""
+    path = "integrations/studio_direct_mcp/git-publish.mjs"
+    source = "    await mkdir(dir, {recursive:true, mode:0o700});\n"
+    assert _scan_added_identity_diff(_d8_frozen_source_diff(path, source)) == []
+
+
+@pytest.mark.parametrize("source", [
+    "await mkdir(peer_uid, {recursive:true, mode:0o700});",
+    "await makedir(dir, {recursive:true, mode:0o700});",
+    "await mkdir(dir, {recursive:false, mode:0o700});",
+    "await mkdir(dir, {recursive:true, mode:0o700, peer_uid:501});",
+    "await mkdir(dir, {recursive:true, mode:0o700}); peer_uid = 501;",
+    "await mkdir(dir, {recursive:true, mode:0o700}); anotherEffect();",
+    "await mkdir(dir, {recursive:true, mode:0o700});\npeer_uid = 501;",
+])
+def test_d8_js_mkdir_near_misses_remain_guarded(source):
+    path = "integrations/studio_direct_mcp/git-publish.mjs"
+    assert not _is_js_mkdir_mode_literal(source, "0o700")
+    findings = _scan_added_identity_diff(_d8_frozen_source_diff(path, source))
+    # The D8 scanner is contextual; a shape alone is not an identity. Actual
+    # identity-bearing text remains guarded even beside a mkdir mode token.
+    if "peer_uid:501" in source or "peer_uid = 501" in source:
+        assert "501" in findings
+    if "mkdir(peer_uid" in source:
+        assert "0o700" in findings
+
+
+
 def test_d8_lowlevel_mkdir_mode_slot_with_dir_fd_is_not_identity():
     """RED before the repair: the f904 os.mkdir mode slot was misclassified.
 
@@ -3163,8 +3218,8 @@ def test_d8_hermes_https_port_rejects_false_postimage():
 def test_d8_s14_private_parent_mode_is_one_exact_source_bound_token():
     path = 'ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'
     source = (ROOT / path).read_text()
-    assert hashlib.sha256(source.encode()).hexdigest() == '2a78630ccaf574da752c77d7b8f821723ccb264b970e2fe38b1976d886ca97a0'
-    assert REVIEWED_FILES[path]['sites'] == ((293, 79, 84, 'int', '0o700'),)
+    assert hashlib.sha256(source.encode()).hexdigest() == '80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337'
+    assert REVIEWED_FILES[path]['sites'] == ((294, 79, 84, 'int', '0o700'),)
     def scan(content, actual_path=path, postimage=True):
         return _scan_added_identity_diff(_d8_frozen_source_diff(actual_path, content),
             source_postimages={actual_path: content} if postimage else None)

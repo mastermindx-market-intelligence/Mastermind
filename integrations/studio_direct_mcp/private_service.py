@@ -304,10 +304,41 @@ FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256 = {
     "git-publish.mjs": "badd8a554ae8230808d18a1943aa49edb7ced51391ed2cbadb358cd015d62c3a",
     "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
 }
-FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256 = {
+# Previously accepted rejection-diagnostics publisher is an exact incoming
+# predecessor only. The next target embeds the recovery journal in the single
+# already-staged git-publish.mjs, avoiding a new unsealed runtime import.
+FLEET_V10_REJECTION_PUBLISHER_PREDECESSOR_SHA256 = {
     "git-publish.mjs": "10574812f428114314a1529df2d969e52b19d2db8d4f971564a98970d93adc67",
     "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
 }
+FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256 = {
+    "git-publish.mjs": "abc3b4dc6f3c9574ebb116e28a44f42136f8d8df3f2b0ec1504668daaf46b6bc",
+    "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
+}
+
+# One closed C1 fleet-gateway Git-failure correction. This adds a gateway-only
+# successor route to the incumbent owner for the single already-enrolled
+# chatgpt1 seat. It creates no seat, installer, publisher, registry, queue,
+# service or account, and it changes no publisher module, configuration byte,
+# fleet route, scheduling cap, dependency, launcher, credential or grant.
+#
+# The predecessor is the exact installed fleet gateway (public Git object
+# f87ac012...). The successor is the deterministic compile of that exact
+# predecessor by integrations/studio_direct_mcp/fleet_git_failure_compat.py,
+# which pins one fixed complete successor hash. The classifier and the
+# typed-Git catch are byte-exact copies of the current protected gateway's own
+# regions, so the truthfulness of the classification is inherited rather than
+# re-invented here.
+C1_GIT_FAILURE_COMPAT_ACCOUNT = "chatgpt1"
+C1_GIT_FAILURE_COMPAT_GATEWAY = "gateway.mjs"
+C1_GIT_FAILURE_COMPAT_PREDECESSOR_SHA256 = (
+    "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30")
+C1_GIT_FAILURE_COMPAT_PREDECESSOR_GIT_BLOB = (
+    "f87ac012339e82fe46bce5ddc70d1d04183d1b6e")
+C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256 = (
+    "336de8ed10e7da483d46e93bd98439fd00c3e277111b39b5baa9cf0e68074674")
+C1_GIT_FAILURE_COMPAT_SUCCESSOR_GIT_BLOB = (
+    "c02bcdada5217bbc987099e90ebdce236f023b86")
 
 # Exact sealed C2 predecessor observed for the one-seat Paper v10 -> v12 repair.
 # These are reviewed installation identity pins, never caller-selectable source or runtime paths.
@@ -855,9 +886,12 @@ CONTROL_BUNDLE_FILES = (
     "studio_direct_control.py",
     "private_service_status_successor.py",
     "private_service_pin.py",
+    "fleet_git_failure_compat.py",
     "private_service_pin_enrollment.py",
     "paper_v20_fleet_cohorts.py",
     "ops/native_fabric/quota_continuity/rollout/native_install.py",
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/native_generation_75330d.py",
     "ops/native_fabric/quota_continuity/rollout/native_generation.py",
     "ops/fabric_launch/install.py",
 )
@@ -1057,6 +1091,24 @@ def _pin_enrollment_owner_module():
     import importlib.util
     path = Path(__file__).resolve().with_name("private_service_pin_enrollment.py")
     spec = importlib.util.spec_from_file_location("_studio_pin_enrollment_owner", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _fleet_git_failure_compat_module():
+    """Load the deterministic source compiler for the one C1 gateway successor.
+
+    The compiler is pure source code: it decides whether a byte sequence is
+    exactly the reviewed predecessor and returns the exact accepted successor
+    bytes. It never touches a host, an installed directory or a live effect.
+    """
+    if _INSTALLED_CONTROL_CONTEXT is not None:
+        return _installed_control_module(
+            "_studio_fleet_git_failure_compat", "fleet_git_failure_compat.py")
+    import importlib.util
+    path = Path(__file__).resolve().with_name("fleet_git_failure_compat.py")
+    spec = importlib.util.spec_from_file_location("_studio_fleet_git_failure_compat", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -2092,7 +2144,8 @@ def _fabric_profile_setting(args, roots: dict, prior: dict | None) -> bool:
         if "fabricOnly" in config:
             if (config["fabricOnly"] is not True or config.get("gitPublish") is not False
                     or config.get("paperDesign") is not False
-                    or "repositoryWorkspaces" in config or "commissionPublication" in config):
+                    or "repositoryWorkspaces" in config or "commissionPublication" in config
+                    or "fleetStatus" in config):
                 raise SystemExit("invalid retained Fabric-only profile")
             previous = True
         if requested and not previous:
@@ -2474,6 +2527,16 @@ def _upgrade_fleet_v10_publisher_only(
         actual = hashlib.sha1(
             b"blob " + str(len(data)).encode("ascii") + b"\0" + data
         ).hexdigest()
+        if name == C1_GIT_FAILURE_COMPAT_GATEWAY:
+            # The reviewed C1 gateway-only successor is an accepted installed
+            # generation for this one seat only. No other account and no
+            # arbitrary gateway bytes are admitted.
+            accepted = {expected_blob}
+            if account == C1_GIT_FAILURE_COMPAT_ACCOUNT:
+                accepted.add(C1_GIT_FAILURE_COMPAT_SUCCESSOR_GIT_BLOB)
+            if actual not in accepted:
+                raise SystemExit("fleet publisher compatibility: preserved fleet generation changed")
+            continue
         if actual != expected_blob:
             raise SystemExit("fleet publisher compatibility: preserved fleet generation changed")
     config_path = roots["config"]
@@ -2502,10 +2565,11 @@ def _upgrade_fleet_v10_publisher_only(
             or "commissionPublication" in old_config
             or "modernFabricProtocol" in old_config):
         raise SystemExit("fleet publisher compatibility: original scoped capabilities changed")
-    # Preserve historical legacy/index-sync transition constraints. The
-    # current target admits only two *exact sealed* closed-profile predecessor
-    # pairs: original index-sync and installed merge-capable publisher. The
-    # sealed manifest, not the caller, chooses the transition.
+    # Preserve historical legacy/index-sync transition constraints. Only
+    # three exact sealed closed-profile predecessor pairs are eligible:
+    # original index-sync, merge-capable publisher and reviewed rejection-
+    # diagnostics generation. No wildcard source hashes or account expansion.
+    # The sealed manifest, not the caller, chooses the transition.
     original_publisher = old_config.get("gitPublish")
     expected_closed = _typed_git_config(user_root, closed_repositories=True)
     patch_hashes = FLEET_V10_PUBLISHER_PATCH_SHA256
@@ -2515,6 +2579,7 @@ def _upgrade_fleet_v10_publisher_only(
             for exact_pair in (
                 FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256,
                 FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256,
+                FLEET_V10_REJECTION_PUBLISHER_PREDECESSOR_SHA256,
             ))):
         patch_hashes = FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256
         preserve_config_bytes = True
@@ -2624,6 +2689,301 @@ def _upgrade_fleet_v10_publisher_only(
         "manifestSha256": _sha256_file(manifest_path),
         "gatewayAndFleetModulesPreserved": True,
         "repositoryWorkspacesPreserved": True,
+        "serviceStarted": False,
+    }, sort_keys=True))
+    return 0
+
+
+@contextmanager
+def _c1_retained_pin_state(account: str, roots: dict, *, operation="status"):
+    """Keep the incumbent selected-pin proof through this closed transition.
+
+    The native pin owner verifies its own intent, transformation, result,
+    selected phase and bridge. Its existing publication lock is retained for
+    apply, inside the existing lifecycle lock. No pin operation is replayed.
+    """
+    # The incumbent fleet-status transaction owns startup while its record
+    # exists. This formatter has no authority to rewrite or replay that plan.
+    if os.path.lexists(roots["state"] / "fleet-status-module-successor"):
+        raise SystemExit("C1_FLEET_STATUS_SUCCESSOR_REQUIRES_OWNER")
+    pin = _pin_owner_module()
+    path = roots["state"] / "native-pool-pin"
+    if not os.path.lexists(path):
+        yield {"present": False, "state": "ABSENT", "applicable": False}
+        return
+    pin.directory(sys.modules[__name__], path)
+    if not os.path.lexists(path / "result.json"):
+        raise SystemExit(
+            "C1 fleet gateway compatibility: retained native-pool pin is pending")
+    with pin.selected_applied_context(
+            sys.modules[__name__], account, roots, operation=operation) as (plan, raw):
+        current = _fabric_release_bytes(roots["config"])
+        manifest = _fabric_release_bytes(roots["manifest"])
+        original = (current == raw["config.after.json"]
+                    and manifest == raw["manifest.after.json"])
+        paper = (not original and pin._fleet_paper_v20_postpin_start(
+            sys.modules[__name__], account, roots, plan, raw, current, manifest))
+        if not (original or paper):
+            raise SystemExit(
+                "C1 fleet gateway compatibility: retained native-pool pin is not the current installed state")
+        yield {"present": True, "state": "COMPLETE", "applicable": True,
+               "planSha256": pin.plan_sha(sys.modules[__name__], plan),
+               "paperSuccessor": bool(paper)}
+
+
+def _cmd_c1_fleet_git_failure_compat(args, account: str) -> int:
+    """Dispatch the one closed chatgpt1 gateway-only transition.
+
+    The successor is compiled from the exact installed predecessor bytes, so
+    no caller-supplied source bundle reaches the installation. A read-only
+    preflight works while the service still runs; a modifying transaction
+    holds the incumbent persistent lifecycle lock inode through apply and
+    reconciliation.
+    """
+    _validate_account_label(account)
+    if account != C1_GIT_FAILURE_COMPAT_ACCOUNT:
+        raise SystemExit(
+            "C1 fleet gateway compatibility requires the enrolled chatgpt1 "
+            "owner and an exact manifest CAS")
+    label = f"com.mastermind.studio-direct-private.{account}"
+    if not os.path.isabs(args.source):
+        raise SystemExit("--source must be absolute")
+    source = Path(args.source)
+    if source.is_symlink() or not source.is_dir():
+        raise SystemExit(f"source dir invalid: {source}")
+    node_abs = _resolve_abs("--node", args.node)
+    backend_abs = _resolve_abs("--backend", args.backend)
+    port = int(args.port)
+    _validate_port(port)
+    roots = _build_runtime_roots(account)
+    if getattr(args, "publisher_preflight_only", False) is True:
+        with _c1_retained_pin_state(account, roots) as pin_state:
+            return _upgrade_c1_fleet_git_failure_compat(
+                args, source, node_abs, backend_abs, account, label, port, roots,
+                pin_state=pin_state)
+    with _c2_lifecycle_mutex(account):
+        with _c1_retained_pin_state(account, roots, operation="apply") as pin_state:
+            return _upgrade_c1_fleet_git_failure_compat(
+                args, source, node_abs, backend_abs, account, label, port, roots,
+                pin_state=pin_state)
+
+
+def _upgrade_c1_fleet_git_failure_compat(
+    args, source: Path, node_abs: Path, backend_abs: Path,
+    account: str, label: str, port: int, roots: dict, *, pin_state: dict,
+) -> int:
+    """Replace ONLY the installed C1 fleet gateway with the reviewed successor.
+
+    One closed, gateway-only transaction for the single already-enrolled
+    ``chatgpt1`` seat. The incumbent owner keeps owning installation, the
+    manifest/seal and the launchd lifecycle. This route replaces one module
+    and its manifest digest; it changes no publisher module, configuration
+    byte, fleet route, scheduling cap, dependency, package file, launcher,
+    credential or grant, and it never creates a seat, installer, publisher,
+    registry, queue or service.
+
+    The administrator supplies the exact observed manifest digest (CAS). The
+    gateway hash alone never qualifies an installation: the complete existing
+    file map, manifest/config/plist hashes, dependency seal, Node/backend
+    identity, account, port and the actual permitted publisher pair are all
+    verified first.
+    """
+    expected = getattr(args, "publisher_expected_manifest_sha256", None)
+    preview = getattr(args, "publisher_preflight_only", False)
+    if (account != C1_GIT_FAILURE_COMPAT_ACCOUNT or type(preview) is not bool
+            or not _sha256_hex(expected)
+            or getattr(args, "fabric_only", False)
+            or getattr(args, "enable_repository_workspaces", False)
+            or getattr(args, "os_commission_config_sha256", None)):
+        raise SystemExit(
+            "C1 fleet gateway compatibility requires the enrolled chatgpt1 "
+            "owner and an exact manifest CAS")
+    manifest_path = roots["manifest"]
+    config_path = roots["config"]
+    gateway_path = roots["base"] / C1_GIT_FAILURE_COMPAT_GATEWAY
+    for candidate in (manifest_path, config_path, gateway_path):
+        _assert_dest_safe(candidate)
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C1 fleet gateway compatibility: installed manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    if (prior.get("version") != MANIFEST_VERSION
+            or frozenset(prior["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+            or not prior.get("dependencyTreeHash")
+            or prior.get("node") != str(node_abs)
+            or prior.get("backend") != str(backend_abs)
+            or prior.get("host") != "127.0.0.1"
+            or prior.get("port") != port):
+        raise SystemExit("C1 fleet gateway compatibility: original sealed identity does not match")
+    # Every preserved fleet module must still be the incumbent's exact
+    # reviewed generation. Only the gateway itself is replaced.
+    for name, expected_blob in FLEET_V10_PRESERVED_GIT_BLOBS.items():
+        if name == C1_GIT_FAILURE_COMPAT_GATEWAY:
+            continue
+        candidate = roots["base"] / name
+        _assert_dest_safe(candidate)
+        data = candidate.read_bytes()
+        actual = hashlib.sha1(
+            b"blob " + str(len(data)).encode("ascii") + b"\0" + data
+        ).hexdigest()
+        if actual != expected_blob:
+            raise SystemExit("C1 fleet gateway compatibility: preserved fleet generation changed")
+    # The installed publisher pair must be one the incumbent already accepts.
+    installed_pair = {name: prior["files"].get(name)
+                      for name in ("git-publish.mjs", "workspace-access.mjs")}
+    accepted_pairs = (
+        dict(FLEET_V10_PUBLISHER_PATCH_SHA256),
+        dict(FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256),
+        dict(FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256),
+        dict(FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256),
+        {"git-publish.mjs": FLEET_V10_PREVIOUS_CLOSED_PUBLISHER_SHA256,
+         "workspace-access.mjs": FLEET_V10_PUBLISHER_PATCH_SHA256["workspace-access.mjs"]},
+    )
+    if installed_pair not in accepted_pairs:
+        raise SystemExit("C1 fleet gateway compatibility: unrecognized prior publisher identity")
+    old_config_bytes = config_path.read_bytes()
+    old_manifest_bytes = manifest_path.read_bytes()
+    if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or hashlib.sha256(old_manifest_bytes).hexdigest() != expected):
+        raise SystemExit("C1 fleet gateway compatibility: verified snapshot changed during preflight")
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("C1 fleet gateway compatibility: original config invalid") from exc
+    routes = old_config.get("fleetRouting") if type(old_config) is dict else None
+    if (type(old_config) is not dict
+            or type(routes) is not dict or routes.get("enabled") is not True
+            or not isinstance(routes.get("routes"), list) or len(routes["routes"]) < 1
+            or type(old_config.get("fleetStatus")) is not dict
+            or old_config.get("fabricOnly") is True
+            or "commissionPublication" in old_config
+            or "modernFabricProtocol" in old_config):
+        raise SystemExit("C1 fleet gateway compatibility: original scoped capabilities changed")
+    # The installed gateway must be exactly the reviewed predecessor. The
+    # compiler refuses anything else, including a preimage with one changed
+    # byte, several anchors or a preimage that is already patched.
+    installed_gateway = gateway_path.read_bytes()
+    compat = _fleet_git_failure_compat_module()
+    try:
+        compat.verify_preimage(installed_gateway)
+        successor = compat.compile_successor(installed_gateway)
+    except compat.CompatError as exc:
+        raise SystemExit(
+            "C1 fleet gateway compatibility: installed gateway is not the reviewed "
+            f"predecessor ({exc.code})") from None
+    if (hashlib.sha256(successor).hexdigest() != C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256
+            or compat.git_blob_sha1(successor) != C1_GIT_FAILURE_COMPAT_SUCCESSOR_GIT_BLOB):
+        raise SystemExit("C1 fleet gateway compatibility: compiled successor is not the pinned successor")
+    # A retained native-pool pin is qualified before anything is written. A
+    # pending, unknown or foreign pin refuses; an applied pin keeps its own
+    # records, plan, result and native phase untouched.
+    if pin_state.get("present") and not pin_state.get("applicable"):
+        raise SystemExit(
+            "C1 fleet gateway compatibility: retained native-pool pin is "
+            f"{pin_state.get('state')} and cannot be advanced")
+    future = dict(prior)
+    future["files"] = dict(prior["files"])
+    future["files"][C1_GIT_FAILURE_COMPAT_GATEWAY] = hashlib.sha256(successor).hexdigest()
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("C1 fleet gateway compatibility: prospective manifest invalid")
+    target_manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C1 fleet gateway compatibility: installed state changed during planning")
+    diff = compat.diff_report(installed_gateway, successor)
+    guard = compat.guard_report(successor)
+    if preview:
+        try:
+            stopped = _lifecycle_inspect(account, label, roots, require_positive=True) is None
+            blocker = None
+        except SystemExit as exc:
+            stopped = False
+            blocker = str(exc)
+        print(json.dumps({
+            "preflight": True, "effect": "NOT_APPLIED", "account": account,
+            "label": label, "port": port,
+            "originalManifestSha256": expected,
+            "targetManifestSha256": hashlib.sha256(target_manifest_bytes).hexdigest(),
+            "gatewayModule": C1_GIT_FAILURE_COMPAT_GATEWAY,
+            "preimageGatewaySha256": C1_GIT_FAILURE_COMPAT_PREDECESSOR_SHA256,
+            "preimageGatewayGitBlob": C1_GIT_FAILURE_COMPAT_PREDECESSOR_GIT_BLOB,
+            "targetGatewaySha256": C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256,
+            "targetGatewayGitBlob": C1_GIT_FAILURE_COMPAT_SUCCESSOR_GIT_BLOB,
+            "targetGatewaySize": len(successor),
+            "sourceDiff": {"hunks": diff["hunks"], "addedLines": diff["addedLines"],
+                           "removedLines": diff["removedLines"]},
+            "preservedGuard": guard,
+            "preservedFiles": sorted(prior["files"]),
+            "publisherPairPreserved": installed_pair,
+            "fleetRoutesPreserved": len(routes["routes"]),
+            "concurrencyPreserved": [old_config.get("maxPerSessionConcurrency"),
+                                     old_config.get("maxQueuedPerSession")],
+            "configBytesPreserved": True,
+            "nativePoolPin": pin_state,
+            "serviceStopped": stopped,
+            "blocker": blocker,
+            "serviceStarted": False,
+        }, sort_keys=True))
+        return 0
+    # A stopped-service prerequisite needs a positive stop proof. The generic
+    # launchd probe treats every nonzero launchctl result as absence, which is
+    # not proof that the service stopped.
+    if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
+        raise SystemExit("refusing C1 fleet gateway upgrade while service is loaded; stop first")
+    # Reconfirm every observed byte immediately before the first effect.
+    if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+            or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]
+            or hashlib.sha256(gateway_path.read_bytes()).hexdigest()
+            != C1_GIT_FAILURE_COMPAT_PREDECESSOR_SHA256):
+        raise SystemExit("C1 fleet gateway compatibility: original installation changed")
+    old_bytes = {gateway_path: installed_gateway, manifest_path: old_manifest_bytes}
+    planned = {gateway_path: successor, manifest_path: target_manifest_bytes}
+    committed = False
+    try:
+        for target, payload in planned.items():
+            _atomic_write_bytes(target, payload)
+        committed = True
+        _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    except BaseException as exc:
+        if committed:
+            raise SystemExit(
+                "C1 fleet gateway compatibility: EFFECT_UNKNOWN after manifest commit; "
+                "inspect the original service before attempting recovery"
+            ) from exc
+        try:
+            # os.replace may have succeeded even when a later fsync failed, so
+            # a return-code ledger cannot prove which file changed. Reconcile
+            # every planned path by bytes and distinguish the exact original,
+            # the exact target and any foreign or mixed bytes.
+            if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
+                raise RuntimeError("service became loaded during transaction")
+            observed = {target: target.read_bytes() for target in planned}
+            if any(observed[target] not in (old_bytes[target], planned[target])
+                   for target in planned):
+                raise RuntimeError("foreign or mixed bytes while recovering")
+            for target in reversed(tuple(planned)):
+                if observed[target] != old_bytes[target]:
+                    _atomic_write_bytes(target, old_bytes[target])
+            if (any(target.read_bytes() != old_bytes[target] for target in planned)
+                    or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+                raise RuntimeError("rollback byte identity differs")
+            _verify_staged_install(account, label, roots, require_runtime_seal=True)
+        except BaseException as rollback_exc:
+            raise SystemExit(
+                "C1 fleet gateway compatibility: EFFECT_UNKNOWN during rollback; "
+                "do not restart or replay until the original state is reconciled"
+            ) from rollback_exc
+        raise SystemExit(
+            "C1 fleet gateway compatibility: NOT_APPLIED; original state restored") from exc
+    print(json.dumps({
+        "c1FleetGitFailureCompatibility": True, "account": account, "effect": "APPLIED",
+        "label": label, "port": port,
+        "manifestSha256": _sha256_file(manifest_path),
+        "gatewayModule": C1_GIT_FAILURE_COMPAT_GATEWAY,
+        "targetGatewaySha256": C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256,
+        "targetGatewayGitBlob": C1_GIT_FAILURE_COMPAT_SUCCESSOR_GIT_BLOB,
+        "otherFleetModulesPreserved": True,
+        "publisherPairPreserved": True,
+        "configBytesPreserved": True,
+        "nativePoolPin": pin_state,
         "serviceStarted": False,
     }, sort_keys=True))
     return 0
@@ -3149,6 +3509,13 @@ def _upgrade_c2_personal_git_timeout_only(
 @_fabric_lifecycle_serialized()
 def cmd_upgrade(args) -> int:
     account = args.account
+    # The closed C1 gateway-only route is dispatched before the generic restage
+    # refusal. It qualifies the retained native-pool pin itself, replaces one
+    # module and never restages the seat, so it is not a generic capability
+    # rebuild. Every other account and every generic upgrade keeps the
+    # existing refusal unchanged.
+    if getattr(args, "c1_fleet_git_failure_compat", False) is True:
+        return _cmd_c1_fleet_git_failure_compat(args, account)
     _pin_reject_generic_restage(account)
     _validate_account_label(account)
     label = f"com.mastermind.studio-direct-private.{account}"
@@ -3212,7 +3579,9 @@ def cmd_upgrade(args) -> int:
     # Reject only actual explicit option values, not arbitrary Mock values.
     if (getattr(args, "publisher_preflight_only", False) is True
             or type(getattr(args, "publisher_expected_manifest_sha256", None)) is str):
-        raise SystemExit("publisher preflight and CAS options require --publisher-only-fleet-v10")
+        raise SystemExit(
+            "publisher preflight and CAS options require --publisher-only-fleet-v10 "
+            "or --c1-fleet-git-failure-compat")
     if _launchd_inspect(label) is not None:
         raise SystemExit("refusing upgrade while service is running; stop first")
     prior = _verify_staged_install(
@@ -4376,6 +4745,8 @@ def build_parser() -> argparse.ArgumentParser:
                            help="exact sealed C2 Personal stopped-service Git command budget patch")
             s.add_argument("--publisher-only-fleet-v10", action="store_true",
                            help="preserve the exact sealed enrolled fleet v0.1.10 runtime; patch only two publisher modules")
+            s.add_argument("--c1-fleet-git-failure-compat", action="store_true",
+                           help="closed chatgpt1-only fleet gateway Git-failure successor; exact manifest CAS required")
             s.add_argument("--publisher-expected-manifest-sha256",
                            help="CAS pin for the original sealed, approved fleet manifest")
             s.add_argument("--publisher-preflight-only", action="store_true",

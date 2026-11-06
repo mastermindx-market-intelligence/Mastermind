@@ -20,6 +20,8 @@ from control_plane.executive_worker_broker import BrokerStateError
 
 CONFIG_SCHEMA_VERSION = "mastermind.executive_fabric_bindings/v1"
 REMOTE_CONFIG_SCHEMA_VERSION = "mastermind.executive_fabric_bindings/v2"
+HOST_READ_CONFIG_SCHEMA_VERSION = "mastermind.executive_fabric_bindings/v3"
+HERMES_HOST_READ_SCHEMA = "mastermind.hermes_role_metadata_host_binding/v1"
 MAX_CONFIG_BYTES = 64 * 1024
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _BINDING_FIELDS = frozenset(field.name for field in dataclasses.fields(FabricHostBinding))
@@ -137,27 +139,93 @@ def _bindings(raw: bytes) -> tuple[FabricHostBinding, ...]:
     return tuple(bindings)
 
 
+@dataclasses.dataclass(frozen=True)
+class HermesHostObservationBinding:
+    """One pinned host-read route, with no Worker or Attempt identity."""
+
+    host_ref: str
+    transport: object
+    expected_host_binding_sha256: str
+    expected_implementation_sha: str
+
+    @classmethod
+    def from_document(cls, value):
+        fields = {'schema', 'host_ref', 'transport', 'expected_host_binding_sha256',
+                  'expected_implementation_sha'}
+        if (type(value) is not dict or set(value) != fields
+                or value['schema'] != HERMES_HOST_READ_SCHEMA):
+            raise FabricCompositionError('Hermes host observation differs from its closed schema')
+        from common.hermes_role_status_contract import RoleStatusError, validate_source_pins
+        from control_plane.remote_worker_transport import TransportValidationError, validate_host_ref
+        from control_plane.fabric_remote_transport import FabricRemoteTransport
+        try:
+            validate_host_ref(value['host_ref'])
+            validate_source_pins(value['expected_host_binding_sha256'], value['expected_implementation_sha'])
+        except (RoleStatusError, TransportValidationError) as exc:
+            raise FabricCompositionError('Hermes observation requires exact host and source pins') from exc
+        return cls(value['host_ref'], FabricRemoteTransport.from_host_document(value['transport']),
+                   value['expected_host_binding_sha256'], value['expected_implementation_sha'])
+
+
+def _remote_transports(values, bindings):
+    index = {(b.host_ref, b.worker_id): b for b in bindings}
+    from control_plane.fabric_remote_transport import FabricRemoteTransport
+    transports = {}
+    for value in values:
+        if type(value) is not dict:
+            raise FabricCompositionError('Remote Fabric transport is invalid')
+        key = (value.get('host_ref'), value.get('worker_id'))
+        if any(type(part) is not str for part in key) or key not in index or key in transports:
+            raise FabricCompositionError('Remote Fabric transport requires one exact physical binding')
+        transports[key] = FabricRemoteTransport.from_document(value, index[key])
+    return MappingProxyType(transports)
+
+
 def _composition(raw):
     document = _document(raw)
+    if type(document) is dict and document.get('schema_version') == HOST_READ_CONFIG_SCHEMA_VERSION:
+        if (set(document) != {'schema_version', 'bindings', 'remote_transports', 'hermes_role_metadata_read'}
+                or type(document['bindings']) is not list
+                or type(document['remote_transports']) is not list):
+            raise FabricCompositionError('Host-read Fabric composition differs from its closed schema')
+        observation = HermesHostObservationBinding.from_document(document['hermes_role_metadata_read'])
+        legacy = dict(schema_version=CONFIG_SCHEMA_VERSION, bindings=document['bindings'])
+        bindings = (_bindings(json.dumps(legacy, ensure_ascii=False, allow_nan=False).encode())
+                    if document['bindings'] else ())
+        transports = _remote_transports(document['remote_transports'], bindings)
+        if any(key[0] == observation.host_ref and transport.binding != observation.transport.binding
+               for key, transport in transports.items()):
+            raise FabricCompositionError('Conflicting transports for the same observation host are forbidden')
+        return bindings, transports, observation
     if type(document) is dict and document.get('schema_version') == REMOTE_CONFIG_SCHEMA_VERSION:
-        if (set(document) != {'schema_version', 'bindings', 'remote_transports'}
+        if (set(document) not in (
+                    {'schema_version', 'bindings', 'remote_transports'},
+                    {'schema_version', 'bindings', 'remote_transports', 'hermes_role_metadata_read'})
                 or type(document['remote_transports']) is not list
                 or not document['remote_transports']):
             raise FabricCompositionError('Remote Fabric composition differs from its closed schema')
         legacy = dict(schema_version=CONFIG_SCHEMA_VERSION, bindings=document['bindings'])
         bindings = _bindings(json.dumps(legacy, ensure_ascii=False, allow_nan=False).encode())
-        index = {(b.host_ref, b.worker_id): b for b in bindings}
-        from control_plane.fabric_remote_transport import FabricRemoteTransport
-        transports = {}
-        for value in document['remote_transports']:
-            if type(value) is not dict:
-                raise FabricCompositionError('Remote Fabric transport is invalid')
-            key = (value.get('host_ref'), value.get('worker_id'))
-            if any(type(part) is not str for part in key) or key not in index or key in transports:
-                raise FabricCompositionError('Remote Fabric transport requires one exact physical binding')
-            transports[key] = FabricRemoteTransport.from_document(value, index[key])
-        return bindings, MappingProxyType(transports)
-    return _bindings(raw), MappingProxyType({})
+        transports = _remote_transports(document['remote_transports'], bindings)
+        observation = None
+        if 'hermes_role_metadata_read' in document:
+            value = document['hermes_role_metadata_read']
+            fields = {'host_ref', 'worker_id', 'expected_host_binding_sha256',
+                      'expected_implementation_sha'}
+            if type(value) is not dict or set(value) != fields:
+                raise FabricCompositionError('Hermes observation selection differs from its closed schema')
+            key = (value['host_ref'], value['worker_id'])
+            if any(type(part) is not str for part in key) or key not in transports:
+                raise FabricCompositionError('Hermes observation requires one exact installed remote transport')
+            from common.hermes_role_status_contract import RoleStatusError, validate_source_pins
+            try:
+                validate_source_pins(value['expected_host_binding_sha256'],
+                                     value['expected_implementation_sha'])
+            except RoleStatusError as exc:
+                raise FabricCompositionError('Hermes observation requires exact source pins') from exc
+            observation = MappingProxyType(dict(value))
+        return bindings, transports, observation
+    return _bindings(raw), MappingProxyType({}), None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -169,6 +237,7 @@ class FabricBindingSource:
     _file_identity: tuple[int, ...] = dataclasses.field(repr=False)
     _index: Mapping[tuple[str, str], FabricHostBinding] = dataclasses.field(repr=False, compare=False)
     _remote_index: Mapping = dataclasses.field(repr=False, compare=False)
+    _hermes_role_metadata_read: Mapping | HermesHostObservationBinding | None = dataclasses.field(default=None, repr=False, compare=False)
 
     @classmethod
     def from_path(cls, path: str | Path, expected_sha256: str) -> "FabricBindingSource":
@@ -178,20 +247,73 @@ class FabricBindingSource:
             raise FabricCompositionError("Fabric composition requires a filesystem path")
         fixed_path = _absolute_path(str(path))
         raw, identity = _read_pinned(fixed_path, expected_sha256)
-        bindings, remote_index = _composition(raw)
+        bindings, remote_index, observation = _composition(raw)
         return cls(fixed_path, expected_sha256, bindings, identity,
-                   MappingProxyType({(b.host_ref, b.worker_id): b for b in bindings}), remote_index)
+                   MappingProxyType({(b.host_ref, b.worker_id): b for b in bindings}),
+                   remote_index, observation)
 
-    def __call__(self, host_ref: str, worker_id: str) -> FabricHostBinding:
+    def require_current(self) -> None:
         _, identity = _read_pinned(self.path, self.expected_sha256)
         if identity != self._file_identity:
             raise FabricCompositionError("Fabric composition file identity changed after pinning")
+
+    @property
+    def has_execution_bindings(self) -> bool:
+        return bool(self.bindings or self._remote_index)
+
+    def __call__(self, host_ref: str, worker_id: str) -> FabricHostBinding:
+        self.require_current()
         if type(host_ref) is not str or type(worker_id) is not str:
             raise FabricCompositionError("Fabric lookup requires exact host and worker strings")
         try:
             return self._index[(host_ref, worker_id)]
         except KeyError as exc:
             raise FabricCompositionError("Exact Fabric host/worker binding is not installed") from exc
+
+    def hermes_roles_reader(self):
+        """Compose the fixed host read without admitting a Worker or Attempt."""
+        selection = self._hermes_role_metadata_read
+        if selection is None:
+            return None
+        if type(selection) is HermesHostObservationBinding:
+            host_ref = selection.host_ref
+            transport = selection.transport
+            host_pin, implementation_pin = selection.expected_host_binding_sha256, selection.expected_implementation_sha
+            physical = None
+        else:
+            key = (selection['host_ref'], selection['worker_id'])
+            physical, transport = self._index[key], self._remote_index[key]
+            host_ref = selection['host_ref']
+            host_pin, implementation_pin = selection['expected_host_binding_sha256'], selection['expected_implementation_sha']
+
+        def require_current():
+            self.require_current()
+            if physical is not None and self(*key) != physical:
+                raise FabricCompositionError('Hermes observation route changed')
+            transport.require_current()
+
+        async def read():
+            from common import workspace_byok_read_contract as wire
+            from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
+            try:
+                require_current()
+            except (FabricCompositionError, OSError):
+                return wire.unavailable('SOURCE_CHANGED')
+            try:
+                client = RemoteWorkerBrokerClient.for_host_observation(
+                    transport.binding, host_ref=host_ref,
+                    expected_host_binding_sha256=host_pin,
+                    expected_implementation_sha=implementation_pin)
+                result = await client.read_hermes_roles()
+            except Exception:
+                result = wire.unavailable()
+            try:
+                require_current()
+            except (FabricCompositionError, OSError):
+                return wire.unavailable('SOURCE_CHANGED')
+            return result
+
+        return read
 
     def client_for(self, physical: FabricHostBinding, payload):
         if self(physical.host_ref, physical.worker_id) != physical:

@@ -29,6 +29,12 @@ _WEEKLY_MAX_AGE = 9
 _INTRADAY_MAX_AGE = 1
 _MAX_LIMIT = 20
 
+_CHINA_COMPANY_EVIDENCE_ARTIFACT = "site/china_intel/command.json"
+_CHINA_COMMAND_SCHEMA = "china_intel.command.v1"
+_CHINA_COMPANY_EVIDENCE_SOURCE_SCHEMA = "china_intel.company_evidence.v1"
+_CHINA_COMPANY_EVIDENCE_PACKET_SCHEMA = "mastermind.china_company_evidence.v1"
+_CHINA_A_SHARE_RE = re.compile(r"^\d{6}\.(?:SS|SZ)$")
+
 
 def _clamp_limit(value: int | None, default: int = 8) -> int:
     try:
@@ -391,6 +397,306 @@ def _fit_content(value: Any, *, budget: int) -> Any:
         if _packet_size(compact) <= budget:
             return compact
     return {"status": "content_budget_exceeded", "_content_truncated": True}
+
+
+def _fit_china_company_evidence(packet: dict) -> dict:
+    """Fit CIE-15 without dropping its authority or negative-context envelope."""
+    budget = 6_500
+    complete = {**packet, "packet_truncated": False}
+    if _packet_size(complete) <= budget:
+        return complete
+
+    row_priority = (
+        "basis", "detail_en", "detail_zh", "kind", "title", "source",
+        "source_id", "source_url", "source_published_at",
+        "system_recorded_at", "visitor_identity_state",
+    )
+    exact_provenance = (
+        "source", "source_id", "source_url", "source_published_at",
+        "system_recorded_at", "visitor_identity_state",
+    )
+
+    def project_rows(rows: list, limit: int, text_limit: int) -> list:
+        projected = []
+        for row in rows[:limit]:
+            if not isinstance(row, dict):
+                projected.append(_bounded_value(row, str_limit=text_limit))
+                continue
+            ordered = {key: row[key] for key in row_priority if key in row}
+            ordered.update({key: value for key, value in row.items() if key not in ordered})
+            item = _bounded_value(
+                ordered, list_limit=limit, dict_limit=14,
+                str_limit=text_limit, max_depth=4,
+            )
+            # A shortened URL, source ID or clock is not usable provenance.
+            for key in exact_provenance:
+                if key in row:
+                    item[key] = row[key]
+            projected.append(item)
+        return projected
+
+    # Never pass this top-level packet through an insertion-order dict limiter.
+    # Source, clocks, market context and both authority boundaries remain exact.
+    for limit, text_limit in ((6, 180), (4, 120), (2, 90), (1, 60)):
+        compact = {
+            **packet,
+            "name": _bounded_value(packet.get("name"), str_limit=140),
+            "evidence": project_rows(packet["evidence"], limit, text_limit),
+            "packet_truncated": True,
+            "compaction": {
+                "evidence_rows_omitted": max(0, len(packet["evidence"]) - limit),
+                "contradiction_rows_omitted": 0,
+                "unknown_rows_omitted": 0,
+            },
+        }
+        if _packet_size(compact) <= budget:
+            return compact
+
+    # Bulk positive evidence has reached one row before negative text/row
+    # compaction begins. Keep at least that row's exact citation when present.
+    for limit, text_limit in ((6, 180), (4, 120), (2, 90), (1, 60), (1, 40)):
+        compact = {
+            **packet,
+            "name": _bounded_value(packet.get("name"), str_limit=140),
+            "evidence": project_rows(packet["evidence"], 1, 60),
+            "contradictions": project_rows(packet["contradictions"], limit, text_limit),
+            "falsifier": {
+                key: _bounded_value(value, str_limit=text_limit)
+                for key, value in packet["falsifier"].items()
+            },
+            "unknowns": _bounded_value(
+                packet["unknowns"], list_limit=limit, str_limit=text_limit,
+            ),
+            "packet_truncated": True,
+            "compaction": {
+                "evidence_rows_omitted": max(0, len(packet["evidence"]) - 1),
+                "contradiction_rows_omitted": max(0, len(packet["contradictions"]) - limit),
+                "unknown_rows_omitted": max(0, len(packet["unknowns"]) - limit),
+            },
+        }
+        if _packet_size(compact) <= budget:
+            return compact
+
+    # Unrepresentable mandatory context is unavailable, never a smaller
+    # positive packet that silently lost its clocks, warnings or boundaries.
+    return {
+        "schema": packet["schema"],
+        "status": "packet_budget_exceeded",
+        "ticker": packet["ticker"],
+        "name": None,
+        "context_only": True,
+        "execution_authority": False,
+        "authority": packet["authority"],
+        "source": {
+            "artifact": _CHINA_COMPANY_EVIDENCE_ARTIFACT,
+            "url": f"{_URL_BASE}/china_intel.html",
+            "available": False,
+            "status": "packet_budget_exceeded",
+        },
+        "contradictions": [],
+        "falsifier": {"en": None, "zh": None},
+        "unknowns": ["mandatory_context_exceeds_packet_budget"],
+        "evidence_context": {"status": "unavailable", "clocks": None},
+        "evidence": [],
+        "recognition": packet["recognition"],
+        "prophet_timing": packet["prophet_timing"],
+        "packet_truncated": True,
+    }
+
+
+def china_company_evidence(ticker: str) -> dict:
+    """Return one bounded, read-only China company-evidence packet.
+
+    The reader consumes only the fixed vendored Macro publication at
+    site/china_intel/command.json. It never fetches source documents, never
+    reads an arbitrary path, and never grants ranking, Prophet, sizing, exit or
+    trade authority. CIE-14 recognition fields attach only after their separate
+    acceptance; this slice is grounded in the already PROVEN_LIVE CIE-06
+    company-evidence contract.
+    """
+    symbol = _ticker(ticker)
+    authority = {
+        "context_only": True,
+        "may_rank": False,
+        "may_feed_prophet": False,
+        "may_size": False,
+        "may_change_eligibility": False,
+        "may_change_entry": False,
+        "may_change_exit": False,
+        "may_trade": False,
+        "may_execute_source_text": False,
+    }
+
+    def _base(status: str, *, source: dict | None = None) -> dict:
+        return {
+            "schema": _CHINA_COMPANY_EVIDENCE_PACKET_SCHEMA,
+            "status": status,
+            "ticker": symbol,
+            "context_only": True,
+            "execution_authority": False,
+            "authority": authority,
+            "source": source,
+        }
+
+    if symbol is None or not _CHINA_A_SHARE_RE.fullmatch(symbol):
+        return _fit_packet(_base("invalid_or_off_venue_ticker"), budget=6_500)
+
+    payload, health = _read_vendor(
+        _CHINA_COMPANY_EVIDENCE_ARTIFACT,
+        max_age_days=_DAILY_MAX_AGE,
+        cadence="settled-close",
+        authority="context",
+    )
+    source = {
+        **_source_ref(health),
+        "url": f"{_URL_BASE}/china_intel.html",
+    }
+    if not health.get("available"):
+        return _fit_packet(_base("unavailable", source=source), budget=6_500)
+
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema") != _CHINA_COMMAND_SCHEMA
+        or payload.get("is_context_only") is not True
+        or not isinstance(payload.get("command"), list)
+    ):
+        return _fit_packet(
+            {
+                **_base("unsupported_contract", source=source),
+                "observed_contract": {
+                    "schema": payload.get("schema") if isinstance(payload, dict) else None,
+                    "is_context_only": (
+                        payload.get("is_context_only") if isinstance(payload, dict) else None
+                    ),
+                },
+            },
+            budget=6_500,
+        )
+
+    rows = [
+        row for row in payload["command"]
+        if isinstance(row, dict)
+        and str(row.get("ticker") or "").upper().strip() == symbol
+    ]
+    if not rows:
+        return _fit_packet(
+            {
+                **_base("not_in_published_cohort", source=source),
+                "publication": {
+                    "schema": payload.get("schema"),
+                    "as_of": payload.get("as_of"),
+                    "generated_utc": payload.get("generated_utc"),
+                    "n_universe": payload.get("n_universe"),
+                    "command_count": len(payload["command"]),
+                },
+            },
+            budget=6_500,
+        )
+    if len(rows) != 1:
+        return _fit_packet(
+            {
+                **_base("ambiguous_published_identity", source=source),
+                "matching_rows": len(rows),
+            },
+            budget=6_500,
+        )
+
+    row = rows[0]
+    evidence = row.get("company_evidence")
+    if (
+        not isinstance(evidence, dict)
+        or evidence.get("schema") != _CHINA_COMPANY_EVIDENCE_SOURCE_SCHEMA
+        or evidence.get("is_context_only") is not True
+    ):
+        return _fit_packet(
+            {
+                **_base("unsupported_company_evidence_contract", source=source),
+                "observed_contract": {
+                    "schema": evidence.get("schema") if isinstance(evidence, dict) else None,
+                    "is_context_only": (
+                        evidence.get("is_context_only") if isinstance(evidence, dict) else None
+                    ),
+                },
+            },
+            budget=6_500,
+        )
+
+    upstream_authority = evidence.get("authority")
+    if (
+        not isinstance(upstream_authority, dict)
+        or upstream_authority.get("ranking") != "none"
+        or upstream_authority.get("prophet") != "none"
+        or upstream_authority.get("trade") != "none"
+    ):
+        return _fit_packet(
+            {
+                **_base("authority_contract_refused", source=source),
+                "observed_authority": _bounded_value(
+                    upstream_authority,
+                    list_limit=2,
+                    dict_limit=8,
+                    str_limit=100,
+                    max_depth=2,
+                ),
+            },
+            budget=6_500,
+        )
+
+    contradictions = (
+        evidence.get("contradictions")
+        if isinstance(evidence.get("contradictions"), list)
+        else []
+    )
+    unknowns = (
+        evidence.get("unknowns")
+        if isinstance(evidence.get("unknowns"), list)
+        else []
+    )
+    source_rows = (
+        evidence.get("evidence")
+        if isinstance(evidence.get("evidence"), list)
+        else []
+    )
+
+    packet = {
+        "schema": _CHINA_COMPANY_EVIDENCE_PACKET_SCHEMA,
+        "status": "stale" if health.get("status") == "stale" else "ok",
+        "ticker": symbol,
+        "name": row.get("name"),
+        "context_only": True,
+        "execution_authority": False,
+        "authority": authority,
+        "source": {
+            **source,
+            "root_schema": payload.get("schema"),
+            "root_as_of": payload.get("as_of"),
+            "root_generated_utc": payload.get("generated_utc"),
+            "company_schema": evidence.get("schema"),
+        },
+        "contradictions": contradictions[:6],
+        "falsifier": {
+            "en": row.get("falsifier"),
+            "zh": row.get("falsifier_zh"),
+        },
+        "unknowns": unknowns[:12],
+        "evidence_context": {
+            "source_state": evidence.get("source_state"),
+            "coverage_start": evidence.get("coverage_start"),
+            "clocks": evidence.get("clocks"),
+            "change": evidence.get("change"),
+            "market_context": evidence.get("market_context"),
+        },
+        "evidence": source_rows[:6],
+        "recognition": {
+            "status": "not_attached_until_accepted_cie14",
+            "may_multiply_conviction": False,
+        },
+        "prophet_timing": {
+            "included": False,
+            "reason": "separate_authority",
+        },
+    }
+    return _fit_china_company_evidence(packet)
 
 
 def _num(value: Any) -> float | None:

@@ -28,15 +28,30 @@ def _missing(work_ref):
 
 
 def capture_plan_continuity(*, owner, git, work_ref, macro_sha,
-                            workstream_source, workstream_bytes):
+                            workstream_source, workstream_bytes, executable_macro_sha=None,
+                            _data_closure=None, code_git=None):
     """Use the parent's bounded Git runner and existing cumulative deadline."""
+    if _data_closure is not None:
+        _data_closure.update(state='CAPTURED',captures=[])
+    def retain(kind,capture):
+        if _data_closure is not None:
+            source=capture['source']
+            _data_closure['captures'].append(dict(kind=kind,path=source['path'],
+                commit=source['commit'] if kind=='ANCHORED_CONTENT' else 'CURRENT_DATA',
+                content_sha256=source['content_sha256'],mode='100644'))
+    def missing(*,fixed=False):
+        if _data_closure is not None:
+            _data_closure['state']='FIXED_READER_UNAVAILABLE' if fixed else 'FAILED'
+        return _missing(work_ref)
+    code_sha = macro_sha if executable_macro_sha is None else executable_macro_sha
+    read_code = git if code_git is None else code_git
     if not callable(getattr(owner, "select_project_plan_adoption", None)):
-        return _missing(work_ref)  # Older canonical owner: retain truthful missingness.
+        return missing(fixed=True)  # Older configured reader, identical at both refs.
     try:
-        membership = git("ls-tree", "-z", macro_sha, "--", _HELPER)
+        membership = read_code("ls-tree", "-z", code_sha, "--", _HELPER)
         if re.fullmatch(r"100644 blob [0-9a-f]{40}\t" + re.escape(_HELPER) + "\x00", membership) is None:
-            return _missing(work_ref)
-        helper_text = git("show", macro_sha + ":" + _HELPER, limit=1048576)
+            return missing(fixed=True)
+        helper_text = read_code("show", code_sha + ":" + _HELPER, limit=1048576)
         helper = types.ModuleType("_captured_agentos_plan_content_contract")
         helper.__file__ = "scripts/agentos_project_plan_contract.py"
         exec(compile(helper_text, helper.__file__, "exec"), helper.__dict__)
@@ -115,9 +130,10 @@ def capture_plan_continuity(*, owner, git, work_ref, macro_sha,
             if metadata.get("work_ref") != work_ref and work_ref not in affects:
                 continue
             decisions.append(capture)
+            retain('ADOPTION_DECISION',capture)
             parsed_records.append(record)
         if len(decisions) > 128:
-            return _missing(work_ref)
+            return missing()
         try:
             current = owner.select_project_plan_adoption(parsed_records, work_ref=work_ref)
         except ValueError:
@@ -144,11 +160,12 @@ def capture_plan_continuity(*, owner, git, work_ref, macro_sha,
             if path not in paths:
                 paths.append(path)
         if len(paths) > 64:
-            return _missing(work_ref)
+            return missing()
         artifacts_captured = batch(macro_sha, rows(macro_sha, paths, maximum_bytes=8 * 1024 * 1024),
                                    maximum_bytes=8 * 1024 * 1024) if paths else []
         proposals = []
         for capture in artifacts_captured:
+            retain('SELECTED_ARTIFACT',capture)
             try:
                 header, _ = owner.parse_record(Record(capture["raw_bytes"]))
             except ValueError:
@@ -156,7 +173,7 @@ def capture_plan_continuity(*, owner, git, work_ref, macro_sha,
             if header.get("schema") == "agentos.project_plan_proposal.v1":
                 proposals.append(capture)
         if len(proposals) > 32:
-            return _missing(work_ref)
+            return missing()
 
         contents = []
         captured_keys = set()
@@ -188,6 +205,7 @@ def capture_plan_continuity(*, owner, git, work_ref, macro_sha,
             if total_content > 2 * 1024 * 1024:
                 raise ValueError("SOURCE_UNAVAILABLE")
             contents.append(captured)
+            retain('ANCHORED_CONTENT',captured)
 
         if current:
             resolve(current["adoption"]["adopted_source"])
@@ -205,4 +223,4 @@ def capture_plan_continuity(*, owner, git, work_ref, macro_sha,
             decision_captures=decisions, proposal_captures=proposals, content_captures=contents)
     except (ValueError, TypeError, KeyError, AttributeError, OSError, SyntaxError,
             UnicodeError, OverflowError, RecursionError):
-        return _missing(work_ref)
+        return missing()

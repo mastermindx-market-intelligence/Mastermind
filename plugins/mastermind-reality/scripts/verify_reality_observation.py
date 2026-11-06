@@ -24,6 +24,7 @@ values are never echoed back.
 from __future__ import annotations
 
 import datetime as _datetime
+import errno
 import hashlib
 import json
 import math
@@ -47,6 +48,10 @@ MAX_PNG_IDAT_BYTES = 16 * 1024 * 1024
 MAX_PNG_RASTER_BYTES = 64 * 1024 * 1024
 MAX_ERROR_DETAIL = 240
 READ_CHUNK = 1024 * 1024
+MAX_JSON_DEPTH = 64
+MAX_JSON_NODES = 100_000
+MAX_ERRORS = 256
+MAX_TOTAL_ARTIFACT_BYTES = 128 * 1024 * 1024
 
 # Closed error codes. Nothing outside this tuple may be emitted.
 ERROR_CODES = (
@@ -169,13 +174,30 @@ def _strict_float(text):
 
 
 def _strict_loads(text):
-    """Parse JSON strictly: duplicate keys and non-finite numbers are refused."""
-    return json.loads(
+    """Strict JSON with finite numbers, unique keys and bounded traversal."""
+    node = json.loads(
         text,
         object_pairs_hook=_strict_pairs,
         parse_constant=_reject_constant,
         parse_float=_strict_float,
     )
+    stack = [(node, 0)]
+    count = 0
+    while stack:
+        value, depth = stack.pop()
+        count += 1
+        if depth > MAX_JSON_DEPTH or count > MAX_JSON_NODES:
+            raise ValueError("JSON structure exceeds the supported budget")
+        if isinstance(value, dict):
+            count += len(value)  # Keys are input nodes too.
+            if count + len(stack) + len(value) > MAX_JSON_NODES:
+                raise ValueError("JSON structure exceeds the supported budget")
+            stack.extend((child, depth + 1) for child in value.values())
+        elif isinstance(value, list):
+            if count + len(stack) + len(value) > MAX_JSON_NODES:
+                raise ValueError("JSON structure exceeds the supported budget")
+            stack.extend((child, depth + 1) for child in value)
+    return node
 
 
 def _utc_epoch_ns(text):
@@ -200,170 +222,451 @@ def _utc_epoch_ns(text):
     return int(base.timestamp()) * 1_000_000_000 + nanos
 
 
+def _has_secret(text):
+    return isinstance(text, str) and any(p.search(text) for p in _SECRET_PATTERNS)
+
+
 def _sanitize(detail):
-    """Bound and flatten one error detail so it never carries a secret value."""
-    text = " ".join(str(detail).split())
-    if len(text) > MAX_ERROR_DETAIL:
-        text = text[: MAX_ERROR_DETAIL - 3] + "..."
-    return text
+    """Redact before truncating; no partial credential survives the bound."""
+    text = str(detail)
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub("[REDACTED]", text)
+    text = " ".join(text.split())
+    return text if len(text) <= MAX_ERROR_DETAIL else text[:MAX_ERROR_DETAIL - 3] + "..."
 
 
 def _walk_strings(node, path="$"):
-    """Yield ``(json_path, text)`` for every string inside a JSON document."""
-    if isinstance(node, str):
-        yield path, node
-    elif isinstance(node, dict):
-        for key, value in node.items():
-            for item in _walk_strings(value, "%s.%s" % (path, key)):
-                yield item
-    elif isinstance(node, list):
-        for index, value in enumerate(node):
-            for item in _walk_strings(value, "%s[%d]" % (path, index)):
-                yield item
+    """Iterate keys and values without exposing input keys in output paths."""
+    pending = [(node, path)]
+    while pending:
+        value, site = pending.pop()
+        if isinstance(value, str):
+            yield site, value
+        elif isinstance(value, dict):
+            for index, (key, child) in reversed(list(enumerate(value.items()))):
+                yield "%s.key[%d]" % (site, index), key
+                pending.append((child, "%s.value[%d]" % (site, index)))
+        elif isinstance(value, list):
+            pending.extend(
+                (child, "%s[%d]" % (site, index))
+                for index, child in reversed(list(enumerate(value)))
+            )
 
 
 def _safe_ref(ref):
-    """Return True when a reference is a safe owner-relative path fragment."""
-    if not isinstance(ref, str) or not ref or "\x00" in ref:
+    return (
+        isinstance(ref, str)
+        and re.fullmatch(SAFE_REF_PATTERN, ref) is not None
+        and all(part not in ("", ".", "..") for part in ref.split("/"))
+    )
+
+
+class _ReadRefusal(ValueError):
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+
+def _identity(info):
+    return info.st_dev, info.st_ino, info.st_mode
+
+
+def _version(info):
+    return _identity(info) + (info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _directory_flags():
+    # Unsupported hosts fail closed; there is no follow-symlinks fallback.
+    return os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _check_links(links):
+    for parent, name, expected in links:
+        current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if _identity(current) != _identity(expected) or not stat.S_ISDIR(current.st_mode):
+            raise _ReadRefusal("ARTIFACT_REF_INVALID")
+
+
+def _open_directory_chain(path):
+    """Walk only the explicitly supplied path, retaining directory identities."""
+    fds, links = [], []
+    try:
+        absolute = os.path.abspath(os.fspath(path))
+        if not isinstance(absolute, str) or "\x00" in absolute:
+            raise _ReadRefusal("ARTIFACT_REF_INVALID")
+        fds.append(os.open(os.sep, _directory_flags()))
+        for name in absolute.split(os.sep):
+            if not name:
+                continue
+            before = os.stat(name, dir_fd=fds[-1], follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                raise _ReadRefusal("ARTIFACT_REF_INVALID")
+            child = os.open(name, _directory_flags(), dir_fd=fds[-1])
+            fds.append(child)
+            after = os.fstat(child)
+            if _identity(before) != _identity(after):
+                raise _ReadRefusal("ARTIFACT_REF_INVALID")
+            links.append((fds[-2], name, after))
+        _check_links(links)
+        return fds, links
+    except BaseException:
+        for fd in reversed(fds):
+            os.close(fd)
+        raise
+
+
+def _read_relative(root_fd, ref, limit, root_links):
+    """Read once through a no-follow descriptor, then prove its identity."""
+    fds, links = [], list(root_links)
+    file_fd = None
+    try:
+        parent = root_fd
+        parts = ref.split("/")
+        for name in parts[:-1]:
+            before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                raise _ReadRefusal("ARTIFACT_REF_INVALID")
+            child = os.open(name, _directory_flags(), dir_fd=parent)
+            fds.append(child)
+            after = os.fstat(child)
+            if _identity(before) != _identity(after):
+                raise _ReadRefusal("ARTIFACT_REF_INVALID")
+            links.append((parent, name, after))
+            parent = child
+        leaf = parts[-1]
+        named_before = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        if stat.S_ISLNK(named_before.st_mode):
+            raise _ReadRefusal("ARTIFACT_REF_INVALID")
+        if not stat.S_ISREG(named_before.st_mode):
+            raise _ReadRefusal("ARTIFACT_NOT_REGULAR_FILE")
+        file_fd = os.open(
+            leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+            dir_fd=parent,
+        )
+        before = os.fstat(file_fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise _ReadRefusal("ARTIFACT_NOT_REGULAR_FILE")
+        if _version(named_before) != _version(before):
+            raise _ReadRefusal("ARTIFACT_REF_INVALID")
+        if before.st_size > limit:
+            raise _ReadRefusal("ARTIFACT_SIZE_MISMATCH")
+        chunks, count = [], 0
+        while True:
+            chunk = os.read(file_fd, min(READ_CHUNK, limit + 1 - count))
+            if not chunk:
+                break
+            count += len(chunk)
+            if count > limit:
+                raise _ReadRefusal("ARTIFACT_SIZE_MISMATCH")
+            chunks.append(chunk)
+        after = os.fstat(file_fd)
+        named_after = os.stat(leaf, dir_fd=parent, follow_symlinks=False)
+        if (
+            _version(before) != _version(after)
+            or _version(after) != _version(named_after)
+            or count != after.st_size
+        ):
+            raise _ReadRefusal("ARTIFACT_REF_INVALID")
+        _check_links(links)
+        return b"".join(chunks)
+    except OSError as exc:
+        code = "ARTIFACT_REF_INVALID" if exc.errno in (errno.ELOOP, errno.ENOTDIR) else "ARTIFACT_MISSING"
+        raise _ReadRefusal(code) from None
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
+        for fd in reversed(fds):
+            os.close(fd)
+
+
+def _read_regular_input(path, limit):
+    """Explicit observation/schema input: bounded, regular and stable."""
+    fds = []
+    try:
+        absolute = os.path.abspath(os.fspath(path))
+        parent, leaf = os.path.split(absolute)
+        fds, links = _open_directory_chain(parent)
+        return _read_relative(fds[-1], leaf, limit, links)
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
+
+
+class _QualifiedArtifacts:
+    """One invocation's byte cache; no persistent store or authority."""
+    def __init__(self, root):
+        self.fds, self.links = _open_directory_chain(root)
+        self.cache = {}
+        self.total = 0
+
+    def close(self):
+        for fd in reversed(self.fds):
+            os.close(fd)
+        self.fds = []
+
+    def read(self, ref, limit=MAX_ARTIFACT_BYTES):
+        if not _safe_ref(ref):
+            raise _ReadRefusal("ARTIFACT_REF_INVALID")
+        if ref in self.cache:
+            result = self.cache[ref]
+            if isinstance(result, _ReadRefusal):
+                raise result
+            if len(result) > limit:
+                raise _ReadRefusal("ARTIFACT_SIZE_MISMATCH")
+            return result
+        try:
+            data = _read_relative(
+                self.fds[-1], ref,
+                min(limit, MAX_TOTAL_ARTIFACT_BYTES - self.total), self.links,
+            )
+        except _ReadRefusal as exc:
+            self.cache[ref] = exc
+            raise
+        self.total += len(data)
+        self.cache[ref] = data
+        return data
+
+
+def _payload(entry):
+    """Parse only already-qualified bytes, at most once for each artifact."""
+    if entry is None or not entry.get("qualified"):
+        return None
+    if "payload" not in entry:
+        try:
+            if len(entry["raw"]) > MAX_OBSERVATION_BYTES:
+                raise ValueError("JSON witness exceeds the supported budget")
+            value = _strict_loads(entry["raw"].decode("utf-8"))
+            entry["payload"] = value if isinstance(value, dict) else None
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            entry["payload"] = None
+    return entry["payload"]
+
+
+def _record_shape_safe(record):
+    """Admit containers before semantic helpers, even with a bad schema."""
+    if not isinstance(record, dict):
         return False
-    if ref.startswith("/") or os.path.isabs(ref):
+    for key in (
+        "revision", "persona", "target", "source_relationship", "journey",
+        "capture", "negative_controls", "effect", "cleanup", "next_action",
+    ):
+        if not isinstance(record.get(key), dict):
+            return False
+    capture = record["capture"]
+    shots, findings = capture.get("screenshots"), record.get("findings")
+    if not isinstance(shots, list) or not isinstance(findings, list):
         return False
-    if "://" in ref:
-        return False
-    if len(ref) > 1 and ref[1] == ":":
-        return False
-    parts = ref.split("/")
-    for part in parts:
-        if part in ("", ".", ".."):
+    descriptors = []
+    for shot in shots:
+        if not isinstance(shot, dict):
+            return False
+        if not isinstance(shot.get("viewport"), dict) or not isinstance(shot.get("consumption"), dict):
+            return False
+        descriptors.append(shot)
+        for key in ("proof_ref", "proof_sha256", "consumer_ref"):
+            if shot["consumption"].get(key) is not None and not isinstance(shot["consumption"][key], str):
+                return False
+    for family in ("semantic_evidence", "runtime_evidence"):
+        block = capture.get(family)
+        if not isinstance(block, dict) or not isinstance(block.get("artifacts"), list):
+            return False
+        descriptors.extend(block["artifacts"])
+    for name in ("effect", "cleanup"):
+        block = record[name]
+        if not isinstance(block.get("evidence"), list):
+            return False
+        descriptors.extend(block["evidence"])
+    for descriptor in descriptors:
+        if not isinstance(descriptor, dict):
+            return False
+        for key in ("artifact_ref", "sha256"):
+            if descriptor.get(key) is not None and not isinstance(descriptor[key], str):
+                return False
+    for finding in findings:
+        if not isinstance(finding, dict):
+            return False
+        if finding.get("finding_id") is not None and not isinstance(finding["finding_id"], str):
+            return False
+    for block in [*findings, *record["negative_controls"].values()]:
+        if not isinstance(block, dict) or not isinstance(block.get("evidence_refs"), list):
+            return False
+        if not all(isinstance(ref, str) for ref in block["evidence_refs"]):
+            return False
+    for field in ("changed_input_refs", "affected_finding_ids"):
+        value = record["revision"].get(field)
+        if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
             return False
     return True
 
 
-def _resolve_ref(root_real, ref):
-    """Resolve one owner-relative reference under the supplied evidence root.
-
-    Returns ``(path, None)`` on success or ``(None, code)`` on refusal.
-    Absolute paths, traversal, URL-shaped references, and symlink escapes are
-    refused before any file is touched.
-    """
-    if not _safe_ref(ref):
-        return None, "ARTIFACT_REF_INVALID"
-    candidate = os.path.join(root_real, ref)
-    real = os.path.realpath(candidate)
-    if real != root_real and not real.startswith(root_real + os.sep):
-        return None, "ARTIFACT_REF_INVALID"
-    if not os.path.exists(real):
-        return None, "ARTIFACT_MISSING"
-    try:
-        info = os.stat(real)
-    except OSError:
-        return None, "ARTIFACT_MISSING"
-    if not stat.S_ISREG(info.st_mode):
-        return None, "ARTIFACT_NOT_REGULAR_FILE"
-    if info.st_size > MAX_ARTIFACT_BYTES:
-        return None, "ARTIFACT_SIZE_MISMATCH"
-    return real, None
-
-
-def _digest_file(path):
-    """Return ``(sha256_hex, size_bytes)`` for one regular file."""
-    digest = hashlib.sha256()
-    size = 0
-    with open(path, "rb") as handle:
-        while True:
-            chunk = handle.read(READ_CHUNK)
-            if not chunk:
-                break
-            size += len(chunk)
-            digest.update(chunk)
-    return digest.hexdigest(), size
+def _schema_without_references(schema):
+    if not isinstance(schema, dict):
+        return False
+    if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
+        return False
+    if schema.get("type") != "object" or schema.get("additionalProperties") is not False:
+        return False
+    properties = schema.get("properties")
+    if not isinstance(properties, dict) or not isinstance(properties.get("schema"), dict):
+        return False
+    if properties["schema"].get("const") != OBSERVATION_SCHEMA:
+        return False
+    pending = [schema]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, dict):
+            if {"$ref", "$dynamicRef", "$recursiveRef"} & node.keys():
+                return False
+            if "$schema" in node and node["$schema"] != schema["$schema"]:
+                return False
+            pending.extend(node.values())
+        elif isinstance(node, list):
+            pending.extend(node)
+    return True
 
 
-def _read_bounded(path, limit):
-    """Read at most ``limit`` bytes from one regular file."""
-    with open(path, "rb") as handle:
-        return handle.read(limit + 1)
+def _schema_path(error):
+    # Field names from untrusted JSON/schema never become receipt text.
+    return "observation" + "".join(
+        "[%d]" % item if isinstance(item, int) else ".field"
+        for item in error.absolute_path
+    )
 
 
 def _png_dimensions(data):
-    """Return ``(width, height)`` for a structurally valid PNG, else ``None``.
+    """Validate the bounded default-image raster and return its dimensions.
 
-    The signature, chunk framing, chunk CRC, IHDR geometry, IDAT decompression
-    and IEND terminator are all checked. Reads and decompression are bounded.
+    PNG3 critical-chunk, filter and Adam7 rules apply. Ancillary payloads are
+    CRC checked but not interpreted. Final-IDAT padding is not another image.
     """
-    if len(data) < len(_PNG_SIGNATURE) or data[: len(_PNG_SIGNATURE)] != _PNG_SIGNATURE:
+    if not data.startswith(_PNG_SIGNATURE):
         return None
-    position = len(_PNG_SIGNATURE)
-    width = height = bit_depth = color_type = interlace = None
-    seen_ihdr = False
-    seen_iend = False
+    position, total = len(_PNG_SIGNATURE), len(data)
+    geometry = None
+    palette_size = None
     idat = bytearray()
-    total = len(data)
-    while position + 8 <= total:
-        (length,) = struct.unpack(">I", data[position : position + 4])
-        chunk_type = data[position + 4 : position + 8]
+    seen_idat, after_idat, seen_iend = False, False, False
+    while position < total:
+        if total - position < 12:
+            return None
+        length = struct.unpack(">I", data[position:position + 4])[0]
+        kind = data[position + 4:position + 8]
         position += 8
-        if length > MAX_PNG_IDAT_BYTES:
+        if (
+            length > MAX_ARTIFACT_BYTES
+            or position + length + 4 > total
+            or not all(65 <= ch <= 90 or 97 <= ch <= 122 for ch in kind)
+        ):
             return None
-        if position + length + 4 > total:
-            return None
-        payload = data[position : position + length]
+        payload = data[position:position + length]
         position += length
-        (crc,) = struct.unpack(">I", data[position : position + 4])
+        crc = struct.unpack(">I", data[position:position + 4])[0]
         position += 4
-        if zlib.crc32(chunk_type + payload) & 0xFFFFFFFF != crc:
+        if zlib.crc32(kind + payload) & 0xFFFFFFFF != crc:
             return None
-        if chunk_type == b"IHDR":
-            if seen_ihdr or length != 13:
+        if geometry is None and kind != b"IHDR":
+            return None
+        if seen_idat and kind != b"IDAT":
+            after_idat = True
+        if kind == b"IHDR":
+            if geometry is not None or length != 13:
                 return None
-            (
-                width,
-                height,
-                bit_depth,
-                color_type,
-                compression,
-                filter_method,
-                interlace,
-            ) = struct.unpack(">IIBBBBB", payload)
-            if compression != 0 or filter_method != 0:
+            width, height, depth, color, compression, filtering, interlace = struct.unpack(">IIBBBBB", payload)
+            depths = {0: (1, 2, 4, 8, 16), 2: (8, 16), 3: (1, 2, 4, 8), 4: (8, 16), 6: (8, 16)}
+            if (
+                not 1 <= width <= 16384 or not 1 <= height <= 16384
+                or color not in depths or depth not in depths[color]
+                or compression != 0 or filtering != 0 or interlace not in (0, 1)
+            ):
                 return None
-            if interlace not in (0, 1):
+            geometry = width, height, depth, color, interlace
+        elif kind == b"PLTE":
+            if (
+                palette_size is not None or seen_idat or color in (0, 4)
+                or not length or length % 3 or length > 768
+            ):
                 return None
-            if color_type not in _PNG_CHANNELS or bit_depth not in (1, 2, 4, 8, 16):
+            palette_size = length // 3
+            if color == 3 and palette_size > 2 ** depth:
                 return None
-            if width <= 0 or height <= 0:
+        elif kind == b"IDAT":
+            if after_idat or (color == 3 and palette_size is None):
                 return None
-            seen_ihdr = True
-        elif chunk_type == b"IDAT":
-            if not seen_ihdr:
+            seen_idat = True
+            if len(idat) + length > MAX_PNG_IDAT_BYTES:
                 return None
-            idat += payload
-            if len(idat) > MAX_PNG_IDAT_BYTES:
+            idat.extend(payload)
+        elif kind == b"IEND":
+            if length != 0 or not seen_idat or position != total:
                 return None
-        elif chunk_type == b"IEND":
             seen_iend = True
             break
-    if not seen_ihdr or not seen_iend or not idat:
+        elif not kind[0] & 32:
+            return None  # An unknown critical chunk cannot be ignored.
+    if geometry is None or not seen_iend or not idat:
         return None
-    channels = _PNG_CHANNELS[color_type]
-    expected = height * (1 + (width * channels * bit_depth + 7) // 8)
-    if interlace == 0 and expected > MAX_PNG_RASTER_BYTES:
-        return None
-    bound = min(expected, MAX_PNG_RASTER_BYTES) if interlace == 0 else MAX_PNG_RASTER_BYTES
-    try:
-        decompressor = zlib.decompressobj()
-        raster = decompressor.decompress(bytes(idat), bound + 1)
-        if decompressor.unconsumed_tail:
+    bits_per_pixel = _PNG_CHANNELS[color] * depth
+    steps = ((0, 0, 1, 1),) if interlace == 0 else (
+        (0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4),
+        (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2),
+    )
+    passes, expected = [], 0
+    for x, y, dx, dy in steps:
+        columns = max(0, (width - x + dx - 1) // dx)
+        rows = max(0, (height - y + dy - 1) // dy)
+        if not columns or not rows:
+            continue  # Empty Adam7 passes have no filter bytes.
+        row_bytes = (columns * bits_per_pixel + 7) // 8
+        expected += rows * (row_bytes + 1)
+        if expected > MAX_PNG_RASTER_BYTES:
             return None
-        raster += decompressor.flush()
+        passes.append((columns, rows, row_bytes))
+    try:
+        decoder = zlib.decompressobj()
+        raster = decoder.decompress(bytes(idat), expected + 1)
     except zlib.error:
         return None
-    if not decompressor.eof:
+    # No unbounded flush: the extra byte distinguishes an oversized raster.
+    # PNG3 permits unused bytes after the zlib stream in final IDAT data.
+    if not decoder.eof or decoder.unconsumed_tail or len(raster) != expected:
         return None
-    if len(raster) > bound:
-        return None
-    if interlace == 0 and len(raster) != expected:
-        return None
+    offset, stride = 0, max(1, (bits_per_pixel + 7) // 8)
+    for columns, rows, row_bytes in passes:
+        previous = bytearray(row_bytes)
+        for _ in range(rows):
+            filter_type = raster[offset]
+            offset += 1
+            if filter_type > 4:
+                return None
+            row = bytearray(raster[offset:offset + row_bytes])
+            offset += row_bytes
+            if color != 3:
+                continue  # Every reconstructed non-indexed sample is legal.
+            for index in range(row_bytes):
+                left = row[index - stride] if index >= stride else 0
+                up = previous[index]
+                corner = previous[index - stride] if index >= stride else 0
+                if filter_type == 1:
+                    predictor = left
+                elif filter_type == 2:
+                    predictor = up
+                elif filter_type == 3:
+                    predictor = (left + up) // 2
+                elif filter_type == 4:
+                    center = left + up - corner
+                    distances = (abs(center - left), abs(center - up), abs(center - corner))
+                    predictor = (left, up, corner)[distances.index(min(distances))]
+                else:
+                    predictor = 0
+                row[index] = (row[index] + predictor) & 255
+            mask = (1 << depth) - 1
+            for index in range(columns):
+                bit = index * depth
+                value = (row[bit // 8] >> (8 - depth - bit % 8)) & mask
+                if value >= palette_size:
+                    return None
+            # Unused low-order packed-sample bits are intentionally ignored.
+            previous = row
     return width, height
 
 
@@ -583,45 +886,129 @@ def _check_source_relationship(record, add):
             )
 
 
-def _check_negative_controls(record, declared_refs, add):
-    controls = record.get("negative_controls") or {}
-    for name, expected in NEGATIVE_CONTROL_CONTRACT.items():
+def _opaque_identity(value):
+    return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,511}", value) is not None
+
+
+def _control_witness_matches(name, witness, record, references, resolved):
+    """Interpret one explicitly bound negative case, never a primary success."""
+    if not isinstance(witness, dict):
+        return False
+    effect, capture = record["effect"], record["capture"]
+    observed = _utc_epoch_ns(witness.get("observed_at"))
+    started = _utc_epoch_ns(capture.get("started_at"))
+    completed = _utc_epoch_ns(capture.get("completed_at"))
+    if (
+        witness.get("control") != name
+        or witness.get("operation_ref") != effect.get("operation_ref")
+        or witness.get("carrier_ref") != effect.get("carrier_ref")
+        or not _opaque_identity(witness.get("case_ref"))
+        or observed is None or started is None or completed is None
+        or not started <= observed <= completed
+    ):
+        return False
+    target = witness.get("target_ref")
+    if not isinstance(target, str) or not target or len(target) > 1000:
+        return False
+    if name in ("wrong_target", "different_build", "excluded_account_surface"):
+        if target == record["target"].get("locator"):
+            return False
+    if name == "wrong_target":
+        return type(witness.get("http_status")) is int and witness["http_status"] == 404
+    if name == "stale_capture":
+        captured = _utc_epoch_ns(witness.get("input_captured_at"))
+        threshold = _utc_epoch_ns(witness.get("required_not_before"))
+        return (
+            captured is not None and threshold is not None
+            and captured < threshold <= observed
+            and witness.get("stale_disclosed") is True
+            and _safe_ref(witness.get("input_ref"))
+            and isinstance(witness.get("input_sha256"), str)
+            and re.fullmatch(r"[0-9a-f]{64}", witness["input_sha256"]) is not None
+        )
+    if name == "different_build":
+        expected, actual = witness.get("protected_sha"), witness.get("observed_deployed_sha")
+        return (
+            isinstance(expected, str) and isinstance(actual, str)
+            and re.fullmatch(r"[0-9a-f]{40}", expected) is not None
+            and re.fullmatch(r"[0-9a-f]{40}", actual) is not None
+            and expected == record["source_relationship"].get("protected_sha")
+            and expected != actual
+        )
+    if name == "different_viewport_or_data_state":
+        first, second = witness.get("first_artifact_ref"), witness.get("second_artifact_ref")
+        if not isinstance(first, str) or not isinstance(second, str):
+            return False
+        a, b = resolved.get(first), resolved.get(second)
+        return (
+            first in references and second in references
+            and _payload(a) is not None and _payload(b) is not None
+            and a["sha256"] != b["sha256"]
+            and isinstance(_payload(a).get("data_state"), str)
+            and isinstance(_payload(b).get("data_state"), str)
+            and _payload(a)["data_state"] != _payload(b)["data_state"]
+        )
+    if name == "missing_screenshot_bytes":
+        attempted = witness.get("attempted_artifact_ref")
+        return (
+            witness.get("screenshot_bytes_present") is False
+            and witness.get("refusal_code") == "SCREENSHOT_BYTES_REQUIRED"
+            and _safe_ref(attempted) and attempted not in resolved
+        )
+    if name == "broken_browser_connection":
+        return (
+            witness.get("connection_state") == "DISCONNECTED"
+            and _opaque_identity(witness.get("provider_ref"))
+            and target == record["target"].get("locator")
+        )
+    if name == "excluded_account_surface":
+        return (
+            witness.get("surface_class") == "MANAGED_CHAIRMAN_ACCOUNT"
+            and witness.get("refusal_code") == "TARGET_CLASS_EXCLUDED"
+            and witness.get("access_attempted") is False
+        )
+    return False
+
+
+def _check_negative_controls(record, declared_refs, resolved, add):
+    controls = record["negative_controls"]
+    for name, (method, signal) in NEGATIVE_CONTROL_CONTRACT.items():
         control = controls.get(name)
-        path = "negative_controls.%s" % name
+        path = "negative_controls." + name
         if not isinstance(control, dict):
-            add(
-                "NEGATIVE_CONTROL_INVALID",
-                path,
-                "this required negative control is absent",
-            )
+            add("NEGATIVE_CONTROL_INVALID", path, "this required negative control is absent")
             continue
-        method, signal = expected
-        if control.get("method") != method:
-            add(
-                "NEGATIVE_CONTROL_INVALID",
-                path + ".method",
-                "control method does not discriminate its own bad state",
-            )
-        if control.get("signal") != signal:
-            add(
-                "NEGATIVE_CONTROL_INVALID",
-                path + ".signal",
-                "control signal does not discriminate its own bad state",
-            )
-        status = control.get("status")
+        if control.get("method") != method or control.get("signal") != signal:
+            add("NEGATIVE_CONTROL_INVALID", path, "the control method or signal does not discriminate its bad state")
+        status, references = control.get("status"), control.get("evidence_refs", [])
         if status not in NEGATIVE_CONTROL_STATUSES:
-            add(
-                "NEGATIVE_CONTROL_INVALID",
-                path + ".status",
-                "control status is not a closed state",
-            )
-        for reference in control.get("evidence_refs") or []:
-            if reference not in declared_refs:
-                add(
-                    "NEGATIVE_CONTROL_INVALID",
-                    path + ".evidence_refs",
-                    "control evidence does not resolve to a declared artifact",
-                )
+            add("NEGATIVE_CONTROL_INVALID", path, "control status is not a closed state")
+        for ref in references:
+            if ref not in declared_refs or not resolved.get(ref, {}).get("qualified"):
+                add("NEGATIVE_CONTROL_INVALID", path, "control evidence is not an identity-qualified declared artifact")
+        if status == "NOT_EXERCISED":
+            continue
+        wanted = "DETECTED" if method == "OWNER_EVIDENCE" else "REFUSED"
+        if status != wanted:
+            add("NEGATIVE_CONTROL_INVALID", path, "the recorded result does not match the control method")
+        witnessed, contradiction = False, False
+        for ref in references:
+            payload = _payload(resolved.get(ref))
+            facts = payload.get("negative_controls") if isinstance(payload, dict) else None
+            if isinstance(facts, dict) and name in facts:
+                matches = _control_witness_matches(name, facts[name], record, references, resolved)
+                witnessed = witnessed or matches
+                contradiction = contradiction or not matches
+        if name == "different_viewport_or_data_state":
+            dimensions = {
+                resolved[ref]["dimensions"] for ref in references
+                if ref in resolved and resolved[ref].get("qualified")
+                and resolved[ref].get("dimensions") is not None
+            }
+            # These are decoded bytes from this capture, not viewport labels.
+            witnessed = witnessed or len(dimensions) > 1
+        if not witnessed or contradiction:
+            add("NEGATIVE_CONTROL_INVALID", path, "the supplied bytes do not consistently witness this negative case")
 
 
 def _check_reference_closure(record, declared_refs, add):
@@ -648,21 +1035,18 @@ def _check_evidence_semantics(record, add):
         if state == "AVAILABLE" and (not artifacts or reason is not None):
             add(
                 "EVIDENCE_STATE_INVALID",
-    "EFFECT_INVALID",
                 path,
                 "AVAILABLE requires retained artifacts and no limitation reason",
             )
         elif state == "PARTIAL" and (not artifacts or not reason):
             add(
                 "EVIDENCE_STATE_INVALID",
-    "EFFECT_INVALID",
                 path,
                 "PARTIAL requires retained artifacts and a concrete reason",
             )
         elif state == "UNAVAILABLE" and (artifacts or not reason):
             add(
                 "EVIDENCE_STATE_INVALID",
-    "EFFECT_INVALID",
                 path,
                 "UNAVAILABLE requires zero artifacts and a concrete reason",
             )
@@ -678,11 +1062,9 @@ def _capability_problem(record, unresolved):
         return "target.surface_class is TEST_FIXTURE"
     outcome = journey.get("outcome")
     if outcome != "SUCCESS":
-        return "journey.outcome is %s" % (outcome,)
+        return "the journey is not a recorded success"
     if target.get("observed_surface_state") != "LIVE":
-        return "target.observed_surface_state is %s" % (
-            target.get("observed_surface_state"),
-        )
+        return "the observed surface is not recorded as live"
     if not target.get("architecture_ref"):
         return "target.architecture_ref is an unknown architecture binding"
     controls = record.get("negative_controls") or {}
@@ -692,59 +1074,101 @@ def _capability_problem(record, unresolved):
         if isinstance(control, dict) and control.get("status") == "NOT_EXERCISED"
     )
     if unexercised:
-        return "negative controls were not exercised: %s" % (", ".join(unexercised),)
+        return "at least one required negative control was not exercised"
     if unresolved:
         return "the record carries an unresolved artifact identity"
     return None
 
 
+def _effect_payload_matches(payload, effect):
+    return isinstance(payload, dict) and all(
+        payload.get(key) == effect.get(key)
+        for key in ("state", "operation_ref", "carrier_ref")
+    )
+
+
+def _effect_problem(record, resolved):
+    effect = record["effect"]
+    evidence = effect.get("evidence", [])
+    if not evidence:
+        return "the effect has no owner-recorded evidence"
+    for descriptor in evidence:
+        if not _effect_payload_matches(_payload(resolved.get(descriptor.get("artifact_ref"))), effect):
+            return "effect evidence does not agree with the original operation, carrier and state"
+    return None
+
+
 def _cleanup_problem(record, cleanup_payloads):
-    """Return the first cleanup claim problem, else ``None``."""
-    cleanup = record.get("cleanup") or {}
-    state = cleanup.get("state")
-    profile = cleanup.get("temporary_profile")
+    """A positive profile claim needs named, typed before/after facts."""
+    cleanup, effect = record["cleanup"], record["effect"]
+    state, profile = cleanup.get("state"), cleanup.get("temporary_profile")
     if state == "CLEAN" and cleanup.get("temporary_processes") != "ABSENT":
         return "CLEAN requires absent temporary processes"
     if state == "CLEAN" and cleanup.get("shared_resources") != "UNCHANGED":
         return "CLEAN requires unchanged shared resources"
-    if profile == "REMOVED":
-        grounded = False
-        for payload in cleanup_payloads:
-            if not isinstance(payload, dict):
-                continue
-            identity = payload.get("temporary_profile_id")
-            if not isinstance(identity, str) or not identity:
-                continue
-            if isinstance(payload.get("pre_removal"), dict) and isinstance(
-                payload.get("post_removal"), dict
+    if state == "CLEAN" and profile not in ("REMOVED", "NOT_CREATED"):
+        return "CLEAN requires a proven removed or never-created profile"
+    if profile not in ("REMOVED", "NOT_CREATED"):
+        return None
+    expected = cleanup.get("temporary_profile_id")
+    if not _opaque_identity(expected):
+        return "a positive profile claim requires the explicitly intended profile identity"
+    grounded, terminal = False, False
+    for payload in cleanup_payloads:
+        if not isinstance(payload, dict):
+            return "positive cleanup evidence must be a qualified JSON object"
+        for field in ("operation_ref", "carrier_ref"):
+            if field in payload and payload[field] != effect.get(field):
+                return "the cleanup witness names a different original operation or carrier"
+        for field in ("temporary_processes", "shared_resources", "temporary_profile"):
+            if field in payload and payload[field] != cleanup.get(field):
+                return "a cleanup witness contradicts the recorded disposition"
+        terminal = terminal or (
+            payload.get("temporary_processes") == "ABSENT"
+            and payload.get("shared_resources") == "UNCHANGED"
+        )
+        if "temporary_profile_id" not in payload:
+            continue
+        if payload["temporary_profile_id"] != expected:
+            return "a cleanup witness names a different intended profile"
+        before = payload.get("pre_removal")
+        if not isinstance(before, dict) or before.get("temporary_profile_id") != expected:
+            return "the profile witness lacks a bound before-state"
+        before_time = _utc_epoch_ns(before.get("observed_at"))
+        if before_time is None:
+            return "the profile before-state has no valid observation time"
+        if profile == "REMOVED":
+            after = payload.get("post_removal")
+            if not isinstance(after, dict) or after.get("temporary_profile_id") != expected:
+                return "the profile witness lacks a bound after-state"
+            after_time = _utc_epoch_ns(after.get("observed_at"))
+            if (
+                before.get("present") is not True or after.get("present") is not False
+                or after_time is None or after_time < before_time
             ):
-                grounded = True
-                break
-        if not grounded:
-            return (
-                "REMOVED requires an owner-grounded profile identity with "
-                "pre-removal and post-removal evidence"
-            )
-    elif profile == "NOT_CREATED":
-        grounded = False
-        for payload in cleanup_payloads:
-            if not isinstance(payload, dict):
-                continue
-            identity = payload.get("temporary_profile_id")
-            if not isinstance(identity, str) or not identity:
-                continue
-            if isinstance(payload.get("pre_removal"), dict):
-                grounded = True
-                break
-        if not grounded:
-            return (
-                "NOT_CREATED requires an owner-grounded profile identity with "
-                "pre-creation evidence"
-            )
+                return "REMOVED requires ordered presence and absence facts for the same profile"
+        else:
+            decision = payload.get("creation")
+            if not isinstance(decision, dict):
+                return "NOT_CREATED requires an explicit owner-recorded no-create decision"
+            decision_time = _utc_epoch_ns(decision.get("observed_at"))
+            if (
+                before.get("present") is not False
+                or decision.get("temporary_profile_id") != expected
+                or decision.get("created") is not False
+                or not _opaque_identity(decision.get("owner_ref"))
+                or decision_time is None or decision_time < before_time
+            ):
+                return "NOT_CREATED requires prior absence and a named owner's ordered no-create decision"
+        grounded = True
+    if not grounded:
+        return "the intended profile has no complete owner-grounded witness"
+    if state == "CLEAN" and not terminal:
+        return "CLEAN requires terminal process and shared-resource facts in its evidence"
     return None
 
 
-def _check_revision(record, declared_refs, root_real, add):
+def _check_revision(record, declared_refs, reader, resolved, validator, add):
     """Validate the closed revision object and, for a correction, its proof."""
     revision = record.get("revision")
     if not isinstance(revision, dict):
@@ -845,15 +1269,14 @@ def _check_revision(record, declared_refs, root_real, add):
             "a correction must bind an owner-relative predecessor record and digest",
         )
         return
-    path, code = _resolve_ref(root_real, predecessor_ref)
-    if code is not None:
-        add(
-            "CORRECTION_INVALID",
-            "revision.predecessor_record_ref",
-            "the bound predecessor record does not resolve under the supplied root",
-        )
+    try:
+        if reader is None:
+            raise _ReadRefusal("EVIDENCE_ROOT_INVALID")
+        raw = reader.read(predecessor_ref, MAX_OBSERVATION_BYTES)
+    except _ReadRefusal:
+        add("CORRECTION_INVALID", "revision.predecessor_record_ref",
+            "the predecessor record is not a bounded, qualified file under the supplied root")
         return
-    raw = _read_bounded(path, MAX_OBSERVATION_BYTES)
     actual = hashlib.sha256(raw).hexdigest()
     if actual != predecessor_digest:
         add(
@@ -864,46 +1287,43 @@ def _check_revision(record, declared_refs, root_real, add):
         return
     try:
         predecessor = _strict_loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        add(
-            "CORRECTION_INVALID",
-            "revision.predecessor_record_ref",
-            "the bound predecessor record is not a strict JSON document",
-        )
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        add("CORRECTION_INVALID", "revision.predecessor_record_ref",
+            "the bound predecessor record is not a bounded strict JSON document")
         return
-    if not isinstance(predecessor, dict):
-        add(
-            "CORRECTION_INVALID",
-            "revision.predecessor_record_ref",
-            "the bound predecessor record is not a closed observation object",
-        )
+    if not _record_shape_safe(predecessor):
+        add("CORRECTION_INVALID", "revision.predecessor_record_ref",
+            "the bound predecessor record is not a closed comparable observation")
+        return
+    if validator is None or next(validator.iter_errors(predecessor), None) is not None:
+        add("CORRECTION_INVALID", "revision.predecessor_record_ref",
+            "the bound predecessor record violates the closed observation schema")
         return
     if predecessor.get("observation_id") != predecessor_id:
-        add(
-            "CORRECTION_INVALID",
-            "revision.predecessor_observation_id",
-            "the bound predecessor record does not carry the named observation identity",
-        )
+        add("CORRECTION_INVALID", "revision.predecessor_observation_id",
+            "the predecessor bytes do not carry the named observation identity")
         return
-    if not isinstance(predecessor.get("capture"), dict) or not isinstance(
-        predecessor.get("findings"), list
-    ):
-        add(
-            "CORRECTION_INVALID",
-            "revision.predecessor_record_ref",
-            "the bound predecessor record does not carry a comparable shape",
-        )
+    time_problems = []
+    _check_timestamps(predecessor, lambda *args: time_problems.append(args))
+    if time_problems:
+        add("CORRECTION_INVALID", "revision.predecessor_record_ref",
+            "the predecessor has invalid or inconsistent observation times")
         return
-
-    predecessor_capture = predecessor.get("capture") or {}
-    if predecessor_capture.get("started_at") != (
-        record.get("capture") or {}
-    ).get("started_at"):
-        add(
-            "CORRECTION_INVALID",
-            "capture.started_at",
-            "a correction may not upgrade the capture epoch of its predecessor",
-        )
+    for field in ("started_at", "completed_at"):
+        before = _utc_epoch_ns(predecessor["capture"].get(field))
+        after = _utc_epoch_ns(record["capture"].get(field))
+        if before is None or before != after:
+            add("CORRECTION_INVALID", "capture." + field,
+                "a correction preserves both original capture instants")
+    predecessor_sets = _declared_identities(_collect_declarations(predecessor))
+    if any(len(digests) > 1 for digests in predecessor_sets.values()):
+        add("CORRECTION_INVALID", "revision.predecessor_record_ref",
+            "the predecessor carries conflicting declared artifact identities")
+        return
+    for reference in changed_refs:
+        if not resolved.get(reference, {}).get("qualified"):
+            add("CORRECTION_INVALID", "revision.changed_input_refs",
+                "changed evidence must resolve to the current qualified bytes")
 
     predecessor_identities = _predecessor_identities(predecessor)
     current_identities = _declared_identities(_collect_declarations(record))
@@ -937,21 +1357,26 @@ def _check_revision(record, declared_refs, root_real, add):
             "a correction must change evidence, a finding, or the stated capability",
         )
 
-    predecessor_effect = predecessor.get("effect") or {}
-    current_effect = record.get("effect") or {}
+    predecessor_effect = predecessor["effect"]
+    current_effect = record["effect"]
+    if any(predecessor_effect.get(key) != current_effect.get(key)
+           for key in ("operation_ref", "carrier_ref")):
+        add("CORRECTION_INVALID", "effect",
+            "a correction preserves the original effect operation and carrier")
     if predecessor_effect.get("state") != current_effect.get("state"):
         before_effect = _block_identities(predecessor, "effect")
         after_effect = _block_identities(record, "effect")
-        effect_changed = any(
-            before_effect.get(reference) != after_effect.get(reference)
-            for reference in set(before_effect) | set(after_effect)
+        evidence_changed = any(
+            reference in changed_refs
+            and digest is not None
+            and digest != before_effect.get(reference)
+            and resolved.get(reference, {}).get("sha256") == digest
+            and _effect_payload_matches(_payload(resolved.get(reference)), current_effect)
+            for reference, digest in after_effect.items()
         )
-        if not effect_changed:
-            add(
-                "CORRECTION_INVALID",
-                "effect.state",
-                "a correction may not upgrade effect authority without changed evidence",
-            )
+        if not evidence_changed:
+            add("CORRECTION_INVALID", "effect.state",
+                "an effect change needs new qualified supporting evidence named among the changed inputs")
 
 
 def _consumption_problem(record, resolved):
@@ -967,20 +1392,10 @@ def _consumption_problem(record, resolved):
         if not isinstance(proof_ref, str) or not isinstance(proof_digest, str):
             failures.append((path, "the consumption proof reference or digest is absent"))
             continue
-        resolved_path = resolved.get(proof_ref)
-        if resolved_path is None:
-            failures.append(
-                (path, "the consumption proof does not resolve to a declared artifact")
-            )
-            continue
-        raw = _read_bounded(resolved_path, MAX_OBSERVATION_BYTES)
-        try:
-            proof = _strict_loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, ValueError):
-            failures.append((path, "the consumption proof is not a strict JSON document"))
-            continue
-        if not isinstance(proof, dict):
-            failures.append((path, "the consumption proof is not a closed JSON object"))
+        entry = resolved.get(proof_ref)
+        proof = _payload(entry)
+        if proof is None:
+            failures.append((path, "the consumption proof is not an identity-qualified strict JSON object"))
             continue
         if proof.get("consumer_ref") != consumption.get("consumer_ref"):
             failures.append(
@@ -1023,359 +1438,229 @@ def _receipt(verdict, observation_id, observation_sha256, artifact_count, checks
 
 
 def verify_observation_file(observation_path, evidence_root, schema_path):
-    """Verify one closed Reality observation against supplied evidence.
-
-    Parameters
-    ----------
-    observation_path:
-        Path to one ``mastermind.reality_observation.v1`` record.
-    evidence_root:
-        Owner-qualified directory that contains the declared artifacts. The
-        caller supplies it; this API grants no authority over it.
-    schema_path:
-        Path to the packaged observation schema.
-
-    Returns
-    -------
-    dict
-        A closed receipt with exactly the keys ``schema``, ``verdict``,
-        ``observation_id``, ``observation_sha256``, ``artifact_count``,
-        ``checks`` and ``errors``.
-    """
-    errors = []
-    checks = {}
+    """Return the closed consistency receipt for exactly the supplied inputs."""
+    errors, error_keys = [], set()
+    names = (
+        "JSON_STRICT_PARSE", "SCHEMA_CLOSED_SHAPE", "UTC_TIMESTAMP_CALENDAR",
+        "TIME_ORDERING", "SOURCE_RELATION_CONSISTENCY", "SECRET_SHAPE_SCAN",
+        "NEGATIVE_CONTROL_MEANING", "CAPABILITY_CONSISTENCY", "CLEANUP_ATTESTATION",
+        "REVISION_SEMANTICS", "ARTIFACT_RESOLUTION", "ARTIFACT_IDENTITY_UNIQUENESS",
+        "ARTIFACT_BYTES_AND_DIGEST", "PNG_STRUCTURE_AND_DIMENSIONS",
+        "CONSUMPTION_BINDING", "REFERENCE_CLOSURE", "EVIDENCE_FAMILY_SEMANTICS",
+        "EFFECT_BINDING",
+    )
+    checks = dict.fromkeys(names, "NOT_APPLICABLE")
+    observation_id, observation_sha256, artifact_count = None, None, 0
 
     def add(code, path, detail):
         if code not in ERROR_CODES:
             code = "SCHEMA_VIOLATION"
-        errors.append(
-            {"code": code, "path": _sanitize(path), "detail": _sanitize(detail)}
-        )
+        key = (code, _sanitize(path), _sanitize(detail))
+        if key in error_keys or len(errors) >= MAX_ERRORS:
+            return
+        if len(errors) == MAX_ERRORS - 1:
+            key = ("SCHEMA_VIOLATION", "observation", "the bounded error budget is exhausted")
+        error_keys.add(key)
+        errors.append(dict(zip(("code", "path", "detail"), key)))
 
-    def mark(name, ok, applicable=True):
-        if not applicable:
-            checks[name] = "NOT_APPLICABLE"
-        else:
-            checks[name] = "PASS" if ok else "FAIL"
+    def mark(name, ok):
+        checks[name] = "PASS" if ok else "FAIL"
 
-    observation_path = Path(observation_path)
-    evidence_root = Path(evidence_root)
-    schema_path = Path(schema_path)
-
-    # --- input availability -------------------------------------------------
-    try:
-        raw = observation_path.read_bytes()
-    except OSError:
-        add(
-            "OBSERVATION_UNREADABLE",
-            "observation_path",
-            "the observation record could not be read",
-        )
-        raw = b""
-    if len(raw) > MAX_OBSERVATION_BYTES:
-        add(
-            "OBSERVATION_UNREADABLE",
-            "observation_path",
-            "the observation record exceeds the supported size",
-        )
-        raw = raw[:MAX_OBSERVATION_BYTES]
-    observation_sha256 = hashlib.sha256(raw).hexdigest()
-
-    try:
-        schema_raw = schema_path.read_bytes()
-    except OSError:
-        add("SCHEMA_UNREADABLE", "schema_path", "the schema could not be read")
-        schema_raw = b""
-    if len(schema_raw) > MAX_SCHEMA_BYTES:
-        add("SCHEMA_UNREADABLE", "schema_path", "the schema exceeds the supported size")
-        schema_raw = b""
-
-    root_real = ""
-    if not evidence_root.is_dir():
-        add(
-            "EVIDENCE_ROOT_INVALID",
-            "evidence_root",
-            "the supplied evidence root is not a directory",
-        )
-    else:
-        root_real = os.path.realpath(str(evidence_root))
-
-    # --- strict parsing -----------------------------------------------------
-    record = None
-    parse_ok = False
-    if raw:
-        try:
-            record = _strict_loads(raw.decode("utf-8"))
-            parse_ok = True
-        except UnicodeDecodeError:
-            add("JSON_INVALID", "observation", "the record is not valid UTF-8")
-        except _DuplicateKeyError:
-            add(
-                "JSON_DUPLICATE_KEY",
-                "observation",
-                "the record repeats an object key",
-            )
-        except _NonFiniteError:
-            add(
-                "JSON_NON_FINITE",
-                "observation",
-                "the record carries a non-finite number",
-            )
-        except ValueError:
-            add("JSON_INVALID", "observation", "the record is not valid JSON")
-    else:
-        add("JSON_INVALID", "observation", "the record carries no bytes")
-    mark("JSON_STRICT_PARSE", parse_ok)
-    if not parse_ok or not isinstance(record, dict):
-        mark("SCHEMA_CLOSED_SHAPE", False)
-        mark("UTC_TIMESTAMP_CALENDAR", False)
-        mark("TIME_ORDERING", False)
-        mark("SOURCE_RELATION_CONSISTENCY", False)
-        mark("SECRET_SHAPE_SCAN", False)
-        mark("NEGATIVE_CONTROL_MEANING", False)
-        mark("CAPABILITY_CONSISTENCY", False)
-        mark("CLEANUP_ATTESTATION", False)
-        mark("REVISION_SEMANTICS", False)
-        mark("ARTIFACT_RESOLUTION", False)
-        mark("ARTIFACT_IDENTITY_UNIQUENESS", False)
-        mark("ARTIFACT_BYTES_AND_DIGEST", False)
-        mark("PNG_STRUCTURE_AND_DIMENSIONS", False)
-        mark("CONSUMPTION_BINDING", False)
-        mark("REFERENCE_CLOSURE", False)
-        mark("EVIDENCE_FAMILY_SEMANTICS", False)
+    def finish():
         return _receipt(
-            "INVALID",
-            None,
-            observation_sha256,
-            0,
+            "INVALID" if errors else "VALID", observation_id,
+            observation_sha256, artifact_count,
             [{"name": name, "status": status} for name, status in sorted(checks.items())],
             errors,
         )
 
-    observation_id = record.get("observation_id")
-    if not isinstance(observation_id, str):
-        observation_id = None
-
-    # --- closed schema ------------------------------------------------------
-    schema_ok = False
-    validator = None
-    if schema_raw:
+    raw, schema_raw = None, None
+    for supplied, limit, label in (
+        (observation_path, MAX_OBSERVATION_BYTES, "observation"),
+        (schema_path, MAX_SCHEMA_BYTES, "schema"),
+    ):
         try:
-            schema = _strict_loads(schema_raw.decode("utf-8"))
-        except (UnicodeDecodeError, ValueError):
-            schema = None
-        if isinstance(schema, dict):
-            try:
-                Draft202012Validator.check_schema(schema)
-                validator = Draft202012Validator(schema)
-                schema_ok = True
-            except SchemaError:
-                add("SCHEMA_INVALID", "schema_path", "the schema is not a valid schema")
-    if validator is None:
-        add("SCHEMA_UNREADABLE", "schema_path", "no usable observation schema")
-        schema_ok = False
-    schema_error_count = 0
-    if validator is not None:
-        for error in sorted(
-            validator.iter_errors(record), key=lambda item: list(item.absolute_path)
-        ):
-            schema_error_count += 1
-            path = ".".join(str(part) for part in error.absolute_path)
+            data = _read_regular_input(supplied, limit)
+        except (_ReadRefusal, OSError, TypeError, ValueError, AttributeError):
             add(
-                _schema_error_code(error),
-                path or "observation",
-                "the record violates the closed observation schema",
+                "OBSERVATION_UNREADABLE" if label == "observation" else "SCHEMA_UNREADABLE",
+                label + "_path", "the input is not a complete bounded stable regular file",
             )
-    mark("SCHEMA_CLOSED_SHAPE", schema_error_count == 0)
+            continue
+        if label == "observation":
+            raw = data
+            observation_sha256 = hashlib.sha256(data).hexdigest()
+        else:
+            schema_raw = data
 
-    # --- declared artifacts -------------------------------------------------
+    record = None
+    try:
+        if raw is None:
+            raise ValueError("no complete observation input")
+        record = _strict_loads(raw.decode("utf-8"))
+        mark("JSON_STRICT_PARSE", True)
+    except _DuplicateKeyError:
+        add("JSON_DUPLICATE_KEY", "observation", "the record repeats an object key")
+    except _NonFiniteError:
+        add("JSON_NON_FINITE", "observation", "the record carries a non-finite number")
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        add("JSON_INVALID", "observation", "the record is not bounded strict UTF-8 JSON")
+    if checks["JSON_STRICT_PARSE"] != "PASS":
+        mark("JSON_STRICT_PARSE", False)
+        mark("SCHEMA_CLOSED_SHAPE", False)
+        return finish()
+    _check_secret_shapes(record, add)
+    mark("SECRET_SHAPE_SCAN", not any(e["code"] == "SECRET_SHAPED_VALUE" for e in errors))
+    if not isinstance(record, dict):
+        add("SCHEMA_VIOLATION", "observation", "the observation must be a closed object")
+        mark("SCHEMA_CLOSED_SHAPE", False)
+        return finish()
+    proposed_id = record.get("observation_id")
+    if (
+        isinstance(proposed_id, str)
+        and re.fullmatch(r"[A-Z0-9][A-Z0-9._:-]{2,127}", proposed_id) is not None
+        and not _has_secret(proposed_id)
+    ):
+        observation_id = proposed_id
+
+    validator, schema_errors = None, 0
+    try:
+        if schema_raw is None:
+            raise ValueError("no complete schema input")
+        schema = _strict_loads(schema_raw.decode("utf-8"))
+        if not _schema_without_references(schema):
+            raise ValueError("only the closed, reference-free packaged dialect is supported")
+        Draft202012Validator.check_schema(schema)
+        validator = Draft202012Validator(schema)
+        for error in validator.iter_errors(record):
+            schema_errors += 1
+            add(_schema_error_code(error), _schema_path(error),
+                "the record violates the closed observation schema")
+            if schema_errors >= MAX_ERRORS:
+                break
+    except (UnicodeDecodeError, ValueError, TypeError, RecursionError, SchemaError):
+        add("SCHEMA_INVALID", "schema_path", "the supplied schema is not a supported closed offline schema")
+        validator = None
+    mark("SCHEMA_CLOSED_SHAPE", validator is not None and schema_errors == 0)
+    if not _record_shape_safe(record):
+        add("SCHEMA_VIOLATION", "observation", "unsafe nested containers are refused before semantic traversal")
+        mark("SCHEMA_CLOSED_SHAPE", False)
+        return finish()
+    if validator is None:
+        return finish()
+
     declarations = _collect_declarations(record)
     identities = _declared_identities(declarations)
     declared_refs = set(identities)
     artifact_count = len(declared_refs)
-
     identity_conflict = False
     for ref, digests in identities.items():
         if len(digests) > 1:
             identity_conflict = True
-            add(
-                "ARTIFACT_IDENTITY_CONFLICT",
-                ref,
-                "one artifact reference carries more than one declared identity",
-            )
+            site = next(d["site"] for d in declarations if d["ref"] == ref)
+            add("ARTIFACT_IDENTITY_CONFLICT", site, "one reference has conflicting declared identities")
     mark("ARTIFACT_IDENTITY_UNIQUENESS", not identity_conflict)
+    unresolved = any(d["sha256"] is None for d in declarations)
 
-    unresolved = False
-    for declaration in declarations:
-        if declaration["sha256"] is None:
-            unresolved = True
-
-    # --- artifact resolution ------------------------------------------------
-    resolved = {}
-    resolution_ok = True
-    bytes_ok = True
-    png_ok = True
-    cleanup_payloads = []
-    for declaration in declarations:
-        ref = declaration["ref"]
-        site = declaration["site"]
-        if not isinstance(ref, str):
-            resolution_ok = False
-            add("ARTIFACT_REF_INVALID", site, "the artifact reference is not a string")
-            continue
-        if root_real == "":
-            resolution_ok = False
-            add(
-                "ARTIFACT_MISSING",
-                site,
-                "the artifact cannot be resolved without a usable evidence root",
-            )
-            continue
-        path, code = _resolve_ref(root_real, ref)
-        declared_digest = declaration["sha256"]
-        if declared_digest is None:
-            unresolved = True
-            add(
-                "ARTIFACT_IDENTITY_UNRESOLVED",
-                site,
-                "this artifact identity is unresolved; no digest is asserted",
-            )
-        if code is not None:
-            resolution_ok = False
-            add(code, site, "the declared artifact does not resolve to a regular file")
-            continue
-        resolved.setdefault(ref, path)
-        actual_digest, actual_size = _digest_file(path)
-        if declared_digest is None:
-            pass
-        elif actual_digest != declared_digest:
-            bytes_ok = False
-            add(
-                "ARTIFACT_DIGEST_MISMATCH",
-                site,
-                "the declared digest does not match the artifact bytes",
-            )
-        declared_size = declaration["bytes"]
-        if isinstance(declared_size, int) and not isinstance(declared_size, bool):
-            if declared_size != actual_size:
+    reader = None
+    try:
+        try:
+            reader = _QualifiedArtifacts(evidence_root)
+        except (_ReadRefusal, OSError, TypeError, ValueError, AttributeError):
+            add("EVIDENCE_ROOT_INVALID", "evidence_root", "the supplied owner root is not a qualified directory")
+        resolved = {}
+        resolution_ok = bytes_ok = png_ok = True
+        for declaration in declarations:
+            ref, site, expected = declaration["ref"], declaration["site"], declaration["sha256"]
+            if expected is None:
                 bytes_ok = False
-                add(
-                    "ARTIFACT_SIZE_MISMATCH",
-                    site,
-                    "the declared byte count does not match the artifact bytes",
-                )
-        if declaration["kind"] == "screenshot":
-            data = _read_bounded(path, MAX_ARTIFACT_BYTES)
-            dimensions = _png_dimensions(data)
-            if dimensions is None:
-                png_ok = False
-                add(
-                    "PNG_INVALID",
-                    site,
-                    "the artifact is not a structurally valid PNG image",
-                )
-            else:
-                width, height = dimensions
-                if (
-                    declaration["width"] != width
-                    or declaration["height"] != height
-                ):
-                    png_ok = False
-                    add(
-                        "PNG_DIMENSION_MISMATCH",
-                        site,
-                        "the declared viewport does not match the PNG geometry",
-                    )
-        if declaration["kind"] == "cleanup":
-            raw_cleanup = _read_bounded(path, MAX_ARTIFACT_BYTES)
+                add("ARTIFACT_IDENTITY_UNRESOLVED", site, "this artifact identity is explicitly unresolved")
+            if not isinstance(ref, str):
+                resolution_ok = bytes_ok = False
+                add("ARTIFACT_REF_INVALID", site, "the artifact reference is not a string")
+                continue
             try:
-                cleanup_payloads.append(_strict_loads(raw_cleanup.decode("utf-8")))
-            except (UnicodeDecodeError, ValueError):
-                cleanup_payloads.append(None)
-    mark("ARTIFACT_RESOLUTION", resolution_ok)
-    mark("ARTIFACT_BYTES_AND_DIGEST", bytes_ok)
-    mark("PNG_STRUCTURE_AND_DIMENSIONS", png_ok)
+                if reader is None:
+                    raise _ReadRefusal("ARTIFACT_MISSING")
+                data = reader.read(ref, MAX_ARTIFACT_BYTES)
+            except _ReadRefusal as exc:
+                resolution_ok = bytes_ok = False
+                if declaration["kind"] == "screenshot":
+                    png_ok = False
+                add(exc.code, site, "the artifact is not a bounded stable regular file under the owner root")
+                continue
+            if ref not in resolved:
+                digest = hashlib.sha256(data).hexdigest()
+                related = [d for d in declarations if d["ref"] == ref]
+                qualified = all(
+                    d["sha256"] == digest
+                    and (d["bytes"] is None or (type(d["bytes"]) is int and d["bytes"] == len(data)))
+                    for d in related
+                )
+                resolved[ref] = {
+                    "raw": data, "sha256": digest, "size": len(data),
+                    "qualified": qualified,
+                }
+            entry = resolved[ref]
+            if expected is not None and expected != entry["sha256"]:
+                bytes_ok = False
+                add("ARTIFACT_DIGEST_MISMATCH", site, "the declared identity does not match the qualified bytes")
+            if declaration["bytes"] is not None and declaration["bytes"] != entry["size"]:
+                bytes_ok = False
+                add("ARTIFACT_SIZE_MISMATCH", site, "the declared size does not match the qualified bytes")
+            if declaration["kind"] == "screenshot":
+                if "dimensions" not in entry:
+                    entry["dimensions"] = _png_dimensions(entry["raw"])
+                dimensions = entry["dimensions"]
+                if dimensions is None:
+                    png_ok = False
+                    add("PNG_INVALID", site, "the bytes do not contain a valid supported PNG default-image raster")
+                elif dimensions != (declaration["width"], declaration["height"]):
+                    png_ok = False
+                    add("PNG_DIMENSION_MISMATCH", site, "the declared viewport differs from decoded geometry")
+        mark("ARTIFACT_RESOLUTION", resolution_ok)
+        mark("ARTIFACT_BYTES_AND_DIGEST", bytes_ok)
+        mark("PNG_STRUCTURE_AND_DIMENSIONS", png_ok)
 
-    # --- secret shapes ------------------------------------------------------
-    secret_before = len(errors)
-    _check_secret_shapes(record, add)
-    mark("SECRET_SHAPE_SCAN", len(errors) == secret_before)
-
-    # --- time ---------------------------------------------------------------
-    _check_timestamps(record, add)
-    mark("UTC_TIMESTAMP_CALENDAR", not any(e["code"] == "TIMESTAMP_INVALID" for e in errors))
-    mark("TIME_ORDERING", not any(e["code"] == "TIME_ORDER_INVALID" for e in errors))
-
-    # --- source relationship ------------------------------------------------
-    _check_source_relationship(record, add)
-    mark(
-        "SOURCE_RELATION_CONSISTENCY",
-        not any(e["code"] == "SOURCE_RELATION_INVALID" for e in errors),
-    )
-
-    # --- negative controls --------------------------------------------------
-    _check_negative_controls(record, declared_refs, add)
-    mark(
-        "NEGATIVE_CONTROL_MEANING",
-        not any(e["code"] == "NEGATIVE_CONTROL_INVALID" for e in errors),
-    )
-
-    # --- reference closure --------------------------------------------------
-    _check_reference_closure(record, declared_refs, add)
-    mark(
-        "REFERENCE_CLOSURE",
-        not any(e["code"] == "EVIDENCE_REF_UNDECLARED" for e in errors),
-    )
-
-    # --- evidence family semantics -----------------------------------------
-    _check_evidence_semantics(record, add)
-    mark(
-        "EVIDENCE_FAMILY_SEMANTICS",
-        not any(e["code"] == "EVIDENCE_STATE_INVALID" for e in errors),
-    )
-
-    # --- consumption binding ------------------------------------------------
-    consumption_failures = _consumption_problem(record, resolved)
-    for path, detail in consumption_failures:
-        add("CONSUMPTION_BINDING_INVALID", path, detail)
-    mark("CONSUMPTION_BINDING", not consumption_failures)
-
-    # --- cleanup ------------------------------------------------------------
-    cleanup_problem = _cleanup_problem(record, cleanup_payloads)
-    if cleanup_problem:
-        add("CLEANUP_CLAIM_INVALID", "cleanup", cleanup_problem)
-    mark("CLEANUP_ATTESTATION", cleanup_problem is None)
-
-    # --- capability consistency --------------------------------------------
-    capability_problem = _capability_problem(record, unresolved)
-    if capability_problem:
-        add("CAPABILITY_CONSISTENCY_INVALID", "capability_state", capability_problem)
-    mark("CAPABILITY_CONSISTENCY", capability_problem is None)
-
-    # --- revision semantics -------------------------------------------------
-    if root_real == "":
-        if (record.get("revision") or {}).get("state") == "CORRECTION":
-            add(
-                "CORRECTION_INVALID",
-                "revision",
-                "a correction cannot be proven without a usable evidence root",
-            )
-    else:
-        _check_revision(record, declared_refs, root_real, add)
-    mark(
-        "REVISION_SEMANTICS",
-        not any(e["code"] == "CORRECTION_INVALID" for e in errors),
-    )
-
-    verdict = "VALID" if not errors else "INVALID"
-    return _receipt(
-        verdict,
-        observation_id,
-        observation_sha256,
-        artifact_count,
-        [{"name": name, "status": status} for name, status in sorted(checks.items())],
-        errors,
-    )
+        _check_timestamps(record, add)
+        mark("UTC_TIMESTAMP_CALENDAR", not any(e["code"] == "TIMESTAMP_INVALID" for e in errors))
+        mark("TIME_ORDERING", not any(e["code"] == "TIME_ORDER_INVALID" for e in errors))
+        _check_source_relationship(record, add)
+        mark("SOURCE_RELATION_CONSISTENCY", not any(e["code"] == "SOURCE_RELATION_INVALID" for e in errors))
+        _check_negative_controls(record, declared_refs, resolved, add)
+        mark("NEGATIVE_CONTROL_MEANING", not any(e["code"] == "NEGATIVE_CONTROL_INVALID" for e in errors))
+        _check_reference_closure(record, declared_refs, add)
+        mark("REFERENCE_CLOSURE", not any(e["code"] == "EVIDENCE_REF_UNDECLARED" for e in errors))
+        _check_evidence_semantics(record, add)
+        mark("EVIDENCE_FAMILY_SEMANTICS", not any(e["code"] == "EVIDENCE_STATE_INVALID" for e in errors))
+        consumption_failures = _consumption_problem(record, resolved)
+        for path, detail in consumption_failures:
+            add("CONSUMPTION_BINDING_INVALID", path, detail)
+        mark("CONSUMPTION_BINDING", not consumption_failures)
+        problem = _effect_problem(record, resolved)
+        if problem:
+            add("EFFECT_INVALID", "effect", problem)
+        mark("EFFECT_BINDING", problem is None)
+        cleanup_payloads = [_payload(resolved.get(d.get("artifact_ref"))) for d in record["cleanup"]["evidence"]]
+        problem = _cleanup_problem(record, cleanup_payloads)
+        if problem:
+            add("CLEANUP_CLAIM_INVALID", "cleanup", problem)
+        mark("CLEANUP_ATTESTATION", problem is None)
+        problem = _capability_problem(record, unresolved)
+        if (
+            problem is None and record.get("capability_state") == "PROVEN_LIVE"
+            and checks["NEGATIVE_CONTROL_MEANING"] != "PASS"
+        ):
+            problem = "a required negative control is not grounded in the qualified evidence"
+        if problem:
+            add("CAPABILITY_CONSISTENCY_INVALID", "capability_state", problem)
+        mark("CAPABILITY_CONSISTENCY", problem is None)
+        _check_revision(record, declared_refs, reader, resolved, validator, add)
+        mark("REVISION_SEMANTICS", not any(e["code"] == "CORRECTION_INVALID" for e in errors))
+        return finish()
+    finally:
+        if reader is not None:
+            reader.close()
 
 
 __all__ = ["verify_observation_file", "RECEIPT_SCHEMA", "ERROR_CODES"]

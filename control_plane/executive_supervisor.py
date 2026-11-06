@@ -34,8 +34,11 @@ import urllib.request
 from enum import Enum
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol, Sequence
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from control_plane.terminal_original_input_artifacts import TerminalOriginalInputReference
 
 from control_plane.worker_execution_contract import (
     CleanupPolicy,
@@ -82,6 +85,11 @@ from control_plane.executive_runtime import (
     RuntimeProofError,
     StateConflict,
     _dialogue_source_from_root_creation,
+    _normalise_constraints,
+    _project_work_placement,
+    _capacity_matches_route,
+    CHILD_WORKSPACE_POLICY,
+    CHILD_WORKSPACE_POLICY_KEY,
 )
 from control_plane.executive_workspace import (
     AssignmentSealError,
@@ -1347,6 +1355,73 @@ PLANNER_ROUTING_OPTIONS_SCHEMA = "mastermind.planner_routing_options/v2"
 _PLANNER_ROUTING_MODEL_LIMIT = 16
 
 
+def _planner_pool_constraints(root: Job, member: Mapping[str, Any], capacities, registry) -> dict[str, Any]:
+    """Observe supported step limits from matching registered profiles only."""
+    paid = "paid_execution_route" in member
+    attended = "attended_route" in member
+    limits = {
+        "constraints_available": False,
+        "supported_authorities": [],
+        "allows_write_paths": False,
+        "allows_validation_commands": False,
+        "allows_coordinator": False,
+        "continuation_constraint": "ORIGINAL_REQUEST_ONLY" if attended else "ROOT_CONTINUATION_MODE",
+        "input_constraint": "SEALED_SUPPLIED_TEXT_ONLY" if paid else "ROOT_WORKSPACE",
+    }
+    try:
+        base = _normalise_constraints(root.constraints)
+        projected = _project_work_placement(base, root.constraints,
+            {key: member[key] for key in ("provider_realm", "quota_class")},
+            raw_root_constraints=root.constraints, plan_schema_version="mastermind.execution_plan/v5")
+    except (StateConflict, KeyError, TypeError, ValueError):
+        return limits
+    compatible = []
+    for worker, quota in capacities:
+        try:
+            metadata = quota.metadata
+            if not _capacity_matches_route(
+                {"worker_id": worker.worker_id, "metadata_json": json.dumps(metadata)}, projected
+            ):
+                continue
+            profile = registry.resolve(str(metadata.get("execution_profile_id") or ""))
+            if (not profile.enabled
+                    or quota.provider != worker.provider
+                    or metadata.get("adapter_id") not in (None, "", worker.worker_type)
+                    or metadata.get("execution_profile_digest") != profile.profile_digest
+                    or metadata.get("capability_policy_version") != registry.policy_version
+                    or metadata.get("capability_policy_digest") != registry.policy_digest
+                    or not is_sealed_worker_execution_surface(profile.execution_surface)
+                    or not adapter_supports_execution_surface(worker.worker_type, profile.execution_surface)):
+                continue
+            supported = set(root.requested_authorities)
+            if not profile.write_capable:
+                supported.discard("WRITE_BRANCH")
+            if paid:
+                supported &= {"READ", "RESEARCH"}
+            elif attended:
+                supported &= {"READ"}
+            if root.constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY:
+                supported &= {"READ", "RESEARCH"}
+            capabilities = set(quota.capabilities) & set(worker.capabilities)
+            needed = {"READ": "read", "RESEARCH": "research", "WRITE_BRANCH": "code", "RUN_TESTS": "tests"}
+            supported = {authority for authority in supported if needed.get(authority) in capabilities}
+            if "READ" in supported:
+                compatible.append(supported)
+        except (CapabilityPolicyError, StateConflict, KeyError, TypeError, ValueError):
+            continue
+    if not compatible:
+        return limits
+    supported = set().union(*compatible)
+    limits.update(
+        constraints_available=True,
+        supported_authorities=sorted(supported),
+        allows_write_paths="WRITE_BRANCH" in supported and bool(root.allowed_write_paths),
+        allows_validation_commands="RUN_TESTS" in supported and bool(root.validation_commands),
+        allows_coordinator=not paid,
+    )
+    return limits
+
+
 def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | None:
     """Project model-safe routing choices for one orchestration planner.
 
@@ -1393,6 +1468,7 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
         }
 
     workers = runtime.workers.list_workers()
+    registry = ExecutionCapabilityRegistry.load()
     pools: list[dict[str, Any]] = []
     for member in raw_union:
         if not isinstance(member, Mapping):
@@ -1404,11 +1480,13 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
         models: dict[str, dict[str, int]] = {}
         registered_count = 0
         available_count = 0
+        capacities = []
         for worker in workers:
             quota = runtime.workers.get_quota_class(worker.worker_id, quota_class)
             if quota is None or quota.provider != provider:
                 continue
             registered_count += 1
+            capacities.append((worker, quota))
             if quota.status.value == "AVAILABLE":
                 available_count += 1
             if not quota.model:
@@ -1433,6 +1511,7 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
                 "available_capacity_count": available_count,
                 "models": model_rows,
                 "models_truncated": len(models) > _PLANNER_ROUTING_MODEL_LIMIT,
+                **_planner_pool_constraints(root, member, capacities, registry),
             }
         )
 
@@ -1486,6 +1565,7 @@ class ExecutiveSupervisor:
         subscription_canary_binding_id: str | None = None,
         product_acceptance_macro_root: str | Path | None = None,
         product_acceptance_context_reader: Any | None = None,
+        project_input_owner: "ExecutiveSupervisor | None" = None,
     ) -> None:
         self.runtime = runtime
         self._product_acceptance_review_owner = None
@@ -1589,6 +1669,11 @@ class ExecutiveSupervisor:
         if not 0.1 <= self.validation_timeout_seconds <= 3600:
             raise SupervisorError("validation timeout must be between 0.1 and 3600 seconds")
         self.instance_id = instance_id or f"supervisor-{uuid4().hex}"
+        if project_input_owner is not None and (type(project_input_owner) is not ExecutiveSupervisor
+                or project_input_owner.runtime is not runtime or project_input_owner.instance_id != self.instance_id
+                or project_input_owner._project_input_owner is not None):
+            raise SupervisorError("project input requires the original same-service owner")
+        self._project_input_owner = project_input_owner
         self._recovered_runs: dict[str, ActiveRun] = {}
         self._recovered_attempt_ids: set[str] = set()
 
@@ -1621,6 +1706,98 @@ class ExecutiveSupervisor:
 
     def _run_dir(self, attempt_id: str) -> Path:
         return self.runs_root / attempt_id
+
+    def lookup_terminal_original_input(self, *, command_id: str, issuer_scope_sha256: str):
+        """Private same-command lookup only; no public input-ref authority."""
+        from control_plane.terminal_original_input_artifacts import TerminalInputError, TerminalOriginalInputArtifacts
+        if (type(command_id) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", command_id) is None
+                or type(issuer_scope_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", issuer_scope_sha256) is None):
+            raise TerminalInputError("TERMINAL_INPUT_INVALID")
+        if self.runtime.store.find_event_by_command_id(command_id) is not None:
+            return None  # existing original command reconciles before artifact access
+        try:
+            self.runs_root.lstat()
+        except FileNotFoundError:
+            return None
+        return TerminalOriginalInputArtifacts(self.runs_root).lookup_original(
+            command_id=command_id, issuer_scope_sha256=issuer_scope_sha256)
+
+    def prepare_terminal_original_input(
+        self,
+        *,
+        command_id: str,
+        issuer_scope_sha256: str,
+        fingerprint_sha256: str,
+        payload: bytes,
+    ) -> TerminalOriginalInputReference | None:
+        """Prepare private source input before a NEW original Job insertion.
+
+        This is a private controller composition seam, not an ingress tool,
+        authority issuer, or source validator. The authenticated command owner
+        supplies its actual issuer scope and already validated typed producer
+        input; credentials must never enter the payload. An existing command
+        returns None BEFORE filesystem preparation so the caller must reconcile
+        that original operation through the existing sink, without retrofitting
+        resource input. A prepared reference proves custody only.
+
+        The original command owner must bind the returned immutable digest in
+        its Job insertion, and preserve its original carrier if that insertion
+        has an ambiguous outcome. This helper never inserts or dispatches a Job.
+        """
+        from control_plane.terminal_original_input_artifacts import (
+            TerminalInputError,
+            TerminalOriginalInputArtifacts,
+        )
+
+        if (
+            type(command_id) is not str
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", command_id) is None
+            or type(issuer_scope_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", issuer_scope_sha256) is None
+            or type(fingerprint_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", fingerprint_sha256) is None
+            or type(payload) is not bytes
+            or not 0 < len(payload) <= 256 * 1024
+        ):
+            raise TerminalInputError("TERMINAL_INPUT_INVALID")
+        if self.runtime.store.find_event_by_command_id(command_id) is not None:
+            return None
+
+        # runs_root already belongs to this Supervisor. This is the minimal
+        # new pre-Job allocator; incumbent _write_schema allocates after claim.
+        # Never create arbitrary ancestors or repair an unexpected directory.
+        try:
+            if not self.runs_root.exists():
+                flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+                descriptor = os.open(self.runs_root.parent, flags)
+                try:
+                    parent = os.fstat(descriptor)
+                    if (
+                        not stat.S_ISDIR(parent.st_mode)
+                        or parent.st_uid != os.geteuid()
+                        or stat.S_IMODE(parent.st_mode) & 0o022
+                    ):
+                        raise TerminalInputError("TERMINAL_INPUT_UNAVAILABLE")
+                    try:
+                        os.mkdir(self.runs_root.name, mode=0o700, dir_fd=descriptor)
+                    except FileExistsError:
+                        pass  # The immutable artifact owner checks the winner.
+                    os.fsync(descriptor)
+                    current = self.runs_root.parent.lstat()
+                    if (current.st_dev, current.st_ino) != (parent.st_dev, parent.st_ino):
+                        raise TerminalInputError("TERMINAL_INPUT_UNAVAILABLE")
+                finally:
+                    os.close(descriptor)
+            return TerminalOriginalInputArtifacts(self.runs_root).prepare(
+                command_id=command_id,
+                issuer_scope_sha256=issuer_scope_sha256,
+                fingerprint_sha256=fingerprint_sha256,
+                payload=payload,
+            )
+        except TerminalInputError:
+            raise
+        except Exception:
+            raise TerminalInputError("TERMINAL_INPUT_UNAVAILABLE") from None
 
     @staticmethod
     def _isolation_manifest(
@@ -2028,6 +2205,20 @@ class ExecutiveSupervisor:
                 commission.get("verified_local_path") if commission is not None else None
             ),
         }
+        from control_plane.project_execution_admission import input_for_job, COMMISSION_PATH as PROJECT_EXECUTION_COMMISSION
+        if commission is not None and commission.get("path") == PROJECT_EXECUTION_COMMISSION:
+            project_input = input_for_job(self, job)
+            if project_input is None:
+                raise SupervisorError("project execution original input unavailable")
+            packet["project_execution_input"] = project_input
+        if _is_direct_native_job(job):
+            admitted=self.runtime.jobs.direct_native_provenance(job.job_id)
+            if 'project_planning' in admitted:
+                from control_plane.project_planning_admission import ProjectPlanningInput
+                packet['project_initial_planning_input']=ProjectPlanningInput(self).read(
+                    admitted['project_planning']).decode('utf-8',errors='strict')
+                packet['project_initial_planning_source']=admitted['project_planning']['source']
+                packet['project_initial_planning_stage']=admitted['project_planning']['stage']
         if "responsibility_intent" in job.constraints:
             from control_plane.executive_responsibility import (
                 ResponsibilityIntentError, normalize_responsibility_intent,
@@ -2141,6 +2332,13 @@ class ExecutiveSupervisor:
         spec_kwargs: dict[str, Any] = {
             "effective_grant_digest": attempt.effective_grant_digest
         } if effective_grant is not None else {}
+        if _is_direct_native_job(job):
+            from control_plane.project_planning_policy import launch_limits
+            # Legacy direct Jobs return no overrides. Typed project planning
+            # must rejoin its protected policy before the physical owner sees
+            # a LaunchSpec; missing/drifted bounds cannot fall back to defaults.
+            spec_kwargs.update(launch_limits(self.runtime,job))
+        from control_plane.project_execution_admission import workspace_base_for_job
         return spec_type(
             run_id=attempt.attempt_id,
             job_id=job.job_id,
@@ -2163,7 +2361,7 @@ class ExecutiveSupervisor:
             model=model,
             reasoning_effort=effort,
             worker_user=self.worker_user,
-            expected_base_sha=str(job.constraints.get("base_sha") or "") or None,
+            expected_base_sha=workspace_base_for_job(self, job),
             allowed_artifact_paths=tuple(
                 effective_grant["write_paths"]
                 if effective_grant is not None
@@ -2173,7 +2371,10 @@ class ExecutiveSupervisor:
             isolation_denied_paths=isolation_denied,
             isolation_manifest=isolation_manifest,
             isolation_manifest_sha256=isolation_manifest_sha256,
-            forbidden_paths=(self.runtime.store.path,),
+            forbidden_paths=(
+                self.runtime.store.path,
+                self.runs_root / "terminal-original-input",
+            ),
             expected_worker_uid=self.worker_uid,
             expected_worker_gid=self.worker_gid,
             shared_run_gid=self.shared_run_gid,

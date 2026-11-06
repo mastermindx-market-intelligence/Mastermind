@@ -16,8 +16,11 @@ const selector = 'main .grid > .card > dl .state';
 function cssAtWidth(width: number) {
   const sheet = postcss.parse(css);
   // Model only this stylesheet's max-width media conditions, not browser layout.
+  // The short-drawer rule carries a max-height conjunction that touches only
+  // navigation-drawer selectors, never the badge selectors asserted below, so
+  // the width term alone decides inclusion; any other condition still throws.
   sheet.walkAtRules('media', rule => {
-    const match = rule.params.match(/^\(max-width:\s*(\d+)px\)$/);
+    const match = rule.params.match(/^\(max-width:\s*(\d+)px\)(?: and \(max-height:\s*(\d+)px\))?$/);
     if (!match) throw new Error(`Unsupported media condition: ${rule.params}`);
     if (width <= Number(match[1])) rule.replaceWith(...rule.nodes!);
     else rule.remove();
@@ -47,6 +50,8 @@ async function openOverview(width: number, extendedStates = false) {
   await act(async () => { root!.render(<App />); });
   await click('Projects'); await click('Open project Beta program');
   await click('Project details');
+  await click('Work controls');
+  expect(container.querySelector('[aria-label="Inspect Work controls"]')?.hasAttribute('hidden')).toBe(false);
   await act(async () => { Array.from(container.querySelectorAll('summary')).find(n => n.textContent === 'More work details')!.click(); });
   await click('Overview');
   expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Overview');

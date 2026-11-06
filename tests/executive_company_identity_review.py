@@ -32,28 +32,32 @@ REVIEWED_ANCHORS = {
         "node_type": "AsyncFunctionDef",
         # Existing section-sign/em-dash prose needs an exact full-source pin
         # in addition to the method AST; all three literal lines are ASCII.
-        # Qualified session/direction/capacity READ and admission additions change the enclosing ingress AST.
+        # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
         # The original CCR branch and listener remain structurally unchanged.
-        # 2026-11-05 Mission-result composition re-pin (attended parent source
-        # review under the current Chairman waiver, NOT an independent/formal
-        # review of this postimage): the method body gains one statement before
-        # the pinned branch, so only the enclosing body index moves (35 -> 36);
-        # the three pinned status operands keep their exact spelling, values and
-        # relative AST paths, and their source lines shift by the same +14.
-        # The new MISSION_RESULT read branch uses the existing HTTPStatus
-        # convention for its own invalid_input refusal. Previous source SHA
-        # e43df430e5652ffd9aff5114572bccb5438616e615f7edd065239f018493ef96 and
-        # previous AST SHA
-        # 6735cd4807ae1d203599d8210f141ea9b49b5d3487deaaa169789d6fd4565c72.
-        "source_sha256": "835c619a2a31659bff848b319b175ef63e44430d269d4d7982941ab3e563280b",
-        "ast_sha256": "a28a07df30890f0945054f42d6a1434cc41c57838ea3079128c2cf7c2d9d76cc",
+        "source_sha256": "9b7dee55b65807867d08840c44b79c5932f30cdc7c13645228736eb240aade0c",
+        "ast_sha256": "bfeed80a98cf1e20152070659d1397600a2597921c38b938799ce2e095a879eb",
         "sites": (
-            (("body", 3, "body", 36, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 36, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
               "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 36, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
               "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
         ),
     },
 }
+
+# BYOK fixed READ changes the full ingress AST, with existing App/Runtime fences.
+# The same three original Fabric HTTP operands are retained at mapped exact sites.
+# Parent checked this postimage under the Chairman waiver; no independent approval claim.
+# Protected #695 backup composition changes the full source only; the BYOK ingress AST and exact status sites are unchanged.
+
+# Parent reviewed the BYOK + protected Workspace composition at 49c2e1d.
+# The exact 136-node Fabric response branch and original three operands are unchanged.
+
+# 2026-11-06 composed-source audit: qualified project execution/planning and
+# bounded project conversation/Fresh READ coexist with protected BYOK and host
+# observation. The whole Company listener AST and exact 136-node protected
+# Fabric response branch are unchanged; only the enclosing ingress composition
+# and mapped sites change. These fixed pins are a new source-drift qualification,
+# not inherited native SEND approval or installation/release authority.

@@ -24,7 +24,8 @@ FIXTURE = ROOT / "ops/native_fabric/qualification/native_manual_preview_fixture.
 HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102/fabric_task.py.base"
 PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
 PRE_POLL255_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
-CURRENT_TASK_SHA = "baae8bb99ef6ccda1162dd486a10c8e713bcf4e731ba9160c5e9d1d9bdd1e7d8"
+PRE_POLL255_WITH_UBUNTU4_TASK_SHA = "36fbd16469befa0f4ade8d75fe15b3384a042b726668879c59ae03c82d194058"
+CURRENT_TASK_SHA = "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -35,7 +36,7 @@ AFTER = {
     "ext/pick.py": "9bbb96c8da84e38bbd802fdd373a0e8ba386395abc5a80bc8628b49d5afd8174",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
 }
-COMPOSED_PICK = "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132"
+COMPOSED_PICK = "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892"
 
 
 def _preobserver_picker():
@@ -49,6 +50,22 @@ def _preobserver_picker():
     assert len(raw) == value["bytes"] == 118474
     assert hashlib.sha256(raw).hexdigest() == value["sha256"] == "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b"
     return raw
+
+
+def _pre_ubuntu4_task(value: bytes) -> bytes:
+    """Undo only the three Ubuntu4 hunks before the frozen F1 inverse."""
+    pairs = (
+        (b'{"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4"}',
+         b'{"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}'),
+        (b'host=(?P<host>ubuntu[0-4])', b'host=(?P<host>ubuntu[0-3])'),
+        (b'(Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4)',
+         b'(Grok on Mac, MiniMax on M1 or Ubuntu4)'),
+    )
+    for newer, older in pairs:
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
+    return value
 
 
 def _inverse_manual_member(value: bytes, member: str) -> bytes:
@@ -149,6 +166,9 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
             first, last = latest.index(start), latest.index(end)
             assert first < last
             pre_poll = (latest[:first] + latest[last:]).replace(hook, b'', 1)
+            assert hashlib.sha256(pre_poll).hexdigest() == PRE_POLL255_WITH_UBUNTU4_TASK_SHA
+            # Preserve the independent Ubuntu4 boundary before the frozen history.
+            pre_poll = _pre_ubuntu4_task(pre_poll)
             assert hashlib.sha256(pre_poll).hexdigest() == PRE_POLL255_TASK_SHA
             # Only the two finite budget constants differ at this boundary.
             assert pre_poll.count(b'request_remaining_seconds <= 14400') == 1
