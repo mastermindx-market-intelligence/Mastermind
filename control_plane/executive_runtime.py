@@ -1388,6 +1388,35 @@ def _project_work_placement(
 
     return projected
 
+
+def _assert_cycle_placement_compatible(
+    constraints: Mapping[str, Any], *, role: str,
+    requested_authorities: Sequence[str], allowed_write_paths: Sequence[str],
+    validation_commands: Sequence[Sequence[str]],
+) -> None:
+    """Pure route ceiling check; neither admission nor a Capacity grant.
+
+    Resolve the step's existing host placement before this check. Paid model
+    input is sealed text, and finite attended execution retains its original
+    request owner. Neither route can acquire code or test authority by carrying
+    a native parent's wider grant.
+    """
+    profile = constraints.get("execution_profile_id")
+    paid = "paid_execution_route" in constraints or profile == "fabric.paid.glm.sealed-input.v1"
+    attended = "attended_route" in constraints or profile == "fabric.attended.claude.bounded.v1"
+    authorities = set(requested_authorities)
+    if paid and (
+        attended or role not in {"work", "repair"}
+        or authorities not in ({"READ"}, {"READ", "RESEARCH"})
+        or allowed_write_paths or validation_commands
+    ):
+        raise StateConflict("paid placement requires a READ/RESEARCH work or repair step")
+    if attended and (
+        authorities != {"READ"} or allowed_write_paths or validation_commands
+    ):
+        raise StateConflict("attended placement requires an exact READ-only step")
+
+
 def _has_executive_provenance(
     provenance: dict[str, Any] | None, *, target: str
 ) -> bool:
@@ -11770,9 +11799,26 @@ def _assert_orchestration_lineage_for_create(
             raise StateConflict(
                 "active interactive plan lineage is not recognized"
             )
-    _, sealed_plan_digest = _sealed_role_result(
-        connection, attempt_id=str(plan_attempt_id), expected_role="plan"
-    )
+    plan_mode = str(plan_attempt["execution_mode"] or AttemptExecutionMode.SEALED_WORKER.value)
+    if plan_mode == AttemptExecutionMode.SEALED_WORKER.value:
+        # Native sealed planners use the canonical collector/terminal owner,
+        # not the operator-harness event family. Never fall back after a
+        # native validation error or accept another/currently stale Attempt.
+        plan_job = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (plan_attempt["job_id"],)
+        ).fetchone()
+        completed_attempt, _plan_seal, _plan_terminal, sealed_plan_digest = (
+            _validated_role_completion_material(connection, job_row=plan_job,
+                expected_role="plan", root_job_id=str(parent_row["root_job_id"]))
+        )
+        if completed_attempt["attempt_id"] != plan_attempt_id:
+            raise StateConflict("native plan completion does not match its exact Attempt")
+    elif plan_mode == AttemptExecutionMode.OPERATOR_HARNESS.value:
+        _, sealed_plan_digest = _sealed_role_result(
+            connection, attempt_id=str(plan_attempt_id), expected_role="plan"
+        )
+    else:
+        raise StateConflict("plan lineage has an unsupported execution mode")
     if sealed_plan_digest != plan_digest:
         raise StateConflict("plan digest does not match the sealed plan role result")
     if role in {"work", "aggregation"}:
@@ -12625,8 +12671,9 @@ def _insert_cycle_child(
     constraints = _normalise_constraints(
         constraints, host_admitted_placement_union=role == "aggregation"
     )
-    if role == "aggregation" and constraints.get("execution_profile_id") == "fabric.paid.glm.sealed-input.v1":
-        raise StateConflict("paid model-only profile cannot become a coordinator")
+    _assert_cycle_placement_compatible(constraints, role=role,
+        requested_authorities=requested_authorities, allowed_write_paths=allowed_write_paths,
+        validation_commands=validation_commands)
     numbers = [
         int(match.group(1))
         for row in connection.execute("SELECT job_id FROM jobs")
@@ -13953,6 +14000,7 @@ class JobRegistry:
         _c2_capability: object | None = None,
         _instruction_source: object | None = None,
         _fresh_conversation_source: object | None = None,
+        _project_execution_source: object | None = None,
     ) -> Job:
         """Own the existing Job insert plus immutable creation receipt.
 
@@ -14052,6 +14100,31 @@ class JobRegistry:
             # Existing normalized scalar, privately stamped in the SAME Job
             # and immutable creation transaction. It is a denial, never a grant.
             spec = dataclasses.replace(spec, constraints={**spec.constraints, "task_kind": TASK_KIND})
+        project_fields = isinstance(provenance, Mapping) and any(key in provenance
+            for key in ("project_execution", "project_execution_digest"))
+        if _project_execution_source is not None or project_fields:
+            from control_plane.project_execution_admission import ProjectExecutionSource
+            if (type(_project_execution_source) is not ProjectExecutionSource
+                    or _instruction_source is not None or _c2_capability is not None
+                    or _fresh_conversation_source is not None or spec.parent_job_id is not None
+                    or spec.orchestration_role != "aggregation" or not project_fields
+                    or provenance.get("schema") != "mastermind.ceo_intent.v2"
+                    or not isinstance(spec.orchestration_provenance_source, Mapping)
+                    or _orchestration_source_creator(spec.orchestration_provenance_source,
+                        role=spec.orchestration_role) != CEO_ORCHESTRATION_ROOT_CREATOR
+                    or spec.orchestration_provenance_source.get("source_id") != provenance.get("intent_id")
+                    or spec.orchestration_provenance_source.get("source_digest") != provenance.get("fingerprint")):
+                raise StateConflict("PROJECT_EXECUTION_SOURCE_REQUIRED")
+            project_material = _project_execution_source.material()
+            if (provenance.get("project_execution") != project_material
+                    or provenance.get("project_execution_digest") != orchestration_digest(project_material)
+                    or provenance.get("workstream") != project_material["work_ref"]
+                    or provenance.get("fingerprint") != project_material["intent_fingerprint"]
+                    or spec.command_id != project_material["command_id"]):
+                raise StateConflict("PROJECT_EXECUTION_SOURCE_MISMATCH")
+            _project_execution_source.check_fresh()
+            from control_plane.project_execution_admission import _check_parent_transaction
+            _check_parent_transaction(_project_execution_source, connection)
         instruction_fields = isinstance(provenance, Mapping) and any(key in provenance for key in ("instruction_source", "instruction_source_digest"))
         if _instruction_source is not None or instruction_fields:
             from control_plane.instruction_work_source import InstructionWorkSource
@@ -14231,6 +14304,10 @@ class JobRegistry:
                 "schema": "mastermind.fresh_conversation_original_request.v1",
                 "operation_key": _fresh_conversation_source.public_operation_key(),
                 "creation_digest": orchestration_digest(fresh_material)}
+        if _project_execution_source is not None:
+            event_payload["project_execution_admission"] = {
+                "schema": "mastermind.project_execution_driven_root.v1",
+                "source": project_material, "source_digest": orchestration_digest(project_material)}
         self.store.append_event(
             connection,
             aggregate_type="job",
@@ -14265,6 +14342,7 @@ class JobRegistry:
         _instruction_source: object | None = None,
         _instruction_admission_guard: Callable[[], None] | None = None,
         _fresh_conversation_source: object | None = None,
+        _project_execution_source: object | None = None,
     ) -> Job:
         """The sole strict v2 intent -> Phase 1F-C aggregation-root boundary.
 
@@ -14348,6 +14426,17 @@ class JobRegistry:
             if orchestration_digest(dialogue_source) != material["dialogue_source_sha256"]:
                 raise StateConflict("FRESH_CONVERSATION_SOURCE_MISMATCH")
             provenance.update(fresh_conversation=material, fresh_conversation_digest=orchestration_digest(material))
+        if _project_execution_source is not None:
+            from control_plane.project_execution_admission import ProjectExecutionSource
+            if (type(_project_execution_source) is not ProjectExecutionSource
+                    or _instruction_source is not None or _fresh_conversation_source is not None):
+                raise StateConflict("PROJECT_EXECUTION_SOURCE_REQUIRED")
+            _project_execution_source.check_intent(normalized)
+            material = _project_execution_source.material()
+            if (orchestration_digest(dialogue_source) != material["dialogue_source_sha256"]
+                    or orchestration_digest(execution_binding) != material["execution_binding_sha256"]):
+                raise StateConflict("PROJECT_EXECUTION_SOURCE_MISMATCH")
+            provenance.update(project_execution=material, project_execution_digest=orchestration_digest(material))
         return self.create_job(
             normalized["objective"],
             department=normalized["department"],
@@ -14374,6 +14463,9 @@ class JobRegistry:
             },
             _v2_root_capability=_V2_ROOT_CREATION_CAPABILITY,
             _fresh_conversation_source=_fresh_conversation_source,
+            _project_execution_source=_project_execution_source,
+            **({"_principal_commit_guard": _project_execution_source.check_fresh}
+               if _project_execution_source is not None else {}),
             **({"_instruction_source": _instruction_source,
                 "_principal_commit_guard": _instruction_admission_guard} if _instruction_source is not None else {}),
         )
@@ -15063,6 +15155,33 @@ class JobRegistry:
                     raise StateConflict(
                         "plan step validation IDs do not equal the reviewed root set"
                     )
+                if is_v5:
+                    # Validate the entire reserved plan, including deferred
+                    # dependencies, before creating any child or admission event.
+                    raw_constraints = _strict_canonical_json_loads(
+                        str(root["constraints_json"]), name="root constraints"
+                    )
+                    role = "aggregation" if step.get("delegation") else "work"
+                    projected = _normalise_constraints(raw_constraints,
+                        host_admitted_placement_union=role == "aggregation")
+                    projected["cost_class"] = str(step["cost_class"])
+                    if "placement" in step:
+                        projected = _project_work_placement(projected, raw_constraints,
+                            step["placement"], raw_root_constraints=raw_constraints,
+                            plan_schema_version=plan_body["schema_version"])
+                    projected = _normalise_constraints(projected,
+                        host_admitted_placement_union=role == "aggregation")
+                    _assert_cycle_placement_compatible(projected, role=role,
+                        requested_authorities=step["requested_authorities"],
+                        allowed_write_paths=step["allowed_write_paths"],
+                        validation_commands=root_validations if has_tests else [])
+                    _assert_child_does_not_widen_parent(root,
+                        requested=step["requested_authorities"],
+                        allowed_write_paths=step["allowed_write_paths"], constraints=projected)
+                    if (role == "work" and raw_constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY
+                            and (set(step["requested_authorities"]) - {"READ", "RESEARCH"}
+                                or step["allowed_write_paths"] or has_tests)):
+                        raise StateConflict("isolated analysis child admits READ/RESEARCH only")
                 member_command = f"{command_id}:member:{ordinal}"
                 if is_v3:
                     reservation_steps.append(
@@ -16576,6 +16695,7 @@ class JobRegistry:
         _direct_native_admission: direct_native.DirectNativeAdmission | None = None,
         _instruction_source: object | None = None,
         _fresh_conversation_source: object | None = None,
+        _project_execution_source: object | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -16591,6 +16711,16 @@ class JobRegistry:
         that must record who asked and on what grounding.  It changes no job
         column and confers no authority.
         """
+        project_fields = isinstance(provenance, Mapping) and any(key in provenance
+            for key in ("project_execution", "project_execution_digest"))
+        if _project_execution_source is not None or project_fields:
+            from control_plane.project_execution_admission import ProjectExecutionSource
+            if (type(_project_execution_source) is not ProjectExecutionSource or not project_fields
+                    or parent_job_id is not None or orchestration_role != "aggregation"
+                    or _v2_root_capability is not _V2_ROOT_CREATION_CAPABILITY
+                    or _instruction_source is not None or _fresh_conversation_source is not None
+                    or _direct_native_admission is not None or _principal_commit_guard is None):
+                raise StateConflict("PROJECT_EXECUTION_SOURCE_REQUIRED")
         instruction_fields = isinstance(provenance, Mapping) and any(key in provenance for key in ("instruction_source", "instruction_source_digest"))
         if instruction_fields:
             raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_REQUIRED")
@@ -17135,6 +17265,7 @@ class JobRegistry:
                 ),
                 **({"_instruction_source": _instruction_source} if _instruction_source is not None else {}),
                 _fresh_conversation_source=_fresh_conversation_source,
+                _project_execution_source=_project_execution_source,
             )
             # Refusal rolls back both the Job and its JOB_CREATED event.
             recheck_principal()

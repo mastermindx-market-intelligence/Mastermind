@@ -139,3 +139,6 @@ export function decodeFreshConversationWindow(raw:unknown,expected:unknown):Fres
     state:value.state as FreshConversationWindow['state'],locator,epoch,initial_message:message(value.initial_message),initial_result:initial,
     initial_consumption:consumed,turns,can_send:false,parent_consumed:false});
 }
+
+/** Reused descriptor-only bounded JSON data snapshot; no source authority. */
+export const snapshotConversationData = (value: unknown): unknown => jsonData(value);

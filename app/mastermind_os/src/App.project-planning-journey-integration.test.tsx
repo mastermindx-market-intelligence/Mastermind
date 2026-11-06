@@ -21,7 +21,10 @@ import { createNativeClient } from "./host";
 import { composeMissionHost } from "./compose-mission-host";
 import { decodeLaunchBindingConfig } from "./launch-config";
 import { readOwnerContext } from "./orchestration/host-command-bindings";
-import { canonicalJson, sha256Hex } from "./orchestration/operation-key";
+import { canonicalJson, intentIdForOperationKey, sha256Hex } from "./orchestration/operation-key";
+import programsFixture from "./fixtures/programs-available-workspace-service.json";
+import planFixture from "./fixtures/project-plan-canonical-owner.json";
+import { controlRoomFixture } from "./test-fixtures";
 import {
   planningIntentId,
   planningOperationKey,
@@ -55,6 +58,9 @@ const ATTEMPT = "attempt-1";
 const GOAL = "Publish the liquidity review project.\n保持原文";
 const REQUEST_TEXT = "Plan the first useful slice of this project.";
 const PLAN_DIGEST = sha256Hex("plan");
+const PROJECT_TITLE = "Published liquidity review";
+const EXECUTION_ROOT = "JOB-731";
+const OPEN_FAILURE = "The created project is unavailable in the current project list. Try Open project again.";
 
 function hex64(seed: string): string {
   return sha256Hex(seed);
@@ -239,14 +245,80 @@ function envelope(operation: string, data: unknown) {
 
 // ── native boundary fixture + real mounted Host ──────────────────────────────
 
-function journeySetup() {
-  const responses: { status: unknown } = { status: null };
+// The joined handoff reuses the existing producer DTOs as inert native read
+// DATA. Changed work/title/source values are test coordinates, not proof of an
+// installed publication, real provider execution, or newly granted authority.
+function programsDocument(created: boolean, title = PROJECT_TITLE) {
+  // The envelope fixture deliberately has a minimal control_room for decoder
+  // tests. The mounted App's strict domain mapper needs the existing full CCR.
+  const room = controlRoomFixture(), original = room.work[0];
+  const newRow = structuredClone(original);
+  newRow.work_ref = WORK_REF;
+  newRow.agent_os.workstream = WORK_REF.slice(3);
+  newRow.agent_os.title = title;
+  for (const binding of newRow.bindings) binding.work_ref = WORK_REF;
+  for (const job of newRow.executive.jobs) job.workstream = WORK_REF;
+  room.work = [original, ...(created ? [newRow] : [])];
+  // Creation has no Executive root. The actual App must navigate this
+  // canonical rootless row without deriving a job from the creation receipt.
+  room.autonomy.responsibilities = [];
+  return {...structuredClone(programsFixture), control_room: room};
+}
+
+function projectPlanDocument() {
+  const value = structuredClone(planFixture);
+  value.selection.work_ref = WORK_REF;
+  value.source.commit = COMMIT;
+  value.source.path = SOURCE_PATH;
+  value.source.content_sha256 = CONTENT;
+  value.plan.version_history.revisions[0].content_sha256 = CONTENT;
+  value.plan.title = PROJECT_TITLE;
+  value.plan.objective = GOAL;
+  return value;
+}
+
+// Same closed private preview/receipt shape used by the manifest-free App
+// integration. Only this native boundary is inert; its decoder/port are real.
+function executionEnvelope(operation: string, request: Record<string, unknown>) {
+  const data = operation === "preview" ? {
+    schema: "mastermind.project_execution_preview.v1", work_ref: WORK_REF,
+    context_sha256: "c".repeat(64), execution_binding_sha256: "d".repeat(64),
+    execution_profile_bindings: {research_only: "d".repeat(64)},
+    execution_state: "WORK_CAPABLE", continuation_mode: "DURABLE",
+    coordinator: {provider: "codex", model: "inert-source-model", effort: "high"},
+    execution_scope: {repository: "mastermindx-market-intelligence/Mastermind", commit: MASTERMIND},
+    previous_run: null,
+    binding: {workstream: WORK_REF, priority: 0, attemptLimit: 1,
+      projects: [{ref: "executive-infrastructure", label: "Project team"}],
+      profiles: [{ref: "research_only", label: "Research team"}]},
+  } : {
+    operation_key: request.operation_key, work_ref: WORK_REF, state: "ACCEPTED",
+    receipt: {schema: "mastermind.ceo_intent_receipt.v2",
+      intent_id: intentIdForOperationKey(String(request.operation_key)),
+      fingerprint: FINGERPRINT, job_id: EXECUTION_ROOT, status: "QUEUED",
+      accepted: true, dispatched: false, duplicate: operation === "status",
+      authority: {requested: ["READ", "RESEARCH"], policy_sha256: POLICY, authority_level: "A0"},
+      grounding: {}, created_at_ms: 0},
+  };
+  return {schema: "mastermind.project_execution_private_result.v1", operation, ok: true, data, error: null};
+}
+
+function journeySetup(initialPrograms?: unknown) {
+  const responses: { status: unknown; programs: unknown } = { status: null, programs: initialPrograms };
   const invoke = vi.fn(async (command: string, input?: Record<string, unknown>): Promise<unknown> => {
     if (command === "auth_status") {
       return { status: "signed_in", reason: null, acquisition: true, content: true };
     }
     if (command === "executive_auth_status") return { generation: 4, available: true };
     if (command === "executive_context") return executiveContext();
+    if (command === "read_programs" && responses.programs !== undefined) {
+      if (responses.programs instanceof Error) throw responses.programs;
+      return responses.programs;
+    }
+    if (command === "read_project_plan") return projectPlanDocument();
+    if (command === "executive_project_execution") {
+      return executionEnvelope(String(input!.operation), input!.arguments as Record<string, unknown>);
+    }
     if (command === "read_source_operation_context") return contextDocument();
     if (command === "source_operation_options") return optionsDocument();
     if (command === "source_operation_prepare") {
@@ -281,8 +353,8 @@ function journeySetup() {
   return { responses, invoke, listen, events };
 }
 
-async function mountApp() {
-  const fixture = journeySetup();
+async function mountApp(legacyManifest = true, initialPrograms?: unknown) {
+  const fixture = journeySetup(initialPrograms);
   const client = await createNativeClient(fixture.invoke as never, fixture.listen as never);
   const config = decodeLaunchBindingConfig(JSON.stringify({
     v: 1, workstream: "WS:JOURNEY-INTEG", priority: 0, attemptLimit: 1,
@@ -290,7 +362,7 @@ async function mountApp() {
     profiles: [{ ref: "research_only", label: "Research" },
       { ref: "native_research_only", label: "Native research" }],
   }))!;
-  const composed = composeMissionHost(client, config, new IDBFactory());
+  const composed = composeMissionHost(client, legacyManifest ? config : null, new IDBFactory());
   await composed.ready;
   window.MastermindMissionHost = composed.host;
   const page = render(<App />);
@@ -339,6 +411,7 @@ async function driveToReadableProject(h: Mounted): Promise<string> {
   };
   const requestId = prepareInput.request.request.request_id;
   h.responses.status = statusDocument(requestId, "SOURCE_OBSERVED");
+  expect(screen.queryByRole("button", { name: "Open project" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Create project" }));
   await screen.findAllByText("Project created.");
   return requestId;
@@ -375,6 +448,163 @@ function expectedPlanningKey(h: Mounted, requestId: string): string {
 }
 
 describe("App project planning journey integration", () => {
+  it("opens the observed new project and starts work through manifest-free composition", async () => {
+    const h = await mountApp(false, programsDocument(false));
+    const requestId = await driveToReadableProject(h);
+    const binding = h.host.commandBinding!;
+    expect(binding.getView()).toEqual({ projects: [], profiles: [], session: null });
+    h.page.rerender(<App locale="zh-CN" />);
+    expect(screen.getByRole("button", {name: "打开项目"})).toBeTruthy();
+    h.page.rerender(<App locale="en" />);
+    const readsBeforeOpen = h.calls("read_programs").length;
+    expect(readsBeforeOpen).toBeGreaterThan(0);
+    let finishPrograms!: (value: unknown) => void;
+    h.responses.programs = new Promise(resolve => { finishPrograms = resolve; });
+    const openProject = await screen.findByRole("button", { name: "Open project" });
+    fireEvent.click(openProject);
+    fireEvent.click(openProject);
+    await waitFor(() => expect(h.calls("read_programs")).toHaveLength(readsBeforeOpen + 1));
+    expect(screen.getByRole("button", { name: "Opening project…" })).toHaveProperty("disabled", true);
+    expect(h.calls("read_project_plan")).toHaveLength(0);
+    expect(h.calls("executive_project_execution")).toHaveLength(0);
+    expect(screen.queryByRole("heading", { name: PROJECT_TITLE, level: 1 })).toBeNull();
+
+    await act(async () => { finishPrograms(programsDocument(true)); });
+    expect(await screen.findByRole("heading", { name: PROJECT_TITLE, level: 1 })).toBeTruthy();
+    await waitFor(() => expect(h.calls("read_project_plan")).toHaveLength(1));
+    expect(h.calls("read_project_plan")[0][1]).toEqual({ selection: { work_ref: WORK_REF } });
+    expect(window.location.search).not.toContain("root_job_id=");
+    expect(h.calls("executive_project_execution")).toHaveLength(0);
+
+    await waitFor(() => expect(screen.getByRole("button", {name: "Start work"}))
+      .toHaveProperty("disabled", false));
+    fireEvent.click(screen.getByRole("button", {name: "Start work"}));
+    expect((await screen.findByLabelText("Goal") as HTMLTextAreaElement).value).toBe(GOAL);
+    const previews = h.calls("executive_project_execution");
+    expect(previews).toHaveLength(1);
+    expect(previews[0][1]).toMatchObject({
+      operation: "preview", arguments: {work_ref: WORK_REF,
+        expected_context: {record_source: projectPlanDocument().source,
+          adoption: null, adoption_decision_source: null}},
+    });
+    const handoff = "Carry the published source into the project team's work.";
+    fireEvent.change(screen.getByLabelText("Handoff (optional)"), {target: {value: handoff}});
+    const launch = screen.getByRole("button", {name: "Launch"});
+    fireEvent.click(launch);
+    fireEvent.click(launch);
+    await waitFor(() => expect(h.calls("executive_project_execution")
+      .filter(([, input]) => input?.operation === "submit")).toHaveLength(1));
+    expect(h.calls("executive_project_execution").map(([, input]) => input?.operation))
+      .toEqual(["preview", "submit"]);
+    const submitted = h.calls("executive_project_execution")[1][1]!;
+    expect(submitted.arguments).toMatchObject({
+      work_ref: WORK_REF, objective: GOAL, handoff_text: handoff,
+      execution_profile: "research_only", execution_binding_sha256: "d".repeat(64),
+      continuation_mode: "DURABLE",
+    });
+    await waitFor(async () => expect(await binding.store.read(EXEC_SCOPE)).toBeNull());
+    expect(h.host.commandBinding).toBe(binding);
+    expect(binding.getView()).toEqual({projects: [], profiles: [], session: null});
+    expect(h.calls("source_operation_prepare")).toHaveLength(1);
+    expect(h.calls("source_operation_submit")).toHaveLength(1);
+    expect(h.calls("source_operation_read")).toHaveLength(0);
+    expect(h.calls("source_operation_reconcile")).toHaveLength(0);
+    expect(h.planningOperations()).toEqual([]);
+    expect(h.calls("executive_submit")).toHaveLength(0);
+    expect((h.calls("source_operation_submit")[0][1]!.request as Record<string, unknown>).request_id)
+      .toBe(requestId);
+  });
+
+  it.each(["unavailable", "absent"] as const)(
+    "retains the created project when the fresh list is %s and retries only that read",
+    async failure => {
+      // A tempting old row must not substitute for the required new observation.
+      const h = await mountApp(false, programsDocument(true, "Cached old project label"));
+      const requestId = await driveToReadableProject(h);
+      const readsBeforeOpen = h.calls("read_programs").length;
+      h.responses.programs = failure === "unavailable"
+        ? new Error("inert unavailable current project list") : programsDocument(false);
+      fireEvent.click(await screen.findByRole("button", {name: "Open project"}));
+      expect(await screen.findByText(OPEN_FAILURE)).toBeTruthy();
+      expect((screen.getByLabelText("Your goal") as HTMLTextAreaElement).value).toBe(GOAL);
+      expect(h.calls("read_programs")).toHaveLength(readsBeforeOpen + 1);
+      expect(h.calls("read_project_plan")).toHaveLength(0);
+      expect(screen.queryByRole("heading", {name: PROJECT_TITLE, level: 1})).toBeNull();
+      expect(screen.queryByRole("heading", {name: "Cached old project label", level: 1})).toBeNull();
+      expect(screen.queryByRole("button", {name: "Start work"})).toBeNull();
+      expect(h.calls("executive_project_execution")).toHaveLength(0);
+      expect(decodeURIComponent(location.search)).toContain(requestId);
+
+      h.responses.programs = programsDocument(true);
+      fireEvent.click(screen.getByRole("button", {name: "Open project"}));
+      expect(await screen.findByRole("heading", {name: PROJECT_TITLE, level: 1})).toBeTruthy();
+      expect(h.calls("read_programs")).toHaveLength(readsBeforeOpen + 2);
+      expect(h.calls("read_project_plan")).toHaveLength(1);
+      expect(h.calls("source_operation_prepare")).toHaveLength(1);
+      expect(h.calls("source_operation_submit")).toHaveLength(1);
+      expect(h.calls("source_operation_read")).toHaveLength(0);
+      expect(h.calls("source_operation_reconcile")).toHaveLength(0);
+      expect(h.planningOperations()).toEqual([]);
+      expect(h.calls("executive_project_execution")).toHaveLength(0);
+      expect(h.calls("executive_submit")).toHaveLength(0);
+      expect(location.search).not.toContain("root_job_id=");
+    },
+  );
+
+  it("does not return to the created project after the user leaves while its fresh read waits", async () => {
+    const h = await mountApp(false, programsDocument(false));
+    await driveToReadableProject(h);
+    let finishPrograms!: (value: unknown) => void;
+    h.responses.programs = new Promise(resolve => { finishPrograms = resolve; });
+    const readsBeforeOpen = h.calls("read_programs").length;
+    fireEvent.click(await screen.findByRole("button", {name: "Open project"}));
+    await waitFor(() => expect(h.calls("read_programs")).toHaveLength(readsBeforeOpen + 1));
+
+    fireEvent.click(screen.getByRole("button", {name: "Today"}));
+    await waitFor(() => expect(document.querySelector(".shell")?.getAttribute("data-active-route")).toBe("Today"));
+    const locationAfterLeaving = location.href;
+    await act(async () => { finishPrograms(programsDocument(true)); });
+    expect(document.querySelector(".shell")?.getAttribute("data-active-route")).toBe("Today");
+    expect(location.href).toBe(locationAfterLeaving);
+    expect(screen.queryByRole("heading", {name: PROJECT_TITLE, level: 1})).toBeNull();
+    expect(screen.queryByRole("button", {name: "Start work"})).toBeNull();
+    expect(h.calls("read_project_plan")).toHaveLength(0);
+    expect(h.calls("executive_project_execution")).toHaveLength(0);
+    expect(h.calls("source_operation_prepare")).toHaveLength(1);
+    expect(h.calls("source_operation_submit")).toHaveLength(1);
+    expect(h.calls("source_operation_read")).toHaveLength(0);
+    expect(h.calls("source_operation_reconcile")).toHaveLength(0);
+    expect(h.planningOperations()).toEqual([]);
+    expect(h.calls("executive_submit")).toHaveLength(0);
+  });
+
+  it("withholds a late created-project read after native auth withdrawal without creation or launch replay", async () => {
+    const h = await mountApp(false, programsDocument(false));
+    await driveToReadableProject(h);
+    let finishPrograms!: (value: unknown) => void;
+    h.responses.programs = new Promise(resolve => { finishPrograms = resolve; });
+    const readsBeforeOpen = h.calls("read_programs").length;
+    fireEvent.click(await screen.findByRole("button", {name: "Open project"}));
+    await waitFor(() => expect(h.calls("read_programs")).toHaveLength(readsBeforeOpen + 1));
+    await act(async () => {
+      h.events.get("mastermind-auth-state")!({payload: {
+        status: "signed_out", reason: "USER_SIGNED_OUT", acquisition: false, content: false,
+      }});
+      finishPrograms(programsDocument(true));
+    });
+    expect(screen.queryByRole("heading", {name: PROJECT_TITLE, level: 1})).toBeNull();
+    expect(screen.queryByRole("button", {name: "Start work"})).toBeNull();
+    expect(screen.queryByRole("button", {name: "Open project"})).toBeNull();
+    expect(h.calls("read_project_plan")).toHaveLength(0);
+    expect(h.calls("executive_project_execution")).toHaveLength(0);
+    expect(h.calls("source_operation_prepare")).toHaveLength(1);
+    expect(h.calls("source_operation_submit")).toHaveLength(1);
+    expect(h.calls("source_operation_read")).toHaveLength(0);
+    expect(h.calls("source_operation_reconcile")).toHaveLength(0);
+    expect(h.planningOperations()).toEqual([]);
+    expect(h.calls("executive_submit")).toHaveLength(0);
+    expect(location.search).not.toContain("root_job_id=");
+  });
   it('keeps only exact native readiness diagnostic inside closed source details during new-project setup',async()=>{
     let rejectReadiness!:(reason:Error)=>void;
     const readinessCommands:string[]=[];

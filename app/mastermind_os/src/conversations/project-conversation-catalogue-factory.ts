@@ -20,6 +20,8 @@ export function createProjectConversationCatalogueReader(input:{transport:Projec
       read:(args,signal)=>current()?request.call(read,'read',args,signal):Promise.reject(new Error('PROJECT_CONVERSATION_UNAVAILABLE')),
       freshReferences:(args,signal)=>current()?request.call(read,'fresh_references',args,signal):Promise.reject(new Error('PROJECT_CONVERSATION_UNAVAILABLE')),
       readFreshReference:(args,signal)=>current()?request.call(read,'fresh_read',args,signal):Promise.reject(new Error('PROJECT_CONVERSATION_UNAVAILABLE')),
+      executionReferences:(args,signal)=>current()?request.call(read,'execution_references',args,signal):Promise.reject(new Error('PROJECT_CONVERSATION_UNAVAILABLE')),
+      readExecutionReference:(args,signal)=>current()?request.call(read,'execution_read',args,signal):Promise.reject(new Error('PROJECT_CONVERSATION_UNAVAILABLE')),
     }});
   return Object.freeze({owner,dispose(){owner.dispose();contextOwner.dispose();}});
 }

@@ -586,8 +586,9 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 
 # NEXT accepted source: callback input bound / existing HTTP permission denial,
 # never an OS identity. Exact whole-source hash and token sites only.
+# BYOK/Instructions composition preserves the complete permission handler AST;
+# only its enclosing source and four HTTP denial token positions change.
 REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'b5e717931de280e792c47d9fccba49963f7aec55bb0702d07c2bdb0c43a70790', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
-
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -612,23 +613,30 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
     ),
 }
 
-# validated source path bound; no identity/authority. Exact full postimage and literal sites only.
-REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': 'e3fdbd84b951d7dbffd8e3630ded3baac10490ae24cb1d9586007bd64d12b127', 'sites': ((360, 26, 29, 'int', '512'), (476, 57, 60, 'int', '512'))}
+# Validated source path bounds; no identity/authority. Exact postimage and sites only.
+# 2026-11-06 attended source audit: accepted-creation navigation preserves both
+# complete bounded-path lines; the optional callback shifts them by three lines.
+# The full-source hash and both spans still reject all path/context/byte drift.
+# This source audit supplies no native runtime or release approval.
+REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '95b83a757611e0c5c4930dcce2457b8a6eb4a135565f3cb587ccd29dddac8c30', 'sites': ((363, 26, 29, 'int', '512'), (479, 57, 60, 'int', '512'))}
 
 # fixed HTTP not-found status. Exact full postimage and literal sites only.
 REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': 'b5fd60efebebc04ea12d1d1976663c74f907dec2f151a2d71a6f442182b5e5b2', 'sites': ((93, 39, 42, 'int', '404'),)}
 
 # fixed HTTP unavailable status. Exact full postimage and literal sites only.
-REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport.py'] = {'sha256': 'a7af82acb1492e1eee4e583181f6be2c763a9e61d1be5112345693018defaa09', 'sites': ((41, 45, 48, 'int', '503'), (67, 81, 84, 'int', '503'))}
+# 2026-11-06 source audit: the fixed planning/execution pair shares the original
+# authenticated carrier; these are still only its two HTTP unavailable operands.
+REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport.py'] = {'sha256': 'e2bf5510be0196546d95530840827727721912a94a0b2368cc8c5a70bfb61442', 'sites': ((55, 45, 48, 'int', '503'), (81, 81, 84, 'int', '503'))}
 
 # Actual source-issued proposal PR number, never a UID or HTTP/permission grant.
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '3662989e1f6cce62809d10a7cd05eae7f43cf584180df3ea65b509967ccfadb0', 'sites': ((3498, 68, 71, 'int', '503'), (3503, 69, 72, 'int', '503'), (3507, 67, 70, 'int', '503'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'f20b5b399ff9c6ee6c0cef0447156c59994b6db358c14b759b1d8e3e4bd253cc', 'sites': ((3513, 68, 71, 'int', '503'), (3518, 69, 72, 'int', '503'), (3522, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'cd31cfc2d232e8d3b432ba059209a8a5f8479fd7dc5a811d1897ca664207645f', 'sites': ((13, 118, 121, 'int', '700'),)}
+
 # BYOK metadata READ re-pin: same eight action literals and unchanged action AST.
 # Attended parent source check under the current Chairman waiver; no formal approval claim.
 
@@ -642,7 +650,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '58bfdd1
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "4f6ba0e1e4995e5aee1e4ffd377daa29e9172295dd237e0ca76d9576f64bad71",
+    "sha256": "f3f84a63b1b966a4d2ece6c3669959e377b2dc929ba9dd2e6fbc6c997f743fbf",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -652,3 +660,6 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
     "sha256": "b977481fddffb008064a2760699af3564c1748abea74a381860d5da5ee667280",
     "sites": ((34, 31, 34, "int", "512"),),
 }
+
+# C22 native-control source pin reconciled at its unchanged published postimage;
+# MAX_WIRE_BYTES retains the single exact multiplication operand above.

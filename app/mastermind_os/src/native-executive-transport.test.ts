@@ -357,3 +357,51 @@ describe("native Secretary selection beside qualified Fabric SEND", () => {
     ]);
   });
 });
+
+describe("native project execution bridge", () => {
+  const original = {operation_key: "mmos-project-execute-" + "a".repeat(40), work_ref: "WS:EXAMPLE"};
+  const context = {record_source: {repository: "mastermindx-market-intelligence/macro", commit: "b".repeat(40),
+    path: "agentos/workstreams/WS-EXAMPLE.md", content_sha256: "c".repeat(64)}, adoption: null, adoption_decision_source: null};
+  const requests = {
+    preview: {...original, operation_key: "mmos-project-preview-" + "d".repeat(40), expected_context: context},
+    submit: {...original, expected_context: context, context_sha256: "e".repeat(64),
+      execution_binding_sha256: "f".repeat(64), execution_profile: "research_only",
+      objective: "Finish the project", handoff_text: "Original private handoff", continuation_mode: "DURABLE"},
+    status: original,
+  };
+  it.each(["preview", "submit", "status"] as const)("invokes only the fixed %s command with the original closed arguments", async operation => {
+    const f = await fixture();
+    await f.transport.projectExecution!.request(operation, requests[operation], new AbortController().signal);
+    expect(f.invoke.mock.calls).toEqual([
+      ["executive_auth_status"],
+      ["executive_project_execution", {operation, arguments: requests[operation]}],
+    ]);
+  });
+  it("refuses route, source and root injection before invoking native code", async () => {
+    const f = await fixture(), signal = new AbortController().signal;
+    expect(() => f.transport.projectExecution!.request("../submit" as never, original, signal)).toThrow("PROJECT_EXECUTION_INPUT_INVALID");
+    expect(() => f.transport.projectExecution!.request("status", {...original, root_job_id: "JOB-forged"}, signal)).toThrow("PROJECT_EXECUTION_INPUT_INVALID");
+    expect(() => f.transport.projectExecution!.request("submit", {...requests.submit,
+      expected_context: {...context, record_source: {...context.record_source, path: "agentos/workstreams/WS-OTHER.md"}}}, signal))
+      .toThrow("PROJECT_EXECUTION_INPUT_INVALID");
+    expect(f.invoke.mock.calls).toEqual([["executive_auth_status"]]);
+  });
+  it.each(["preview", "submit", "status"] as const)("settles pending %s on auth replacement and never replays its late reply", async operation => {
+    const f = await fixture(), late = deferred();
+    f.invoke.mockReturnValueOnce(late.promise);
+    const request = f.transport.projectExecution!.request(operation, requests[operation], new AbortController().signal);
+    const rejected = expect(request).rejects.toThrow("EXECUTIVE_AUTH_CHANGED");
+    f.notify({generation: 4, available: true});
+    await rejected;
+    late.resolve({ok: true, data: {root_job_id: "untrusted-late"}});
+    await Promise.resolve();
+    expect(f.invoke).toHaveBeenCalledTimes(2);
+  });
+  it("counts handoff UTF8 bytes and rejects over-budget input before native dispatch", async () => {
+    const f = await fixture(), signal = new AbortController().signal;
+    await f.transport.projectExecution!.request("submit", {...requests.submit, handoff_text: "界".repeat(10922)}, signal);
+    expect(() => f.transport.projectExecution!.request("submit", {...requests.submit, handoff_text: "界".repeat(10923)}, signal))
+      .toThrow("PROJECT_EXECUTION_INPUT_INVALID");
+    expect(f.invoke).toHaveBeenCalledTimes(2);
+  });
+});

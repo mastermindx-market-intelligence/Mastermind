@@ -1200,3 +1200,25 @@ describe("requested CEO selection", () => {
     expect(screen.queryByLabelText("Requested CEO")).toBeNull();
   });
 });
+
+describe("project goal character boundary", () => {
+  it.each(["en", "zh-CN"] as const)("retains full Unicode goals and explains the actual limit in %s", locale => {
+    const onSubmit = vi.fn();
+    render(<LaunchOrchestrator {...makeProps({onSubmit})} locale={locale} projectExecution />);
+    const input = screen.getByLabelText(locale === "zh-CN" ? "目标" : "Goal") as HTMLTextAreaElement;
+    const goal = "𠮷".repeat(4000);
+    fireEvent.change(input, {target:{value:goal}});
+    expect(input.getAttribute("aria-invalid")).toBe("false");
+    fireEvent.submit(input.closest("form")!);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0].goal).toBe(goal);
+    act(() => onSubmit.mock.calls[0][1]({status:"refused"}));
+    fireEvent.change(input, {target:{value:goal + "一"}});
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText(locale === "zh-CN"
+      ? "目标最多为 4,000 个字符。" : "Keep the goal within 4,000 characters.")).toBeTruthy();
+    expect(screen.queryByText(/byte UTF-8/)).toBeNull();
+    fireEvent.submit(input.closest("form")!);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});

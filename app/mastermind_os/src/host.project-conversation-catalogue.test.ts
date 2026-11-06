@@ -5,6 +5,11 @@ import {composeMissionHost} from './compose-mission-host';
 import history from './fixtures/project-conversation-history-owner.json';
 import fixture from './fixtures/project-conversation-catalogue-owner.json';
 import fresh from './fixtures/project-fresh-conversation-owner.json';
+const executionReference = {
+  schema: 'mastermind.project_execution_reference.v1', work_ref: 'WS:PROJECT-ONE',
+  root_job_id: 'JOB-123', root_event_id: 42, root_event_sha256: 'a'.repeat(64),
+  project_execution_source_sha256: 'b'.repeat(64), principal_scope_sha256: 'c'.repeat(64),
+};
 const disposed:Array<()=>void>=[];afterEach(()=>disposed.splice(0).forEach(fn=>fn()));
 async function setup(){
   const events=new Map<string,(event:{payload:unknown})=>void>();
@@ -17,6 +22,7 @@ async function setup(){
       if(args?.operation==='read')return structuredClone(fixture.read);
       if(args?.operation==='fresh_references')return structuredClone(fresh.catalogue);
       if(args?.operation==='fresh_read')return structuredClone(fresh.initial_read);
+      if(args?.operation==='execution_references'||args?.operation==='execution_read')return {inertTransportResult:true};
     }
     throw Error('unlisted fixture boundary');
   });
@@ -59,4 +65,38 @@ it('refuses accessors/foreign selectors before invocation and retires actual Exe
   expect(reader.owner.context()).toBeNull();
   await expect(reader.owner.catalogue({workRef:history.work_ref,signal:new AbortController().signal})).rejects.toThrow();
   expect(e.invoke.mock.calls.filter(([name])=>name==='executive_project_conversations_read')).toHaveLength(0);
+});
+
+it('forwards project execution READ through the incumbent NativeClient without a new command or send grant', async()=>{
+  const e=await setup(),transport=e.raw.executiveSession!.projectConversations!,signal=new AbortController().signal;
+  await transport.request('execution_references',{work_ref:executionReference.work_ref},signal);
+  await transport.request('execution_read',executionReference,signal);
+  expect(e.invoke.mock.calls.filter(([name])=>name==='executive_project_conversations_read')).toEqual([
+    ['executive_project_conversations_read',{operation:'execution_references',arguments:{work_ref:executionReference.work_ref}}],
+    ['executive_project_conversations_read',{operation:'execution_read',arguments:executionReference}],
+  ]);
+  expect(e.invoke.mock.calls.some(([name])=>name==='executive_submit'||name==='executive_session_send')).toBe(false);
+});
+it('rejects foreign execution references and does not evaluate accessor selectors', async()=>{
+  const e=await setup(),transport=e.raw.executiveSession!.projectConversations!,signal=new AbortController().signal;
+  const getter=vi.fn(()=>executionReference.work_ref);
+  const accessor=Object.defineProperty({...executionReference},'work_ref',{get:getter});
+  for(const args of [accessor,{...executionReference,operation_key:'forged'},
+    {...executionReference,work_ref:'WS:project.a_1'},{...executionReference,root_event_id:Number.MAX_SAFE_INTEGER+1},
+    {...executionReference,project_execution_source_sha256:'short'}]) {
+    await expect(transport.request('execution_read',args,signal)).rejects.toThrow('PROJECT_CONVERSATION_SELECTION_INVALID');
+  }
+  await expect(transport.request('execution_references',{work_ref:executionReference.work_ref,cursor:null},signal)).rejects.toThrow();
+  expect(getter).not.toHaveBeenCalled();
+  expect(e.invoke.mock.calls.filter(([name])=>name==='executive_project_conversations_read')).toHaveLength(0);
+});
+it('settles a pending project execution READ on the current auth generation boundary without retry', async()=>{
+  const e=await setup(),transport=e.raw.executiveSession!.projectConversations!;
+  let release!:(value:unknown)=>void;
+  e.invoke.mockReturnValueOnce(new Promise(resolve=>{release=resolve;}) as never);
+  const pending=transport.request('execution_read',executionReference,new AbortController().signal);
+  const rejected=expect(pending).rejects.toThrow('EXECUTIVE_AUTH_CHANGED');
+  e.events.get('mastermind-executive-auth-state')!({payload:{generation:2,available:false}});
+  await rejected;release({inertTransportResult:true});await Promise.resolve();
+  expect(e.invoke.mock.calls.filter(([name])=>name==='executive_project_conversations_read')).toHaveLength(1);
 });

@@ -1508,6 +1508,16 @@ describe("fixed H2 direct-native authenticated routes",()=>{
     await expect(e.client.executive!.directNative!.read(selection,new AbortController().signal)).rejects.toThrow('RESPONSE_INVALID_JSON');
     expect(e.fetcher).toHaveBeenCalledTimes(2);
   });
+  it("rejects HTTP 400 on the existing direct-native route even with a typed unavailable body", async () => {
+    const e = setup({executiveResource: resource});
+    await e.login(); e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(unavailable), {
+      status: 400, headers: {"content-type": "application/json"},
+    }));
+    await expect(e.client.executive!.directNative!.read(selection, new AbortController().signal))
+      .rejects.toThrow("EXECUTIVE_REQUEST_FAILED");
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
   it("rejects malformed digest/selection before fetch and fences a late reply after signout",async()=>{
     const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
     await expect(e.client.executive!.directNative!.consume({...selection,attempt_id:'ATT-456',result_digest:'x'+'d'.repeat(64),operation_key:'original'},new AbortController().signal)).rejects.toThrow('DIRECT_SELECTION_INVALID');
@@ -1957,6 +1967,10 @@ describe('fixed current project access Web read',()=>{
 
 describe("project history fixed READ",()=>{
   const historyResource="https://mcp.mastermind-x.com/os/executive";
+  const executionReference = {
+    schema:"mastermind.project_execution_reference.v1",work_ref:"WS:PROJECT-ONE",root_job_id:"JOB-123",root_event_id:42,
+    root_event_sha256:"a".repeat(64),project_execution_source_sha256:"b".repeat(64),principal_scope_sha256:"c".repeat(64),
+  };
   async function readOnlyHistory(){
     const e=setup({executiveResource:historyResource});
     e.fetcher.mockImplementation(async()=>response({token_type:"Bearer",access_token:"private-token",expires_in:3600,
@@ -1964,7 +1978,7 @@ describe("project history fixed READ",()=>{
         ?"mastermind.executive.read":new URL(e.popup.location).searchParams.get("scope")}));
     await e.login();e.fetcher.mockClear();return e;
   }
-  it("sends four literal conversation READs with exact arguments and READ-only authority",async()=>{
+  it("sends six literal conversation READs with exact arguments and READ-only authority",async()=>{
     const e=await readOnlyHistory(),signal=new AbortController().signal;
     e.fetcher.mockImplementation(async()=>response({inertTransportResult:true}));
     const transport=e.client.executiveSession!.projectConversations!;
@@ -1973,6 +1987,8 @@ describe("project history fixed READ",()=>{
       ["read","conversation-read",projectConversationLegacy.selection],
       ["fresh_references","fresh-conversations",{work_ref:projectConversationFresh.catalogue.work_ref}],
       ["fresh_read","fresh-conversation-read",projectConversationFresh.initial_read.reference],
+      ["execution_references","project-executions",{work_ref:executionReference.work_ref}],
+      ["execution_read","project-execution-read",executionReference],
     ] as const;
     for(const [operation,path,args] of cases){
       await transport.request(operation,args,signal);
@@ -1981,7 +1997,27 @@ describe("project history fixed READ",()=>{
       expect(JSON.parse(request!.body as string)).toEqual({arguments:args});
       expect(new Headers(request!.headers).has("x-mastermind-workspace-authorization")).toBe(false);
     }
-    expect(e.fetcher).toHaveBeenCalledTimes(4);
+    expect(e.fetcher).toHaveBeenCalledTimes(6);
+  });
+  it("refuses foreign project execution selectors before a network request or accessor evaluation",async()=>{
+    const e=setup({executiveResource:historyResource}),signal=new AbortController().signal;
+    const transport=e.client.executiveSession!.projectConversations!,getter=vi.fn(()=>executionReference.work_ref);
+    for(const value of [Object.defineProperty({...executionReference},"work_ref",{get:getter}),
+      {...executionReference,root_job_id:"JOB-invented"},{...executionReference,root_event_id:true},
+      {...executionReference,principal_scope_sha256:"short"},{...executionReference,operation_key:"forged"}]) {
+      await expect(transport.request("execution_read",value,signal)).rejects.toThrow("PROJECT_CONVERSATION_SELECTION_INVALID");
+    }
+    await expect(transport.request("execution_references",{work_ref:"WS:project.a_1"},signal)).rejects.toThrow();
+    await expect(transport.request("execution_references",{work_ref:executionReference.work_ref,cursor:null},signal)).rejects.toThrow();
+    expect(getter).not.toHaveBeenCalled();expect(e.fetcher).not.toHaveBeenCalled();
+  });
+  it.each(["execution_references","execution_read"] as const)("discards delayed %s after the existing Executive auth generation ends",async operation=>{
+    const e=await readOnlyHistory(),held=deferred<Response>();e.fetcher.mockReturnValue(held.promise);
+    const args=operation==="execution_read"?executionReference:{work_ref:executionReference.work_ref};
+    const pending=e.client.executiveSession!.projectConversations!.request(operation,args,new AbortController().signal);
+    const rejected=expect(pending).rejects.toThrow("EXECUTIVE_REQUEST_CANCELLED");
+    await e.client.signOut();held.resolve(response({inertTransportResult:true}));await rejected;
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
   });
   it("sends only the direct work selection with READ-only Executive authority and never widens SEND",async()=>{
     const e=await readOnlyHistory(),signal=new AbortController().signal;
@@ -2070,4 +2106,109 @@ describe("fresh conversation fixed transport",()=>{
   await flush();await e.client.signOut();held.resolve(response({ok:true}));await refused;
   expect(e.fetcher).toHaveBeenCalledTimes(1);
  });
+});
+
+describe("fixed project execution two-resource requests", () => {
+  const resource = "https://fixture-resource.mastermind-x.com/executive";
+  const statusArgs = {operation_key: "mmos-project-execute-" + "a".repeat(40), work_ref: "WS:EXAMPLE"};
+  const context = {record_source: {repository: "mastermindx-market-intelligence/macro", commit: "b".repeat(40),
+    path: "agentos/workstreams/WS-EXAMPLE.md", content_sha256: "c".repeat(64)}, adoption: null, adoption_decision_source: null};
+  const requests = {
+    preview: {...statusArgs, operation_key: "mmos-project-preview-" + "d".repeat(40), expected_context: context},
+    submit: {...statusArgs, expected_context: context, context_sha256: "e".repeat(64),
+      execution_binding_sha256: "f".repeat(64), execution_profile: "research_only",
+      objective: "Finish the project", handoff_text: "Original private handoff", continuation_mode: "DURABLE"},
+    status: statusArgs,
+  };
+  const envelope = (operation: string, code: string | null = null) => ({
+    schema: "mastermind.project_execution_private_result.v1", operation, ok: code === null,
+    data: code === null ? {state: "ACCEPTED", operation_key: statusArgs.operation_key} : null,
+    error: code === null ? null : {code, message: "Fixed refusal"},
+  });
+  it.each(["preview", "submit", "status"] as const)("sends exact %s arguments with both private grants to the fixed route", async operation => {
+    const e = setup({executiveResource: resource});
+    e.fetcher.mockImplementation(async () => {
+      const url = new URL(e.popup.location), audience = url.searchParams.get("audience");
+      return response({token_type: "Bearer", access_token: audience === resource ? "private-executive" : "private-workspace",
+        expires_in: 3600, scope: url.searchParams.get("scope")});
+    });
+    await e.login();
+    e.fetcher.mockReset();
+    e.fetcher.mockResolvedValue(response(envelope(operation)));
+    await e.client.executive!.projectExecution!.request(operation, requests[operation], new AbortController().signal);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    const [url, options] = e.fetcher.mock.calls[0]!;
+    expect(url).toBe(ORIGIN + "/os/executive/project-execution/" + operation);
+    expect(options).toMatchObject({method: "POST", redirect: "error", credentials: "omit", cache: "no-store",
+      headers: {Authorization: "Bearer private-executive", "X-Mastermind-Workspace-Authorization": "Bearer private-workspace"},
+      body: JSON.stringify({arguments: requests[operation]})});
+    expect(JSON.stringify(e.client)).not.toContain("private-executive");
+  });
+  it.each(["preview", "submit", "status"] as const)("requires submit authority for the original %s owner before fetch", async operation => {
+    const e = setup({executiveResource: resource});
+    e.fetcher.mockImplementation(async () => response({token_type: "Bearer", access_token: "private-token", expires_in: 3600,
+      scope: new URL(e.popup.location).searchParams.get("audience") === resource
+        ? "mastermind.executive.read" : new URL(e.popup.location).searchParams.get("scope")}));
+    await e.login();
+    e.fetcher.mockClear();
+    await expect(e.client.executive!.projectExecution!.request(operation, requests[operation], new AbortController().signal))
+      .rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+    expect(e.fetcher).not.toHaveBeenCalled();
+  });
+  it("rejects unknown route and extra authority fields before fetch", async () => {
+    const e = setup({executiveResource: resource});
+    await e.login(); e.fetcher.mockClear();
+    expect(() => e.client.executive!.projectExecution!.request("../submit" as never, statusArgs, new AbortController().signal))
+      .toThrow("PROJECT_EXECUTION_INPUT_INVALID");
+    expect(() => e.client.executive!.projectExecution!.request("status", {...statusArgs, principal_scope: "f".repeat(64)}, new AbortController().signal))
+      .toThrow("PROJECT_EXECUTION_INPUT_INVALID");
+    expect(e.fetcher).not.toHaveBeenCalled();
+  });
+  it.each([["invalid_request", 400], ["context_changed", 403], ["operation_conflict", 409], ["source_unavailable", 503], ["effect_unknown", 202]] as const)
+    ("preserves typed %s without retrying or replacing the original request", async (code, httpStatus) => {
+      const e = setup({executiveResource: resource});
+      await e.login(); e.fetcher.mockReset();
+      const body = envelope("submit", code);
+      e.fetcher.mockResolvedValue(new Response(JSON.stringify(body), {status: httpStatus, headers: {"content-type": "application/json"}}));
+      await expect(e.client.executive!.projectExecution!.request("submit", requests.submit, new AbortController().signal)).resolves.toEqual(body);
+      expect(e.fetcher).toHaveBeenCalledTimes(1);
+    });
+  it("rejects mismatched error envelopes without exposing a private response", async () => {
+    const e = setup({executiveResource: resource});
+    await e.login(); e.fetcher.mockReset();
+    e.fetcher.mockResolvedValue(new Response(JSON.stringify(envelope("status", "refused")), {status: 403, headers: {"content-type": "application/json"}}));
+    await expect(e.client.executive!.projectExecution!.request("submit", requests.submit, new AbortController().signal))
+      .rejects.toThrow("PROJECT_EXECUTION_RESPONSE_INVALID");
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("drops a delayed execution response on sign-out and does not resubmit after sign-in", async () => {
+    const e = setup({executiveResource: resource});
+    await e.login(); e.fetcher.mockReset();
+    const held = deferred<Response>();
+    e.fetcher.mockReturnValue(held.promise);
+    const request = e.client.executive!.projectExecution!.request("submit", requests.submit, new AbortController().signal);
+    const rejected = expect(request).rejects.toThrow("EXECUTIVE_REQUEST_CANCELLED");
+    await e.client.signOut();
+    held.resolve(response(envelope("submit")));
+    await rejected;
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    e.fetcher.mockImplementation(async () => response({token_type: "Bearer", access_token: "replacement-private",
+      expires_in: 3600, scope: new URL(e.popup.location).searchParams.get("scope")}));
+    await e.login();
+    expect(e.fetcher.mock.calls.filter(([url]) => String(url).includes("/project-execution/"))).toHaveLength(1);
+  });
+  it("settles on the shorter Workspace expiry even while Executive remains authorized", async () => {
+    const e = setup({executiveResource: resource});
+    e.fetcher.mockImplementation(async () => response({token_type: "Bearer", access_token: "private-token",
+      expires_in: new URL(e.popup.location).searchParams.get("audience") === ACQUISITION_AUDIENCE ? 120 : 3600,
+      scope: new URL(e.popup.location).searchParams.get("scope")}));
+    await e.login(); e.fetcher.mockReset();
+    e.fetcher.mockReturnValue(new Promise(() => {}));
+    const request = e.client.executive!.projectExecution!.request("submit", requests.submit, new AbortController().signal);
+    const rejected = expect(request).rejects.toThrow("EXECUTIVE_REQUEST_CANCELLED");
+    await vi.advanceTimersByTimeAsync(120_000);
+    await rejected;
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    expect(e.fetcher.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+  });
 });

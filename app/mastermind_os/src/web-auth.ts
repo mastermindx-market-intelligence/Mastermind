@@ -44,6 +44,7 @@ import { normalizeResultSelection, RESULT_HTTP_BODY_BYTES } from "./result";
 import { DIRECT_RESULT_BYTES, decodeDirectNativeResult, normalizeDirectSelection, parseDirectNativeJson } from "./direct-native-result";
 import { validActivitySelection } from "./planning/retained-activity";
 import { planningArguments, type PlanningOperation } from "./planning/project-planning-transport";
+import { projectExecutionArguments, projectExecutionResult, type ProjectExecutionOperation } from "./planning/project-execution-transport";
 import { attendedSelection } from "./fabric/attended-status";
 import {
   normalizeExecutiveSessionSelection,
@@ -1126,19 +1127,19 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     });
   }
   async function executivePost(
-    route: "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | typeof FRESH_CONVERSATION_PATHS[keyof typeof FRESH_CONVERSATION_PATHS] | typeof PROJECT_CONVERSATION_READ_PATHS[keyof typeof PROJECT_CONVERSATION_READ_PATHS],
+    route: "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | `project-execution/${ProjectExecutionOperation}` | typeof FRESH_CONVERSATION_PATHS[keyof typeof FRESH_CONVERSATION_PATHS] | typeof PROJECT_CONVERSATION_READ_PATHS[keyof typeof PROJECT_CONVERSATION_READ_PATHS],
     arguments_: unknown,
     signal: AbortSignal,
   ) {
     const token = tokens.executive, ticket = executiveGeneration;
-    const planning=route.startsWith("project-planning/"), fresh=route.startsWith("conversation/");
-    const dual=planning || route==="conversation/preview" || route==="conversation/create" || route==='conversation/consume' || route==='conversation/turn' || route==='conversation/turn/preview';
+    const planning=route.startsWith("project-planning/"), execution=route.startsWith("project-execution/"), fresh=route.startsWith("conversation/");
+    const dual=planning || execution || route==="conversation/preview" || route==="conversation/create" || route==='conversation/consume' || route==='conversation/turn' || route==='conversation/turn/preview';
     const workspace=dual ? tokens.acquisition : null, workspaceGeneration=generation;
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
     if (dual && (!workspace || !valid("acquisition"))) throw new Error("WORKSPACE_AUTH_REQUIRED");
     // READ-only may observe but must never originate a SEND or Event ACK effect.
-    if ((planning || fresh || route === "submit" || route === "session/send" || route === "direct-native/consume" || (route === "direct-native/correction" && (arguments_ as Record<string,unknown>)?.operation === "request")) &&
+    if ((planning || execution || fresh || route === "submit" || route === "session/send" || route === "direct-native/consume" || (route === "direct-native/correction" && (arguments_ as Record<string,unknown>)?.operation === "request")) &&
       token.executiveSend !== true)
       throw new Error("EXECUTIVE_SEND_SCOPE_REQUIRED");
     const direct = route.startsWith("direct-native/");
@@ -1154,7 +1155,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     const foregroundResearch = route === "submit" && arguments_ !== null &&
       typeof arguments_ === "object" && !Array.isArray(arguments_) &&
       Reflect.get(arguments_, "execution_profile") === "research_only";
-    const timer = later(abort, (planning || fresh) ? Math.max(0,Math.min(300_000,token.expires-now(),dual ? workspace!.expires-now() : Infinity)) : foregroundResearch ? 430_000 : READ_TIMEOUT_MS);
+    const timer = later(abort, (planning || execution || fresh) ? Math.max(0,Math.min(300_000,token.expires-now(),dual ? workspace!.expires-now() : Infinity)) : foregroundResearch ? 430_000 : READ_TIMEOUT_MS);
     executiveRequests.add(controller);
     const current = () => !controller.signal.aborted && ticket === executiveGeneration &&
       tokens.executive === token && valid("executive") && (!dual ||
@@ -1173,10 +1174,16 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           body, signal: controller.signal,
         });
         if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
-        if (!response.ok && !direct) throw new Error("EXECUTIVE_REQUEST_FAILED");
+        if (!response.ok && !direct && !execution) throw new Error("EXECUTIVE_REQUEST_FAILED");
         const decoded = await boundedJson(response, direct ? DIRECT_RESULT_BYTES : 262_144, direct ? parseDirectNativeJson : JSON.parse);
-        if (!response.ok && (![401,403,409,503].includes(response.status) || decodeDirectNativeResult(decoded)?.availability!=="UNAVAILABLE"))
-          throw new Error("EXECUTIVE_REQUEST_FAILED");
+        if (!response.ok) {
+          const errorStatuses = execution ? [400, 401, 403, 409, 503] : [401, 403, 409, 503];
+          if (!errorStatuses.includes(response.status)) throw new Error("EXECUTIVE_REQUEST_FAILED");
+          if (execution) {
+            if (projectExecutionResult(decoded, route.slice("project-execution/".length) as ProjectExecutionOperation).ok !== false)
+              throw new Error("EXECUTIVE_REQUEST_FAILED");
+          } else if (decodeDirectNativeResult(decoded)?.availability !== "UNAVAILABLE") throw new Error("EXECUTIVE_REQUEST_FAILED");
+        }
         if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
         return decoded;
       })();
@@ -1211,6 +1218,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       status: (arguments_, signal) => executivePost("status", { intent_id: arguments_.intent_id }, signal),
       projectPlanning: { request: (operation,arguments_,signal) =>
         executivePost(`project-planning/${operation}`,planningArguments(operation,arguments_),signal) },
+      projectExecution: { request: (operation,arguments_,signal) =>
+        executivePost(`project-execution/${operation}`,projectExecutionArguments(operation,arguments_),signal) },
       freshConversation: {request:(operation,arguments_,signal)=>
         executivePost(FRESH_CONVERSATION_PATHS[operation],freshConversationArguments(operation,arguments_),signal)},
       directNative: {

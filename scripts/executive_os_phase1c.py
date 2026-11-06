@@ -2246,7 +2246,7 @@ def _service_from_config(
                     shared_run_gid=None,secret_canary_verdict=None,
                     require_complete_launch_attestation=True,
                     cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
-                    process_controller=paid_adapter,instance_id=primary.instance_id,
+                    process_controller=paid_adapter,instance_id=primary.instance_id,project_input_owner=primary,
                     product_acceptance_macro_root=product_acceptance_macro_root,
                     product_acceptance_context_reader=(product_acceptance_basis_reader()
                         if product_acceptance_context_owner is not None else None))
@@ -2284,7 +2284,7 @@ def _service_from_config(
                                 else raw["shared_run_gid"]),
                 secret_canary_verdict={}, require_complete_launch_attestation=True,
                 cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
-                process_controller=fabric_adapter, instance_id=primary.instance_id,
+                process_controller=fabric_adapter, instance_id=primary.instance_id, project_input_owner=primary,
                 product_acceptance_macro_root=product_acceptance_macro_root,
                 product_acceptance_context_reader=(product_acceptance_basis_reader()
                     if product_acceptance_context_owner is not None else None),
@@ -2856,7 +2856,10 @@ def _service_from_config(
                     def current_codex_owner_configured():
                         from ops.executive_os.a2_agent_relay_enrollment import w3c_plist_configured
                         return w3c_plist_configured(release_sha=config.proof_base_sha)
-                    return build_runtime_project_conversation_reader(runtime,
+                    from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
+                    supervisor = service._require_supervisor()
+                    primary = supervisor.primary if type(supervisor) is MixedExecutionOwnerSupervisor else supervisor
+                    return build_runtime_project_conversation_reader(runtime, supervisor=primary,
                         dialogue_socket_path=relay_readside_socket_path,
                         codex_owner_configured=current_codex_owner_configured,
                         authorized_policies=session_read_policy_loader(),
@@ -2875,24 +2878,31 @@ def _service_from_config(
         if "workspace_read_provider_factory" in workspace_factories and installed_profile == WEB_CEO_V3_PROFILE:
             # Same sealed Workspace collector/membership and existing root-sealed
             # OS policy source; no second OAuth configuration or admission store.
-            def project_planning_factory(runtime, workspace_policy=policy,
+            def project_request_factory(runtime, workspace_policy=policy,
                     load_workspace_bindings=legacy_workspace_loader,
                     creation_reader=creation_source_reader,collector=packet_collector):
                 service._namespace_custody.bound_runtime(runtime)
                 from ops.executive_os.executive_mcp_entry import installed_os_session_policy_source
                 from ops.executive_os.coo_principal_host import DEFAULT_INSTALL_PATH
                 from integrations.mastermind_executive_app.project_planning_factory import (
-                    ProjectPlanningAppFactory,build_ingress_owner)
+                    ProjectPlanningAppFactory)
                 from control_plane.workspace_source_operations import SourceOperationEvents
                 policy_loader=installed_os_session_policy_source(DEFAULT_INSTALL_PATH,
                     Path(__file__).resolve().parents[1],expected_uid=int(raw["control_uid"]))
-                return build_ingress_owner(ProjectPlanningAppFactory(service=service,
+                return ProjectPlanningAppFactory(service=service,
                     app_binding=service._ceo_ingress_app_binding,policies=policy_loader(),
                     policy_loader=policy_loader,reader=creation_reader,
                     plan_reader=collector.project_plan_reader(macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                     events=SourceOperationEvents(runtime.store),workspace_policy=workspace_policy,
-                    load_workspace_bindings=load_workspace_bindings))
+                    load_workspace_bindings=load_workspace_bindings)
+            def project_planning_factory(runtime):
+                from integrations.mastermind_executive_app.project_planning_factory import build_ingress_owner
+                return build_ingress_owner(project_request_factory(runtime))
+            def project_execution_factory(runtime):
+                from integrations.mastermind_executive_app.project_execution_factory import build_ingress_owner
+                return build_ingress_owner(project_request_factory(runtime))
             workspace_factories["project_planning_provider_factory"]=project_planning_factory
+            workspace_factories["project_execution_provider_factory"]=project_execution_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],
