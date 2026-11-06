@@ -7,7 +7,7 @@ an installer. In particular a raw C26 INCOMPLETE report is never rewritten.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -89,6 +89,13 @@ GATE_RECEIPTS = {
 
 
 @dataclass(frozen=True)
+class ReceiptBinding:
+    """Exact original object selected independently of the candidate bundle."""
+    source_ref: str
+    raw_sha256: str
+
+
+@dataclass(frozen=True)
 class ExpectedSource:
     """Independent current expectations, never learned from the candidate bundle."""
     implementation_sha: str
@@ -97,6 +104,8 @@ class ExpectedSource:
     issuer_sha256: str
     upstream_sha: str = UPSTREAM_SHA
     original_pr: int = 2120
+    receipt_bindings: Mapping[str, ReceiptBinding] = field(default_factory=dict)
+    original_operations: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -211,6 +220,19 @@ class _Check:
                 or not _hex(expected.issuer_sha256) or expected.original_pr != 2120
                 or type(expected.original_pr) is not int or not _integer(now, 1)):
             raise _Invalid("INVALID_INDEPENDENT_EXPECTATION")
+        if (type(expected.receipt_bindings) is not dict
+                or set(expected.receipt_bindings) - set(OWNERS)
+                or type(expected.original_operations) is not dict
+                or set(expected.original_operations) - {"origin", "workers", "c25", "c26"}):
+            raise _Invalid("INVALID_ORIGINAL_SELECTION")
+        self.bindings = dict(expected.receipt_bindings)
+        self.operations = dict(expected.original_operations)
+        for binding in self.bindings.values():
+            if (not isinstance(binding, ReceiptBinding) or not _hex(binding.raw_sha256)
+                    or type(binding.source_ref) is not str or not binding.source_ref.strip()):
+                raise _Invalid("INVALID_ORIGINAL_RECEIPT_BINDING")
+        if any(type(value) is not str or not value for value in self.operations.values()):
+            raise _Invalid("INVALID_ORIGINAL_OPERATION_ID")
         if (type(receipts) is not dict or set(receipts) - set(OWNERS)
                 or any(type(v) is not bytes for v in receipts.values())
                 or sum(len(v) for v in receipts.values()) > MAX_BUNDLE_BYTES):
@@ -222,6 +244,12 @@ class _Check:
             self.slot = slot
             try:
                 doc = _decode(raw, MAX_REPORT_BYTES if slot in RUNS else MAX_RECEIPT_BYTES)
+                binding = self.bindings.get(slot)
+                if binding is None:
+                    self.add(INCOMPLETE, "ORIGINAL_RECEIPT_BINDING_MISSING")
+                    continue
+                if binding.raw_sha256 != _digest(raw):
+                    raise _Invalid("ORIGINAL_RECEIPT_DIGEST_MISMATCH")
                 # The injected verifier must use already acquired original-owner
                 # evidence; the reducer supplies bytes, never a filesystem path.
                 proof = verify(slot, raw)
@@ -235,6 +263,8 @@ class _Check:
                         or proof.custody_verified is not True
                         or type(proof.source_ref) is not str or not proof.source_ref.strip()):
                     raise _Invalid("SIGNATURE_CUSTODY_OR_ORIGIN_INVALID")
+                if proof.source_ref != binding.source_ref:
+                    raise _Invalid("ORIGINAL_RECEIPT_REFERENCE_MISMATCH")
                 self.docs[slot], self.auth[slot] = doc, proof
             except _Invalid as exc:
                 self.add(REFUSED, str(exc))
@@ -329,6 +359,8 @@ class _Check:
             row = _dict(d.get(name))
             self.need(type(row.get("operation_id")) is str and bool(row["operation_id"]),
                       "ORIGINAL_OPERATION_ID_MISSING", name)
+            if self.need(name in self.operations, "EXPECTED_ORIGINAL_OPERATION_MISSING", name):
+                self.same(row.get("operation_id"), self.operations[name], name + ".operation_id")
             self.need(row.get("state") in {"NO_EFFECT", "RECONCILED", "TERMINAL"},
                       "ORIGINAL_EFFECT_UNRESOLVED", name, REFUSED)
             self.need(row.get("denied") is False and row.get("active_writer") is False,
@@ -410,8 +442,8 @@ class _Check:
             self.bound(units)
             self.fresh(units.get("observed_at_utc"), "observed_at_utc")
             self.same(set(_dict(units.get("roles"))), set(ROLES), "roles")
-            for role, row in units["roles"].items():
-                self.unit(row, role, inert=True)
+            for role in ROLES:
+                self.unit(units["roles"].get(role, {}), role, inert=True)
 
     def unit(self, row, role, *, inert):
         row, p = _dict(row), self.role_pin(role)
@@ -449,6 +481,11 @@ class _Check:
         self.need(_hex(host.get("machine_id"), 32) and type(host.get("boot_id")) is str
                   and re.fullmatch(r"[0-9a-f-]{36}", host["boot_id"]) is not None,
                   "HOST_BOOT_IDENTITY_MISSING")
+        self.need(set(host) == {"machine_id", "boot_id", "netns", "kernel"}
+                  and type(host.get("netns")) is list and len(host["netns"]) == 2
+                  and all(_integer(v, 1) for v in host["netns"])
+                  and type(host.get("kernel")) is str and bool(host["kernel"]),
+                  "HOST_NAMESPACE_OR_KERNEL_MISSING")
         units = self.docs.get("units", {})
         self.same(host.get("boot_id"), units.get("boot_id"), "boot_id")
         self.same(host.get("machine_id"), units.get("machine_id"), "machine_id")
@@ -488,6 +525,8 @@ class _Check:
             self.need(started <= finished <= self.now and self.now - started <= MAX_AGE_SECONDS
                       and (previous_finish is None or previous_finish < started),
                       "STALE_OR_OVERLAPPING_ABA_SEQUENCE", state=REFUSED)
+            self.need(_time(units.get("observed_at_utc")) <= started,
+                      "INERT_STAGE_AFTER_QUALIFICATION", state=REFUSED)
             previous_finish = finished
             self.report(reports[run], facts, q, run, role, started, finished)
         self.slot = "qualification"
@@ -506,6 +545,10 @@ class _Check:
                           "exact_overrides_removed", "original_properties_restored", "credentials_untouched"):
                 self.need(cleanup.get(field) is True, "CLEANUP_PROOF_MISSING", field)
             self.same(cleanup.get("serving_started"), False, "serving_started")
+            completed = _time(cleanup.get("completed_at_utc"))
+            self.need(previous_finish is not None and previous_finish <= completed
+                      <= _time(q.get("observed_at_utc")) <= self.now,
+                      "QUALIFICATION_CLEANUP_ORDER_INVALID", state=REFUSED)
 
     def report(self, r, facts, q, run, role, started, finished):
         self.same(r.get("schema"), REPORT_SCHEMA, "schema")
@@ -717,7 +760,8 @@ class _Check:
         self.need(d.get("principal_enrolled") is True and bool(d.get("principal_id"))
                   and d.get("issuer_entitlement") == "ACCEPTED", "ENROLLED_PRINCIPAL_OR_ENTITLEMENT_MISSING")
         self.same(set(_dict(d.get("roles"))), set(ROLES), "roles")
-        for role, row in d["roles"].items():
+        for role in ROLES:
+            row = _dict(d["roles"].get(role, {}))
             p = self.role_pin(role)
             self.same(row.get("uid"), p.get("uid"), role + ".uid")
             for field in ("credential_enrollment", "provider_entitlement", "source_entitlement"):
@@ -725,6 +769,11 @@ class _Check:
             self.need(_hex(row.get("credential_metadata_sha256")) and _hex(row.get("provider_binding_sha256")),
                       "ROLE_ENROLLMENT_IDENTITY_MISSING", role)
         self.same(d.get("credential_contents_included"), False, "credential_contents_included")
+        accepted = self.fresh(d.get("accepted_at_utc"), "accepted_at_utc")
+        qualification = self.docs.get("qualification")
+        if qualification:
+            self.need(_time(qualification.get("observed_at_utc")) <= accepted,
+                      "ENROLLMENT_BEFORE_QUALIFICATION_ACCEPTANCE", state=REFUSED)
 
     def serving(self):
         edge, d = self.receipt("edge"), self.receipt("serving")
@@ -745,12 +794,30 @@ class _Check:
         self.same(d.get("issuer_sha256"), self.expected.issuer_sha256, "issuer_sha256")
         if "enrollment" in self.raw:
             self.same(d.get("enrollment_receipt_sha256"), _digest(self.raw["enrollment"]), "enrollment_receipt_sha256")
+        if "cleanup" in self.raw:
+            self.same(d.get("qualification_cleanup_sha256"), _digest(self.raw["cleanup"]), "qualification_cleanup_sha256")
+        self.need(type(d.get("release_id")) is str and bool(d["release_id"]), "SERVING_RELEASE_ID_MISSING")
+        authorized = _time(d.get("authorized_at_utc"))
+        interval_start, interval_end = _time(d.get("interval_start_utc")), _time(d.get("observed_at_utc"))
+        self.need(authorized <= interval_start <= interval_end <= self.now,
+                  "SERVING_OBSERVATION_ORDER_INVALID", state=REFUSED)
+        enrollment, cleanup = self.docs.get("enrollment"), self.docs.get("cleanup")
+        if enrollment:
+            self.need(_time(enrollment.get("accepted_at_utc")) <= authorized,
+                      "SERVICE_RELEASE_PRECEDES_ENROLLMENT", state=REFUSED)
+        if cleanup:
+            self.need(_time(cleanup.get("completed_at_utc")) < authorized,
+                      "SERVING_INVALIDATED_BY_LATER_CLEANUP", state=REFUSED)
         self.same(d.get("edge_metadata_sha256"), edge.get("edge_metadata_sha256"), "edge_metadata_sha256")
         self.same(d.get("boot_id"), self.docs.get("qualification", {}).get("host", {}).get("boot_id"), "boot_id")
         self.same(set(_dict(d.get("roles"))), set(ROLES), "roles")
-        for role, pair in d["roles"].items():
+        for role in ROLES:
+            pair = _dict(d["roles"].get(role, {}))
             before, after = _dict(pair.get("before")), _dict(pair.get("after"))
             self.same(after, before, role + ".process_identity")
+            started = _time(before.get("invocation_started_at_utc"))
+            self.need(authorized <= started <= interval_start,
+                      "ROLE_INVOCATION_PRECEDES_AUTHORIZED_RELEASE", role, REFUSED)
             self.unit(before, role, inert=False)
             pin = self.role_pin(role)
             self.need(before.get("ActiveState") == "active" and before.get("SubState") == "running"
@@ -780,6 +847,14 @@ class _Check:
         self.same(d.get("issuer_sha256"), self.expected.issuer_sha256, "issuer_sha256")
         if "serving" in self.raw:
             self.same(d.get("serving_receipt_sha256"), _digest(self.raw["serving"]), "serving_receipt_sha256")
+        serving = self.docs.get("serving")
+        if serving:
+            self.same(d.get("serving_release_id"), serving.get("release_id"), "serving_release_id")
+            started, completed, accepted = (_time(d.get(k)) for k in
+                ("started_at_utc", "completed_at_utc", "accepted_at_utc"))
+            self.need(_time(serving.get("interval_start_utc")) <= started <= completed
+                      <= accepted <= _time(serving.get("observed_at_utc")),
+                      "USEFUL_TURN_OUTSIDE_SERVING_INVOCATION", state=REFUSED)
         role = d.get("role")
         if self.need(role in ROLES, "USEFUL_TURN_ROLE_MISSING"):
             observed = self.docs.get("serving", {}).get("roles", {}).get(role, {}).get("after", {})
@@ -803,6 +878,13 @@ class _Check:
         self.same(d.get("useful_turn_operation_id"), self.docs.get("useful_turn", {}).get("operation_id"), "useful_turn_operation_id")
         if "useful_turn" in self.raw:
             self.same(d.get("useful_turn_sha256"), _digest(self.raw["useful_turn"]), "useful_turn_sha256")
+        useful_turn, serving = self.docs.get("useful_turn"), self.docs.get("serving")
+        if useful_turn and serving:
+            self.same(d.get("serving_release_id"), serving.get("release_id"), "serving_release_id")
+            completed = self.fresh(d.get("completed_at_utc"), "completed_at_utc")
+            self.need(max(_time(useful_turn.get("accepted_at_utc")),
+                          _time(serving.get("observed_at_utc"))) <= completed,
+                      "CUTOVER_PRECEDES_USEFUL_TURN_ACCEPTANCE", state=REFUSED)
 
     def run(self, target):
         if type(target) is not str or target not in DEPENDENCIES:
@@ -837,7 +919,9 @@ class _Check:
                 "permission_boundary": "ORIGINAL_OWNERS_RETAIN_INSTALL_ENROLLMENT_SERVING_AND_CUTOVER_AUTHORITY",
                 "gates": gates, "missing_receipts": sorted({i["receipt"] for i in blockers if i["code"] == "RECEIPT_MISSING"}),
                 "blockers": blockers, "next_permitted_read": next_read,
-                "raw_probe_status": {k: self.docs[k].get("status") for k in RUNS if k in self.docs},
+                "raw_probe_status": {k: (self.docs[k].get("status") if type(self.docs[k].get("status")) is str
+                    and self.docs[k]["status"] in {"PASS", "FAIL", "INCOMPLETE"} else "INVALID")
+                    for k in RUNS if k in self.docs},
                 "receipt_sha256": {k: _digest(v) for k, v in self.raw.items()},
                 "dependency_graph": [{"gate": k, "depends_on": list(v), "state": gates[k]["state"]}
                                      for k, v in DEPENDENCIES.items()]}

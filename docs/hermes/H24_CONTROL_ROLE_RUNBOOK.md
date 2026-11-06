@@ -78,11 +78,22 @@ These expectations must come from the original owners; never learn them from
 the candidate receipt being checked. A changed source or issuer requires
 requalification under its existing owner, not a string substitution here.
 
+It also carries `receipt_bindings`, an independently selected map of each slot
+to `ReceiptBinding(source_ref, raw_sha256)`, and `original_operations`, the exact
+original `origin`, `workers`, `c25` and `c26` operation identifiers. Every supplied
+receipt needs its own expected original reference and byte digest. Matching two
+identifiers supplied by the candidate is insufficient: another authentic C25
+success cannot replace reconciliation of the original failed/unknown operation.
+Missing independent selection stays INCOMPLETE. A different reference, digest
+or original operation is REFUSED. Do not derive this map from untrusted input or
+mistake C25's later source-repair commission for the earlier live-clone carrier.
+
 The mandatory `verify(slot, raw_bytes)` callback represents the **existing
 owner's non-effectful authentication/custody verification of already acquired
 evidence**. It returns `ReceiptVerification(owner, source_ref, raw_sha256,
-signature, custody_verified)`. The checker matches the exact slot owner and
-raw-byte hash. Signature is `VERIFIED`, `NOT_APPLICABLE` for genuinely unsigned
+signature, custody_verified)`. The checker matches the exact slot owner,
+independently expected reference and raw-byte hash. Signature is `VERIFIED`,
+`NOT_APPLICABLE` for genuinely unsigned
 original root-custody evidence, or invalid (refused). Custody must be verified.
 No default permissive verifier exists. A `verified: true` property in untrusted
 JSON cannot authenticate itself. Missing verifier evidence stays INCOMPLETE;
@@ -181,6 +192,18 @@ their exact time bounds. This conservative readiness freshness check grants no
 authority to repeat an expired operation. Read original retained evidence and
 the existing owner's current invalidation decision first.
 
+Digest equality and freshness also do not establish causal order. The compiler
+requires the inert preflight before the sequence; terminal cleanup after the
+last invocation and before qualification acceptance; enrollment acceptance
+after that qualification; service-release authorization after enrollment and
+cleanup; and each production invocation after its release authorization.
+The useful turn must fall inside the exact serving observation interval, with
+the same release/role/invocation/session. Completed cutover must follow the
+accepted useful turn and final serving observation. Enrollment, cleanup,
+serving and useful-turn original-byte hashes bind the successive receipts.
+An old serving observation invalidated by later cleanup cannot remain READY
+merely because every receipt is still within the freshness window.
+
 ## Ready/blocked dependency graph
 
 The output returns this graph with each node's current closed state and reasons.
@@ -235,6 +258,8 @@ result = compile_readiness(
         protected_law_sha=verified_law_sha,
         original_pr_head=original_pr_head_sha,
         issuer_sha256=accepted_issuer_fingerprint,
+        receipt_bindings=independently_selected_original_receipt_bindings,
+        original_operations=independently_selected_original_operation_ids,
     ),
     verify=existing_owner_verification_of_retained_bytes,
     now=owner_observation_time_epoch,

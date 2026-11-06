@@ -28,7 +28,8 @@ LAW = "88a8b103a5a69e4b4e870a184655dde9fd5875c3"
 ISSUER = "e" * 64
 HOST = {"machine_id": "1" * 32, "boot_id": "11111111-2222-3333-4444-555555555555",
         "netns": [4, 5], "kernel": "fixture-kernel"}
-EXPECTED = checker.ExpectedSource(checker.BASE_SHA, LAW, checker.BASE_SHA, ISSUER)
+EXPECTED = checker.ExpectedSource(checker.BASE_SHA, LAW, checker.BASE_SHA, ISSUER,
+    original_operations={k: "original-" + k for k in ("origin", "workers", "c25", "c26")})
 
 
 def stamp(seconds):
@@ -215,6 +216,7 @@ def qualification_documents():
             facts["external"][case] = ext
         docs["qualification"]["runs"][run] = facts
     docs["cleanup"] = {"operation_id": "original-c26", "boot_id": HOST["boot_id"],
+        "completed_at_utc": stamp(NOW - 140),
         "report_sha256": {k: digest(encoded(docs[k])) for k in checker.RUNS},
         **{k: True for k in ("terminal_processes", "no_residual_children", "external_sockets_closed",
             "exact_overrides_removed", "original_properties_restored", "credentials_untouched")}, "serving_started": False}
@@ -223,6 +225,7 @@ def qualification_documents():
 
 def later_documents(docs):
     docs["enrollment"] = {"implementation_sha": checker.BASE_SHA, "upstream_sha": checker.UPSTREAM_SHA,
+        "accepted_at_utc": stamp(NOW - 90),
         "issuer_sha256": ISSUER, "principal_enrolled": True, "principal_id": "existing-native-principal",
         "issuer_entitlement": "ACCEPTED", "credential_contents_included": False,
         **{k: {"accepted": True, "implementation_sha": checker.BASE_SHA} for k in ("C29", "C30", "C31")},
@@ -234,14 +237,16 @@ def later_documents(docs):
                             "vendor_connect_acl_verified", "cross_role_denial_verified")}, "edge_metadata_sha256": "c" * 64}
     docs["serving"] = {"implementation_sha": checker.BASE_SHA, "observed_at_utc": stamp(NOW - 10),
         "authorized_release": True, "edge_metadata_sha256": "c" * 64, "boot_id": HOST["boot_id"],
-        "issuer_sha256": ISSUER, "enrollment_receipt_sha256": digest(encoded(docs["enrollment"])), "roles": {}}
+        "issuer_sha256": ISSUER, "enrollment_receipt_sha256": digest(encoded(docs["enrollment"])),
+        "qualification_cleanup_sha256": digest(encoded(docs["cleanup"])), "release_id": "original-service-release",
+        "authorized_at_utc": stamp(NOW - 80), "interval_start_utc": stamp(NOW - 60), "roles": {}}
     for index, r in enumerate(checker.ROLES):
         pin = docs["source"]["roles"][r]
         before = unit(r, pin)
         before.update(ActiveState="active", SubState="running", MainPID=950 + index,
             start_ticks=9500 + index, invocation_id=str(7 + index) * 32, uid=pin["uid"], gid=pin["gid"],
             image_sha256=pin["image_sha256"], manifest_sha256=docs["source"]["manifest_sha256"],
-            boot_id=HOST["boot_id"])
+            boot_id=HOST["boot_id"], invocation_started_at_utc=stamp(NOW - 70))
         if r == "mmsecretary":
             before.update(gateway_listener={"host": "127.0.0.2", "port": 8765, "inode": "333"},
                 gateway_kernel_listeners=[{"host": "127.0.0.2", "port": 8765, "inode": 333}],
@@ -251,11 +256,14 @@ def later_documents(docs):
         "issuer_sha256": ISSUER, "authenticated": True, "original_operation_consumed": True,
         "useful_result_accepted": True, "browser_path_accepted": True, "operation_id": "original-turn",
         "result_sha256": "d" * 64, "serving_receipt_sha256": digest(encoded(docs["serving"])),
-        "role": "mmsecretary", "invocation_id": "7" * 32, "session_id": "original-native-session"}
+        "role": "mmsecretary", "invocation_id": "7" * 32, "session_id": "original-native-session",
+        "serving_release_id": "original-service-release", "started_at_utc": stamp(NOW - 40),
+        "completed_at_utc": stamp(NOW - 30), "accepted_at_utc": stamp(NOW - 25)}
     docs["cutover"] = {"implementation_sha": checker.BASE_SHA, "explicit_authorization": True,
         "accepted": True, "rollback_proven": True, "useful_turn_operation_id": "original-turn",
         "completed": True, "incumbent_transition_verified": True, "operation_id": "original-cutover",
-        "useful_turn_sha256": digest(encoded(docs["useful_turn"]))}
+        "useful_turn_sha256": digest(encoded(docs["useful_turn"])), "completed_at_utc": stamp(NOW - 5),
+        "serving_release_id": "original-service-release"}
     return docs
 
 
@@ -284,8 +292,13 @@ def refresh_report_bindings(docs):
     docs["cleanup"]["report_sha256"] = {k: digest(encoded(docs[k])) for k in checker.RUNS if k in docs}
 
 
+def trusted_expected(docs, template=EXPECTED):
+    return replace(template, receipt_bindings={k: checker.ReceiptBinding(
+        "fake-original-owner://" + k, digest(encoded(v))) for k, v in docs.items()})
+
+
 def run_check(docs, *, target="actual_unit_qualified", expected=EXPECTED, bad_signature=None,
-              bad_custody=None, unknown_auth=None, raw_override=None):
+              bad_custody=None, unknown_auth=None, raw_override=None, frozen_bindings=None):
     raw = {k: encoded(v) for k, v in docs.items()}
     signatures = {k: hmac.digest(b"fake-test-authority-only", v, "sha256") for k, v in raw.items()}
     if raw_override:
@@ -298,7 +311,10 @@ def run_check(docs, *, target="actual_unit_qualified", expected=EXPECTED, bad_si
         return checker.ReceiptVerification(checker.OWNERS[slot], "fake-original-owner://" + slot,
             digest(value), "VERIFIED" if valid else "INVALID", slot != bad_custody)
 
-    return checker.compile_readiness(raw, expected=expected, verify=verify, now=NOW, target=target)
+    selected = trusted_expected(docs, expected)
+    if frozen_bindings is not None:
+        selected = replace(selected, receipt_bindings=frozen_bindings)
+    return checker.compile_readiness(raw, expected=selected, verify=verify, now=NOW, target=target)
 
 
 def codes(result):
@@ -588,9 +604,9 @@ class TestHermesP0Readiness(unittest.TestCase):
     def test_custody_only_original_reports_do_not_need_invented_signatures(self):
         docs = qualification_documents()
         raw = {k: encoded(v) for k, v in docs.items()}
-        result = checker.compile_readiness(raw, expected=EXPECTED, now=NOW,
+        result = checker.compile_readiness(raw, expected=trusted_expected(docs), now=NOW,
             verify=lambda slot, value: checker.ReceiptVerification(checker.OWNERS[slot],
-                "fake-root-custody://" + slot, digest(value), "NOT_APPLICABLE", True))
+                "fake-original-owner://" + slot, digest(value), "NOT_APPLICABLE", True))
         assert result["state"] == checker.READY, result["blockers"]
 
     def test_actual_unit_invocation_is_not_an_unbound_string(self):
@@ -654,6 +670,88 @@ class TestHermesP0Readiness(unittest.TestCase):
         for target in (None, True, [], {}):
             with self.subTest(target=target):
                 assert run_check({}, target=target)["state"] == checker.REFUSED
+
+    def test_an_authentic_other_operation_cannot_replace_original_c25(self):
+        docs = qualification_documents()
+        docs["c25"]["operation_id"] = "another-authentic-successful-c25"
+        docs["effects"]["c25"]["operation_id"] = "another-authentic-successful-c25"
+        result = run_check(docs)
+        assert result["state"] == checker.REFUSED
+        assert "IDENTITY_OR_SOURCE_DRIFT" in codes(result)
+
+    def test_authentic_receipts_require_independent_exact_origin_selection(self):
+        docs = qualification_documents()
+        anchors = trusted_expected(docs).receipt_bindings
+        docs["c25"]["normalization"]["reachable_object_count"] += 1
+        result = run_check(docs, frozen_bindings=anchors)
+        assert result["state"] == checker.REFUSED
+        assert "ORIGINAL_RECEIPT_DIGEST_MISMATCH" in codes(result)
+        anchors = trusted_expected(docs).receipt_bindings
+        anchors["c25"] = replace(anchors["c25"], source_ref="different-original-object://c25")
+        result = run_check(docs, frozen_bindings=anchors)
+        assert result["state"] == checker.REFUSED
+        assert "ORIGINAL_RECEIPT_REFERENCE_MISMATCH" in codes(result)
+
+    def test_missing_original_selection_is_incomplete_even_with_valid_authentication(self):
+        docs = qualification_documents()
+        result = run_check(docs, frozen_bindings={})
+        assert result["state"] == checker.INCOMPLETE
+        assert "ORIGINAL_RECEIPT_BINDING_MISSING" in codes(result)
+        result = run_check(docs, expected=replace(EXPECTED, original_operations={}))
+        assert result["state"] == checker.INCOMPLETE
+        assert "EXPECTED_ORIGINAL_OPERATION_MISSING" in codes(result)
+
+    def test_future_phase_order_cannot_be_repaired_by_matching_digests(self):
+        for scenario in ("cleanup_after_serving", "enroll_before_qualification", "release_before_enrollment",
+                         "old_role_invocation", "turn_before_serving", "turn_after_observation", "early_cutover"):
+            with self.subTest(scenario=scenario):
+                docs = later_documents(qualification_documents())
+                if scenario == "cleanup_after_serving":
+                    docs["cleanup"]["completed_at_utc"] = stamp(NOW - 5)
+                    docs["qualification"]["observed_at_utc"] = stamp(NOW - 4)
+                elif scenario == "enroll_before_qualification":
+                    docs["enrollment"]["accepted_at_utc"] = stamp(NOW - 110)
+                elif scenario == "release_before_enrollment":
+                    docs["serving"]["authorized_at_utc"] = stamp(NOW - 95)
+                elif scenario == "old_role_invocation":
+                    for sample in docs["serving"]["roles"]["mmmeta"].values():
+                        sample["invocation_started_at_utc"] = stamp(NOW - 81)
+                elif scenario == "turn_before_serving":
+                    docs["useful_turn"]["started_at_utc"] = stamp(NOW - 61)
+                elif scenario == "turn_after_observation":
+                    docs["useful_turn"]["accepted_at_utc"] = stamp(NOW - 9)
+                else:
+                    docs["cutover"]["completed_at_utc"] = stamp(NOW - 26)
+                # Keep every digest join internally consistent: ordering itself
+                # must reject this signed but causally obsolete chain.
+                docs["serving"]["qualification_cleanup_sha256"] = digest(encoded(docs["cleanup"]))
+                docs["serving"]["enrollment_receipt_sha256"] = digest(encoded(docs["enrollment"]))
+                docs["useful_turn"]["serving_receipt_sha256"] = digest(encoded(docs["serving"]))
+                docs["cutover"]["useful_turn_sha256"] = digest(encoded(docs["useful_turn"]))
+                result = run_check(docs, target="cutover")
+                assert result["state"] == checker.REFUSED, result
+                assert any("ORDER" in code or "PRECEDES" in code or "BEFORE" in code
+                           or "OUTSIDE_SERVING" in code or "LATER_CLEANUP" in code for code in codes(result))
+
+    def test_a1_without_peer_report_does_not_invent_peer_read_proof(self):
+        profile = make_profile("mmsecretary")
+        raw_case = next(c for c in probe._case_catalog() if c.case_id == "file.peer.read")
+        with mock.patch.object(probe, "_load_peer_report", return_value=(None, "no peer report supplied")), \
+             mock.patch.object(probe, "_file_outcome_peer", side_effect=AssertionError("must not read")) as read:
+            result = probe._file_outcome(raw_case, profile, 2101, 2101,
+                Path(fixture_file("mmsecretary")["path"]), Path(fixture_file("mmmeta")["path"]), None)
+        assert result.observed == "UNAVAILABLE"
+        read.assert_not_called()
+
+    def test_malformed_status_and_role_names_are_not_echoed(self):
+        docs = qualification_documents()
+        docs["A2"]["status"] = {"private": "do-not-echo-input"}
+        docs["units"]["roles"]["do-not-echo-input"] = {}
+        refresh_report_bindings(docs)
+        result = run_check(docs)
+        assert result["state"] == checker.REFUSED
+        assert result["raw_probe_status"]["A2"] == "INVALID"
+        assert "do-not-echo-input" not in json.dumps(result)
 
 
 if __name__ == "__main__":
