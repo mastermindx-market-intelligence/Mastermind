@@ -107,9 +107,19 @@ def test_gateway_witness_comes_from_own_exclusive_listening_socket(monkeypatch):
         getsockname=lambda: (instance.host, instance.port),
         getsockopt=lambda level, option: options[option])
     instance._httpd = SimpleNamespace(socket=channel)
-    monkeypatch.setattr(role_gateway.sys, "platform", "linux")
-    monkeypatch.setattr(role_gateway.os, "fstat", lambda fd: SimpleNamespace(
-        st_mode=stat.S_IFSOCK, st_uid=os.geteuid(), st_ino=12345))
+    # Bind narrow stand-ins on the gateway module only. Patching the shared os
+    # and sys modules would replace os.fstat and sys.platform for the whole
+    # process, so unrelated teardown code reading os.fstat(...).st_size would
+    # receive this fixture's SimpleNamespace instead of a real stat result.
+    real_getpid, real_geteuid = os.getpid, os.geteuid
+    fake_os = SimpleNamespace(
+        getpid=real_getpid,
+        geteuid=real_geteuid,
+        fstat=lambda fd: SimpleNamespace(
+            st_mode=stat.S_IFSOCK, st_uid=real_geteuid(), st_ino=12345))
+    fake_sys = SimpleNamespace(platform="linux")
+    monkeypatch.setattr(role_gateway, "os", fake_os)
+    monkeypatch.setattr(role_gateway, "sys", fake_sys)
     assert instance.listener_custody() == LISTENER
     for key, invalid in [(socket.SO_ACCEPTCONN, 0), (socket.SO_REUSEADDR, 1),
                          (socket.SO_REUSEPORT, 1)]:
