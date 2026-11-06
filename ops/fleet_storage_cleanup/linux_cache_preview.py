@@ -214,6 +214,30 @@ def _inventory(fd, uid, allowed, deadline):
             "allocated_bytes": allocated, "inventory_sha256": digest.hexdigest()}
 
 
+def _admission_current(home, active, active_fd, active_before, lock_fd, lock_before, uid):
+    """Rejoin the named namespace after all blocking readers/inventory finish."""
+    if (home / "lanes/ext/active").resolve(strict=True) != active:
+        raise PreviewHeld("directory_identity")
+    named_fd = _directory(active, uid)
+    try:
+        # The held directory must still be the one reached through its name.
+        for current in (os.fstat(active_fd), os.fstat(named_fd)):
+            if _signature(current)[:4] != _signature(active_before)[:4]:
+                raise PreviewHeld("directory_identity")
+        named_lock = os.stat(".admission.lock", dir_fd=named_fd, follow_symlinks=False)
+        if (_signature(lock_before) != _signature(os.fstat(lock_fd))
+                or _signature(lock_before) != _signature(named_lock)):
+            raise PreviewHeld("admission_lock_identity")
+        if set(os.listdir(named_fd)) != {".admission.lock"}:
+            raise PreviewHeld("active_lane_or_reconciliation_hold")
+        # Also withhold a transient namespace change whose entry was removed.
+        if any(_signature(os.fstat(fd)) != _signature(active_before)
+               for fd in (active_fd, named_fd)):
+            raise PreviewHeld("directory_identity")
+    finally:
+        os.close(named_fd)
+
+
 def preview(*, home=None, uid=None, platform=None, live_reader=None):
     home = Path.home() if home is None else Path(home)
     uid = os.getuid() if uid is None else uid
@@ -247,6 +271,7 @@ def preview(*, home=None, uid=None, platform=None, live_reader=None):
         # conservatively holds this first preview subset.
         if set(os.listdir(active_fd)) != {".admission.lock"}:
             raise PreviewHeld("active_lane_or_reconciliation_hold")
+        active_before = os.fstat(active_fd)
         state = home / ".local/state/mastermind/storage-cleanup"
         if state.exists():
             state_fd = _directory(state, uid)
@@ -290,11 +315,17 @@ def preview(*, home=None, uid=None, platform=None, live_reader=None):
                 row.clear()
                 row.update(cache=name, relative_root=relative, status="HELD",
                            reason=str(exc) if isinstance(exc, PreviewHeld) else "filesystem_unavailable")
+        _admission_current(home, active, active_fd, active_before, lock_fd, lock, uid)
         if any(r["status"] == "PREVIEWED" for r in result["caches"]):
             result["status"] = "PREVIEWED"
     except (OSError, PreviewHeld):
         exc = sys.exc_info()[1]
         result["reasons"] = [str(exc) if isinstance(exc, PreviewHeld) else "owner_or_lock_unavailable"]
+        # No earlier cache observation remains publishable after scope drift.
+        result["status"] = "HELD"
+        result["caches"] = [dict(cache=row["cache"], relative_root=row["relative_root"],
+                                 status="HELD", reason=result["reasons"][0])
+                            for row in result["caches"]]
     finally:
         if lock_fd is not None:
             os.close(lock_fd)
