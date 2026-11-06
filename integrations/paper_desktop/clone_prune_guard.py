@@ -68,7 +68,10 @@ def _basic_read(file_id: str, page_id: str | None = None, *,
     if (not isinstance(response, dict) or response.get("state") != "OBSERVED"
             or not isinstance(raw, dict) or ("isError" in raw and raw["isError"] is not False)):
         raise bridge.Refusal("DOCUMENT_UNAVAILABLE")
-    if not isinstance(raw.get("content"), list) or raw.get("structuredContent") is not None:
+    # An explicitly truncated envelope is a partial observation. Refuse it
+    # before normalization, as the JSX reader refuses its own envelope flags.
+    if (raw.get("truncated") is True or response.get("truncated") is True
+            or not isinstance(raw.get("content"), list) or raw.get("structuredContent") is not None):
         raise bridge.Refusal("DOCUMENT_SCHEMA_UNVERIFIED")
     # Explicit reads must use the requested tool result, not the separately
     # captured active-file/page snapshot in response.document.
