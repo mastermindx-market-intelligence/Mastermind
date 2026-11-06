@@ -803,6 +803,9 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         # template intentionally leaves it absent so an unconfigured host
         # never presents a publication target.
         "workspace_source_publication",
+        # Retirement provenance is installed only after finite cleanup; an
+        # unconfigured template must never imply an accepted predecessor.
+        "retired_finite_composition",
     }
     assert installed_product_keys <= _CONFIG_OPTIONAL
     assert set(value) == _CONFIG_REQUIRED | (_CONFIG_OPTIONAL - installed_product_keys)
