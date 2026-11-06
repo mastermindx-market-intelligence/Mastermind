@@ -2,6 +2,7 @@
 from contextlib import contextmanager, redirect_stdout
 import importlib.util
 import io
+import itertools
 import json
 import os
 from pathlib import Path
@@ -117,11 +118,16 @@ def test_default_build_stays_exact_reviewed_104_and_go_adds_only_the_fixed_pair(
     historical = dict(default)
     historical.update({"ext/" + name: value for name, value in builder.GO_BASE_DEPENDENCIES.items()})
     historical["ext/pick.py"] = builder.GO_BASE_PICKER_SHA256
+    assert default["ext/remote_sub_exec.py"] == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]
+    historical["ext/remote_sub_exec.py"] = builder.GO_BASE_EXECUTOR_SHA256
     historical.update({"ext/" + name: value for name, value in builder.GO_SELECTION_SUPPORT_PREIMAGES.items()})
     assert default["ext/provider_outcome.py"] == builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256
     historical["ext/provider_outcome.py"] = builder.GO_BASE_PROVIDER_OUTCOME_SHA256
+    for name, original in builder.GO_UBUNTU4_PREIMAGES.items():
+        assert default["ext/" + name] == builder.GO_UBUNTU4_DIGESTS[name]
+        historical["ext/" + name] = original
     for name, original in builder.GO_COMPLETED_POLL_PREIMAGES.items():
-        assert default["ext/" + name] == builder.GO_COMPLETED_POLL_DIGESTS[name]
+        assert historical["ext/" + name] == builder.GO_COMPLETED_POLL_DIGESTS[name]
         historical["ext/" + name] = original
     for name, original in builder.GO_POST_FAILURE_PREIMAGES.items():
         assert default["ext/" + name] == builder.GO_POST_FAILURE_DIGESTS[name]
@@ -155,7 +161,7 @@ def test_exact_historical_picker_remains_a_valid_base_but_no_arbitrary_fourth_me
         exact["ext/provider_outcome.py"] = digest
         builder.validate_go_base_manifest(exact, captured)
     for member in ("ext/pick.py", "ext/model_tier.py", "ext/quota_circuit.py",
-                   "ext/pool_ledger.py", "ext/provider_outcome.py"):
+                   "ext/pool_ledger.py", "ext/provider_outcome.py", "ext/remote_sub_exec.py"):
         bad = dict(manifest)
         bad[member] = "f" * 64
         with pytest.raises(ValueError):
@@ -165,7 +171,7 @@ def test_exact_historical_picker_remains_a_valid_base_but_no_arbitrary_fourth_me
         builder.validate_go_base_manifest(bad, captured)
 
 
-@pytest.mark.parametrize("corruption", ["handler", "dependency", "base", "picker", "provider-outcome", "post-failure", "post-failure-old-observer", "post-failure-old-delivery", "other-member", "entry-symlink"])
+@pytest.mark.parametrize("corruption", ["handler", "dependency", "base", "picker", "executor", "ubuntu4", "provider-outcome", "post-failure", "post-failure-old-observer", "post-failure-old-delivery", "other-member", "entry-symlink"])
 def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path, corruption):
     output = tmp_path / "copy"
     shutil.copytree(builds.default, output)
@@ -181,6 +187,10 @@ def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path
         manifest["ext/lease_broker.py"] = "0" * 64
     elif corruption == "picker":
         manifest["ext/pick.py"] = "0" * 64
+    elif corruption == "executor":
+        manifest["ext/remote_sub_exec.py"] = "0" * 64
+    elif corruption == "ubuntu4":
+        manifest["ext/fabric_host_qualification.py"] = builder.GO_UBUNTU4_PREIMAGES["fabric_host_qualification.py"]
     elif corruption == "provider-outcome":
         manifest["ext/provider_outcome.py"] = "0" * 64
     elif corruption == "post-failure":
@@ -204,6 +214,7 @@ def test_exact_post_failure_cohort_and_prior_102_are_both_closed(builds):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     prior = dict(current)
+    prior.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
     for name, original in builder.GO_COMPLETED_POLL_PREIMAGES.items():
         prior["ext/" + name] = original
     for name, original in builder.GO_POST_FAILURE_PREIMAGES.items():
@@ -261,6 +272,8 @@ def test_completed_poll_pair_is_closed_and_cannot_relabel_historical_102(builds)
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     builder.validate_go_base_manifest(current, captured)
+    # Isolate the original poll pair after reversing the whole Ubuntu4 cohort.
+    current.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
     pre_poll = dict(current)
     pre_poll.update({"ext/" + name: digest
                      for name, digest in builder.GO_COMPLETED_POLL_PREIMAGES.items()})
@@ -279,3 +292,57 @@ def test_completed_poll_pair_is_closed_and_cannot_relabel_historical_102(builds)
     assert len(synthetic_prior) == 102
     with pytest.raises(ValueError, match="completed-poll cohort"):
         builder.validate_go_base_manifest(synthetic_prior, captured)
+
+
+def test_ubuntu4_runtime_cohort_preserves_prior_generation_and_rejects_mixtures(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    original = dict(current)
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    previous = dict(current)
+    previous.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
+    builder.validate_go_base_manifest(current, captured)
+    builder.validate_go_base_manifest(previous, captured)
+    names = tuple(builder.GO_UBUNTU4_DIGESTS)
+    for count in (1, 2):
+        for selected in itertools.combinations(names, count):
+            mixed = dict(previous)
+            mixed.update({"ext/" + name: builder.GO_UBUNTU4_DIGESTS[name] for name in selected})
+            with pytest.raises(ValueError, match="Ubuntu4 cohort"):
+                builder.validate_go_base_manifest(mixed, captured)
+    for name in names:
+        corrupt = dict(current)
+        corrupt["ext/" + name] = "f" * 64
+        with pytest.raises(ValueError):
+            builder.validate_go_base_manifest(corrupt, captured)
+    old_helper = dict(current)
+    old_helper["ext/remote_sub_helpers.py"] = builder.GO_COMPLETED_POLL_PREIMAGES["remote_sub_helpers.py"]
+    with pytest.raises(ValueError, match="completed-poll cohort"):
+        builder.validate_go_base_manifest(old_helper, captured)
+    historical_namespace = dict(current)
+    historical_namespace.update({"ext/" + name: digest
+                                 for name, digest in builder.GO_POST_FAILURE_PREIMAGES.items()})
+    for name in builder.GO_POST_FAILURE_ADDITIONS:
+        del historical_namespace["ext/" + name]
+    assert len(historical_namespace) == 102
+    with pytest.raises(ValueError, match="Ubuntu4 cohort"):
+        builder.validate_go_base_manifest(historical_namespace, captured)
+    assert current == original
+
+
+def test_sparse_config_executor_successor_is_exact_and_does_not_mutate_manifest(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    previous = dict(current)
+    previous.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
+    for cohort in (previous, current):
+        for digest in (builder.GO_BASE_EXECUTOR_SHA256,
+                       builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]):
+            exact = dict(cohort)
+            exact["ext/remote_sub_exec.py"] = digest
+            before = dict(exact)
+            builder.validate_go_base_manifest(exact, captured)
+            assert exact == before
+    wrong = dict(current)
+    wrong["ext/remote_sub_exec.py"] = "f" * 64
+    with pytest.raises(ValueError, match="executor"):
+        builder.validate_go_base_manifest(wrong, captured)

@@ -211,6 +211,23 @@ class PairedLauncherUpgrade(unittest.TestCase):
             if g.digest(pool_preimage) != '85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e' or old['ext/pool_ledger.py'] != g.digest(pool_preimage):
                 raise AssertionError('historical pool ledger preimage differs')
             (cls.built / 'native-code-stage/ext/pool_ledger.py').write_bytes(pool_preimage)
+            # Ubuntu4 changes current first-worker policy. Restore its exact
+            # protected predecessor; never repin the immutable95 target.
+            qualification_raw = fixture.with_name('ubuntu4-grok-qualification-predecessor-f374289e.json').read_bytes()
+            if g.digest(qualification_raw) != '93f5285a758f1045be1f178f35d17e792459f167d2d631ff2914778253b64ebb':
+                raise AssertionError('qualification predecessor fixture changed')
+            qualification = json.loads(qualification_raw)
+            if (qualification['schema'] != 'fabric.ubuntu4-qualification-predecessor.v1'
+                    or qualification['commit'] != 'f374289eb74587eaa755f5bc8e5a3252d00850e0'
+                    or qualification['blob'] != 'f72b12eac939143b1b2ed298139d55b06667a2c2'
+                    or qualification['path'] != 'ops/native_fabric/quota_continuity/candidate/fabric_host_qualification.py'):
+                raise AssertionError('qualification predecessor scope differs')
+            qualification_payload = zlib.decompress(base64.b64decode(qualification['zlib_base64'], validate=True))
+            if (len(qualification_payload) != qualification['bytes']
+                    or g.digest(qualification_payload) != qualification['sha256']
+                    or qualification['sha256'] != old['ext/fabric_host_qualification.py']):
+                raise AssertionError('historical95 qualification predecessor differs')
+            (cls.built / 'native-code-stage/ext/fabric_host_qualification.py').write_bytes(qualification_payload)
             # S7 changed two members that the authentic historical95 inverse
             # previously left untouched. Restore their exact protected bytes;
             # never repin the immutable95 manifest or its paired-upgrade owner.

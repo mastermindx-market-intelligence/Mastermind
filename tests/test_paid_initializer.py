@@ -583,7 +583,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='e1503157be8d3ae71be814115947ba1ef761e068fc5342354bf1e0dfcb27057d'
+    assert hashlib.sha256(current_raw).hexdigest()=='25b27bc0166d02d91d844fe059c3a3b6351a1980623dd6a5c82c348c98e2402b'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==104
     assert set(before)<=set(current)
@@ -614,9 +614,12 @@ def test_native_initializer_extends_only_exact_preimage_members():
     application_changed={'ext/lease_broker.py', 'ext/go_lease_capability.py', 'ext/go_lease_gateway.py', 'ext/quota_circuit.py'}
     recovery_changed={'ext/artifact_delivery.py','ext/run_observation.py',
                       'ext/run_observation_delivery.py'}
-    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed
-    assert sum(before[p]==current[p] for p in before)==62
-    for name in added|changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed:
+    # Preserve the protected Ubuntu4 qualifier and the application A members.
+    ubuntu4_changed={'ext/fabric_host_qualification.py'}
+    assert before['ext/fabric_host_qualification.py']=='1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899'
+    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed
+    assert sum(before[p]==current[p] for p in before)==61
+    for name in added|changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation

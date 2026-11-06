@@ -66,9 +66,9 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 # closed composed candidate bytes; neither source may silently replace the other.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'artifact_delivery.py': '81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1',
-    'remote_sub_exec.py': '9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1',
+    'remote_sub_exec.py': '710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db',
     'pick.py': '5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892',
-    'remote_sub.sh': 'a1e271170778f992cf07c780234620c22d17f6242581311c414e30dd428ade40',
+    'remote_sub.sh': '0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c',
     'remote_sub_helpers.py': 'f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93',
     'sub.sh': '4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f',
     'native_remote.py': '2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6',
@@ -92,6 +92,8 @@ GO_APPLICATION_DEPENDENCIES = ("lease_broker.py", "go_lease_capability.py", "go_
 # are unchanged; remote_sub retains the protected fast-observation and terminal-replay fixes.
 GO_BASE_MANIFEST_SHA256 = "395b1af90c815125a92c81c8b72ec61065002f4f9e66ad53618794ec790ce429"
 GO_BASE_PICKER_SHA256 = "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132"
+# The sparse-config data successor is additive to this exact executor.
+GO_BASE_EXECUTOR_SHA256 = "9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1"
 # Protected47dc keeps diagnostic false distinct from unproved cleanup (76).
 # Admit only that exact provider outcome delta while retaining actual395b.
 GO_BASE_PROVIDER_OUTCOME_SHA256 = "22b5ae9325118327b8b0734514c6f5711e39ae919f0e04426f7fac182895bf24"
@@ -156,6 +158,20 @@ GO_COMPLETED_POLL_DIGESTS = {
 }
 
 
+# Protected Ubuntu4 qualification changes these three runtime members as one
+# cohort. Normalize it before the older completed-poll pair is checked.
+GO_UBUNTU4_PREIMAGES = {
+    "fabric_host_qualification.py": "1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899",
+    "fabric_task.py": "baae8bb99ef6ccda1162dd486a10c8e713bcf4e731ba9160c5e9d1d9bdd1e7d8",
+    "remote_sub.sh": "a1e271170778f992cf07c780234620c22d17f6242581311c414e30dd428ade40",
+}
+GO_UBUNTU4_DIGESTS = {
+    "fabric_host_qualification.py": "f50ef3208efe97c933372eada2e26b8870ba9b9590e33766f991e3416b613aa2",
+    "fabric_task.py": "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd",
+    "remote_sub.sh": "0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c",
+}
+
+
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/current104 and captured application compositions.
 
@@ -164,7 +180,8 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     the existing Grok composition owner. Normalize only that exact successor
     (or the unchanged historical picker), plus the two closed same-owner
     support changes, the exact protected diagnostic outcome correction, and
-    the complete protected poll pair within the current diagnostic closure.
+    the complete protected Ubuntu4/poll cohorts within the current diagnostic
+    closure, and the exact sparse-config executor successor.
     Every other member/key stays bound to actual395b.
     """
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
@@ -174,9 +191,16 @@ def validate_go_base_manifest(manifest, dependency_hashes):
             or type(dependency_hashes) is not dict
             or set(dependency_hashes) != set(GO_APPLICATION_DEPENDENCIES)):
         raise ValueError("native Go base dependency closure differs")
-    historical = dict(manifest)
     current_diagnostics = set(manifest) == expected
-    poll_pair = {name: manifest["ext/" + name] for name in GO_COMPLETED_POLL_PREIMAGES}
+    normalized = dict(manifest)
+    ubuntu4 = {name: manifest["ext/" + name] for name in GO_UBUNTU4_DIGESTS}
+    if any(ubuntu4[name] == digest for name, digest in GO_UBUNTU4_DIGESTS.items()):
+        if not current_diagnostics or ubuntu4 != GO_UBUNTU4_DIGESTS:
+            raise ValueError("native Go Ubuntu4 cohort is not the exact protected source")
+        normalized.update({"ext/" + name: digest
+                           for name, digest in GO_UBUNTU4_PREIMAGES.items()})
+    historical = dict(normalized)
+    poll_pair = {name: normalized["ext/" + name] for name in GO_COMPLETED_POLL_PREIMAGES}
     if (poll_pair != GO_COMPLETED_POLL_PREIMAGES
             and not (current_diagnostics and poll_pair == GO_COMPLETED_POLL_DIGESTS)):
         raise ValueError("native Go completed-poll cohort is not the exact protected source")
@@ -203,6 +227,10 @@ def validate_go_base_manifest(manifest, dependency_hashes):
             GO_BASE_PICKER_SHA256, GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]}:
         raise ValueError("native Go base picker is not the exact composed source")
     historical["ext/pick.py"] = GO_BASE_PICKER_SHA256
+    if manifest["ext/remote_sub_exec.py"] not in {
+            GO_BASE_EXECUTOR_SHA256, GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]}:
+        raise ValueError("native Go executor is not the exact composed source")
+    historical["ext/remote_sub_exec.py"] = GO_BASE_EXECUTOR_SHA256
     for name, original in GO_SELECTION_SUPPORT_PREIMAGES.items():
         if manifest["ext/" + name] not in {original, GO_SELECTION_SUPPORT_DIGESTS[name]}:
             raise ValueError("native Go selection support is not the exact composed source")
