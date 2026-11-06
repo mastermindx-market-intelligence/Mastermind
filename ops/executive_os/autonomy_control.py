@@ -157,6 +157,12 @@ CONTROL_USER = "_mastermind_exec"
 CONTROL_GROUP = "_mastermind_exec"
 WORKER_GROUP = "_mastermind_worker"
 
+# Before Control binds status, installed startup allows 240 seconds for Workspace
+# composition and 30 seconds each for its boot canary and OHF identity exchange.
+# Reserve a further bounded minute for remaining initialization and observation;
+# this allowance never substitutes for READY or extends an inner operation.
+_SERVICES_READY_TIMEOUT = 240.0 + 2 * 30.0 + 60.0
+
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 _HOST_CODES = frozenset(
@@ -3028,14 +3034,14 @@ class ProductionStatusHost:
         )
 
     @staticmethod
-    def _loaded(label: str) -> bool:
+    def _loaded(label: str, *, timeout: float = 5.0) -> bool:
         completed = subprocess.run(
             ["/bin/launchctl", "print", f"system/{label}"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
-            timeout=5,
+            timeout=timeout,
         )
         return completed.returncode == 0
 
@@ -3063,7 +3069,7 @@ class ProductionStatusHost:
         raise ArmAdmissionError("services_gate_failed")
 
     @staticmethod
-    def _control_ready(expected_sha: str) -> bool:
+    def _control_ready(expected_sha: str, *, timeout: float = 10.0) -> bool:
         release = SYSTEM_ROOT / "releases" / expected_sha
         control_home = RUNTIME_ROOT / "control" / "home"
         command = [
@@ -3092,7 +3098,7 @@ class ProductionStatusHost:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=False,
-            timeout=10,
+            timeout=timeout,
         )
         if completed.returncode != 0 or len(completed.stdout) > _MAX_JSON_BYTES:
             return False
@@ -3107,14 +3113,43 @@ class ProductionStatusHost:
             and value["result"].get("service_state") == "READY"
         )
 
-    def _service_state(self, expected_sha: str) -> tuple[str, bool]:
-        control_loaded = self._loaded(CONTROL_LABEL)
-        worker_loaded = self._loaded(WORKER_LABEL)
+    @staticmethod
+    def _startup_timeout(deadline: float, maximum: float) -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("Executive services did not reach READY")
+        return min(maximum, remaining)
+
+    def _service_state(
+        self, expected_sha: str, *, startup_deadline: float | None = None,
+    ) -> tuple[str, bool]:
+        if startup_deadline is None:
+            control_loaded = self._loaded(CONTROL_LABEL)
+            worker_loaded = self._loaded(WORKER_LABEL)
+        else:
+            control_loaded = self._loaded(
+                CONTROL_LABEL, timeout=self._startup_timeout(startup_deadline, 5.0)
+            )
+            worker_loaded = self._loaded(
+                WORKER_LABEL, timeout=self._startup_timeout(startup_deadline, 5.0)
+            )
         if not control_loaded and not worker_loaded:
             return "STOPPED", True
         if control_loaded is not worker_loaded:
             return "AMBIGUOUS", False
-        if self._control_ready(expected_sha):
+        if startup_deadline is None:
+            ready = self._control_ready(expected_sha)
+        else:
+            try:
+                ready = self._control_ready(
+                    expected_sha, timeout=self._startup_timeout(startup_deadline, 10.0)
+                )
+            except subprocess.TimeoutExpired:
+                # launchd can accept a connection while initial composition
+                # still precedes the status handler. Only this startup wait
+                # treats that bounded status timeout as not-yet-READY.
+                ready = False
+        if ready:
             return "READY", True
         return "DEGRADED", True
 
@@ -4516,14 +4551,20 @@ class ProductionTransactionHost(ProductionArmHost):
             self._persist_phase(self._active_transaction, "SERVICES_STARTED")
 
     def prove_services_ready(self, expected_sha: str) -> None:
-        deadline = time.monotonic() + 45.0
+        deadline = time.monotonic() + _SERVICES_READY_TIMEOUT
         while time.monotonic() < deadline:
-            service_state, reconciled = self._service_state(expected_sha)
+            service_state, reconciled = self._service_state(
+                expected_sha, startup_deadline=deadline
+            )
+            if time.monotonic() >= deadline:
+                break
             if reconciled and service_state == "READY":
                 if self._active_transaction is not None:
                     self._persist_phase(self._active_transaction, "READY_PROVEN")
                 return
-            time.sleep(1.0)
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(1.0, remaining))
         raise RuntimeError("Executive services did not reach READY")
 
     def stop_services(self, expected_sha: str) -> None:

@@ -552,13 +552,13 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # permissions, not principals; each complete token and enclosing call was
 # inspected on these exact source bytes. No generic numeric rule changes.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': 'c3d96bf994aea0969161b25405db9e3623eb7d5047ebd81e7a06b68757e11e7f',
-    'sites': ((342, 24, 27, 'int', '501'),
-              (6847, 35, 37, 'int', '80'),
-              (6848, 50, 55, 'int', '0o755'),
-              (7385, 41, 46, 'int', '0o644'),
-              (8122, 64, 69, 'int', '0o644'),
-              (9524, 41, 46, 'int', '0o644')),
+    'sha256': 'dcc1bed3448a5a0d452c6c0413e246937041335957bc087668e378096a652096',
+    'sites': ((348, 24, 27, 'int', '501'),
+              (6888, 35, 37, 'int', '80'),
+              (6889, 50, 55, 'int', '0o755'),
+              (7426, 41, 46, 'int', '0o644'),
+              (8163, 64, 69, 'int', '0o644'),
+              (9565, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
@@ -742,3 +742,12 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'a08b20f
 # audit, protected autonomy/initializer/qualification/enrollment sources matched
 # d3f bytes; their sites were read in their owning call context. The current C20
 # enrollment source is bound by its protected exact-postimage review above.
+
+
+# The installer exclusively creates the gateway audit parent with this private
+# initial mode, under its held trusted root, before qualified final0755 mode.
+# Only this new token is reviewed; existing source identities remain visible.
+REVIEWED_FILES['ops/executive_os/install.sh'] = {
+    'sha256': '1764e5f60e6ec90d5361b79486dba2dbb6fa73f15a040bec5ca05c415b350eaf',
+    'sites': ((1666, 26, 31, 'int', '0o700'),),
+}
