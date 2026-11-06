@@ -1252,7 +1252,10 @@ class PublicProvenanceTransportTests(unittest.TestCase):
                         request += part
                     reading.set()
                     if phase == 'headers':
-                        fragments = b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 440\r\nConnection: close\r\n\r\n'
+                        # Keep the header incomplete beyond the 2s deadline even on
+                        # fast Linux startup; the old 91-byte header finished early.
+                        fragments = (b'HTTP/1.1 200 OK\r\nX-Fixture-Drip: ' + b'x' * 256 +
+                                     b'\r\nContent-Type: application/json\r\nContent-Length: 440\r\nConnection: close\r\n\r\n')
                     else:
                         client.sendall(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 440\r\nConnection: close\r\n\r\n')
                         fragments = b'{"slow":true}' * 40
