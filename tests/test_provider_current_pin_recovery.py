@@ -81,6 +81,11 @@ def recovery(state, custody_root, monkeypatch):
     monkeypatch.setattr(r, "CODEX_BINARY", s.tmp / "codex-0.159.2")
     monkeypatch.setattr(rec, "RECOVERY_STATE_ROOT", custody_root)
     monkeypatch.setattr(rec, "RECOVERY_GRANT_PATH", custody_root / "grant.json")
+    # historical_recovery_grants scans both original and incident candidates;
+    # a test must not consult the real /var/db incident path (permission-denied
+    # on M2) merely because the optional file is absent in its private root.
+    # Preserve the exact production custody validator and fail-closed behavior.
+    monkeypatch.setattr(rec, "RECOVERY_INCIDENT_GRANT_PATH", custody_root / "incident-grant.json")
     monkeypatch.setattr(rec, "RECOVERY_ALLOCATION_PATH", custody_root / "allocation.json")
     monkeypatch.setattr(rec, "CUSTODY_UID", os.getuid())
     monkeypatch.setattr(rec, "CUSTODY_GID", os.getgid())
@@ -994,7 +999,10 @@ def test_qualified_chained_adverse_cannot_recover_again(qualified_state, monkeyp
 def test_qualified_success_finalization_and_no_second_allocation(qualified_state, monkeypatch):
     s = qualified_state
     write_observation(s)
-    reserve_qualified(s, monkeypatch)
+    # Reserve and finalize one immutable expiry; independently sampling the
+    # second-granularity clock can otherwise cross a second boundary.
+    expiry = iso(datetime.now(UTC) + timedelta(minutes=55))
+    reserve_qualified(s, monkeypatch, deadline=expiry)
     canary_path = s.tmp / "canary.json"
     write_json(canary_path, canary(True))
     assert r.main([
@@ -1002,7 +1010,7 @@ def test_qualified_success_finalization_and_no_second_allocation(qualified_state
         "--post-identity-command-status", "0", "--canary-json", str(canary_path),
         "--canary-command-status", "0", "--expected-kind", "device-auth",
         "--workspace-binding-class", r.COMPANY_WORKSPACE_BINDING_CLASS,
-        "--credential-expires-at", iso(datetime.now(UTC) + timedelta(minutes=55)),
+        "--credential-expires-at", expiry,
     ]) == 0
     final = json.loads(s.receipt.read_bytes())
     assert final["passed"] is True
@@ -1290,6 +1298,11 @@ def test_root_executive_source_uses_existing_manifest_and_actual_file_bytes(tmp_
     root = prefix / ("a" * 40)
     script = root / "ops" / "executive_os" / "provider_recovery.py"
     script.parent.mkdir(parents=True)
+    # A real service release must be traversable by both service UIDs. The
+    # synthetic test root inherits pytest's private 0700 umask on M2, so give
+    # only this fixture the reviewed release-root traverse mode; ownership/ACL
+    # are still substituted below and all original manifest hashing remains.
+    root.chmod(0o755)
     script.write_text("fixture source\n")
     monkeypatch.setattr(broker, "_RELEASE_PREFIX", prefix)
     monkeypatch.setattr(rec, "__file__", str(script))
