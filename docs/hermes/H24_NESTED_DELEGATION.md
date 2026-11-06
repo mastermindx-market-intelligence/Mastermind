@@ -14,7 +14,7 @@ Implementation base: `b54cb10e4abdd3766c62d4088f6a576ecfe80437` in
 Assigned branch: `sol/h24-07-nested-contract-20261106`.
 
 Governing protected-source pin:
-`88a8b103a5a69e4b4e870a184655dde9fd5875c3`, Skillpack
+`609bc3a3e4117fed9b656a0552cecb8b8c7e3bf1`, Skillpack
 `mastermind.sol_skillpack.v1`, version `1.0.1`, bootstrap major `1`.
 The current Chairman instruction authorizes concurrent source-only placement;
 there is no wait for H24-01 or a soft wave seal.
@@ -82,13 +82,53 @@ other frozen records, and tuples. Lists and malformed nested facts are refused.
 | `validate_observation(observation, policy=...)` | `TreeProjection`: retained descendant count, maximum observed depth, complete per-coordinator reservation totals. |
 | `project_request(request, selected, observation, policy=...)` | `OwnerRequest`: exact frozen selection, original command, current observation stamp, and any original Attempt/fence/result references. |
 | `project_aggregate(observation, binding, policy=...)` | `AggregateProjection`: dependency readiness, pending real Jobs, reserved steps without Jobs, unresolved commands, accepted result references. It never finalizes a parent. |
+| `project_admitted_plan(plan=..., admission=..., planner=..., jobs=..., policy=...)` | Detaches the canonical v5 body and v3 reservation into a complete `PlanFact`, including unmaterialized dependent steps. Uses the existing pure plan validator and canonical digest. |
+| `project_accepted_revision(value)` | Detaches the exact 18-field owner-accepted revision, including raw result, grant, receipt, placement, principal and qualifying-review references. |
+| `project_dependency_manifest(value, job=...)` | Validates and detaches the immutable v2 creation snapshot; preserves ordered accepted prerequisite revisions, including an empty manifest. |
+| `project_aggregation_handoff(value, plan=...)` | Projects the v2 handoff's own coordinator plan, ordered revisions, reservation and digest-bound adverse history. |
+| `project_child_result(job=..., command=..., worker_id=..., envelope=..., terminal=..., accepted_revision=..., aggregation=...)` | Converts fields of an owner-validated completion using the existing closed result validator. A completed wire without owner acceptance projects `PARTIAL`. |
 
 `OwnerObservation` carries a complete coherent root read, permission and authority
 generation bindings, owner snapshot digest, Jobs, full plan reservations,
 original command/Attempt observations, terminal/review evidence and, when
-applicable, the existing owner's exact `JOB_REQUEUED` evidence. A caller's boolean,
+applicable, immutable dependency manifests and the existing owner's exact
+`JOB_REQUEUED` evidence. A caller's boolean,
 digest, type name or constructor is **not authentication**. These records must
 never be model-supplied public tool parameters.
+
+The adapters produce immutable values from canonical owner wire shapes; they
+do not acquire a read boundary. Assemble them from the same owner observation,
+then call `validate_observation` or one of the request/aggregate projections,
+which performs that validation itself. An isolated plan conversion does not
+prove the complete tree, inherited authority or the accounting of other plans.
+
+### Two result digests and two coordinator scopes
+
+The canonical result and admission contracts distinguish these references:
+
+| Reference | Meaning and use |
+| --- | --- |
+| `ResultFact.result_envelope_digest` | Full `ValidatedRoleCompletion.result_digest`; returned by original-command status. |
+| `ResultFact.role_result_digest` | Digest of the envelope's `role_result`; canonical review targets and accepted revision `current_result_digest` use this value. |
+| `review_acceptance_digest` | The qualifying review's **role-result** digest from the owner-accepted revision, not an invented approval digest. |
+| `AggregateProjection.accepted_result_digests` | Accepted **role-result** digests for the current transitive plan obligations. |
+| Nested `ResultFact.plan_*` | Immutable **parent** plan/step lineage from the nested coordinator Job. |
+| `ResultFact.aggregation.plan_*` | That coordinator's **own** admitted plan and handoff, matching its aggregation-result body. |
+
+`AcceptedRevisionFact` preserves all 18 canonical fields. Digests alone do not
+establish acceptance: the existing owner must have returned the exact accepted
+revision after enforcing its independent-principal and unresolved-rejection
+checks. The adapter joins the current Job, Attempt, role-result digest, repair,
+terminal grant/artifact/validation receipts and qualifying review. The whole
+observation also joins that review to its actual current completed Job/Attempt.
+
+Work and repair results use their parent plan lineage. A nested aggregation
+result instead joins its local v2 handoff and exact ordered revision projection;
+its parent lineage remains separately retained. Root, planner and review results
+are refused by `project_child_result`: they retain their own canonical role
+paths and never acquire a fabricated selected-child step. Root handoff readiness
+is supported by `project_aggregate`, and its handoff by
+`project_aggregation_handoff`; neither finalizes the root.
 
 The host freezes `FrozenChild` from canonical selection. The model receives only:
 
@@ -130,7 +170,8 @@ command; the bridge supplies none.
 
 Fresh descendants require every aggregation ancestor to remain QUEUED,
 uncancelled and unstarted. RUNNING is not the source contract's admitting-parent
-state. The child must remain the admitted step's exact current revision; old,
+state. An ancestor's unresolved dispatch also fences fresh descendants. The
+child must remain the admitted step's exact current revision; old,
 forked, skipped or replacement repair lineage refuses.
 
 An owner-initiated requeue clears `Job.current_attempt_id` and retains the old
@@ -139,6 +180,10 @@ ordinal requires `RequeueFact` for the exact terminal predecessor, the canonical
 requeue Event and the same latest Job Event. Its digest references owner-validated
 evidence; it does not issue a retry grant. The Runtime must still validate its
 actual retry chain, Job Attempt limit and normal claim gates.
+Only current continuation evidence belongs in `requeues`; historical requeue
+Events remain with their existing owner. After ordinal 2 starts, ordinal 1 status
+still returns ordinal 1's original Attempt and fence, without a stale continuation
+fact or a new retry grant.
 
 ### Placement and aggregate completeness
 
@@ -154,11 +199,22 @@ even after the existing owner later materializes the dependency-qualified Job.
 H24 retains that absence, charges the full reserve, lets independent siblings
 progress, and exposes an unmaterialized obligation in `pending_steps`.
 
+Fresh v5 work and nested aggregation require their existing immutable creation
+manifest, including an empty manifest for an independent step. Accepted
+prerequisites are insufficient if that manifest names an older repair, Attempt,
+raw result, grant, receipt, placement, principal or qualifying review. The bridge
+compares the full ordered 18-field revisions against current accepted facts and
+refuses drift. Repair follows the incumbent repair owner, whose dependency guard
+does not assign a new work-creation manifest to the repair Job. This fresh-only
+comparison does not erase original-command status after dependencies change.
+
 Aggregate readiness is derived from the complete admitted plan, not the set of
 returned results. It requires all current transitive work, terminal evidence,
 the exact current accepted repair revision and any required owner-validated
 review. It also waits for every retained nonterminal descendant and unresolved
-dispatch-return marker. A completed coordinator cannot hide a live grandchild;
+dispatch-return marker in the coordinator's subtree, including the coordinator's
+own command. An unrelated sibling's uncertainty does not prevent a distinct
+reserved sibling from progressing. A completed coordinator cannot hide a live grandchild;
 a partial child result or omitted deferred step cannot finalize its parent.
 
 Terminal evidence binds the original command, Job, Attempt, plan lineage and
@@ -180,8 +236,40 @@ implemented in incumbent owner files by this packet.
 | Inherited placement | Owner-normalized `work_placement_union`, preserving exact normalized content/digest and absence. |
 | Original command, Attempt and uncertainty | Existing `selected_child_status`, command Event lookup, Attempt registry and dispatch-effect reconciliation. |
 | Accepted terminal/review references | `_validated_role_completion_material`, `_accepted_current_step_revision` and the existing independent-review validation. |
+| Immutable prerequisites and current revision comparison | `_validated_job_dependency_manifest`, `_work_dependency_manifest` and `_assert_dependency_manifest_current`. |
+| Local aggregate handoff and result | `_validated_aggregation_handoff` and `_validated_aggregation_terminal_payload`; preserve the coordinator's own plan and digest-bound rejected history. |
 | Requeue continuation | The Runtime's exact terminal-Attempt / `JOB_REQUEUED` / latest-Job-Event checks at claim. |
 | Final side effect | Existing COO/Executive claim, reservation, lease and aggregation owners only. |
+
+The bounded public read records are useful inputs, not a complete producer for
+this bundle. `BoundedRuntimeRootSnapshot` alone omits cancellation and accepted
+plan/result evidence. `BoundedRoleResultSnapshot` and
+`BoundedAdmittedPlanSnapshot` carry detached dictionaries and a request-scoped
+observation identity. A finalized `SAME` read receipt applies to its actual
+selection after close; separate successful reads cannot be relabelled as one
+complete all-plan/all-result observation or a continuously held lock. The
+existing owner must provide that coherent root bundle and transaction-local
+recheck before consuming these projections.
+
+Illustrative pure conversion inside that existing owner boundary:
+
+```python
+# All inputs below come from the owner's already validated coherent read.
+plan_fact = project_admitted_plan(
+    plan=typed_plan, admission=admission, planner=planner_fact,
+    jobs=job_facts, policy=policy,
+)
+dependency_fact = project_dependency_manifest(creation_manifest, job=child_fact)
+result_fact = project_child_result(
+    job=child_fact, command=original_command_fact,
+    worker_id=completion.attempt.worker_id,
+    envelope=completion.result_envelope, terminal=completion.terminal_receipt,
+    accepted_revision=owner_accepted_revision,
+    aggregation=local_handoff_fact,  # None for work/repair.
+)
+# Assemble the complete OwnerObservation; its caller retains all authority.
+request = project_request(public_arguments, frozen_child, observation, policy=policy)
+```
 
 Transaction sequence:
 
@@ -219,6 +307,12 @@ to its immediate coordinator and an aggregation dispatch to the aggregation
 Job itself. H24 validates the Runtime form. It does not rewrite nested commands
 to manufacture C17 compatibility or substitute a coordinator as a new root.
 
+PR #2120 merged on 2026-11-06. Its inspected head
+[`25e18c9a96603f59289b431f402204f8b3b7581d`](https://github.com/mastermindx-market-intelligence/Mastermind/blob/25e18c9a96603f59289b431f402204f8b3b7581d/integrations/hermes_delegate/executive.py)
+still explicitly restricts `ExecutiveChildQualification` to `parent_job_id ==
+root_job_id`, depth 1, and work/repair. Its merge does not prove a nested owner
+join, and it does not change this packet's immutable implementation base.
+
 The [C29/C30 composition commission](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2120#issuecomment-6680534154)
 owns authenticated ingress and the trusted installed selected-child target.
 Those owners must preserve immediate-coordinator selection and original-root
@@ -247,32 +341,40 @@ The focused suite uses only the standard library and the checked-in policy:
 PYTHONDONTWRITEBYTECODE=1 python -B -m unittest tests.test_h24_hermes_delegation_contract -q
 ```
 
-Result: **55 tests passed**, exit 0. It covers depths 0–3 / depth-4 refusal,
+Result: **74 tests passed**, exit 0. It covers depths 0–3 / depth-4 refusal,
 quota 16, retained terminal occupancy, exact reserves, sibling overbooking,
 duplicate commands, root/parent/cycle substitution, stale plan and authority,
 grant/placement widening, cancellation, original Attempt/fence reconciliation,
 partial aggregates, deferred dependencies, contiguous repairs, exact reviews,
-canonical requeue and independent sibling progression. No test is skipped.
+canonical requeue and independent sibling progression. Canonical wire fixtures
+add plan/reservation conversion, two result digests, nested parent/local plan
+scopes, accepted repair and provenance drift in dependency manifests, terminal
+receipt substitution, immutable input detachment, own-coordinator uncertainty,
+and original-command recovery after a successor starts. No test is skipped.
 
 The additional focused regression run combines this suite with the existing
 `tests/test_executive_coo_hierarchy.py`, using an already present pytest environment
 with `--noconftest -o addopts='' -q -p no:cacheprovider`. This avoids unrelated
 global portfolio fixtures; it does not replace the Runtime or hierarchy code
-under test. Result: **96 tests passed plus 41 subtests**, exit 0, no failures or
-skips, in 14.12 seconds. No package was installed. The exact execution command was:
+under test. Result: **115 tests passed plus 41 subtests**, exit 0, no failures or
+skips, in 10.56 seconds. The JUnit count is 156 including subtests. No package was
+installed. The exact execution command was:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 /workspace/scratch/16d3df696438/qa-venv/bin/python -B -m pytest --noconftest -o addopts='' -q -p no:cacheprovider tests/test_h24_hermes_delegation_contract.py tests/test_executive_coo_hierarchy.py --junitxml=../h24-hierarchy-results.xml
+PYTHONDONTWRITEBYTECODE=1 /workspace/scratch/16d3df696438/qa-venv/bin/python -B -m pytest --noconftest -o addopts='' -q -p no:cacheprovider tests/test_h24_hermes_delegation_contract.py tests/test_executive_coo_hierarchy.py --junitxml=../h24-resume-hierarchy-results.xml
 ```
 
 Validated source SHA-256:
-`35e4a7a3a024878a8741ef645c3fe8f6beab30f13bbfdbf94c7999b619da0559`.
+`c50ecfce013e890cb5803190a4ba2f644e6f305235cb9298a23aca757d83518b`.
 Validated test SHA-256:
-`31dce05d1aad041f01dc0b14a59ebd8fbe670efc76110a02252a9e70b064101f`.
+`797052551ef5ed3897de18f4203cb61d6c81e73b7e8f3ed6403ca518f578c7b5`.
 The parent's checkpoint additionally retains the published head and owned diff
 checksum; the documentation does not attempt to embed its own recursive checksum.
 
-Return the branch, exact head with this immutable base as its sole parent,
+The initial packet commit is `b24a5d0826a5b9ad94530089538ed2ccd3859b32`.
+This implementation continuation is a direct successor on the same branch;
+it does not merge or rebase the immutable base. Return the branch, exact head
+and parent chain to the immutable base,
 changed paths, test commands/results and SHA-256 of the following exact owned
 diff bytes:
 

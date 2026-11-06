@@ -12,7 +12,7 @@ pure hierarchy/policy validators. Public Hermes arguments remain action/command.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 import hashlib
 import json
 import re
@@ -24,6 +24,10 @@ from control_plane.executive_coo_hierarchy import (
 )
 from control_plane.executive_coo_policy import (
     CooCyclePolicy, CooCyclePolicyError, HIERARCHY_POLICY_SHA256,
+)
+from control_plane.executive_orchestration_principal import digest as orchestration_digest
+from control_plane.executive_orchestration_result import (
+    OrchestrationResultError, _validate_plan, canonical_digest, validate_envelope,
 )
 from integrations.hermes_delegate.schema import SubmissionError, parse_selected_child
 
@@ -137,6 +141,63 @@ class RequeueFact:
 
 
 @dataclass(frozen=True)
+class AcceptedRevisionFact:
+    """Exact OWNER-accepted revision, including grant/receipt/review bindings.
+
+    Both result digests are ROLE digests, not full envelope digests. Producing
+    this value never performs principal independence or review acceptance.
+    """
+
+    ordinal: int
+    plan_step_id: str
+    current_job_id: str
+    current_attempt_id: str
+    current_result_digest: str
+    current_raw_result_digest: str
+    effective_grant_digest: str
+    artifact_receipt_digest: str
+    validation_receipt_digest: str
+    placement_snapshot_digest: str
+    execution_principal_snapshot_digest: str
+    repair_round: int
+    review_required: bool
+    qualifying_review_job_id: str | None
+    qualifying_review_attempt_id: str | None
+    qualifying_review_result_digest: str | None
+    qualifying_review_effective_grant_digest: str | None
+    qualifying_review_principal_snapshot_digest: str | None
+
+
+@dataclass(frozen=True)
+class DependencyFact:
+    """Immutable creation manifest; currentness is checked only for fresh work."""
+
+    job_id: str
+    root_job_id: str
+    coordinator_job_id: str
+    plan_attempt_id: str
+    plan_digest: str
+    plan_step_id: str
+    prerequisite_step_ids: tuple[str, ...]
+    revisions: tuple[AcceptedRevisionFact, ...]
+    dependency_manifest_digest: str
+
+
+@dataclass(frozen=True)
+class AggregationFact:
+    """A coordinator's OWN handoff, separate from its parent admission lineage."""
+
+    root_job_id: str
+    coordinator_job_id: str
+    plan_attempt_id: str
+    plan_digest: str
+    reservation_digest: str
+    handoff_digest: str
+    revisions: tuple[AcceptedRevisionFact, ...]
+    rejected_history_digest: str
+
+
+@dataclass(frozen=True)
 class ResultFact:
     """References to OWNER-validated terminal and, if owed, review evidence.
 
@@ -153,11 +214,14 @@ class ResultFact:
     repair_round: int
     fence_generation: int
     result_envelope_digest: str
+    role_result_digest: str
     terminal_evidence_digest: str
     outcome: str
     review_attempt_id: str | None = None
     review_acceptance_digest: str | None = None
     reviewed_result_digest: str | None = None
+    accepted_revision: AcceptedRevisionFact | None = None
+    aggregation: AggregationFact | None = None
 
 
 @dataclass(frozen=True)
@@ -172,6 +236,7 @@ class OwnerObservation:
     commands: tuple[CommandFact, ...] = ()
     results: tuple[ResultFact, ...] = ()
     requeues: tuple[RequeueFact, ...] = ()
+    dependencies: tuple[DependencyFact, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -227,7 +292,7 @@ class AggregateProjection:
     pending_job_ids: tuple[str, ...]
     pending_steps: tuple[tuple[str, str], ...]
     unresolved_commands: tuple[str, ...]
-    accepted_result_digests: tuple[str, ...]
+    accepted_result_digests: tuple[str, ...]  # Canonical ROLE-result digests.
 
 
 def _require(condition: bool, code: str) -> None:
@@ -294,6 +359,254 @@ def _lineage(job: JobFact) -> tuple[Any, ...]:
     return job.plan_attempt_id, job.plan_digest, job.plan_step_id, job.repair_round
 
 
+def _wire(value: Any, keys: set[str]) -> dict[str, Any]:
+    _require(isinstance(value, Mapping) and set(value) == keys, "CANONICAL_WIRE_INVALID")
+    return dict(value)
+
+
+def _array(value: Any, maximum: int = 16) -> list[Any]:
+    _require(type(value) is list and len(value) <= maximum, "CANONICAL_ARRAY_INVALID")
+    return value
+
+
+def _sealed_wire(value: Any, keys: set[str], digest_key: str) -> dict[str, Any]:
+    raw = _wire(value, keys | {digest_key})
+    _text(raw[digest_key], digest=True)
+    try:
+        actual = orchestration_digest({key: item for key, item in raw.items() if key != digest_key})
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise DelegationContractError("CANONICAL_WIRE_INVALID") from exc
+    _require(actual == raw[digest_key], "CANONICAL_DIGEST_MISMATCH")
+    return raw
+
+
+def _revision(value: AcceptedRevisionFact) -> None:
+    _require(type(value) is AcceptedRevisionFact, "REVISION_SHAPE_INVALID")
+    _integer(value.ordinal, 0, 15)
+    _integer(value.repair_round, 0, 2)
+    _require(type(value.review_required) is bool, "REVISION_REVIEW_INVALID")
+    for name, item in asdict(value).items():
+        if name.startswith("qualifying_review_"):
+            _require((item is not None) == value.review_required, "REVISION_REVIEW_INVALID")
+            if item is not None:
+                _text(item, digest=name.endswith("digest"))
+        elif name not in {"ordinal", "repair_round", "review_required"}:
+            _text(item, digest=name.endswith("digest"))
+
+
+def project_accepted_revision(value: Mapping[str, Any]) -> AcceptedRevisionFact:
+    """Detach `_accepted_current_step_revision` output; never infer acceptance."""
+    result = AcceptedRevisionFact(**_wire(value, {field.name for field in fields(AcceptedRevisionFact)}))
+    _revision(result)
+    return result
+
+
+def _aggregate_revision(value: AcceptedRevisionFact) -> dict[str, Any]:
+    return {name: item for name, item in asdict(value).items() if name in {
+        "ordinal", "plan_step_id", "current_job_id", "current_attempt_id",
+        "current_result_digest", "repair_round", "review_required",
+        "qualifying_review_job_id", "qualifying_review_attempt_id", "qualifying_review_result_digest",
+    }}
+
+
+def project_admitted_plan(*, plan: Mapping[str, Any], admission: Mapping[str, Any],
+                          planner: JobFact, jobs: tuple[JobFact, ...],
+                          policy: CooCyclePolicy) -> PlanFact:
+    """Convert the owner's validated v5 plan/v3 admission without dropping reserves.
+
+    This does not authenticate an Event or a coherent read. Call
+    validate_observation on the assembled root before projecting any request.
+    """
+    _policy(policy)
+    _require(type(planner) is JobFact and planner.orchestration_role == "plan",
+             "PLAN_ATTEMPT_MISMATCH")
+    _tuple(jobs, JobFact, 17)
+    raw = _sealed_wire(admission, {
+        "schema_version", "root_job_id", "coordinator_job_id", "policy_sha", "plan_attempt_id",
+        "plan_digest", "steps", "reserved_children_total", "command_id",
+    }, "reservation_digest")
+    try:
+        body = _validate_plan(plan, outer={"run_id": planner.current_attempt_id,
+                                          "expected_root_job_id": planner.root_job_id})
+    except (OrchestrationResultError, TypeError, KeyError, RecursionError) as exc:
+        raise DelegationContractError("CANONICAL_PLAN_INVALID") from exc
+    _require(body == plan and body["schema_version"] == "mastermind.execution_plan/v5"
+             and raw["schema_version"] == "mastermind.coo_plan_admission/v3"
+             and raw["root_job_id"] == body["root_job_id"]
+             and raw["coordinator_job_id"] == body["coordinator_job_id"] == planner.parent_job_id
+             and raw["plan_attempt_id"] == body["plan_attempt_id"]
+             and raw["plan_digest"] == canonical_digest(body)
+             and raw["policy_sha"] == policy.policy_sha256,
+             "PLAN_ADMISSION_MISMATCH")
+    command = f"coo-cycle:{planner.parent_job_id}:admit-plan:{planner.current_attempt_id}"
+    _require(raw["command_id"] == command, "PLAN_ADMISSION_MISMATCH")
+    reservations = _array(raw["steps"])
+    _require(len(reservations) == len(body["steps"]), "PLAN_RESERVATION_MISMATCH")
+    steps = []
+    for ordinal, (step, reserved) in enumerate(zip(body["steps"], reservations)):
+        reserved = _wire(reserved, {"ordinal", "plan_step_id", "step_slots", "review_required",
+                                   "prerequisite_step_ids", "initial_work_job_id", "initial_work_command_id"})
+        _integer(reserved["ordinal"], 0, 15)
+        _integer(reserved["step_slots"], 1, 16)
+        _require(type(reserved["review_required"]) is bool
+                 and reserved["ordinal"] == ordinal and reserved["plan_step_id"] == step["step_id"]
+                 and reserved["prerequisite_step_ids"] == step["prerequisite_step_ids"],
+                 "PLAN_RESERVATION_MISMATCH")
+        grant = Grant(**step["delegation"]) if step["delegation"] is not None else None
+        _require(not grant or not reserved["review_required"], "PLAN_RESERVATION_MISMATCH")
+        _require(grant is not None or reserved["review_required"] or (
+            not step["review_required"] and step["business_impact"] == "routine"
+        ), "PLAN_REVIEW_WEAKENED")
+        revisions = sorted((job for job in jobs if job.parent_job_id == planner.parent_job_id
+                            and job.plan_step_id == step["step_id"]
+                            and job.orchestration_role in {"work", "repair", "aggregation"}),
+                           key=lambda job: job.repair_round)
+        current = revisions[-1] if revisions else None
+        steps.append(StepFact(step["step_id"], current.job_id if current else None,
+                              current.repair_round if current else 0, reserved["review_required"],
+                              reserved["step_slots"], reserved["initial_work_job_id"],
+                              reserved["initial_work_command_id"], grant,
+                              tuple(step["prerequisite_step_ids"])))
+    return PlanFact(raw["root_job_id"], raw["coordinator_job_id"], planner.job_id,
+                    raw["plan_attempt_id"], raw["plan_digest"], raw["reservation_digest"],
+                    raw["reserved_children_total"], tuple(steps))
+
+
+def project_dependency_manifest(value: Mapping[str, Any], *, job: JobFact) -> DependencyFact:
+    """Detach the existing Job's immutable v2 creation manifest, including empty ones."""
+    _require(type(job) is JobFact and job.parent_job_id is not None
+             and job.orchestration_role in {"work", "aggregation"}, "DEPENDENCY_SCOPE_INVALID")
+    raw = _sealed_wire(value, {"schema_version", "root_job_id", "coordinator_job_id",
+                              "plan_attempt_id", "plan_digest", "plan_step_id",
+                              "prerequisite_step_ids", "revisions"}, "dependency_manifest_digest")
+    _require(raw["schema_version"] == "mastermind.work_dependency_manifest/v2"
+             and (raw["root_job_id"], raw["coordinator_job_id"], raw["plan_attempt_id"],
+                  raw["plan_digest"], raw["plan_step_id"]) == (
+                      job.root_job_id, job.parent_job_id, job.plan_attempt_id, job.plan_digest, job.plan_step_id),
+             "DEPENDENCY_SCOPE_INVALID")
+    prerequisites = tuple(_array(raw["prerequisite_step_ids"], 15))
+    _tuple(prerequisites, str, 15)
+    for step_id in prerequisites:
+        _text(step_id)
+    revisions = tuple(project_accepted_revision(item) for item in _array(raw["revisions"], 15))
+    _require(len(set(prerequisites)) == len(prerequisites)
+             and tuple(item.plan_step_id for item in revisions) == prerequisites,
+             "DEPENDENCY_REVISION_MISMATCH")
+    return DependencyFact(job.job_id, job.root_job_id, job.parent_job_id, job.plan_attempt_id,
+                          job.plan_digest, job.plan_step_id, prerequisites, revisions,
+                          raw["dependency_manifest_digest"])
+
+
+def project_aggregation_handoff(value: Mapping[str, Any], *, plan: PlanFact) -> AggregationFact:
+    """Preserve the owner's local-plan handoff and digest-bind its adverse history."""
+    _require(type(plan) is PlanFact, "PLAN_SCOPE_INVALID")
+    raw = _sealed_wire(value, {"schema_version", "root_job_id", "coordinator_job_id", "policy_sha",
+                              "plan_attempt_id", "plan_digest", "reservation_digest", "revisions",
+                              "rejected_history", "aggregate_result_schema", "allowed_evidence_reads",
+                              "command_id"}, "handoff_digest")
+    _require(raw["schema_version"] == "mastermind.aggregation_handoff/v2"
+             and raw["aggregate_result_schema"] == "mastermind.aggregation_result/v2"
+             and raw["allowed_evidence_reads"] == ["attempts", "events", "jobs"]
+             and raw["policy_sha"] == HIERARCHY_POLICY_SHA256
+             and (raw["root_job_id"], raw["coordinator_job_id"], raw["plan_attempt_id"],
+                  raw["plan_digest"], raw["reservation_digest"]) == (
+                      plan.root_job_id, plan.coordinator_job_id, plan.plan_attempt_id,
+                      plan.plan_digest, plan.reservation_digest)
+             and raw["command_id"] == f"coo-cycle:{plan.coordinator_job_id}:aggregation-handoff:1",
+             "AGGREGATION_SCOPE_INVALID")
+    revisions = tuple(project_accepted_revision(item) for item in _array(raw["revisions"]))
+    _require(len(revisions) == len(plan.steps), "AGGREGATION_REVISION_MISMATCH")
+    for ordinal, (revision, step) in enumerate(zip(revisions, plan.steps)):
+        _require((revision.ordinal, revision.plan_step_id, revision.current_job_id,
+                  revision.repair_round, revision.review_required) == (
+                      ordinal, step.step_id, step.current_job_id, step.current_repair_round, step.review_required),
+                 "AGGREGATION_REVISION_MISMATCH")
+    history = _array(raw["rejected_history"], 128)
+    return AggregationFact(plan.root_job_id, plan.coordinator_job_id, plan.plan_attempt_id,
+                           plan.plan_digest, plan.reservation_digest, raw["handoff_digest"],
+                           revisions, orchestration_digest(history))
+
+
+def project_child_result(*, job: JobFact, command: CommandFact, worker_id: str,
+                         envelope: Mapping[str, Any], terminal: Mapping[str, Any],
+                         accepted_revision: Mapping[str, Any] | None = None,
+                         aggregation: AggregationFact | None = None) -> ResultFact:
+    """Project fields of OWNER-validated completion; completion alone is PARTIAL.
+
+    Work/repair bodies use parent lineage; aggregation bodies use their own
+    handoff. Root/planner/review results are separate canonical roles and cannot
+    be passed off as selected children or acquire a fabricated parent step.
+    """
+    _require(type(job) is JobFact and type(command) is CommandFact and job.parent_job_id is not None
+             and job.orchestration_role in {"work", "repair", "aggregation"}, "CHILD_RESULT_ROLE_INVALID")
+    _require(command.job_id == job.job_id and command.attempt_status == "COMPLETED"
+             and command.attempt_id is not None, "RESULT_LINEAGE_MISMATCH")
+    _command_matches(command.command, job, command.attempt_ordinal)
+    _integer(command.fence_generation, 1)
+    try:
+        normalized = validate_envelope(envelope, expected_job_id=job.job_id,
+                                       expected_run_id=command.attempt_id, expected_worker_id=worker_id,
+                                       expected_role=job.orchestration_role, expected_root_job_id=job.root_job_id)
+    except (OrchestrationResultError, TypeError, KeyError, RecursionError) as exc:
+        raise DelegationContractError("CANONICAL_RESULT_INVALID") from exc
+    _require(normalized == envelope, "CANONICAL_RESULT_INVALID")
+    envelope_digest, role_digest = canonical_digest(normalized), canonical_digest(normalized["role_result"])
+    receipt = _sealed_wire(terminal, {"schema_version", "status", "job_id", "attempt_id",
+                                     "orchestration_role", "execution_mode", "result_seal_command_id",
+                                     "result_evidence", "result_envelope", "result_envelope_digest",
+                                     "artifact_receipt_digest", "validation_receipt_digest", "effective_grant_digest"},
+                           "terminal_evidence_digest")
+    _require(receipt["schema_version"] == "mastermind.orchestration_terminal_receipt/v1"
+             and receipt["status"] == "COMPLETED" and receipt["job_id"] == job.job_id
+             and receipt["attempt_id"] == command.attempt_id
+             and receipt["orchestration_role"] == job.orchestration_role
+             and receipt["result_envelope"] == normalized
+             and receipt["result_envelope_digest"] == envelope_digest, "TERMINAL_BINDING_MISMATCH")
+    mode = receipt["execution_mode"]
+    _require(type(mode) is str and mode in {"OPERATOR_HARNESS", "SEALED_WORKER"}
+             and receipt["result_seal_command_id"] == (
+                 f"orchestration-result-seal:{command.attempt_id}" if mode == "OPERATOR_HARNESS"
+                 else f"sealed-worker-result:{command.attempt_id}")
+             and (receipt["result_evidence"] is None if mode == "OPERATOR_HARNESS"
+                  else isinstance(receipt["result_evidence"], dict)), "TERMINAL_BINDING_MISMATCH")
+    for name in ("artifact_receipt_digest", "validation_receipt_digest", "effective_grant_digest"):
+        _text(receipt[name], digest=True)
+    body = normalized["role_result"]
+    if job.orchestration_role == "aggregation":
+        _require(type(aggregation) is AggregationFact
+                 and body["schema_version"] == "mastermind.aggregation_result/v2"
+                 and body["root_job_id"] == aggregation.root_job_id == job.root_job_id
+                 and body["coordinator_job_id"] == aggregation.coordinator_job_id == job.job_id
+                 and body["plan_attempt_id"] == aggregation.plan_attempt_id
+                 and body["plan_digest"] == aggregation.plan_digest
+                 and body["handoff_digest"] == aggregation.handoff_digest
+                 and body["policy_sha"] == HIERARCHY_POLICY_SHA256
+                 and body["revisions"] == [_aggregate_revision(item) for item in aggregation.revisions],
+                 "AGGREGATION_RESULT_MISMATCH")
+    else:
+        _require(aggregation is None and body["root_job_id"] == job.root_job_id
+                 and (body["plan_attempt_id"], body["plan_digest"], body["plan_step_id"],
+                      body["repair_round"]) == _lineage(job), "RESULT_LINEAGE_MISMATCH")
+        if job.orchestration_role == "repair":
+            _require(body["supersedes_job_id"] == job.supersedes_job_id, "RESULT_LINEAGE_MISMATCH")
+    accepted = project_accepted_revision(accepted_revision) if accepted_revision is not None else None
+    if accepted is not None:
+        _require((accepted.current_job_id, accepted.current_attempt_id, accepted.current_result_digest,
+                  accepted.plan_step_id, accepted.repair_round) == (
+                      job.job_id, command.attempt_id, role_digest, job.plan_step_id, job.repair_round)
+                 and accepted.artifact_receipt_digest == receipt["artifact_receipt_digest"]
+                 and accepted.validation_receipt_digest == receipt["validation_receipt_digest"]
+                 and accepted.effective_grant_digest == receipt["effective_grant_digest"],
+                 "ACCEPTED_REVISION_MISMATCH")
+    return ResultFact(job.job_id, command.attempt_id, command.command, job.plan_attempt_id,
+                      job.plan_digest, job.plan_step_id, job.repair_round, command.fence_generation,
+                      envelope_digest, role_digest, receipt["terminal_evidence_digest"],
+                      "ACCEPTED" if accepted else "PARTIAL",
+                      accepted.qualifying_review_attempt_id if accepted else None,
+                      accepted.qualifying_review_result_digest if accepted else None,
+                      role_digest if accepted and accepted.review_required else None, accepted, aggregation)
+
+
 def _validate(observation: OwnerObservation, policy: CooCyclePolicy):
     """Return ephemeral indexes only; never retain a second owner state."""
     _policy(policy)
@@ -308,6 +621,7 @@ def _validate(observation: OwnerObservation, policy: CooCyclePolicy):
     _tuple(observation.commands, CommandFact, 128)
     _tuple(observation.results, ResultFact, 128)
     _tuple(observation.requeues, RequeueFact, 17)
+    _tuple(observation.dependencies, DependencyFact, 16)
     rows = []
     for job in observation.jobs:
         for value in (job.job_id, job.root_job_id):
@@ -533,6 +847,22 @@ def _validate(observation: OwnerObservation, policy: CooCyclePolicy):
                  and prior.attempt_status in _TERMINAL and not prior.effect_unknown,
                  "REQUEUE_EVIDENCE_INVALID")
         requeued_jobs.add(job.job_id)
+    dependency_jobs = set()
+    for dependency in observation.dependencies:
+        _require(dependency.job_id in jobs and dependency.job_id not in dependency_jobs,
+                 "DEPENDENCY_IDENTITY_INVALID")
+        _tuple(dependency.prerequisite_step_ids, str, 15)
+        _tuple(dependency.revisions, AcceptedRevisionFact, 15)
+        for revision in dependency.revisions:
+            _revision(revision)
+        wire = asdict(dependency)
+        wire.pop("job_id")
+        wire["schema_version"] = "mastermind.work_dependency_manifest/v2"
+        wire["prerequisite_step_ids"] = list(dependency.prerequisite_step_ids)
+        wire["revisions"] = [asdict(item) for item in dependency.revisions]
+        _require(project_dependency_manifest(wire, job=jobs[dependency.job_id]) == dependency,
+                 "DEPENDENCY_SCOPE_INVALID")
+        dependency_jobs.add(dependency.job_id)
     results = {}
     for result in observation.results:
         for value in (result.job_id, result.attempt_id, result.plan_attempt_id, result.plan_step_id):
@@ -550,6 +880,7 @@ def _validate(observation: OwnerObservation, policy: CooCyclePolicy):
                  and command.attempt_status == "COMPLETED"
                  and command.fence_generation == result.fence_generation, "RESULT_LINEAGE_MISMATCH")
         _text(result.result_envelope_digest, digest=True)
+        _text(result.role_result_digest, digest=True)
         _text(result.terminal_evidence_digest, digest=True)
         _require(type(result.outcome) is str and result.outcome in {"ACCEPTED", "PARTIAL", "REJECTED"}
                  and result.attempt_id not in results, "RESULT_IDENTITY_INVALID")
@@ -570,8 +901,37 @@ def _validate(observation: OwnerObservation, policy: CooCyclePolicy):
                      and reviewer.reviews_job_id == job.job_id
                      and reviewer.parent_job_id == job.parent_job_id
                      and _lineage(reviewer) == _lineage(job)
-                     and result.reviewed_result_digest == result.result_envelope_digest,
+                     and result.reviewed_result_digest == result.role_result_digest,
                      "REVIEW_BINDING_MISMATCH")
+        accepted = result.accepted_revision
+        if accepted is not None:
+            _revision(accepted)
+            plan = plans[job.parent_job_id]
+            _require(accepted.ordinal < len(plan.steps), "ACCEPTED_REVISION_MISMATCH")
+            step = plan.steps[accepted.ordinal]
+            _require(result.outcome == "ACCEPTED"
+                     and (accepted.current_job_id, accepted.current_attempt_id, accepted.current_result_digest,
+                          accepted.plan_step_id, accepted.repair_round, accepted.review_required) == (
+                              job.job_id, result.attempt_id, result.role_result_digest,
+                              step.step_id, job.repair_round, step.review_required)
+                     and accepted.qualifying_review_attempt_id == result.review_attempt_id
+                     and accepted.qualifying_review_result_digest == result.review_acceptance_digest,
+                     "ACCEPTED_REVISION_MISMATCH")
+            if result.review_attempt_id is not None:
+                _require(accepted.qualifying_review_job_id == reviewer.job_id, "REVIEW_BINDING_MISMATCH")
+        scope = result.aggregation
+        if scope is not None:
+            _require(type(scope) is AggregationFact and job.orchestration_role == "aggregation"
+                     and scope.root_job_id == root_id and scope.coordinator_job_id == job.job_id,
+                     "AGGREGATION_SCOPE_INVALID")
+            for value in (scope.plan_attempt_id,):
+                _text(value)
+            for value in (scope.plan_digest, scope.reservation_digest, scope.handoff_digest,
+                          scope.rejected_history_digest):
+                _text(value, digest=True)
+            _tuple(scope.revisions, AcceptedRevisionFact, 16)
+            for revision in scope.revisions:
+                _revision(revision)
         results[result.attempt_id] = result
     return jobs, tree, plans, commands, results
 
@@ -599,11 +959,22 @@ def _authorized(observation: OwnerObservation, binding: AuthorityBinding) -> Non
 
 
 def _accepted(job: JobFact, step: StepFact, facts) -> bool:
-    _, _, _, commands, results = facts
+    jobs, _, plans, commands, results = facts
     result = results.get(job.current_attempt_id)
-    return (job.status == "COMPLETED" and result is not None
+    accepted = (job.status == "COMPLETED" and result is not None
             and result.outcome == "ACCEPTED" and not commands[result.command].effect_unknown
+            and result.accepted_revision is not None
             and (not step.review_required or result.review_acceptance_digest is not None))
+    if not accepted or job.orchestration_role != "aggregation":
+        return accepted
+    scope, plan = result.aggregation, plans.get(job.job_id)
+    if scope is None or plan is None or (scope.plan_attempt_id, scope.plan_digest, scope.reservation_digest) != (
+            plan.plan_attempt_id, plan.plan_digest, plan.reservation_digest):
+        return False
+    current = tuple(results.get(jobs[item.current_job_id].current_attempt_id)
+                    if item.current_job_id else None for item in plan.steps)
+    return (all(item is not None and item.accepted_revision is not None for item in current)
+            and scope.revisions == tuple(item.accepted_revision for item in current))
 
 
 def _aggregate(coordinator_id: str, facts) -> tuple[set[str], set[tuple[str, str]], set[str], set[str]]:
@@ -611,7 +982,7 @@ def _aggregate(coordinator_id: str, facts) -> tuple[set[str], set[tuple[str, str
     descendants = descendant_ids(tree, coordinator_id)
     pending = {key for key in descendants if jobs[key].status not in _TERMINAL}
     unresolved = {item.command for item in commands.values()
-                  if item.job_id in descendants and item.effect_unknown}
+                  if item.job_id in descendants | {coordinator_id} and item.effect_unknown}
     accepted = set()
     pending_steps = set()
     plan = plans.get(coordinator_id)
@@ -624,7 +995,7 @@ def _aggregate(coordinator_id: str, facts) -> tuple[set[str], set[tuple[str, str
                 continue
             job = jobs[step.current_job_id]
             if _accepted(job, step, facts):
-                accepted.add(results[job.current_attempt_id].result_envelope_digest)
+                accepted.add(results[job.current_attempt_id].role_result_digest)
             else:
                 pending.add(job.job_id)
             if job.orchestration_role == "aggregation":
@@ -728,6 +1099,8 @@ def project_request(request: Mapping[str, Any], selected: FrozenChild,
              and current.current_repair_round == selected.repair_round, "STEP_SUPERSEDED")
     for row in ancestors(tree, selected.parent_job_id):
         node = jobs[row["job_id"]]
+        _require(not any(item.job_id == node.job_id and item.effect_unknown for item in commands.values()),
+                 "ANCESTOR_EFFECT_UNRESOLVED")
         _require(node.placement_union_digest is not None, "PLACEMENT_UNION_ABSENT")
         if node.parent_job_id is not None:
             _require(node.placement_union_digest == jobs[node.parent_job_id].placement_union_digest,
@@ -747,6 +1120,16 @@ def project_request(request: Mapping[str, Any], selected: FrozenChild,
             if prerequisite.orchestration_role == "aggregation":
                 pending, pending_steps, unresolved, _ = _aggregate(prerequisite.job_id, facts)
                 _require(not pending and not pending_steps and not unresolved, "DEPENDENCY_NOT_ACCEPTED")
+    if job.orchestration_role in {"work", "aggregation"}:
+        manifest = next((item for item in observation.dependencies if item.job_id == job.job_id), None)
+        _require(manifest is not None, "DEPENDENCY_MANIFEST_ABSENT")
+        current_revisions = tuple(
+            results[jobs[next(step.current_job_id for step in plan.steps
+                              if step.step_id == prerequisite)].current_attempt_id].accepted_revision
+            for prerequisite in current.prerequisite_step_ids
+        )
+        _require(manifest.prerequisite_step_ids == current.prerequisite_step_ids
+                 and manifest.revisions == current_revisions, "DEPENDENCY_MANIFEST_STALE")
     return OwnerRequest("selected_child_submit", selected.command, "FRESH_REQUEST",
                         selected, observation.snapshot_digest, None, None, None,
                         requeue_evidence_digest=requeue.evidence_digest if requeue else None)

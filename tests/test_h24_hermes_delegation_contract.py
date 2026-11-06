@@ -6,14 +6,18 @@ The test suite is also runnable with stdlib unittest; no installation is needed.
 """
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError, asdict, replace
 import hashlib
 import unittest
 
 from control_plane.executive_coo_policy import CooCyclePolicy
+from control_plane.executive_orchestration_principal import digest as orchestration_digest
+from control_plane.executive_orchestration_result import canonical_digest
 from control_plane.hermes_delegation_contract import (
-    AggregateProjection, AuthorityBinding, CommandFact, DelegationContractError,
+    AcceptedRevisionFact, AggregateProjection, AggregationFact, AuthorityBinding, CommandFact, DelegationContractError,
     FrozenChild, Grant, JobFact, OwnerObservation, PlanFact, RequeueFact, ResultFact, StepFact,
+    project_accepted_revision, project_admitted_plan, project_aggregation_handoff,
+    project_child_result, project_dependency_manifest,
     project_aggregate, project_request, validate_observation,
 )
 
@@ -73,7 +77,46 @@ def fixture(*, depth=1, leaves=1, reviewed=False):
     authority = AuthorityBinding(root_id, coordinator_id, digest("permission"), digest("generation"))
     observation = OwnerObservation(authority, digest("snapshot-0"), True, True, True,
                                    tuple(jobs), tuple(plans))
+    observation = replace(observation, dependencies=tuple(dependency_for(job) for job in jobs
+                          if job.parent_job_id and job.orchestration_role in {"work", "aggregation"}))
     return observation, selection_for(observation, "JOB-W0")
+
+
+def dependency_for(job, prerequisites=(), revisions=()):
+    wire = {"schema_version": "mastermind.work_dependency_manifest/v2",
+            "root_job_id": job.root_job_id, "coordinator_job_id": job.parent_job_id,
+            "plan_attempt_id": job.plan_attempt_id, "plan_digest": job.plan_digest,
+            "plan_step_id": job.plan_step_id, "prerequisite_step_ids": list(prerequisites),
+            "revisions": [asdict(item) for item in revisions]}
+    wire["dependency_manifest_digest"] = orchestration_digest(wire)
+    return project_dependency_manifest(wire, job=job)
+
+
+def bind_dependency(observation, job_id):
+    job = next(item for item in observation.jobs if item.job_id == job_id)
+    plan = next(item for item in observation.plans if item.coordinator_job_id == job.parent_job_id)
+    step = next(item for item in plan.steps if item.step_id == job.plan_step_id)
+    revisions = tuple(next(result.accepted_revision for result in observation.results
+                           if result.job_id == next(item.current_job_id for item in plan.steps
+                                                    if item.step_id == prerequisite))
+                      for prerequisite in step.prerequisite_step_ids)
+    fact = dependency_for(job, step.prerequisite_step_ids, revisions)
+    return replace(observation, dependencies=tuple(item for item in observation.dependencies
+                                                   if item.job_id != job_id) + (fact,))
+
+
+def accepted_wire(job, attempt_id, role_digest, ordinal, *, reviewed=False):
+    return dict(ordinal=ordinal, plan_step_id=job.plan_step_id, current_job_id=job.job_id,
+                current_attempt_id=attempt_id, current_result_digest=role_digest,
+                current_raw_result_digest=digest("raw"), effective_grant_digest=digest("grant"),
+                artifact_receipt_digest=digest("artifact"), validation_receipt_digest=digest("validation"),
+                placement_snapshot_digest=digest("placement"), execution_principal_snapshot_digest=digest("principal"),
+                repair_round=job.repair_round, review_required=reviewed,
+                qualifying_review_job_id=f"REV-{job.job_id}" if reviewed else None,
+                qualifying_review_attempt_id=f"ATT-REV-{job.job_id}" if reviewed else None,
+                qualifying_review_result_digest=digest(f"review-{job.job_id}") if reviewed else None,
+                qualifying_review_effective_grant_digest=digest("review-grant") if reviewed else None,
+                qualifying_review_principal_snapshot_digest=digest("review-principal") if reviewed else None)
 
 
 def selection_for(observation, job_id):
@@ -101,19 +144,33 @@ def settle(observation, job_id, *, outcome="ACCEPTED", reviewed=False):
     command = CommandFact(command_for(original), job_id, 1, attempt_id, "COMPLETED", 7)
     result = ResultFact(job_id, attempt_id, command.command, original.plan_attempt_id,
                         original.plan_digest, original.plan_step_id, original.repair_round,
-                        7, digest(f"result-{job_id}"), digest(f"terminal-{job_id}"), outcome)
+                        7, digest(f"envelope-{job_id}"), digest(f"role-{job_id}"),
+                        digest(f"terminal-{job_id}"), outcome)
     jobs, commands = observation.jobs, observation.commands + (command,)
     if reviewed:
         review_id, review_attempt = f"REV-{job_id}", f"ATT-REV-{job_id}"
         review_job = replace(original, job_id=review_id, orchestration_role="review",
                               status="COMPLETED", current_attempt_id=review_attempt,
-                              attempt_count=1, reviews_job_id=job_id)
+                              attempt_count=1, reviews_job_id=job_id, supersedes_job_id=None)
         jobs += (review_job,)
         commands += (CommandFact(command_for(review_job), review_id, 1, review_attempt,
                                   "COMPLETED", 8),)
         result = replace(result, review_attempt_id=review_attempt,
                           review_acceptance_digest=digest(f"review-{job_id}"),
-                          reviewed_result_digest=result.result_envelope_digest)
+                          reviewed_result_digest=result.role_result_digest)
+    plan = next(item for item in observation.plans if item.coordinator_job_id == original.parent_job_id)
+    ordinal, step = next((i, item) for i, item in enumerate(plan.steps) if item.step_id == original.plan_step_id)
+    if outcome == "ACCEPTED" and (not step.review_required or reviewed):
+        result = replace(result, accepted_revision=project_accepted_revision(
+            accepted_wire(original, attempt_id, result.role_result_digest, ordinal, reviewed=reviewed)))
+    if original.orchestration_role == "aggregation":
+        local = next(item for item in observation.plans if item.coordinator_job_id == job_id)
+        revisions = tuple(next((item.accepted_revision for item in observation.results
+                                if item.job_id == step.current_job_id), None) for step in local.steps)
+        if all(item is not None for item in revisions):
+            result = replace(result, aggregation=AggregationFact(original.root_job_id, job_id,
+                local.plan_attempt_id, local.plan_digest, local.reservation_digest,
+                digest(f"handoff-{job_id}"), revisions, orchestration_digest([])))
     return replace(observation, jobs=jobs, commands=commands,
                     results=observation.results + (result,),
                     snapshot_digest=digest(observation.snapshot_digest + job_id))
@@ -133,6 +190,81 @@ def aggregate(observation, coordinator_id=None):
     binding = replace(observation.authority, coordinator_job_id=coordinator_id or "JOB-ROOT")
     observation = replace(observation, authority=binding)
     return project_aggregate(observation, binding, policy=POLICY)
+
+
+def plan_wires(plan):
+    body = {"schema_version": "mastermind.execution_plan/v5", "root_job_id": plan.root_job_id,
+            "coordinator_job_id": plan.coordinator_job_id, "plan_attempt_id": plan.plan_attempt_id,
+            "steps": [{"ordinal": ordinal, "step_id": step.step_id, "objective": "Bounded source work",
+                       "business_impact": "routine", "review_required": step.review_required,
+                       "requested_authorities": ["READ"], "allowed_write_paths": [], "validation_ids": [],
+                       "attempt_limit": 1, "cost_class": "small",
+                       "prerequisite_step_ids": list(step.prerequisite_step_ids),
+                       "delegation": {"descendant_limit": step.delegation.descendant_limit,
+                                      "max_depth": step.delegation.max_depth} if step.delegation else None}
+                      for ordinal, step in enumerate(plan.steps)]}
+    admission = {"schema_version": "mastermind.coo_plan_admission/v3", "root_job_id": plan.root_job_id,
+                 "coordinator_job_id": plan.coordinator_job_id, "policy_sha": POLICY.policy_sha256,
+                 "plan_attempt_id": plan.plan_attempt_id, "plan_digest": canonical_digest(body),
+                 "reserved_children_total": plan.reserved_children_total,
+                 "command_id": f"coo-cycle:{plan.coordinator_job_id}:admit-plan:{plan.plan_attempt_id}",
+                 "steps": [{"ordinal": ordinal, "plan_step_id": step.step_id,
+                            "step_slots": step.reserved_slots, "review_required": step.review_required,
+                            "prerequisite_step_ids": list(step.prerequisite_step_ids),
+                            "initial_work_job_id": step.initial_work_job_id,
+                            "initial_work_command_id": step.initial_work_command_id}
+                           for ordinal, step in enumerate(plan.steps)]}
+    admission["reservation_digest"] = orchestration_digest(admission)
+    return body, admission
+
+
+def canonical_plan_fixture(observation):
+    wires = {plan.coordinator_job_id: plan_wires(plan) for plan in observation.plans}
+    jobs = tuple(replace(job, plan_digest=wires[job.parent_job_id][1]["plan_digest"])
+                 if job.plan_digest is not None else job for job in observation.jobs)
+    plans = tuple(project_admitted_plan(plan=wires[plan.coordinator_job_id][0],
+                    admission=wires[plan.coordinator_job_id][1],
+                    planner=next(job for job in jobs if job.job_id == plan.planner_job_id),
+                    jobs=jobs, policy=POLICY) for plan in observation.plans)
+    return replace(observation, jobs=jobs, plans=plans, dependencies=tuple(dependency_for(job) for job in jobs
+                   if job.parent_job_id and job.orchestration_role in {"work", "aggregation"})), wires
+
+
+def completion_wires(observation, job_id, *, body=None):
+    job = next(item for item in observation.jobs if item.job_id == job_id)
+    command = next(item for item in observation.commands if item.attempt_id == job.current_attempt_id)
+    if body is None:
+        body = {"schema_version": "mastermind.work_result/v1", "root_job_id": job.root_job_id,
+                "plan_attempt_id": job.plan_attempt_id, "plan_digest": job.plan_digest,
+                "plan_step_id": job.plan_step_id, "repair_round": job.repair_round,
+                "artifacts": [], "evidence_digests": []}
+    envelope = {"schema_version": "mastermind.executive_orchestration_result/v1", "job_id": job_id,
+                "run_id": command.attempt_id, "worker_id": "WORKER-1", "role": job.orchestration_role,
+                "status": "COMPLETED", "role_result": body, "summary": "Scoped source result",
+                "current_state": "Completed", "next_actions": [], "errors": [], "validations": []}
+    terminal = {"schema_version": "mastermind.orchestration_terminal_receipt/v1", "status": "COMPLETED",
+                "job_id": job_id, "attempt_id": command.attempt_id, "orchestration_role": job.orchestration_role,
+                "execution_mode": "OPERATOR_HARNESS", "result_seal_command_id": f"orchestration-result-seal:{command.attempt_id}",
+                "result_evidence": None, "result_envelope": envelope, "result_envelope_digest": canonical_digest(envelope),
+                "artifact_receipt_digest": digest("artifact"), "validation_receipt_digest": digest("validation"),
+                "effective_grant_digest": digest("grant")}
+    terminal["terminal_evidence_digest"] = orchestration_digest(terminal)
+    return dict(job=job, command=command, worker_id="WORKER-1", envelope=envelope, terminal=terminal)
+
+
+def handoff_wire(observation, coordinator_id):
+    plan = next(item for item in observation.plans if item.coordinator_job_id == coordinator_id)
+    revisions = [asdict(next(result.accepted_revision for result in observation.results
+                            if result.job_id == step.current_job_id)) for step in plan.steps]
+    wire = {"schema_version": "mastermind.aggregation_handoff/v2", "root_job_id": plan.root_job_id,
+            "coordinator_job_id": coordinator_id, "policy_sha": POLICY.policy_sha256,
+            "plan_attempt_id": plan.plan_attempt_id, "plan_digest": plan.plan_digest,
+            "reservation_digest": plan.reservation_digest, "revisions": revisions, "rejected_history": [],
+            "aggregate_result_schema": "mastermind.aggregation_result/v2",
+            "allowed_evidence_reads": ["attempts", "events", "jobs"],
+            "command_id": f"coo-cycle:{coordinator_id}:aggregation-handoff:1"}
+    wire["handoff_digest"] = orchestration_digest(wire)
+    return wire, plan
 
 
 class OwnerTransactionSpecimen:
@@ -169,7 +301,7 @@ class OwnerTransactionSpecimen:
 class HierarchyTests(unittest.TestCase):
     def test_depth_zero_and_one_two_three_allowed(self):
         observation, _ = fixture()
-        root_only = replace(observation, jobs=observation.jobs[:1], plans=())
+        root_only = replace(observation, jobs=observation.jobs[:1], plans=(), dependencies=())
         self.assertEqual(validate_observation(root_only, policy=POLICY).maximum_observed_depth, 0)
         for depth in (1, 2, 3):
             with self.subTest(depth=depth):
@@ -258,10 +390,12 @@ class HierarchyTests(unittest.TestCase):
                            initial_work_job_id=None, initial_work_command_id=None)
         observation = change_job(observation, "JOB-W0", plan_step_id=first.step_id)
         observation = replace(observation, plans=(replace(plan, steps=(first, second)),))
+        observation = bind_dependency(observation, "JOB-W0")
         validate_observation(observation, policy=POLICY)
         self.assertEqual(submit(selection_for(observation, "JOB-W0"), observation).selection.plan_step_id,
                           "phase:research")
         observation = settle(observation, "JOB-W0")
+        observation = bind_dependency(observation, "JOB-W1")
         self.assertEqual(submit(selection_for(observation, "JOB-W1"), observation).disposition, "FRESH_REQUEST")
 
     def test_rollback_fork_or_skipped_repair_revision_refused(self):
@@ -623,7 +757,8 @@ class AggregateTests(unittest.TestCase):
         deferred = replace(plan.steps[2], current_job_id=None, prerequisite_step_ids=("STEP-0",),
                             initial_work_job_id=None, initial_work_command_id=None)
         observation = replace(observation, jobs=observation.jobs[:-1],
-                                plans=(replace(plan, steps=plan.steps[:2] + (deferred,)),))
+                                plans=(replace(plan, steps=plan.steps[:2] + (deferred,)),),
+                                dependencies=observation.dependencies[:-1])
         self.assertEqual(dict(validate_observation(observation, policy=POLICY).reservations)["JOB-ROOT"], 4)
         self.assertEqual(submit(selection_for(observation, "JOB-W1"), observation).disposition, "FRESH_REQUEST")
         projection = aggregate(observation)
@@ -635,6 +770,7 @@ class AggregateTests(unittest.TestCase):
         materialized = replace(deferred, current_job_id=future_job.job_id)
         observation = replace(observation, jobs=observation.jobs + (future_job,),
                                 plans=(replace(plan, steps=plan.steps[:2] + (materialized,)),))
+        observation = bind_dependency(observation, future_job.job_id)
         self.assertEqual(submit(selection_for(observation, future_job.job_id), observation).disposition,
                           "FRESH_REQUEST")
 
@@ -704,7 +840,269 @@ class AggregateTests(unittest.TestCase):
         self.assertEqual(submit(sibling, observation).disposition, "FRESH_REQUEST")
         with self.assertRaisesRegex(DelegationContractError, "DEPENDENCY_NOT_ACCEPTED"):
             submit(waiting, observation)
-        self.assertEqual(submit(waiting, settle(observation, selected.job_id)).disposition, "FRESH_REQUEST")
+        completed = bind_dependency(settle(observation, selected.job_id), waiting.job_id)
+        self.assertEqual(submit(waiting, completed).disposition, "FRESH_REQUEST")
+
+
+class CanonicalAdapterTests(unittest.TestCase):
+    def test_full_v5_plan_and_v3_reservation_project_at_all_levels(self):
+        observation, _ = fixture(depth=3, leaves=11)
+        projected, wires = canonical_plan_fixture(observation)
+        self.assertEqual(validate_observation(projected, policy=POLICY).total_descendants, 16)
+        self.assertEqual(submit(selection_for(projected, "JOB-W0"), projected).disposition, "FRESH_REQUEST")
+        for plan in projected.plans:
+            body, admission = wires[plan.coordinator_job_id]
+            self.assertEqual(plan.plan_digest, canonical_digest(body))
+            self.assertEqual(plan.reservation_digest, admission["reservation_digest"])
+
+    def test_plan_adapter_retains_deferred_slots_and_detaches_mutable_inputs(self):
+        observation, _ = fixture(leaves=2)
+        plan = observation.plans[0]
+        deferred = replace(plan.steps[1], current_job_id=None, initial_work_job_id=None,
+                           initial_work_command_id=None, prerequisite_step_ids=(plan.steps[0].step_id,))
+        observation = replace(observation, jobs=observation.jobs[:-1],
+                              plans=(replace(plan, steps=(plan.steps[0], deferred)),), dependencies=())
+        projected, wires = canonical_plan_fixture(observation)
+        self.assertEqual(projected.plans[0].reserved_children_total, 3)
+        self.assertIsNone(projected.plans[0].steps[1].current_job_id)
+        self.assertIn(("JOB-ROOT", "STEP-1"), aggregate(projected).pending_steps)
+        wires["JOB-ROOT"][0]["steps"][1]["prerequisite_step_ids"].clear()
+        wires["JOB-ROOT"][1]["steps"].clear()
+        self.assertEqual(projected.plans[0].steps[1].prerequisite_step_ids, ("STEP-0",))
+
+    def test_plan_adapter_refuses_tampered_digest_and_foreign_coordinator(self):
+        observation, _ = fixture()
+        plan, admission = plan_wires(observation.plans[0])
+        planner = observation.jobs[1]
+        for key, value in (("plan_digest", digest("other")), ("coordinator_job_id", "JOB-OTHER")):
+            changed = dict(admission, **{key: value})
+            if key == "coordinator_job_id":
+                changed.pop("reservation_digest")
+                changed["reservation_digest"] = orchestration_digest(changed)
+            with self.assertRaises(DelegationContractError):
+                project_admitted_plan(plan=plan, admission=changed, planner=planner,
+                                      jobs=observation.jobs, policy=POLICY)
+
+    def test_accepted_revision_is_closed_strict_and_immutable(self):
+        observation, _ = fixture()
+        job = observation.jobs[-1]
+        wire = accepted_wire(job, "ATT-WORK", digest("role"), 0)
+        projected = project_accepted_revision(wire)
+        self.assertEqual(asdict(projected), wire)
+        for altered in (dict(wire, ordinal=True), dict(wire, extra=True),
+                        dict(wire, qualifying_review_result_digest=digest("unowed-review")),
+                        dict(wire, current_raw_result_digest="missing")):
+            with self.assertRaises(DelegationContractError):
+                project_accepted_revision(altered)
+        with self.assertRaises(FrozenInstanceError):
+            projected.repair_round = 1
+
+    def test_review_and_aggregate_use_role_digest_while_status_uses_envelope(self):
+        observation, selected = fixture(reviewed=True)
+        observation = settle(observation, selected.job_id, reviewed=True)
+        args = completion_wires(observation, selected.job_id)
+        role_digest = canonical_digest(args["envelope"]["role_result"])
+        accepted = accepted_wire(args["job"], args["command"].attempt_id, role_digest, 0, reviewed=True)
+        result = project_child_result(**args, accepted_revision=accepted)
+        observation = replace(observation, results=(result,))
+        self.assertNotEqual(result.result_envelope_digest, result.role_result_digest)
+        self.assertEqual(result.reviewed_result_digest, role_digest)
+        self.assertEqual(aggregate(observation).accepted_result_digests, (role_digest,))
+        self.assertEqual(status(selected, observation).result_envelope_digest, canonical_digest(args["envelope"]))
+        accepted["current_result_digest"] = canonical_digest(args["envelope"])
+        with self.assertRaisesRegex(DelegationContractError, "ACCEPTED_REVISION"):
+            project_child_result(**args, accepted_revision=accepted)
+        wrong = replace(result, reviewed_result_digest=result.result_envelope_digest)
+        with self.assertRaisesRegex(DelegationContractError, "REVIEW_BINDING"):
+            aggregate(replace(observation, results=(wrong,)))
+
+    def test_completed_wire_without_owner_acceptance_stays_partial(self):
+        observation, _ = fixture()
+        observation = settle(observation, "JOB-W0")
+        args = completion_wires(observation, "JOB-W0")
+        result = project_child_result(**args)
+        self.assertEqual(result.outcome, "PARTIAL")
+        self.assertFalse(aggregate(replace(observation, results=(result,))).ready_for_owner_handoff)
+        args["envelope"]["summary"] = "Mutable source changed after projection"
+        self.assertNotEqual(result.result_envelope_digest, canonical_digest(args["envelope"]))
+
+    def test_terminal_wire_cannot_substitute_attempt_receipt_or_grant(self):
+        observation, _ = fixture()
+        observation = settle(observation, "JOB-W0")
+        args = completion_wires(observation, "JOB-W0")
+        accepted = accepted_wire(args["job"], args["command"].attempt_id,
+                                 canonical_digest(args["envelope"]["role_result"]), 0)
+        for name, value in (("attempt_id", "ATT-OTHER"), ("effective_grant_digest", digest("different-grant")),
+                            ("artifact_receipt_digest", digest("different-artifact"))):
+            terminal = dict(args["terminal"], **{name: value})
+            terminal.pop("terminal_evidence_digest")
+            terminal["terminal_evidence_digest"] = orchestration_digest(terminal)
+            with self.assertRaises(DelegationContractError):
+                project_child_result(**dict(args, terminal=terminal), accepted_revision=accepted)
+
+    def test_nested_aggregate_preserves_parent_lineage_and_own_plan(self):
+        observation, _ = fixture(depth=2)
+        observation, _ = canonical_plan_fixture(observation)
+        observation = settle(observation, "JOB-W0")
+        args = completion_wires(observation, "JOB-W0")
+        leaf = project_child_result(**args, accepted_revision=accepted_wire(args["job"], args["command"].attempt_id,
+                                    canonical_digest(args["envelope"]["role_result"]), 0))
+        observation = replace(observation, results=(leaf,))
+        wire, plan = handoff_wire(observation, "JOB-C1")
+        scope = project_aggregation_handoff(wire, plan=plan)
+        keys = {"ordinal", "plan_step_id", "current_job_id", "current_attempt_id", "current_result_digest",
+                "repair_round", "review_required", "qualifying_review_job_id", "qualifying_review_attempt_id",
+                "qualifying_review_result_digest"}
+        body = {key: wire[key] for key in ("root_job_id", "coordinator_job_id", "policy_sha",
+                                          "plan_attempt_id", "plan_digest", "handoff_digest")}
+        body.update(schema_version="mastermind.aggregation_result/v2", aggregate_summary="Scoped children accepted",
+                    evidence_digests=[], revisions=[{key: value for key, value in item.items() if key in keys}
+                                                    for item in wire["revisions"]])
+        observation = settle(observation, "JOB-C1")
+        args = completion_wires(observation, "JOB-C1", body=body)
+        result = project_child_result(**args, aggregation=scope, accepted_revision=accepted_wire(
+            args["job"], args["command"].attempt_id, canonical_digest(body), 0))
+        self.assertNotEqual(result.plan_attempt_id, result.aggregation.plan_attempt_id)
+        self.assertEqual(result.plan_attempt_id, observation.plans[0].plan_attempt_id)
+        self.assertEqual(result.aggregation.plan_attempt_id, observation.plans[1].plan_attempt_id)
+        observation = replace(observation, results=(leaf, result))
+        self.assertTrue(aggregate(observation).ready_for_owner_handoff)
+        stale = replace(scope.revisions[0], current_raw_result_digest=digest("new-raw-observation"))
+        result = replace(result, aggregation=replace(scope, revisions=(stale,)))
+        self.assertFalse(aggregate(replace(observation, results=(leaf, result))).ready_for_owner_handoff)
+        with self.assertRaisesRegex(DelegationContractError, "AGGREGATION_RESULT"):
+            project_child_result(**args, aggregation=replace(scope, plan_attempt_id=result.plan_attempt_id))
+
+    def test_handoff_binds_rejected_history_and_order(self):
+        observation, _ = fixture(leaves=2)
+        observation = settle(settle(observation, "JOB-W0"), "JOB-W1")
+        wire, plan = handoff_wire(observation, "JOB-ROOT")
+        scope = project_aggregation_handoff(wire, plan=plan)
+        self.assertEqual(scope.rejected_history_digest, orchestration_digest([]))
+        for changed in (dict(wire, rejected_history=[{"changed": True}]),
+                        dict(wire, revisions=list(reversed(wire["revisions"])))):
+            with self.assertRaises(DelegationContractError):
+                project_aggregation_handoff(changed, plan=plan)
+        changed = dict(wire, revisions=list(reversed(wire["revisions"])))
+        changed.pop("handoff_digest")
+        changed["handoff_digest"] = orchestration_digest(changed)
+        with self.assertRaisesRegex(DelegationContractError, "AGGREGATION_REVISION"):
+            project_aggregation_handoff(changed, plan=plan)
+
+    def test_root_planner_review_cannot_be_fabricated_as_child_results(self):
+        observation, _ = fixture()
+        observation = settle(observation, "JOB-W0")
+        args = completion_wires(observation, "JOB-W0")
+        for job in (observation.jobs[0], observation.jobs[1], replace(args["job"], orchestration_role="review")):
+            with self.assertRaisesRegex(DelegationContractError, "CHILD_RESULT_ROLE"):
+                project_child_result(**dict(args, job=job))
+
+    def test_empty_dependency_manifest_required_for_fresh_but_not_status(self):
+        observation, selected = fixture()
+        missing = replace(observation, dependencies=())
+        with self.assertRaisesRegex(DelegationContractError, "DEPENDENCY_MANIFEST_ABSENT"):
+            submit(selected, missing)
+        self.assertEqual(status(selected, missing).disposition, "OBSERVE_UNCLAIMED")
+        completed = settle(missing, selected.job_id)
+        self.assertEqual(submit(selected, completed).disposition, "RECONCILE_ORIGINAL")
+
+    def test_creation_manifest_changes_only_through_owner_observation(self):
+        observation, _ = fixture(leaves=2)
+        plan = observation.plans[0]
+        step = replace(plan.steps[1], prerequisite_step_ids=("STEP-0",),
+                       initial_work_job_id=None, initial_work_command_id=None)
+        observation = replace(observation, plans=(replace(plan, steps=(plan.steps[0], step)),))
+        observation = bind_dependency(settle(observation, "JOB-W0"), "JOB-W1")
+        selected = selection_for(observation, "JOB-W1")
+        self.assertEqual(submit(selected, observation).disposition, "FRESH_REQUEST")
+        result = observation.results[0]
+        changed = replace(result, accepted_revision=replace(result.accepted_revision,
+                          execution_principal_snapshot_digest=digest("new-principal")))
+        stale = replace(observation, results=(changed,))
+        with self.assertRaisesRegex(DelegationContractError, "DEPENDENCY_MANIFEST_STALE"):
+            submit(selected, stale)
+        # The prior accepted role digest alone is insufficient: exact provenance must agree.
+        self.assertEqual(result.role_result_digest, changed.role_result_digest)
+        model = OwnerTransactionSpecimen(observation)
+        claim = model.consume(submit(selected, observation))
+        restarted = replace(model.observation, results=(changed,))
+        self.assertEqual(submit(selected, restarted).original_attempt_id, claim.attempt_id)
+
+    def test_accepted_repair_invalidates_old_prerequisite_snapshot(self):
+        observation, _ = fixture(leaves=2)
+        plan = observation.plans[0]
+        first = replace(plan.steps[0], review_required=True, reserved_slots=9)
+        second = replace(plan.steps[1], prerequisite_step_ids=(first.step_id,),
+                         initial_work_job_id=None, initial_work_command_id=None)
+        observation = replace(observation, plans=(replace(plan, steps=(first, second), reserved_children_total=11),))
+        observation = bind_dependency(settle(observation, "JOB-W0", reviewed=True), "JOB-W1")
+        selected = selection_for(observation, "JOB-W1")
+        self.assertEqual(submit(selected, observation).disposition, "FRESH_REQUEST")
+        original = next(job for job in observation.jobs if job.job_id == "JOB-W0")
+        repair = replace(original, job_id="JOB-REPAIR", orchestration_role="repair", repair_round=1,
+                         supersedes_job_id=original.job_id, status="QUEUED", attempt_count=0, current_attempt_id=None)
+        first = replace(first, current_job_id=repair.job_id, current_repair_round=1)
+        observation = replace(observation, jobs=observation.jobs + (repair,),
+                              plans=(replace(observation.plans[0], steps=(first, second)),))
+        observation = settle(observation, repair.job_id, reviewed=True)
+        with self.assertRaisesRegex(DelegationContractError, "DEPENDENCY_MANIFEST_STALE"):
+            submit(selected, observation)
+
+    def test_coordinator_own_unknown_command_blocks_aggregate_handoff(self):
+        observation, _ = fixture(depth=2)
+        observation = settle(observation, "JOB-W0")
+        coordinator = next(job for job in observation.jobs if job.job_id == "JOB-C1")
+        unknown = CommandFact(command_for(coordinator), coordinator.job_id, 1, None, None, None, True)
+        observation = replace(observation, commands=observation.commands + (unknown,))
+        scoped = aggregate(observation, "JOB-C1")
+        self.assertFalse(scoped.ready_for_owner_handoff)
+        self.assertEqual(scoped.unresolved_commands, (unknown.command,))
+
+    def test_parent_unknown_command_does_not_block_independent_nested_progress(self):
+        observation, _ = fixture(depth=2)
+        observation = settle(observation, "JOB-W0")
+        root = observation.jobs[0]
+        unknown = CommandFact(command_for(root), root.job_id, 1, None, None, None, True)
+        observation = replace(observation, commands=observation.commands + (unknown,))
+        self.assertTrue(aggregate(observation, "JOB-C1").ready_for_owner_handoff)
+        self.assertFalse(aggregate(observation).ready_for_owner_handoff)
+
+    def test_unknown_ancestor_fences_fresh_descendants_without_erasing_status(self):
+        observation, selected = fixture(depth=2)
+        root = observation.jobs[0]
+        unknown = CommandFact(command_for(root), root.job_id, 1, None, None, None, True)
+        observation = replace(observation, commands=(unknown,))
+        with self.assertRaisesRegex(DelegationContractError, "ANCESTOR_EFFECT_UNRESOLVED"):
+            submit(selected, observation)
+        completed = settle(observation, selected.job_id)
+        self.assertEqual(submit(selected, completed).disposition, "RECONCILE_ORIGINAL")
+
+    def test_unknown_sibling_does_not_fence_distinct_reserved_sibling(self):
+        observation, _ = fixture(leaves=2)
+        first, second = observation.jobs[-2:]
+        unknown = CommandFact(command_for(first), first.job_id, 1, None, None, None, True)
+        observation = replace(observation, commands=(unknown,))
+        self.assertEqual(submit(selection_for(observation, second.job_id), observation).disposition, "FRESH_REQUEST")
+
+    def test_dependency_snapshot_is_closed_digest_bound_and_exactly_owned(self):
+        observation, _ = fixture()
+        fact = observation.dependencies[0]
+        for dependencies in ((fact, fact), (replace(fact, dependency_manifest_digest=digest("tampered")),),
+                             (replace(fact, job_id="JOB-FOREIGN"),)):
+            with self.assertRaises(DelegationContractError):
+                validate_observation(replace(observation, dependencies=dependencies), policy=POLICY)
+
+    def test_original_attempt_status_after_successor_started(self):
+        observation, selected = fixture()
+        prior = CommandFact(selected.command, selected.job_id, 1, "ATT-OLD", "FAILED", 1)
+        successor = CommandFact(selected.command[:-1] + "2", selected.job_id, 2, "ATT-NEW", "RUNNING", 2)
+        observation = change_job(observation, selected.job_id, status="RUNNING", attempt_count=2,
+                                 current_attempt_id=successor.attempt_id)
+        observation = replace(observation, commands=(prior, successor))
+        returned = submit(selected, observation)
+        self.assertEqual(returned.original_attempt_id, prior.attempt_id)
+        self.assertEqual(returned.attempt_status, "FAILED")
+        self.assertEqual(returned.fence_generation, 1)
 
 
 if __name__ == "__main__":
