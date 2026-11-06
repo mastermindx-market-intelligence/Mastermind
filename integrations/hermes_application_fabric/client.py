@@ -12,6 +12,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 from types import SimpleNamespace
 from typing import Callable
 
@@ -231,6 +232,16 @@ class HermesApplicationClient:
             raise HermesFabricError("hermes_fabric_host_selection_mismatch")
         # Freeze the caller payload before the external owner sees it.
         request = json.loads(json_bytes(kwargs, MAX_REQUEST_BYTES))
+        consumer_timeout = request.pop("timeout", None)
+        if consumer_timeout is not None:
+            # Hermes adds its SDK deadline after request-body construction.
+            # The existing owner already owns a bounded hard deadline. Accept
+            # only a consumer wait at least that long; never mutate its timeout
+            # in flight or silently ignore a tighter requested deadline.
+            if (type(consumer_timeout) not in (int, float)
+                    or not math.isfinite(consumer_timeout) or consumer_timeout <= 0
+                    or binding._owner._timeout > consumer_timeout):
+                raise HermesFabricError("hermes_fabric_owner_deadline_not_bound")
         request["model"] = binding.model
         request, structured = prepare_structured_request(request)
         owner_request = to_owner_request(request, binding.model)

@@ -165,6 +165,13 @@ class OwnerLoopbackTests(unittest.TestCase):
             self.invoke()
         self.assertEqual(len(self.calls), 1)
 
+    def test_native_sdk_deadline_cannot_be_tighter_than_bound_owner(self):
+        with self.assertRaises(HermesFabricError):
+            self.invoke(timeout=1)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.invoke(timeout=900).model, "model-1")
+        self.assertNotIn("timeout", self.calls[0]["payload"])
+
     def test_forced_tool_choice_cannot_be_answered_with_text(self):
         with self.assertRaises(HermesFabricError):
             self.invoke(tools=[{"type": "function", "function": {"name": "read", "parameters": {}}}],
