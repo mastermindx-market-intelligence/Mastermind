@@ -364,6 +364,7 @@ def test_waited_completion_preserves_actual_queue_order(tmp_path):
         turn = _turn(harness, "turn-ordered-wait")
         started = _begin(harness, launch, turn)
         state = harness.adapter._generations[turn.process_generation_id]
+        state.client.request("thread/turns/list", {"threadId": state.provider_session_id})
         state.client.drain_notifications()
         before = {"method": "item/completed", "params": {
             "threadId": state.provider_session_id,
