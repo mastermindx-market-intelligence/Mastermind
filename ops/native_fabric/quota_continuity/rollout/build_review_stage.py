@@ -182,6 +182,20 @@ GO_PARTICIPANT_OPERATOR_PREIMAGE = "f81b4f053a22ba973b06214f6d06ed2d66e3fc471c78
 
 
 
+# Protected process-custody and paid eligibility upgrades form one exact
+# source-bound cohort in CURRENT, never a mutation of the frozen 102 baseline.
+# These are SHA-256 members of the already-reviewed protected master closure.
+GO_PROTECTED_CUSTODY_PREIMAGES = {
+    "linux_process_identity.py": "e2cbe24d453116c09af8b25bb936a1e00c9e6999014bc5ea5276edb84b8dcca2",
+    "paid_host_qualification.py": "e4cb143b13324bd5ce4d96af5396054b3c63e1b82c831edae4516f37e495a1b0",
+    "paid_initializer.py": "d203b1363cdc6f926d9542a2ecfb2ec6b24dd1da46c3fd1f527caea232132749",
+}
+GO_PROTECTED_CUSTODY_DIGESTS = {
+    "linux_process_identity.py": "11a0771d7f8fb8c8288303b3d182100341413098c1ee31d12339330dd869e71e",
+    "paid_host_qualification.py": "2a52ba79e6cd38a42ecbd48919704d2c837c65d042707b37640df78f27b8d0c0",
+    "paid_initializer.py": "602893be1fa1ece43862ba889e92af8d8e879cb67f62f16840300b7f21ad2887",
+}
+
 # Approved successor to the exact #2060 native stage; retain its preimages
 # for historical installer fixtures and Go's original base normalization.
 BROKER_BUSY_STAGE_PREIMAGES = {
@@ -196,6 +210,18 @@ BROKER_BUSY_STAGE_DIGESTS = {
 }
 BROKER_BUSY_PICKER_PREIMAGE = "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892"
 BROKER_BUSY_QUOTA_PREIMAGE = "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303"
+BROKER_BUSY_PREIMAGES = {
+    **BROKER_BUSY_STAGE_PREIMAGES,
+    "lease_broker.py": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
+    "pick.py": BROKER_BUSY_PICKER_PREIMAGE,
+    "quota_circuit.py": BROKER_BUSY_QUOTA_PREIMAGE,
+}
+BROKER_BUSY_DIGESTS = {
+    **BROKER_BUSY_STAGE_DIGESTS,
+    "lease_broker.py": "06cf44ed3d0b4393c687c4df36e5a2c347a8ccdfd20788852f4d7b8dfd6fed50",
+    "pick.py": "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057",
+    "quota_circuit.py": "ba1f2582505a0350260d0bdc4a00f6374a2e1140bc4b6cead84368b606f9970e",
+}
 
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/current106 application compositions.
@@ -228,7 +254,16 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         for name in GO_PARTICIPANT_ADDITIONS:
             del normalized["ext/" + name]
         normalized["ext/fabric_operator_owner.py"] = GO_PARTICIPANT_OPERATOR_PREIMAGE
-    ubuntu4 = {name: manifest["ext/" + name] for name in GO_UBUNTU4_DIGESTS}
+    # Only the full published six-member busy epoch can be normalized. The
+    # original broker/selector and all pre-lease denial fences stay in force.
+    busy = {name: manifest["ext/" + name] for name in BROKER_BUSY_PREIMAGES}
+    if current_diagnostics and any(
+            busy[name] == digest for name, digest in BROKER_BUSY_DIGESTS.items()):
+        if busy != BROKER_BUSY_DIGESTS:
+            raise ValueError("native broker busy cohort differs")
+        normalized.update({"ext/" + name: digest
+                           for name, digest in BROKER_BUSY_STAGE_PREIMAGES.items()})
+    ubuntu4 = {name: normalized["ext/" + name] for name in GO_UBUNTU4_DIGESTS}
     if any(ubuntu4[name] == digest for name, digest in GO_UBUNTU4_DIGESTS.items()):
         if not current_diagnostics or ubuntu4 != GO_UBUNTU4_DIGESTS:
             raise ValueError("native Go Ubuntu4 cohort is not the exact protected source")
@@ -260,6 +295,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         historical["ext/" + name] = original
     if manifest["ext/pick.py"] not in {
             GO_BASE_PICKER_SHA256, BROKER_BUSY_PICKER_PREIMAGE,
+            BROKER_BUSY_DIGESTS["pick.py"],
             GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]}:
         raise ValueError("native Go base picker is not the exact composed source")
     historical["ext/pick.py"] = GO_BASE_PICKER_SHA256
@@ -270,18 +306,32 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     for name, original in GO_SELECTION_SUPPORT_PREIMAGES.items():
         if manifest["ext/" + name] not in {
                 original, GO_SELECTION_SUPPORT_DIGESTS[name],
-                BROKER_BUSY_QUOTA_PREIMAGE if name == "quota_circuit.py" else original}:
+                BROKER_BUSY_DIGESTS["quota_circuit.py"]
+                if name == "quota_circuit.py" else original}:
             raise ValueError("native Go selection support is not the exact composed source")
         historical["ext/" + name] = original
     if manifest["ext/provider_outcome.py"] not in {
             GO_BASE_PROVIDER_OUTCOME_SHA256, GO_PROTECTED_PROVIDER_OUTCOME_SHA256}:
         raise ValueError("native Go provider outcome is not the exact protected source")
     historical["ext/provider_outcome.py"] = GO_BASE_PROVIDER_OUTCOME_SHA256
-    for name, original in BROKER_BUSY_STAGE_PREIMAGES.items():
-        current = manifest.get("ext/" + name)
-        if current not in (original, BROKER_BUSY_STAGE_DIGESTS[name]):
-            raise ValueError("native broker busy stage source differs: " + name)
-        historical["ext/" + name] = original
+    if current_diagnostics:
+        for name, original in BROKER_BUSY_STAGE_PREIMAGES.items():
+            current = manifest.get("ext/" + name)
+            if current not in (original, BROKER_BUSY_STAGE_DIGESTS[name]):
+                raise ValueError("native broker busy stage source differs: " + name)
+            historical["ext/" + name] = original
+    # Preserve exact source hashes and deny partial/mixed custody receipts.
+    # The protected/current trio belongs to current diagnostic namespaces,
+    # never a newly relabelled historical102 closure.
+    custody = {name: historical["ext/" + name]
+               for name in GO_PROTECTED_CUSTODY_PREIMAGES}
+    if custody == GO_PROTECTED_CUSTODY_DIGESTS:
+        if not current_diagnostics:
+            raise ValueError("native Go custody cannot relabel historical namespace")
+        historical.update({"ext/" + name: digest
+                           for name, digest in GO_PROTECTED_CUSTODY_PREIMAGES.items()})
+    elif custody != GO_PROTECTED_CUSTODY_PREIMAGES:
+        raise ValueError("native Go protected custody cohort changed")
     if sha((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) != GO_BASE_MANIFEST_SHA256:
         raise ValueError("native Go base closure is not the reviewed protected composition")
 

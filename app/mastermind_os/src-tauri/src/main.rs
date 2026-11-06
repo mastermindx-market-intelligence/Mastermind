@@ -135,6 +135,7 @@ fn main() {
             auth::read_fabric_catalog,
             auth::read_fabric_status,
             auth::read_result,
+            auth::read_mission_result,
             auth::read_result_references,
             auth::read_current_window,
             auth::executive_auth_status,

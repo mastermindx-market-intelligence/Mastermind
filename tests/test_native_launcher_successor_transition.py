@@ -112,6 +112,14 @@ def source_owners(tmp_path_factory):
         # Restore only this disposable historical102 payload, not CURRENT.
         'ext/lease_broker.py':
             fixture.with_name('native-lease-broker-pre-fair-share-899ac3a9.py.txt'),
+        # Protected49c2 custody predecessors are immutable fixture data.
+        # The existing loop joins each complete payload to the frozen102 map.
+        'ext/linux_process_identity.py':
+            fixture.parent / 'native_historical_payloads/linux_process_identity.py.txt',
+        'ext/paid_host_qualification.py':
+            fixture.parent / 'native_historical_payloads/paid_host_qualification.py.txt',
+        'ext/paid_initializer.py':
+            fixture.parent / 'native_historical_payloads/paid_initializer.py.txt',
     }
     new_names = long_names | set(base_paths)
     # S9 also changes the CURRENT picker. Bind its authentic protected

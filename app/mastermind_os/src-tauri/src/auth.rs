@@ -889,6 +889,9 @@ impl ResultSelection {
 
 const RESULT_RESPONSE_CAP: usize = 16_384;
 const MISSION_V3_RESPONSE_CAP: usize = 2_000_000;
+const MISSION_RESULT_RESPONSE_CAP: usize = 2_000_000;
+const MISSION_RESULT_PATH: &str = "/workspace/mission-result/current";
+const MISSION_RESULT_SCHEMA: &str = "mastermind.workspace_mission_result.v1";
 const RESULT_MISSION_V3_PATH: &str = "/workspace/mission/v3/current";
 const RESULT_DETAIL_PATH: &str = "/workspace/result/current";
 const PLAN_DETAIL_PATH: &str = "/workspace/plan/current";
@@ -2206,6 +2209,64 @@ pub async fn read_result(app: AppHandle, selection: ResultSelection) -> Result<V
     }
     Ok(value)
 }
+fn mission_result_url(selection: &ResultSelection) -> Result<Url> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{MISSION_RESULT_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id)
+        .append_pair("job_id", &selection.job_id)
+        .append_pair("attempt_id", &selection.attempt_id)
+        .append_pair("result_envelope_digest", &selection.result_envelope_digest);
+    Ok(url)
+}
+
+fn typed_mission_result_unavailable(value: Value) -> Result<Value> {
+    let value = typed_unavailable(value, MISSION_RESULT_SCHEMA, false)?;
+    if !value.get("mission").is_some_and(Value::is_null)
+        || !value.get("role_result").is_some_and(Value::is_null)
+    {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+
+#[tauri::command]
+pub async fn read_mission_result(app: AppHandle, selection: ResultSelection) -> Result<Value> {
+    let url = mission_result_url(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state
+        .http
+        .get(url)
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send()
+        .await
+        .map_err(|_| "SOURCE_UNAVAILABLE")?;
+    // One acquisition and the received-byte cap apply to both nested documents.
+    // The existing typed host still owns exact association and nested Result limits.
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, MISSION_RESULT_RESPONSE_CAP)
+            .await
+            .and_then(typed_mission_result_unavailable)
+    } else {
+        bounded_json(response, MISSION_RESULT_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if !value.is_object()
+        || value.get("schema").and_then(Value::as_str) != Some(MISSION_RESULT_SCHEMA)
+    {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+
 const WINDOW_SCHEMA_V1: &str = "mastermind.workspace.window_read_candidate.v1";
 const WINDOW_SCHEMA_V2: &str = "mastermind.workspace.window_read_candidate.v2";
 fn allowed_window_schema(schema: &str) -> bool {
@@ -2990,6 +3051,55 @@ mod tests {
         let mut non_null = result;
         non_null["result"] = serde_json::json!({});
         assert!(typed_unavailable(non_null, RESULT_SCHEMA, true).is_err());
+    }
+
+    #[test]
+    fn mission_result_acquisition_uses_fixed_path_and_exact_selection() {
+        let mut selection = ResultSelection {
+            work_ref: "WS:AB".into(),
+            root_job_id: "JOB-1".into(),
+            job_id: "JOB-2".into(),
+            attempt_id: format!("ATT-{}", "a".repeat(32)),
+            result_envelope_digest: "b".repeat(64),
+        };
+        let url = mission_result_url(&selection).unwrap();
+        assert_eq!(url.origin(), Url::parse(ORIGIN).unwrap().origin());
+        assert_eq!(url.path(), "/workspace/mission-result/current");
+        assert!(url.fragment().is_none());
+        let pairs: std::collections::BTreeMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(pairs.len(), 5);
+        assert_eq!(pairs.get("work_ref"), Some(&selection.work_ref));
+        assert_eq!(pairs.get("root_job_id"), Some(&selection.root_job_id));
+        assert_eq!(pairs.get("job_id"), Some(&selection.job_id));
+        assert_eq!(pairs.get("attempt_id"), Some(&selection.attempt_id));
+        assert_eq!(pairs.get("result_envelope_digest"), Some(&selection.result_envelope_digest));
+        selection.job_id = "https://other.invalid".into();
+        assert!(mission_result_url(&selection).is_err());
+    }
+
+    #[test]
+    fn compound_unavailable_cannot_carry_a_mission_or_result() {
+        let unavailable = serde_json::json!({
+            "schema": MISSION_RESULT_SCHEMA,
+            "availability": "UNAVAILABLE",
+            "mission": null,
+            "role_result": null,
+        });
+        assert!(typed_mission_result_unavailable(unavailable.clone()).is_ok());
+        for name in ["mission", "role_result"] {
+            let mut non_null = unavailable.clone();
+            non_null[name] = serde_json::json!({});
+            assert!(typed_mission_result_unavailable(non_null).is_err());
+            let mut missing = unavailable.clone();
+            missing.as_object_mut().unwrap().remove(name);
+            assert!(typed_mission_result_unavailable(missing).is_err());
+        }
+        let mut wrong = unavailable.clone();
+        wrong["schema"] = RESULT_SCHEMA.into();
+        assert!(typed_mission_result_unavailable(wrong).is_err());
+        let mut available = unavailable;
+        available["availability"] = "AVAILABLE".into();
+        assert!(typed_mission_result_unavailable(available).is_err());
     }
 
     #[test]

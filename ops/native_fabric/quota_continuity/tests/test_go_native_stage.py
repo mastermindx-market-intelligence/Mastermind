@@ -115,6 +115,32 @@ def before_participant_cohort(manifest):
     return prior
 
 
+def before_busy_cohort(manifest):
+    """Build only the exact pre-busy six-member source namespace."""
+    prior = dict(manifest)
+    assert {name: prior["ext/" + name] for name in builder.BROKER_BUSY_PREIMAGES} == builder.BROKER_BUSY_DIGESTS
+    prior.update({"ext/" + name: digest
+                  for name, digest in builder.BROKER_BUSY_PREIMAGES.items()})
+    return prior
+
+
+def captured_dependencies(manifest):
+    return {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+
+
+def test_broker_busy_epoch_stages_as_one_closed_source_cohort(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    previous = before_busy_cohort(current)
+    builder.validate_go_base_manifest(current, captured_dependencies(current))
+    builder.validate_go_base_manifest(previous, captured_dependencies(previous))
+    for name in builder.BROKER_BUSY_DIGESTS:
+        mixed = dict(previous)
+        mixed["ext/" + name] = builder.BROKER_BUSY_DIGESTS[name]
+        with pytest.raises(ValueError, match="broker busy cohort"):
+            builder.validate_go_base_manifest(mixed, captured_dependencies(mixed))
+    assert current != previous
+
+
 def test_default_build_stays_exact_reviewed_106_and_go_adds_only_the_fixed_pair(builds):
     default_raw = (builds.default / "native-manifest.json").read_bytes()
     default = json.loads(default_raw)
@@ -123,8 +149,10 @@ def test_default_build_stays_exact_reviewed_106_and_go_adds_only_the_fixed_pair(
     captured = {name: g.digest((ROOT / "candidate" / name).read_bytes())
                 for name in builder.GO_APPLICATION_DEPENDENCIES}
     builder.validate_go_base_manifest(default, captured)
-    assert default["ext/pick.py"] == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]
+    assert default["ext/pick.py"] == builder.BROKER_BUSY_DIGESTS["pick.py"]
     historical = before_participant_cohort(default)
+    historical.update({"ext/" + name: digest
+                       for name, digest in builder.BROKER_BUSY_STAGE_PREIMAGES.items()})
     historical.update({"ext/" + name: value for name, value in builder.GO_BASE_DEPENDENCIES.items()})
     historical["ext/pick.py"] = builder.GO_BASE_PICKER_SHA256
     assert default["ext/remote_sub_exec.py"] == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]
@@ -132,8 +160,12 @@ def test_default_build_stays_exact_reviewed_106_and_go_adds_only_the_fixed_pair(
     historical.update({"ext/" + name: value for name, value in builder.GO_SELECTION_SUPPORT_PREIMAGES.items()})
     assert default["ext/provider_outcome.py"] == builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256
     historical["ext/provider_outcome.py"] = builder.GO_BASE_PROVIDER_OUTCOME_SHA256
+    before_busy = before_busy_cohort(default)
     for name, original in builder.GO_UBUNTU4_PREIMAGES.items():
-        assert default["ext/" + name] == builder.GO_UBUNTU4_DIGESTS[name]
+        assert before_busy["ext/" + name] == builder.GO_UBUNTU4_DIGESTS[name]
+        historical["ext/" + name] = original
+    for name, original in builder.GO_PROTECTED_CUSTODY_PREIMAGES.items():
+        assert default["ext/" + name] == builder.GO_PROTECTED_CUSTODY_DIGESTS[name]
         historical["ext/" + name] = original
     for name, original in builder.GO_COMPLETED_POLL_PREIMAGES.items():
         assert historical["ext/" + name] == builder.GO_COMPLETED_POLL_DIGESTS[name]
@@ -164,9 +196,9 @@ def test_default_build_stays_exact_reviewed_106_and_go_adds_only_the_fixed_pair(
 def test_exact_historical_picker_remains_a_valid_base_but_no_arbitrary_fourth_member(builds):
     manifest = json.loads((builds.default / "native-manifest.json").read_bytes())
     captured = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-    historical = dict(manifest)
+    historical = before_busy_cohort(manifest)
     historical["ext/pick.py"] = builder.GO_BASE_PICKER_SHA256
-    builder.validate_go_base_manifest(historical, captured)
+    builder.validate_go_base_manifest(historical, captured_dependencies(historical))
     for digest in (builder.GO_BASE_PROVIDER_OUTCOME_SHA256,
                    builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256):
         exact = dict(manifest)
@@ -225,7 +257,9 @@ def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path
 def test_exact_post_failure_cohort_and_prior_102_are_both_closed(builds):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-    prior = before_participant_cohort(current)
+    prior = before_participant_cohort(before_busy_cohort(current))
+    prior.update({"ext/" + name: digest
+                  for name, digest in builder.GO_PROTECTED_CUSTODY_PREIMAGES.items()})
     prior.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
     for name, original in builder.GO_COMPLETED_POLL_PREIMAGES.items():
         prior["ext/" + name] = original
@@ -234,7 +268,7 @@ def test_exact_post_failure_cohort_and_prior_102_are_both_closed(builds):
     for name in builder.GO_POST_FAILURE_ADDITIONS:
         del prior["ext/" + name]
     assert len(prior) == 102
-    builder.validate_go_base_manifest(prior, captured)
+    builder.validate_go_base_manifest(prior, captured_dependencies(prior))
     members = set(builder.GO_POST_FAILURE_PREIMAGES) | set(builder.GO_POST_FAILURE_ADDITIONS)
     for name in members:
         bad = dict(current)
@@ -284,7 +318,10 @@ def test_completed_poll_pair_is_closed_and_cannot_relabel_historical_102(builds)
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     builder.validate_go_base_manifest(current, captured)
-    # Isolate the original poll pair after reversing the whole Ubuntu4 cohort.
+    # Old Ubuntu4/poll sources must begin with the complete pre-busy
+    # predecessor, not a hybrid of new AUTO and historical wrappers.
+    current = before_busy_cohort(current)
+    captured = captured_dependencies(current)
     current.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
     pre_poll = dict(current)
     pre_poll.update({"ext/" + name: digest
@@ -310,17 +347,17 @@ def test_ubuntu4_runtime_cohort_preserves_prior_generation_and_rejects_mixtures(
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     original = dict(current)
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-    previous = dict(current)
+    previous = before_busy_cohort(current)
     previous.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
     builder.validate_go_base_manifest(current, captured)
-    builder.validate_go_base_manifest(previous, captured)
+    builder.validate_go_base_manifest(previous, captured_dependencies(previous))
     names = tuple(builder.GO_UBUNTU4_DIGESTS)
     for count in (1, 2):
         for selected in itertools.combinations(names, count):
             mixed = dict(previous)
             mixed.update({"ext/" + name: builder.GO_UBUNTU4_DIGESTS[name] for name in selected})
             with pytest.raises(ValueError, match="Ubuntu4 cohort"):
-                builder.validate_go_base_manifest(mixed, captured)
+                builder.validate_go_base_manifest(mixed, captured_dependencies(mixed))
     for name in names:
         corrupt = dict(current)
         corrupt["ext/" + name] = "f" * 64
@@ -330,7 +367,7 @@ def test_ubuntu4_runtime_cohort_preserves_prior_generation_and_rejects_mixtures(
     old_helper["ext/remote_sub_helpers.py"] = builder.GO_COMPLETED_POLL_PREIMAGES["remote_sub_helpers.py"]
     with pytest.raises(ValueError, match="completed-poll cohort"):
         builder.validate_go_base_manifest(old_helper, captured)
-    historical_namespace = before_participant_cohort(current)
+    historical_namespace = before_participant_cohort(before_busy_cohort(current))
     historical_namespace.update({"ext/" + name: digest
                                  for name, digest in builder.GO_POST_FAILURE_PREIMAGES.items()})
     for name in builder.GO_POST_FAILURE_ADDITIONS:
@@ -341,10 +378,38 @@ def test_ubuntu4_runtime_cohort_preserves_prior_generation_and_rejects_mixtures(
     assert current == original
 
 
+
+def test_protected_process_custody_is_one_exact_reversible_source_cohort(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    original = dict(current)
+    captured = {name: current["ext/" + name]
+                for name in builder.GO_APPLICATION_DEPENDENCIES}
+    before = dict(current)
+    before.update({"ext/" + name: digest
+                   for name, digest in builder.GO_PROTECTED_CUSTODY_PREIMAGES.items()})
+    # Both exact historical/source-current members are admitted, but a
+    # fabricated hybrid, missing version, or foreign source hash is not.
+    builder.validate_go_base_manifest(current, captured)
+    builder.validate_go_base_manifest(before, captured)
+    names = tuple(builder.GO_PROTECTED_CUSTODY_PREIMAGES)
+    for count in (1, 2):
+        for changed in itertools.combinations(names, count):
+            mixed = dict(before)
+            mixed.update({"ext/" + name: builder.GO_PROTECTED_CUSTODY_DIGESTS[name]
+                          for name in changed})
+            with pytest.raises(ValueError, match="custody cohort"):
+                builder.validate_go_base_manifest(mixed, captured)
+    for name in names:
+        forged = dict(current)
+        forged["ext/" + name] = "f" * 64
+        with pytest.raises(ValueError, match="custody cohort"):
+            builder.validate_go_base_manifest(forged, captured)
+    assert current == original
+
 def test_sparse_config_executor_successor_is_exact_and_does_not_mutate_manifest(builds):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-    previous = dict(current)
+    previous = before_busy_cohort(current)
     previous.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
     for cohort in (previous, current):
         for digest in (builder.GO_BASE_EXECUTOR_SHA256,
@@ -352,7 +417,7 @@ def test_sparse_config_executor_successor_is_exact_and_does_not_mutate_manifest(
             exact = dict(cohort)
             exact["ext/remote_sub_exec.py"] = digest
             before = dict(exact)
-            builder.validate_go_base_manifest(exact, captured)
+            builder.validate_go_base_manifest(exact, captured_dependencies(exact))
             assert exact == before
     wrong = dict(current)
     wrong["ext/remote_sub_exec.py"] = "f" * 64

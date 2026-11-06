@@ -2137,7 +2137,8 @@ def _fabric_profile_setting(args, roots: dict, prior: dict | None) -> bool:
         if "fabricOnly" in config:
             if (config["fabricOnly"] is not True or config.get("gitPublish") is not False
                     or config.get("paperDesign") is not False
-                    or "repositoryWorkspaces" in config or "commissionPublication" in config):
+                    or "repositoryWorkspaces" in config or "commissionPublication" in config
+                    or "fleetStatus" in config):
                 raise SystemExit("invalid retained Fabric-only profile")
             previous = True
         if requested and not previous:

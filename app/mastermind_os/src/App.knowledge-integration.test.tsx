@@ -30,6 +30,10 @@ async function fixture(holdResult = false, indexForDiscovery = false, currentChi
   Object.assign(result.selection,{work_ref:selected.workRef,root_job_id:selected.rootJobId});
   result.result.selection.root_job_id = selected.rootJobId;
   result.source_observation.selection = {...result.selection};
+  // This synthetic pair must describe one retained owner observation.
+  result.source_observation.control_room = structuredClone(paired.mission.source.owner_observation.control_room);
+  result.source_observation.runtime = structuredClone(paired.mission.result_refs.generation);
+  result.result.generation = structuredClone(paired.mission.result_refs.generation);
   const exact = {...selected,jobId:result.selection.job_id,attemptId:result.selection.attempt_id,
     resultEnvelopeDigest:result.selection.result_envelope_digest};
   expect(decodeResultEnvelope(result,exact)).not.toBeNull();
@@ -76,12 +80,19 @@ async function fixture(holdResult = false, indexForDiscovery = false, currentChi
     if(command==="read_current_window")return structuredClone(paired.window);
     if(command==="read_result_references")return structuredClone(list);
     if(command==="read_result")return holdResult?pending:structuredClone(result);
+    if(command==="read_mission_result")return {
+      schema:"mastermind.workspace_mission_result.v1",selection:structuredClone(result.selection),
+      availability:"AVAILABLE",reason_codes:[],
+      mission:structuredClone(indexForDiscovery ? indexedMission : paired.mission),
+      role_result:holdResult ? await pending : structuredClone(result),
+    };
     if(command==="read_resource_capacity")return structuredClone(capacity);
     throw new Error("Unexpected fixture command");
   });
   const client = await createNativeClient(invoke as never,async (_event,listener)=>{notify=listener;return()=>{};});
   const host = bindMissionHost(client), read = vi.spyOn(host,"readResult");
-  return {host,read,invoke,notify,settle,exact,result,room,list,indexedMission};
+  const readPair = vi.spyOn(host,"readMissionResult");
+  return {host,read,readPair,invoke,notify,settle,exact,result,room,list,indexedMission};
 }
 async function start(f:Awaited<ReturnType<typeof fixture>>) {
   window.MastermindMissionHost=f.host;render(<App/>);
@@ -234,8 +245,10 @@ async function selectActualReturnedWork(f:Awaited<ReturnType<typeof fixture>>) {
   // The Office is auth/selection-keyed. Reacquire its current mounted region
   // after the awaited interaction instead of retaining a replaceable DOM node.
   await user.click(await within(screen.getByRole("region",{name:"Inside this mission"})).findByRole("button",{name:"Inspect indexed result"}));
-  await waitFor(()=>expect(f.read).toHaveBeenCalledTimes(1));
-  await screen.findByText("Result detail");
+  await waitFor(()=>expect(f.readPair).toHaveBeenCalledExactlyOnceWith({...f.exact,signal:expect.any(AbortSignal)}));
+  expect(f.read).not.toHaveBeenCalled();
+  // The title is also present while pending; wait for the retained document.
+  await screen.findByText("Role-result digest");
   await user.click(screen.getByRole("button",{name:"Fleet & Capacity workspace"}));
 }
 
@@ -270,10 +283,12 @@ it("cannot inspect through a detached Office worker control after host invalidat
   await screen.findByRole("button",{name:new RegExp("^"+f.exact.jobId+" ·")});
   expect(oldRegion.isConnected).toBe(false);fireEvent.click(oldWorker);
   expect(f.read).not.toHaveBeenCalled();
+  expect(f.readPair).not.toHaveBeenCalled();
   const current=screen.getByRole("region",{name:"Inside this mission"});
   expect(current).not.toBe(oldRegion);
   await user.click(within(current).getByRole("button",{name:new RegExp("^"+f.exact.jobId+" ·")}));
   await user.click(await within(current).findByRole("button",{name:"Inspect indexed result"}));
-  await waitFor(()=>expect(f.read).toHaveBeenCalledTimes(1));
+  await waitFor(()=>expect(f.readPair).toHaveBeenCalledExactlyOnceWith({...f.exact,signal:expect.any(AbortSignal)}));
+  expect(f.read).not.toHaveBeenCalled();
   expect(f.invoke.mock.calls.some(([name])=>/submit|prepare|send/.test(name))).toBe(false);
 });
