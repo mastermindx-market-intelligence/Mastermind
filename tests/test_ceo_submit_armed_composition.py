@@ -1592,11 +1592,14 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # static literal freezes the combined candidate, not independent review or
     # release authority, and grants no native SEND or installed-release
     # approval.
+    # PR #2151: the installed-only retirement config validator changes this
+    # full-file pin. The exact installed entry AST and all ten mutation
+    # refusals remain unchanged; no additional call is admitted.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '724ff3567465bef3fe220c0d2cce77263556bba0ee4102b0cec67fb087a763cd'):
+            '99b67ad9bd8984fd179c213dff7d310ecefdd43b0675ebcf70344973edbc86cd'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
