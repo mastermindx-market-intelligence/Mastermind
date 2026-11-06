@@ -10,6 +10,7 @@ import asyncio
 from control_plane.workspace_owned_task import await_owned
 import copy
 import dataclasses
+import inspect
 import math
 from http import HTTPStatus
 import re
@@ -500,7 +501,8 @@ class WorkspaceReadService:
                  project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
                  canonical_project_data=None, project_discovery=None,
                  control_room_presenter=None,
-                 control_room_actions=None, project_admission_permissions=None, instruction_admission_permissions=None):
+                 control_room_actions=None, project_admission_permissions=None, instruction_admission_permissions=None,
+                 byok_roles_reader=None):
         from control_plane.workspace_project_permission_binding import ProjectAdmissionPermissions
         if project_admission_permissions is not None:
             if type(project_admission_permissions) is not ProjectAdmissionPermissions:
@@ -529,6 +531,12 @@ class WorkspaceReadService:
             if type(control_room_actions) is not ExistingControlRoomActions:
                 raise ValueError("exact existing Control Room action owner required")
         self._control_room_actions = control_room_actions
+        # Installed composition only. No host/path/credential can arrive in an HTTP frame.
+        if byok_roles_reader is not None and not (
+                inspect.iscoroutinefunction(byok_roles_reader)
+                or inspect.iscoroutinefunction(getattr(byok_roles_reader, "__call__", None))):
+            raise ValueError("BYOK source must be a trusted asynchronous reader")
+        self._byok_roles_reader = byok_roles_reader
         self._acquire = acquire
         self._compose = compose
         self._bounded_runtime = bounded_runtime
@@ -2042,7 +2050,51 @@ class WorkspaceReadService:
             return error("access_denied", 403)
         return result
 
+    async def _handle_byok_frame(self, frame):
+        from common import workspace_byok_read_contract as wire
+        try:
+            checked = copy.deepcopy(wire.validate_frame(frame))
+        except (TypeError, ValueError):
+            return error("invalid_input", HTTPStatus.BAD_REQUEST)
+        principal = checked["principal"]
+        authorizer, reader, runtime = self.authorize, self._byok_roles_reader, self.runtime
+        try:
+            if authorizer(principal) is not True:
+                raise ValueError("access_denied")
+            stamp = permission_stamp(authorizer, principal)
+            if stamp is None or self.authorize is not authorizer:
+                raise ValueError("access_denied")
+        except Exception:
+            return error("access_denied", HTTPStatus.FORBIDDEN)
+        if self._byok_roles_reader is not reader or self.runtime is not runtime:
+            body = wire.unavailable("SOURCE_CHANGED")
+        elif reader is None:
+            body = wire.unavailable("SOURCE_UNBOUND")
+        else:
+            try:
+                if not (inspect.iscoroutinefunction(reader)
+                        or inspect.iscoroutinefunction(getattr(reader, "__call__", None))):
+                    raise ValueError("asynchronous BYOK source required")
+                # One finite read of the role pair, no thread/worker/CLI or retry.
+                body = wire.validate_body(await asyncio.wait_for(reader(), timeout=5.0))
+            except Exception:
+                body = wire.unavailable()
+        try:
+            if (self.authorize is not authorizer or authorizer(principal) is not True
+                    or permission_stamp(authorizer, principal) != stamp):
+                return error("access_denied", HTTPStatus.FORBIDDEN)
+        except Exception:
+            return error("access_denied", HTTPStatus.FORBIDDEN)
+        if self._byok_roles_reader is not reader or self.runtime is not runtime:
+            body = wire.unavailable("SOURCE_CHANGED")
+        elif not wire.current(body, now_ms=int(time.time() * 1000)):
+            body = wire.unavailable("SOURCE_STALE")
+        return {"ok": True, "result": body}
+
     async def handle_frame(self, frame, *, action_host_ready=None):
+        from common import workspace_byok_read_contract as byok_wire
+        if type(frame) is dict and frame.get("schema") == byok_wire.FRAME_SCHEMA:
+            return await self._handle_byok_frame(frame)
         from common.workspace_project_archive_contract import FRAME_SCHEMA as ARCHIVE_FRAME_SCHEMA, PAGE_FRAME_SCHEMA as ARCHIVE_PAGE_FRAME_SCHEMA
         if type(frame) is dict and frame.get("schema") in {ARCHIVE_FRAME_SCHEMA, ARCHIVE_PAGE_FRAME_SCHEMA}:
             from control_plane.workspace_project_archive_read import ProjectArchiveReadAdapter
@@ -2352,7 +2404,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
                                canonical_project_data_factory=None, canonical_project_read_bindings_factory=None,
                                cross_plane_context=None, cross_plane_enrollment=None,
-                               project_admission_permissions=None, instruction_admission_permissions=None):
+                               project_admission_permissions=None, instruction_admission_permissions=None, byok_roles_reader=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -2423,6 +2475,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
         return WorkspaceReadService(cache=cache, runtime=runtime, authorize=authorize,
                                     armed=armed, runtime_identity=runtime_identity,
                                     control_room_presenter=presenter, control_room_actions=actions,
+                                    byok_roles_reader=byok_roles_reader,
                                     bounded_runtime=bounded_runtime,
                                     product_acceptance_basis_reader=product_acceptance_basis_reader,
                                     product_acceptance_owner_target=product_acceptance_owner_target,

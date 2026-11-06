@@ -19,9 +19,18 @@ from tests.test_executive_coo_hierarchy_service import _plan_body, _complete
 from tests.test_executive_coo_hierarchy_cycle import finish_result
 
 
-def composed(tmp_path, monkeypatch, *, mode="DURABLE"):
+def composed(tmp_path, monkeypatch, *, mode="DURABLE", paid=False):
     factory, principal, args, armed, _ = fixture(tmp_path,monkeypatch,mode=mode)
     service = factory.service
+    if paid:
+        from tests.test_foreground_paid_placements import paid_fixture
+        paid_path = tmp_path / "paid-source-fixture"
+        paid_path.mkdir()
+        _, source, placements, _, _ = paid_fixture(paid_path, monkeypatch, runtime=service.runtime)
+        service.config = dataclasses.replace(service.config, coo_paid_work_placements=placements)
+        service._paid_worker_binding_source = source
+        monkeypatch.setattr(service, "_paid_subject_review_registration",
+            ExecutiveControlService._paid_subject_review_registration.__get__(service))
     # Restore actual installed-binding qualification and workspace methods.
     service._coo_execution_binding = service._load_coo_execution_binding()
     monkeypatch.setattr(service,"_require_project_execution_binding",

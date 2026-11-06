@@ -1,4 +1,5 @@
 mod auth;
+mod native_session_send;
 mod project_planning;
 mod project_execution;
 mod fresh_conversation;
@@ -105,6 +106,7 @@ fn main() {
             auth::sign_in,
             auth::sign_out,
             auth::read_programs,
+            auth::read_byok_roles,
             auth::read_work,
             auth::read_mission,
             auth::read_mission_v3,
@@ -154,6 +156,7 @@ fn main() {
             auth::executive_project_execution,
             auth::executive_fresh_conversation,
             auth::executive_session_context,
+            auth::executive_session_send,
             auth::executive_project_history_context,
             auth::executive_project_conversations_read,
             auth::executive_session_reply,

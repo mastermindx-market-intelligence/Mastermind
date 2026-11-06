@@ -5742,15 +5742,23 @@ class ExecutiveControlService:
             from common import workspace_autonomy_read_contract as autonomy_wire
             from common import workspace_resource_capacity_contract as capacity_wire
             from common import workspace_host_observation_contract as host_observation_wire
+            from common import workspace_byok_read_contract as byok_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
                     ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
-                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA}:
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == instructions_wire.FRAME_SCHEMA:
+                if parsed.get("schema") == byok_wire.FRAME_SCHEMA:
+                    ceiling = byok_wire.MAX_RESPONSE_BYTES
+                    try:
+                        byok_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == instructions_wire.FRAME_SCHEMA:
                     ceiling = instructions_wire.MAX_RESPONSE_BYTES
                     try: instructions_wire.validate_frame(parsed)
                     except (TypeError, ValueError):
@@ -5963,6 +5971,29 @@ class ExecutiveControlService:
                             result = await owner.read_workspace_retained_activity(parsed)
                         except Exception:
                             result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
+                elif parsed.get("schema") == byok_wire.FRAME_SCHEMA:
+                    try:
+                        from control_plane.workspace_read_service import WorkspaceReadService
+                        runtime = self._require_runtime()
+                        def byok_host_ready():
+                            return (self._ceo_ingress_app_binding is app_binding
+                                    and app_binding.workspace_read_provider_factory is factory
+                                    and callable(factory) and self._require_runtime() is runtime
+                                    and not self._closing and self._ceo_ingress_ready
+                                    and self._service_state in {"READY", "AWAITING_CANARY"})
+                        if not byok_host_ready():
+                            raise ValueError("installed BYOK read owner retired")
+                        provider = factory(runtime)
+                        if (type(provider) is not WorkspaceReadService or provider.runtime is not runtime
+                                or not byok_host_ready()):
+                            raise ValueError("installed BYOK read owner unavailable")
+                        result = await provider.handle_frame(parsed)
+                        if not byok_host_ready():
+                            raise ValueError("installed BYOK read owner changed")
+                        if result.get("ok") is True:
+                            result = {"ok": True, "result": byok_wire.validate_body(result["result"])}
+                    except Exception:
+                        result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 elif factory is None:
                     result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 else:
@@ -6664,7 +6695,8 @@ class ExecutiveControlService:
                     provider=str(binding["provider"]),
                     model=str(binding["model"]),
                     effort=str(binding["effort"]),
-                    cost_class=str(binding["cost_class"]),
+                    # Root mixed-pool ceiling is not this native quota's identity.
+                    cost_class=str(router.model_aliases[self.config.coo_model_alias].cost_class),
                     capabilities=coo_capabilities,
                     metadata=coo_metadata,
                 )
@@ -6721,7 +6753,7 @@ class ExecutiveControlService:
                     "provider": binding["provider"],
                     "model": binding["model"],
                     "effort": binding["effort"],
-                    "cost_class": binding["cost_class"],
+                    "cost_class": router.model_aliases[self.config.coo_model_alias].cost_class,
                     "capabilities": coo_capabilities,
                     "metadata": coo_metadata,
                 },
@@ -7510,6 +7542,25 @@ class ExecutiveControlService:
     def _coo_binding_for_root(self, root: Job) -> dict[str, Any]:
         from ops.executive_os.acceptance_maintenance import MaintenanceError, frozen_binding
         raw = self._require_current_coo_binding()
+        from control_plane import project_execution_admission as project_source
+        material = project_source.read_source(self._require_runtime(), root)
+        if material is not None:
+            original = json.loads(project_source.read_original_input(self._require_supervisor(), material))
+            effective = self._require_project_execution_binding(
+                original["request"]["execution_profile"])
+            previous = original["previous_run"]
+            if type(previous) is dict and "workspace_revision" in previous:
+                canonical_parent = project_source.completed_run(self._require_supervisor(),
+                    previous["witness"]["root_job_id"], material["work_ref"],
+                    material["principal_scope_sha256"])
+                if any(previous[key] != value for key, value in canonical_parent.items()):
+                    raise StateConflict("project previous result changed")
+                effective = dict(effective, base_sha=previous["workspace_revision"]["commit"])
+            from common.project_execution_private_contract import digest
+            if (effective != original["execution_binding"]
+                    or digest(effective) != material["execution_binding_sha256"]):
+                raise StateConflict("project execution original binding changed")
+            return effective
         from control_plane.executive_runtime import CHILD_WORKSPACE_POLICY_KEY
         if CHILD_WORKSPACE_POLICY_KEY not in root.constraints:
             # Existing roots keep their original workspace assignment forever.
@@ -7812,18 +7863,64 @@ class ExecutiveControlService:
                 raise StateConflict("another dispatch owns workspace preparation")
             workspace = Path(root.worktree)
             binding = self._coo_binding_for_root(root)
+            from control_plane import project_execution_admission as project_source
+            original = json.loads(project_source.read_original_input(self._require_supervisor(), material))
+            previous = original["previous_run"]
+            source = self.config.proof_source_repository
+            if type(previous) is dict and "workspace_revision" in previous:
+                revision = project_source.completed_workspace_revision(self._require_supervisor(), previous)
+                if revision != previous["workspace_revision"] or revision["commit"] != binding["base_sha"]:
+                    raise StateConflict("project previous workspace changed before allocation")
+                source = Path(revision["workspace_path"])
+            self._require_project_execution_root(root)
             receipt = await self._run_physical(
                 prepare_credentialless_clone,
-                self.config.proof_source_repository, self.config.proof_workspace_root,
+                source, self.config.proof_workspace_root,
                 job_id=workspace.name, base_sha=binding["base_sha"], branch=root.branch,
                 shared_gid=self.config.proof_shared_gid,
                 shared_write_paths=tuple(root.allowed_write_paths))
             self._require_project_execution_root(root)
+            if type(previous) is dict and "workspace_revision" in previous:
+                if project_source.completed_workspace_revision(self._require_supervisor(), previous) != previous["workspace_revision"]:
+                    raise StateConflict("project previous workspace changed during allocation")
             if (receipt.workspace_path != str(workspace) or receipt.branch != root.branch
                     or receipt.base_sha != binding["base_sha"] or receipt.remote_count != 0):
                 raise StateConflict("project workspace receipt differs")
             self._workspace_observation(workspace, require_fresh=False, expected_branch=root.branch)
             self._require_initial_coo_workspace(root)
+
+    async def _prepare_project_cycle_workspace(self, job: Job, root: Job) -> None:
+        """One canonical terminal-to-next-launch handoff under the existing locks."""
+        from control_plane import project_execution_admission as source
+        from control_plane.executive_workspace import prepare_project_workspace_handoff
+        material = source.read_source(self._require_runtime(), root)
+        if material is None or job.worktree != root.worktree:
+            return
+        runtime = self._require_runtime()
+        supervisor = self._require_supervisor()
+        source.input_for_job(supervisor, job)
+        terminals = source.workspace_terminals(supervisor, root)
+        if not terminals:
+            return  # Initial allocator handoff; no terminal effect to transform.
+        def current():
+            self._require_project_execution_root(root)
+            if source.workspace_terminals(supervisor, root) != terminals:
+                raise StateConflict("project workspace terminal source changed")
+            # Claims and physical starts share the enclosing dispatch/workspace
+            # locks. Query the actual Attempt owner as well: a task's completion
+            # alone never proves that a worker relinquished this workspace.
+            for attempt in runtime.attempts.list_attempts():
+                if attempt.status in _COO_ACTIVE_ATTEMPT_STATUSES:
+                    owner = runtime.jobs.get_job(attempt.job_id)
+                    if owner is not None and owner.worktree == root.worktree:
+                        raise StateConflict("active attempt owns the project workspace")
+            if self._native_operator_dispatch is not None:
+                raise StateConflict("native operator owns workspace custody")
+        current()
+        await self._run_physical(prepare_project_workspace_handoff, root.worktree,
+            branch=root.branch, root_job_id=root.job_id, base_sha=root.constraints["base_sha"],
+            terminals=terminals, shared_gid=self.config.proof_shared_gid, current=current)
+        current()
 
     def _maintenance_workspace_pending(self, root: Job) -> bool:
         """Only the exact PASS-qualified untouched root may materialize its path."""
@@ -8053,9 +8150,24 @@ class ExecutiveControlService:
                     from control_plane.executive_runtime import CHILD_WORKSPACE_POLICY, CHILD_WORKSPACE_POLICY_KEY
                     if (job.orchestration_role in {"work", "review", "repair"}
                             and root.constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY):
+                        from control_plane import project_execution_admission as project_source
+                        child_source = self.config.proof_source_repository
+                        if project_source.read_source(runtime, root) is not None:
+                            self._require_project_execution_root(root)
+                            # A research turn following code retains the exact
+                            # derived base in its own allocator-owned root clone.
+                            # Keep readonly/v1 intact and clone only that proven
+                            # root, never a caller-selected repository or SHA.
+                            if project_source.workspace_base_for_job(self._require_supervisor(), root) != root.constraints["base_sha"]:
+                                raise StateConflict("readonly project child source changed")
+                            child_source = Path(root.worktree)
                         await self._run_physical(runtime.jobs.prepare_coo_child_workspace, job.job_id,
-                            source_repository=self.config.proof_source_repository,
-                            shared_gid=self.config.proof_shared_gid)
+                            source_repository=child_source, shared_gid=self.config.proof_shared_gid)
+                        if child_source != self.config.proof_source_repository:
+                            self._require_project_execution_root(root)
+                            if project_source.workspace_base_for_job(self._require_supervisor(), root) != root.constraints["base_sha"]:
+                                raise StateConflict("readonly project child source changed during allocation")
+                    await self._prepare_project_cycle_workspace(job, root)
                     self._require_coo_workspace(job)
                 if runtime.operator_harness.is_interactive_job(job.job_id):
                     raise StateConflict(
@@ -8349,11 +8461,26 @@ class ExecutiveControlService:
         qualification = self._require_attended_qualification()
         return "DURABLE" if not self.config.coo_foreground_only and not self.config.coo_attended_work_placements and qualification is None else "ATTENDED"
 
-    def _require_project_execution_binding(self):
-        """Qualify the existing sealed worker without promoting native-return."""
+    def _require_project_execution_binding(self, execution_profile="research_only"):
+        """Derive a fresh profile from the same installed, host-admitted workers."""
         qualification = self._require_attended_qualification()
         current = self._require_coo_admission_binding()
         binding = dict(current, operator_harness_armed=False)
+        if execution_profile not in {"research_only", "bounded_code_change"}:
+            raise StateConflict("project execution profile is unavailable")
+        if execution_profile == "bounded_code_change":
+            # _load_coo_execution_binding already requires the exact installed
+            # native alias to be sealed, write-capable and extension-free. Paid
+            # leaves retain their separate READ ceiling at plan/claim admission.
+            # Select the existing shared-workspace route only for this explicit
+            # code profile; never reinterpret readonly/v1 or alter an old root.
+            from control_plane.executive_runtime import CHILD_WORKSPACE_POLICY_KEY
+            router = ModelRouter.load()
+            alias = router.model_aliases[self.config.coo_model_alias]
+            profile = router.capability_registry.resolve(alias.execution_profile_id)
+            if (not profile.write_capable or not {"code", "tests"}.issubset(set(alias.capabilities))):
+                raise StateConflict("project code capability is unavailable")
+            binding.pop(CHILD_WORKSPACE_POLICY_KEY, None)
         if self._closing or self._service_state != "READY" or self.config.coo_autonomy_armed is not True:
             raise StateConflict("project execution is unavailable")
         self._require_current_autonomy()
@@ -8371,10 +8498,9 @@ class ExecutiveControlService:
         material = read_source(self._require_runtime(), root)
         if material is None:
             return None
-        binding = self._require_project_execution_binding()
+        binding = self._coo_binding_for_root(root)
         if (root.constraints.get("operator_harness_armed") is not False
-                or digest(binding) != material["execution_binding_sha256"]
-                or self._coo_binding_for_root(root) != binding):
+                or digest(binding) != material["execution_binding_sha256"]):
             raise StateConflict("project execution original binding changed")
         owner = self._foreground_cycle_owner
         # Admission freezes the continuation mode. A later host setting cannot

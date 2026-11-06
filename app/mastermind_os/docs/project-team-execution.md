@@ -105,6 +105,37 @@ project, not a child of the previous completed root.
 Failed, lost, cancelled, active or unvalidated roots do not authorize a normal
 follow-up. Their existing recovery and reconciliation controls remain required.
 
+## Code artifact continuity
+
+Research and code profiles have separate source-derived execution bindings. The
+preview offers only profiles supported by the current host composition; the
+submitted operation includes the binding for the selected profile. Read-only
+paid and attended placements retain their existing authority and input limits.
+The planner receives those actual placement limits before proposing work.
+
+A code worker returns a sealed artifact containing the declared changes and
+validation evidence. The existing workspace allocator adopts those exact bytes
+as a service-authored local Git snapshot only after canonical terminal-result
+verification and worker quiescence. The original root's constraints and input
+remain immutable. A subsequent child receives the verified snapshot as its base;
+it does not lose the preceding worker's files or treat model-supplied commit text
+as workspace authority.
+
+Snapshot adoption binds the original workspace identity, parent and resulting
+Git trees, terminal receipt, allowed paths and file digests. Recovery reconciles
+the original snapshot and index, including a crash after the Git reference was
+advanced but before the index was replaced. Unrelated staged changes, additional
+files, links, changed modes and mismatched source or terminal evidence remain
+refusals. No active worker's workspace is reset or repurposed.
+
+A completed code run's follow-up privately retains that verified workspace
+revision alongside the existing public parent witness. The incumbent allocator
+creates the next run from the exact snapshot. A preview only reads this evidence;
+it does not snapshot files, reopen a sealed workspace or create work. Missing or
+changed previous workspace evidence refuses new admission. Once a new root has
+been committed, a later failure is recovered through that original operation.
+These local continuity snapshots do not publish code or merge a repository PR.
+
 ## Fixed transport surfaces
 
 | Purpose | Fixed operation/path |
@@ -118,8 +149,16 @@ follow-up. Their existing recovery and reconciliation controls remain required.
 The first three use the existing dual-resource App transport and private socket
 lifetime. The two history routes reuse the current Executive conversation READ
 transport and policy pairing. Native and web adapters share the closed schemas.
-The public edge accepts these exact paths while preserving its complete prior
-route profile; it adds no wildcard or authentication bypass.
+The public edge accepts these exact paths while preserving complete prior
+route profiles. The composed native Session Send POST and protected BYOK metadata
+GET remain separate fixed routes with their existing authorization. No wildcard
+route or authentication bypass is added.
+
+The current App also retains the parent's Activity and result-reading behavior:
+recorded child activity is attached to the exact selected root, summaries precede
+source details, and Back returns to the retained-result list. Native Session Send
+continues through its own current private Executive owner and fixed four-field
+body. Project follow-ups use the completed-result witness described above.
 
 ## Qualification evidence and limits
 
@@ -128,6 +167,16 @@ original-input retention; revocation rollback; post-commit uncertainty; nested
 teams; workspace recovery; actual canonical completed results; successive and
 competing follow-ups; original-principal history; late auth/source replacement;
 native/web selectors; and IndexedDB reopen.
+
+The code continuity suite drives the actual factory, service, Runtime, native
+collector and allocator through two completed code runs, including the nominal
+mixed-supervisor composition. It checks that code survives into aggregation and
+a follow-up, a read-only follow-up retains its child policy, unsafe previous
+workspaces refuse new admission, stale native plans refuse child creation, and an
+active Attempt blocks workspace transformation. Allocator cases separately cover
+ref/index crash recovery, source withdrawal and file/index tampering. Its bounded
+history exceeds the incumbent maximum of 16 descendants; each follow-up starts
+from its own admitted immutable base.
 
 Physical workers and provider returns in the automated source tests are inert.
 The retained frontend history fixture is produced by the actual test Runtime

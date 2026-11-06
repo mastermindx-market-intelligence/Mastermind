@@ -75,7 +75,9 @@ it("preserves the user's follow-up but refuses a submit after the previous-resul
 
 it("cannot replace another unsent project goal or handoff when replying to a historical run",async()=>{
   const f=await setup();
-  fireEvent.click(screen.getByRole("button",{name:"Start work"}));await screen.findByLabelText("Goal");
+  await waitFor(()=>expect((screen.getByRole("button",{name:"Start work"}) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button",{name:"Start work"}));
+  await waitFor(()=>expect(screen.queryByLabelText("Goal"),document.body.textContent ?? "").not.toBeNull());
   fireEvent.change(screen.getByLabelText("Goal"),{target:{value:"My existing unsent work."}});
   fireEvent.change(screen.getByLabelText("Handoff (optional)"),{target:{value:"Preserve this handoff too."}});
   await readCompletedRun();fireEvent.click(screen.getByRole("button",{name:"Reply to project team"}));
@@ -104,8 +106,13 @@ it("requalifies the same completed-run witness without replacing the edited foll
 it("recovers a browser-reopened project execution using only its original real IndexedDB pointer",async()=>{
   const database=new IDBFactory();
   const first=await setup({history:"empty",mode:"lost_reply"},database);
-  fireEvent.click(screen.getByRole("button",{name:"Start work"}));await screen.findByLabelText("Goal");
-  fireEvent.click(screen.getByRole("button",{name:"Launch"}));await screen.findByRole("button",{name:"Check status"});
+  await waitFor(()=>expect((screen.getByRole("button",{name:"Start work"}) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button",{name:"Start work"}));
+  await waitFor(()=>expect(screen.queryByLabelText("Goal"),document.body.textContent ?? "").not.toBeNull());
+  await waitFor(()=>expect((screen.getByRole("button",{name:"Launch"}) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button",{name:"Launch"}));
+  await waitFor(()=>expect(first.requests.filter(x=>x.operation==="submit")).toHaveLength(1));
+  await screen.findByRole("button",{name:"Check status"});
   const original=await first.store.read(first.scope);
   expect(original).toEqual({kind:"launch",targetKey:first.workRef,operationKey:expect.stringMatching(/^mmos-project-execute-[0-9a-f]{40}$/)});
   first.view.unmount();
@@ -123,7 +130,9 @@ it("recovers a browser-reopened project execution using only its original real I
 
 it("keeps a pre-execution refusal editable without retaining an unknown original in IndexedDB",async()=>{
   const f=await setup({history:"empty",mode:"refused"});
-  fireEvent.click(screen.getByRole("button",{name:"Start work"}));await screen.findByLabelText("Goal");
+  await waitFor(()=>expect((screen.getByRole("button",{name:"Start work"}) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole("button",{name:"Start work"}));
+  await waitFor(()=>expect(screen.queryByLabelText("Goal"),document.body.textContent ?? "").not.toBeNull());
   fireEvent.change(screen.getByLabelText("Handoff (optional)"),{target:{value:"Retain this useful context after refusal."}});
   fireEvent.click(screen.getByRole("button",{name:"Launch"}));
   expect((await screen.findByRole("alert")).textContent).toBe("REFUSED");

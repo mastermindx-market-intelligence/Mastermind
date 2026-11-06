@@ -12,7 +12,7 @@ import sys
 from ops.executive_os.capacity_source_contract import PYTHON_BINARY
 
 PINNED = {
- 'agentos_project_knowledge_recipe_entry.py':'8fe367f4b089641bfc26a007000532799f4d1d18000605a2564e135f23f97251',
+ 'agentos_project_knowledge_recipe_entry.py':'80b954460662c4eac7c87c2d752cdcba5504e260084b68f9ee6cbfc3c82c6534',
  'agentos_project_knowledge_entry.py':'9b3662838ee93d764ea9740ecc66a5644b041c6e6eef003939f544f8a2d4a037',
 }
 

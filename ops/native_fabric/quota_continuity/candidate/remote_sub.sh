@@ -879,9 +879,9 @@ print(alias, cores, max_active, load_gate, min_free_mem, thermal_limit,
 }
 load_host_registry || exit "$RC"
 if [ -n "$NEW_MACRO_COMMIT" ]; then
-  # This initial implementation covers the four Linux fleet hosts only.
+  # Registered Linux fleet hosts; enrollment and donor custody remain separate.
   case "$HOST_ARG" in
-    ubuntu0|ubuntu1|ubuntu2|ubuntu3) ;;
+    ubuntu0|ubuntu1|ubuntu2|ubuntu3|ubuntu4) ;;
     *) log "FABRIC_NEW_MACRO_LINUX_HOST_REFUSED before_lease=1"; exit 78 ;;
   esac
 fi

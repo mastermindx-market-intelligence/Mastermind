@@ -1,3 +1,4 @@
+import {RetainedResultContent} from './activity/RetainedResultContent';
 import {PlanAdoptionWorkflow} from "./planning/PlanAdoptionWorkflow";
 import { appCopy } from "./app-copy";
 import { ProductAcceptancePanel } from "./product-acceptance/ProductAcceptancePanel";
@@ -34,10 +35,13 @@ import privateEntryArt from "./auth-entry/private-entry.jpg";
 import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
 import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
+import { useByokRoleObservation } from "./meta-ceo/use-byok-role-observation";
+import { byokRoleView } from "./meta-ceo/byok-role-view";
 import { qualifyExecutiveOfficeSession, SESSION_TARGET_REF } from "./meta-ceo/session-context";
 import { Projects } from "./projects/Projects";
 import { ProjectPlanningJourney } from "./projects/ProjectPlanningJourney";
 import { useProjectJourneyState } from "./projects/useProjectJourneyState";
+import {createSessionExecutiveOwnerGetter} from "./auth-recovery/session-executive-owner";
 import { useNativeProjectGoalRecovery } from "./auth-recovery/useNativeProjectGoalRecovery";
 import { NativeDraftRecoveryNotice } from "./auth-recovery/NativeDraftRecoveryNotice";
 import { readProjectJourneyLocation } from "./projects/project-journey-location";
@@ -66,6 +70,8 @@ import { ProjectWorkDetail, ProjectEvidence, ProjectJournal } from "./workJourne
 import { ConversationWindow } from "./conversations/ConversationWindow";
 import { HistoricalOriginalAnswers } from "./conversations/HistoricalOriginalAnswers";
 import { RetainedResults } from "./RetainedResults";
+import { RetainedActivityInspector, type RetainedActivityReader } from "./planning/RetainedActivityInspector";
+import { validActivitySelection } from "./planning/retained-activity";
 import { RetainedRootChoice } from "./RetainedRootChoice";
 import { normalizeResultReferencesSelection } from "./result-references";
 import { parseDirectConsumeTarget } from "./direct-native-result";
@@ -579,30 +585,31 @@ type ResultState =
     }
   | { kind: "UNAVAILABLE"; selection: ResultSelection; reason: string };
 
-function ResultCard({ state }: { state: ResultState }) {
+function ResultCard({ state, locale = "en" }: { state: ResultState; locale?: "en" | "zh-CN" }) {
+  const t = (en: string, zh: string) => locale === "zh-CN" ? zh : en;
   if (state.kind === "IDLE") return null;
   const title =
     state.selection.jobId + " / " + state.selection.attemptId.slice(0, 8) + "…";
   if (state.kind === "PENDING") {
     return (
-      <section className="card">
+      <section className="card" lang={locale}>
         <div className="section-title">
-          <h2>Result detail</h2>
-          <State value="SOURCE_READ_PENDING" />
+          <h2>{t("Result detail", "结果详情")}</h2>
+
         </div>
-        <p className="muted">Reading the exact selected tuple…</p>
+        <p className="muted">{t("Reading the selected result…", "正在读取所选结果…")}</p>
         <code>{title}</code>
       </section>
     );
   }
   if (state.kind === "UNAVAILABLE") {
     return (
-      <section className="card">
+      <section className="card" lang={locale}>
         <div className="section-title">
-          <h2>Result detail</h2>
-          <State value="UNAVAILABLE" />
+          <h2>{t("Result detail", "结果详情")}</h2>
+
         </div>
-        <p className="muted">{state.reason}</p>
+        <p className="muted">{t("This result could not be read.", "无法读取此结果。")}</p><details className="reason-details"><summary>{t("Source details", "来源详情")}</summary><code>{state.reason}</code></details>
         <code>{title}</code>
       </section>
     );
@@ -611,19 +618,17 @@ function ResultCard({ state }: { state: ResultState }) {
   const result = doc.result;
   if (doc.availability === "UNAVAILABLE" || !result) {
     return (
-      <section className="card">
+      <section className="card" lang={locale}>
         <div className="section-title">
-          <h2>Result detail</h2>
-          <State value={doc.availability} />
+          <h2>{t("Result detail", "结果详情")}</h2>
+
         </div>
         <p className="muted">
-          The bounded result read returned a typed unavailability response:{" "}
-          <code>{doc.reason_codes[0] ?? "SOURCE_UNAVAILABLE"}</code>. This is
-          not a producer acceptance and adds no result history.
+          {t("This result is unavailable. Reading it does not change acceptance or release.", "此结果不可用。读取结果不会改变验收或发布状态。") }
         </p>
         <code>{title}</code>
         <details className="reason-details">
-          <summary>Technical details</summary>
+          <summary>{t("Source details", "来源详情")}</summary>
           <code>
             {(doc.reason_codes[0] ?? "SOURCE_UNAVAILABLE") +
               " · selection " +
@@ -650,62 +655,62 @@ function ResultCard({ state }: { state: ResultState }) {
         label(review.verdict) +
         " · latest revision UNPROVEN";
   return (
-    <section className="card">
+    <section className="card" lang={locale}>
       <div className="section-title">
-        <h2>Result detail</h2>
-        <State value={doc.availability} />
+        <h2>{t("Result detail", "结果详情")}</h2>
+
       </div>
-      {doc.availability !== "AVAILABLE" ? (
-        <p className="muted">
-          <code>{doc.reason_codes.join(" · ")}</code>
-        </p>
-      ) : null}
-      <dl>
-        <dt>Role</dt>
+      {doc.availability !== "AVAILABLE" ? <p className="muted">{t("Only part of this result was supplied.", "此结果只提供了部分内容。")}</p> : null}
+      <p className="muted">{t("This is a recorded return. Review, acceptance and release remain separate.", "这是已保留的工作结果。审阅、验收和发布状态分别确认。")}</p>
+      {result.content === null ? <Empty>{t("The source did not supply the result text. Counts and source references remain available below.", "来源未提供结果正文。下方仍保留统计与来源引用。")}</Empty> :
+        <RetainedResultContent locale={locale} summary={result.content.summary} roleResult={result.content.role_result} nextActions={result.content.next_actions}/>}
+      <details className="reason-details"><summary>{t("Source and review details", "来源与审阅详情")}</summary>
+      <dl><dt>{t("Result source", "结果来源")}</dt><dd><State value={doc.availability}/><code>{doc.reason_codes.join(" · ")}</code></dd>
+        <dt>{t("Role", "角色")}</dt>
         <dd>{label(result.role)}</dd>
-        <dt>Execution</dt>
+        <dt>{t("Execution", "执行")}</dt>
         <dd>{label(result.execution_status)}</dd>
-        <dt>Acceptance</dt>
+        <dt>{t("Acceptance", "验收")}</dt>
         <dd>
           <State value={result.acceptance} />
         </dd>
-        <dt>Review</dt>
+        <dt>{t("Review", "审阅")}</dt>
         <dd>{review === null ? "Not a review role" : verdictLabel}</dd>
-        <dt>Findings</dt>
+        <dt>{t("Findings", "发现")}</dt>
         <dd>
           {counts === null
             ? "No findings tracked for this role"
             : `Total ${counts.total} · blocking ${counts.blocking} · warning ${counts.warning} · info ${counts.info}`}
         </dd>
-        <dt>Next actions</dt>
+        <dt>{t("Next actions", "下一步")}</dt>
         <dd>
           {result.counts.next_actions === 0
             ? "None reported"
             : `${result.counts.next_actions} item(s)`}
         </dd>
-        <dt>Envelope digest</dt>
+        <dt>{t("Envelope digest", "结果信封摘要")}</dt>
         <dd>
           <code>{result.selection.result_envelope_digest}</code>
         </dd>
         {review ? (
           <>
-            <dt>Reviewed job and attempt</dt>
+            <dt>{t("Reviewed job and attempt", "审阅的任务与尝试")}</dt>
             <dd>
               <code>
                 {review.reviewed_job_id} · {review.reviewed_attempt_id}
               </code>
             </dd>
-            <dt>Reviewed role-result digest</dt>
+            <dt>{t("Reviewed role-result digest", "审阅的角色结果摘要")}</dt>
             <dd>
               <code>{review.reviewed_result_digest}</code>
             </dd>
           </>
         ) : null}
-        <dt>Role-result digest</dt>
+        <dt>{t("Role-result digest", "角色结果摘要")}</dt>
         <dd>
           <code>{result.role_result_digest}</code>
         </dd>
-        <dt>Selection</dt>
+        <dt>{t("Selection", "所选记录")}</dt>
         <dd>
           <code>
             {result.selection.root_job_id +
@@ -715,39 +720,14 @@ function ResultCard({ state }: { state: ResultState }) {
               result.selection.attempt_id}
           </code>
         </dd>
-        <dt>Omitted</dt>
+        <dt>{t("Omitted", "省略内容")}</dt>
         <dd>
           {result.omitted.length === 0
             ? "Whole content shown for this role."
             : result.omitted.map((x) => label(x)).join(" · ")}
         </dd>
       </dl>
-      {result.content === null ? (
-        <Empty>
-          Content omitted by owner. Counts and digests remain, but the full role
-          result body was not delivered within the bounded response. A full
-          result link is not provided.
-        </Empty>
-      ) : (
-        <article className="result-content">
-          <h3>Structured role result</h3>
-          <pre className="visible-text">
-            {JSON.stringify(result.content.role_result, null, 2)}
-          </pre>
-          <h3>Summary</h3>
-          <pre className="visible-text">{result.content.summary}</pre>
-          {result.content.next_actions.length > 0 ? (
-            <>
-              <h3>Next actions</h3>
-              <ul className="artifact-list">
-                {result.content.next_actions.map((x, i) => (
-                  <li key={`na-${i}`}>{x}</li>
-                ))}
-              </ul>
-            </>
-          ) : null}
-        </article>
-      )}
+      </details>
     </section>
   );
 }
@@ -919,82 +899,43 @@ function Mission({ d }: { d: MissionDocument }) {
     </>
   );
 }
-function Activity({ d }: { d: MissionDocument }) {
-  return (
-    <>
-      <section className="card activity-summary">
-        <div className="section-title">
-          <div>
-            <h2>Activity</h2>
-            <p className="muted">
-              The same admitted Mission document, organized by current work
-              posture. Opening this view performs no extra read and starts no
-              work.
-            </p>
-          </div>
-          <State value={d.execution.state} />
-        </div>
-        <div className="activity-facts">
-          <div>
-            <small>EXECUTION</small>
-            <State value={d.execution.state} />
-          </div>
-          <div>
-            <small>REVIEW</small>
-            <State value={d.review.verdict} />
-          </div>
-          <div>
-            <small>TRANSPORT</small>
-            <State value={d.transport.dispatch_state} />
-          </div>
-          <div>
-            <small>ACCEPTANCE</small>
-            <State value={d.acceptance.state} />
-          </div>
-          <div>
-            <small>POSTURE</small>
-            <State value={d.posture.value} />
-          </div>
-        </div>
-      </section>
-      <section className="card">
-        <div className="section-title">
-          <div>
-            <h2>Live work</h2>
-            <p className="muted">
-              Canonical child facts from this Mission snapshot. Missing joins
-              remain missing; a row is never promoted to running from UI state.
-            </p>
-          </div>
-          <State value={d.children.state} />
-        </div>
-        {d.children.items.length ? (
-          <ul className="items activity-items">
-            {d.children.items.map((item, index) => (
-              <li key={item.job_id ?? `unidentified-activity-${index}`}>
-                <code>{display(item.job_id, "Unidentified child")}</code>
-                <State value={item.status} />
-                <small>
-                  {display(item.orchestration_role)} · attempt{" "}
-                  {item.latest_attempt?.status ?? "not established"}
-                </small>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <Empty>
-            No bounded child rows are available. This is not evidence of zero
-            work.
-          </Empty>
-        )}
-        <p className="muted">
-          {d.children.coverage === "INCOMPLETE"
-            ? "Coverage is incomplete; known rows are not the complete queue."
-            : "The owner reported complete child coverage for this observation."}
-        </p>
-      </section>
-    </>
-  );
+function Activity({ d, selection, readActivity, sourceGeneration, canRead, locale = "en" }: {
+  d: MissionDocument;
+  selection?: {workRef: string; rootJobId: string} | null;
+  readActivity?: RetainedActivityReader;
+  sourceGeneration?: () => number;
+  canRead?: () => boolean;
+  locale?: "en" | "zh-CN";
+}) {
+  const exact = selection?.workRef === d.program.work_ref &&
+    selection?.rootJobId === d.mission.root_job_id && d.mission.root_job_ambiguous === false;
+  const t = (en: string, zh: string) => locale === "zh-CN" ? zh : en;
+  const status = (value: string | null | undefined) => ({RUNNING:t("Running", "运行中"),COMPLETED:t("Completed", "已完成"),QUEUED:t("Queued", "排队中"),PENDING:t("Pending", "待处理"),FAILED:t("Failed", "失败"),CANCELLED:t("Cancelled", "已取消"),CHECKPOINTED:t("Checkpoint saved", "检查点已保存"),RATE_LIMITED:t("Rate limited", "受到速率限制"),LOST:t("Lost", "已失联"),CANCEL_REQUESTED:t("Cancellation requested", "已请求取消"),CLAIMED:t("Claimed", "已认领")}[value ?? ""] ?? t("Status not established", "状态尚未确认"));
+  const role = (value: string | null | undefined) => ({plan:t("Planning", "规划"),work:t("Work", "执行工作"),review:t("Review", "审阅"),repair:t("Repair", "修复"),aggregation:t("Coordination", "协调")}[value ?? ""] ?? t("Work item", "工作项"));
+  return <section className="card mm-project-activity" lang={locale}>
+    <div className="section-title"><div><h2>{t("Recorded work", "工作记录")}</h2>
+      <p className="muted">{t("Inspect recorded activity for an item. These records are not a live stream.", "查看工作项的已记录活动。这些记录不是实时信息流。")}</p>
+    </div></div>
+    {d.children.items.length ? <ul className="items activity-items">{d.children.items.map((item,index)=><li key={item.job_id ?? `unidentified-activity-${index}`}>
+      <b>{role(item.orchestration_role)}</b><span>{status(item.status)}</span>
+      <small><code>{display(item.job_id, t("Unidentified item", "未标识工作项"))}</code> · {t("Attempt", "尝试")}: {status(item.latest_attempt?.status)}</small>
+                {exact && index < 8 && validActivitySelection({work_ref: d.program.work_ref,
+                  root_job_id: d.mission.root_job_id, job_id: item.job_id, attempt_id: item.current_attempt_id}) &&
+                  <RetainedActivityInspector selection={{work_ref: d.program.work_ref,
+                    root_job_id: d.mission.root_job_id!, job_id: item.job_id,
+                    attempt_id: item.current_attempt_id!}} read={readActivity}
+                    sourceGeneration={sourceGeneration} canRead={canRead} locale={locale} />}
+    </li>)}</ul> : <Empty>{t("No work records were supplied. This does not establish that there is no work.", "尚未提供工作记录，这不表示没有工作。")}</Empty>}
+    <p className="muted">{d.children.coverage === "INCOMPLETE" ? t("Only part of the work is shown; this is not the full queue.", "此处只显示部分工作，并非完整队列。") : t("All child records reported for this observation are shown.", "已显示此次观测中报告的全部子任务记录。")}</p>
+    <details className="reason-details"><summary>{t("Work status details", "工作状态详情")}</summary>
+      <dl><dt>{t("Execution", "执行")}</dt><dd><State value={d.execution.state}/></dd>
+      <dt>{t("Review", "审阅")}</dt><dd><State value={d.review.verdict}/></dd>
+      <dt>{t("Transport", "传输")}</dt><dd><State value={d.transport.dispatch_state}/></dd>
+      <dt>{t("Acceptance", "验收")}</dt><dd><State value={d.acceptance.state}/></dd>
+      <dt>{t("Work posture", "工作状态")}</dt><dd><State value={d.posture.value}/></dd>
+      <dt>{t("Child source", "子任务来源")}</dt><dd><State value={d.children.state}/></dd></dl>
+    </details>
+  </section>;
 }
 
 function Connections({ d }: { d: MissionDocument }) {
@@ -1167,23 +1108,25 @@ function ProjectTabs({
   active,
   onChange,
   tablistRef,
+  locale = "en",
 }: {
   active: ProjectTab;
+  locale?: "en" | "zh-CN";
   onChange: (tab: ProjectTab) => void;
   tablistRef?: React.Ref<HTMLDivElement>;
 }) {
   return (
-    <nav className="card" aria-label="Project sections">
-      <div ref={tablistRef} className="segmented" role="tablist" aria-label="Project workspace">
+    <nav className="card" aria-label={locale === "zh-CN" ? "项目分区" : "Project sections"}>
+      <div ref={tablistRef} className="segmented" role="tablist" aria-label={locale === "zh-CN" ? "项目工作区" : "Project workspace"}>
         {projectTabs.map((tab) => (
           <button
-            key={tab}
+            key={locale === "zh-CN" ? {Conversation:"对话",Overview:"概览",Plan:"规划",Work:"工作",Evidence:"证据",Journal:"日志",More:"更多"}[tab] : tab}
             type="button"
             role="tab"
             aria-selected={active === tab}
             onClick={() => onChange(tab)}
           >
-            {tab}
+            {locale === "zh-CN" ? {Conversation:"对话",Overview:"概览",Plan:"规划",Work:"工作",Evidence:"证据",Journal:"日志",More:"更多"}[tab] : tab}
           </button>
         ))}
       </div>
@@ -1911,18 +1854,24 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     previousLiveComposerScope.current = liveComposerScope;
   }, [signedIn, liveComposerScope]);
   // The session owner context and host-projected target stay fenced on the
-  // live signed-in state; the binding itself is read once per render above.
-  const sessionOwner =
-    sessionBinding && signedIn ? readSessionOwnerContext(sessionBinding) : null;
+  // current resource owner; the binding itself is read once per render above.
+  const sessionExecutiveOwner=useMemo(()=>createSessionExecutiveOwnerGetter({host:freshHost??null,native,
+    authRevision,currentAuthRevision:freshAuthRevision}),[freshHost,freshHostGeneration,native,authRevision,sessionBinding,sessionBinding?.port.context]);
+  const sessionOwner = native?sessionExecutiveOwner():sessionBinding&&signedIn?readSessionOwnerContext(sessionBinding):null;
   const sessionTargetKey = sessionOwner && sessionBinding
     ? sessionBinding.port.currentTargetRef()
     : null;
   // Read-only exact-session association from the existing Executive owner.
   // Unknown/legacy/DSH/Grok native sessions stay UNBOUND, not guessed.
   const officeSession = qualifyExecutiveOfficeSession(
-    signedIn, selection, sessionBinding,
+    native?!!sessionOwner:signedIn, selection, sessionBinding,
   );
   const office = useOfficeProjection(authRevision, selection, officeSession);
+  const byokRoles = useByokRoleObservation({
+    active: active === "Meta-CEO",
+    acquisition: signedIn && authState?.acquisition === true,
+    authRevision,
+  });
   // The Office draft is part of the unsent-text signal. It is read after the
   // session-qualified projection exists, never before.
   hasUnsentUserText.current = Boolean(freshDraft.hasUnsentDraft() || freshTurnDraft.hasUnsentDraft() || hasFreshAttendedOriginal() || projectJourney.hasUnsentDraft() || office.draft.text ||
@@ -1935,25 +1884,28 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     index.programs.some(card => card.workRef === selection.workRef && card.rootState === "RESOLVED" &&
       card.rootJobId === selection.rootJobId && card.rootCandidates.length === 1 &&
       card.rootCandidates[0] === selection.rootJobId);
+  const officeSessionPresentation=active==='Meta-CEO'&&officeSession.sessionRef!==null&&
+    officeSession.sessionRef===sessionTargetKey&&office.projection.mission.source.state==='CURRENT';
+  const nativeSessionPresentation=native&&!signedIn&&!!sessionOwner&&conversationNavigation.view==='detail';
   const answerView = useQualifiedOriginalAnswer();
   // React may abandon an interrupted render. Only the committed layout
   // publishes a current identity to the private reply acceptance fence.
   useLayoutEffect(() => {
-    answerView.setCurrent(sessionBinding && sessionOwner && signedIn ? {
+    answerView.setCurrent(sessionBinding && sessionOwner && (native||signedIn) ? {
       binding: sessionBinding,
       principalScope: sessionOwner.principalScope,
       generation: sessionOwner.generation,
       selectionSeq: selectionSeq.current,
       authRevision,
-      active: active === "Conversations" || projectConversationActive,
+      active: active === "Conversations" || projectConversationActive || officeSessionPresentation || nativeSessionPresentation,
     } : null);
-  }, [active, projectConversationActive, signedIn, sessionBinding, sessionOwner?.principalScope,
+  }, [active, projectConversationActive,officeSessionPresentation,nativeSessionPresentation, signedIn, sessionBinding, sessionOwner?.principalScope,
     sessionOwner?.generation, authRevision, selection?.workRef, selection?.rootJobId]);
   const ownsSession = (binding: MountedExecutiveSessionBinding, ctx: { principalScope: string; generation: string }, sequence: number) => {
     const liveBinding = completeExecutiveSessionBinding(window.MastermindMissionHost?.sessionCommandBinding);
     const liveContext = liveBinding ? readSessionOwnerContext(liveBinding) : null;
     return liveBinding === binding && selectionSeq.current === sequence &&
-      window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
+      (native?!!sessionExecutiveOwner():window.MastermindMissionHost?.auth?.getState().status === "signed_in") &&
       liveContext?.principalScope === ctx.principalScope && liveContext.generation === ctx.generation;
   };
   const makeSessionController = (
@@ -2197,8 +2149,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation,
     selection?.workRef, selection?.rootJobId]);
   useEffect(() => {
-    if (active !== "Conversations" && !projectConversationActive) answerView.leavePresentation();
-  }, [active, projectConversationActive]);
+    if (active !== "Conversations" && !projectConversationActive && !officeSessionPresentation && !nativeSessionPresentation) answerView.leavePresentation();
+  }, [active, projectConversationActive,officeSessionPresentation,nativeSessionPresentation]);
 
   useEffect(() => () => {
     commandSlot.current?.controller.invalidate();
@@ -3332,11 +3284,18 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       window.MastermindMissionHost?.sessionCommandBinding,
     );
     const liveAuth = window.MastermindMissionHost?.auth?.getState();
-    const ctx = binding ? readSessionOwnerContext(binding) : null;
+    const ctx = native?sessionExecutiveOwner():binding?readSessionOwnerContext(binding):null;
     const liveTarget = binding ? binding.port.currentTargetRef() : null;
-    if (!binding || liveAuth?.status !== "signed_in" || !ctx || !liveTarget) {
+    if (!binding || (!native&&liveAuth?.status !== "signed_in") || !ctx || !liveTarget) {
       onComplete({ status: "refused" });
       return;
+    }
+    // Native caller binds the user's rendered selected-session frame, not
+    // merely whichever valid E target happens to be current at click time.
+    if(native&&(binding!==sessionBinding||ctx.principalScope!==sessionOwner?.principalScope||
+        ctx.generation!==sessionOwner?.generation||liveTarget!==sessionTargetKey||
+        selectionSeq.current!==commandSelectionRevision)){
+      onComplete({status:"refused"});return;
     }
     if (sessionPending.current) {
       // One session dispatch at a time: the newer callback is refused exactly
@@ -3399,9 +3358,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       window.MastermindMissionHost?.sessionCommandBinding,
     );
     const liveAuth = window.MastermindMissionHost?.auth?.getState();
-    const ctx = binding ? readSessionOwnerContext(binding) : null;
+    const ctx = native?sessionExecutiveOwner():binding?readSessionOwnerContext(binding):null;
     const slot = sessionSlot.current;
-    if (!binding || liveAuth?.status !== "signed_in" || !ctx || !slot) return;
+    if (!binding || (!native&&liveAuth?.status !== "signed_in") || !ctx || !slot) return;
     if (
       slot.generation !== ctx.generation ||
       slot.principalScope !== ctx.principalScope ||
@@ -3995,11 +3954,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     </section>
   );
   const sessionLive =
-    !!sessionBinding && signedIn && !!sessionOwner && !!sessionTargetKey;
+    !!sessionBinding && (native||signedIn) && !!sessionOwner && !!sessionTargetKey;
   // A qualified original READ is scoped to the current selected-session
   // owner, even if the old target is now unavailable for NEW sends.
   const presentedSessionAnswer = answerView.visible(
-    sessionBinding && sessionOwner && signedIn ? {
+    sessionBinding && sessionOwner && (native||signedIn) ? {
       binding: sessionBinding,
       principalScope: sessionOwner.principalScope,
       generation: sessionOwner.generation,
@@ -4483,6 +4442,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           auth?.status === "signed_in" && Boolean(auth.acquisition);
       },
       generation: host?.invalidationGeneration ? () => host.invalidationGeneration!() : undefined,
+      activity: host?.readRetainedActivity ? (request: Parameters<NonNullable<MissionHost["readRetainedActivity"]>>[0]) => host.readRetainedActivity!(request) : undefined,
       plan: host?.readProjectPlan ? (request: Parameters<NonNullable<MissionHost["readProjectPlan"]>>[0]) => host.readProjectPlan!(request) : undefined,
       journal: host?.readProjectJournal ? ({workRef, signal}: {workRef: string; signal: AbortSignal}) => host.readProjectJournal!({work_ref: workRef, signal}) : undefined,
       archive: host?.readProjectArchive ? (request: Parameters<NonNullable<MissionHost["readProjectArchive"]>>[0]) => host.readProjectArchive!(request) : undefined,
@@ -4793,7 +4753,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       readReferences={retainedResultHost.readResultReferences}
       readResult={retainedResultHost.readResult}
       renderResult={(selected, document) =>
-        <ResultCard state={{ kind: "READY", selection: selected, document }} />}
+        <ResultCard locale={locale} state={{ kind: "READY", selection: selected, document }} />}
     /> : null;
   const retainedResultsPanel = selection && !directSelected &&
     retainedResultHost?.readResultReferences && retainedResultHost.readResult &&
@@ -4809,7 +4769,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         readReferences={retainedResultHost.readResultReferences}
         readResult={retainedResultHost.readResult}
         renderResult={(selected, document) => (
-          <ResultCard state={{ kind: "READY", selection: selected, document }} />
+          <ResultCard locale={locale} state={{ kind: "READY", selection: selected, document }} />
         )}
       />
     ) : null;
@@ -4891,11 +4851,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const sessionEntryContext = sessionBinding?.port.context;
   const sessionEntryGeneration = sessionEntryHost?.invalidationGeneration;
   const sessionEntrySequence = selectionSeq.current;
-  const openSessionRequests = sessionBinding && sessionOwner && signedIn ? () => {
+  const openSessionRequests = sessionBinding && sessionOwner && (native||signedIn) ? () => {
     try {
       if (!sessionEntryHost || window.MastermindMissionHost !== sessionEntryHost ||
           sessionEntryHost.auth !== sessionEntryAuth || sessionEntryAuth?.getState !== sessionEntryAuthRead ||
-          !sessionEntryAuthRead || sessionEntryAuthRead.call(sessionEntryAuth).status !== "signed_in" ||
+          !sessionEntryAuthRead || (!native&&sessionEntryAuthRead.call(sessionEntryAuth).status !== "signed_in") ||
           sessionEntryHost.sessionCommandBinding !== sessionBinding || sessionBinding.port.context !== sessionEntryContext ||
           sessionEntryHost.invalidationGeneration !== sessionEntryGeneration ||
           (sessionEntryGeneration?.call(sessionEntryHost) ?? null) !== freshHostGeneration ||
@@ -4941,7 +4901,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <ConversationWindow
           headingLevel={active === "Conversations" ? 1 : 2}
           locale={locale}
-          continuation={active === "Projects" ? undefined : sessionContinuationPanel}
+          continuation={active === "Projects" && !(native&&!signedIn) ? undefined : sessionContinuationPanel}
           historicalAnswers={<HistoricalOriginalAnswers
             binding={sessionBinding}
             selection={selection}
@@ -5005,6 +4965,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       }}>{locale === "zh-CN" ? "返回原项目设置" : "Return to original project setup"}</button> : null}
       <button type="button" onClick={projectJourney.discardRetainedGoal}>{locale === "zh-CN" ? "丢弃项目目标" : "Discard project goal"}</button>
     </section> : null;
+  const nativeSessionReturn=native&&!signedIn&&sessionOwner?<>
+    {conversationNavigation.view==='detail'?<>
+      <button type="button" onClick={conversationNavigation.backToList}>{locale==='zh-CN'?'返回对话':'Back to conversations'}</button>
+      {currentConversationPanel}
+    </>:openSessionRequests?<button type="button" onClick={()=>openSessionRequests()}>{locale==='zh-CN'?'查看会话请求':'Open session requests'}</button>:null}
+  </>:null;
   const retainedFreshMessage = freshDraft.retainedDraft &&
     (!freshDraft.retainedDraft.passivelyHeld || passiveExpiryHold.current) ?
     <section className="card" aria-label={locale === "zh-CN" ? "保留的第一条消息" : "Retained first message"}>
@@ -5066,6 +5032,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           key={JSON.stringify([authRevision, selection, officeSession.sessionRef, officeSession.bindingGeneration])}
           locale={locale}
           projection={office.projection}
+          byokObservation={byokRoleView(byokRoles)}
+          canRefreshByok={byokRoles.canRefresh}
+          onRefreshByok={byokRoles.refresh}
           programmeDirection={{selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
             read: projectReaders.plan, sourceGeneration: projectReaders.generation, canRead: projectReaders.canRead}}
           draft={office.draft}
@@ -5075,7 +5044,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             officeSession.sessionRef !== null &&
             officeSession.sessionRef === sessionTargetKey &&
             office.projection.mission.source.state === "CURRENT"
-              ? sessionContinuationPanel
+              ? currentConversationPanel
               : null
           }
           onStartNewWork={canLaunch && commandView ? startOfficeLaunch : undefined}
@@ -5185,7 +5154,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               projectConversationActive ? selection?.rootJobId : null, sessionTargetKey])}
             title={currentProjectCards[0].title || projectWorkRef} goal={objective}
             startWorkControl={<ProjectStartWork inspection={launchInspection} locale={locale}
-              disabled={!signedIn} onStart={startProjectLaunch}/>}
+              disabled={!signedIn} operationHold={currentReopened
+                ? currentReopened.reason === "READING" ? "checking" : "pending"
+                : pendingCommand.current?.kind === "launch" || heldKind === "launch" ? "pending" : null}
+              onStart={startProjectLaunch}/>}
             launchPanel={launchHandoff?.kind === "project" && launchHandoff.workstreamRef === projectWorkRef
               ? commandPanel : undefined}
             conversationPanel={<>
@@ -5247,7 +5219,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                   canRead={Boolean(projectReaders.generation) && projectReaders.canRead()}
                   sourceGeneration={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"} locale={locale}/>
                 <details className="reason-details"><summary>{locale === "zh-CN" ? "更多工作详情" : "More work details"}</summary>
-                  <ProjectTabs active="Conversation" onChange={changeProjectTab}/>
+                  <ProjectTabs locale={locale} active="Conversation" onChange={changeProjectTab}/>
                 </details>
               </> : null}
             </>}/>}/>
@@ -5283,7 +5255,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               </div>
             </div>
           </section>
-          {!directSelected ? <ProjectTabs tablistRef={legacyProjectTabs} active={projectTab ?? "Overview"} onChange={changeProjectTab} /> : null}
+          {!directSelected ? <ProjectTabs locale={locale} tablistRef={legacyProjectTabs} active={projectTab ?? "Overview"} onChange={changeProjectTab} /> : null}
           {retainedResultsPanel}
           {directSelected ? directResultPanel : !d ? (
             <section className="card empty-panel">
@@ -5309,7 +5281,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             <>
               <Mission d={d} />
               {resultRefs}
-              <ResultCard state={resultState} />
+              <ResultCard locale={locale} state={resultState} />
             </>
           ) : projectTab === "Plan" ? (
             <ProjectPlan d={d} />
@@ -5317,20 +5289,20 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             <>
               <ProjectWorkDetail key={projectReadGeneration} document={d} selection={selection}
                 generation={projectReadGeneration} locale={locale}
-                resultPanel={<>{resultRefs}<ResultCard state={resultState}/></>}
-                activityPanel={<Activity d={d}/>}
+                resultPanel={<>{resultRefs}<ResultCard locale={locale} state={resultState}/></>}
+                activityPanel={<Activity d={d} selection={selection} readActivity={projectReaders.activity} sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead} locale={locale}/>}
                 actionPanel={<>{commandPanel}{workRefreshControl}</>}
                 onOpenEvidence={() => setProjectTab("Evidence")}
                 onOpenJournal={() => setProjectTab("Journal")} />
-              <WorkQueue state={workState} rootJobId={selection.rootJobId} />
+              <details className="mm-work-journey__details"><summary>{locale === "zh-CN" ? "相关工作状态" : "Related work status"}</summary><WorkQueue state={workState} rootJobId={selection.rootJobId} /></details>
             </>
           ) : projectTab === "Evidence" ? (
             <><ProjectEvidence key={projectReadGeneration} document={d} selection={selection}
               generation={projectReadGeneration} locale={locale}
-              resultPanel={<>{resultRefs}<ResultCard state={resultState}/></>}/>{productAcceptancePanel}</>
+              resultPanel={<>{resultRefs}<ResultCard locale={locale} state={resultState}/></>}/>{productAcceptancePanel}</>
           ) : projectTab === "Journal" ? (
             <ProjectJournal key={projectReadGeneration} document={d} selection={selection}
-              generation={projectReadGeneration} locale={locale} activityPanel={<Activity d={d}/>} />
+              generation={projectReadGeneration} locale={locale} activityPanel={<Activity d={d} selection={selection} readActivity={projectReaders.activity} sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead} locale={locale}/>} />
           ) : (
             <><ProjectMore d={d} sessionPanel={sessionPanel} onNavigate={navigateOperationalView} />
               {recordedProjectDetails}
@@ -5556,10 +5528,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             disabled={!authState?.acquisition}
           />
         ) : null}
-        <ResultCard state={resultState} />
+        <ResultCard locale={locale} state={resultState} />
       </>
     );
-  else if (active === "Activity") content = <Activity d={d} />;
+  else if (active === "Activity") content = <Activity d={d} selection={selection} readActivity={projectReaders.activity} sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead} locale={locale}/>;
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <><Evidence d={d} />{productAcceptancePanel}</>;
   else content = <Conversation locale={locale} />;
@@ -5582,8 +5554,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       authState.reason === "POPUP_CLOSED" ? copy.popupClosed :
       authState.reason.includes("EXPIRED") || authState.reason.includes("TIMEOUT") ? copy.signInTimeout : copy.signInFailed
     }</p> : undefined}
-    protectedWork={(nativeGoalQuarantined || (passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails || retainedComposerDrafts.session || office.draft.text || observedConversation.draft || projectJourney.retainedGoal?.text || freshDraft.retainedDraft?.text)) || showCheckStatus) ? <>
-      {nativeGoalNotice}
+    protectedWork={(nativeGoalQuarantined || nativeSessionReturn || (passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails || retainedComposerDrafts.session || office.draft.text || observedConversation.draft || projectJourney.retainedGoal?.text || freshDraft.retainedDraft?.text)) || showCheckStatus) ? <>
+      {nativeGoalNotice}{nativeSessionReturn}
       {passiveExpiryHold.current ? retainedProjectGoal : null}
       {passiveExpiryHold.current ? retainedFreshMessage : null}
       {passiveExpiryHold.current && office.draft.text ? <section className="card">
@@ -5731,14 +5703,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <header className={quietHeader ? "workspace-header workspace-header-quiet" : "workspace-header"}>
           <div className="workspace-route">
             <button ref={navigationToggle} type="button" className="navigation-toggle" aria-expanded={navigationOpen} aria-controls="workspace-navigation" aria-label={locale === "zh-CN" ? "打开导航" : "Open navigation"} onClick={() => setNavigationOpen(value => !value)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
-            <span className="eyebrow">{directRoute ? (locale === "zh-CN" ? "单个只读任务" : "One read-only task") : newProjectRoute ? (locale === "zh-CN" ? "新建项目" : "New project") : navigationLabel(active, locale)}</span>
+            {active !== "Activity" && <span className="eyebrow">{directRoute ? (locale === "zh-CN" ? "单个只读任务" : "One read-only task") : newProjectRoute ? (locale === "zh-CN" ? "新建项目" : "New project") : navigationLabel(active, locale)}</span>}
             {quietHeader ? <h2 ref={routeHeading} tabIndex={-1}>{newProjectRoute ? (locale === "zh-CN" ? "新建项目" : "New project") : navigationLabel(active, locale)}</h2> : <h1 ref={routeHeading} tabIndex={-1}>
               {directRoute ? (locale === "zh-CN" ? "原生任务" : "Native task") : navigationLabel(active, locale)}
             </h1>}
-            {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>}
+            {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : active === "Activity" ? (locale === "zh-CN" ? "此项目已记录的工作与结果。来源信息可能不完整。" : "Recorded work and results for this project. Source information may be incomplete.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {!directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
+            {active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} /> : null}
           </div>
         </header>
         {nativeGoalNotice}
@@ -5760,7 +5732,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             }}>{copy.discardAll}</button>
           </section>
         ) : null}
-        {active !== "Control Room" && active !== "Today" && active !== "Conversations" && !directRoute &&
+        {active !== "Control Room" && active !== "Today" && active !== "Conversations" && active !== "Activity" && !directRoute &&
           !((active === "Inbox" || active === "Projects" && (projectJourney.shown || projectJourney.invalidLink)) && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") &&
           !reading.suppressBodyNotice &&
           !(active === "Projects" && (projectJourney.shown || projectJourney.invalidLink) && reading.readinessDiagnostic !== null) ? (
@@ -5822,7 +5794,21 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             }}/>
         </section>}
         {content}
-        {d && missionNavigation.includes(active) && !conversationActive && (
+        {d && active === "Activity" ? <details className="reason-details mm-activity-source-gaps"><summary>{locale === "zh-CN" ? "来源缺失详情" : "Source gaps"}</summary>            {d.missingness.length ? (
+              <ul className="missing">
+                {d.missingness.map((x, i) => (
+                  <li key={i}>
+                    <State value={x.missingness_class} />{" "}
+                    <code>{x.target_field}</code> — {x.reason}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <Empty>
+                No missingness facts were projected. This adds no freshness
+                claim.
+              </Empty>
+            )}</details> : d && missionNavigation.includes(active) && !conversationActive && (
           <section className="card">
             <h2>Missingness and source state</h2>
             {d.missingness.length ? (

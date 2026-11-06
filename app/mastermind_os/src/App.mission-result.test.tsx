@@ -484,7 +484,7 @@ describe("App compound Mission/Result consumption", () => {
     render(<App />);
     const user = await openProject();
     await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
-    expect(await screen.findByText(/Content omitted by owner/)).toBeTruthy();
+    expect(await screen.findByText(/The source did not supply the result text\. Counts and source references remain available below\./)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     const returns = document.getElementById("office-returns-title")?.closest("section");
     expect(within(returns!).getByText("JOB-004")).toBeTruthy();
@@ -571,7 +571,7 @@ describe("App compound Mission/Result consumption", () => {
     expect(replacementCalls).toBe(0);
     expect(e.calls("/workspace/mission-result/current")).toHaveLength(before);
     expect(screen.getByText("READ_CANCELLED")).toBeTruthy();
-    expect(screen.queryByText("Reading the exact selected tuple…")).toBeNull();
+    expect(screen.queryByText("Reading the selected result…")).toBeNull();
     await expectOfficeHalvesEmpty(user);
   });
 
@@ -594,7 +594,7 @@ describe("App compound Mission/Result consumption", () => {
     expect(replacementCalls).toBe(0);
     expect(screen.queryByText("bounded typed fixture result")).toBeNull();
     expect(screen.getByText("READ_CANCELLED")).toBeTruthy();
-    expect(screen.queryByText("Reading the exact selected tuple…")).toBeNull();
+    expect(screen.queryByText("Reading the selected result…")).toBeNull();
     await expectOfficeHalvesEmpty(user);
   });
 
@@ -619,7 +619,7 @@ describe("App compound Mission/Result consumption", () => {
         await flush();
       });
       expect(await screen.findByText("READ_CANCELLED")).toBeTruthy();
-      expect(screen.queryByText("Reading the exact selected tuple…")).toBeNull();
+      expect(screen.queryByText("Reading the selected result…")).toBeNull();
       expect(screen.queryByText("bounded typed fixture result")).toBeNull();
       await expectOfficeHalvesEmpty(user);
     },
@@ -649,7 +649,7 @@ describe("App compound Mission/Result consumption", () => {
     });
     expect(replacementCalls).toBe(0);
     expect(screen.getByText("READ_CANCELLED")).toBeTruthy();
-    expect(screen.queryByText("Reading the exact selected tuple…")).toBeNull();
+    expect(screen.queryByText("Reading the selected result…")).toBeNull();
     expect(screen.queryByText("bounded typed fixture result")).toBeNull();
     expect(screen.queryByText("SOURCE_READ_PENDING")).toBeNull();
     await expectOfficeHalvesEmpty(user);
@@ -668,13 +668,13 @@ describe("App compound Mission/Result consumption", () => {
       NonNullable<typeof window.MastermindMissionHost>["readMissionResult"]
     >;
     await user.click(await screen.findByRole("button", { name: /JOB-002/ }));
-    expect(screen.getByText("Reading the exact selected tuple…")).toBeTruthy();
+    expect(screen.getByText("Reading the selected result…")).toBeTruthy();
     await act(async () => {
       e.queue[0].resolve(new Response(producer.bytes, { headers: { "content-type": "application/json" } }));
       await flush();
     });
     expect(screen.queryByText("bounded typed fixture result")).toBeNull();
-    expect(screen.getByText("Reading the exact selected tuple…")).toBeTruthy();
+    expect(screen.getByText("Reading the selected result…")).toBeTruthy();
     expect(screen.queryByText("READ_CANCELLED")).toBeNull();
     await act(async () => {
       // JOB-002 was requested; this typed host returns the JOB-004 producer.
@@ -684,7 +684,7 @@ describe("App compound Mission/Result consumption", () => {
     });
     expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
     expect(screen.queryByText("bounded typed fixture result")).toBeNull();
-    expect(screen.queryByText("Reading the exact selected tuple…")).toBeNull();
+    expect(screen.queryByText("Reading the selected result…")).toBeNull();
     expect(e.calls("/workspace/result/current")).toHaveLength(0);
     await expectOfficeHalvesEmpty(user);
   });
@@ -868,7 +868,7 @@ describe.skipIf(fallbackDir === undefined)("App fresh mounted content fallback",
     expect(loaded.provenance.content_fallback).toBe("mounted_producer_CONTENT_OVER_BUDGET");
     expect(loaded.parsed.role_result.availability).toBe("CONTENT_OVER_BUDGET");
     expect(loaded.parsed.role_result.result?.content).toBeNull();
-    expect(await screen.findByText(/Content omitted by owner/)).toBeTruthy();
+    expect(await screen.findByText(/The source did not supply the result text\. Counts and source references remain available below\./)).toBeTruthy();
     expect(screen.queryByText("bounded typed fixture result")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     const returns = document.getElementById("office-returns-title")?.closest("section");

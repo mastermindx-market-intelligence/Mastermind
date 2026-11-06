@@ -500,7 +500,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'fd62f0d885bd1267c21a98f10268caff5bcde7d1d0165816da67b16648117aef', 'sites': ((877, 71, 74, 'int', '400'), (888, 71, 74, 'int', '403'), (896, 71, 74, 'int', '400'), (902, 79, 82, 'int', '400'), (911, 71, 74, 'int', '400'), (921, 71, 74, 'int', '403'), (926, 76, 79, 'int', '503'), (932, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '22335a6b83924ae3c28eeb8610e1b8bb2a834964e1ba99afc97ebcaa534440ac', 'sites': ((924, 71, 74, 'int', '400'), (935, 71, 74, 'int', '403'), (943, 71, 74, 'int', '400'), (949, 79, 82, 'int', '400'), (958, 71, 74, 'int', '400'), (968, 71, 74, 'int', '403'), (973, 76, 79, 'int', '503'), (979, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -562,8 +562,9 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 
 # NEXT accepted source: callback input bound / existing HTTP permission denial,
 # never an OS identity. Exact whole-source hash and token sites only.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '1ad6accf606fccee6b3734e31d660b446a7e9f2a63ef98855fde05a76031d6a1', 'sites': ((704, 93, 96, 'int', '403'), (706, 56, 59, 'int', '403'), (713, 46, 49, 'int', '403'), (714, 56, 59, 'int', '403'))}
-
+# BYOK/Instructions composition preserves the complete permission handler AST;
+# only its enclosing source and four HTTP denial token positions change.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'b5e717931de280e792c47d9fccba49963f7aec55bb0702d07c2bdb0c43a70790', 'sites': ((712, 93, 96, 'int', '403'), (714, 56, 59, 'int', '403'), (721, 46, 49, 'int', '403'), (722, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -595,10 +596,23 @@ REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'
 REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': 'b5fd60efebebc04ea12d1d1976663c74f907dec2f151a2d71a6f442182b5e5b2', 'sites': ((93, 39, 42, 'int', '404'),)}
 
 # fixed HTTP unavailable status. Exact full postimage and literal sites only.
-REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport.py'] = {'sha256': 'a7af82acb1492e1eee4e583181f6be2c763a9e61d1be5112345693018defaa09', 'sites': ((41, 45, 48, 'int', '503'), (67, 81, 84, 'int', '503'))}
+# 2026-11-06 source audit: the fixed planning/execution pair shares the original
+# authenticated carrier; these are still only its two HTTP unavailable operands.
+REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport.py'] = {'sha256': 'e2bf5510be0196546d95530840827727721912a94a0b2368cc8c5a70bfb61442', 'sites': ((55, 45, 48, 'int', '503'), (81, 81, 84, 'int', '503'))}
 
 # Actual source-issued proposal PR number, never a UID or HTTP/permission grant.
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '3ee477861ae7344849499c3af483e8650f26fa58aea7874ad2a6479e776824ac', 'sites': ((3308, 68, 71, 'int', '503'), (3313, 69, 72, 'int', '503'), (3317, 67, 70, 'int', '503'))}
+# Composed BYOK + qualified Session SEND source audit: the complete Programs
+# observation test body remains byte-identical; this pin supplies no release approval.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '78c3ac5576ec1344b6522d34408963bfcdddaef6edfb4222f14aab931dcd44e3', 'sites': ((3359, 68, 71, 'int', '503'), (3364, 69, 72, 'int', '503'), (3368, 67, 70, 'int', '503'))}
+# 2026-11-06 composed-source check against protected c571acc9 + owned dfb94fb4:
+# control_room_action (635 AST nodes) and instruction-permission handler (194)
+# are exactly protected postimages; the native diagnostic test body is unchanged
+# from dfb94fb4. Reviewed host-observation/project READ/BYOK composition displaces
+# only these fixed HTTP status sites. These new complete-source pins record this
+# source audit; they do not inherit a release approval or release native SEND holds.
+
+# Reviewed Session Unicode-scalar input bound, never an OS identity.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'cd31cfc2d232e8d3b432ba059209a8a5f8479fd7dc5a811d1897ca664207645f', 'sites': ((13, 118, 121, 'int', '700'),)}

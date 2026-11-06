@@ -63,6 +63,7 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/resources/host-observation/current",
         "/workspace/mission-result/current",
         "/workspace/native-draft-identity/current",
+        "/workspace/byok/roles/current",
         "/workspace/instruction-admission/current",
         "/workspace/instruction-admission/operation",
     }
@@ -99,6 +100,7 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/os/executive/conversation/turn/read",
         "/os/executive/conversation/consume/status",
         "/os/executive/conversation/turn/preview",
+        "/os/executive/session/send",
     }
     assert set(GET_ROUTES) == set(INCUMBENT_GET_ROUTES) | expected_get
     assert set(POST_ROUTES) == set(INCUMBENT_POST_ROUTES) | expected_post
@@ -140,13 +142,13 @@ def test_all_accepted_topologies_have_exact_routes(noir, notices, count):
     config = render(value, 49152)
     # OS GET, legacy POST, source POST and both MCP branches share one relay.
     assert config.count("reverse_proxy 127.0.0.1:49152") == 5
-    # All public POSTs are explicit paths. The new session routes are READ
-    # only; effectful session/send stays closed until the held F2 gate clears.
+    # All public POSTs are explicit paths. The historical reader tuple stays
+    # exact; qualified Session SEND is a separate final-profile addition.
     assert "path " + " ".join(POST_ROUTES) + "\n" in config
     assert INCUMBENT_POST_ROUTES == LEGACY_POST_ROUTES + (
         "/os/executive/session/context", "/os/executive/session/reply",
         "/os/executive/session/references")
-    assert "/os/executive/session/send" not in config
+    assert config.count("/os/executive/session/send") == 1
     assert config.count("max_size 64KB") == 2
     assert config.count("max_size 98304") == 1
     assert SOURCE_MAX_BODY == 98304
@@ -348,7 +350,7 @@ def test_real_caddy_adapter_preserves_exact_read_only_edge_routes(tmp_path, noir
     assert (("POST",), tuple(SOURCE_POST_ROUTES)) in by_paths
     assert (("GET",), (MCP_METADATA_ROUTE,)) in by_paths
     assert (("POST",), tuple(MCP_ROUTES)) in by_paths
-    assert "/os/executive/session/send" not in POST_ROUTES
+    assert POST_ROUTES.count("/os/executive/session/send") == 1
     os_get = [match for match in route_matchers
               if match["method"] == ["GET"] and match["path"] != [MCP_METADATA_ROUTE]]
     assert len(os_get) == 1

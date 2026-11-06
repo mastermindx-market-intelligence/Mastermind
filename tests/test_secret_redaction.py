@@ -431,3 +431,18 @@ def test_massive_api_key_is_covered_too(monkeypatch):
     out = sanitize_external_text("failed with url: ...&apiKey=shortkey1")
     assert "shortkey1" not in out
     assert REDACTION in out
+
+@pytest.mark.parametrize("separator", (": ", ": ' ", '" : " '))
+def test_authorization_whitespace_does_not_repartition_when_bearer_is_absent(separator):
+    # The former optional quote separated adjacent whitespace repetitions.
+    # This fixture preserves the real untrusted-input shape without a timing gate.
+    text = "Authorization" + separator + " " * 32768 + "Basic harmless"
+    out = sanitize_external_text(text, include_environment=False)
+    assert "Basic harmless" in out
+
+
+@pytest.mark.parametrize("separator", (": ", ": ' ", '" : " '))
+def test_authorization_keeps_short_token_redaction_after_long_whitespace(separator):
+    text = "Authorization" + separator + " " * 32768 + "Bearer short-token"
+    out = sanitize_external_text(text, include_environment=False)
+    assert "short-token" not in out and REDACTION in out

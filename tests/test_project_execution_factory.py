@@ -39,7 +39,7 @@ def fixture(tmp_path, monkeypatch, *, mode="DURABLE"):
     monkeypatch.setattr(service._ceo_ingress_app_binding.grounding_provider,"observe",lambda:
         dict(mastermind_sha=base,macro_sha="e"*40,boot_packet_schema=BOOT_PACKET_SCHEMA))
     binding = {**_v3_execution_binding(), "base_sha":base}
-    monkeypatch.setattr(service,"_require_project_execution_binding",lambda:copy.deepcopy(binding))
+    monkeypatch.setattr(service,"_require_project_execution_binding",lambda execution_profile="research_only":copy.deepcopy(binding))
     monkeypatch.setattr(service,"_coo_binding_for_root",lambda root:copy.deepcopy(binding))
     view = SimpleNamespace(code_commit="1"*40,data_commit="e"*40,check=lambda:None)
     monkeypatch.setattr(planning,"_canonical_view",lambda *_:view)
@@ -190,3 +190,43 @@ def test_multiline_goal_is_preserved_privately_with_scalar_intent(tmp_path,monke
     private = json.loads(source_owner.read_original_input(factory._supervisor(),source_owner.read_source(factory.service.runtime,root)))
     assert private["request"]["objective"] == args["objective"]
     assert private["intent"]["objective"] == "Research the project. Then build it. Verify the result."
+
+
+@pytest.mark.parametrize("fault", ["fake", "issuer_subclass", "foreign_service", "foreign_runtime", "foreign_operation"])
+def test_core_source_issuer_cannot_change_actual_service_or_foreground_owner(tmp_path, monkeypatch, fault):
+    from control_plane.executive_service import ExecutiveControlService
+    from control_plane.executive_runtime import Runtime
+    factory, principal, args, _, _ = fixture(tmp_path, monkeypatch)
+    issuer = factory._source_issuer
+    if fault == "fake":
+        factory._source_issuer = SimpleNamespace(service=factory.service)
+    elif fault == "issuer_subclass":
+        class OtherIssuer(source_owner.ProjectExecutionIssuer):
+            pass
+        factory._source_issuer = OtherIssuer(issuer._seal, factory.service)
+    elif fault in {"foreign_service", "foreign_runtime"}:
+        other = ExecutiveControlService(dataclasses.replace(factory.service.config,
+            coo_autonomy_armed=False, coo_operator_harness_armed=False, ceo_submit_armed=False))
+        other.runtime = (factory.service.runtime if fault == "foreign_service"
+                         else Runtime.at(tmp_path / "other-runtime"))
+        factory._source_issuer = source_owner.bind_issuer(other)
+    else:
+        original = source_owner.issue_source
+        def different_operation(bound, operation, material, guard):
+            # An exact nominal operation from another identity is still not
+            # the current request, even if its copied fields look identical.
+            return original(bound, copy.copy(operation), material, guard)
+        monkeypatch.setattr(source_owner, "issue_source", different_operation)
+    refused = asyncio.run(invoke(factory, principal, args))
+    assert not refused["ok"]
+    assert factory.service.runtime.jobs.list_jobs() == []
+
+
+def test_core_source_issuer_rejects_fake_and_subclass_services(tmp_path, monkeypatch):
+    from control_plane.executive_service import ExecutiveControlService
+    with pytest.raises(ValueError, match="ISSUER_REQUIRED"):
+        source_owner.bind_issuer(SimpleNamespace())
+    class OtherService(ExecutiveControlService):
+        pass
+    with pytest.raises(ValueError, match="ISSUER_REQUIRED"):
+        source_owner.bind_issuer(object.__new__(OtherService))

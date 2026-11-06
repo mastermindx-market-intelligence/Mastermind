@@ -35,6 +35,23 @@ const deferred = <T>() => {
 const flush = async () => {
   for (let i = 0; i < 30; i++) await Promise.resolve();
 };
+
+describe("fixed BYOK role metadata transport", () => {
+  it("uses the existing acquisition token with the fixed path and private no-store transport", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(response({ state: "SOURCE_UNBOUND" }));
+    expect(await e.client.readByokRoles!({ signal: new AbortController().signal })).toEqual({ state: "SOURCE_UNBOUND" });
+    expect(e.fetcher).toHaveBeenCalledExactlyOnceWith(ORIGIN + "/workspace/byok/roles/current",
+      expect.objectContaining({ method: "GET", redirect: "error", credentials: "omit", cache: "no-store",
+        headers: expect.objectContaining({ Authorization: "Bearer private-token" }) }));
+  });
+  it("enforces its smaller closed byte ceiling", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(response({ payload: "x".repeat(8192) }));
+    await expect(e.client.readByokRoles!({ signal: new AbortController().signal })).rejects.toThrow();
+    expect(e.fetcher).toHaveBeenCalledOnce();
+  });
+});
 function setup(
   options: {
     blocked?: boolean;

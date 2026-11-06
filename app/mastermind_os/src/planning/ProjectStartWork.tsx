@@ -13,6 +13,7 @@ export interface ProjectStartWorkProps {
   inspection: ProjectPlanLaunchInspection | null;
   locale?: "en" | "zh-CN";
   disabled?: boolean;
+  operationHold?: "checking" | "pending" | null;
   onStart: (draft: ProjectLaunchDraft, inspection: ProjectPlanLaunchInspection) =>
     ProjectLaunchOutcome | Promise<ProjectLaunchOutcome>;
 }
@@ -30,7 +31,7 @@ function current(inspection: ProjectPlanLaunchInspection | null): boolean {
 }
 
 /** Opens the existing reviewable launch form; this control never submits work. */
-export function ProjectStartWork({ inspection, locale = "en", disabled = false, onStart }: ProjectStartWorkProps) {
+export function ProjectStartWork({ inspection, locale = "en", disabled = false, operationHold = null, onStart }: ProjectStartWorkProps) {
   const chinese = locale === "zh-CN";
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const flight = useRef(0);
@@ -47,7 +48,7 @@ export function ProjectStartWork({ inspection, locale = "en", disabled = false, 
   }, [read, workRef]);
 
   const start = async () => {
-    if (disabled || busy.current) return;
+    if (disabled || operationHold || busy.current) return;
     const captured = live.current;
     if (!captured || !current(captured)) {
       setStatus({ kind: "refused", reason: "PROJECT_CONTEXT_NOT_CURRENT" });
@@ -85,7 +86,11 @@ export function ProjectStartWork({ inspection, locale = "en", disabled = false, 
     }
   };
   let message: string | null = null;
-  if (status.kind === "refused") message = reasons[status.reason][chinese ? 1 : 0];
+  if (operationHold === "checking") message = chinese ? "正在检查之前的工作…" : "Checking previous work…";
+  else if (operationHold === "pending") message = chinese
+    ? "开始新的执行前，请先确认之前工作的状态。"
+    : "Check the status of earlier work before starting another run.";
+  else if (status.kind === "refused") message = reasons[status.reason][chinese ? 1 : 0];
   else if (status.kind === "opened") message = chinese
     ? "请检查下方的启动设置，点击启动后才会开始工作。"
     : "Review the launch setup below. Work starts when you launch it.";
@@ -94,7 +99,7 @@ export function ProjectStartWork({ inspection, locale = "en", disabled = false, 
   else if (disabled) message = chinese ? "登录后即可开始工作。" : "Sign in to start work.";
   return <span className="mm-project-workspace__control">
     <button type="button" className="mm-project-workspace__control-button"
-      disabled={disabled || inspection === null || status.kind === "opening"}
+      disabled={disabled || operationHold !== null || inspection === null || status.kind === "opening"}
       onClick={() => { void start(); }} aria-busy={status.kind === "opening"}>
       {status.kind === "opening" ? chinese ? "正在打开…" : "Opening…" : chinese ? "开始工作" : "Start work"}
     </button>

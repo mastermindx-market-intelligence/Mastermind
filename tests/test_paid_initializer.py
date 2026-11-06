@@ -573,15 +573,16 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='e71283a6fcbfa4b578156e443624fa2b8d3f7de4251f47abdeec12e9faadf925'
+    assert hashlib.sha256(current_raw).hexdigest()=='c2b66b83484b0ac414a92975abd614c6352c02af50e4cad5cc6305314e855ad8'
     current=json.loads(current_raw)
-    assert len(before)==95 and len(current)==104
+    assert len(before)==95 and len(current)==106
     assert set(before)<=set(current)
     added={'ext/host_pull_daemon.sh','ext/host_pull_launchd.plist.template',
         'ext/paid_host_readiness.py','ext/paid_initializer.py',
         'ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py',
         'ext/paid_provider_entry.py','ext/post_failure_observation.py',
-        'ext/post_failure_observation_delivery.py'}
+        'ext/post_failure_observation_delivery.py', 'ext/participant_binding.py',
+        'ext/fabric_participant_owner.py'}
     # The accepted source union includes the protected review-routing picker,
     # provider/readiness composition and fixed-template launcher transition.
     # Preserve their finite changes without replacing the historical epoch.
@@ -603,10 +604,14 @@ def test_native_initializer_extends_only_exact_preimage_members():
                           'ext/slot.py','ext/sub.sh'}
     recovery_changed={'ext/artifact_delivery.py','ext/run_observation.py',
                       'ext/run_observation_delivery.py'}
-    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|recovery_changed
-    # The fair-share repair advances exactly one prior broker member.
-    assert sum(before[p]==current[p] for p in before)==65
-    for name in added|changed|diagnostic_changed|long_horizon_changed|recovery_changed:
+    # Ubuntu4 adds exactly one changed member to this finite source union.
+    # Its authentic predecessor remains fixed in the historical release.
+    ubuntu4_changed={'ext/fabric_host_qualification.py'}
+    assert before['ext/fabric_host_qualification.py']=='1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899'
+    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|recovery_changed|ubuntu4_changed
+    # Fair-share broker and Ubuntu4 qualifier advance distinct historical members.
+    assert sum(before[p]==current[p] for p in before)==64
+    for name in added|changed|diagnostic_changed|long_horizon_changed|recovery_changed|ubuntu4_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation

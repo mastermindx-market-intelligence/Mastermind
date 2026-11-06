@@ -19,6 +19,7 @@ vi.mock("@tauri-apps/api/core",()=>({invoke:vi.fn().mockResolvedValue({
 const signed:AuthState={status:"signed_in",reason:null,acquisition:true,content:true};
 const preview={schema:"mastermind.project_execution_preview.v1",work_ref:"WS:ONE",
   context_sha256:"c".repeat(64),execution_binding_sha256:"d".repeat(64),execution_state:"WORK_CAPABLE",
+  execution_profile_bindings:{research_only:"d".repeat(64),bounded_code_change:"e".repeat(64)},
   continuation_mode:"DURABLE",coordinator:{provider:"codex",model:"installed-model",effort:"high"},
   execution_scope:{repository:"mastermindx-market-intelligence/Mastermind",commit:"e".repeat(40)},
   binding:{workstream:"WS:ONE",priority:0,attemptLimit:1,
@@ -167,6 +168,7 @@ it("retains edited handoff and build scope across navigation and requalifies the
   await waitFor(()=>expect(f.request.mock.calls.filter(c=>c[0]==="submit")).toHaveLength(1));
   expect(f.request.mock.calls.find(c=>c[0]==="submit")![1]).toMatchObject({
     objective:"My edited project goal.",handoff_text:draftDetails.handoff,execution_profile:"bounded_code_change",
+    execution_binding_sha256:"e".repeat(64),
     allowed_write_paths:["app/source.ts","README.md"],validation:{pytest_targets:[draftDetails.tests],git_diff_check:false},
   });
 });

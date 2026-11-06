@@ -1387,6 +1387,35 @@ def _project_work_placement(
 
     return projected
 
+
+def _assert_cycle_placement_compatible(
+    constraints: Mapping[str, Any], *, role: str,
+    requested_authorities: Sequence[str], allowed_write_paths: Sequence[str],
+    validation_commands: Sequence[Sequence[str]],
+) -> None:
+    """Pure route ceiling check; neither admission nor a Capacity grant.
+
+    Resolve the step's existing host placement before this check. Paid model
+    input is sealed text, and finite attended execution retains its original
+    request owner. Neither route can acquire code or test authority by carrying
+    a native parent's wider grant.
+    """
+    profile = constraints.get("execution_profile_id")
+    paid = "paid_execution_route" in constraints or profile == "fabric.paid.glm.sealed-input.v1"
+    attended = "attended_route" in constraints or profile == "fabric.attended.claude.bounded.v1"
+    authorities = set(requested_authorities)
+    if paid and (
+        attended or role not in {"work", "repair"}
+        or authorities not in ({"READ"}, {"READ", "RESEARCH"})
+        or allowed_write_paths or validation_commands
+    ):
+        raise StateConflict("paid placement requires a READ/RESEARCH work or repair step")
+    if attended and (
+        authorities != {"READ"} or allowed_write_paths or validation_commands
+    ):
+        raise StateConflict("attended placement requires an exact READ-only step")
+
+
 def _has_executive_provenance(
     provenance: dict[str, Any] | None, *, target: str
 ) -> bool:
@@ -11769,9 +11798,26 @@ def _assert_orchestration_lineage_for_create(
             raise StateConflict(
                 "active interactive plan lineage is not recognized"
             )
-    _, sealed_plan_digest = _sealed_role_result(
-        connection, attempt_id=str(plan_attempt_id), expected_role="plan"
-    )
+    plan_mode = str(plan_attempt["execution_mode"] or AttemptExecutionMode.SEALED_WORKER.value)
+    if plan_mode == AttemptExecutionMode.SEALED_WORKER.value:
+        # Native sealed planners use the canonical collector/terminal owner,
+        # not the operator-harness event family. Never fall back after a
+        # native validation error or accept another/currently stale Attempt.
+        plan_job = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (plan_attempt["job_id"],)
+        ).fetchone()
+        completed_attempt, _plan_seal, _plan_terminal, sealed_plan_digest = (
+            _validated_role_completion_material(connection, job_row=plan_job,
+                expected_role="plan", root_job_id=str(parent_row["root_job_id"]))
+        )
+        if completed_attempt["attempt_id"] != plan_attempt_id:
+            raise StateConflict("native plan completion does not match its exact Attempt")
+    elif plan_mode == AttemptExecutionMode.OPERATOR_HARNESS.value:
+        _, sealed_plan_digest = _sealed_role_result(
+            connection, attempt_id=str(plan_attempt_id), expected_role="plan"
+        )
+    else:
+        raise StateConflict("plan lineage has an unsupported execution mode")
     if sealed_plan_digest != plan_digest:
         raise StateConflict("plan digest does not match the sealed plan role result")
     if role in {"work", "aggregation"}:
@@ -12619,8 +12665,9 @@ def _insert_cycle_child(
     constraints = _normalise_constraints(
         constraints, host_admitted_placement_union=role == "aggregation"
     )
-    if role == "aggregation" and constraints.get("execution_profile_id") == "fabric.paid.glm.sealed-input.v1":
-        raise StateConflict("paid model-only profile cannot become a coordinator")
+    _assert_cycle_placement_compatible(constraints, role=role,
+        requested_authorities=requested_authorities, allowed_write_paths=allowed_write_paths,
+        validation_commands=validation_commands)
     numbers = [
         int(match.group(1))
         for row in connection.execute("SELECT job_id FROM jobs")
@@ -14057,7 +14104,8 @@ class JobRegistry:
                     or spec.orchestration_role != "aggregation" or not project_fields
                     or provenance.get("schema") != "mastermind.ceo_intent.v2"
                     or not isinstance(spec.orchestration_provenance_source, Mapping)
-                    or spec.orchestration_provenance_source.get("creator") != "ceo_intent"
+                    or _orchestration_source_creator(spec.orchestration_provenance_source,
+                        role=spec.orchestration_role) != CEO_ORCHESTRATION_ROOT_CREATOR
                     or spec.orchestration_provenance_source.get("source_id") != provenance.get("intent_id")
                     or spec.orchestration_provenance_source.get("source_digest") != provenance.get("fingerprint")):
                 raise StateConflict("PROJECT_EXECUTION_SOURCE_REQUIRED")
@@ -15101,6 +15149,33 @@ class JobRegistry:
                     raise StateConflict(
                         "plan step validation IDs do not equal the reviewed root set"
                     )
+                if is_v5:
+                    # Validate the entire reserved plan, including deferred
+                    # dependencies, before creating any child or admission event.
+                    raw_constraints = _strict_canonical_json_loads(
+                        str(root["constraints_json"]), name="root constraints"
+                    )
+                    role = "aggregation" if step.get("delegation") else "work"
+                    projected = _normalise_constraints(raw_constraints,
+                        host_admitted_placement_union=role == "aggregation")
+                    projected["cost_class"] = str(step["cost_class"])
+                    if "placement" in step:
+                        projected = _project_work_placement(projected, raw_constraints,
+                            step["placement"], raw_root_constraints=raw_constraints,
+                            plan_schema_version=plan_body["schema_version"])
+                    projected = _normalise_constraints(projected,
+                        host_admitted_placement_union=role == "aggregation")
+                    _assert_cycle_placement_compatible(projected, role=role,
+                        requested_authorities=step["requested_authorities"],
+                        allowed_write_paths=step["allowed_write_paths"],
+                        validation_commands=root_validations if has_tests else [])
+                    _assert_child_does_not_widen_parent(root,
+                        requested=step["requested_authorities"],
+                        allowed_write_paths=step["allowed_write_paths"], constraints=projected)
+                    if (role == "work" and raw_constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY
+                            and (set(step["requested_authorities"]) - {"READ", "RESEARCH"}
+                                or step["allowed_write_paths"] or has_tests)):
+                        raise StateConflict("isolated analysis child admits READ/RESEARCH only")
                 member_command = f"{command_id}:member:{ordinal}"
                 if is_v3:
                     reservation_steps.append(

@@ -83,11 +83,11 @@ describe("project execution through the existing command owner",()=>{
     expect(f.request.mock.calls.map(c=>c[0])).toEqual(["submit","status"]);
     expect(f.request.mock.calls[1][1]).toEqual({operation_key:f.intent().payload.operation_key,work_ref:"WS:ONE"});
   });
-  it.each(["operation_conflict","effect_unknown","refused"])("keeps ambiguous effects distinct from pre-effect %s",async code=>{
+  it.each(["operation_conflict","effect_unknown","refused","previous_workspace_unavailable"])("keeps ambiguous effects distinct from pre-effect %s",async code=>{
     const f=setup(operation=>({schema:"mastermind.project_execution_private_result.v1",operation,ok:false,data:null,
       error:{code,message:"Opaque private failure"}}));
     const intent=f.intent(),pointer=f.port.prepare(intent);
-    expect((await f.port.submit(pointer,intent,new AbortController().signal)).disposition).toBe(code==="refused"?"refused":"unknown");
+    expect((await f.port.submit(pointer,intent,new AbortController().signal)).disposition).toBe(["refused","previous_workspace_unavailable"].includes(code)?"refused":"unknown");
     expect((await f.port.readOperation(pointer,new AbortController().signal)).disposition).toBe("unknown");
   });
   it("rejects a foreign accepted root receipt and a foreign outer operation",async()=>{
@@ -107,4 +107,19 @@ describe("project execution through the existing command owner",()=>{
     expect(()=>projectExecutionArguments("submit",{...args,allowed_write_paths:["../escape"]})).toThrow();
     expect(()=>projectExecutionArguments("submit",{...args,endpoint:"https://foreign"})).toThrow();
   });
+});
+
+
+it("binds the selected execution profile into the exact operation without scalar fallback", () => {
+  const f=setup();
+  const selected={...preview,execution_profile_bindings:{research_only:"d".repeat(64),bounded_code_change:"e".repeat(64)}};
+  const codeForm={...form,profileRef:"bounded_code_change",allowedWritePaths:["app/example"],validation:{git_diff_check:true}};
+  const research=f.port.makeLaunchIntent(form,context,selected)!;
+  const code=f.port.makeLaunchIntent(codeForm,context,selected)!;
+  expect(research.payload.execution_binding_sha256).toBe("d".repeat(64));
+  expect(code.payload.execution_binding_sha256).toBe("e".repeat(64));
+  expect(code.payload.operation_key).not.toBe(f.port.makeLaunchIntent(codeForm,context,preview)!.payload.operation_key);
+  expect(f.port.prepare(code).operationKey).toBe(projectExecutionOperationKey("a".repeat(64),code.payload));
+  expect(f.port.makeLaunchIntent(codeForm,context,{...preview,execution_profile_bindings:{research_only:"d".repeat(64)}})).toBeNull();
+  expect(f.request).not.toHaveBeenCalled();
 });

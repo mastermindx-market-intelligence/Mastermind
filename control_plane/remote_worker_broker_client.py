@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import secrets
 import ssl
+import time
 from contextlib import suppress
 from typing import Any, Mapping
 
@@ -26,6 +28,14 @@ from control_plane.remote_worker_transport import (
     encode_frame,
     payload_retargets_authority,
     validate_response,
+    MAX_HOST_OBSERVATION_RESPONSE_BYTES,
+    build_host_observation_request,
+    decode_host_observation_response,
+    validate_host_ref,
+)
+from common import workspace_byok_read_contract as byok_workspace
+from common.hermes_role_status_contract import (
+    RoleStatusError, project_observation, validate_source_pins,
 )
 
 _READ_ONLY_OPERATIONS = frozenset(
@@ -51,6 +61,7 @@ class RemoteWorkerBrokerClient:
         bound_payload_identity: Mapping[str, str] | None = None,
     ) -> None:
         self.binding = binding
+        self._host_observation: tuple[str, str, str] | None = None
         operations = frozenset(allowed_operations)
         if not operations or any(not isinstance(value, str) for value in operations):
             raise TransportValidationError("remote broker client operations are invalid")
@@ -61,6 +72,78 @@ class RemoteWorkerBrokerClient:
         self.identity = normalized_identity
         self.allowed_operations = operations
         self.bound_payload_identity = payload_identity
+
+    @classmethod
+    def for_host_observation(
+        cls, binding: BrokerTransportBinding, *, host_ref: str,
+        expected_host_binding_sha256: str, expected_implementation_sha: str,
+    ) -> RemoteWorkerBrokerClient:
+        """Bind the fixed read family without manufacturing a Worker identity."""
+        if not isinstance(binding, BrokerTransportBinding):
+            raise TransportValidationError("host observation binding is invalid")
+        validate_host_ref(host_ref)
+        try:
+            validate_source_pins(expected_host_binding_sha256, expected_implementation_sha)
+        except RoleStatusError:
+            raise TransportValidationError("host observation binding is invalid") from None
+        instance = cls.__new__(cls)
+        instance.binding = binding
+        instance.identity = {}
+        instance.allowed_operations = frozenset()
+        instance.bound_payload_identity = {}
+        instance._host_observation = (host_ref, expected_host_binding_sha256, expected_implementation_sha)
+        return instance
+
+    async def read_hermes_roles(self) -> dict[str, Any]:
+        """Read the fixed pair once under one total, at-most-four-second budget."""
+        if self._host_observation is None:
+            raise TransportError("host_observation_not_bound", TransportEffect.NO_EFFECT)
+        host_ref, expected_binding, expected_implementation = self._host_observation
+        request = build_host_observation_request(host_ref, secrets.token_hex(32))
+        budget = min(4.0, float(self.binding.timeout_seconds))
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + budget
+        writer = None
+        try:
+            async with asyncio.timeout_at(deadline):
+                reader, writer = await self._open_connection()
+                if not self._server_pin_matches(writer):
+                    return byok_workspace.unavailable()
+                writer.write(encode_frame(self._canonical_bytes(request)))
+                await writer.drain()
+                header = await reader.readexactly(4)
+                size = int.from_bytes(header, "big")
+                if not 0 < size <= MAX_HOST_OBSERVATION_RESPONSE_BYTES:
+                    return byok_workspace.unavailable()
+                raw = await reader.readexactly(size)
+                response = decode_host_observation_response(raw, request)
+                if loop.time() >= deadline:
+                    return byok_workspace.unavailable()
+                if response["state"] == "UNAVAILABLE":
+                    return byok_workspace.unavailable(response["reason_code"])
+                result = project_observation(
+                    response["observation"], expected_host_binding_sha256=expected_binding,
+                    expected_implementation_sha=expected_implementation, now_ms=time.time_ns() // 1_000_000,
+                )
+                if loop.time() >= deadline:
+                    return byok_workspace.unavailable()
+                if not byok_workspace.current(result, now_ms=time.time_ns() // 1_000_000):
+                    return byok_workspace.unavailable("SOURCE_STALE")
+                return result
+        except RoleStatusError as exc:
+            return byok_workspace.unavailable(exc.code)
+        except (asyncio.TimeoutError, asyncio.IncompleteReadError, OSError, ssl.SSLError,
+                TransportValidationError, TypeError, ValueError):
+            return byok_workspace.unavailable()
+        finally:
+            if writer is not None:
+                # Waiting for an SSL close after the deadline would add a
+                # second budget. This read-only one-shot owns no reply writes.
+                with suppress(Exception):
+                    writer.close()
+                    transport = getattr(writer, "transport", None)
+                    if transport is not None:
+                        transport.abort()
 
     @staticmethod
     def _validated_payload_identity(value: Mapping[str, str]) -> dict[str, str]:
@@ -78,6 +161,9 @@ class RemoteWorkerBrokerClient:
         self, *, session_epoch_id: str, process_generation_id: str
     ) -> None:
         """Bind one Runtime-issued OHF generation after allocation, exactly once."""
+
+        if self._host_observation is not None:
+            raise TransportValidationError("host observation cannot bind a Worker identity")
 
         payload_identity = self._validated_payload_identity({
             "session_epoch_id": session_epoch_id,

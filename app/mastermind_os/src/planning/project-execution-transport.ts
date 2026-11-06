@@ -23,6 +23,7 @@ export interface ProjectExecutionPreview {
   readonly context_sha256: string;
   readonly execution_state: "WORK_CAPABLE" | "QUEUED_NATIVE_RETURN" | "PLAN_ONLY" | "AUTONOMY_OFF" | "EXECUTION_UNAVAILABLE";
   readonly execution_binding_sha256: string | null;
+  readonly execution_profile_bindings?: Readonly<Partial<Record<"research_only" | "bounded_code_change", string>>>;
   readonly continuation_mode: "DURABLE" | "ATTENDED" | null;
   readonly coordinator: { readonly provider: string; readonly model: string; readonly effort: string } | null;
   readonly previous_run?: ProjectExecutionPreviousRun | null;
@@ -91,7 +92,7 @@ export function projectExecutionArguments(operation: ProjectExecutionOperation, 
   if (operation === "submit") {
     if (!hex(raw.context_sha256) || !hex(raw.execution_binding_sha256) || !["DURABLE","ATTENDED"].includes(String(raw.continuation_mode)) ||
         !["research_only","bounded_code_change"].includes(String(raw.execution_profile)) ||
-        typeof raw.objective !== "string" || !raw.objective.trim() || raw.objective.length > 4000 || raw.objective.includes("\0") ||
+        typeof raw.objective !== "string" || !raw.objective.trim() || [...raw.objective].length > 4000 || raw.objective.includes("\0") ||
         !(raw.handoff_text === null || typeof raw.handoff_text === "string" && !raw.handoff_text.includes("\0") && new TextEncoder().encode(raw.handoff_text).length <= 32768)) return invalid();
     const paths = raw.allowed_write_paths;
     if (paths !== undefined && (!Array.isArray(paths) || paths.length > 16 ||
@@ -127,7 +128,7 @@ export function decodeProjectExecutionPreview(raw: unknown, workRef: string): Pr
   if (!envelope.ok) throw Error("PROJECT_EXECUTION_UNAVAILABLE");
   const v = envelope.data as Record<string,unknown>;
   if (!exact(v,["schema","work_ref","context_sha256","execution_state","execution_binding_sha256","continuation_mode","coordinator","binding",
-      ...["previous_run", "execution_scope"].filter(key => Object.hasOwn(v, key))]) ||
+      ...["previous_run", "execution_scope", "execution_profile_bindings"].filter(key => Object.hasOwn(v, key))]) ||
       (Object.hasOwn(v, "previous_run") && v.previous_run !== null && !previousRunIsValid(v.previous_run)) ||
       (Object.hasOwn(v, "execution_scope") && v.execution_scope !== null &&
         !(object(v.execution_scope) && exact(v.execution_scope, ["repository", "commit"]) &&
@@ -148,5 +149,12 @@ export function decodeProjectExecutionPreview(raw: unknown, workRef: string): Pr
         !["research_only","bounded_code_change"].includes(String(x.ref)) || typeof x.label !== "string") ||
       new Set(v.binding.profiles.map(x => (x as {ref:string}).ref)).size !== v.binding.profiles.length ||
       (v.execution_state === "WORK_CAPABLE" && (!hex(v.execution_binding_sha256) || !v.continuation_mode || !v.coordinator || v.binding.profiles.length === 0))) throw Error("PROJECT_EXECUTION_RESPONSE_INVALID");
+  if (Object.hasOwn(v, "execution_profile_bindings")) {
+    const bindings = v.execution_profile_bindings;
+    const refs = (v.binding as { profiles: Array<{ ref: string }> }).profiles.map(profile => profile.ref);
+    if (!object(bindings) || !exact(bindings, refs) || !Object.values(bindings).every(value => hex(value)) ||
+        (Object.hasOwn(bindings, "research_only") && bindings.research_only !== v.execution_binding_sha256))
+      throw Error("PROJECT_EXECUTION_RESPONSE_INVALID");
+  }
   return structuredClone(v) as unknown as ProjectExecutionPreview;
 }

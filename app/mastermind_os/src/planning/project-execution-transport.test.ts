@@ -87,3 +87,36 @@ describe("project execution continuation evidence", () => {
       .toThrow("PROJECT_EXECUTION_RESPONSE_INVALID");
   });
 });
+
+
+describe("project execution profile bindings", () => {
+  const profiles = [{ref:"research_only",label:"Research team"}, {ref:"bounded_code_change",label:"Build"}];
+  const both = {...preview, binding:{...preview.binding,profiles}};
+  it("keeps each offered host-derived binding detached and accepts an empty unavailable map", () => {
+    const bindings = {research_only:"d".repeat(64),bounded_code_change:"f".repeat(64)};
+    const decoded = decodeProjectExecutionPreview(envelope({...both,execution_profile_bindings:bindings}),original.work_ref);
+    expect(decoded.execution_profile_bindings).toEqual(bindings);
+    expect(decoded.execution_profile_bindings).not.toBe(bindings);
+    const unavailable = {...preview,execution_state:"AUTONOMY_OFF",execution_binding_sha256:null,
+      continuation_mode:null,coordinator:null,binding:{...preview.binding,profiles:[]},execution_profile_bindings:{}};
+    expect(decodeProjectExecutionPreview(envelope(unavailable),original.work_ref)).toEqual(unavailable);
+  });
+  it("refuses missing, extra, malformed and inconsistent profile digests", () => {
+    for (const bindings of [
+      null, undefined, [], {}, {research_only:"d".repeat(64)},
+      {research_only:"d".repeat(64),bounded_code_change:"short"},
+      {research_only:"d".repeat(64),bounded_code_change:"F".repeat(64)},
+      {research_only:"a".repeat(64),bounded_code_change:"f".repeat(64)},
+      {research_only:"d".repeat(64),bounded_code_change:"f".repeat(64),unrestricted:"e".repeat(64)},
+    ]) expect(()=>decodeProjectExecutionPreview(envelope({...both,execution_profile_bindings:bindings}),original.work_ref))
+      .toThrow("PROJECT_EXECUTION_RESPONSE_INVALID");
+  });
+});
+
+it("uses the same Unicode code-point goal boundary as the private Python and native Rust contract", () => {
+  for (const goal of ["a".repeat(4000), "𠮷".repeat(4000), "🎯".repeat(4000)]) {
+    expect(projectExecutionArguments("submit", {...request, objective: goal}).objective).toBe(goal);
+    expect(() => projectExecutionArguments("submit", {...request, objective: goal + "一"}))
+      .toThrow("PROJECT_EXECUTION_INPUT_INVALID");
+  }
+});

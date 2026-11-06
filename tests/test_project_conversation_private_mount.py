@@ -93,25 +93,27 @@ def test_installed_factory_uses_its_actual_lexical_policy_namespace_and_native_o
     source = Path(__file__).parents[1] / 'scripts/executive_os_phase1c.py'
     function = next(node for node in ast.walk(ast.parse(source.read_text()))
                     if isinstance(node, ast.FunctionDef) and node.name == 'project_conversation_read_factory')
-    runtime, policies, result = object(), object(), object()
+    runtime, policies, supervisor, result = object(), object(), object(), object()
     bound, received, owner_calls = [], [], []
     def build(selected, **kwargs):
         received.append((selected, kwargs))
         return result
     monkeypatch.setattr(installed, 'build_runtime_project_conversation_reader', build)
     monkeypatch.setattr(enrollment, 'w3c_plist_configured', lambda **kwargs: owner_calls.append(kwargs) or True)
-    namespace = {'service': SimpleNamespace(_namespace_custody=SimpleNamespace(bound_runtime=bound.append)),
+    namespace = {'service': SimpleNamespace(_namespace_custody=SimpleNamespace(bound_runtime=bound.append),
+                                           _require_supervisor=lambda: supervisor),
         'session_read_policy_loader': lambda: policies, 'relay_readside_socket_path': Path('/no-live-reader.sock'),
         'session_reference_cursor_key': b'k' * 32, 'config': SimpleNamespace(proof_base_sha='a' * 40)}
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec'), namespace)
     assert namespace['project_conversation_read_factory'](runtime) is result
     assert bound == [runtime]
     assert received[0][0] is runtime and received[0][1]['authorized_policies'] is policies
+    assert received[0][1]['supervisor'] is supervisor
     assert received[0][1]['codex_owner_configured']() is True
     assert owner_calls == [{'release_sha': 'a' * 40}]
 
 
-def test_installed_v3_factory_registers_all_four_reads_with_incumbent_auth_owner(tmp_path, rsa_key, monkeypatch, settings):
+def test_installed_v3_factory_registers_all_six_reads_with_incumbent_auth_owner(tmp_path, rsa_key, monkeypatch, settings):
     from integrations.executive_mcp import server as gateway
     from tests.test_executive_mcp_public_audience import FixedMdm, _assets
     from integrations.mastermind_executive_app.project_conversation_transport import ROUTES

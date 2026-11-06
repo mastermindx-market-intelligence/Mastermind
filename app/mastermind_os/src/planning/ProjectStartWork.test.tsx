@@ -36,3 +36,19 @@ it("does not publish the previous project preview after changing project acquisi
   await act(async()=>finish({status:"OPENED",reuseExisting:false}));
   expect(screen.queryByText(/Review the launch/)).toBeNull();
 });
+
+it("waits for original-operation discovery and distinguishes pending work from sign-in",async()=>{
+  const source=inspection();
+  const start=vi.fn<ProjectStartWorkProps["onStart"]>(async()=>({status:"OPENED",reuseExisting:false}));
+  const view=render(<ProjectStartWork inspection={source} operationHold="checking" onStart={start}/>);
+  const button=screen.getByRole("button",{name:"Start work"}) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  expect(screen.getByRole("status").textContent).toBe("Checking previous work…");
+  fireEvent.click(button);expect(start).not.toHaveBeenCalled();
+  view.rerender(<ProjectStartWork inspection={source} operationHold="pending" locale="zh-CN" onStart={start}/>);
+  expect((screen.getByRole("button",{name:"开始工作"}) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole("status").textContent).toContain("之前工作的状态");
+  view.rerender(<ProjectStartWork inspection={source} operationHold={null} onStart={start}/>);
+  await act(async()=>fireEvent.click(screen.getByRole("button",{name:"Start work"})));
+  expect(start).toHaveBeenCalledTimes(1);
+});

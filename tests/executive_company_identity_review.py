@@ -34,8 +34,30 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
         # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": '626c70a3ee83e924b89235c3b114caad1783a4cebd9fcb4f2a3f5990ea16ec0d',
-        "ast_sha256": 'd39700eede0f0d629fa69fbe349a64307dec2fa8bc0ebee50d28842edfcbb8fd',
-        "sites": ((('body', 3, 'body', 52, 'body', 3, 'orelse', 0, 'body', 2, 'body', 0, 'value', 'args', 1), 'int', 403, '403'), (('body', 3, 'body', 52, 'body', 3, 'orelse', 0, 'body', 2, 'orelse', 0, 'body', 4, 'body', 0, 'value', 'args', 1), 'int', 403, '403'), (('body', 3, 'body', 52, 'body', 3, 'orelse', 0, 'body', 2, 'orelse', 0, 'handlers', 0, 'body', 0, 'value', 'args', 1), 'int', 503, '503')),
+        "source_sha256": "9b7dee55b65807867d08840c44b79c5932f30cdc7c13645228736eb240aade0c",
+        "ast_sha256": "bfeed80a98cf1e20152070659d1397600a2597921c38b938799ce2e095a879eb",
+        "sites": (
+            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
+              "body", 0, "value", "args", 1), "int", 403, "403"),
+            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
+              "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
+            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
+              "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
+        ),
     },
 }
+
+# BYOK fixed READ changes the full ingress AST, with existing App/Runtime fences.
+# The same three original Fabric HTTP operands are retained at mapped exact sites.
+# Parent checked this postimage under the Chairman waiver; no independent approval claim.
+# Protected #695 backup composition changes the full source only; the BYOK ingress AST and exact status sites are unchanged.
+
+# Parent reviewed the BYOK + protected Workspace composition at 49c2e1d.
+# The exact 136-node Fabric response branch and original three operands are unchanged.
+
+# 2026-11-06 composed-source audit: qualified project execution/planning and
+# bounded project conversation/Fresh READ coexist with protected BYOK and host
+# observation. The whole Company listener AST and exact 136-node protected
+# Fabric response branch are unchanged; only the enclosing ingress composition
+# and mapped sites change. These fixed pins are a new source-drift qualification,
+# not inherited native SEND approval or installation/release authority.

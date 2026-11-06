@@ -22,6 +22,13 @@ def git(root, *args):
     return subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
 
 
+def _fixture_source_clock_sample():
+    """Inert paired clock for portable source fixtures; no Darwin capability claim."""
+    elapsed = time.monotonic_ns() // 1000000
+    wall = time.time_ns() // 1000000
+    return (elapsed, wall, elapsed, wall)
+
+
 class CanonicalFixtureCache:
     def __init__(self, macro_root, cache_root, *, mastermind_revision):
         self.mastermind_revision = mastermind_revision
@@ -32,7 +39,8 @@ class CanonicalFixtureCache:
         self.code = subprocess.check_output(['git', '-C', str(self.root), 'show', self.commit + ':scripts/agentos.py'])
         assert self.code == (self.root / 'scripts/agentos.py').read_bytes()
         self.owner = cache_owner.ServerConfig(repo_root=Path.cwd(), macro_root=str(self.root),
-            bindings_path=None, token='inert-private-fixture', origin='http://127.0.0.1:0', port=0)
+            bindings_path=None, token='inert-private-fixture', origin='http://127.0.0.1:0', port=0,
+            validity_sample_fn=_fixture_source_clock_sample)
         self.cache = ExistingControlRoomCache(lambda: self.owner)
         self.publish()
 
@@ -81,9 +89,9 @@ class CanonicalFixtureCache:
     def publish(self, runtime=None):
         # Full canonical composition happens before publication. No owner/row
         # replacement during a Fresh effect; later refresh is a new publication.
-        anchor = cache_owner._source_clock_sample()
+        anchor = self.owner.validity_sample_fn()
         document = self.compile(runtime)
-        sample = cache_owner._source_clock_sample()
+        sample = self.owner.validity_sample_fn()
         assert sample is not None
         with self.owner.state_lock:
             self.owner.state_published_seq += 1

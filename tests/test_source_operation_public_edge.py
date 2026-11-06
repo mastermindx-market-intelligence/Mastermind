@@ -237,7 +237,8 @@ def test_get_route_coherence():
     assert edge.PRE_JOURNEY_POST_ROUTES == edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES + ('/workspace/instruction-admission/pause',)
     assert edge.POST_ROUTES == (edge.PRE_JOURNEY_POST_ROUTES + edge.PROJECT_PLANNING_POST_ROUTES
                                 + edge.PROJECT_CONVERSATION_READ_POST_ROUTES
-                                + edge.FRESH_CONVERSATION_POST_ROUTES)
+                                + edge.FRESH_CONVERSATION_POST_ROUTES + ('/os/executive/session/send',)
+                                + edge.PROJECT_EXECUTION_POST_ROUTES)
     assert not set(edge.SOURCE_POST_ROUTES) & set(edge.POST_ROUTES)
     template = edge._TEMPLATE.read_text(encoding="utf-8")
     get_line = "path " + " ".join(edge.GET_ROUTES) + " __ASSET_PATHS__"

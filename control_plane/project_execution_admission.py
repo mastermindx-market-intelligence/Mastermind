@@ -46,6 +46,22 @@ def validate_material(value):
 
 
 @dataclass(frozen=True, slots=True)
+class ProjectExecutionIssuer:
+    """In-process identity of the existing control-service admission owner."""
+    _seal: object
+    service: object
+
+    def __post_init__(self):
+        from control_plane.executive_service import ExecutiveControlService
+        if self._seal is not _SEAL or type(self.service) is not ExecutiveControlService:
+            raise ValueError("PROJECT_EXECUTION_ISSUER_REQUIRED")
+
+
+def bind_issuer(service):
+    return ProjectExecutionIssuer(_SEAL, service)
+
+
+@dataclass(frozen=True, slots=True)
 class ProjectExecutionSource:
     _seal: object
     _issuer: object
@@ -54,9 +70,8 @@ class ProjectExecutionSource:
     _guard: object
 
     def __post_init__(self):
-        from integrations.mastermind_executive_app.project_execution_factory import ProjectExecutionAppFactory
         from control_plane.foreground_operation import ForegroundOperation
-        if (self._seal is not _SEAL or type(self._issuer) is not ProjectExecutionAppFactory
+        if (self._seal is not _SEAL or type(self._issuer) is not ProjectExecutionIssuer
                 or type(self._operation) is not ForegroundOperation or not callable(self._guard)
                 or inspect.iscoroutinefunction(self._guard)):
             raise ValueError("PROJECT_EXECUTION_SOURCE_REQUIRED")
@@ -147,15 +162,26 @@ def require_same_source(runtime, root_id, source):
     return actual
 
 
+def input_owner(supervisor):
+    """Resolve only the nominal composed primary and its original input owner."""
+    from control_plane.executive_supervisor import ExecutiveSupervisor
+    from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
+    primary = supervisor.primary if type(supervisor) is MixedExecutionOwnerSupervisor else supervisor
+    if (type(primary) is not ExecutiveSupervisor or primary.runtime is not supervisor.runtime
+            or primary.instance_id != supervisor.instance_id):
+        raise ValueError("PROJECT_EXECUTION_ORIGINAL_INPUT_OWNER_INVALID")
+    owner = primary._project_input_owner or primary
+    if (type(owner) is not ExecutiveSupervisor or owner.runtime is not primary.runtime
+            or owner.instance_id != primary.instance_id or owner._project_input_owner is not None):
+        raise ValueError("PROJECT_EXECUTION_ORIGINAL_INPUT_OWNER_INVALID")
+    return owner
+
+
 def read_original_input(supervisor, material):
     from control_plane.terminal_original_input_artifacts import TerminalOriginalInputArtifacts
     material = validate_material(material)
     ref = material["input_reference"]
-    from control_plane.executive_supervisor import ExecutiveSupervisor
-    owner = getattr(supervisor, "_project_input_owner", None) or supervisor
-    if (type(owner) is not ExecutiveSupervisor or owner.runtime is not supervisor.runtime
-            or owner.instance_id != supervisor.instance_id or owner._project_input_owner is not None):
-        raise ValueError("PROJECT_EXECUTION_ORIGINAL_INPUT_OWNER_INVALID")
+    owner = input_owner(supervisor)
     payload = TerminalOriginalInputArtifacts(owner.runs_root).read(
         command_id=material["command_id"], issuer_scope_sha256=material["principal_scope_sha256"],
         fingerprint_sha256=material["input_fingerprint_sha256"], expected_artifact_sha256=ref["artifact_sha256"])
@@ -190,6 +216,8 @@ def read_original_input(supervisor, material):
                 or value["dialogue_source"]["work_ref"] != material["work_ref"]
                 or value["dialogue_source"]["commission_ref"]["path"] != COMMISSION_PATH
                 or digest(value["execution_binding"]) != material["execution_binding_sha256"]
+                or type(value["previous_run"]) is dict and "workspace_revision" in value["previous_run"]
+                and value["execution_binding"].get("base_sha") != value["previous_run"]["workspace_revision"]["commit"]
                 or type(project) is not dict or set(project) != {"expected_context", "plan", "files"}
                 or digest(project) != material["context_sha256"]
                 or project["expected_context"] != request["expected_context"]
@@ -241,12 +269,15 @@ def _previous_snapshot_matches(value, witness):
     from control_plane.executive_orchestration_result import validate_envelope
     try:
         validate_previous_run(witness)
-        if (type(value) is not dict or set(value) != {"witness", "objective", "handoff_text",
-                "result_envelope", "terminal_receipt"} or value["witness"] != witness
+        if (type(value) is not dict or set(value) not in ({"witness", "objective", "handoff_text",
+                "result_envelope", "terminal_receipt"}, {"witness", "objective", "handoff_text",
+                "result_envelope", "terminal_receipt", "workspace_revision"}) or value["witness"] != witness
                 or type(value["objective"]) is not str or not value["objective"]
                 or value["handoff_text"] is not None and type(value["handoff_text"]) is not str
                 or digest(value["result_envelope"]) != witness["result_envelope_sha256"]
-                or digest(value["terminal_receipt"]) != witness["terminal_receipt_sha256"]):
+                or digest(value["terminal_receipt"]) != witness["terminal_receipt_sha256"]
+                or "workspace_revision" in value
+                and not _workspace_revision_matches(value["workspace_revision"], witness)):
             return False
         validate_envelope(value["result_envelope"], expected_job_id=witness["root_job_id"],
             expected_run_id=witness["attempt_id"], expected_worker_id=value["result_envelope"].get("worker_id"),
@@ -337,3 +368,162 @@ def _check_parent_transaction(source, connection):
             or digest(completed.terminal_receipt) != witness["terminal_receipt_sha256"]):
         raise StateConflict("PROJECT_EXECUTION_PARENT_RESULT_CHANGED")
     require_unused_parent(runtime, witness, connection=connection)
+
+
+_WORKSPACE_REVISION_SCHEMA = "mastermind.project_workspace_revision.v1"
+
+
+class PreviousWorkspaceUnavailable(ValueError):
+    """A completed code result has no current, independently proven code tree."""
+
+
+def _workspace_revision_matches(value, witness):
+    try:
+        if (type(value) is not dict or set(value) != {"schema", "root_job_id", "workspace_path",
+                "branch", "root_base_sha", "commit", "tree", "terminal_receipt_sha256",
+                "workspace_identity"}
+                or value["schema"] != _WORKSPACE_REVISION_SCHEMA
+                or value["root_job_id"] != witness["root_job_id"]
+                or value["terminal_receipt_sha256"] != witness["terminal_receipt_sha256"]
+                or any(type(value[key]) is not str or re.fullmatch(r"[0-9a-f]{40}", value[key]) is None
+                       for key in ("root_base_sha", "commit", "tree"))
+                or type(value["workspace_path"]) is not str or type(value["branch"]) is not str):
+            return False
+        identity = value["workspace_identity"]
+        return (type(identity) is dict and set(identity) == {"path", "device", "inode", "uid", "gid"}
+                and identity["path"] == value["workspace_path"]
+                and all(type(identity[key]) is int and identity[key] >= 0
+                        for key in ("device", "inode", "uid", "gid")))
+    except (TypeError, KeyError):
+        return False
+
+
+def workspace_terminals(supervisor, root):
+    """Collect bounded, validated native receipts; no model-provided Git claim."""
+    from pathlib import Path
+    from control_plane.executive_runtime import JobStatus, StateConflict
+    from control_plane.executive_workspace import _project_manifest, PROJECT_WORKSPACE_MAX_TERMINALS
+    runtime = supervisor.runtime
+    material = read_source(runtime, root)
+    if material is None:
+        return []
+    original = json.loads(read_original_input(supervisor, material))
+    contract = original["intent"]["execution_contract"]
+    if root.worktree != contract["worktree"] or root.branch != contract["branch"]:
+        raise StateConflict("PROJECT_EXECUTION_WORKSPACE_ASSIGNMENT_CHANGED")
+    with runtime.store.read() as connection:
+        rows = connection.execute(
+            "SELECT job_id,current_attempt_id FROM jobs WHERE root_job_id=? AND status='COMPLETED' LIMIT ?",
+            (root.job_id, PROJECT_WORKSPACE_MAX_TERMINALS + 1)).fetchall()
+    if len(rows) > PROJECT_WORKSPACE_MAX_TERMINALS:
+        raise StateConflict("PROJECT_EXECUTION_WORKSPACE_RESULT_BOUND")
+    values = []
+    for row in rows:
+        completed = runtime.validated_role_completion(row["job_id"],
+            expected_attempt_id=row["current_attempt_id"])
+        job = completed.job
+        if job.status is not JobStatus.COMPLETED or job.root_job_id != root.job_id:
+            raise StateConflict("PROJECT_EXECUTION_WORKSPACE_RESULT_CHANGED")
+        evidence = completed.terminal_receipt.get("result_evidence") or {}
+        if evidence.get("schema_version") != "mastermind.sealed_worker_result_evidence/v1":
+            # Paid/model-only and operator results are never filesystem evidence.
+            if completed.result_envelope.get("role_result", {}).get("artifacts"):
+                raise StateConflict("PROJECT_EXECUTION_WORKSPACE_NATIVE_RESULT_REQUIRED")
+            continue
+        collection = evidence["collection_receipt"]["collection"]["result"]
+        seal = evidence["assignment_seal_receipt"]
+        boundary = seal["paths"].get("workspace")
+        if job.worktree != root.worktree:
+            # Existing readonly/v1 child clones keep their separate custody.
+            continue
+        if (type(boundary) is not dict or boundary.get("worker_traversal_revoked") is not True
+                or boundary["after"]["path"] != root.worktree or boundary["after"]["mode"] != 0o700
+                or boundary["after"]["uid"] != seal["control_uid"]
+                or Path(root.worktree).parent != Path(original["intent"]["execution_contract"]["worktree"]).parent):
+            raise StateConflict("PROJECT_EXECUTION_WORKSPACE_SEAL_INVALID")
+        git = collection["git_manifest"]
+        if (type(git) is not dict or set(git) - {"base_sha", "head_sha", "changed_paths", "status_sha256"}
+                or any(type(git.get(key)) is not str or re.fullmatch(r"[0-9a-f]{40}", git[key]) is None
+                       for key in ("base_sha", "head_sha"))
+                or git["base_sha"] != git["head_sha"]
+                or type(git.get("changed_paths")) is not list):
+            raise StateConflict("PROJECT_EXECUTION_WORKSPACE_GIT_EVIDENCE_INVALID")
+        value = dict(job_id=job.job_id, attempt_id=completed.attempt.attempt_id,
+            terminal_receipt_sha256=digest(completed.terminal_receipt),
+            role=job.orchestration_role, base_sha=git["base_sha"], head_sha=git["head_sha"],
+            artifacts=collection["artifact_manifest"],
+            workspace_identity={key: boundary["after"][key]
+                                for key in ("path", "device", "inode", "uid", "gid")})
+        manifest = _project_manifest(value)
+        if (sorted(git["changed_paths"]) != sorted(item["path"] for item in manifest)
+                or manifest and (job.orchestration_role not in {"work", "repair"}
+                                 or "WRITE_BRANCH" not in job.requested_authorities)):
+            raise StateConflict("PROJECT_EXECUTION_WORKSPACE_ARTIFACT_EVIDENCE_INVALID")
+        values.append(value)
+    if read_source(runtime, runtime.jobs.get_job(root.job_id)) != material:
+        raise StateConflict("PROJECT_EXECUTION_WORKSPACE_SOURCE_CHANGED")
+    return values
+
+
+def workspace_base_for_job(supervisor, job):
+    """Launch-time base from exact source plus verified allocator snapshots."""
+    from control_plane.executive_workspace import inspect_project_workspace_revision
+    runtime = supervisor.runtime
+    root = runtime.jobs.get_job(job.root_job_id or job.job_id)
+    material = read_source(runtime, root)
+    if material is None:
+        return str(job.constraints.get("base_sha") or "") or None
+    input_for_job(supervisor, job)
+    if job.worktree != root.worktree:
+        return str(job.constraints.get("base_sha") or "") or None
+    value = inspect_project_workspace_revision(root.worktree, branch=root.branch,
+        root_job_id=root.job_id, base_sha=root.constraints["base_sha"],
+        terminals=workspace_terminals(supervisor, root))
+    return value["commit"]
+
+
+def requires_workspace_continuity(supervisor, root):
+    material = read_source(supervisor.runtime, root)
+    if material is None:
+        return False
+    original = json.loads(read_original_input(supervisor, material))
+    return (original["request"]["execution_profile"] == "bounded_code_change"
+            or type(original["previous_run"]) is dict
+            and "workspace_revision" in original["previous_run"])
+
+
+def completed_workspace_revision(supervisor, previous):
+    """Effect-free qualification of the final aggregation collector's exact tree."""
+    from pathlib import Path
+    import stat
+    from control_plane.executive_workspace import inspect_project_workspace_revision
+    try:
+        witness = previous["witness"]
+        root = supervisor.runtime.jobs.get_job(witness["root_job_id"])
+        material = read_source(supervisor.runtime, root)
+        actual = completed_run(supervisor, root.job_id, material["work_ref"],
+                               material["principal_scope_sha256"])
+        if {key: previous[key] for key in actual} != actual:
+            raise ValueError()
+        terminals = workspace_terminals(supervisor, root)
+        final = next(item for item in terminals if item["job_id"] == root.job_id
+                     and item["terminal_receipt_sha256"] == witness["terminal_receipt_sha256"])
+        observed = inspect_project_workspace_revision(root.worktree, branch=root.branch,
+            root_job_id=root.job_id, base_sha=root.constraints["base_sha"], terminals=terminals)
+        if (final["artifacts"] or final["base_sha"] != observed["commit"]
+                or final["head_sha"] != observed["commit"]
+                or final["workspace_identity"] != observed["workspace_identity"]
+                or stat.S_IMODE(Path(root.worktree).lstat().st_mode) != 0o700):
+            raise ValueError()
+        revision = dict(schema=_WORKSPACE_REVISION_SCHEMA, root_job_id=root.job_id,
+            workspace_path=root.worktree, branch=root.branch,
+            root_base_sha=root.constraints["base_sha"], commit=observed["commit"], tree=observed["tree"],
+            terminal_receipt_sha256=witness["terminal_receipt_sha256"],
+            workspace_identity=observed["workspace_identity"])
+        if not _workspace_revision_matches(revision, witness):
+            raise ValueError()
+        return revision
+    except Exception as exc:
+        if isinstance(exc, PreviousWorkspaceUnavailable):
+            raise
+        raise PreviousWorkspaceUnavailable("PROJECT_EXECUTION_PREVIOUS_WORKSPACE_UNAVAILABLE") from exc

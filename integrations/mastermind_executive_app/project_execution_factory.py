@@ -30,6 +30,7 @@ class ProjectExecutionAppFactory:
         self.planning = planning
         self.service = planning.service
         self.app_binding = planning.app_binding
+        self._source_issuer = source_owner.bind_issuer(self.service)
 
     def _authorize(self, principal, args, *, fresh=False):
         operation = current_foreground_operation()
@@ -81,8 +82,11 @@ class ProjectExecutionAppFactory:
         return dict(data=data, context_sha256=wire.digest(data), workspace_permission=stamp,
                     principal_scope=scope, view=view)
 
-    def _binding(self):
-        return self.service._require_project_execution_binding()
+    def _binding(self, execution_profile="research_only", previous=None):
+        binding = self.service._require_project_execution_binding(execution_profile)
+        if type(previous) is dict and "workspace_revision" in previous:
+            binding = dict(binding, base_sha=previous["workspace_revision"]["commit"])
+        return binding
 
     def _fixed_source(self, work_ref):
         from control_plane.project_planning_policy import read_protected_blob
@@ -106,6 +110,9 @@ class ProjectExecutionAppFactory:
             raise ProjectExecutionRefusal("context_changed")
         if unused:
             source_owner.require_unused_parent(self.service._require_runtime(), witness)
+        root = self.service._require_runtime().jobs.get_job(witness["root_job_id"])
+        if source_owner.requires_workspace_continuity(self._supervisor(), root):
+            previous["workspace_revision"] = source_owner.completed_workspace_revision(self._supervisor(), previous)
         return previous
 
     async def preview(self, principal, args):
@@ -117,20 +124,27 @@ class ProjectExecutionAppFactory:
         else:
             try:
                 self._authorize(principal, args, fresh=True)
-                binding = self._binding()
+                binding = self._binding("research_only", previous)
                 self._fixed_source(args["work_ref"])
                 state = "WORK_CAPABLE"
             except Exception:
                 # Eligibility failure is observable; no root or artifact is prepared.
                 state = "EXECUTION_UNAVAILABLE"
         profiles = [{"ref": "research_only", "label": "Research team"}] if binding is not None else []
-        if binding is not None and not self.service.config.coo_attended_work_placements and not self.service.config.coo_paid_work_placements:
-            profiles.append({"ref": "bounded_code_change", "label": "Build in declared paths"})
+        profile_bindings = {"research_only": wire.digest(binding)} if binding is not None else {}
+        if binding is not None:
+            try:
+                code_binding = self._binding("bounded_code_change", previous)
+                profile_bindings["bounded_code_change"] = wire.digest(code_binding)
+                profiles.append({"ref": "bounded_code_change", "label": "Build in declared paths"})
+            except Exception:
+                pass  # Offer only a freshly qualified native write capability.
         self._authorize(principal, args)
         capture["view"].check()
         return dict(schema=wire.PREVIEW_SCHEMA, work_ref=args["work_ref"],
             context_sha256=capture["context_sha256"], execution_state=state,
             execution_binding_sha256=wire.digest(binding) if binding is not None else None,
+            execution_profile_bindings=profile_bindings,
             continuation_mode=self.service._project_execution_mode() if binding is not None else None,
             coordinator={k:binding[k] for k in ("provider", "model", "effort")} if binding is not None else None,
             execution_scope=dict(repository="mastermindx-market-intelligence/Mastermind",
@@ -173,12 +187,9 @@ class ProjectExecutionAppFactory:
         operation, workspace, scope, stamp = self._authorize(principal, args, fresh=True)
         if args["operation_key"] != wire.operation_key(scope, args):
             raise ProjectExecutionRefusal("operation_conflict")
-        if args["execution_profile"] == "bounded_code_change" and (
-                self.service.config.coo_attended_work_placements or self.service.config.coo_paid_work_placements):
-            raise ProjectExecutionRefusal("execution_unavailable")
         capture = await asyncio.to_thread(self._capture, principal, args)
         previous = await asyncio.to_thread(self._previous, args, scope)
-        binding = self._binding()
+        binding = self._binding(args["execution_profile"], previous)
         if (self.service._project_execution_mode() != args["continuation_mode"]
                 or capture["context_sha256"] != args["context_sha256"]
                 or wire.digest(binding) != args["execution_binding_sha256"]):
@@ -210,8 +221,11 @@ class ProjectExecutionAppFactory:
 
         def current():
             now_operation, _, now_scope, now_stamp = self._authorize(principal, args, fresh=True)
-            if (now_operation is not operation or now_scope != scope or now_stamp != stamp
-                    or self._binding() != binding or self._fixed_source(args["work_ref"]) != source
+            if (type(self._source_issuer) is not source_owner.ProjectExecutionIssuer
+                    or self._source_issuer.service is not self.service
+                    or now_operation is not operation or now_scope != scope or now_stamp != stamp
+                    or self._binding(args["execution_profile"], previous) != binding
+                    or self._fixed_source(args["work_ref"]) != source
                     or self.service._project_execution_mode() != args["continuation_mode"]):
                 raise ProjectExecutionRefusal("context_changed")
             # Re-observe canonical CODE/default/Event/permission fences immediately before commit.
@@ -242,7 +256,7 @@ class ProjectExecutionAppFactory:
         def authorize_original():
             self._authorize(principal, args)
         operation._project_execution_authorize = authorize_original
-        admitted = source_owner.issue_source(self, operation, material, current)
+        admitted = source_owner.issue_source(self._source_issuer, operation, material, current)
         def execution_binding():
             current()
             return copy.deepcopy(binding)
@@ -287,7 +301,8 @@ class ProjectExecutionAppFactory:
         except Exception as exc:
             current = current_foreground_operation()
             existing = self.service._require_runtime().store.find_event_by_command_id(current._command)
-            code = ("previous_run_already_continued" if isinstance(exc, source_owner.PreviousRunConflict) and existing is None
+            code = ("previous_workspace_unavailable" if isinstance(exc, source_owner.PreviousWorkspaceUnavailable) and existing is None
+                    else "previous_run_already_continued" if isinstance(exc, source_owner.PreviousRunConflict) and existing is None
                     else "operation_conflict" if isinstance(exc, ProjectExecutionRefusal) and exc.code == "operation_conflict"
                     else "effect_unknown" if existing is not None else
                     exc.code if isinstance(exc, ProjectExecutionRefusal) else "refused")

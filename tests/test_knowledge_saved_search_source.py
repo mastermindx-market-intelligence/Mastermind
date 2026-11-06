@@ -90,7 +90,10 @@ def test_actual_scoped_history_read_and_saved_reply_without_current_target(setup
     from tests.test_agentos_project_knowledge import canonical_decision
     decision=root/'agentos/decisions/DEC-EARLIER-CALL.md';decision.parent.mkdir(parents=True)
     decision.write_text(canonical_decision().replace('ALPHA',work[3:]))
-    git(root,'init','-q');git(root,'add','.');git(root,'commit','-m','Canonical saved-search source fixture')
+    git(root,'init','-q')
+    git(root,'config','user.name','Source fixture')
+    git(root,'config','user.email','source-fixture@example.invalid')
+    git(root,'add','.');git(root,'commit','-m','Canonical saved-search source fixture')
     cache=CanonicalFixtureCache(root,tmp_path/'canonical',mastermind_revision=rev_parse(Path.cwd(),'HEAD'))
     from tests import test_workspace_read_app as workspace_http
     from tests.test_workspace_project_authoring_grant import project_bindings

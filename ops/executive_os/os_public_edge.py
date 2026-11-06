@@ -24,8 +24,8 @@ CONTROL_ROOM_ACTION_ROUTES = (
 )
 READER_POST_ROUTES = LEGACY_POST_ROUTES + SESSION_READ_POST_ROUTES
 CONTROL_ROOM_POST_ROUTES = LEGACY_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
-# Session context/reply/references are reads. The effectful session/send route
-# is deliberately absent; this composition does not change its authorization.
+# Keep the historical reader profile exact. Qualified Session SEND is a separate
+# final-profile addition below; this does not change generic submit authority.
 POST_ROUTES = READER_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
 LEGACY_GET_ROUTES = (
     "/os/", "/os/auth/callback", "/workspace/programs/current",
@@ -126,13 +126,31 @@ PRE_NATIVE_DRAFT_GET_ROUTES = GET_ROUTES
 PRE_NATIVE_DRAFT_POST_ROUTES = POST_ROUTES
 GET_ROUTES = PRE_NATIVE_DRAFT_GET_ROUTES + ("/workspace/native-draft-identity/current",)
 
-# Project team launch and retained results use only these fixed routes.
+# One separately qualified existing-session write, with its complete incumbent
+# profile retained. Authentication, target and original-key authority remain
+# with the existing Session owner; generic submit is unchanged.
+PRE_NATIVE_SESSION_SEND_GET_ROUTES = GET_ROUTES
+PRE_NATIVE_SESSION_SEND_POST_ROUTES = POST_ROUTES
+POST_ROUTES = PRE_NATIVE_SESSION_SEND_POST_ROUTES + ("/os/executive/session/send",)
+
+# Protected f1950e9f: fixed secret-free role metadata READ, with no enrollment
+# or provider operation. Preserve its complete native-SEND predecessor.
+PRE_BYOK_ROLES_GET_ROUTES = GET_ROUTES
+PRE_BYOK_ROLES_POST_ROUTES = POST_ROUTES
+BYOK_READ_ROUTES = ("/workspace/byok/roles/current",)
+GET_ROUTES = PRE_BYOK_ROLES_GET_ROUTES + BYOK_READ_ROUTES
+
+# Project team launch and retained results extend the qualified parent profile.
 # Their existing downstream Executive/Workspace owners still authorize each call.
 PRE_PROJECT_EXECUTION_GET_ROUTES = GET_ROUTES
 PRE_PROJECT_EXECUTION_POST_ROUTES = POST_ROUTES
 PROJECT_EXECUTION_POST_ROUTES = tuple("/os/executive/project-execution/" + name
     for name in ("preview", "submit", "status")) + (
     "/os/executive/session/project-executions", "/os/executive/session/project-execution-read")
+# The published project-only source at 2cf4c5e6 predates native SEND and BYOK.
+# Retain that exact complete pair, not arbitrary mixtures of the three groups.
+PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES = PRE_NATIVE_SESSION_SEND_GET_ROUTES
+PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES = PRE_NATIVE_SESSION_SEND_POST_ROUTES + PROJECT_EXECUTION_POST_ROUTES
 POST_ROUTES = PRE_PROJECT_EXECUTION_POST_ROUTES + PROJECT_EXECUTION_POST_ROUTES
 
 # Preserve exactly the profiles admitted by the two predecessor contracts.
@@ -167,7 +185,10 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_CONVERSATION_READ_GET_ROUTES, PRE_CONVERSATION_READ_POST_ROUTES),
     (PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES, PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES),
     (PRE_NATIVE_DRAFT_GET_ROUTES, PRE_NATIVE_DRAFT_POST_ROUTES),
+    (PRE_NATIVE_SESSION_SEND_GET_ROUTES, PRE_NATIVE_SESSION_SEND_POST_ROUTES),
+    (PRE_BYOK_ROLES_GET_ROUTES, PRE_BYOK_ROLES_POST_ROUTES),
     (PRE_PROJECT_EXECUTION_GET_ROUTES, PRE_PROJECT_EXECUTION_POST_ROUTES),
+    (PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES, PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

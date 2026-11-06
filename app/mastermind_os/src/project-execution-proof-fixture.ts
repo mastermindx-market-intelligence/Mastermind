@@ -103,6 +103,7 @@ export async function createProjectExecutionProofFixture(store:PendingPointerSto
     if(operation==="preview"){
       const value=result(operation,{schema:"mastermind.project_execution_preview.v1",work_ref:PROJECT_EXECUTION_PROOF_WORK,
         context_sha256:"c".repeat(64),execution_state:"WORK_CAPABLE",execution_binding_sha256:"d".repeat(64),
+        execution_profile_bindings:{research_only:"d".repeat(64),bounded_code_change:"e".repeat(64)},
         continuation_mode:"DURABLE",coordinator:{provider:"inert-fixture",model:"fixture-only-no-provider",effort:"fixture"},
         execution_scope:{repository:"mastermindx-market-intelligence/Mastermind",commit:"e".repeat(40)},
         previous_run:args.previous_run??null,

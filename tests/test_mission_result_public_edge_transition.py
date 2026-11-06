@@ -4,13 +4,20 @@ import pytest
 from ops.executive_os import os_public_edge as edge
 from tests import test_os_public_edge_transition as fixture
 
-@pytest.mark.parametrize('fixed', [edge.PRE_MISSION_RESULT_GET_ROUTES,edge.GET_ROUTES])
-def test_whole_compound_get_profile_and_predecessor_preserve_caps_and_other_sites(fixed):
-    assert edge.GET_ROUTES==edge.PRE_MISSION_RESULT_GET_ROUTES+('/workspace/mission-result/current',)
-    assert edge.POST_ROUTES==edge.PRE_MISSION_RESULT_POST_ROUTES
+@pytest.mark.parametrize('fixed_get,fixed_post', [
+    (edge.PRE_MISSION_RESULT_GET_ROUTES, edge.PRE_MISSION_RESULT_POST_ROUTES),
+    (edge.MISSION_RESULT_GET_ROUTES, edge.PRE_MISSION_RESULT_POST_ROUTES),
+    (edge.GET_ROUTES, edge.POST_ROUTES),
+])
+def test_whole_compound_get_profile_and_predecessor_preserve_caps_and_other_sites(fixed_get,fixed_post):
+    # The mission-result addition is READ-only in both retained generations.
+    # Later closed source features legitimately extend the current full profile.
+    assert edge.MISSION_RESULT_GET_ROUTES==edge.PRE_MISSION_RESULT_GET_ROUTES+('/workspace/mission-result/current',)
+    assert edge.PRE_NATIVE_DRAFT_GET_ROUTES==edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES+('/workspace/mission-result/current',)
+    assert edge.PRE_NATIVE_DRAFT_POST_ROUTES==edge.PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES
     live=fixture.fullconfig()
-    fixture.get_paths_of(live)[:]=sorted(set(fixed)|set(edge.asset_routes(fixture.OLD)))
-    fixture.post_paths_of(live)[:]=list(edge.POST_ROUTES)
+    fixture.get_paths_of(live)[:]=sorted(set(fixed_get)|set(edge.asset_routes(fixture.OLD)))
+    fixture.post_paths_of(live)[:]=list(fixed_post)
     fixture.expect_source_upgrade(fixture.inner_of(live))
     before=copy.deepcopy(live)
     planned,prepared,final=fixture.transition_values(live)

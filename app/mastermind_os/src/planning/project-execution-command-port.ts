@@ -42,8 +42,13 @@ export class ProjectExecutionCommandPort implements FiniteCommandPort, ProjectEx
         form.workstreamRef !== context.workRef || form.projectRef !== "executive-infrastructure" ||
         !preview.binding.profiles.some(p=>p.ref === form.profileRef)) return null;
     try {
+      // Select the offered profile's own binding. A missing map entry never
+      // falls back to the scalar binding before the server revalidates it.
+      const bindingDigest = preview.execution_profile_bindings === undefined
+        ? preview.execution_binding_sha256
+        : preview.execution_profile_bindings[form.profileRef as "research_only" | "bounded_code_change"];
       const body = {work_ref:context.workRef,expected_context:projectExpectedContext(context),
-        context_sha256:preview.context_sha256,execution_binding_sha256:preview.execution_binding_sha256,
+        context_sha256:preview.context_sha256,execution_binding_sha256:bindingDigest,
         execution_profile:form.profileRef,objective:form.goal,handoff_text:form.handoffText || null,continuation_mode:preview.continuation_mode,
         ...(preview.previous_run ? {previous_run: preview.previous_run} : {}),
         ...(form.profileRef === "bounded_code_change" ? {allowed_write_paths:form.allowedWritePaths,validation:form.validation} : {}),
@@ -75,7 +80,7 @@ export class ProjectExecutionCommandPort implements FiniteCommandPort, ProjectEx
       if (!value.ok) {
         const code = (value.error as {code:string}).code;
         return this.receipt(pointer,operation === "submit" &&
-          ["invalid_input","refused","context_changed","source_unavailable","execution_unavailable","input_too_large","previous_run_already_continued"].includes(code)
+          ["invalid_input","refused","context_changed","source_unavailable","execution_unavailable","input_too_large","previous_run_already_continued","previous_workspace_unavailable"].includes(code)
             ? "refused" : "unknown",code.toUpperCase());
       }
       const data = value.data as Record<string,unknown>;

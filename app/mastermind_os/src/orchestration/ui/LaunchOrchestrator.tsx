@@ -311,7 +311,9 @@ export function LaunchOrchestrator({
     : undefined;
 
   const goalBytes = utf8ByteLength(draftGoal);
-  const goalTooLong = goalBytes > MAX_GOAL_BYTES || projectExecution && draftGoal.length > 4000;
+  const goalCharacters = [...draftGoal].length;
+  const goalCharacterLimit = projectExecution && goalCharacters > 4000;
+  const goalTooLong = goalBytes > MAX_GOAL_BYTES || goalCharacterLimit;
   const codeScope = projectExecution && selectedProfile === "bounded_code_change";
   const writePaths = lines(writePathsText);
   const testTargets = lines(testTargetsText);
@@ -381,9 +383,9 @@ export function LaunchOrchestrator({
   };
 
   const goalError = goalTooLong
-    ? projectExecution && draftGoal.length > 4000
+    ? goalCharacterLimit
       ? (locale === "zh-CN" ? "目标最多为 4,000 个字符。" : "Keep the goal within 4,000 characters.")
-      : `Goal exceeds ${MAX_GOAL_BYTES} byte UTF-8 limit.`
+      : (locale === "zh-CN" ? `目标超过 ${MAX_GOAL_BYTES} 字节的 UTF-8 上限。` : `Goal exceeds ${MAX_GOAL_BYTES} byte UTF-8 limit.`)
     : goalBlank
       ? "Goal is required."
       : undefined;
@@ -411,7 +413,7 @@ export function LaunchOrchestrator({
               {goalTooLong && (
                 <span className="field-error">
                   {" "}
-                  ({goalBytes}/{MAX_GOAL_BYTES} bytes)
+                  ({goalCharacterLimit ? `${goalCharacters}/4,000 ${locale === "zh-CN" ? "字符" : "characters"}` : `${goalBytes}/${MAX_GOAL_BYTES} bytes`})
                 </span>
               )}
             </label>
@@ -429,7 +431,7 @@ export function LaunchOrchestrator({
             />
             {goalTooLong && (
               <p id={`${goalId}-length`} className="field-error">
-                Goal exceeds the {MAX_GOAL_BYTES} byte UTF-8 ceiling.
+                {goalError}
               </p>
             )}
           </div>

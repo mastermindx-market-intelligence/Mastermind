@@ -95,19 +95,19 @@ def test_shared_installed_read_factory_uses_one_owner_without_supervisor_and_rea
 
 
 def test_phase1c_registers_the_existing_source_factory_paired_read_method(tmp_path,monkeypatch,identity):
-    from control_plane import workspace_read_service as workspace
+    from control_plane import workspace_read_provider_binding as binding
     from tests.test_workspace_source_join import test_installed_factory_is_inert_and_uses_late_service_custody
     from types import MethodType
-    original=workspace.workspace_provider_factory
+    original=binding.bind_installed_read_provider
     seen=[]
-    def capture(**kwargs):
-        method=kwargs.get('canonical_project_read_bindings_factory')
+    def capture(factory, method):
+        # Observe the constructor's existing binding seam. Replacing the factory
+        # itself would invalidate the code identity this composition must prove.
         assert type(method) is MethodType
         assert type(method.__self__) is InstalledWorkspaceSourceOperations
         assert method.__func__ is InstalledWorkspaceSourceOperations.read_bindings
-        assert kwargs.get('canonical_project_data_factory') is None
         seen.append(method)
-        return original(**kwargs)
-    monkeypatch.setattr(workspace,'workspace_provider_factory',capture)
+        return original(factory, method)
+    monkeypatch.setattr(binding,'bind_installed_read_provider',capture)
     test_installed_factory_is_inert_and_uses_late_service_custody(tmp_path,monkeypatch,True,True,identity)
     assert len(seen)==1
