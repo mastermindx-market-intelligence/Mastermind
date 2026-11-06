@@ -1,0 +1,50 @@
+{
+  "schema": "mastermind.memory_v3_public_fixture_dependencies.v1",
+  "reason": "Closed census of the actual supplier isolated_install e0 schema glob and capture default config; only missing public fixture dependencies from same frozenGit9fb, no source-code/schema rewriting. Original54 archive files untouched.",
+  "entries": [
+    {
+      "schema": "mastermind.memory_v3_public_fixture_dependency.v1",
+      "source_commit": "9fb08c079c0048f3f9fe9549208b2afc1316119b",
+      "source_path": "config/market_memory_canary.v1.json",
+      "bytes": 1650,
+      "sha256": "5e7823e48866b2c0828122b65f684ed5872c6816a6224f61e44db4c03d129b33",
+      "git_blob_sha1": "4bdcc241af9a841f3ec163f2953fe84343b5af26",
+      "reason": "Frozen54-path native issuer kit excludes this actual synthetic capture fixture default public identity config. Same-commit byte-exact dependency, not invented identity/current grant; archive54 files untouched."
+    },
+    {
+      "source_commit": "9fb08c079c0048f3f9fe9549208b2afc1316119b",
+      "source_path": "contracts/market_memory/e0_evaluation_spec.v1.schema.json",
+      "bytes": 10213,
+      "sha256": "0dcfe5464becb0f49e72b54418541c04fd733e383054c70ae5b0349e79fe1e95",
+      "git_blob_sha1": "20a2130af3f7ffaaeed0a8b37223cfe3da9b17ed"
+    },
+    {
+      "source_commit": "9fb08c079c0048f3f9fe9549208b2afc1316119b",
+      "source_path": "contracts/market_memory/e0_interval_split.v1.schema.json",
+      "bytes": 8085,
+      "sha256": "edf2316e77f7848fbcc1b34575f9d12a2e8d0f01b4a65dc1c8dc6c1ef66e6e93",
+      "git_blob_sha1": "fa6ab074c883bc323f4e4d2b6ff7ed11a99bdc4a"
+    },
+    {
+      "source_commit": "9fb08c079c0048f3f9fe9549208b2afc1316119b",
+      "source_path": "contracts/market_memory/e0_review_metadata.v2.schema.json",
+      "bytes": 7605,
+      "sha256": "8adc33815cbe928b4e1e47954d3a3c1109196c9a920f0fe71e2b12e11220fc0b",
+      "git_blob_sha1": "1bc55603cfcc6019f8e7df6f69c976b758d20c23"
+    },
+    {
+      "source_commit": "9fb08c079c0048f3f9fe9549208b2afc1316119b",
+      "source_path": "contracts/market_memory/e0_reviewer_plan.v1.schema.json",
+      "bytes": 7166,
+      "sha256": "a586fd7e073e624de8eafc8582e68815d167812732c0fe9673975ea5681ed490",
+      "git_blob_sha1": "ba5a58172bae619bad144d095e675545cb7dedc5"
+    },
+    {
+      "source_commit": "9fb08c079c0048f3f9fe9549208b2afc1316119b",
+      "source_path": "contracts/market_memory/e0_source_coverage.v1.schema.json",
+      "bytes": 7935,
+      "sha256": "d531e3b605e1f46a482570ddae0e6c23d6c40b1a02e699e5bfca841e72f1cf0e",
+      "git_blob_sha1": "aca9bf1268eb879fdcf9cf27dc1476916e428add"
+    }
+  ]
+}

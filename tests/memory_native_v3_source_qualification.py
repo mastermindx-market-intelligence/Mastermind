@@ -40,8 +40,9 @@ def test_actual_macro_exchange_to_genuine_m2_original_execution_and_completed_re
     destination=Path(os.environ['MM_MEMORY_V3_JOIN_RETURN']).resolve()
     assert not destination.exists() and destination.parent.is_dir()
     assert hashlib.sha256((source/'engine/research_factory/market_memory_e0_native_issuer.py').read_bytes()).hexdigest()==SOURCE_MODULE_SHA
-    dependency=json.loads((Path(__file__).parent/'fixtures/memory_native_v3_9fb08/FIXTURE_DEPENDENCY.json').read_text())
-    assert hashlib.sha256((source/dependency['source_path']).read_bytes()).hexdigest()==dependency['sha256']
+    dependencies=json.loads((Path(__file__).parent/'fixtures/memory_native_v3_9fb08/FIXTURE_DEPENDENCIES.json').read_text())
+    for dependency in dependencies['entries']:
+        assert hashlib.sha256((source/dependency['source_path']).read_bytes()).hexdigest()==dependency['sha256']
     import tests
     monkeypatch.setattr(tests,'__path__',[*tests.__path__,str(source/'tests')])
     monkeypatch.syspath_prepend(str(source))
@@ -66,7 +67,7 @@ def test_actual_macro_exchange_to_genuine_m2_original_execution_and_completed_re
         'fixture_authority':'M2 installed/kernel/root/config and Linux OS/key/admin grant primitives substituted; actual temporary owner/data/receipt code runs',
         'economic_clock':'original accepted inert clock, not live budget/deadline proof',
         'provider':'inert existing model child fixture, not provider execution',
-        'additional_same_commit_public_fixture_dependency':dependency,
+        'additional_same_commit_public_fixture_dependencies':dependencies,
         'ssh':False,'scientific_admission':False,'retry_authorized':False,'verification':dict(wire.FLAGS),
         'trace':trace}
     def checkpoint():
