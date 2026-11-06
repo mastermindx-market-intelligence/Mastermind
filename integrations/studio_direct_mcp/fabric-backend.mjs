@@ -219,7 +219,7 @@ export function projectFabricFailureDiagnosis(value) {
   } else if(['REQUEST_ALREADY_ATTEMPTED','RUN_EXISTS'].includes(code)) {
     classification='ORIGINAL_OPERATION_ALREADY_EXISTS';nextStep='OBSERVE_ORIGINAL_RUN_NO_DUPLICATE';
   } else if(['MANUAL_ROUTE_UNAVAILABLE','ADAPTER_CONTINUITY_UNAVAILABLE','ADAPTER_TURN_LIMIT_UNAVAILABLE',
-    'ADAPTER_OBSERVATION_UNAVAILABLE','PROCESS_TRANSPORT_ERROR','CAPTURE_INVALID','UNKNOWN_TOOL'].includes(code)) {
+    'ADAPTER_OBSERVATION_UNAVAILABLE','OBSERVATION_INCOMPLETE','PROCESS_TRANSPORT_ERROR','CAPTURE_INVALID','UNKNOWN_TOOL'].includes(code)) {
     classification='TECHNICAL_INTERFACE_OR_TRANSPORT';nextStep='DIAGNOSE_ORIGINAL_INTERFACE_AND_EFFECTS_WITHIN_GRANT';
   } else if(['RESULT_TOO_LARGE','RESULT_NOT_FULLY_DELIVERED','RESULT_OFFSET_OUT_OF_RANGE'].includes(code)) {
     classification='RESULT_RETRIEVAL_REQUIREMENT';nextStep='READ_ORIGINAL_RESULT_WITH_EXISTING_PAGING';
@@ -531,9 +531,16 @@ export function createFabricFacade(engine, options={}) {
     // A reused native PID cannot retain an older root's output authority.
     if(pid) loseControllerBinding(pid);
     if(!parsed && pid) {
-      // One bounded read of the same incumbent handle, never another command.
-      const read=await engine.callTool({name:'read_process_output',arguments:{pid,timeout_ms:1000,offset:0,length:200}});
-      text=engineText(read); parsed=completedOutput(text);
+      // Native --help/status can outlive start_process's initial output window
+      // on a busy M2. Reobserve ONLY this exact process handle. These are
+      // bounded read-only observations, never an adapter command retry or a
+      // second controller/worker dispatch. Keep an incomplete PID as evidence.
+      for(let readNo=0;readNo<4 && !parsed;readNo++) {
+        const read=await engine.callTool({name:'read_process_output',arguments:{
+          pid,timeout_ms:3000,offset:0,length:200
+        }});
+        text=engineText(read); parsed=completedOutput(text);
+      }
     }
     if(!parsed) fail('OBSERVATION_INCOMPLETE',{controller_pid:pid});
     return parsed;
