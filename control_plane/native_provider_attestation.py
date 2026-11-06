@@ -105,7 +105,7 @@ def _json_receipt(path, *, mode, gid=None, digest=None):
 def _file_observation(path, *, content=False):
     with _native_open(Path(path)) as (fd, info):
         _check_entry(Path(path), fd, info)
-        result = {"path": str(path), "identity": _durable_identity(info)}
+        result = {"path": str(path), "identity": _identity(info)}
         if content:
             if not 0 < info.st_size <= 512 * 1024 * 1024:
                 _fail("native executable size is invalid")
@@ -190,10 +190,12 @@ def build_native_claude_attestation(*, binary_path: Path, sdk_python: Path,
         _fail("native provision evidence is not the qualified installation")
     cli = _file_observation(binary_path, content=True)
     python = _file_observation(sdk_python, content=True)
-    cli_runtime = _runtime_identity(binary_path)
-    python_runtime = _runtime_identity(sdk_python)
-    if ({key: cli_runtime[key] for key in _DURABLE_IDENTITY} != cli["identity"]
-            or {key: python_runtime[key] for key in _DURABLE_IDENTITY} != python["identity"]
+    # Hold the full identities from the same descriptors used to hash bytes.
+    # Device is boot-local for persistence, but remains a within-call fence.
+    cli_runtime = cli["identity"]
+    python_runtime = python["identity"]
+    if (_runtime_identity(binary_path) != cli_runtime
+            or _runtime_identity(sdk_python) != python_runtime
             or cli["sha256"] != cli_source.get("binary_sha256")
             or python["sha256"] != sdk_source.get("python_sha256")
             or not cli["identity"]["mode"] & 0o111
@@ -215,6 +217,9 @@ def build_native_claude_attestation(*, binary_path: Path, sdk_python: Path,
     if _runtime_identity(sdk_python) != python_runtime:
         _fail("native SDK interpreter changed during attestation")
     cli.update(version=CLI_VERSION, team_identifier=CLAUDE_TEAM)
+    # Only the serialized receipt loses its boot-local device identity.
+    cli["identity"] = {key: cli_runtime[key] for key in _DURABLE_IDENTITY}
+    python["identity"] = {key: python_runtime[key] for key in _DURABLE_IDENTITY}
     return {"schema_version": SCHEMA, "recorded_at": datetime.now(timezone.utc).isoformat(),
             "cli": cli, "sdk": {"python": python, "root": str(sdk_root), "version": SDK_VERSION, **tree},
             "source_receipts": {"cli": {"path": str(cli_provision_receipt), "sha256": cli_receipt_sha256},
@@ -268,9 +273,12 @@ def load_native_claude_attestation(receipt_path: Path, *, expected_binary_path: 
                 or sdk["python"]["path"] != str(sdk_python) or sdk["root"] != str(sdk_python.parent.parent)
                 or sdk["version"] != SDK_VERSION):
             _fail("native receipt does not match the configured installation")
+        runtime_identities = {}
         for executable in (cli, sdk["python"]):
-            if _file_observation(Path(executable["path"]))["identity"] != executable["identity"]:
+            current = _file_observation(Path(executable["path"]))["identity"]
+            if {key: current[key] for key in _DURABLE_IDENTITY} != executable["identity"]:
                 _fail("native executable changed since attestation")
+            runtime_identities[executable["path"]] = current
         tree = _sdk_tree(Path(sdk["root"]))
         if tree["entries"] != sdk["entries"] or tree["identity_sha256"] != sdk["identity_sha256"]:
             _fail("native SDK changed since attestation")
@@ -278,10 +286,10 @@ def load_native_claude_attestation(receipt_path: Path, *, expected_binary_path: 
         if _json_receipt(receipt_path, mode=0o440, gid=expected_owner_gid) != document:
             _fail("native receipt changed during observation")
         for executable in (cli, sdk["python"]):
-            if _file_observation(Path(executable["path"]))["identity"] != executable["identity"]:
+            if _file_observation(Path(executable["path"]))["identity"] != runtime_identities[executable["path"]]:
                 _fail("native executable changed during SDK observation")
         runtime_identity = _runtime_identity(Path(cli["path"]))
-        if {key: runtime_identity[key] for key in _DURABLE_IDENTITY} != cli["identity"]:
+        if runtime_identity != runtime_identities[cli["path"]]:
             _fail("native executable changed during final attestation")
         return BinaryAttestation(path=cli["path"], real_path=cli["path"], version=cli["version"],
             sha256=cli["sha256"], team_identifier=cli["team_identifier"],

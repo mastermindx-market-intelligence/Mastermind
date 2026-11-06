@@ -159,3 +159,59 @@ def test_reader_refuses_cli_replacement_during_sdk_observation(installation,monk
         return result
     monkeypatch.setattr(att,'_sdk_tree',observe)
     with pytest.raises(att.NativeAttestationError,match='during SDK'):i.load()
+
+
+@pytest.mark.parametrize('target', ['binary', 'python', 'both'])
+def test_reader_refuses_device_change_between_executable_observations(
+    installation, monkeypatch, target
+):
+    i = installation
+    paths = (i.binary, i.python) if target == 'both' else (getattr(i, target),)
+    inodes = {os.stat(path).st_ino for path in paths}
+    identity, sdk_tree = att._identity, att._sdk_tree
+    device_delta = 0
+
+    def observed(info):
+        result = identity(info)
+        if info.st_ino in inodes:
+            result['device'] += device_delta
+        return result
+
+    def scan_then_renumber(root, **kwargs):
+        nonlocal device_delta
+        result = sdk_tree(root, **kwargs)
+        device_delta = 4096
+        return result
+
+    monkeypatch.setattr(att, '_identity', observed)
+    monkeypatch.setattr(att, '_sdk_tree', scan_then_renumber)
+    with pytest.raises(att.NativeAttestationError, match='during SDK'):
+        i.load()
+
+
+@pytest.mark.parametrize('target', ['binary', 'python'])
+def test_producer_refuses_device_change_between_hash_and_runtime_snapshot(
+    installation, monkeypatch, target
+):
+    i = installation
+    inode = os.stat(getattr(i, target)).st_ino
+    identity, file_observation = att._identity, att._file_observation
+    device_delta = 0
+
+    def observed(info):
+        result = identity(info)
+        if info.st_ino == inode:
+            result['device'] += device_delta
+        return result
+
+    def hash_then_renumber(path, **kwargs):
+        nonlocal device_delta
+        result = file_observation(path, **kwargs)
+        if path == i.python and kwargs.get('content'):
+            device_delta = 4096
+        return result
+
+    monkeypatch.setattr(att, '_identity', observed)
+    monkeypatch.setattr(att, '_file_observation', hash_then_renumber)
+    with pytest.raises(att.NativeAttestationError, match='executable differs'):
+        att.build_native_claude_attestation(**i.args)
