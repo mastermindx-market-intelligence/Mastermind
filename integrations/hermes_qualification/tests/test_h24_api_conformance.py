@@ -40,6 +40,8 @@ from control_plane.executive_runtime import Runtime, RuntimeReadBinding
 from integrations.business_mcp_auth.contracts import AuthError
 from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 from integrations.executive_mcp.coo import COO_TOOL_SPECS, validate_coo_tool_arguments
+from integrations.executive_mcp import e1_http as http_boundary
+from integrations.executive_mcp import server as mcp_server
 from integrations.executive_mcp.server import (
     AuditedWorkspaceApp, _mounted_lifespan, build_executive_mcp_app,
     build_coo_mcp_app, build_web_ceo_v2_with_coo_mcp_app,
@@ -58,7 +60,7 @@ from integrations.mastermind_executive_app.coo_binding import (
     BINDING_SCHEMA, COO_SCOPES, _digest, principal_frame as coo_frame,
     validate_coo_binding,
 )
-from integrations.mastermind_executive_app.gateway import AppPolicies, CeoIngressResponse
+from integrations.mastermind_executive_app.gateway import AppPolicies, CeoIngressClient, CeoIngressResponse
 from integrations.mastermind_executive_app.principal_ruling_http import PrincipalRulingTarget
 from integrations.mastermind_workspace_app.app import WorkspaceAppConfig, create_workspace_app
 from integrations.mastermind_workspace_app.contract import (
@@ -473,13 +475,19 @@ def test_ambiguous_authorization_never_selects_a_principal(identities, tmp_path,
 
 @pytest.mark.parametrize("raw,expected", [
     (b"{", 400),
-    pytest.param(b'{"arguments":{"work_ref":"WS:ONE"},"arguments":{"work_ref":"WS:ONE"}}', 400,
-                 marks=pytest.mark.xfail(strict=True, raises=AssertionError, reason="Pinned COO HTTP parser accepts duplicate keys; C29 receiving join gap")),
-    pytest.param(b'{"arguments":{"work_ref":"WS:ONE","work_ref":"WS:ONE"}}', 400,
-                 marks=pytest.mark.xfail(strict=True, raises=AssertionError, reason="Pinned COO HTTP parser accepts nested duplicate keys; C29 receiving join gap")),
+    (b'{"arguments":{"work_ref":"WS:ONE"},"arguments":{"work_ref":"WS:ONE"}}', 400),
+    (b'{"arguments":{"work_ref":"WS:ONE","work_ref":"WS:ONE"}}', 400),
     (b'{"arguments":{"work_ref":NaN}}', 400),
     (b" " * 65537, 413),
-], ids=["truncated", "duplicate-root", "duplicate-nested", "nonfinite", "oversized"])
+    (b'{"arguments":{"work_ref":"WS:ONE","wo\\u0072k_ref":"WS:ONE"}}', 400),
+    (b'{"arguments":{"work_ref":Infinity}}', 400),
+    (b'{"arguments":{"work_ref":-Infinity}}', 400),
+    (b'{"arguments":{"work_ref":1e999}}', 400),
+    (b'{"arguments":{"work_ref":"\xff"}}', 400),
+    (b'{"arguments":' + b"[" * 2000 + b"0" + b"]" * 2000 + b"}", 400),
+], ids=["truncated", "duplicate-root", "duplicate-nested", "nonfinite", "oversized",
+        "escaped-duplicate", "infinity", "negative-infinity", "exponent-overflow",
+        "invalid-utf8", "excessive-nesting"])
 def test_malformed_duplicate_nonfinite_and_oversized_json_refuse(identities, tmp_path, raw, expected):
     async def run():
         async with coo_surface(tmp_path, identities) as (core, _, token, _, _):
@@ -531,17 +539,20 @@ def test_actual_mcp_catalog_scope_separation_and_shared_resource_gap(identities,
 
 @pytest.mark.parametrize("raw,expected", [
     (b"{", 400),
-    pytest.param(b'{"jsonrpc":"2.0","id":1,"id":1,"method":"tools/list"}', 400,
-                 marks=pytest.mark.xfail(strict=True, raises=AssertionError,
-                     reason="Pinned COO MCP parser accepts duplicate root keys; C29 receiving join gap")),
-    pytest.param(b'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"executive_mandate","arguments":{"work_ref":"WS:ONE","work_ref":"WS:ONE"}}}', 400,
-                 marks=pytest.mark.xfail(strict=True, raises=AssertionError,
-                     reason="Pinned COO MCP parser accepts duplicate nested keys; C29 receiving join gap")),
-    pytest.param(b'{"jsonrpc":"2.0","id":NaN,"method":"tools/list"}', 400,
-                 marks=pytest.mark.xfail(strict=True, raises=AssertionError,
-                     reason="Pinned COO MCP accepts nonfinite RPC id with HTTP 202; C29 receiving join gap")),
+    (b'{"jsonrpc":"2.0","id":1,"id":1,"method":"tools/list"}', 400),
+    (b'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"executive_mandate","arguments":{"work_ref":"WS:ONE","work_ref":"WS:ONE"}}}', 400),
+    (b'{"jsonrpc":"2.0","id":NaN,"method":"tools/list"}', 400),
     (b" " * 65537, 413),
-], ids=["truncated", "duplicate-root", "duplicate-nested", "nonfinite", "oversized"])
+    (b'{"jsonrpc":"2.0","id":1,"\\u0069d":1,"method":"tools/list"}', 400),
+    (b'{"jsonrpc":"2.0","id":Infinity,"method":"tools/list"}', 400),
+    (b'{"jsonrpc":"2.0","id":-Infinity,"method":"tools/list"}', 400),
+    (b'{"jsonrpc":"2.0","id":1e999,"method":"tools/list"}', 400),
+    (b'{"jsonrpc":"2.0","id":"\xff","method":"tools/list"}', 400),
+    (b'{"jsonrpc":"2.0","id":1,"method":"tools/list","params":' +
+     b"[" * 2000 + b"0" + b"]" * 2000 + b"}", 400),
+], ids=["truncated", "duplicate-root", "duplicate-nested", "nonfinite", "oversized",
+        "escaped-duplicate", "infinity", "negative-infinity", "exponent-overflow",
+        "invalid-utf8", "excessive-nesting"])
 def test_coo_mcp_strict_json_requirement(identities, tmp_path, raw, expected):
     async def run():
         async with coo_surface(tmp_path, identities) as (_, settings, token, _, _):
@@ -550,7 +561,9 @@ def test_coo_mcp_strict_json_requirement(identities, tmp_path, raw, expected):
                 async with signed_asgi_client(app, token) as client:
                     response = await client.post("/mcp/coo", content=raw,
                         headers={**rpc_headers(), "content-type": "application/json"})
-                    assert response.status_code == expected
+                    assert response.status_code == expected, response.text
+                    # Deep, syntactically valid JSON may be refused by the SDK
+                    # schema; the rejection contract is HTTP 400 in either layer.
     asyncio.run(run())
 
 
@@ -1010,3 +1023,151 @@ def test_stdlib_discovery_explicitly_separates_the_pytest_profile():
     assert "Ran 1 test" in result.stderr
     assert "OK (skipped=1)" in result.stderr
     assert "pytest-only integration suite" in result.stderr
+
+
+@pytest.mark.parametrize("surface", ["coo_http", "coo_mcp"])
+@pytest.mark.parametrize("fault", ["duplicate", "escaped_duplicate", "overflow"])
+def test_strict_json_blocks_modifying_requests_before_authority_or_send(
+    identities, tmp_path, short_socket_root, monkeypatch, surface, fault,
+):
+    async def run():
+        host = ingress_fixture.service(tmp_path, short_socket_root)
+        await host.start()
+        frames, authority_calls = [], []
+        original_send = CeoIngressClient.send_frame
+
+        async def observed_send(client, path, frame):
+            frames.append(copy.deepcopy(frame))
+            return await original_send(client, path, frame)
+
+        monkeypatch.setattr(CeoIngressClient, "send_frame", observed_send)
+        try:
+            async with coo_surface(tmp_path, identities,
+                    socket_path=host.ceo_ingress_socket_path) as (_, settings, token, state, _):
+                def authority(principal, work):
+                    authority_calls.append(("authority", work))
+                    return state["authority"]
+
+                def mission(principal, work):
+                    authority_calls.append(("mission", work))
+                    return copy.deepcopy(state["mission"])
+
+                settings = dataclasses.replace(settings, authority_provider=authority,
+                                                mission_provider=mission)
+                arguments = json.dumps(request_body(), separators=(",", ":"))
+                if fault == "overflow":
+                    arguments = arguments.replace('"priority":1', '"priority":1e999')
+                else:
+                    key = "operation_key" if fault == "duplicate" else "oper\\u0061tion_key"
+                    arguments = arguments[:-1] + ',"' + key + '":"h24-original-operation"}'
+                if surface == "coo_http":
+                    raw = ('{"arguments":' + arguments + "}").encode("utf-8")
+                    path = "/v1/tools/submit_principal_intent"
+                else:
+                    raw = ('{"jsonrpc":"2.0","id":1,"method":"tools/call","params":'
+                           '{"name":"submit_principal_intent","arguments":' +
+                           arguments + "}}").encode("utf-8")
+                    path = "/mcp/coo"
+
+                async def invoke(app):
+                    async with signed_asgi_client(app, token) as client:
+                        response = await client.post(path, content=raw,
+                            headers={**rpc_headers(), "content-type": "application/json"})
+                    assert response.status_code == 400, response.text
+                    assert response.json()["error"]["code"] == "invalid_input"
+
+                if surface == "coo_http":
+                    app = create_coo_app(settings, audit_sink=FixtureAudit())
+                    try:
+                        await invoke(app)
+                    finally:
+                        await app.aclose()
+                else:
+                    app = build_coo_mcp_app(settings, audit_sink=FixtureAudit())
+                    async with _mounted_lifespan(app):
+                        await invoke(app)
+                assert authority_calls == []
+                assert frames == []
+                assert host.runtime.jobs.list_jobs() == []
+        finally:
+            await host.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("framing", [
+    "exact", "overflow", "empty", "disconnect", "deadline", "unexpected_event",
+])
+def test_coo_raw_body_guard_bounds_received_bytes_before_sdk(
+    identities, tmp_path, monkeypatch, framing,
+):
+    manager_calls, sdk_requests = [], []
+    actual_manager = mcp_server.StreamableHTTPSessionManager
+
+    class ObservedManager(actual_manager):
+        async def handle_request(self, scope, receive, send):
+            manager_calls.append(scope["path"])
+
+            async def observed_receive():
+                event = await receive()
+                if event.get("type") == "http.request":
+                    sdk_requests.append(bytes(event.get("body", b"")))
+                return event
+
+            await super().handle_request(scope, observed_receive, send)
+
+    monkeypatch.setattr(mcp_server, "StreamableHTTPSessionManager", ObservedManager)
+    monkeypatch.setattr(http_boundary, "PREAUTH_RECEIVE_DEADLINE_SECONDS", 0.02)
+
+    async def run():
+        async with coo_surface(tmp_path, identities) as (_, settings, token, _, _):
+            app = build_coo_mcp_app(settings, audit_sink=FixtureAudit())
+            raw = json.dumps(rpc(), indent=2).encode("utf-8")
+            exact = raw + b" " * (http_boundary.MAX_REQUEST_BYTES - len(raw))
+            if framing in ("exact", "overflow"):
+                body = exact if framing == "exact" else exact + b" "
+                events = [
+                    {"type": "http.request", "body": body[:17000], "more_body": True},
+                    {"type": "http.request", "body": body[17000:], "more_body": False},
+                ]
+            elif framing == "empty":
+                events = [{"type": "http.request", "body": b"", "more_body": False}]
+            elif framing == "unexpected_event":
+                events = [{"type": "http.response.start", "status": 200}]
+            else:
+                events = []
+            sent = []
+
+            async def receive():
+                if events:
+                    return events.pop(0)
+                if framing == "deadline":
+                    await asyncio.Event().wait()
+                return {"type": "http.disconnect"}
+
+            async def send(event):
+                sent.append(dict(event))
+
+            scope = {
+                "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
+                "http_version": "1.1", "scheme": "http", "method": "POST",
+                "path": "/mcp/coo", "raw_path": b"/mcp/coo", "query_string": b"",
+                "headers": [(b"host", b"127.0.0.1"),
+                    (b"authorization", ("Bearer " + token).encode("ascii")),
+                    (b"content-type", b"application/json"), (b"content-length", b"1"),
+                    *[(key.encode("ascii"), value.encode("ascii"))
+                      for key, value in rpc_headers().items()]],
+                "client": ("127.0.0.1", 9000), "server": ("127.0.0.1", 9001),
+            }
+            async with _mounted_lifespan(app):
+                await asyncio.wait_for(app(scope, receive, send), timeout=1.0)
+            expected = 200 if framing == "exact" else 413 if framing == "overflow" else 400
+            assert sent[0]["status"] == expected, sent
+            if framing == "exact":
+                assert manager_calls == ["/mcp/coo"]
+                assert sdk_requests == [exact]  # unchanged bytes replayed once
+            else:
+                assert manager_calls == []
+                assert sdk_requests == []
+                body = b"".join(event.get("body", b"") for event in sent[1:])
+                assert json.loads(body)["error"]["code"] == "invalid_input"
+    asyncio.run(run())
