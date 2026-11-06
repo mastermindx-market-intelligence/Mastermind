@@ -1,0 +1,161 @@
+"""Installed Hermes implementation tests; the APPLICATION endpoint is a fixture."""
+import asyncio
+import json
+from types import SimpleNamespace as N
+import unittest
+from unittest.mock import patch
+
+import test_owner_integration as fixtures
+from integrations.hermes_application_fabric.client import HermesApplicationClient, NativeCall, call_scope
+from integrations.hermes_application_fabric.errors import HermesFabricError
+from integrations.hermes_application_fabric.native import (
+    AUTH_TYPE, PROVIDER, create_primary_agent, execution_middleware, register_native_provider,
+)
+
+
+class InstalledNativeTests(unittest.TestCase):
+    def setUp(self):
+        fixtures.OwnerLoopbackTests.setUp(self)
+        register_native_provider()
+        from hermes_cli.plugins import _delivery_manager
+        self.manager = _delivery_manager()
+        self.native_calls = []
+
+        def resolve(call):
+            if not self.native_calls:
+                self.binding.turn_id = call.turn_id
+            self.native_calls.append(call)
+            return self.binding
+
+        self.middleware = execution_middleware(resolve)
+        self.manager._middleware.setdefault("llm_execution", []).append(self.middleware)
+
+    def tearDown(self):
+        self.manager._middleware["llm_execution"].remove(self.middleware)
+        fixtures.OwnerLoopbackTests.tearDown(self)
+
+    def agent(self, **extra):
+        return create_primary_agent(model="host-selection", session_id="session-1",
+            quiet_mode=True, skip_memory=True, skip_background_review=True,
+            skip_context_files=True, load_soul_identity=False, save_trajectories=False,
+            max_iterations=3, max_tokens=256, **extra)
+
+    def test_discovered_profile_and_keyless_actual_primary_construction(self):
+        from providers import get_provider_profile
+        from agent.auxiliary_client import resolve_provider_client
+        profile = get_provider_profile(PROVIDER)
+        self.assertEqual(profile.auth_type, AUTH_TYPE)
+        self.assertEqual(profile.env_vars, ())
+        self.assertIs(profile.supports_streaming, False)
+        client, selected = resolve_provider_client(PROVIDER, model="host-selection", raw_codex=True)
+        self.assertIs(type(client), HermesApplicationClient)
+        self.assertEqual(selected, "host-selection")
+        self.assertIsNone(client.api_key)
+        self.assertEqual(client.base_url, "")
+        native = self.agent(enabled_toolsets=[])
+        self.assertIs(type(native.client), HermesApplicationClient)
+        self.assertIn(native.api_key, (None, ""))
+        self.assertEqual(self.calls, [])
+
+    def test_unbound_profile_client_does_not_fall_back_to_http(self):
+        from agent.agent_runtime_helpers import create_openai_client
+        native = N(provider=PROVIDER, model="host-selection", _client_log_context=lambda: "fixture")
+        client = create_openai_client(native, {"api_key": None, "base_url": ""}, reason="fixture", shared=True)
+        self.assertIs(type(client), HermesApplicationClient)
+        with self.assertRaises(HermesFabricError):
+            client.chat.completions.create(model="host-selection", messages=[])
+        self.assertEqual(self.calls, [])
+
+    def test_real_transport_tool_history_and_normalization(self):
+        from providers import get_provider_profile
+        from agent.transports.chat_completions import ChatCompletionsTransport
+        transport = ChatCompletionsTransport()
+        profile = get_provider_profile(PROVIDER)
+        self.mode = "tools"
+        kwargs = transport.build_kwargs("host-selection", [{"role": "user", "content": "Read"}],
+            tools=[{"type": "function", "function": {"name": "read", "parameters": {}}}],
+            provider_profile=profile, max_tokens=256)
+        with call_scope(self.binding, self.call):
+            result = HermesApplicationClient().create(**kwargs)
+        normalized = transport.normalize_response(result)
+        self.assertEqual(normalized.tool_calls[0].id, "tool-original")
+        self.assertEqual(normalized.tool_calls[0].name, "read")
+        self.assertEqual(normalized.finish_reason, "tool_calls")
+
+    def test_real_native_primary_turn_uses_the_original_owner(self):
+        native = self.agent(enabled_toolsets=[])
+        result = native.run_conversation("Reply with the fixture result.", task_id="task-fixture")
+        self.assertEqual(result.get("final_response"), "Result 世界")
+        self.assertEqual(len(self.calls), 1)
+        self.assertTrue(self.calls[0]["authenticated"])
+        self.assertEqual(self.native_calls[0].session_id, "session-1")
+        self.assertEqual(self.calls[0]["request_id"], self.binding.request_id(self.native_calls[0]))
+
+    def test_actual_error_classifier_disables_all_recovery_flags(self):
+        from agent.error_classifier import classify_api_error
+        for error in (HermesFabricError("hermes_fabric_owner_refused", effect_unknown=True),
+                      TimeoutError("watchdog"), ValueError("shape"), TypeError("shape")):
+            with self.subTest(kind=type(error).__name__):
+                verdict = classify_api_error(error, provider=PROVIDER, model="host-selection")
+                for flag in ("retryable", "should_compress", "should_rotate_credential", "should_fallback"):
+                    self.assertFalse(getattr(verdict, flag))
+
+    def test_native_middleware_detaches_errors_and_closes_original_owner(self):
+        from hermes_cli.middleware import run_llm_execution_middleware
+        seen = []
+
+        def terminal(request):
+            seen.append(request)
+            HermesApplicationClient().create(**request)
+            raise TimeoutError("private watchdog body that must not reach recovery")
+
+        request = {"model": "host-selection", "messages": [{"role": "user", "content": "hello"}]}
+        with self.assertRaises(HermesFabricError) as caught:
+            run_llm_execution_middleware(request, terminal, provider=PROVIDER,
+                session_id="session-1", task_id="task-1", turn_id="turn-1", api_request_id="api-1")
+        self.assertTrue(caught.exception.effect_unknown)
+        self.assertIsNone(caught.exception.__context__)
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertEqual((len(seen), len(self.calls), self.closed), (1, 1, 1))
+        with call_scope(self.binding, NativeCall("session-1", "task-1", "turn-1", "new-api-id")), self.assertRaises(HermesFabricError):
+            HermesApplicationClient().create(**request)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_async_native_resolution_is_an_awaitable_refusal(self):
+        from agent.auxiliary_client import resolve_provider_client
+        client, _ = resolve_provider_client(PROVIDER, model="host-selection", async_mode=True)
+        with self.assertRaises(HermesFabricError):
+            asyncio.run(client.chat.completions.create(model="host-selection", messages=[]))
+        self.assertEqual(self.calls, [])
+
+    def test_colliding_custom_provider_is_not_overwritten(self):
+        with patch("hermes_cli.runtime_provider_custom.has_named_custom_provider", return_value=True), self.assertRaises(HermesFabricError):
+            register_native_provider()
+
+    def test_existing_auth_arm_is_not_overwritten(self):
+        from agent.auxiliary_client_registry import REGISTRY_AUTHTYPE_ARMS
+        incumbent = lambda _: None
+        with patch.dict(REGISTRY_AUTHTYPE_ARMS, {AUTH_TYPE: incumbent}), self.assertRaises(HermesFabricError):
+            register_native_provider()
+
+    def test_native_tool_execution_and_original_result_continuation(self):
+        from tools.registry import registry
+        self.mode = "native-conversation"
+        self.tool_name, self.tool_arguments = "mmx_fixture_read", {"value": "native fixture"}
+        executed = []
+
+        def handler(arguments, **_):
+            executed.append(arguments)
+            return json.dumps({"value": arguments["value"]})
+
+        registry.register(name=self.tool_name, toolset="mmx_fixture_tools", schema={"name": self.tool_name,
+            "description": "Read an immutable in-memory fixture.", "parameters": {"type": "object",
+                "properties": {"value": {"type": "string"}}, "required": ["value"]}}, handler=handler)
+        native = self.agent(enabled_toolsets=["mmx_fixture_tools"])
+        result = native.run_conversation("Read the fixture once, then report.", task_id="task-native-tools")
+        self.assertEqual(result.get("final_response"), "Result 世界")
+        self.assertEqual(executed, [{"value": "native fixture"}])
+        self.assertEqual(len(self.calls), 2)
+        self.assertNotEqual(self.calls[0]["request_id"], self.calls[1]["request_id"])
+        self.assertEqual(self.calls[1]["payload"]["messages"][-1]["role"], "tool")
+        self.assertEqual(self.calls[1]["payload"]["messages"][-1]["tool_call_id"], "tool-original")
