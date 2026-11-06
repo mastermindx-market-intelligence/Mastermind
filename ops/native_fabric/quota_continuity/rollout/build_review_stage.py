@@ -39,7 +39,8 @@ ADDITIONS = frozenset({"host_pull_daemon.sh", "host_pull_launchd.plist.template"
                       "paid_controller_channel.py", "paid_glm_model_client.py", "paid_model_owner.py",
                       "linux_process_identity.py", "paid_controller_spawn.py", "paid_incumbent_state.py", "paid_host_qualification.py", "paid_initializer.py", "paid_initializer_token_data.py", "paid_initializer_nested_data.py", "paid_yaml_runtime.py", "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json",
                       "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py",
-                      "post_failure_observation.py", "post_failure_observation_delivery.py"})
+                      "post_failure_observation.py", "post_failure_observation_delivery.py",
+                      "participant_binding.py", "fabric_participant_owner.py"})
 # The retired credential-to-stdout helper is audit evidence only. It must never
 # be importable from source/ or selected as a runtime fallback. Its exact bytes
 # still have to match the installed preimage before the secure overlay is used.
@@ -172,8 +173,16 @@ GO_UBUNTU4_DIGESTS = {
 }
 
 
+GO_PARTICIPANT_ADDITIONS = {
+    "participant_binding.py": "09aafda1390914e283915204459e37900123cd54a3d0f4e9116102f3a8921f56",
+    "fabric_participant_owner.py": "1619505962de4c73f415312871cc407777bf6c04ba6d02fb9be62c9d54a5545c",
+}
+GO_PARTICIPANT_OPERATOR = "90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f55c5f72c0c7"
+GO_PARTICIPANT_OPERATOR_PREIMAGE = "f81b4f053a22ba973b06214f6d06ed2d66e3fc471c781311f074718683cf4675"
+
+
 def validate_go_base_manifest(manifest, dependency_hashes):
-    """Accept exact historical102/current104 and captured application compositions.
+    """Accept exact historical102/prior104/current106 application compositions.
 
     Both the builder and installer compare A3 with their reviewed source
     component first. The picker successor is independently source-pinned by
@@ -181,18 +190,28 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     (or the unchanged historical picker), plus the two closed same-owner
     support changes, the exact protected diagnostic outcome correction, and
     the complete protected Ubuntu4/poll cohorts within the current diagnostic
-    closure, and the exact sparse-config executor successor.
+    closure, the exact sparse-config executor successor, and the complete
+    protected participant cohort in the current106 namespace.
     Every other member/key stays bound to actual395b.
     """
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
-    prior_expected = expected - {"ext/" + name for name in GO_POST_FAILURE_ADDITIONS}
+    prior_expected = expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
+    historical_expected = prior_expected - {"ext/" + name for name in GO_POST_FAILURE_ADDITIONS}
     if (type(manifest) is not dict
-            or frozenset(manifest) not in (frozenset(expected), frozenset(prior_expected))
+            or frozenset(manifest) not in (frozenset(expected), frozenset(prior_expected),
+                                          frozenset(historical_expected))
             or type(dependency_hashes) is not dict
             or set(dependency_hashes) != set(GO_APPLICATION_DEPENDENCIES)):
         raise ValueError("native Go base dependency closure differs")
-    current_diagnostics = set(manifest) == expected
+    current_diagnostics = set(manifest) != historical_expected
     normalized = dict(manifest)
+    if set(manifest) == expected:
+        if (any(manifest["ext/" + name] != digest for name, digest in GO_PARTICIPANT_ADDITIONS.items())
+                or manifest["ext/fabric_operator_owner.py"] != GO_PARTICIPANT_OPERATOR):
+            raise ValueError("native Go participant cohort is not the exact protected source")
+        for name in GO_PARTICIPANT_ADDITIONS:
+            del normalized["ext/" + name]
+        normalized["ext/fabric_operator_owner.py"] = GO_PARTICIPANT_OPERATOR_PREIMAGE
     ubuntu4 = {name: manifest["ext/" + name] for name in GO_UBUNTU4_DIGESTS}
     if any(ubuntu4[name] == digest for name, digest in GO_UBUNTU4_DIGESTS.items()):
         if not current_diagnostics or ubuntu4 != GO_UBUNTU4_DIGESTS:

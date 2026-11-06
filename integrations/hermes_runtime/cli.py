@@ -247,11 +247,13 @@ def _supervise(args: argparse.Namespace) -> int:
         from .tcp_sandbox import enforce_role_tcp_ports
         assert_role_credential_isolation(profile)
         enforce_role_tcp_ports(profile)
+        from .role_status_publisher import publisher_from_process
+        publisher = publisher_from_process(profile)
     except RuntimeRefusal as exc:
         print(exc.code, file=sys.stderr)
         return CONFIG_EXIT
     secrets = load_secrets(profile.secrets_file)
-    runtime = ServiceRuntime(profile, secrets, args.hermes_bin)
+    runtime = ServiceRuntime(profile, secrets, args.hermes_bin, role_status_publisher=publisher)
     try:
         runtime.start()
     except RuntimeRefusal as exc:

@@ -583,15 +583,16 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='25b27bc0166d02d91d844fe059c3a3b6351a1980623dd6a5c82c348c98e2402b'
+    assert hashlib.sha256(current_raw).hexdigest()=='c1a09c73291ede1965fbdf2d97608ddb5ae57309a84ad616f46643de72d901c8'
     current=json.loads(current_raw)
-    assert len(before)==95 and len(current)==104
+    assert len(before)==95 and len(current)==106
     assert set(before)<=set(current)
     added={'ext/host_pull_daemon.sh','ext/host_pull_launchd.plist.template',
         'ext/paid_host_readiness.py','ext/paid_initializer.py',
         'ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py',
         'ext/paid_provider_entry.py','ext/post_failure_observation.py',
-        'ext/post_failure_observation_delivery.py'}
+        'ext/post_failure_observation_delivery.py', 'ext/participant_binding.py',
+        'ext/fabric_participant_owner.py'}
     # The accepted source union includes the protected review-routing picker,
     # provider/readiness composition and fixed-template launcher transition.
     # Preserve their finite changes without replacing the historical epoch.

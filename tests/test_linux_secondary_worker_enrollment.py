@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
 import stat
 import subprocess
 import sys
+import tarfile
 
 import pytest
 
@@ -143,13 +145,102 @@ def test_source_identity_refuses_wrong_commit_or_tree(tmp_path: Path) -> None:
 
 def test_release_archive_scope_excludes_vendor_and_unneeded_surfaces() -> None:
     m = _load()
-    assert m.RELEASE_PATHS == (
+    assert m.RELEASE_PATHS[:4] == (
         "control_plane",
         "ops/executive_os",
         "scripts/executive_os_linux_worker.py",
         "scripts/executive_os_remote_worker_gateway.py",
     )
     assert all("vendor" not in item for item in m.RELEASE_PATHS)
+    assert "integrations" not in m.RELEASE_PATHS
+    assert "integrations/business_mcp_auth" not in m.RELEASE_PATHS
+    assert "integrations/mastermind_secretary_mcp" not in m.RELEASE_PATHS
+
+
+def test_real_git_archive_preserves_runtime_byok_modules_and_role_data(tmp_path: Path) -> None:
+    """Exercise the install owner's pathspecs and isolated first-party imports.
+
+    The fixture is a source archive, not an installed interpreter or unit proof.
+    No enrollment, credential, provider, supervision or live host is invoked.
+    """
+    import yaml
+
+    m = _load()
+    repo, _, _ = _source_repo(tmp_path)
+    # Use actual tracked source bytes, with no checkout-wide sys.path fallback.
+    source = m._git(ROOT, "archive", "HEAD", "--", *m.RELEASE_PATHS).stdout
+    with tarfile.open(fileobj=io.BytesIO(source), mode="r:") as archive:
+        m._safe_archive_members(archive)
+        archive.extractall(repo, filter="data")
+    decoys = (
+        "vendor/hermes/secret.txt", "integrations/unrelated/secret.txt",
+        "integrations/business_mcp_auth/server.py", "integrations/business_mcp_auth/jwks.py",
+        "integrations/mastermind_secretary_mcp/adapter.py", "integrations/hermes_delegate/policy.py",
+        "unrelated/private.txt",
+    )
+    for relative in decoys:
+        path = repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"excluded fixture\n")
+    _git("add", ".", cwd=repo)
+    _git("commit", "-qm", "runtime source closure with excluded decoys", cwd=repo)
+    sha = _git("rev-parse", "HEAD", cwd=repo)
+    (repo / "common/untracked-private.txt").write_bytes(b"untracked fixture\n")
+    required = (
+        "common/__init__.py", "integrations/__init__.py",
+        "ops/native_fabric/quota_continuity/candidate/paid_yaml_runtime.py",
+        "ops/native_fabric/quota_continuity/candidate/paid_pyyaml_6_0_3.zip",
+        "ops/native_fabric/quota_continuity/candidate/paid_pyyaml_provenance.json",
+        "integrations/hermes_runtime/supervisor.py", "integrations/hermes_harness/native_byok.py",
+        "integrations/hermes_runtime/profile.py", "integrations/hermes_models/profile_config.py",
+        "integrations/hermes_steward/client.py", "integrations/hermes_steward/hermes.mcp.yaml",
+        "integrations/business_mcp_auth/__init__.py", "integrations/business_mcp_auth/claims.py",
+        "integrations/business_mcp_auth/contracts.py", "integrations/mastermind_secretary_mcp/__init__.py",
+        "integrations/mastermind_secretary_mcp/schemas.py",
+        *(f"integrations/hermes_runtime/profiles/{role}.yaml" for role in ("mmmeta", "mmsecretary")),
+        *(f"integrations/hermes_qualification/profiles/{role}/{name}"
+          for role in ("mmmeta", "mmsecretary") for name in ("config.yaml", "SOUL.md")),
+        *(f"integrations/hermes_models/profiles/{role}.hermes-providers.yaml"
+          for role in ("mmmeta", "mmsecretary")),
+    )
+    raw = m._git(repo, "archive", sha, "--", *m.RELEASE_PATHS).stdout
+    extracted = tmp_path / "extracted"
+    extracted.mkdir()
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
+        m._safe_archive_members(archive)
+        names = set(archive.getnames())
+        assert set(required) <= names
+        assert not (set(decoys) | {"common/untracked-private.txt"}) & names
+        for relative in required:
+            assert archive.extractfile(relative).read() == (repo / relative).read_bytes()
+        archive.extractall(extracted, filter="data")
+    modules = [
+        "integrations.hermes_runtime.supervisor", "integrations.hermes_harness.native_byok",
+        "integrations.hermes_runtime.install", "integrations.hermes_runtime.system_service",
+        "integrations.hermes_runtime.profile", "integrations.hermes_harness.native_mcp",
+        "integrations.hermes_models.profile_config", "integrations.hermes_steward.client",
+    ]
+    probe = (
+        "import importlib,json,pathlib,sys\n"
+        "root=pathlib.Path(sys.argv[1]).resolve()\n"
+        "sys.path.insert(0,str(root))\n"
+        "sys.path.append(sys.argv[2])\n"
+        "for name in json.loads(sys.argv[3]): importlib.import_module(name)\n"
+        "for name,module in tuple(sys.modules.items()):\n"
+        " if name.split('.')[0] in {'common','control_plane','ops','integrations'}:\n"
+        "  origin=getattr(module,'__file__',None)\n"
+        "  if origin: assert pathlib.Path(origin).resolve().is_relative_to(root),(name,origin)\n"
+        "print('ISOLATED_RUNTIME_BYOK_IMPORTS_OK')\n"
+    )
+    # -I -S disables repository editable-install hooks and ambient PYTHONPATH;
+    # only this fixture plus the explicitly selected PyYAML dependency is added.
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", probe, str(extracted),
+         str(Path(yaml.__file__).resolve().parent.parent), json.dumps(modules)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr[-3000:]
+    assert result.stdout.strip() == "ISOLATED_RUNTIME_BYOK_IMPORTS_OK"
 
 
 def test_linux_identities_are_consumed_from_canonical_bootstrap_source(tmp_path: Path) -> None:

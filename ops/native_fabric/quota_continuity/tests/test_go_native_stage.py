@@ -106,16 +106,25 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.path[:] = path_before
 
 
-def test_default_build_stays_exact_reviewed_104_and_go_adds_only_the_fixed_pair(builds):
+def before_participant_cohort(manifest):
+    prior = dict(manifest)
+    assert prior.pop("ext/participant_binding.py") == "09aafda1390914e283915204459e37900123cd54a3d0f4e9116102f3a8921f56"
+    assert prior.pop("ext/fabric_participant_owner.py") == "1619505962de4c73f415312871cc407777bf6c04ba6d02fb9be62c9d54a5545c"
+    assert prior["ext/fabric_operator_owner.py"] == "90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f55c5f72c0c7"
+    prior["ext/fabric_operator_owner.py"] = "f81b4f053a22ba973b06214f6d06ed2d66e3fc471c781311f074718683cf4675"
+    return prior
+
+
+def test_default_build_stays_exact_reviewed_106_and_go_adds_only_the_fixed_pair(builds):
     default_raw = (builds.default / "native-manifest.json").read_bytes()
     default = json.loads(default_raw)
     application = json.loads((builds.application / "native-manifest.json").read_bytes())
-    assert len(default) == 104
+    assert len(default) == 106
     captured = {name: g.digest((ROOT / "candidate" / name).read_bytes())
                 for name in builder.GO_APPLICATION_DEPENDENCIES}
     builder.validate_go_base_manifest(default, captured)
     assert default["ext/pick.py"] == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]
-    historical = dict(default)
+    historical = before_participant_cohort(default)
     historical.update({"ext/" + name: value for name, value in builder.GO_BASE_DEPENDENCIES.items()})
     historical["ext/pick.py"] = builder.GO_BASE_PICKER_SHA256
     assert default["ext/remote_sub_exec.py"] == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]
@@ -138,7 +147,10 @@ def test_default_build_stays_exact_reviewed_104_and_go_adds_only_the_fixed_pair(
     assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == builder.GO_BASE_MANIFEST_SHA256
     assert {k: v for k, v in application.items() if k in default} == default
     assert set(application) - set(default) == {g.GO_ENTRY, g.GO_HANDLER}
-    assert len(application) == 106
+    assert len(application) == 108
+    http = json.loads((builds.http / "native-manifest.json").read_bytes())
+    assert len(http) == 111
+    assert set(http) - set(application) == set(g.HTTP_REQUIRED)
     inventory = json.loads((builds.application / "native-source-inventory.json").read_bytes())
     component = json.loads((builds.application / "external-go-component/component.json").read_bytes())
     assert component["native_stage_dependencies"] == {n: application["ext/" + n] for n in builder.GO_APPLICATION_DEPENDENCIES}
@@ -213,7 +225,7 @@ def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path
 def test_exact_post_failure_cohort_and_prior_102_are_both_closed(builds):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-    prior = dict(current)
+    prior = before_participant_cohort(current)
     prior.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
     for name, original in builder.GO_COMPLETED_POLL_PREIMAGES.items():
         prior["ext/" + name] = original
@@ -284,7 +296,7 @@ def test_completed_poll_pair_is_closed_and_cannot_relabel_historical_102(builds)
             mixed["ext/" + name] = digest
             with pytest.raises(ValueError, match="completed-poll cohort"):
                 builder.validate_go_base_manifest(mixed, captured)
-    synthetic_prior = dict(current)
+    synthetic_prior = before_participant_cohort(current)
     synthetic_prior.update({"ext/" + name: digest
                             for name, digest in builder.GO_POST_FAILURE_PREIMAGES.items()})
     for name in builder.GO_POST_FAILURE_ADDITIONS:
@@ -318,7 +330,7 @@ def test_ubuntu4_runtime_cohort_preserves_prior_generation_and_rejects_mixtures(
     old_helper["ext/remote_sub_helpers.py"] = builder.GO_COMPLETED_POLL_PREIMAGES["remote_sub_helpers.py"]
     with pytest.raises(ValueError, match="completed-poll cohort"):
         builder.validate_go_base_manifest(old_helper, captured)
-    historical_namespace = dict(current)
+    historical_namespace = before_participant_cohort(current)
     historical_namespace.update({"ext/" + name: digest
                                  for name, digest in builder.GO_POST_FAILURE_PREIMAGES.items()})
     for name in builder.GO_POST_FAILURE_ADDITIONS:
@@ -346,3 +358,35 @@ def test_sparse_config_executor_successor_is_exact_and_does_not_mutate_manifest(
     wrong["ext/remote_sub_exec.py"] = "f" * 64
     with pytest.raises(ValueError, match="executor"):
         builder.validate_go_base_manifest(wrong, captured)
+
+
+def test_participant_cohort_preserves_prior_104_and_input_identity(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    original = dict(current)
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    prior = before_participant_cohort(current)
+    assert len(prior) == 104
+    builder.validate_go_base_manifest(prior, captured)
+    builder.validate_go_base_manifest(current, captured)
+    assert current == original
+
+
+@pytest.mark.parametrize("corruption", ["binding-absent", "owner-absent", "binding-hash",
+    "owner-hash", "old-operator-with-pair", "new-operator-without-pair", "participants-without-diagnostics"])
+def test_participant_cohort_cannot_relabel_legacy_namespace(builds, corruption):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    bad = dict(current)
+    if corruption == "binding-absent": del bad["ext/participant_binding.py"]
+    elif corruption == "owner-absent": del bad["ext/fabric_participant_owner.py"]
+    elif corruption == "binding-hash": bad["ext/participant_binding.py"] = "f" * 64
+    elif corruption == "owner-hash": bad["ext/fabric_participant_owner.py"] = "f" * 64
+    elif corruption == "old-operator-with-pair":
+        bad["ext/fabric_operator_owner.py"] = "f81b4f053a22ba973b06214f6d06ed2d66e3fc471c781311f074718683cf4675"
+    elif corruption == "new-operator-without-pair":
+        bad = before_participant_cohort(current)
+        bad["ext/fabric_operator_owner.py"] = current["ext/fabric_operator_owner.py"]
+    else:
+        for name in builder.GO_POST_FAILURE_ADDITIONS: del bad["ext/" + name]
+        assert len(bad) == 104
+    with pytest.raises(ValueError): builder.validate_go_base_manifest(bad, captured)
