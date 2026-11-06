@@ -536,7 +536,7 @@ describe('KnowledgeLibrary pending source navigation', () => {
     expect(screen.getByText(loadingText)).toBeTruthy();
     expect(query.closest('[hidden]')).not.toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: backName, exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: backName }));
     expect(readSource.mock.calls[0][0].signal.aborted).toBe(true);
     await waitFor(() => expect(document.activeElement).toBe(open));
     expect(query.closest('[hidden]')).toBeNull();
@@ -550,7 +550,7 @@ describe('KnowledgeLibrary pending source navigation', () => {
     expect(screen.getByText(loadingText)).toBeTruthy();
     expect(screen.queryByText('Scope and sources for the market intelligence project.')).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: backName, exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: backName }));
     expect(readSource.mock.calls[1][0].signal.aborted).toBe(true);
     await act(async () => { pending[1].resolve(payload); });
     await waitFor(() => expect(document.activeElement).toBe(open));
