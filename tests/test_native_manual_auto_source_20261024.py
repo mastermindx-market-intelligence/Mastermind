@@ -25,7 +25,8 @@ HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102
 PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
 PRE_POLL255_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
 PRE_POLL255_WITH_UBUNTU4_TASK_SHA = "36fbd16469befa0f4ade8d75fe15b3384a042b726668879c59ae03c82d194058"
-CURRENT_TASK_SHA = "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
+PRE_REMOTE_CWD_TASK_SHA = "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
+CURRENT_TASK_SHA = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -158,6 +159,16 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
             # Restore the exact pre-poll-qualifier epoch first. The historical
             # manual-auto fixture and every subsequent inverse stay immutable.
             latest = source.read_bytes()
+            # Undo only the remote cwd default before the exact older epochs.
+            remote_cwd = (
+                b'    # Resolve an implicit working directory on the receiving host.\n'
+                b'    # The receiving host still validates explicit --cwd values.\n'
+                b'    p_request.add_argument("--cwd", default="~")\n'
+            )
+            caller_cwd = b'    p_request.add_argument("--cwd", default=os.getcwd())\n'
+            assert latest.count(remote_cwd) == 1
+            latest = latest.replace(remote_cwd, caller_cwd, 1)
+            assert hashlib.sha256(latest).hexdigest() == PRE_REMOTE_CWD_TASK_SHA
             start = b'# These reviewed wrapper bytes classify normal SSH255 as controller uncertainty\n'
             end = b'def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]:\n'
             hook = (b'    if state == "EFFECT_UNKNOWN" and _qualify_completed_poll255(rid, original_log, **owner):\n'
