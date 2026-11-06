@@ -157,6 +157,9 @@ import {
 import { ProjectJournalReader } from "./ProjectJournalReader";
 import { AutonomyPanel } from "./supervision/AutonomyPanel";
 import { ActivationReceipt } from "./activation/ActivationReceipt";
+import { ActivationFacts } from "./activation/ActivationFacts";
+import { activationFacts, type ReceiptRoute } from "./activation/activation-facts";
+import type { OriginalOperationObservation } from "./orchestration/operation-controller";
 import { WebSessionPreview } from "./activation/WebSessionPreview";
 import { readLaunchRequestPreview } from "./activation/LaunchRequestPreview";
 import { useControlRoomSurfaceControls } from "./useControlRoomSurfaceControls";
@@ -1523,6 +1526,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       principalScope: string;
       generation: string;
     } | null>(null),
+    activationOriginal = useRef<{observation: OriginalOperationObservation;
+      binding: OrchestratorCommandBinding; frame: () => {principalScope: string; generation: string} | null;
+      selectionSeq: number} | null>(null),
+    [activationWorkReturn, setActivationWorkReturn] = useState<string | null>(null),
     pendingCommand = useRef<{
       generation: string;
       principalScope: string;
@@ -3288,10 +3295,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       const sel = state.missionSelection
         ? normalizeSelection(state.missionSelection)
         : null;
+      const original = commandSlot.current?.binding === bindingAtStart
+        ? commandSlot.current.controller.observeOriginalOperation() : null;
       // Only this owner-qualified accepted launch releases its Office handoff.
       // A refusal or unknown effect keeps the frozen context and original hold.
       setLaunchHandoff(null);
       if (sel) open(sel.workRef, sel.rootJobId,bindingAtStart.directNative?.isDirectSelection(sel)===true);
+      // Navigation invalidates the command controller. Retain only its already
+      // validated public original receipt, with the exact caller and selection
+      // lifetime; this is neither a pending store nor a lifecycle projection.
+      if (original?.status === "accepted" && sel && original.missionSelection?.workRef === sel.workRef
+          && original.missionSelection.rootJobId === sel.rootJobId && freshExecutiveOwner())
+        activationOriginal.current = {observation: original, binding: bindingAtStart,
+          frame: freshExecutiveOwner, selectionSeq: selectionSeq.current};
     }
     pending.complete({ status: state.status });
     pendingCommand.current = null;
@@ -3358,6 +3374,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       presentationSeq: commandPresentation.current.seq,
       complete: onComplete,
     };
+    activationOriginal.current = null;
+    setActivationWorkReturn(null);
     setReopenedOperation(null);
     setHeldKind(kind);
     void Promise.resolve()
@@ -3603,6 +3621,29 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     commandSlot.current.principalScope === ownerContext.principalScope &&
     commandSlot.current.generation === ownerContext.generation
       ? commandSlot.current.controller.getState() : null;
+  const readActivationOriginal = (): OriginalOperationObservation | null => {
+    try {
+      const ctx = freshExecutiveOwner(), liveAuth = window.MastermindMissionHost?.auth?.getState();
+      if (!ctx || !liveAuth?.acquisition || !commandBinding) return null;
+      const slot = commandSlot.current;
+      const live = slot?.binding === commandBinding ? slot.controller.observeOriginalOperation() : null;
+      if (live) return live;
+      const prior = activationOriginal.current, sel = prior?.observation.missionSelection;
+      return prior?.binding === commandBinding && prior.frame === freshExecutiveOwner
+        && prior.selectionSeq === selectionSeq.current && prior.observation.owner.principalScope === ctx.principalScope
+        && prior.observation.owner.generation === ctx.generation && sel?.workRef === selection?.workRef
+        && sel?.rootJobId === selection?.rootJobId ? prior.observation : null;
+    } catch {return null;}
+  };
+  const activationModel = activationFacts(readActivationOriginal(), d);
+  const navigateActivation = (route: ReceiptRoute) => {
+    const current = activationFacts(readActivationOriginal(), d);
+    if (!current || current.operationKey !== activationModel?.operationKey || current.kind !== activationModel.kind
+        || current.targetKey !== activationModel.targetKey || !current.routes.includes(route)) return;
+    if (route === "original_status") {checkCommandStatus(); return;}
+    if (route === "work") {setActivationWorkReturn(current.operationKey); setActive("Work"); return;}
+    document.getElementById("activation-session-owner")?.focus();
+  };
   // Observer-only snapshot for the fallback disclosures. A throwing or
   // absent getter degrades to null, which the fields render as unknown
   // values; reading it triggers no request, refresh or subscription change.
@@ -5708,7 +5749,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       </section>
     );
   else if (active === "Session Estate")
-    content = <><SessionEstate key={"estate:" + authRevision} state={currentControlRoom} locale={locale}
+    content = <><div id="activation-session-owner" tabIndex={-1}><SessionEstate key={"estate:" + authRevision} state={currentControlRoom} locale={locale}
       controlsHeld={controlRoomSurfaceControls.held}
       canOpenSurface={controlRoomSurfaceControls.canAct && !controlRoomSurfaceControls.held
         && controlRoomSurfaceControls.action.state !== "PENDING"
@@ -5721,12 +5762,15 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       <ControlRoomSurfaceControls key={"estate-controls:" + authRevision}
         navigation={currentControlRoom.state === "AVAILABLE" ? currentControlRoom.navigation : null}
         locale={locale} {...controlRoomSurfaceControls}/>
-    </SessionEstate>
+    </SessionEstate></div>
     <SupervisionLedger read={currentControlRoom.state === "AVAILABLE"
       ? currentControlRoom.supervision ?? { state: "UNAVAILABLE", reason: "SOURCE_UNAVAILABLE" }
       : { state: "UNAVAILABLE", reason: "SOURCE_UNAVAILABLE" }} locale={locale} onOpenMission={open}/>
     <SupervisionTrace document={d} selection={selection} locale={locale}/>
-    <ActivationReceipt state={currentControllerState} locale={locale} onReadOriginalStatus={checkCommandStatus}/>
+    <ActivationFacts model={activationModel} locale={locale} onNavigate={navigateActivation}/>
+    <details className="reason-details"><summary>{locale === "zh-CN" ? "原始请求状态" : "Original request status"}</summary>
+      <ActivationReceipt state={currentControllerState} locale={locale} onReadOriginalStatus={() => navigateActivation("original_status")}/>
+    </details>
     <WebSessionPreview key={authRevision} document={d} selection={selection} locale={locale}/></>;
   else if (active === "Control Room")
     content = (
@@ -5837,6 +5881,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <><Evidence d={d} />{productAcceptancePanel}</>;
   else content = <Conversation locale={locale} />;
+  if (active === "Work" && activationWorkReturn && activationModel?.operationKey === activationWorkReturn)
+    content = <><button type="button" onClick={() => {
+      const original = readActivationOriginal();
+      if (original?.pointer.operationKey !== activationWorkReturn) return;
+      setActive("Session Estate"); setActivationWorkReturn(null);
+    }}>{locale === "zh-CN" ? "返回激活回执" : "Back to activation receipts"}</button>{content}</>;
   if (active === "Projects" && conversationNavigation.projectReturn !== null &&
       !projectJourney.shown && !projectJourney.invalidLink &&
       conversationNavigation.projectReturn === projectWorkRef)
