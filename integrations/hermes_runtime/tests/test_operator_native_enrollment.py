@@ -20,7 +20,7 @@ from integrations.hermes_harness.tests.test_native_executive_consumer import (
 )
 from integrations.hermes_runtime import cli, native_gateway_entry, native_session_control
 from integrations.hermes_runtime import role_isolation, system_service, tcp_sandbox
-from integrations.hermes_runtime.constants import PINNED_UPSTREAM_SHA
+from integrations.hermes_runtime.constants import PINNED_UPSTREAM_SHA, conversation_contract
 from integrations.hermes_runtime.errors import RuntimeRefusal
 from integrations.hermes_runtime.profile import dump_profile
 from ops.executive_os import hermes_role_metadata_observer as observer
@@ -32,22 +32,27 @@ BOOT = "fixture-original-boot"
 
 @pytest.fixture
 def enrollment_command(tmp_path, monkeypatch):
-    def build(version=3):
+    def build(version=3, role="mmsecretary"):
         publication = publication_document() if version == 3 else None
-        installation = validate_hermes_runtime_installation(
-            _installation(consumer=publication))
-        row = installation["roles"][1]
+        document = _installation(consumer=publication, role=role)
+        row = next(item for item in document["roles"] if item["role"] == role)
+        row["native_gateway"]["session_enrollment"]["schema"] = conversation_contract(role).enrollment_schema
+        if publication is not None:
+            publication["session"].update(role=role, principal_id=f"uid:{row['uid']}")
+            row["native_gateway"]["executive_consumer"] = publication
+        installation = validate_hermes_runtime_installation(document)
+        row = next(item for item in installation["roles"] if item["role"] == role)
         recipe = deepcopy(row["native_gateway"])
         state_dir = tmp_path / ("v" + str(version)) / "state"
         home = state_dir / "current/hermes-home"
         profile = replace(
-            compose_profile("mmsecretary", state_dir=state_dir,
+            compose_profile(role, state_dir=state_dir,
                             secrets_file=state_dir / "role.env", hermes_home=home),
             gateway_backend="native-session-authority",
-            native_provider_id="byteplus-modelark.glm-5.3-flash",
+            native_provider_id=("byteplus-modelark.glm-5.3-flash" if role == "mmsecretary" else "zai.glm-5.3"),
             tool_allowlist=frozenset({"clarify"}))
         profile_path = state_dir / "current/profile.yaml"
-        native_config = home / "profiles/mmsecretary/config.yaml"
+        native_config = home / "profiles" / role / "config.yaml"
         native_config.parent.mkdir(parents=True)
         native_config.write_text(expected_native_config(profile, publication), encoding="utf-8")
         native_config.chmod(0o600)
@@ -60,7 +65,7 @@ def enrollment_command(tmp_path, monkeypatch):
             change_after_read=False, change_after_create=False,
             prepares=0, checks=0)
         target = dict(profile_id=str(actual_home), session_id="original-native-session",
-                      principal_id="uid:994", instance_id="original-native-owner",
+                      principal_id=f"uid:{row['uid']}", instance_id="original-native-owner",
                       authority_epoch=7, revision=0, execution_generation=0)
         endpoint = SimpleNamespace(
             profile_id=str(actual_home), instance_id=target["instance_id"],
@@ -102,12 +107,12 @@ def enrollment_command(tmp_path, monkeypatch):
                 check()
 
             def role_facts(self, role, properties, boot):
-                assert role == "mmsecretary" and boot == BOOT and properties == {"Id": "original"}
+                assert role == profile.role and boot == BOOT and properties == {"Id": "original"}
                 return dict(main_pid=100, boot_id=BOOT, gateway_listener="qualified")
 
         class Client:
-            def __init__(self, directory, *, expected_pid):
-                assert directory == actual_home and expected_pid == 200
+            def __init__(self, directory, *, expected_pid, role="mmsecretary"):
+                assert directory == actual_home and expected_pid == 200 and role == profile.role
 
             def inspect_enrollment(self, implementation, request):
                 assert implementation == SHA and request == recipe["session_enrollment"]["request_id"]
@@ -116,7 +121,7 @@ def enrollment_command(tmp_path, monkeypatch):
                     state.changed = True
                 return native_session_control.enrollment_result(
                     implementation, request, state.inspect_status,
-                    target if state.inspect_status == "ENROLLED" else None)
+                    target if state.inspect_status == "ENROLLED" else None, role=profile.role)
 
             def enroll_session(self, implementation, request):
                 assert implementation == SHA and request == recipe["session_enrollment"]["request_id"]
@@ -127,10 +132,10 @@ def enrollment_command(tmp_path, monkeypatch):
                     raise TimeoutError("original native reply lost")
                 state.inspect_status = "ENROLLED"
                 return native_session_control.enrollment_result(
-                    implementation, request, "ENROLLED", target)
+                    implementation, request, "ENROLLED", target, role=profile.role)
 
         async def query(*, role):
-            assert role == "mmsecretary"
+            assert role == profile.role
             return [dict(role=role, unit_properties={"Id": "original"})]
 
         def prepare(path):
@@ -155,7 +160,7 @@ def enrollment_command(tmp_path, monkeypatch):
         monkeypatch.setattr(observer, "_query_fixed_pid1", query)
         monkeypatch.setattr(observer, "_boot_id", lambda: BOOT)
         monkeypatch.setattr(system_service, "assert_root_service_cgroup",
-                            lambda role: None if role == "mmsecretary" else pytest.fail("foreign role"))
+                            lambda role: None if role == profile.role else pytest.fail("foreign role"))
         monkeypatch.setattr(system_service, "assert_role_network_profile", lambda current: None)
         monkeypatch.setattr(role_isolation, "assert_role_credential_isolation", lambda current: None)
         monkeypatch.setattr(tcp_sandbox, "enforce_role_tcp_ports", lambda current: None)
@@ -166,9 +171,11 @@ def enrollment_command(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("version", [2, 3])
-def test_actual_command_enrolls_original_once_and_reopens_existing(enrollment_command, capsys, version):
-    world = enrollment_command(version)
-    argv = ["enroll-secretary-session", "--profile", str(world.path),
+@pytest.mark.parametrize("role", ["mmsecretary", "mmmeta"])
+def test_actual_command_enrolls_original_once_and_reopens_existing(enrollment_command, capsys, version, role):
+    world = enrollment_command(version, role)
+    command = "enroll-secretary-session" if role == "mmsecretary" else "enroll-meta-session"
+    argv = [command, "--profile", str(world.path),
             "--hermes-bin", str(world.binary)]
     for _ in range(2):
         assert cli.main(argv, native_launch=world.launch) == 0
@@ -262,3 +269,12 @@ def test_v3_refuses_bearer_material_in_new_connection(enrollment_command):
     publication["mcp"]["client_id"] = "Bearer synthetic-publication-sentinel"
     with pytest.raises(RuntimeRefusal):
         expected_native_config(world.profile, publication)
+
+
+@pytest.mark.parametrize("role", ["mmsecretary", "mmmeta"])
+def test_command_cannot_enroll_the_other_role(enrollment_command, role):
+    world = enrollment_command(role=role)
+    operation = cli._enroll_meta_session if role == "mmsecretary" else cli._enroll_secretary_session
+    with pytest.raises(RuntimeRefusal, match="NATIVE_ENROLLMENT_INSTALLATION_REQUIRED"):
+        operation(world.path, world.binary, native_launch=world.launch)
+    assert world.state.qualifications == world.state.inspections == world.state.creations == 0

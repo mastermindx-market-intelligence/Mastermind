@@ -175,8 +175,9 @@ class NativeSupervisorTests(unittest.TestCase):
         enrollment = native_session_control.enrollment_result(
             OWNER, publication.session.request_id, "ENROLLED", target)
         class Client:
-            def __init__(self, home, expected_pid=None):
+            def __init__(self, home, expected_pid=None, role="mmsecretary"):
                 assert home == runtime._native_home and expected_pid == runtime._child.pid
+                assert role == runtime.profile.role
             def consumer_extension(self):
                 return {"schema": native_session_control.SCHEMA,
                         "status": "OBSERVED", "extension": dict(extension)}

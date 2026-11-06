@@ -90,7 +90,7 @@ def install(
     if profile.gateway_backend == "native-session-authority":
         from ops.executive_os.release_manifest import _hermes_native_gateway, ReleaseManifestError
         try:
-            native = _hermes_native_gateway(native_installation)
+            native = _hermes_native_gateway(native_installation, role=profile.role)
         except (ReleaseManifestError, TypeError, ValueError):
             raise RuntimeRefusal("NATIVE_INSTALLATION_REQUIRED") from None
         if (fetch or upstream_source is None

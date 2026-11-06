@@ -197,9 +197,10 @@ installed/product work is:
    originating request/turn through the existing owners. Never choose the latest
    request for a root or equate native UID/session identity with the Office or
    COO OAuth principal.
-4. Complete the separately scoped Meta-CEO participant. The current private
-   conversation adapter admits mmsecretary only; a role label does not enroll
-   mmmeta or authorize it as a COO Attempt.
+4. Complete the Meta-CEO participant's public gateway, transport and Office
+   selection. The native enrollment/control owner now supports explicit mmmeta
+   identity; that source support does not authorize a COO Attempt or make the
+   Meta role selectable in Office.
 
 The installed role/proxy/provider/canary/cutover restrictions remain separate
 from source completion. Independent review is not a blanket prerequisite for
@@ -219,3 +220,28 @@ The v3 renderer preserves the approved, disabled Steward environment placeholder
 The added Executive MCP connection and plugin grant separately reject bearer
 material; neither carries a credential. This source compatibility does not
 execute an installed enrollment or satisfy the held host/provider proof.
+
+### Explicit Meta native enrollment
+
+The existing native enrollment and private-control owners now select one closed
+role contract: mmsecretary or mmmeta. The Meta command is enroll-meta-session;
+its enrollment receipt, private verb and result schema are distinct from the
+Secretary's existing wire values. A runner installs one selected role, and a
+client refuses a sibling-role result before opening the private socket.
+
+Held v2/v3 installation recipes select the matching command and bind consumer
+role, enrollment request and Unix principal. The prior Secretary command and
+recipes retain their defaults. No role service is enabled by this source change.
+
+The isolated release bootstrap stages bounded consumer data without importing
+first-party modules. It then runs the existing publication validator through the
+held source loader, checks exact candidate identity and qualifies native
+dependency bytes while only the original stdlib paths are visible. The same
+source owner survives two finite import scopes; each finder freezes its own
+expected paths and continues to refuse drift. Dependency preparation performs
+the same semantic checks before preparing its inventory.
+
+Focused proof includes actual command/renderer qualification, original native
+enrollment recovery with owner doubles, and fresh isolated Python runtime and
+dependency-preparation entries with explicit held-descriptor/effect doubles.
+These checks are source evidence, not installed enrollment or a provider turn.

@@ -354,12 +354,12 @@ class ServiceRuntime:
             publication = publication_from_document(self._consumer_publication())
             implementation = launch.owner.root.name
             launch.observe_child(child_pid)
-            client = NativeSecretaryClient(home, expected_pid=child_pid)
+            client = NativeSecretaryClient(home, expected_pid=child_pid, role=self.profile.role)
             result = client.consumer_extension()
             enrollment = validate_enrollment_result(
                 client.inspect_enrollment(implementation, publication.session.request_id),
                 implementation_sha=implementation, request_id=publication.session.request_id,
-                profile_id=str(home), principal_id=publication.session.principal_id)
+                profile_id=str(home), principal_id=publication.session.principal_id, role=self.profile.role)
             launch.observe_child(child_pid)
             if (not isinstance(result, dict) or result.get("status") != "OBSERVED"
                     or enrollment["status"] != "ENROLLED"

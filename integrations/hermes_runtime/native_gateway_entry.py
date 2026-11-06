@@ -205,7 +205,8 @@ async def _qualify_consumer(runner, document, role_home: Path, launch, *,
     owner_loop = asyncio.get_running_loop()
     owner_context = contextvars.copy_context()
     enrollment = read_enrolled_session(
-        runner, role_home, owner, publication.session.request_id, publication.session.principal_id)
+        runner, role_home, owner, publication.session.request_id, publication.session.principal_id,
+        role=publication.session.role)
     if enrollment["status"] != "ENROLLED":
         slot.qualification_outcome = "UNBOUND"
         return
@@ -232,7 +233,8 @@ async def _qualify_consumer(runner, document, role_home: Path, launch, *,
                 or descriptor.get("authority_epoch") != target["authority_epoch"]):
             return False
         observed = read_enrolled_session(
-            runner, role_home, owner, publication.session.request_id, publication.session.principal_id)
+            runner, role_home, owner, publication.session.request_id, publication.session.principal_id,
+        role=publication.session.role)
         return (observed["status"] == "ENROLLED"
                 and tuple(observed["target"].get(key) for key in identity_keys) == original_identity
                 and observed["route"] == original_route and package_check() is True)
@@ -375,7 +377,7 @@ def _install_consumer_seam(launch, vendor: Path, role_home: Path, *, gateway=Tru
         from .native_session_control import read_enrolled_session
         observed = read_enrolled_session(
             runner, role_home, owner, publication.session.request_id,
-            publication.session.principal_id)
+            publication.session.principal_id, role=publication.session.role)
         target = observed["target"] or {}
         key = (observed["status"], target.get("session_id"), target.get("instance_id"),
                target.get("authority_epoch"), observed["route"])
