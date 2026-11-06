@@ -391,7 +391,10 @@ export function ProjectPlanPanel({
     displayedPlan = document;
   }
 
-  const proposal=displayedPlan?.schema==='mastermind.workspace_project_plan.v2'&&displayedPlan.availability==='AVAILABLE'
+  const originalMissing=!!initialProposalId&&displayedPlan?.availability==='AVAILABLE'&&
+    (displayedPlan.schema!=='mastermind.workspace_project_plan.v2'||displayedPlan.continuity.proposals.state!=='AVAILABLE'||
+      !displayedPlan.continuity.proposals.items.some(item=>'proposal_id' in item&&item.proposal_id===initialProposalId));
+  const proposal=originalMissing?null:displayedPlan?.schema==='mastermind.workspace_project_plan.v2'&&displayedPlan.availability==='AVAILABLE'
     ?selectedRecordedPlanProposal(displayedPlan.continuity,proposalHint):null;
   currentProposal.current=proposal?.proposal_id??null;
   const capturedFence=fence.current;
@@ -451,7 +454,7 @@ export function ProjectPlanPanel({
         <AvailablePlanBody plan={displayedPlan.plan} source={displayedPlan.source} chinese={chinese}
           hasContinuity={displayedPlan.schema === "mastermind.workspace_project_plan.v2"}
           continuity={displayedPlan.schema === "mastermind.workspace_project_plan.v2"
-            ? <ProjectPlanContinuity data={displayedPlan.continuity} locale={locale}
+            ? originalMissing ? <p role="status">{chinese?"此次当前计划读取未提供此原始提案；未选择替代提案。":"This original proposal is not supplied by the current Plan read; no replacement was selected."}</p> : <ProjectPlanContinuity data={displayedPlan.continuity} locale={locale}
                 selectedProposalId={proposalHint} onSelectedProposal={setProposalHint}/> : undefined} />
       </div>}
   </section>;

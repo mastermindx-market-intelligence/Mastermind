@@ -40,6 +40,7 @@ export interface ProjectJourneyStateApi {
   draftFiles: readonly ProjectDraftFile[];
   originalFileLookup: ProjectDraftFileLookup | null;
   proposalOriginal: PlanProposalOriginal | null;
+  currentProposalOriginal: ()=>PlanProposalOriginal|null;
   onProposalOriginalChange: (value:PlanProposalOriginal|null)=>void;
   filesHeld: boolean;
   onDraftFilesChange: (files:readonly ProjectDraftFile[])=>void;
@@ -575,7 +576,8 @@ export function useProjectJourneyState(props: ProjectJourneyStateProps): Project
     goalBelongsToSelection: visible,
     draftFiles:filesVisible(state,actor)?state.files!.rows:[],
     originalFileLookup:fileLookupFor(state,state.selection),
-    proposalOriginal:proposalOriginalFor(state,state.selection),onProposalOriginalChange,
+    proposalOriginal:proposalOriginalFor(state,state.selection),
+    currentProposalOriginal:()=>isCurrent()?proposalOriginalFor(stateRef.current,stateRef.current.selection):null,onProposalOriginalChange,
     filesHeld:!!state.files?.rows.length&&!filesVisible(state,actor),
     onDraftFilesChange,onOriginalFileLookupChange,invalidateFilesAuth,checkRetainedFileDraft,discardRetainedFiles,
     retainedGoal,

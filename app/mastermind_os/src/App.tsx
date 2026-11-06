@@ -5313,7 +5313,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         onGoalChange={text => {if (nativeGoal.canEdit) projectJourney.onGoalChange(text);}}
         draftFiles={projectJourney.draftFiles} onDraftFilesChange={projectJourney.onDraftFilesChange}
         originalFileLookup={projectJourney.originalFileLookup} onOriginalFileLookupChange={projectJourney.onOriginalFileLookupChange}
-        proposalOriginal={projectJourney.proposalOriginal} onProposalOriginalChange={projectJourney.onProposalOriginalChange}/>
+        proposalOriginal={projectJourney.proposalOriginal} currentProposalOriginal={projectJourney.currentProposalOriginal} onProposalOriginalChange={projectJourney.onProposalOriginalChange}/>
       {projectJourney.filesHeld && <section className="card" aria-label={locale==='zh-CN'?'保留的文件草稿':'Held file draft'}>
         <p>{locale==='zh-CN'?'文件草稿已为原始项目及登录身份保留。':'The file draft is held for its original project and signed-in identity.'}</p>
         <button type="button" onClick={()=>void projectJourney.checkRetainedFileDraft()}>{locale==='zh-CN'?'查询文件草稿访问状态':'Check file draft access'}</button>
