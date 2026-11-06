@@ -55,6 +55,14 @@ G7B_MAC_ADDED_RE='^requirements/[A-Za-z0-9][A-Za-z0-9._-]*-macos-arm64-py312[.](
 # 0 non-comment lines = equal, any pin/extra/hash/option line = STOP. The #1714 trio path and D-G7B-2 are unchanged.
 G7B_GATE_LOCKS="requirements/gate-linux-x86_64-py312.lock
 requirements/gate-macos-arm64-py312.lock"
+# G7a rev 3.6 (seat ruling D-G7A-1, 2026-11-06): #1422 (b796d4505) changed portfolio/forward_evaluation.py OLD->SHA in one hunk of
+# _current_exposure_metrics (build_snapshot path only), traced inert to every deploy probe and runbook mirror (evidence
+# runtime-rev36-build-20261106T0607Z/G7A_forward_evaluation_trace.md). Admitted ONLY as this exact mode+blob pair; any other blob or
+# mode, a git read failure, or a change to any other MECH path STOPs.
+G7A_FE_PATH=portfolio/forward_evaluation.py
+G7A_FE_OLD_ENTRY="100644 blob 46031e40a2510b49cd4d3dce23a5ed05cc759213"
+G7A_FE_NEW_ENTRY="100644 blob 13d15e91823d2b46b97dd4057c04d6c8628a29e0"
+G7A_PR1422=b796d450505f77a3c9a0716c2c825db9800c27a7
 SHOW_PROPS="-p ActiveState -p SubState -p MainPID -p ActiveEnterTimestamp -p ExecMainStartTimestamp -p NRestarts -p FragmentPath -p DropInPaths -p NeedDaemonReload -p ControlGroup -p Result -p InvocationID"
 VPS=(ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=20 "$HOST")
 
@@ -275,6 +283,25 @@ g6_forward() {
 }
 gates_all() { g5_clock; g8_master; g12_events; g2_cgroup; g3_apt; g4_gate; g6_forward; }
 
+g7_pipe_ok() {  # g7_pipe_ok "${PIPESTATUS[@]}": rc 0 iff stage 1 (git) exited 0 and every later grep stage 0|1 (2 = error). rev 3.6 (r6 MINOR)
+  [ "$1" = 0 ] || return 1; shift
+  local s; for s in "$@"; do [ "$s" -le 1 ] || return 1; done
+  return 0
+}
+
+g7a_classify() {  # g7a_classify <wt> <old> <sha>: stdout G7A_MODE (none|D-G7A-1) rc 0; stderr reason rc 1. git reads only.
+  local wt=$1 old=$2 sha=$3 mech oe ne
+  mech=$(git -C "$wt" diff --no-renames --name-only "$old" "$sha" -- "${MECH[@]}") || { echo "G7a: git diff failed - STOP, seat" >&2; return 1; }
+  [ -n "$mech" ] || { echo none; return 0; }
+  [ "$mech" = "$G7A_FE_PATH" ] || { echo "G7a: deploy/runtime mechanics changed since OLD: $(echo $mech) - seat ruling (the runbook's mirrors would be stale)" >&2; return 1; }
+  oe=$(git -C "$wt" ls-tree "$old" -- "$G7A_FE_PATH") || { echo "G7a: git ls-tree OLD failed - STOP, seat" >&2; return 1; }
+  ne=$(git -C "$wt" ls-tree "$sha" -- "$G7A_FE_PATH") || { echo "G7a: git ls-tree SHA failed - STOP, seat" >&2; return 1; }
+  if [ "$oe" != "$G7A_FE_OLD_ENTRY"$'\t'"$G7A_FE_PATH" ] || [ "$ne" != "$G7A_FE_NEW_ENTRY"$'\t'"$G7A_FE_PATH" ]; then
+    echo "G7a: $G7A_FE_PATH changed since OLD but not as the D-G7A-1 pair (OLD '$oe' -> SHA '$ne') - STOP, seat" >&2; return 1
+  fi
+  echo D-G7A-1
+}
+
 g7b_mac_added() {  # g7b_mac_added <wt> <old> <sha>: stdout the D-G7B-2 admitted paths, sorted (may be empty); rc 1 = git failed. git reads only.
   local ns; ns=$(git -C "$1" diff --no-renames --name-status --diff-filter=A "$2" "$3" -- requirements/) || return 1
   printf '%s\n' "$ns" | cut -f2- | grep -E "$G7B_MAC_ADDED_RE" | grep -vi '^requirements/gate-' | sort   # rev 3.5 (r5o NIT): case-insensitive gate-* exclusion
@@ -306,7 +333,8 @@ g7b_classify() {  # g7b_classify <wt> <old> <sha>: stdout T2_MODE (equal|floor_p
   [ "$dep" = "$SDK_TRIO" ] || g7b_gate_locks_only "$dep" || { echo "G7b: dependency drift beyond the #1714 trio / the D-G7B-3 gate-lock subset: $(echo $dep) - STOP, seat" >&2; return 1; }
   # rev 3.5 / D-G7B-3: on a gate-lock-only drift pyproject.toml is unchanged, so plines/sdk/rest are empty and only lockbody decides
   local plines sdk sdk_bad rest lockbody
-  plines=$(git -C "$wt" diff --text --no-textconv --no-ext-diff -U0 "$old" "$sha" -- pyproject.toml | grep -E '^[-+]' | grep -vE '^(--- |\+\+\+ )' | grep -vE '^[-+][[:space:]]*#')
+  plines=$(git -C "$wt" diff --text --no-textconv --no-ext-diff -U0 "$old" "$sha" -- pyproject.toml | grep -E '^[-+]' | grep -vE '^(--- |\+\+\+ )' | grep -vE '^[-+][[:space:]]*#'; g7_pipe_ok "${PIPESTATUS[@]}") \
+    || { echo "G7b: pyproject.toml diff failed - STOP, seat" >&2; return 1; }   # rev 3.6 (r6 MINOR): a git failure must not read as an empty diff
   sdk=$(printf '%s\n' "$plines" | grep 'claude-agent-sdk' | grep -v '^$')                 # the floor's -/+ lines
   sdk_bad=$(printf '%s\n' "$sdk" | grep '^+' | grep -vc 'claude-agent-sdk>=0\.2')          # a new floor must stay in the 0.2 series
   rest=$(printf '%s\n' "$plines" | grep -v 'claude-agent-sdk' | grep -v '^$')
@@ -315,7 +343,8 @@ g7b_classify() {  # g7b_classify <wt> <old> <sha>: stdout T2_MODE (equal|floor_p
     echo "G7b: pyproject drift is not the claude-agent-sdk floor / the ruled dev bound (D-G7B-1): $(echo $rest) - STOP, seat" >&2; return 1
   fi
   if [ -n "$sdk" ]; then echo floor_pending; return 0; fi   # #1714 trio: rev-2 semantics, T2 runs in floor_pending mode
-  lockbody=$(git -C "$wt" diff --text --no-textconv --no-ext-diff -U0 "$old" "$sha" -- requirements/gate-linux-x86_64-py312.lock requirements/gate-macos-arm64-py312.lock | grep -E '^[-+]' | grep -vE '^(--- |\+\+\+ )' | grep -vcE '^[-+][[:space:]]*#')   # rev 3.1: column-0 option lines (-r, --index-url, -e) count as body lines; only the ---/+++ headers are dropped. rev 3.4: the two gate locks only. rev 3.5 (r5o NIT): --text --no-textconv --no-ext-diff
+  lockbody=$(git -C "$wt" diff --no-renames --text --no-textconv --no-ext-diff -U0 "$old" "$sha" -- requirements/gate-linux-x86_64-py312.lock requirements/gate-macos-arm64-py312.lock | grep -E '^[-+]' | grep -vE '^(--- |\+\+\+ )' | grep -vcE '^[-+][[:space:]]*#'; g7_pipe_ok "${PIPESTATUS[@]}") \
+    || { echo "G7b: gate-lock diff failed - STOP, seat" >&2; return 1; }   # rev 3.1: column-0 option lines (-r, --index-url, -e) count as body lines; only the ---/+++ headers are dropped. rev 3.4: the two gate locks only. rev 3.5 (r5o NIT): --text --no-textconv --no-ext-diff. rev 3.6 (r6 MINOR/NIT): pipeline status checked (grep -c exits 1 on a zero count, so not `|| return`); --no-renames
   [ "$lockbody" = 0 ] || { echo "G7b: $lockbody non-comment gate-lock line(s) changed without an SDK floor (pins/extras/hashes) - STOP, seat" >&2; return 1; }
   echo equal
 }
@@ -380,8 +409,13 @@ EOF
   rm -f "$a/probe.txt"; rmdir "$a" "$b"
   # 0.5 G7 composition gates
   git -C "$wt" merge-base --is-ancestor "$OLD" "$sha" || stop "G7: OLD $OLD is not an ancestor of $sha"
-  local mech; mech=$(git -C "$wt" diff --name-only "$OLD" "$sha" -- "${MECH[@]}")
-  [ -z "$mech" ] || stop "G7a: deploy/runtime mechanics changed since OLD: $(echo $mech) - seat ruling (the runbook's mirrors would be stale)"
+  local g7a; g7a=$(g7a_classify "$wt" "$OLD" "$sha" 2> "$EV/gates/G7a.reason") || stop "$(cat "$EV/gates/G7a.reason")"   # rev 3.6 / D-G7A-1
+  rm -f "$EV/gates/G7a.reason"
+  if [ "$g7a" = D-G7A-1 ]; then
+    printf 'G7a (rev 3.6): %s changed OLD->SHA exactly as the D-G7A-1 pair (OLD %s -> SHA %s; #1422 %s, one hunk of _current_exposure_metrics on the build_snapshot path), traced inert to the deploy probes and the runbook G4/G6 mirrors (evidence runtime-rev36-build-20261106T0607Z/G7A_forward_evaluation_trace.md). Every other MECH path is unchanged OLD->SHA.\n' \
+      "$G7A_FE_PATH" "$G7A_FE_OLD_ENTRY" "$G7A_FE_NEW_ENTRY" "${G7A_PR1422:0:9}" > "$EV/gates/G7a.RULING" || stop "G7a ruling record"
+  fi
+  state G7A_MODE "$g7a"
   local t2; t2=$(g7b_classify "$wt" "$OLD" "$sha" 2> "$EV/gates/G7b.reason") || stop "$(cat "$EV/gates/G7b.reason")"
   rm -f "$EV/gates/G7b.reason"
   git -C "$wt" diff -U0 "$OLD" "$sha" -- pyproject.toml requirements/ > "$EV/identity/dep_drift.diff" || stop "dep drift diff"
@@ -395,7 +429,7 @@ EOF
   state T2_MODE "$t2"
   git -C "$wt" diff --name-status "$OLD" "$sha" > "$EV/identity/old_to_sha.name-status.txt"
   pass G7
-  say "s0 PASS: SHA=$sha T2_MODE=$t2 WT=$wt"
+  say "s0 PASS: SHA=$sha T2_MODE=$t2 G7A_MODE=$g7a WT=$wt"
   echo "export PBR_EV=$EV"
 }
 
@@ -972,7 +1006,7 @@ rollback_c() {  # transactional re-deploy of OLD through deploy_code_to_vps.sh (
 }
 rollback_c_result() { STEP=R-c-result; load; classify rc "$OLD" "$EV/rollback/rc.deploy.log"; state ROLLED_BACK R-c; say "R-c OK - run proof-old"; }
 
-g7b_selftest() {  # helper import check + twenty-one synthetic repos + one live read of SEAT_WT (git only, no host contact); rc 0 = all PASS
+g7b_selftest() {  # helper import check + 24 G7b and 12 G7a synthetic repos + three reads of SEAT_WT (git only, no host contact); rc 0 = all PASS
   STEP=g7b-selftest
   local root fail=0 n=0 r live
   root=$(mktemp -d) || stop "mktemp"
@@ -1001,15 +1035,26 @@ g7b_selftest() {  # helper import check + twenty-one synthetic repos + one live 
   _base() {  # _base <case>: commit the working change in $r as the new OLD (no classification)
     "${_g[@]}" -C "$r" add -A && "${_g[@]}" -C "$r" commit -qm base || stop "selftest base $1"
   }
-  _expect() {  # _expect <case> <repo> <old> <new> <want: equal|floor_pending|STOP|ANY>
+  _expect() {  # _expect <case> <repo> <old> <new> <want: equal|floor_pending|none|D-G7A-1|STOP|ANY> [classifier, default g7b_classify]
     n=$((n + 1))
-    local got rc; got=$(g7b_classify "$2" "$3" "$4" 2>/dev/null); rc=$?; [ "$rc" -eq 0 ] || got=STOP
+    local got rc; got=$("${6:-g7b_classify}" "$2" "$3" "$4" 2>/dev/null); rc=$?; [ "$rc" -eq 0 ] || got=STOP
     if [ "$got" = "$5" ] || { [ "$5" = ANY ] && [ "$got" != STOP ]; }; then say "g7b-selftest $1: PASS ($got)"
     else say "g7b-selftest $1: FAIL want=$5 got=$got"; fail=1; fi
   }
-  _run() {  # _run <case> <want>: commit the working change in $r, classify HEAD~1..HEAD
+  _run() {  # _run <case> <want> [classifier]: commit the working change in $r, classify HEAD~1..HEAD
     "${_g[@]}" -C "$r" add -A && "${_g[@]}" -C "$r" commit -qm new || stop "selftest commit $1"
-    _expect "$1" "$r" "$(git -C "$r" rev-parse HEAD~1)" "$(git -C "$r" rev-parse HEAD)" "$2"
+    _expect "$1" "$r" "$(git -C "$r" rev-parse HEAD~1)" "$(git -C "$r" rev-parse HEAD)" "$2" "${3:-}"
+  }
+  _unread() {  # _unread <repo> <path>: commit the working change, then delete the loose object of <path> at HEAD (git cannot read it)
+    "${_g[@]}" -C "$1" add -A && "${_g[@]}" -C "$1" commit -qm new || return 1
+    local o; o=$(git -C "$1" rev-parse "HEAD:$2") && [ -f "$1/.git/objects/${o:0:2}/${o:2}" ] && rm -f "$1/.git/objects/${o:0:2}/${o:2}"
+  }
+  _mka() {  # _mka <name>: repo with forward_evaluation.py = the D-G7A-1 OLD blob plus one other MECH path; prints its path
+    local d=$root/$1
+    mkdir -p "$d/portfolio" "$d/app" && "${_g[@]}" -C "$d" init -q || return 1
+    cp "$fe_a" "$d/$G7A_FE_PATH" && echo main > "$d/app/main.py" && echo old > "$d/README.md" || return 1
+    "${_g[@]}" -C "$d" add -A && "${_g[@]}" -C "$d" commit -qm old || return 1
+    echo "$d"
   }
   local cmt=$'    # pytest 9.2.0 reds five existing tests at teardown; hold below 9.2\n'
   n=$((n + 1)); if "$PY_WT" -E -s -B "$WT_TOOL" --help > /dev/null 2>&1; then say "g7b-selftest c0_wt_tool: PASS (helper imports under -E -s -B)"; else say "g7b-selftest c0_wt_tool: FAIL ($PY_WT -E -s -B $WT_TOOL --help)"; fail=1; fi
@@ -1065,12 +1110,60 @@ g7b_selftest() {  # helper import check + twenty-one synthetic repos + one live 
   r=$(_mk c22_lock_pin_pyproject_equal) || stop "mk"
     _lock 1909 0.1.0 s1 9.2.0 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock 1909 0.1.0 s1 9.2.0 "$r/requirements/gate-macos-arm64-py312.lock"
     _run c22_lock_pin_pyproject_equal STOP
+  # rev 3.6 (r6 MINOR/NIT): an unreadable blob or a rename-paired gate lock must STOP, never read as an empty diff
+  r=$(_mk c23_lock_blob_unreadable) || stop "mk"
+    _lock 1909 0.1.0 s1 9.1.1 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock 1909 0.1.0 s1 9.1.1 "$r/requirements/gate-macos-arm64-py312.lock"
+    _unread "$r" requirements/gate-linux-x86_64-py312.lock || stop "selftest unread c23"
+    _expect c23_lock_blob_unreadable "$r" "$(git -C "$r" rev-parse HEAD~1)" "$(git -C "$r" rev-parse HEAD)" STOP
+  r=$(_mk c24_pyproject_blob_unreadable) || stop "mk"; _pp 0.2.120 '8,<10' '' '' "$r/pyproject.toml"
+    _lock bbbb 0.1.0 s1 9.1.1 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock bbbb 0.1.0 s1 9.1.1 "$r/requirements/gate-macos-arm64-py312.lock"
+    _unread "$r" pyproject.toml || stop "selftest unread c24"
+    _expect c24_pyproject_blob_unreadable "$r" "$(git -C "$r" rev-parse HEAD~1)" "$(git -C "$r" rev-parse HEAD)" STOP
+  r=$(_mk c25_lock_rename_pair) || stop "mk"; rm "$r/requirements/gate-macos-arm64-py312.lock"; _base c25_lock_rename_pair
+    "${_g[@]}" -C "$r" mv requirements/gate-linux-x86_64-py312.lock requirements/gate-macos-arm64-py312.lock || stop "selftest mv"
+    _run c25_lock_rename_pair STOP
   live=$(git -C "$SEAT_WT" rev-parse --verify -q origin/master) || stop "SEAT_WT origin/master unreadable"
   _expect "c8_live(OLD..origin/master@${live:0:8})" "$SEAT_WT" "$OLD" "$live" ANY
+  # rev 3.6 / D-G7A-1: forward_evaluation.py is admitted only as the exact OLD->SHA mode+blob pair; synthetic repos carry the real blobs
+  local fe_a=$root/fe.old fe_b=$root/fe.new
+  git -C "$SEAT_WT" cat-file blob "${G7A_FE_OLD_ENTRY##* }" > "$fe_a" && git -C "$SEAT_WT" cat-file blob "${G7A_FE_NEW_ENTRY##* }" > "$fe_b" \
+    || stop "selftest: the D-G7A-1 blobs are unreadable in $SEAT_WT"
+  r=$(_mka a1_unrelated) || stop "mk"; echo new > "$r/README.md"; _run a1_unrelated none g7a_classify
+  r=$(_mka a2_exact_pair) || stop "mk"; cp "$fe_b" "$r/$G7A_FE_PATH"; _run a2_exact_pair D-G7A-1 g7a_classify
+  r=$(_mka a3_exact_pair_plus_unrelated) || stop "mk"; cp "$fe_b" "$r/$G7A_FE_PATH"; echo new > "$r/README.md"
+    _run a3_exact_pair_plus_unrelated D-G7A-1 g7a_classify
+  r=$(_mka a4_other_new_blob) || stop "mk"; cp "$fe_b" "$r/$G7A_FE_PATH"; echo '# x' >> "$r/$G7A_FE_PATH"; _run a4_other_new_blob STOP g7a_classify
+  r=$(_mka a5_other_old_blob) || stop "mk"; echo '# x' >> "$r/$G7A_FE_PATH"; _base a5_other_old_blob
+    cp "$fe_b" "$r/$G7A_FE_PATH"; _run a5_other_old_blob STOP g7a_classify
+  r=$(_mka a6_pair_plus_other_mech) || stop "mk"; cp "$fe_b" "$r/$G7A_FE_PATH"; echo main2 > "$r/app/main.py"
+    _run a6_pair_plus_other_mech STOP g7a_classify
+  r=$(_mka a7_other_mech_only) || stop "mk"; echo main2 > "$r/app/main.py"; _run a7_other_mech_only STOP g7a_classify
+  r=$(_mka a8_fe_deleted) || stop "mk"; rm "$r/$G7A_FE_PATH"; _run a8_fe_deleted STOP g7a_classify
+  r=$(_mka a9_fe_added) || stop "mk"; rm "$r/$G7A_FE_PATH"; _base a9_fe_added
+    cp "$fe_b" "$r/$G7A_FE_PATH"; _run a9_fe_added STOP g7a_classify
+  r=$(_mka a10_pair_exec_mode) || stop "mk"; cp "$fe_b" "$r/$G7A_FE_PATH"; chmod +x "$r/$G7A_FE_PATH"
+    _run a10_pair_exec_mode STOP g7a_classify
+  r=$(_mka a11_reverse_pair) || stop "mk"; cp "$fe_b" "$r/$G7A_FE_PATH"; _base a11_reverse_pair
+    cp "$fe_a" "$r/$G7A_FE_PATH"; _run a11_reverse_pair STOP g7a_classify
+  r=$(_mka a12_bad_rev) || stop "mk"
+    _expect a12_bad_rev "$r" 0000000000000000000000000000000000000001 "$(git -C "$r" rev-parse HEAD)" STOP g7a_classify
+  _expect "a13_live_pr1422(OLD..${G7A_PR1422:0:9})" "$SEAT_WT" "$OLD" "$G7A_PR1422" D-G7A-1 g7a_classify
+  _expect "a14_live(OLD..origin/master@${live:0:8})" "$SEAT_WT" "$OLD" "$live" ANY g7a_classify
   rm -rf "$root"
   [ "$fail" = 0 ] || stop "g7b-selftest FAILED"
-  [ "$n" = 23 ] || stop "g7b-selftest ran $n cases, expected 23"
+  [ "$n" = 40 ] || stop "g7b-selftest ran $n cases, expected 40"
   say "g7b-selftest PASS ($n cases)"
+}
+
+g7a_check() {  # rev 3.6: s0's G7a on SEAT_WT origin/master as of its last fetch (git only, no host contact); the precheck's mirror of s0 0.5
+  STEP=g7a-check
+  local live g7a why
+  live=$(git -C "$SEAT_WT" rev-parse --verify -q origin/master) || stop "SEAT_WT origin/master unreadable"
+  git -C "$SEAT_WT" merge-base --is-ancestor "$OLD" "$live" || stop "G7: OLD $OLD is not an ancestor of origin/master@${live:0:8}"
+  why=$(mktemp) || stop "mktemp"
+  g7a=$(g7a_classify "$SEAT_WT" "$OLD" "$live" 2> "$why") || { local m; m=$(cat "$why"); rm -f "$why"; stop "origin/master@${live:0:8}: $m"; }
+  rm -f "$why"
+  say "g7a-check PASS (origin/master@${live:0:8}: G7A_MODE=$g7a)"
 }
 
 status() { load; cat "$EV/state.env"; ls "$EV/gates"; tail -n 5 "$EV/logs/stops.log" 2>/dev/null; return 0; }
@@ -1097,5 +1190,6 @@ case "${1:-}" in
   rollback-c-result) rollback_c_result ;;
   status) status ;;
   g7b-selftest) g7b_selftest ;;
-  *) echo "usage: install_w1.sh s0|s1|s2|s3|s3-result|s4|s4a [label]|s5|s5-revert|s6|cycle <job> <HH:MM> [book] [day]|restart-check [HH:MM] [day]|needrestart-check [day]|proof-old|rollback-b|rollback-c|rollback-c-result|status|g7b-selftest" >&2; exit 2 ;;
+  g7a-check) g7a_check ;;
+  *) echo "usage: install_w1.sh s0|s1|s2|s3|s3-result|s4|s4a [label]|s5|s5-revert|s6|cycle <job> <HH:MM> [book] [day]|restart-check [HH:MM] [day]|needrestart-check [day]|proof-old|rollback-b|rollback-c|rollback-c-result|status|g7b-selftest|g7a-check" >&2; exit 2 ;;
 esac
