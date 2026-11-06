@@ -1,0 +1,1 @@
+{"acceptance_reason":"NO_OUTCOME","acceptance_state":"NOT_ACCEPTED","accepted":false,"accepted_by":null,"parent_run_id":"fabric-mcp-web-20261011-c3","rc":0,"result_available":true,"result_bytes":3672,"root_id":"fabric-mcp-web-20261011-c3","run_id":"fabric-mcp-web-20261011-c3-check-01","schema":"mastermind.fabric_task_status.v1","signal":"ok","state":"TERMINAL"}

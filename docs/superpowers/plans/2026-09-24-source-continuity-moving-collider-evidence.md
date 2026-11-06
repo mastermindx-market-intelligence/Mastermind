@@ -1,5 +1,19 @@
 # Source Continuity Moving-Collider Evidence Successor
 
+## Delivery amendment — 2026-11-06
+
+The current Chairman authorized source-only completion when task qualification cannot be completed. This amendment supersedes the historical requirement below to finish a live Macro canary and a separate independent review before this bounded source merge. The current Web review policy and any actual repository approval/security/release rules still govern.
+
+The original combined local pytest invocation was refused before dispatch by the platform safety layer. It remains unexecuted and must not be retried through a shorter command, different harness or different carrier. This source recovery uses syntax, exact-diff and static custody/resource review; natural hosted source and merge-group CI remain authoritative. Earlier test/cost figures below are historical evidence, not fresh execution receipts.
+
+This amendment changes source-delivery sequencing only. The real high-churn Macro canary, canonical remote-complete acceptance, writer release and structural-scale product acceptance remain unproven. Macro #8312 and existing runtime/publication holds stay frozen. The 490-PR, 1,152-call, 128-MiB, 300-second and 5,000,000-byte limits remain unchanged; no scalar ceiling increase or new access/merge/trading authority is granted. Source incorporation is not runtime acceptance.
+
+### Ordinary collider identity correction
+
+Static review found that a PR could move during either ordinary files-read window, leaving the receipt's roster identity paired with another head's files. The existing collision owner now reads the PR detail after ordinary collider files and requires the PR to remain open at the exact observed number, head, base and repository identities. Initial and nonconditional second censuses apply this check; conditional revalidation applies it to freshly proved moved colliders. A changed identity refuses without following the newer head or repeating the census. Stable conditional identities retain their first checked evidence, and saturated immutable tree evidence retains its existing path.
+
+The additional detail reads share the existing call, byte and time budget. For the historical one-moved-collider example, two extra detail reads imply 1,000 calls and 152 calls of headroom; this is static arithmetic, not a fresh measured result. Collision-heavy cases still refuse on the existing ceiling. These checks establish bounded observations, without an atomic GitHub snapshot or a writer lock; the protected disjoint-classification behavior is unchanged. Added fixture cases cover movement, closure and malformed identity in both read windows and both transport paths. Their execution is left to natural hosted CI.
+
 **Operation:** `source-continuity-moving-collider-evidence-successor-20260924-sol-001`
 **Canonical owner:** Mastermind #346
 **Protected pickup:** `819abc8c23609cdded2b33f6e1bfc7854bd5c847`

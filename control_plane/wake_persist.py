@@ -222,6 +222,10 @@ class WakeLedgerRepository:
         payload = event_payload_for(record, obligation=obligation)
         oid = record.command_id.split(":", 1)[0]
         job_id, attempt_id = _correlation(obligation, record)
+        if (record.native_company_read is not None
+                and (obligation is None
+                     or record.native_company_read.target_attempt_id != attempt_id)):
+            raise WakeLedgerError("native Company evidence requires the exact Wake Attempt")
         existing = self.store.get_event_by_command_id(
             record.command_id, connection=connection
         )

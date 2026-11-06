@@ -30,7 +30,20 @@ from .slack_web_api import (
 
 CONFIG_SCHEMA = "mastermind.sol_state_relay_config.v1"
 RELAY_USERNAME = "_mastermind_sol_relay"
-REQUIRED_SLACK_SCOPES = ("chat:write", "groups:history")
+LEGACY_SLACK_SCOPES = ("chat:write", "groups:history")
+SHARED_EXECUTIVE_RELAY_SCOPES = (
+    "channels:history",
+    "chat:write",
+    "groups:history",
+)
+# C1 remains available while the existing Executive Relay app is migrated to
+# the shared transport scope set. A2 admission requires the shared set exactly;
+# C1 accepts only these two closed sets and no other widening.
+ALLOWED_SLACK_SCOPE_SETS = (
+    LEGACY_SLACK_SCOPES,
+    SHARED_EXECUTIVE_RELAY_SCOPES,
+)
+REQUIRED_SLACK_SCOPES = LEGACY_SLACK_SCOPES
 CONFIG_PATH = Path(
     "/Library/Application Support/MastermindExecutive/config/sol-state-relay.json"
 )
@@ -328,9 +341,9 @@ def _parse_scope_header(headers: Mapping[str, str]) -> tuple[str, ...]:
     if not values or len(values) != len(set(values)):
         raise RuntimeError("C1_SLACK_IDENTITY_REFUSED")
     normalized = tuple(sorted(values))
-    if normalized != REQUIRED_SLACK_SCOPES:
+    if normalized not in ALLOWED_SLACK_SCOPE_SETS:
         raise RuntimeError("C1_SLACK_IDENTITY_REFUSED")
-    return REQUIRED_SLACK_SCOPES
+    return normalized
 
 
 async def verify_slack_identity(
@@ -387,6 +400,7 @@ async def verify_slack_identity(
 
 
 __all__ = [
+    "ALLOWED_SLACK_SCOPE_SETS",
     "CONFIG_PATH",
     "CONFIG_SCHEMA",
     "C1RuntimeConfig",
@@ -394,8 +408,10 @@ __all__ = [
     "HEARTBEAT_SECONDS",
     "MAX_EXECUTIVE_AGE_SECONDS",
     "POLL_SECONDS",
+    "LEGACY_SLACK_SCOPES",
     "RELAY_USERNAME",
     "REQUIRED_SLACK_SCOPES",
+    "SHARED_EXECUTIVE_RELAY_SCOPES",
     "SLACK_CHANNEL_ID",
     "SLACK_WORKSPACE_ID",
     "TOKEN_PATH",

@@ -713,15 +713,26 @@ def test_installed_collector_refuses_when_direct_git_disappears_before_child(
     macro_sha = _git(macro, "rev-parse", "HEAD").stdout.strip()
     helper_called = False
     removed = False
+    # Source and Macro snapshots run in separate proof threads. Make the
+    # injected topology loss happen before Macro's first Git execution so this
+    # test observes the intended missing-.git refusal, not a scheduling-dependent
+    # unrelated Git failure from the concurrent observer.
+    import threading
+    source_observed = threading.Event()
 
     def runner(argv, **kwargs):
         nonlocal helper_called, removed
         if str(argv[0]) == "git":
+            if Path(kwargs["cwd"]) == macro:
+                assert source_observed.wait(timeout=3.0), (
+                    "source Git observation did not reach the fixture fault injection"
+                )
             result = _default_packet_runner(argv, **kwargs)
             # Remove Macro metadata after the source pre-observation completes.
             if Path(kwargs["cwd"]) == repo and not removed:
                 shutil.rmtree(macro / ".git")
                 removed = True
+                source_observed.set()
             return result
         helper_called = True
         return {
@@ -746,6 +757,8 @@ def test_installed_collector_refuses_when_direct_git_disappears_before_child(
         collector(
             repo_root=repo, macro_root_flag=str(macro), now=None, timeout=5.0,
         )
+    assert removed is True
+    assert not (macro / ".git").exists()
     assert helper_called is False
 
 
@@ -1780,6 +1793,7 @@ def _proof_observations(
         "overlaps": [],
         "threads": set(),
         "object_maps": [],
+        "completed_object_maps": [],
         "inventories": [],
         "entered": set(),
         "settled": set(),
@@ -1787,7 +1801,7 @@ def _proof_observations(
 
     def _rendezvous(mine: str, theirs: str) -> None:
         state["threads"].add(threading.get_ident())
-        # The object proof enters twice (commits, then blobs); only its first
+        # The object proof enters for commits and blobs; only its first
         # entry takes part in the rendezvous.
         if announced[mine]:
             return
@@ -1806,7 +1820,9 @@ def _proof_observations(
                 raise object_failure
             mapping = args[1] if len(args) > 1 else kwargs["expected_types"]
             state["object_maps"].append(dict(mapping))
-            return real_objects(*args, **kwargs)
+            result = real_objects(*args, **kwargs)
+            state["completed_object_maps"].append(dict(mapping))
+            return result
         finally:
             state["settled"].add("objects")
 
@@ -1873,8 +1889,8 @@ def test_clean_snapshot_overlaps_full_object_closure_with_full_inventory(
     checked = [object_id for mapping in object_maps for object_id in mapping]
     assert len(checked) == len(set(checked))
     assert set(checked) == expected_commits | expected_blobs
-    assert object_maps[1] == {object_id: "blob" for object_id in expected_blobs}
-    assert set(object_maps[0]) == expected_commits
+    assert {object_id: "blob" for object_id in expected_blobs} in object_maps
+    assert {object_id: "commit" for object_id in expected_commits} in object_maps
 
     # ... and one full raw inventory, with no leaf or directory dropped.
     inventories = state["inventories"]
@@ -2015,8 +2031,12 @@ def test_clean_snapshot_inventory_failure_blocks_object_use(
             include_seal=True, snapshot_capture=captures,
         )
 
-    # The concurrent object proof still settled before the refusal surfaced.
-    assert len(state["object_maps"]) == 2
+    # Current-blob proof is the independent branch and still settles before
+    # the inventory refusal. Ancestry/history closure now runs on the inventory
+    # worker after inventory succeeds, so it must not start after this failure.
+    assert len(state["object_maps"]) == 1
+    assert state["completed_object_maps"] == state["object_maps"]
+    assert set(state["object_maps"][0].values()) == {"blob"}
     assert state["inventories"] == []
     assert captures == []
 
@@ -2067,7 +2087,7 @@ def test_clean_snapshot_overlap_cannot_resurrect_expired_deadline(
     # proof never completed, and no snapshot survived the exhausted budget.
     assert deadline < installed.time.monotonic()
     assert not any(
-        set(mapping.values()) == {"blob"} for mapping in state["object_maps"]
+        set(mapping.values()) == {"blob"} for mapping in state["completed_object_maps"]
     )
     assert captures == []
     assert state["inventories"] == []
@@ -2188,3 +2208,131 @@ def test_installed_collector_refuses_live_macro_mutation_made_during_child(
     assert materialized_roots[0] != macro
     assert not materialized_roots[0].exists()
     assert consumed.read_text(encoding="utf-8").endswith("mutated\n")
+
+
+def test_macro_snapshot_capture_scopes_live_inventory_to_child_visible_paths(
+    tmp_path: Path,
+):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+
+    macro, head = _macro_sparse_fixture(tmp_path)
+    unrelated = macro / "unrelated/runtime-only.tmp"
+    unrelated.write_text("not child visible\n", encoding="utf-8")
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+    captures = []
+
+    observed = _clean_git_snapshot(
+        macro,
+        runner=_default_packet_runner,
+        env=env,
+        label="Macro source",
+        content_scope="macro_brief",
+        include_seal=True,
+        snapshot_capture=captures,
+    )
+
+    assert observed[0] == head
+    assert len(captures) == 1
+    assert captures[0].sealed_to_caller is True
+
+
+def test_macro_snapshot_capture_still_refuses_untracked_record_namespace(
+    tmp_path: Path,
+):
+    from integrations.executive_mcp.installed import (
+        _clean_git_snapshot,
+        _default_packet_runner,
+        _installed_child_env,
+    )
+    from integrations.executive_mcp.schemas import GatewayError
+
+    macro, _head = _macro_sparse_fixture(tmp_path)
+    shadow = macro / "agentos/workstreams/SHADOW.md"
+    shadow.write_text("---\nkey: SHADOW\n---\n", encoding="utf-8")
+    env = _installed_child_env(code_root=macro, macro_root=macro)
+
+    with pytest.raises(GatewayError, match="worktree observation failed"):
+        _clean_git_snapshot(
+            macro,
+            runner=_default_packet_runner,
+            env=env,
+            label="Macro source",
+            content_scope="macro_brief",
+            include_seal=True,
+            snapshot_capture=[],
+        )
+
+
+def test_object_type_probe_shards_large_complete_sets_without_weakening():
+    from pathlib import Path
+    from integrations.executive_mcp.installed import _require_git_object_types
+
+    expected = {f"{index:040x}": "blob" for index in range(48_001)}
+    calls: list[tuple[str, ...]] = []
+
+    def runner(argv, **kwargs):
+        object_ids = tuple(
+            line for line in kwargs["input_bytes"].decode("ascii").splitlines() if line
+        )
+        calls.append(object_ids)
+        return {
+            "code": 0,
+            "stdout": "".join(f"{object_id} blob\n" for object_id in object_ids),
+            "stderr": "",
+            "timed_out": False,
+            "limit_exceeded": False,
+            "invalid_utf8": False,
+        }
+
+    _require_git_object_types(
+        Path("/tmp/unused"),
+        expected,
+        runner=runner,
+        env={},
+        deadline=None,
+        label="Macro source",
+    )
+
+    assert len(calls) == 3
+    assert max(map(len, calls)) <= 24_000
+    assert {object_id for call in calls for object_id in call} == set(expected)
+    assert sum(len(call) for call in calls) == len(expected)
+
+def test_scoped_macro_seal_refuses_symlink_parent_before_descendant(
+    tmp_path: Path, monkeypatch,
+):
+    """A substituted directory symlink is rejected before any child lookup."""
+    from integrations.executive_mcp.installed import _scoped_worktree_path_sets
+
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "leaf.txt").write_text("outside\n", encoding="utf-8")
+    (root / "scope").symlink_to(outside, target_is_directory=True)
+
+    descendant = root / "scope" / "leaf.txt"
+    real_lstat = Path.lstat
+    observed: list[Path] = []
+
+    def guarded_lstat(path: Path):
+        observed.append(path)
+        if path == descendant:
+            raise AssertionError("scoped seal followed a substituted directory symlink")
+        return real_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", guarded_lstat)
+    with pytest.raises(OSError, match="directory topology differs"):
+        _scoped_worktree_path_sets(
+            root,
+            files={"scope/leaf.txt"},
+            directories={"scope"},
+            deadline=None,
+            label="Macro source",
+        )
+
+    assert descendant not in observed

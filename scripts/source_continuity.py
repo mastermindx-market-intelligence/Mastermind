@@ -142,6 +142,10 @@ class _RemoteProbeError(Exception):
     pass
 
 
+class _CollisionEvidenceChanged(_RemoteProbeError):
+    """An ordinary collider moved while its mutable file evidence was read."""
+
+
 class _RemoteResourceMissing(_RemoteProbeError):
     """A 404 on an endpoint whose absence is itself a lawful observation.
 
@@ -1342,6 +1346,23 @@ def _read_open_pull_roster(
     return pulls, False
 
 
+def _collision_identity_still_matches(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    identity: _ForeignPullIdentity,
+) -> bool:
+    """Recheck the full PR identity after reading ordinary collider files."""
+    detail = _api(
+        http_get,
+        token,
+        f"repos/{repository}/pulls/{identity.pr_number}",
+    )
+    if not isinstance(detail, dict) or detail.get("state") != "open":
+        return False
+    return _foreign_pull_identity(detail, repository) == identity
+
+
 def _collision_census_details(
     http_get: HTTPGet,
     token: str,
@@ -1399,6 +1420,15 @@ def _collision_census_details(
             number,
             owned_paths,
         )
+        if (
+            identity is not None
+            and overlaps
+            and not isinstance(evidence, _SaturatedCollisionEvidence)
+            and not _collision_identity_still_matches(
+                reader, token, repository, identity
+            )
+        ):
+            raise _CollisionEvidenceChanged()
         return _ForeignCollisionRecord(number, identity, evidence, overlaps)
 
     records: list[_ForeignCollisionRecord]
@@ -1746,6 +1776,13 @@ def _revalidate_collision_census(
                 owned_paths, second_evidence
             )
             if not first_projection or second_projection != first_projection:
+                return False, True, ()
+            if (
+                not isinstance(second_evidence, _SaturatedCollisionEvidence)
+                and not _collision_identity_still_matches(
+                    reader, token, repository, second_identity
+                )
+            ):
                 return False, True, ()
         elif second_overlaps:
             return False, True, ()
@@ -2930,6 +2967,8 @@ def main(
         result = _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
     except _AuthProbeError:
         result = _refusal(RefusalCode.AUTH_UNAVAILABLE, 2)
+    except _CollisionEvidenceChanged:
+        result = _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
     except _RemoteProbeError:
         result = _refusal(RefusalCode.REMOTE_PROBE_FAILED, 2)
     except Exception:

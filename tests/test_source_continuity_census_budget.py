@@ -34,6 +34,27 @@ class EstateHTTP(fx._ProbeHTTP):
         self.passes = 0
         self.after_read = None
 
+    def _foreign_row(self, number):
+        head_sha = f"{number:040x}"[-40:]
+        if (
+            self.move_overlap
+            and self.passes > 1
+            and number == 1000 + self.count - 2
+        ):
+            head_sha = "e" * 40
+        return {
+            "number": number,
+            "state": "open",
+            "head": {
+                "sha": head_sha,
+                "repo": {"full_name": fx.REPOSITORY},
+            },
+            "base": {
+                "sha": "f" * 40,
+                "repo": {"full_name": fx.REPOSITORY},
+            },
+        }
+
     def __call__(self, url, *, token, timeout):
         parsed = urlparse(url)
         page = int(parse_qs(parsed.query).get("page", ["1"])[0])
@@ -45,25 +66,7 @@ class EstateHTTP(fx._ProbeHTTP):
             for i in range(self.count - 1):
                 number = 1000 + i
                 if self.identity_complete:
-                    head_sha = f"{number:040x}"[-40:]
-                    if (
-                        self.move_overlap
-                        and self.passes > 1
-                        and number == 1000 + self.count - 2
-                    ):
-                        head_sha = "e" * 40
-                    foreign_rows.append({
-                        "number": number,
-                        "state": "open",
-                        "head": {
-                            "sha": head_sha,
-                            "repo": {"full_name": fx.REPOSITORY},
-                        },
-                        "base": {
-                            "sha": "f" * 40,
-                            "repo": {"full_name": fx.REPOSITORY},
-                        },
-                    })
+                    foreign_rows.append(self._foreign_row(number))
                 else:
                     foreign_rows.append({"number": number})
             rows = [{"number": fx.PR_NUMBER}] + foreign_rows
@@ -84,6 +87,14 @@ class EstateHTTP(fx._ProbeHTTP):
             if self.change == "paths" and self.passes > 1:
                 rows[-1]["filename"] += ".changed"
             result = rows[(page - 1) * 100:page * 100]
+        elif (
+            self.identity_complete
+            and parsed.path.startswith(f"/repos/{fx.REPOSITORY}/pulls/")
+            and parsed.path.rsplit("/", 1)[-1].isdigit()
+            and 1000 <= int(parsed.path.rsplit("/", 1)[-1]) < 1000 + self.count - 1
+        ):
+            self.calls.append((url, token, timeout))
+            result = self._foreign_row(int(parsed.path.rsplit("/", 1)[-1]))
         else:
             result = super().__call__(url, token=token, timeout=timeout)
         if self.after_read:
@@ -154,6 +165,16 @@ def _foreign_file_call_count(http: EstateHTTP) -> int:
     )
 
 
+def _foreign_detail_call_count(http: EstateHTTP) -> int:
+    return sum(
+        1
+        for url, _token, _timeout in http.calls
+        if urlparse(url).path.rsplit("/", 1)[0].endswith("/pulls")
+        and urlparse(url).path.rsplit("/", 1)[-1].isdigit()
+        and urlparse(url).path.rsplit("/", 1)[-1] != str(fx.PR_NUMBER)
+    )
+
+
 def test_490_selective_revalidation_reuses_stable_foreign_evidence(monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
@@ -185,6 +206,7 @@ def test_490_selective_revalidation_reuses_stable_foreign_evidence(monkeypatch):
     assert (matched, complete) == (True, True)
     assert len(final_records) == estate_size - 1
     assert _foreign_file_call_count(http) == first_file_calls
+    assert _foreign_detail_call_count(http) == 1
     assert http.passes == 2
 
 
@@ -217,6 +239,7 @@ def test_490_selective_revalidation_reproves_only_moved_foreign_identity(monkeyp
     assert (matched, complete) == (True, True)
     assert len(final_records) == estate_size - 1
     assert _foreign_file_call_count(http) == first_file_calls + 1
+    assert _foreign_detail_call_count(http) == 2
     assert http.passes == 2
 
 
@@ -238,6 +261,7 @@ def test_490_estate_moved_collider_same_projection_stays_within_closed_budget(
     assert payload["receipt_version"] == "v2"
     assert len(payload["collision_evidence_fingerprint"]) == 64
     assert len(http.calls) < module._MAX_HTTP_CALLS
+    assert _foreign_detail_call_count(http) == 2
     assert http.passes == 2
 
 

@@ -66,7 +66,8 @@ class CollisionChurnHTTP:
         first_roster: list[dict[str, object]],
         second_roster: list[dict[str, object]],
         foreign_files: dict[int, tuple[str, ...] | list[tuple[str, ...]]],
-        direct_details: dict[int, dict[str, object]] | None = None,
+        direct_details: dict[int, dict[str, object] | list[dict[str, object]]] | None = None,
+        conditional: bool = True,
     ) -> None:
         self.module = module
         self.base = fx._ProbeHTTP()
@@ -74,8 +75,10 @@ class CollisionChurnHTTP:
         self.second_roster = second_roster
         self.foreign_files = foreign_files
         self.direct_details = direct_details or {}
+        self._source_continuity_conditional = conditional
         self.roster_reads = 0
         self.foreign_file_reads: dict[int, int] = {}
+        self.foreign_detail_reads: dict[int, int] = {}
         self.plain_calls: list[str] = []
         self.conditional_calls: list[str] = []
 
@@ -102,7 +105,18 @@ class CollisionChurnHTTP:
             if suffix.isdigit():
                 number = int(suffix)
                 if number in self.direct_details:
-                    return self.direct_details[number]
+                    index = self.foreign_detail_reads.get(number, 0)
+                    self.foreign_detail_reads[number] = index + 1
+                    configured = self.direct_details[number]
+                    if isinstance(configured, list):
+                        return configured[min(index, len(configured) - 1)]
+                    return configured
+                if number in self.foreign_files:
+                    roster = self.first_roster if self.roster_reads == 1 else self.second_roster
+                    row = next((row for row in roster if row["number"] == number), None)
+                    if row is not None:
+                        self.foreign_detail_reads[number] = self.foreign_detail_reads.get(number, 0) + 1
+                        return copy.deepcopy(row)
             if "/files?per_page=100&page=1" in suffix:
                 number = int(suffix.split("/", 1)[0])
                 if number in self.foreign_files:
@@ -130,6 +144,9 @@ class CollisionChurnHTTP:
     ) -> object:
         assert token == fx.TOKEN
         assert timeout > 0
+        if not self._source_continuity_conditional:
+            assert if_none_match is None
+            return self._plain(url, token=token, timeout=timeout)
         if if_none_match is None:
             payload = self._plain(url, token=token, timeout=timeout)
             return self.module._HTTPRepresentation(
@@ -290,9 +307,12 @@ def test_stable_colliding_pr_reuses_first_pass_evidence_without_refetch(
     assert payload["collision_state"] == "OVERLAP"
     assert payload["colliding_pr_numbers"] == [FOREIGN_A]
     assert http.foreign_file_reads == {FOREIGN_A: 1}
+    assert http.foreign_detail_reads == {FOREIGN_A: 1}
 
 
+@pytest.mark.parametrize("conditional", [True, False])
 def test_colliding_pr_head_movement_with_same_overlap_projection_does_not_starve(
+    conditional: bool,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = sat._module()
@@ -304,6 +324,7 @@ def test_colliding_pr_head_movement_with_same_overlap_projection_does_not_starve
             _foreign_row(FOREIGN_A, head_sha=A_HEAD_MOVED),
         ],
         foreign_files={FOREIGN_A: ("scripts/source_continuity.py",)},
+        conditional=conditional,
     )
 
     result = _run(module, http, capsys)
@@ -314,6 +335,47 @@ def test_colliding_pr_head_movement_with_same_overlap_projection_does_not_starve
     assert payload["receipt_version"] == "v2"
     assert len(payload["collision_evidence_fingerprint"]) == 64
     assert http.foreign_file_reads == {FOREIGN_A: 2}
+    assert http.foreign_detail_reads == {FOREIGN_A: 2}
+
+
+@pytest.mark.parametrize("conditional", [True, False])
+@pytest.mark.parametrize("phase", ["first", "second"])
+@pytest.mark.parametrize("fault", ["head_moved", "closed", "malformed"])
+def test_ordinary_collider_identity_change_inside_files_window_refuses_once(
+    conditional: bool,
+    phase: str,
+    fault: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = sat._module()
+    first = _foreign_row(FOREIGN_A, head_sha=A_HEAD)
+    second = _foreign_row(FOREIGN_A, head_sha=A_HEAD_MOVED)
+    changed = copy.deepcopy(first if phase == "first" else second)
+    if fault == "head_moved":
+        changed["head"]["sha"] = A_HEAD_MOVED if phase == "first" else B_HEAD
+    elif fault == "closed":
+        changed["state"] = "closed"
+    else:
+        changed["head"]["sha"] = "malformed-head"
+    http = CollisionChurnHTTP(
+        module,
+        first_roster=[_target_row(), first],
+        second_roster=[_target_row(), second],
+        foreign_files={FOREIGN_A: ("scripts/source_continuity.py",)},
+        direct_details={FOREIGN_A: [changed] if phase == "first" else [first, changed]},
+        conditional=conditional,
+    )
+
+    result = _run(module, http, capsys)
+    if fault == "malformed":
+        assert result[0] == 2
+        assert result[1]["code"] == "REMOTE_PROBE_FAILED"
+    else:
+        _assert_changed(result)
+    expected_reads = 1 if phase == "first" else 2
+    assert http.roster_reads == expected_reads
+    assert http.foreign_file_reads == {FOREIGN_A: expected_reads}
+    assert http.foreign_detail_reads == {FOREIGN_A: expected_reads}
 
 
 def test_colliding_pr_movement_that_swaps_target_path_refuses(
@@ -512,12 +574,12 @@ def test_colliding_pr_closure_refuses(
         first_roster=[_target_row(), _foreign_row(FOREIGN_A, head_sha=A_HEAD)],
         second_roster=[_target_row()],
         foreign_files={FOREIGN_A: ("scripts/source_continuity.py",)},
-        direct_details={
-            FOREIGN_A: _foreign_row(FOREIGN_A, head_sha=A_HEAD, state="closed"),
-        },
     )
 
     _assert_changed(_run(module, http, capsys))
+    assert http.roster_reads == 2
+    assert http.foreign_file_reads == {FOREIGN_A: 1}
+    assert http.foreign_detail_reads == {FOREIGN_A: 1}
 
 
 @pytest.mark.parametrize(
