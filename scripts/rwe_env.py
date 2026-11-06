@@ -1063,8 +1063,10 @@ def cmd_gate(args: argparse.Namespace) -> int:
     if shard_index is not None:
         records = [line for line in completed.stdout.splitlines()
                    if line.startswith("parallel_shard=")]
+        # Canonical serial RWE shards now emit workers=0; preserve the prior
+        # bare record but reject parallel/mismatched worker declarations.
         match = re.fullmatch(
-            r"parallel_shard=(\d+)/6 modules=(\d+) included_sha256=([0-9a-f]{64})",
+            r"parallel_shard=(\d+)/6 modules=(\d+) included_sha256=([0-9a-f]{64})(?: workers=0)?",
             records[0],
         ) if len(records) == 1 else None
         valid = (match is not None and int(match[1]) == shard_index + 1

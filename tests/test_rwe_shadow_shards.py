@@ -110,6 +110,7 @@ RECORD = "parallel_shard=3/6 modules=1 included_sha256=" + "a" * 64
 @pytest.mark.parametrize("record", [
     "", RECORD.replace("3/6", "2/6"), RECORD.replace("3/6", "3/5"),
     RECORD + "\n" + RECORD, RECORD.replace("a" * 64, "bad"),
+    RECORD + " workers=4", RECORD + " workers=0 extra",
     RECORD.replace("modules=1", "modules=0"), RECORD.replace("modules=1", "modules=7"),
 ])
 def test_zero_child_exit_without_one_matching_plan_cannot_qualify(tmp_path, monkeypatch, record):
@@ -125,11 +126,12 @@ def test_zero_child_exit_without_one_matching_plan_cannot_qualify(tmp_path, monk
     assert proof["shard"]["included_sha256"] is None
 
 
+@pytest.mark.parametrize("record", [RECORD, RECORD + " workers=0"])
 @pytest.mark.parametrize("exit_code", [0, 7])
-def test_completed_shard_preserves_exit_and_never_becomes_full_gate(tmp_path, monkeypatch, exit_code):
+def test_completed_shard_preserves_exit_and_never_becomes_full_gate(tmp_path, monkeypatch, exit_code, record):
     args, env_dir = _arguments(tmp_path, monkeypatch)
     monkeypatch.setattr(rwe, "_stream_gate", lambda argv, **kw: subprocess.CompletedProcess(
-        argv, exit_code, "discovered=6 excluded=0 running=6\n" + RECORD + "\n", "",
+        argv, exit_code, "discovered=6 excluded=0 running=6\n" + record + "\n", "",
     ))
     assert rwe.cmd_gate(args) == exit_code
     proof = json.loads((env_dir / rwe.RECEIPT_FILENAME).read_text())["proof"]
