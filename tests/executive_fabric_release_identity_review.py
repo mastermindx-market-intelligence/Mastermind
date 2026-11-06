@@ -594,8 +594,12 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
     ),
 }
 
-# validated source path bound; no identity/authority. Exact full postimage and literal sites only.
-REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': 'e3fdbd84b951d7dbffd8e3630ded3baac10490ae24cb1d9586007bd64d12b127', 'sites': ((360, 26, 29, 'int', '512'), (476, 57, 60, 'int', '512'))}
+# Validated source path bounds; no identity/authority. Exact postimage and sites only.
+# 2026-11-06 attended source audit: accepted-creation navigation preserves both
+# complete bounded-path lines; the optional callback shifts them by three lines.
+# The full-source hash and both spans still reject all path/context/byte drift.
+# This source audit supplies no native runtime or release approval.
+REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '95b83a757611e0c5c4930dcce2457b8a6eb4a135565f3cb587ccd29dddac8c30', 'sites': ((363, 26, 29, 'int', '512'), (479, 57, 60, 'int', '512'))}
 
 # fixed HTTP not-found status. Exact full postimage and literal sites only.
 REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': 'b5fd60efebebc04ea12d1d1976663c74f907dec2f151a2d71a6f442182b5e5b2', 'sites': ((93, 39, 42, 'int', '404'),)}
