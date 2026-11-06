@@ -271,8 +271,7 @@ class PeekabooAdapter:
         else:
             native = ["press", args["key"]]
         native += ["--snapshot", snapshot_id, "--pid", str(target.pid),
-                   "--window-id", str(target.window_id), "--input-strategy", "actionOnly",
-                   "--no-auto-focus"]
+                   "--window-id", str(target.window_id), "--input-strategy", "actionOnly"]
         result = self._run(native, effectful=True)
         return {"carrier": self.carrier, "native_result_sha256": digest(result),
                 "native_acknowledged": True, "business_outcome_verified": False}

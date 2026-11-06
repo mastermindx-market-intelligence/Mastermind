@@ -56,7 +56,7 @@ def test_native_command_has_no_shell_foreground_implicit_target_or_carrier_retry
     assert args[args.index("--window-id") + 1] == str(TARGET.window_id)
     assert args[args.index("--snapshot") + 1] == "snapshot-1"
     assert args[args.index("--input-strategy") + 1] == "actionOnly"
-    assert "--foreground" not in args and "--no-auto-focus" in args
+    assert "--foreground" not in args and "--no-auto-focus" not in args
 
 
 def test_inventory_includes_background_apps_and_preserves_decimal_identity():

@@ -17,6 +17,7 @@ import plistlib
 import secrets
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-disposable-probe", action="store_true")
     parser.add_argument("--report", required=True)
+    parser.add_argument("--peekaboo-binary", default="/opt/homebrew/bin/peekaboo")
+    parser.add_argument("--bridge-socket")
     args = parser.parse_args()
     if sys.platform != "darwin" or not args.run_disposable_probe:
         parser.error("explicit disposable macOS probe required")
@@ -70,10 +73,24 @@ def main():
                 check=True, timeout=60, capture_output=True)
             boot = _boot_id()
             host = ActionHostBinding(hashlib.sha256(socket.gethostname().encode()).hexdigest(), boot)
-            binary = Path("/opt/homebrew/bin/peekaboo").resolve(strict=True)
+            binary_input = Path(args.peekaboo_binary)
+            if not binary_input.is_absolute():
+                raise RuntimeError("qualified Peekaboo executable must be absolute")
+            binary = binary_input.resolve(strict=True)
+            bridge_socket = None
+            if args.bridge_socket:
+                bridge_input = Path(args.bridge_socket)
+                if not bridge_input.is_absolute():
+                    raise RuntimeError("qualified Peekaboo bridge path must be absolute")
+                bridge_info = bridge_input.lstat()
+                if (not stat.S_ISSOCK(bridge_info.st_mode)
+                        or bridge_info.st_uid != os.getuid()):
+                    raise RuntimeError("qualified Peekaboo bridge is not an owned socket")
+                bridge_socket = str(bridge_input)
             binary_digest = hashlib.sha256(binary.read_bytes()).hexdigest()
             provider = PeekabooAdapter(PeekabooConfig(str(binary), binary_digest,
-                str(Path.home()), host, os.getuid(), ("click_element",)))
+                str(Path.home()), host, os.getuid(), ("click_element",),
+                bridge_socket=bridge_socket))
             report.update({"carrier": provider.carrier, "binary_sha256": binary_digest,
                 "session_ref": provider.session_ref, "permissions": provider.permissions()})
             if report["permissions"].get("observation_ready") is not True:
