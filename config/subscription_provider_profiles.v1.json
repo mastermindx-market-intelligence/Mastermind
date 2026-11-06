@@ -67,7 +67,7 @@
       "models": {
         "routine": "MiniMax-M3",
         "hard": "MiniMax-M3",
-        "fast": "MiniMax-M3",
+        "fast": "MiniMax-M3.1-Flash",
         "subagent": "MiniMax-M3"
       },
       "default_model_class": "routine",
