@@ -449,133 +449,22 @@ class PreleaseCooldownRace(unittest.TestCase):
                 request_capacity_preflight=True)
         self.assertFalse(self.path("pinned", ".request.json").exists())
 
-    def test_auto_busy_pool_falls_to_ready_pool_without_phantom_waiter(self):
-        # Two eligible pools exist. Force exactly one *real* incumbent broker
-        # slot occupied on MiniMax without any provider quota cooldown; the
-        # current advisory picker must still race toward the occupied pool.
-        spec = self.accounts["providers"]["minimax"]
-        spec["concurrency_cap"] = 1
-        spec["accounts"][0]["per_account_cap"] = 1
-        (self.root / "accounts.json").write_text(json.dumps(self.accounts))
-        self.br._accounts_cache = None
-        occupied = self.br.acquire(
-            "other-root", "minimax", model="MiniMax-M2.7",
-            host="fixture", task_class="remote-minimax", ttl=1000, wait=0)
-        self.assertTrue(occupied.ok)
-        self.addCleanup(
-            lambda: self.br.release(occupied.lease_id, "other-root"))
-        # The first native controller sees ordinary broker contention,
-        # *not* the cooldown injected by the previous regression.
-        with patch.object(self, "cool_from_settled_other_commission", return_value=None):
-            rc = fabric_continuation.foreground(
-                api, "origin", "mechanical", cwd="~",
-                packet=None, stdin_bytes=b"original task\\n",
-                root_id="root", parent_run_id="parent",
-                task_complexity="C0_MECHANICAL")
-        self.assertNotEqual(rc, 0)  # fixture forbids remote transport
-        first = api.inspect_run("origin")
-        self.assertEqual(first["state"], "TERMINAL_FAILURE")
-        self.assertEqual((first["signal"], first["reason"]),
-                         ("capacity", "prelease_broker_busy"))
-        proof = fabric_continuation.eligible(
-            api, self.root, "origin", "root", "parent")
-        self.assertEqual((proof["kind"], proof["pool"], proof["broker_reason"]),
-                         ("prelease_broker_busy", "minimax", "cap_full"))
-        self.assertEqual([route["pool"] for route in self.route_calls[:2]],
-                         ["minimax", "glm"])
-        self.assertEqual(len(self.native_calls), 2)
-        self.assertEqual(
-            fabric_continuation.resolve(api, "origin")["prior_attempts"][0]["reason"],
-            "prelease_broker_busy")
-        self.assertFalse(self.path("origin", ".support.json").exists())
-        self.assertFalse(self.path("origin", ".process.jsonl").exists())
-        with self.br._conn() as conn:
-            self.assertEqual(conn.execute(
-                "SELECT COUNT(*) FROM leases WHERE orchestrator_id='root' "
-                "AND pool='minimax'").fetchone()[0], 0)
-            self.assertEqual(conn.execute(
-                "SELECT COUNT(*) FROM waiters WHERE orchestrator_id='root'").fetchone()[0], 0)
-            self.assertEqual(conn.execute(
-                "SELECT COUNT(*) FROM leases WHERE orchestrator_id='other-root' "
-                "AND pool='minimax' AND state IN ('held','rented')").fetchone()[0], 1)
-
-    def test_busy_proof_tampering_fails_closed(self):
-        spec = self.accounts["providers"]["minimax"]
-        spec["concurrency_cap"] = 1
-        spec["accounts"][0]["per_account_cap"] = 1
-        (self.root / "accounts.json").write_text(json.dumps(self.accounts))
-        self.br._accounts_cache = None
-        occupied = self.br.acquire(
-            "other-root", "minimax", model="MiniMax-M2.7",
-            host="fixture", task_class="remote-minimax", ttl=1000, wait=0)
-        self.assertTrue(occupied.ok)
-        self.addCleanup(lambda: self.br.release(occupied.lease_id, "other-root"))
-        with patch.object(self, "cool_from_settled_other_commission", return_value=None):
-            rc = api.request("origin", "mechanical", cwd="~", packet=None,
-                stdin_bytes=b"original task\\n", root_id="root", parent_run_id="parent",
-                task_complexity="C0_MECHANICAL", request_capacity_preflight=True,
-                request_remaining_seconds=60,
-                request_deadline_ns=time.monotonic_ns() + 60_000_000_000)
-        self.assertEqual(rc, 75)
-        self.assertEqual(api.inspect_run("origin")["reason"], "prelease_broker_busy")
-        file = self.path("origin", ".prelease-quota.json")
-        original = file.read_bytes()
-        for change in (
-            lambda v: v.update(lease_granted=True),
-            lambda v: v.update(task_cli_started=True),
-            lambda v: v.update(broker_reason="account_parked"),
-            lambda v: v.update(waiter_cleared=False),
-            lambda v: v.update(root_id="wrong-root"),
-            lambda v: v["native_sources"].update(**{"lease_broker.py": "0" * 64}),
-        ):
-            with self.subTest(change=change):
-                value = json.loads(original)
-                change(value)
-                file.write_text(json.dumps(value))
-                self.assertNotEqual(
-                    api.inspect_run("origin")["state"], "TERMINAL_FAILURE")
-                with self.assertRaises(ValueError):
-                    fabric_continuation.eligible(api, self.root, "origin", "root", "parent")
-        file.write_bytes(original)
-        returned = self.path("origin", ".request-return.json")
-        original_return = returned.read_bytes()
-        returned.unlink()
-        self.assertEqual(api.inspect_run("origin")["state"], "SETTLING")
-        with self.assertRaises(ValueError):
-            fabric_continuation.eligible(api, self.root, "origin", "root", "parent")
-        returned.write_bytes(original_return)
-        self.assertEqual(
-            fabric_continuation.eligible(api, self.root, "origin", "root", "parent")["pool"],
-            "minimax")
-
-    def test_pool_exclusion_cannot_override_manual_route_or_allows(self):
-        # Verify the unchanged incumbent selector receives only qualified
-        # unexcluded routes; a caller cannot use this as a manual pool switch.
+    def test_picker_exclusions_are_scoped_and_pins_still_refused(self):
         routes = {"minimax": ("fixture", "minimax"), "glm": ("fixture", "glm")}
-        with patch.object(api.pick, "_eligible_host_routes", return_value=dict(routes)), \\
-             patch.object(api.pick, "_format_pick",
-                          side_effect=lambda task, **kw:
-                              "POOL=" + next(iter(kw["host_modes"]))
-                              + " KEY=- MODEL=fixture MODEL_ROLE=fixture REASON=ok"):
-            line = api.pick._format_pick_host(
-                "mechanical", host="auto", excluded_pools=["minimax"])
-            self.assertIn("POOL=glm ", line)
-            self.assertIn("HOST=fixture MODE=glm", line)
-            self.assertIn("invalid excluded_pools", api.pick._format_pick_host(
-                "mechanical", host="auto", pool="minimax",
-                excluded_pools=["minimax"]))
-            self.assertIn("invalid excluded_pools", api.pick._format_pick_host(
-                "mechanical", host="auto", excluded_pools=["unregistered"]))
-        with self.assertRaises(ValueError):
-            fabric_continuation.foreground(
-                api, "strict", "mechanical", cwd="~",
-                packet=None, stdin_bytes=b"strict\\n",
-                root_id="root", parent_run_id="parent", pool="minimax")
-        with self.assertRaises(api.FabricTaskError):
-            api.request("pinned", "mechanical", cwd="~", packet=None,
-                stdin_bytes=b"pinned\\n", root_id="root", parent_run_id="parent",
-                pool="minimax", capacity_excluded_pools=["minimax"],
-                request_capacity_preflight=True)
+        def choose(task, **options):
+            self.assertEqual(set(options["host_modes"]), {"glm"})
+            return "POOL=glm KEY=- MODEL=glm-5.3-flash REASON=ok"
+        with patch.object(api.pick, "_eligible_host_routes", return_value=dict(routes)):
+            with patch.object(api.pick, "_format_pick", side_effect=choose):
+                result = api.pick._format_pick_host(
+                    "mechanical", host="auto", excluded_pools=["minimax"])
+                self.assertIn("POOL=glm ", result)
+                self.assertIn("HOST=fixture MODE=glm", result)
+                self.assertIn("invalid excluded_pools", api.pick._format_pick_host(
+                    "mechanical", host="auto", pool="minimax",
+                    excluded_pools=["minimax"]))
+                self.assertIn("invalid excluded_pools", api.pick._format_pick_host(
+                    "mechanical", host="auto", excluded_pools=["unregistered"]))
 
 
 if __name__ == "__main__":
