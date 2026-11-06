@@ -314,12 +314,9 @@ def validate_go_base_manifest(manifest, dependency_hashes):
             GO_BASE_PROVIDER_OUTCOME_SHA256, GO_PROTECTED_PROVIDER_OUTCOME_SHA256}:
         raise ValueError("native Go provider outcome is not the exact protected source")
     historical["ext/provider_outcome.py"] = GO_BASE_PROVIDER_OUTCOME_SHA256
-    if current_diagnostics:
-        for name, original in BROKER_BUSY_STAGE_PREIMAGES.items():
-            current = manifest.get("ext/" + name)
-            if current not in (original, BROKER_BUSY_STAGE_DIGESTS[name]):
-                raise ValueError("native broker busy stage source differs: " + name)
-            historical["ext/" + name] = original
+    # Busy source is already normalized before Ubuntu4 and completed-poll.
+    # Reapplying its newer preimage here would overwrite those older sealed
+    # predecessor hashes and falsify historical102.
     # Preserve exact source hashes and deny partial/mixed custody receipts.
     # The protected/current trio belongs to current diagnostic namespaces,
     # never a newly relabelled historical102 closure.
