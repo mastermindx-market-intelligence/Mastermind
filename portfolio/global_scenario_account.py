@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timezone
 from typing import Any
 
-from portfolio import global_scenario_context, instrument_policy, paper_account, registry
+from portfolio import global_scenario_context, global_scenario_summary, instrument_policy, paper_account, registry
 
 SCHEMA = "mastermind.global_scenario_account/v1"
 _SYMBOL = re.compile(r"[A-Z0-9][A-Z0-9.-]{0,19}\Z")
@@ -225,7 +225,7 @@ def compare_account(*, portfolio_id: str, account: Mapping[str, Any],
             "positions": weights, "cash_weight": cash_weight,
             "universe": sorted(native_universe, key=lambda row: row["instrument_id"]),
             "constraints": {k: constraints[k] for k in _LIMITS}}
-    comparison = global_scenario_context.compare(book, alternatives, scenarios, as_of=at)
+    comparison = global_scenario_summary.compare_with_hold_baseline(book, alternatives, scenarios, as_of=at)
     return {"schema": SCHEMA, "as_of": at, "status": comparison["status"],
             "reasons": comparison.get("reasons", []), "comparison": comparison,
             "valuation_session": session, "valuation_status": "QUALIFIED",

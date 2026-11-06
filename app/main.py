@@ -111,6 +111,10 @@ if FastAPI is not None:
     # only on a local/non-authoritative box. See app/auth.py _PFOLIO_PATH_PREFIX.
     app.include_router(pfolio.router)
 
+    # Bounded, private operator-supplied what-ifs; existing auth owns admission.
+    from app import portfolio_scenarios
+    app.include_router(portfolio_scenarios.router)
+
     # Short-TTL response cache for GET /api/* — installed BEFORE auth so the auth gate stays
     # OUTERMOST (an unauthenticated request never reaches the cache). No-op unless
     # MASTERMIND_RESP_CACHE_TTL>0.
