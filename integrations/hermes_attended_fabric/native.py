@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import os
 import json
 import re
 from dataclasses import dataclass
@@ -245,14 +246,57 @@ def register_native_tool(ctx: Any, *, authorize_session: Callable[[str], Session
     handler = native_handler(profile_id=ctx.profile_name,
                              authorize_session=authorize_session, port=port,
                              currentness_guard=currentness_guard)
+    # Native Hermes owns the registry, collision fence and registration lease.
+    # Do not overwrite a prior installation or create a parallel registry.
     try:
-        # Upstream owns profile-scoped registration and disposal.
-        handle = ctx.register_tool(
-            name=TOOL, toolset=TOOLSET, schema=TOOL_SCHEMA, handler=handler,
-            check_fn=lambda: True, is_async=False,
-            description=TOOL_SCHEMA["description"], emoji="cpu")
+        from hermes_cli.plugin_isolation import (
+            HOST_PROCESS_ENV, ISOLATION_HOST, isolation_mode,
+        )
+        from registration_lifecycle import replacement_coordinator
+        from tools.registry import registry
+    except ImportError:
+        raise FabricNativeRefusal("HERMES_NATIVE_OWNER_UNAVAILABLE") from None
+    if os.environ.get(HOST_PROCESS_ENV) == "1":
+        raise FabricNativeRefusal("HERMES_PLUGIN_HOST_PROCESS_REFUSED")
+    try:
+        if isolation_mode() == ISOLATION_HOST and (
+            getattr(getattr(ctx, "manifest", None), "source", "") != "bundled"
+        ):
+            raise FabricNativeRefusal("HERMES_PLUGIN_ISOLATION_REFUSED")
+    except FabricNativeRefusal:
+        raise
     except Exception:
-        raise FabricNativeRefusal("HERMES_REGISTRATION_EFFECT_UNKNOWN") from None
-    if handle is None:
-        raise FabricNativeRefusal("HERMES_TOOL_NOT_REGISTERED")
-    return handle
+        raise FabricNativeRefusal("HERMES_PLUGIN_ISOLATION_UNKNOWN") from None
+    scope = getattr(getattr(ctx, "_manager", None), "scope_key", None)
+    if type(scope) is not str or not scope:
+        raise FabricNativeRefusal("HERMES_NATIVE_SCOPE_UNAVAILABLE")
+    check_fn = lambda: True   # Each call checks current native session grant.
+    with replacement_coordinator.transaction():
+        if (registry.snapshot_registration(TOOL, scope=scope) is not None
+                or registry.get_entry(TOOL, scope=scope) is not None):
+            raise FabricNativeRefusal("HERMES_NATIVE_TOOL_COLLISION")
+        try:
+            handle = ctx.register_tool(
+                name=TOOL, toolset=TOOLSET, schema=TOOL_SCHEMA,
+                handler=handler, check_fn=check_fn, is_async=False,
+                description=TOOL_SCHEMA["description"], emoji="cpu")
+        except Exception:
+            # This may have written the native entry before a transport loss.
+            raise FabricNativeRefusal("HERMES_REGISTRATION_EFFECT_UNKNOWN") from None
+        if handle is None:
+            raise FabricNativeRefusal("HERMES_REGISTRATION_RECEIPT_UNAVAILABLE")
+        try:
+            entry = registry.snapshot_registration(TOOL, scope=scope)
+            if (entry is None or entry.handler is not handler
+                    or entry.schema != TOOL_SCHEMA or entry.toolset != TOOLSET
+                    or entry.check_fn is not check_fn):
+                raise FabricNativeRefusal("HERMES_REGISTRATION_READBACK_MISMATCH")
+        except Exception as exc:
+            try:
+                handle.dispose()   # Only this exact native lease; no broad unregister.
+            except Exception:
+                raise FabricNativeRefusal("HERMES_REGISTRATION_ROLLBACK_UNKNOWN") from None
+            if isinstance(exc, FabricNativeRefusal):
+                raise
+            raise FabricNativeRefusal("HERMES_REGISTRATION_READBACK_UNAVAILABLE") from None
+        return handle
