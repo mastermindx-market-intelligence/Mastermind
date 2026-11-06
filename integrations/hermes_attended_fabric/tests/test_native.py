@@ -47,8 +47,9 @@ class FakeOwner:
             raise TimeoutError()
         return self._return(grant, run_id, self.state)
 
-    def submit(self, grant, run_id, task_class, complexity, packet, reason):
-        self.calls.append(("submit", run_id, task_class, complexity, packet, reason))
+    def submit(self, grant, run_id, task_class, complexity, packet, reason, *,
+               pool=None, model=None):
+        self.calls.append(("submit", run_id, task_class, complexity, packet, reason, pool, model))
         if self.fail == "submit":
             raise TimeoutError()
         if self.fail == "bad_submit":
@@ -122,11 +123,52 @@ class TestNativeFabric(unittest.TestCase):
         self.assertEqual(self.port.calls, [])
 
     def test_model_cannot_change_account_or_host(self):
-        for field in ("pool", "model", "account", "host", "session_id",
+        for field in ("account", "host", "session_id",
                       "parent_id", "run_id", "idempotency_key", "accepted_by"):
             with self.subTest(field=field):
                 result = self.call("submit", **self.fields(), **{field: "other"})
                 self.assertEqual(result["reason"], "UNKNOWN_FIELD")
+        self.assertEqual(self.port.calls, [])
+
+    def test_model_without_manual_grant_cannot_pin_pool_or_model(self):
+        for selection in ({"pool": "minimax"}, {"pool": "minimax", "model": "MiniMax-M3"},
+                          {"model": "MiniMax-M3"}):
+            with self.subTest(selection=selection):
+                got = self.call("submit", **self.fields(), **selection)
+                self.assertEqual(got["reason"], "MANUAL_ROUTE_NOT_AUTHORIZED")
+        self.assertEqual(self.port.calls, [])
+
+    def test_exact_manual_grant_reuses_native_strict_pin_owner(self):
+        grant = SessionGrant(
+            "main", "native-session-A", self.grant.root_id, self.grant.parent_id,
+            "generation-A", manual_pools=("minimax",),
+            manual_models=(("minimax", "MiniMax-M3"),))
+        handle = native_handler(
+            profile_id="main", authorize_session=lambda session: grant,
+            port=self.port, currentness_guard=lambda grant: True)
+        def call(**selection):
+            return json.loads(handle(
+                {"action": "submit", "task_key": "one-thing",
+                 **self.fields(), **selection}, session_id=grant.session_id))
+        got = call(pool="minimax", model="MiniMax-M3")
+        self.assertEqual(got["state"], "CONTROLLER_CREATED")
+        self.assertEqual(self.port.calls[-1][-2:], ("minimax", "MiniMax-M3"))
+
+    def test_unauthorized_manual_model_or_pool_refuses_before_owner(self):
+        grant = SessionGrant(
+            "main", "native-session-A", self.grant.root_id, self.grant.parent_id,
+            "generation-A", manual_pools=("minimax",),
+            manual_models=(("minimax", "MiniMax-M3"),))
+        handle = native_handler(
+            profile_id="main", authorize_session=lambda session: grant,
+            port=self.port, currentness_guard=lambda grant: True)
+        for selection in ({"pool": "minimax", "model": "Other-M3"},
+                          {"pool": "glm", "model": "auto"},
+                          {"model": "MiniMax-M3"}):
+            got = json.loads(handle(
+                {"action": "submit", "task_key": "one-thing",
+                 **self.fields(), **selection}, session_id=grant.session_id))
+            self.assertEqual(got["reason"], "MANUAL_ROUTE_NOT_AUTHORIZED")
         self.assertEqual(self.port.calls, [])
 
     def test_wrong_actual_native_caller_fails(self):
