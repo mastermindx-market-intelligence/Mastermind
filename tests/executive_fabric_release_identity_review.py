@@ -729,7 +729,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '58bfdd1
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "f3f84a63b1b966a4d2ece6c3669959e377b2dc929ba9dd2e6fbc6c997f743fbf",
+    "sha256": "7a16dd22038594d275de2eb3c853bdfe7a4952529ceec33de4b4baf4562255f0",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -740,5 +740,5 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
     "sites": ((34, 31, 34, "int", "512"),),
 }
 
-# C22 native-control source pin reconciled at its unchanged published postimage;
-# MAX_WIRE_BYTES retains the single exact multiplication operand above.
+# C46 native-control composition changes the enclosing source. The byte-ceiling
+# declaration, both consumers and the single reviewed operand remain exact.

@@ -40,8 +40,8 @@ jobs:
         run: |
           set -eu
           for package in hermes_models hermes_harness hermes_runtime hermes_steward hermes_delegate hermes_secretary; do
-            if [ "$package" = hermes_runtime ]; then
-              python -m pytest -q integrations/hermes_runtime/tests
+            if [ "$package" = hermes_runtime ] || [ "$package" = hermes_harness ]; then
+              python -m pytest -q "integrations/$package/tests"
             else
               python -m unittest discover -v -s "integrations/$package/tests" -p 'test_*.py'
             fi
