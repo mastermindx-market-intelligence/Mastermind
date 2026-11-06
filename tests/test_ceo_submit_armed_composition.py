@@ -1583,27 +1583,20 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
 
 
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
-    # H2 direct-native host composition: the qualified current-config/source
-    # generation callback changes this module; the installed event-loop AST
-    # remains exactly the independently reviewed 060525... anchor below.
-    # Keep a pinned full-source digest. Never derive it during this test.
-    # Exact source review of the canonical installed wrapper. This does not
-    # exempt other run calls or imports, even inside the same function.
-    # Return plus attention composition changes the module; the installed entry
-    # AST below remains identical to protected d65414e. This static literal
-    # freezes the combined candidate, not independent review or release authority.
-    # The accepted current Knowledge/Instructions owner composition changes this
-    # module; the exact installed event-loop AST and closed call below stay fixed.
-    # 2026-11-06 source audit: project input custody and paired canonical READ
-    # composition retain protected c571acc9's exact 060525... wrapper AST. This
-    # composed-file pin grants no native SEND or installed-release approval.
-    # d3f observation-only Fabric coexistence adds no event loop: the exact
-    # installed wrapper AST below and paid/attended non-mixing guards remain.
+    # Exact source review of the canonical installed wrapper. Keep a pinned
+    # full-source digest; never derive it during this test. The pinned digest
+    # covers the composed C18 Secretary and frozen selected-child target
+    # injection. The installed entry AST remains exactly the
+    # independently reviewed 060525... anchor checked below. This does not
+    # exempt other run calls or imports, even inside the same function. This
+    # static literal freezes the combined candidate, not independent review or
+    # release authority, and grants no native SEND or installed-release
+    # approval.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '4d6e98524f460ae9a0dbb38ed35b95b80e27979563c7043deed37df9b61564ab'):
+            '1d0d7592b038f8f105476a02520412d427f1a468dec3e814eaae1a47ae32e154'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

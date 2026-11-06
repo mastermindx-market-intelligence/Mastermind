@@ -168,9 +168,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 109297,
+      "bytes": 109420,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd",
+      "sha256": "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -222,16 +222,16 @@
       "source": "source/go_codex_exec.sh"
     },
     "ext/go_lease_capability.py": {
-      "bytes": 9456,
+      "bytes": 17821,
       "installed_preimage_sha256": "9f350698ba94d64fedc3f64ebffce993840d7ee3376b46254756d58bdb78c66a",
-      "sha256": "9f350698ba94d64fedc3f64ebffce993840d7ee3376b46254756d58bdb78c66a",
-      "source": "source/go_lease_capability.py"
+      "sha256": "5227bf4d7b2b4b5664392c5178f31b113603e42490e9693fc0da5c79401c7938",
+      "source": "candidate/go_lease_capability.py"
     },
     "ext/go_lease_gateway.py": {
-      "bytes": 4513,
+      "bytes": 27855,
       "installed_preimage_sha256": "7b1e1d48933218135771c770a1d25c994aa0332bc6bc8461c5b9d625ef8a7658",
-      "sha256": "7b1e1d48933218135771c770a1d25c994aa0332bc6bc8461c5b9d625ef8a7658",
-      "source": "source/go_lease_gateway.py"
+      "sha256": "19f4276840361a1efafd329f72e919a2b9d4d898c9eb67ee5fddaaf3b8a27c03",
+      "source": "candidate/go_lease_gateway.py"
     },
     "ext/go_remote_capsule.py": {
       "bytes": 3531,
@@ -294,15 +294,15 @@
       "source": "candidate/host_pull_probe.template"
     },
     "ext/lane_runtime.py": {
-      "bytes": 91552,
+      "bytes": 92154,
       "installed_preimage_sha256": "966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937",
-      "sha256": "83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d",
+      "sha256": "a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f",
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 74098,
+      "bytes": 142839,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "598d9b905b71897275a0617d143f3280bc802fbd6c375bed9848d222564e1488",
+      "sha256": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
       "source": "candidate/lease_broker.py"
     },
     "ext/linux_process_identity.py": {
@@ -534,9 +534,9 @@
       "source": "candidate/participant_binding.py"
     },
     "ext/pick.py": {
-      "bytes": 129395,
+      "bytes": 169718,
       "installed_preimage_sha256": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
-      "sha256": "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132",
+      "sha256": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
       "source": "candidate/pick.py"
     },
     "ext/placement_view.py": {
@@ -546,9 +546,9 @@
       "source": "source/placement_view.py"
     },
     "ext/pool_ledger.py": {
-      "bytes": 85784,
+      "bytes": 87567,
       "installed_preimage_sha256": "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e",
-      "sha256": "34be52eca114c32f44538254b3675ce2d0a79dc420ebda2f42702c6be56ad6cc",
+      "sha256": "a9ba8724ad1d6f9a78944cd87f95c1cb70a0832d71612402565111fb04100ef2",
       "source": "candidate/pool_ledger.py"
     },
     "ext/pool_status.py": {
@@ -576,9 +576,9 @@
       "source": "candidate/provider_outcome.py"
     },
     "ext/quota_circuit.py": {
-      "bytes": 28768,
+      "bytes": 28888,
       "installed_preimage_sha256": null,
-      "sha256": "0962d638a0a5655a71ea7a6eeb83088ad60af30f4a26e9c5bc47a92c3ab77945",
+      "sha256": "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303",
       "source": "candidate/quota_circuit.py"
     },
     "ext/quota_remote.py": {
@@ -606,9 +606,9 @@
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {
-      "bytes": 60654,
+      "bytes": 61402,
       "installed_preimage_sha256": "a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61",
-      "sha256": "9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1",
+      "sha256": "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db",
       "source": "candidate/remote_sub_exec.py"
     },
     "ext/remote_sub_helpers.py": {

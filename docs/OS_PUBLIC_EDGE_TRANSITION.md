@@ -56,14 +56,18 @@ identity to loopback/https. The 64000-byte cap is the gateway's own ceiling and
 is not 65536. Caddy performs no authentication, token handling or audience
 check on any branch.
 
-The COO paths are a **new source interface**, not a claim that it is installed.
-The edge serves the two paths; the receiving owner still has to publish the real
-COO resource, issuer and scopes at the COO metadata path and to keep rejecting
-the public CEO audience there. `CooAppSettings` still requires the COO policy to
-share the base Executive resource metadata URL, and `_ExecutiveWithCoo` still
-serves one shared metadata document, so opening Caddy alone does not establish
-the authenticated path. Until the receiving composition lands, the COO route
-pair is fail-closed: the path exists, the resource does not.
+The receiving COO composition uses the shared OAuth resource
+`https://mcp.mastermind-x.com/mcp`, with `/mcp/coo` as its role transport.
+The canonical protected-resource metadata is
+`/.well-known/oauth-protected-resource/mcp`. CEO and COO authority remains
+separated by the exact scope contracts, the enrolled principal binding and
+the existing role handlers.
+
+The edge retains its accepted forwarding path for
+`/.well-known/oauth-protected-resource/mcp/coo`, but the receiver does not
+register that metadata alias and returns **404**. It does not establish a
+second OAuth resource. This source composition does not prove installation,
+live enrollment or a credentialed role turn.
 
 The transition admits exactly two coherent public-MCP profiles:
 
