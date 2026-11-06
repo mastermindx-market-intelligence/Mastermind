@@ -106,8 +106,16 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.path[:] = path_before
 
 
-def before_original_artifact_recovery(manifest):
+def before_census_runtime(manifest):
     prior = dict(manifest)
+    assert len(prior) == 107
+    assert prior["ext/lane_runtime.py"] == builder.GO_CENSUS_RUNTIME_DIGEST
+    prior["ext/lane_runtime.py"] = builder.GO_CENSUS_RUNTIME_PREIMAGE
+    return prior
+
+
+def before_original_artifact_recovery(manifest):
+    prior = before_census_runtime(manifest)
     assert len(prior) == 107
     assert prior.pop("ext/original_advertised_artifact.py") == "46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0"
     assert prior["ext/artifact_delivery.py"] == "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d"
@@ -497,3 +505,39 @@ def test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace(bu
         bad["ext/artifact_delivery.py"] = builder.GO_ORIGINAL_ARTIFACT_DIGEST
     with pytest.raises(ValueError):
         builder.validate_go_base_manifest(bad, captured)
+
+
+def test_exact_census_successor_preserves_original_107_without_mutation(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    before = dict(current)
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    builder.validate_go_base_manifest(current, captured)
+    builder.validate_go_base_manifest(before_census_runtime(current), captured)
+    assert current == before
+
+
+@pytest.mark.parametrize("namespace", ["106", "104", "102"])
+def test_census_successor_cannot_be_backdated_to_a_historical_namespace(builds, namespace):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    prior = before_original_artifact_recovery(current) if namespace == "106" else before_participant_cohort(current)
+    if namespace == "102":
+        for name, digest in builder.GO_POST_FAILURE_PREIMAGES.items():
+            prior["ext/" + name] = digest
+        for name in builder.GO_POST_FAILURE_ADDITIONS:
+            del prior["ext/" + name]
+    assert len(prior) == int(namespace)
+    prior["ext/lane_runtime.py"] = builder.GO_CENSUS_RUNTIME_DIGEST
+    with pytest.raises(ValueError, match="census cannot relabel"):
+        builder.validate_go_base_manifest(prior, captured)
+
+
+@pytest.mark.parametrize("digest", ["f" * 64, ""])
+def test_unknown_census_bytes_refuse_without_changing_the_manifest(builds, digest):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    current["ext/lane_runtime.py"] = digest
+    before = dict(current)
+    with pytest.raises(ValueError, match="census is not the exact"):
+        builder.validate_go_base_manifest(current, captured)
+    assert current == before

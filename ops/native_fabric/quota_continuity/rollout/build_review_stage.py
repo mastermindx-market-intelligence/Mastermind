@@ -202,6 +202,10 @@ GO_ORIGINAL_ARTIFACT_ADDITIONS = {
 GO_ORIGINAL_ARTIFACT_PREIMAGE = "81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1"
 GO_ORIGINAL_ARTIFACT_DIGEST = "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d"
 
+# Exact protected107 process-census successor; prior namespaces retain their bytes.
+GO_CENSUS_RUNTIME_PREIMAGE = "61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329"
+GO_CENSUS_RUNTIME_DIGEST = "83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d"
+
 
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/previous106/current107 compositions.
@@ -217,7 +221,9 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     advertised-artifact recovery pair extends that closure to107 and is
     projected back to106 before historical validation; it grants no new
     application artifact access.
-    Every other member/key stays bound to actual395b.
+    The exact current107 census successor is normalized without changing any
+    historical namespace or the caller manifest. Every other member/key stays
+    bound to actual395b.
     """
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
@@ -230,6 +236,13 @@ def validate_go_base_manifest(manifest, dependency_hashes):
             or set(dependency_hashes) != set(GO_APPLICATION_DEPENDENCIES)):
         raise ValueError("native Go base dependency closure differs")
     normalized = dict(manifest)
+    runtime = manifest["ext/lane_runtime.py"]
+    if runtime == GO_CENSUS_RUNTIME_DIGEST:
+        if set(manifest) != expected:
+            raise ValueError("native Go census cannot relabel historical namespace")
+        normalized["ext/lane_runtime.py"] = GO_CENSUS_RUNTIME_PREIMAGE
+    elif runtime != GO_CENSUS_RUNTIME_PREIMAGE:
+        raise ValueError("native Go census is not the exact protected source")
     if set(manifest) == expected:
         if (any(manifest["ext/" + name] != digest for name, digest in GO_ORIGINAL_ARTIFACT_ADDITIONS.items())
                 or manifest["ext/artifact_delivery.py"] != GO_ORIGINAL_ARTIFACT_DIGEST):
