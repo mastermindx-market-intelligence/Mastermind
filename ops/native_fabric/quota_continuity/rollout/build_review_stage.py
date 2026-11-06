@@ -208,6 +208,10 @@ GO_CENSUS_RUNTIME_DIGEST = "83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3
 # C36 at fe3265a9: exact owned-child exit observation successor, current107 only.
 GO_CENSUS_EXIT_RUNTIME_DIGEST = "a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f"
 
+# Exact current107 remote-cwd successor of the protected Ubuntu4 task member.
+# The complete Ubuntu4 cohort must still validate after this normalization.
+GO_REMOTE_CWD_TASK_DIGEST = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
+
 
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/previous106/current107 compositions.
@@ -223,9 +227,10 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     advertised-artifact recovery pair extends that closure to107 and is
     projected back to106 before historical validation; it grants no new
     application artifact access.
-    The two exact current107 census successors are normalized without changing any
-    historical namespace or the caller manifest. Every other member/key stays
-    bound to actual395b.
+    The two exact current107 census successors and the exact remote-cwd
+    task successor are normalized without changing any historical namespace
+    or the caller manifest. The task successor still requires the complete
+    Ubuntu4 and poll cohorts. Every other member/key stays bound to actual395b.
     """
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
@@ -245,6 +250,10 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         normalized["ext/lane_runtime.py"] = GO_CENSUS_RUNTIME_PREIMAGE
     elif runtime != GO_CENSUS_RUNTIME_PREIMAGE:
         raise ValueError("native Go census is not the exact protected source")
+    if manifest["ext/fabric_task.py"] == GO_REMOTE_CWD_TASK_DIGEST:
+        if set(manifest) != expected:
+            raise ValueError("native Go remote-cwd task cannot relabel historical namespace")
+        normalized["ext/fabric_task.py"] = GO_UBUNTU4_DIGESTS["fabric_task.py"]
     if set(manifest) == expected:
         if (any(manifest["ext/" + name] != digest for name, digest in GO_ORIGINAL_ARTIFACT_ADDITIONS.items())
                 or manifest["ext/artifact_delivery.py"] != GO_ORIGINAL_ARTIFACT_DIGEST):
@@ -261,7 +270,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         for name in GO_PARTICIPANT_ADDITIONS:
             del normalized["ext/" + name]
         normalized["ext/fabric_operator_owner.py"] = GO_PARTICIPANT_OPERATOR_PREIMAGE
-    ubuntu4 = {name: manifest["ext/" + name] for name in GO_UBUNTU4_DIGESTS}
+    ubuntu4 = {name: normalized["ext/" + name] for name in GO_UBUNTU4_DIGESTS}
     if any(ubuntu4[name] == digest for name, digest in GO_UBUNTU4_DIGESTS.items()):
         if not current_diagnostics or ubuntu4 != GO_UBUNTU4_DIGESTS:
             raise ValueError("native Go Ubuntu4 cohort is not the exact protected source")

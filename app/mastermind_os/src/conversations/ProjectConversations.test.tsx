@@ -37,7 +37,7 @@ it('mounts without IO, reads only explicit selected project, then Open/Back/reop
   fireEvent.click(screen.getByRole('button',{name:'Back to conversations'}));
   expect((screen.getByRole('textbox',{name:'Find in these conversations'}) as HTMLInputElement).value).toBe('selected');
   const reopened=screen.getByRole('button',{name:'Open'});expect(reopened).toBe(document.activeElement);
-  fireEvent.click(reopened);await screen.findByText(fixture.read.turns[0]!.reply!.text);
+  await act(async()=>{fireEvent.click(reopened);});await screen.findByText(fixture.read.turns[0]!.reply!.text);
   expect(s.transport.read).toHaveBeenCalledTimes(2);
   expect(s.transport.catalogue).toHaveBeenCalledTimes(1);
   fireEvent.keyDown(window,{key:'Escape'});
