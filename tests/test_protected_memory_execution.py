@@ -136,7 +136,7 @@ def joined(configured,installed,monkeypatch,economy,request):
                     actual=base64.b64decode(envelope['input_base64'])
                     assert actual==result['native_packet']
                     body=json.loads(base64.b64decode(envelope['body_base64']))
-                    assert body['input'].encode()==native and body['input'].encode().count(wire.SUFFIX)==1
+                    assert body['input'].encode()==actual and body['input'].encode().count(wire.SUFFIX)==1
                     chosen=selected_descriptors(actual)[0]
                     if result['bad']:chosen['context_id']='foreign-arm'
                     original=wire.canonical({'schema':'research_factory.market_memory_e0_participant_result.v1','answer':'Fixture untrusted answer','citations':[chosen]})
@@ -144,7 +144,7 @@ def joined(configured,installed,monkeypatch,economy,request):
                 except BaseException as error:errors.append(error)
                 finally:os.close(out);channel.close();done.set()
             threading.Thread(target=child,daemon=True).start()
-        def poll(self):return 0 if done.is_set() and not errors else None
+        def poll(self):return (1 if errors else 0) if done.is_set() else None
     monkeypatch.setattr(execution.subprocess,'Popen',Process)
     # Inert filesystem UID premise only; real file bytes/modes/stability remain.
     def retained(path,limit):

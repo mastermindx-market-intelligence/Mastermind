@@ -39,6 +39,15 @@ def test_actual_macro_exchange_to_genuine_m2_original_execution_and_completed_re
     source=Path(os.environ['MM_MEMORY_V3_MACRO_ROOT']).resolve()
     destination=Path(os.environ['MM_MEMORY_V3_JOIN_RETURN']).resolve()
     assert not destination.exists() and destination.parent.is_dir()
+    manifest_raw=(Path(__file__).parent/'fixtures/memory_native_v3_9fb08/SOURCE_MANIFEST.json').read_bytes()
+    assert hashlib.sha256(manifest_raw).hexdigest()=='23dc4b963ffb160789de767db419dd454824007cb5be7f559752da22dc0f7dc4'
+    source_manifest=json.loads(manifest_raw)
+    assert source_manifest['source_head']=='9fb08c079c0048f3f9fe9549208b2afc1316119b'
+    for relative,entry in source_manifest['paths'].items():
+        path=source/relative
+        assert path.is_file() and not path.is_symlink()
+        body=path.read_bytes()
+        assert len(body)==entry['bytes'] and hashlib.sha256(body).hexdigest()==entry['sha256']
     assert hashlib.sha256((source/'engine/research_factory/market_memory_e0_native_issuer.py').read_bytes()).hexdigest()==SOURCE_MODULE_SHA
     dependencies=json.loads((Path(__file__).parent/'fixtures/memory_native_v3_9fb08/FIXTURE_DEPENDENCIES.json').read_text())
     for dependency in dependencies['entries']:
@@ -59,7 +68,7 @@ def test_actual_macro_exchange_to_genuine_m2_original_execution_and_completed_re
     primitives=importlib.import_module('tests.market_memory_native_peer_fixtures')
     issuer=native.issuer;case=native.case
     assert Path(issuer.__file__).resolve()==source/'engine/research_factory/market_memory_e0_native_issuer.py'
-    source_before=native_case.source_guard_snapshot()
+    original_source_before=native_case.source_guard_snapshot()
     runtime,job,lease,_,processes,_,errors,state,run=joined
     trace=[];summary={'schema':'mastermind.memory_actual_v3_source_join.v1','complete':False,
         'consumer_base':'c2b0614381959ab3092ea2407c851144511b65dc',
@@ -99,6 +108,7 @@ def test_actual_macro_exchange_to_genuine_m2_original_execution_and_completed_re
         records=native.records.__wrapped__()
         for value in records.values():value['study_id']=actual_intent['study_id']
         linux.setattr(case,'_SOURCE_PATHS',issuer.FULL_SOURCE_PATHS)
+        source_before=native_case.source_guard_snapshot()
         linux.setattr(issuer,'_platform',lambda:'linux');linux.setattr(issuer,'_uid',lambda:0)
         temporary=tmp_path/'linux';temporary.mkdir()
         with native_case.isolated_install(temporary,linux) as installed_root:
@@ -183,4 +193,4 @@ def test_actual_macro_exchange_to_genuine_m2_original_execution_and_completed_re
                 checkpoint()
             finally:
                 in_linux(generator.close)
-    assert native_case.source_guard_snapshot()==source_before
+    assert native_case.source_guard_snapshot()==original_source_before
