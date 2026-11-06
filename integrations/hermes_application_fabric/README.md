@@ -50,6 +50,10 @@ authenticated host and its grant/currentness checks. Metadata is correlation,
 not authority. The host retains this binding across native client rebuilds and
 owns its lifecycle and recovery. The adapter does not invent a role/session map.
 
+The exact [host integration and live acceptance contract](HOST_INTEGRATION.md)
+specifies the existing host callbacks, first strict-model canary and canonical
+owner evidence. It contains no new host/session implementation.
+
 The role-specific factory must pass the original APPLICATION closed relation,
 capability, qualification and policy checks. Proposed Hermes service relations in
 `from_factory` are reserved integration names, not enrollment or enabled policy.
