@@ -69,8 +69,77 @@ def test_real_private_kernel_peer_and_foreground_creation_mount(tmp_path, rsa_ke
                 assert adapters[0].begin_turn_calls == 2
                 count = len(runtime.jobs.list_jobs())
                 before = runtime.events.list_events()
-                code, duplicate = await post(app, "create", create, token, workspace_token)
-                assert code == 200 and duplicate["ok"] is True
+                duplicate_trace = []
+
+                def exception_trace(exc):
+                    # Keep only bounded type/code/location evidence, never messages
+                    # or locals. Explicit context survives ``raise ... from None``.
+                    pending, seen, chain = [("raised", exc)], set(), []
+                    while pending and len(chain) < 8:
+                        relation, current_exc = pending.pop(0)
+                        if id(current_exc) in seen:
+                            continue
+                        seen.add(id(current_exc))
+                        frames, tb = [], current_exc.__traceback__
+                        while tb is not None:
+                            frames.append({"file": tb.tb_frame.f_code.co_filename,
+                                "function": tb.tb_frame.f_code.co_name, "line": tb.tb_lineno})
+                            frames = frames[-12:]
+                            tb = tb.tb_next
+                        item = {"relation": relation,
+                            "type": f"{type(current_exc).__module__}.{type(current_exc).__qualname__}",
+                            "frames": frames}
+                        if type(current_exc).__name__ in {"ConversationRefusal", "CeoIngressError"}:
+                            item["code"] = getattr(current_exc, "code", None)
+                            item["effect"] = getattr(current_exc, "effect", None)
+                        chain.append(item)
+                        for name in ("__cause__", "__context__"):
+                            related = getattr(current_exc, name, None)
+                            if related is not None:
+                                pending.append((relation + "." + name, related))
+                    return chain
+
+                original_send_frame = client._send_frame
+                original_create = FreshConversationOwner.create
+
+                async def traced_send_frame(socket_path, frame, *, keep_write_open, foreground_source=None):
+                    duplicate_trace.append({"owner": "transport", "event": "entered"})
+                    try:
+                        response = await original_send_frame(socket_path, frame,
+                            keep_write_open=keep_write_open, foreground_source=foreground_source)
+                    except BaseException as exc:
+                        duplicate_trace.append({"owner": "transport", "event": "raised",
+                            "exceptions": exception_trace(exc)})
+                        raise
+                    nested = response.result if isinstance(response.result, dict) else {}
+                    nested_error = nested.get("error")
+                    duplicate_trace.append({"owner": "transport", "event": "returned",
+                        "transport": response.transport, "ok": response.ok, "detail": response.detail,
+                        "error_code": response.error.get("code") if isinstance(response.error, dict) else None,
+                        "result_ok": nested.get("ok"),
+                        "result_error_code": nested_error.get("code") if isinstance(nested_error, dict) else None})
+                    return response
+
+                async def traced_create(owner, principal, request, *, workspace_principal):
+                    duplicate_trace.append({"owner": "create", "event": "entered"})
+                    try:
+                        value = await original_create(owner, principal, request,
+                            workspace_principal=workspace_principal)
+                    except BaseException as exc:
+                        duplicate_trace.append({"owner": "create", "event": "raised",
+                            "exceptions": exception_trace(exc)})
+                        raise
+                    duplicate_trace.append({"owner": "create", "event": "returned",
+                        "state": value.get("state"), "effect": value.get("effect")})
+                    return value
+
+                with monkeypatch.context() as trace_patch:
+                    trace_patch.setattr(client, "_send_frame", traced_send_frame)
+                    trace_patch.setattr(FreshConversationOwner, "create", traced_create)
+                    code, duplicate = await post(app, "create", create, token, workspace_token)
+                assert code == 200 and duplicate["ok"] is True, {
+                    "status": code, "response": duplicate, "duplicate_trace": duplicate_trace,
+                }
                 assert len(runtime.jobs.list_jobs()) == count and runtime.events.list_events() == before
                 assert len(adapters) == 1 and adapters[0].start_calls == 1
                 current = False

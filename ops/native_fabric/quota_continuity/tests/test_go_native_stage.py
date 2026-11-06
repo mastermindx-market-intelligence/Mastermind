@@ -106,8 +106,15 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.path[:] = path_before
 
 
-def before_census_runtime(manifest):
+def before_remote_cwd_task(manifest):
     prior = dict(manifest)
+    if prior["ext/fabric_task.py"] == builder.GO_REMOTE_CWD_TASK_DIGEST:
+        prior["ext/fabric_task.py"] = builder.GO_UBUNTU4_DIGESTS["fabric_task.py"]
+    return prior
+
+
+def before_census_runtime(manifest):
+    prior = before_remote_cwd_task(manifest)
     assert len(prior) == 107
     assert prior["ext/lane_runtime.py"] == builder.GO_CENSUS_RUNTIME_DIGEST
     prior["ext/lane_runtime.py"] = builder.GO_CENSUS_RUNTIME_PREIMAGE
@@ -154,7 +161,9 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     assert default["ext/provider_outcome.py"] == builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256
     historical["ext/provider_outcome.py"] = builder.GO_BASE_PROVIDER_OUTCOME_SHA256
     for name, original in builder.GO_UBUNTU4_PREIMAGES.items():
-        assert default["ext/" + name] == builder.GO_UBUNTU4_DIGESTS[name]
+        expected = (builder.GO_REMOTE_CWD_TASK_DIGEST if name == "fabric_task.py"
+                    else builder.GO_UBUNTU4_DIGESTS[name])
+        assert default["ext/" + name] == expected
         historical["ext/" + name] = original
     for name, original in builder.GO_PROTECTED_CUSTODY_PREIMAGES.items():
         assert default["ext/" + name] == builder.GO_PROTECTED_CUSTODY_DIGESTS[name]
@@ -539,5 +548,70 @@ def test_unknown_census_bytes_refuse_without_changing_the_manifest(builds, diges
     current["ext/lane_runtime.py"] = digest
     before = dict(current)
     with pytest.raises(ValueError, match="census is not the exact"):
+        builder.validate_go_base_manifest(current, captured)
+    assert current == before
+
+
+def test_exact_remote_cwd_task_preserves_original_107_and_caller_manifest(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    before = dict(current)
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    assert current["ext/fabric_task.py"] == g.digest((ROOT / "candidate/fabric_task.py").read_bytes())
+    assert current["ext/fabric_task.py"] == "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
+    previous = before_remote_cwd_task(current)
+    previous_before = dict(previous)
+    for task_generation in (current, previous):
+        for runtime in (builder.GO_CENSUS_RUNTIME_DIGEST, builder.GO_CENSUS_RUNTIME_PREIMAGE):
+            manifest = dict(task_generation)
+            manifest["ext/lane_runtime.py"] = runtime
+            unchanged = dict(manifest)
+            builder.validate_go_base_manifest(manifest, captured)
+            assert manifest == unchanged
+    assert current == before
+    assert previous == previous_before
+
+
+@pytest.mark.parametrize("namespace", ["106", "104", "102"])
+def test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace(builds, namespace):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    prior = before_original_artifact_recovery(current) if namespace == "106" else before_participant_cohort(current)
+    if namespace == "102":
+        prior.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
+        prior.update({"ext/" + name: digest for name, digest in builder.GO_COMPLETED_POLL_PREIMAGES.items()})
+        prior.update({"ext/" + name: digest for name, digest in builder.GO_POST_FAILURE_PREIMAGES.items()})
+        for name in builder.GO_POST_FAILURE_ADDITIONS:
+            del prior["ext/" + name]
+    assert len(prior) == int(namespace)
+    builder.validate_go_base_manifest(prior, captured)
+    prior["ext/fabric_task.py"] = builder.GO_REMOTE_CWD_TASK_DIGEST
+    before = dict(prior)
+    with pytest.raises(ValueError, match="remote-cwd task cannot relabel"):
+        builder.validate_go_base_manifest(prior, captured)
+    assert prior == before
+
+
+@pytest.mark.parametrize("members", [
+    ("fabric_host_qualification.py",), ("remote_sub.sh",),
+    ("fabric_host_qualification.py", "remote_sub.sh"),
+])
+def test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort(builds, members):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    for member in members:
+        current["ext/" + member] = builder.GO_UBUNTU4_PREIMAGES[member]
+    before = dict(current)
+    with pytest.raises(ValueError, match="Ubuntu4 cohort"):
+        builder.validate_go_base_manifest(current, captured)
+    assert current == before
+
+
+@pytest.mark.parametrize("digest", ["f" * 64, ""])
+def test_unknown_remote_cwd_task_bytes_refuse_without_changing_the_manifest(builds, digest):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    current["ext/fabric_task.py"] = digest
+    before = dict(current)
+    with pytest.raises(ValueError):
         builder.validate_go_base_manifest(current, captured)
     assert current == before
