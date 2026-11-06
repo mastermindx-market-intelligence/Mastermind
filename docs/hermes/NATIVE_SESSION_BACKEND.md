@@ -197,10 +197,10 @@ installed/product work is:
    originating request/turn through the existing owners. Never choose the latest
    request for a root or equate native UID/session identity with the Office or
    COO OAuth principal.
-4. Complete the Meta-CEO participant's remote transport and Office selection.
-   The native enrollment/control and role gateway now support explicit mmmeta
-   identity; that source support does not authorize a COO Attempt or make the
-   Meta role selectable in Office.
+4. Complete the Meta-CEO participant's Runtime continuation and Office selection.
+   Native enrollment/control, the role gateway and the shared remote transport
+   now support explicit mmmeta identity; that source support does not authorize
+   a COO Attempt or make the Meta role selectable in Office.
 
 The installed role/proxy/provider/canary/cutover restrictions remain separate
 from source completion. Independent review is not a blanket prerequisite for
@@ -270,3 +270,36 @@ The source tests exercise HTTP through the actual native private-client wire
 using a socket pair, cross-role refusals, startup wiring and measured-listener
 doubles. Remote forwarding, Office selection, installed service/provider
 qualification and activation remain separately owed.
+
+### Dual-role remote transport and preserved composition
+
+The incumbent mTLS listener accepts two closed conversation families. Meta uses
+mastermind.remote_hermes_meta_request/v1 and its matching response/native-result
+schemas. The client binds one family, host, original root/session and exact
+configuration/source digests before connecting. Wrong-family calls fail before
+connection; after a possible submission, failures retain their existing
+EFFECT_UNKNOWN classification. No retry, admission queue or second listener is
+introduced.
+
+Gateway config v4 selects metadata plus separate Secretary and Meta conversation
+bindings at the existing canonical conversation-config path. Each role has its
+own fixed credential path. The same protected file reader enforces root/group
+custody, mode0440, one link and descriptor identity. Equal retained token values
+refuse before the listener starts. The forwarder qualifies only its selected
+role's current main process and exclusive kernel listener, so an inactive sibling
+does not invalidate that role. The paired metadata observer still reads both.
+
+Fabric composition v5 adds an explicit Meta member to v4. Both roles must join
+the same qualified metadata host, transport and configuration/source pins.
+Their native session/responsibility selections remain independently bound. Existing v1-v4
+documents retain their interfaces and defaults; absence of Meta has no fallback.
+
+The existing Control component writer now carries complete qualified conversation
+members through initial qualification, compiler inputs, publication and recovery.
+An incompatible metadata source change refuses before a transaction is claimed.
+Recovery derives its policy from the original sealed candidate: v4/v5 preserve
+their matching original members, while an older v3 transaction retains its
+original bytes. It never selects replacement inputs or republishes an artifact.
+
+These are source integration changes. Installed credentials, role services,
+provider admission and Office Meta selection remain separately qualified work.

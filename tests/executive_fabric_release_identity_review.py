@@ -552,13 +552,13 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # permissions, not principals; each complete token and enclosing call was
 # inspected on these exact source bytes. No generic numeric rule changes.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': 'dcc1bed3448a5a0d452c6c0413e246937041335957bc087668e378096a652096',
+    'sha256': '05eebaa5bed65b3b686e422677352d6ba8d31d7a4b31d2577810594a291ac726',
     'sites': ((348, 24, 27, 'int', '501'),
               (6888, 35, 37, 'int', '80'),
               (6889, 50, 55, 'int', '0o755'),
               (7426, 41, 46, 'int', '0o644'),
               (8163, 64, 69, 'int', '0o644'),
-              (9565, 41, 46, 'int', '0o644')),
+              (9575, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
@@ -736,7 +736,7 @@ REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
 # Fixed Secretary wire-response byte ceiling, not an OS identity. The complete
 # NUMBER token is the left operand of MAX_SECRETARY_RESPONSE_BYTES = 512 * 1024.
 REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
-    "sha256": "b977481fddffb008064a2760699af3564c1748abea74a381860d5da5ee667280",
+    "sha256": "c0d8d30ec2789d56c609c5f245b530c5765a2bb774f647cb7bd8cc2a86b05c31",
     "sites": ((34, 31, 34, "int", "512"),),
 }
 
