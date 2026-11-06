@@ -66,6 +66,7 @@ it("shows actual running Mission and recorded metadata, then original retained r
   const title=source.final.programs.body.control_room.work[0].agent_os.title;
   await user.click(await screen.findByRole("button",{name:new RegExp(title)}));
   await user.click(await screen.findByRole("button",{name:"Project details"}));
+  await user.click(await screen.findByRole("button",{name:"Work controls"}));
   await user.click(await screen.findByText("More work details",{selector:"summary"}));
   const work=await screen.findByRole("tab",{name:"Work"});await user.click(work);
   const liveWork=screen.getByRole("heading",{name:"Recorded work"}).closest("section")!;

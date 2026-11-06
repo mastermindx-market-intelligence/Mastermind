@@ -62,7 +62,10 @@ describe('new canonical N project in the real mounted App',()=>{
   expect(new URLSearchParams(location.search).get('root_job_id')).toBe(rootJobId);
   const details=await screen.findByRole('button',{name:'Project details'});fireEvent.click(details);
   const panel=await screen.findByRole('region',{name:'Project details'});
-  await waitFor(()=>expect(panel.textContent).toContain(actual.selected_plan.plan.objective));
+  fireEvent.click(within(panel).getByRole('button',{name:'Plan',exact:true}));
+  const planOwner=within(screen.getByRole('region',{name:'Inspect Plan',exact:true}));
+  const objective=await planOwner.findByText((_text,node)=>node?.classList.contains('mm-project-plan__objective')===true && node.textContent===actual.selected_plan.plan.objective);
+  expect(objective.textContent).toBe(actual.selected_plan.plan.objective);
   expect(e.calls('read_project_plan').at(-1)?.[1]).toEqual({selection:{work_ref:workRef}});
   fireEvent.click(screen.getByRole('button',{name:'Projects'}));await waitFor(()=>expect(newCard()).not.toBeNull());
   expect(await e.host.commandBinding!.store.read(executiveScope)).toBeNull();
