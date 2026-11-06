@@ -69,6 +69,14 @@ FABRIC_PUBLIC_REF = "refs/heads/master"
 FABRIC_PUBLIC_API_ROOT = "https://api.github.com/repos/" + FABRIC_PUBLIC_REPOSITORY
 FABRIC_PUBLIC_JSON_LIMIT = 1024 * 1024
 FABRIC_PUBLIC_TIMEOUT_SECONDS = 10
+FABRIC_PUBLIC_METADATA_URL_RE = re.compile(
+    re.escape(FABRIC_PUBLIC_API_ROOT)
+    + r"(?:/git/ref/heads/master|/git/(?:commits|trees)/[0-9a-f]{40})\Z"
+)
+
+
+def _fabric_git_sha(value) -> bool:
+    return type(value) is str and re.fullmatch(r"[0-9a-f]{40}", value) is not None
 # Host-owned identities; these match the existing mmx-workspace repository catalog.
 # No caller-supplied path, remote, repository or credential is admitted.
 TYPED_GIT_CLOSED_PROFILES = (
@@ -4442,32 +4450,63 @@ def _fabric_public_json_pairs(pairs):
     return result
 
 
-def _fabric_public_https_json(url: str) -> dict:
-    """Read one fixed GitHub JSON document; never retry or follow redirects."""
-    if not isinstance(url, str) or not url.startswith(FABRIC_PUBLIC_API_ROOT + "/"):
+class _FabricNoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _fabric_public_opener():
+    # An explicit empty ProxyHandler prevents environment, macOS system proxy,
+    # and proxy-credential discovery. The standard HTTPS handler retains its
+    # default certificate and hostname verification.
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _FabricNoRedirect())
+
+
+def _fabric_public_remaining(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SystemExit("Fabric public release: total GitHub metadata deadline exceeded")
+    return remaining
+
+
+def _fabric_public_bounded_read(response, size: int, deadline: float) -> bytes:
+    # HTTPSResponse reads can block beyond a read-size bound. Move the socket's
+    # inactivity ceiling forward to the one shared absolute deadline each time.
+    raw = getattr(getattr(response, "fp", None), "raw", None)
+    sock = getattr(raw, "_sock", None)
+    if sock is not None:
+        sock.settimeout(_fabric_public_remaining(deadline))
+    return response.read(size)
+
+
+def _fabric_public_https_json(url: str, *, deadline: float = None) -> dict:
+    """Read one canonical GitHub JSON document within one total traversal deadline."""
+    if type(url) is not str or FABRIC_PUBLIC_METADATA_URL_RE.fullmatch(url) is None:
         raise SystemExit("Fabric public release: non-canonical metadata URL refused")
-
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            return None
-
-    opener = urllib.request.build_opener(NoRedirect())
+    if deadline is None:
+        deadline = time.monotonic() + FABRIC_PUBLIC_TIMEOUT_SECONDS
+    opener = _fabric_public_opener()
     request = urllib.request.Request(url, headers={
         "Accept": "application/vnd.github+json",
         "User-Agent": "studio-direct-mcp-public-release-provenance",
         "X-GitHub-Api-Version": "2022-11-28",
     }, method="GET")
+    response = None
     try:
-        with opener.open(request, timeout=FABRIC_PUBLIC_TIMEOUT_SECONDS) as response:
-            if response.status != 200:
-                raise SystemExit("Fabric public release: GitHub metadata refused")
-            raw = response.read(FABRIC_PUBLIC_JSON_LIMIT + 1)
-            if len(raw) > FABRIC_PUBLIC_JSON_LIMIT or response.read(1):
-                raise SystemExit("Fabric public release: GitHub metadata too large")
+        response = opener.open(request, timeout=_fabric_public_remaining(deadline))
+        if response.status != 200:
+            response.close()
+            raise SystemExit("Fabric public release: GitHub metadata refused")
+        raw = _fabric_public_bounded_read(response, FABRIC_PUBLIC_JSON_LIMIT + 1, deadline)
+        if len(raw) > FABRIC_PUBLIC_JSON_LIMIT:
+            raise SystemExit("Fabric public release: GitHub metadata too large")
     except SystemExit:
         raise
     except Exception as exc:
         raise SystemExit("Fabric public release: bounded GitHub metadata unavailable") from exc
+    finally:
+        if response is not None:
+            response.close()
     try:
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=_fabric_public_json_pairs,
                            parse_constant=lambda value: (_ for _ in ()).throw(ValueError("non-finite JSON")))
@@ -4479,24 +4518,27 @@ def _fabric_public_https_json(url: str) -> dict:
 
 
 def _fabric_public_provenance(release_commit: str, expected_sha: str) -> tuple[Path, dict]:
-    """Read fixed public metadata only, with no local-Git fallback or checkout."""
-    if (not isinstance(release_commit, str)
-            or re.fullmatch(r"[0-9a-f]{40}", release_commit) is None
-            or not _sha256_hex(expected_sha)):
+    """Read fixed public metadata only, with one absolute deadline and no fallback."""
+    if not _fabric_git_sha(release_commit) or not _sha256_hex(expected_sha):
         raise SystemExit("Fabric release requires an exact commit and backend SHA256")
-    ref = _fabric_public_https_json(FABRIC_PUBLIC_API_ROOT + "/git/ref/heads/master")
+    deadline = time.monotonic() + FABRIC_PUBLIC_TIMEOUT_SECONDS
+    ref = _fabric_public_https_json(FABRIC_PUBLIC_API_ROOT + "/git/ref/heads/master", deadline=deadline)
     if (ref.get("ref") != FABRIC_PUBLIC_REF or type(ref.get("object")) is not dict
             or ref["object"].get("type") != "commit"
             or ref["object"].get("sha") != release_commit):
         raise SystemExit("Fabric public release: protected master does not equal requested commit")
-    commit = _fabric_public_https_json(FABRIC_PUBLIC_API_ROOT + "/git/commits/" + release_commit)
+    commit = _fabric_public_https_json(FABRIC_PUBLIC_API_ROOT + "/git/commits/" + release_commit,
+                                       deadline=deadline)
     if (commit.get("sha") != release_commit or type(commit.get("tree")) is not dict
-            or re.fullmatch(r"[0-9a-f]{40}", commit["tree"].get("sha", "")) is None):
+            or not _fabric_git_sha(commit["tree"].get("sha"))):
         raise SystemExit("Fabric public release: exact commit/tree evidence required")
     tree_sha = commit["tree"]["sha"]
     current_sha, entry, components = tree_sha, None, FABRIC_BACKEND_SOURCE.split("/")
     for component in components:
-        tree = _fabric_public_https_json(FABRIC_PUBLIC_API_ROOT + "/git/trees/" + current_sha)
+        if not _fabric_git_sha(current_sha):
+            raise SystemExit("Fabric public release: every intermediate tree needs an exact Git SHA")
+        tree = _fabric_public_https_json(FABRIC_PUBLIC_API_ROOT + "/git/trees/" + current_sha,
+                                         deadline=deadline)
         if (tree.get("sha") != current_sha or tree.get("truncated") is not False
                 or type(tree.get("tree")) is not list):
             raise SystemExit("Fabric public release: complete exact tree required")
@@ -4508,9 +4550,11 @@ def _fabric_public_provenance(release_commit: str, expected_sha: str) -> tuple[P
         if component != components[-1]:
             if entry.get("type") != "tree" or entry.get("mode") != "040000":
                 raise SystemExit("Fabric public release: fixed backend parent is not a tree")
-            current_sha = entry.get("sha", "")
+            current_sha = entry.get("sha")
+            if not _fabric_git_sha(current_sha):
+                raise SystemExit("Fabric public release: every intermediate tree needs an exact Git SHA")
     if (entry.get("type") != "blob" or entry.get("mode") not in ("100644", "100755")
-            or re.fullmatch(r"[0-9a-f]{40}", entry.get("sha", "")) is None
+            or not _fabric_git_sha(entry.get("sha"))
             or type(entry.get("size")) is not int or entry["size"] < 0):
         raise SystemExit("Fabric public release: backend must be one regular public Git blob")
     backend = _user_root() / FABRIC_BACKEND_RELEASES_REL / ("fabric-c3-" + release_commit) / FABRIC_BACKEND_SOURCE

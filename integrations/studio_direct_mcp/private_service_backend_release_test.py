@@ -10,7 +10,10 @@ import hashlib
 import io
 import json
 import os
+import re
+import re
 from pathlib import Path
+import socket
 import subprocess
 import tempfile
 from types import SimpleNamespace
@@ -119,7 +122,7 @@ class BackendReleaseFixture:
         self.local_git_fail_closed.start()
         self.addCleanup(self.local_git_fail_closed.stop)
 
-        def metadata(url):
+        def metadata(url, *, deadline=None):
             self.public_calls.append(url)
             if self.public_override is not None:
                 return self.public_override(url)
@@ -140,9 +143,8 @@ class BackendReleaseFixture:
                      'sha': self.source_sha, 'size': self.source_size}]}
             raise AssertionError('non-canonical public metadata URL: ' + url)
 
-        def raw_metadata(url):
-            saved = self.public_override
-            self.public_override = None
+        def raw_metadata(url, *, deadline=None):
+            saved, self.public_override = self.public_override, None
             try:
                 return metadata(url)
             finally:
@@ -887,49 +889,240 @@ class ModernBackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
                 self.assertEqual(self.snapshot(), self.before)
 
 
+    def test_shared_absolute_deadline_exhausts_after_valid_documents(self):
+        self.enable_public()
+        documents = iter([
+            {'ref': svc.FABRIC_PUBLIC_REF, 'object': {'type': 'commit', 'sha': self.commit}},
+            {'sha': self.commit, 'tree': {'sha': self.tree_sha}},
+            {'sha': self.tree_sha, 'truncated': False, 'tree': [
+                {'path': 'integrations', 'mode': '040000', 'type': 'tree', 'sha': '1' * 40}]},
+            {'sha': '1' * 40, 'truncated': False, 'tree': [
+                {'path': 'studio_direct_mcp', 'mode': '040000', 'type': 'tree', 'sha': '2' * 40}]},
+            {'sha': '2' * 40, 'truncated': False, 'tree': [
+                {'path': 'fabric-backend.mjs', 'mode': '100644', 'type': 'blob',
+                 'sha': self.source_sha, 'size': self.source_size}]},
+        ])
+        deadlines = []
+        def metadata(url, *, deadline):
+            deadlines.append(deadline)
+            next(documents)
+            if len(deadlines) == 5:
+                self.assertEqual(deadline, 11.0)
+                raise SystemExit('Fabric public release: total GitHub metadata deadline exceeded')
+            return self.raw_metadata(url)
+        self.metadata.stop()
+        with mock.patch.object(svc.time, 'monotonic', return_value=1.0), \
+             mock.patch.object(svc, '_fabric_public_https_json', side_effect=metadata):
+            with self.assertRaisesRegex(SystemExit, 'deadline exceeded'):
+                svc._fabric_public_provenance(self.commit, svc._sha256_file(self.backend))
+        self.assertEqual(deadlines, [11.0] * 5)
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_apply_interleaving_after_first_source_before_second_is_refused(self):
+        self.enable_public()
+        self.prepare_apply()
+        actual_source = svc._fabric_release_source
+        completed = [0]
+        def source(commit, sha, provenance=svc.FABRIC_RELEASE_LOCAL_PROVENANCE):
+            result = actual_source(commit, sha, provenance)
+            completed[0] += 1
+            if completed[0] == 1:
+                replacement = self.backend.with_suffix('.interleaved')
+                replacement.write_bytes(self.backend.read_bytes())
+                replacement.replace(self.backend)
+            return result
+        with mock.patch.object(svc, '_fabric_release_source', side_effect=source):
+            with self.assertRaisesRegex(SystemExit, 'changed before write'):
+                svc.cmd_fabric_backend_release(self.args)
+        self.assertEqual(completed[0], 2)
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_public_ref_interleaving_refuses_before_second_transaction(self):
+        self.enable_public()
+        self.prepare_apply()
+        actual_metadata = self.raw_metadata
+        observations = []
+        def between_complete_source_observations(url, *, deadline=None):
+            observations.append(url)
+            if len(observations) == 6:
+                # All five first-plan documents completed. Change the protected
+                # ref immediately before apply's second source observation returns.
+                # raw_metadata deliberately restores this override after return;
+                # mutating it here alone would erase the controlled interleaving.
+                self.public_override = actual_metadata
+                return {'ref': svc.FABRIC_PUBLIC_REF,
+                        'object': {'type': 'commit', 'sha': 'f' * 40}}
+            return actual_metadata(url)
+        self.public_override = between_complete_source_observations
+        with self.assertRaisesRegex(SystemExit, 'protected master'):
+            svc.cmd_fabric_backend_release(self.args)
+        self.assertEqual(len(observations), 6)
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+
 class PublicProvenanceTransportTests(unittest.TestCase):
     URL = svc.FABRIC_PUBLIC_API_ROOT + '/git/ref/heads/master'
 
-    def run_transport(self, payload=b'{}', response_error=None):
-        class Response:
-            status = 200
-            def __enter__(self): return self
-            def __exit__(self, *args): return False
-            def read(self, limit=-1):
-                if self.served: return b''
-                self.served = True
-                return payload[:limit] if limit >= 0 else payload
-            def __init__(self): self.served = False
+    def test_fixed_direct_transport_under_ambient_proxy_credentials(self):
+        env = {name: 'http://proxy-user:proxy-pass@proxy.invalid:8888'
+               for name in ('https_proxy', 'HTTPS_PROXY', 'http_proxy', 'HTTP_PROXY',
+                            'all_proxy', 'ALL_PROXY')}
+        with mock.patch.dict(os.environ, env), \
+             mock.patch.object(svc.urllib.request, 'getproxies',
+                               side_effect=AssertionError('ambient proxies discovered')), \
+             mock.patch.object(socket, 'create_connection',
+                               side_effect=AssertionError('network forbidden')):
+            opener = svc._fabric_public_opener()
+        self.assertFalse(any(isinstance(item, svc.urllib.request.ProxyHandler)
+                             and item.proxies for item in opener.handlers))
+        request = svc.urllib.request.Request(self.URL)
+        self.assertFalse(request.has_header('Authorization'))
+        self.assertFalse(request.has_header('Proxy-authorization'))
+
+    def test_actual_opener_has_no_proxy_handlers_and_keeps_verified_https(self):
+        env = {name: 'http://proxy-user:proxy-pass@proxy.invalid:8888'
+               for name in ('https_proxy', 'HTTPS_PROXY', 'http_proxy', 'HTTP_PROXY',
+                            'all_proxy', 'ALL_PROXY')}
+        import ssl
+        with mock.patch.dict(os.environ, env), \
+             mock.patch.object(ssl, '_create_unverified_context',
+                               side_effect=AssertionError('TLS verification disabled')):
+            opener = svc._fabric_public_opener()
+        proxies = [item for item in opener.handlers if isinstance(item, svc.urllib.request.ProxyHandler)]
+        https = [item for item in opener.handlers if isinstance(item, svc.urllib.request.HTTPSHandler)]
+        self.assertEqual(proxies, [])
+        self.assertFalse(any(isinstance(item, (svc.urllib.request.HTTPBasicAuthHandler,
+                                              svc.urllib.request.HTTPCookieProcessor))
+                             for item in opener.handlers))
+        context = https[0]._context or ssl._create_default_https_context()
+        self.assertEqual(context.check_hostname, True)
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertNotIn('http_error_302', opener.handle_open.get('https', {}))
+
+    def test_genuine_redirect_handler_response_is_refused_and_closed(self):
         class Opener:
+            def __init__(self):
+                self.production = svc._fabric_public_opener()
             def open(self, request, timeout):
-                self.request, self.timeout = request, timeout
-                if response_error: raise response_error
-                return Response()
-        opener = Opener()
-        with mock.patch.object(svc.urllib.request, 'build_opener', return_value=opener):
-            return svc._fabric_public_https_json(self.URL), opener
+                response = io.BytesIO(b'{}')
+                response.code = 302
+                response.msg = 'Found'
+                response.headers = {'Location': 'https://elsewhere.invalid/x'}
+                response.close = mock.Mock()
+                try:
+                    self.production.error('https', request, response, 302, 'Found', response.headers)
+                finally:
+                    response.close()
+        with mock.patch.object(svc, '_fabric_public_opener', return_value=Opener()):
+            with self.assertRaisesRegex(SystemExit, 'bounded GitHub metadata unavailable'):
+                svc._fabric_public_https_json(self.URL)
 
-    def test_strict_json_no_credentials_bounded_deadline_and_size(self):
-        value, opener = self.run_transport(b'{"object":{"type":"commit"}}')
-        self.assertEqual(value['object']['type'], 'commit')
-        self.assertEqual(opener.timeout, svc.FABRIC_PUBLIC_TIMEOUT_SECONDS)
-        self.assertFalse(opener.request.has_header('Authorization'))
-        for payload in (b'{', b'{"x":1,"x":2}', b'[]', b'{"x":NaN}',
-                        b' ' * (svc.FABRIC_PUBLIC_JSON_LIMIT + 1)):
-            with self.subTest(size=len(payload)):
-                with self.assertRaises(SystemExit):
-                    self.run_transport(payload)
-
-    def test_redirect_timeout_and_noncanonical_url_fail_closed(self):
-        for error in (TimeoutError('deadline'), OSError('redirect refused')):
-            with self.subTest(error=type(error).__name__):
-                with self.assertRaises(SystemExit):
-                    self.run_transport(response_error=error)
-        for url in ('https://example.invalid/x', svc.FABRIC_PUBLIC_API_ROOT + '/../other'):
-            with self.subTest(url=url):
-                with self.assertRaises(SystemExit):
+    def test_invalid_urls_and_sha_types_have_zero_transport(self):
+        valid = self.URL
+        bad = [None, 1, {}, 'https://example.invalid/x', svc.FABRIC_PUBLIC_API_ROOT,
+               svc.FABRIC_PUBLIC_API_ROOT + '/../other',
+               svc.FABRIC_PUBLIC_API_ROOT + '/git/ref/heads/master/',
+               svc.FABRIC_PUBLIC_API_ROOT + '/git/ref/heads/master?x=1',
+               svc.FABRIC_PUBLIC_API_ROOT + '/git/ref/heads/master#x',
+               svc.FABRIC_PUBLIC_API_ROOT + '/git/ref/heads/master%2f..%2fother',
+               svc.FABRIC_PUBLIC_API_ROOT + '/git/ref/heads/master/other',
+               svc.FABRIC_PUBLIC_API_ROOT + '@example.invalid/git/ref/heads/master',
+               svc.FABRIC_PUBLIC_API_ROOT + '/git/commits/' + 'A' * 40,
+               svc.FABRIC_PUBLIC_API_ROOT + '/git/trees/' + 'a' * 39,
+               svc.FABRIC_PUBLIC_API_ROOT + '/git/trees/' + 'a' * 40 + '.git']
+        with mock.patch.object(svc, '_fabric_public_opener',
+                               side_effect=AssertionError('transport must not be constructed')) as transport:
+            for url in bad:
+                with self.subTest(url=url), self.assertRaisesRegex(SystemExit, 'non-canonical'):
                     svc._fabric_public_https_json(url)
+        transport.assert_not_called()
 
+    def test_intermediate_tree_sha_is_validated_before_transport(self):
+        for value in (None, 1, '', 'A' * 40, 'a' * 39, 'a' * 40 + '/../other', '../other'):
+            with self.subTest(value=value):
+                with mock.patch.object(svc, '_fabric_public_https_json',
+                                       return_value={'sha': '1' * 40, 'truncated': False, 'tree': [
+                                           {'path': 'integrations', 'mode': '040000',
+                                            'type': 'tree', 'sha': value}]}) as metadata:
+                    args = SimpleNamespace(account=svc.FABRIC_BACKEND_ACCOUNT,
+                                           release_commit='1' * 40, backend_sha256='a' * 64)
+                    # Direct public-provenance calls stop at the root's first child,
+                    # before creating a URL from the malformed child SHA.
+                    commit = {'sha': '1' * 40, 'tree': {'sha': '1' * 40}}
+                    metadata.side_effect = lambda url, deadline=None: (
+                        {'ref': svc.FABRIC_PUBLIC_REF,
+                         'object': {'type': 'commit', 'sha': '1' * 40}}
+                        if '/git/ref/' in url else commit if '/git/commits/' in url else
+                        {'sha': '1' * 40, 'truncated': False, 'tree': [
+                            {'path': 'integrations', 'mode': '040000', 'type': 'tree', 'sha': value}]})
+                    with self.assertRaisesRegex(SystemExit, 'intermediate tree'):
+                        svc._fabric_public_provenance('1' * 40, 'a' * 64)
+                self.assertEqual(metadata.call_count, 3)
+
+
+    def test_slow_real_tls_headers_and_incremental_body_expire_and_clean_up(self):
+        import http.server
+        import socket
+        import ssl
+        import threading
+        asset = tempfile.TemporaryDirectory()
+        self.addCleanup(asset.cleanup)
+        cert = Path(asset.name)
+        subprocess.run(['/usr/bin/openssl', 'req', '-x509', '-newkey', 'rsa:2048',
+                        '-nodes', '-days', '1', '-subj', '/CN=localhost',
+                        '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1',
+                        '-keyout', str(cert / 'localhost-key.pem'),
+                        '-out', str(cert / 'localhost-cert.pem')],
+                       check=True, capture_output=True)
+        for phase in ('headers', 'body'):
+            with self.subTest(phase=phase):
+                class Handler(http.server.BaseHTTPRequestHandler):
+                    def log_message(self, *args): pass
+                    def do_GET(self):
+                        try:
+                            if phase == 'headers': svc.time.sleep(0.4)
+                            self.send_response(200)
+                            self.send_header('Content-Length', '11')
+                            self.end_headers()
+                            for index, part in enumerate((b'{"slow":', b'true}')):
+                                if phase == 'body' and index == 0:
+                                    svc.time.sleep(0.2)
+                                self.wfile.write(part)
+                                self.wfile.flush()
+                                svc.time.sleep(0.1)
+                        except (BrokenPipeError, ConnectionResetError, ssl.SSLError, OSError):
+                            pass
+                server = http.server.HTTPServer(('127.0.0.1', 0), Handler)
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.load_cert_chain(str(cert / 'localhost-cert.pem'), str(cert / 'localhost-key.pem'))
+                server.socket = context.wrap_socket(server.socket, server_side=True)
+                thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.01})
+                thread.start()
+                client = ssl.create_default_context(cafile=str(cert / 'localhost-cert.pem'))
+                local_root = 'https://localhost:%d' % server.server_port
+                local = re.compile(re.escape(local_root) + r'(?:/git/ref/heads/master)\Z')
+                try:
+                    with mock.patch.object(svc, 'FABRIC_PUBLIC_METADATA_URL_RE', local), \
+                         mock.patch.object(ssl, '_create_default_https_context',
+                                           return_value=client), \
+                         mock.patch.object(socket, 'create_connection',
+                                           wraps=socket.create_connection) as tripwire:
+                        started = svc.time.monotonic()
+                        with self.assertRaisesRegex(SystemExit, 'bounded GitHub metadata unavailable|deadline exceeded'):
+                            svc._fabric_public_https_json(local_root + '/git/ref/heads/master',
+                                                          deadline=started + 0.15)
+                        elapsed = svc.time.monotonic() - started
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=2)
+                self.assertFalse(thread.is_alive())
+                self.assertGreaterEqual(elapsed, 0.10)
+                self.assertLess(elapsed, 0.6)
+                self.assertEqual(tripwire.call_count, 1)
 
 if __name__ == '__main__':
     unittest.main()

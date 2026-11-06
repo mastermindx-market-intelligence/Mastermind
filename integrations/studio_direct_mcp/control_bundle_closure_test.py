@@ -555,8 +555,11 @@ print(json.dumps(value))
         self.assertLess(len(malicious), len(original))
         source.write_bytes(malicious + b"#" * (len(original) - len(malicious)))
         os.utime(source, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
-        cache = Path(py_compile.compile(
-            str(source), doraise=True, invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP))
+        cache = source.parent / "__pycache__" / (source.stem + ".pyc")
+        self.assertEqual(Path(py_compile.compile(
+            str(source), cfile=str(cache), doraise=True,
+            invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)), cache)
+        self.assertTrue(cache.is_file())
         source.write_bytes(original)
         os.utime(source, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
         cache.chmod(0o600)
@@ -603,7 +606,9 @@ print(json.dumps(value))
     def test_installer_removes_prior_bootstrap_caches_under_its_lock(self):
         self._install()
         source = self.control / "private_service.py"
-        py_compile.compile(str(source), doraise=True)
+        cache_file = self.control / "__pycache__" / (source.stem + ".pyc")
+        self.assertEqual(Path(py_compile.compile(str(source), cfile=str(cache_file), doraise=True)), cache_file)
+        self.assertTrue(cache_file.is_file())
         cache = self.control / "__pycache__"
         self.assertTrue(cache.is_dir())
         installed = self._install()

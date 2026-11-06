@@ -253,9 +253,20 @@ the requested release commit, and the fixed tree path must be a regular blob.
 The already staged backend is verified against that blob identity, SHA256, size,
 physical file and inode without downloading or executing it. Provenance and staged
 identity are included in the reviewed plan and revalidated before mutation. Metadata
-is strict JSON with duplicate-key rejection, bounded bytes/deadline and no retry or
-redirect. The default `local_git_v1` remains available only for separately
-authorized local-Git contexts.
+is strict JSON with duplicate-key rejection and a 1MiB ceiling. One fixed absolute
+ten-second deadline covers the whole connection/TLS/header/body sequence and all five
+fixed metadata documents; every document gets only the remaining time. The transport
+closes on rejection with no retry, local-Git fallback or background reader. Explicit
+`ProxyHandler({})` construction disables ambient/system proxy and proxy-credential
+discovery while retaining standard TLS certificate and hostname verification. Only
+`/git/ref/heads/master`, `/git/commits/<40 lowercase hex>` and
+`/git/trees/<40 lowercase hex>` under the canonical API root can reach transport;
+intermediate tree SHAs are checked before URL construction. Redirects, alternate
+authorities, dot/encoded separators, extra path components, query/fragment, and wrong
+SHA types are refused before transport construction. Apply's second observation still
+refuses changed protected refs or staged inode/bytes before any transaction mutation.
+The default `local_git_v1` remains available only for separately authorized local-Git
+contexts.
 The operator separately reconciles existing controllers, then stops and starts
 this original service through the same owner. See
 `ops/native_fabric/quota_continuity/README.md` for native evidence, retention and
