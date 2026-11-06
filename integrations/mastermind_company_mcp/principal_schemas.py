@@ -257,6 +257,11 @@ def validate_principal_tool_arguments(
     required = set(spec.input_schema.get("required", ()))
     if not required <= set(raw):
         raise PrincipalGatewayError("INVALID_REQUEST")
+    # The shared Dialogue body accepts more authority classes than this facet.
+    # Enforce the published facet enums before deriving or resolving anything.
+    for key, field in spec.input_schema["properties"].items():
+        if key in raw and "enum" in field and raw[key] not in field["enum"]:
+            raise PrincipalGatewayError("INVALID_REQUEST")
     if tool_name == "read_thread":
         if raw:
             raise PrincipalGatewayError("INVALID_REQUEST")

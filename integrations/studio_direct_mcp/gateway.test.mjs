@@ -467,7 +467,7 @@ test('tools/list publishes gateway-owned neutral backend metadata and privacy-mi
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     'gateway generation must be an ephemeral random UUID, not a host-derived identifier',
   );
-  assert.equal(payload.gatewayVersion, '0.1.8');
+  assert.equal(payload.gatewayVersion, '0.1.11');
 });
 
 test('configured studio_fleet_status lists and returns the bounded public projection', async () => {
@@ -561,7 +561,7 @@ test('configured studio_fleet_status lists and returns the bounded public projec
     { timeout: 5000 },
   );
   assert.equal(result.isError, undefined);
-  assert.equal(result.structuredContent.schema, 'mastermind.studio_fleet_status_tool.v1');
+  assert.equal(result.structuredContent.schema, 'mastermind.studio_fleet_status_tool.v2');
   assert.equal(result.structuredContent.state, 'DEGRADED');
   assert.equal(result.structuredContent.accountCount, 2);
   assert.equal(result.structuredContent.readyCount, 1);
@@ -962,4 +962,52 @@ test('Fabric-only runtime rejects ambient fleet inventory and unrelated tool gra
   const studio=gatewayMod.resolveConfig({fleetStatus:inventory});
   assert.equal(studio.fleetStatus.launcherPath,inventory.launcherPath);
   assert.equal(studio.fleetStatus.launcherSha256,inventory.launcherSha256);
+});
+
+test('Fabric-only input requires an explicitly supplied boolean flag', () => {
+  for (const fabricOnly of [undefined, null, 'true', 0, 1, {}, []]) {
+    assert.throws(() => gatewayMod.resolveConfig({
+      fabricOnly, gitPublish: false, paperDesign: false,
+    }), /config\.fabricOnly must be boolean when supplied/);
+  }
+});
+
+test('Fabric-only input requires own literal-false Git and Paper flags', () => {
+  const clean = { fabricOnly: true, gitPublish: false, paperDesign: false };
+  for (const key of ['gitPublish', 'paperDesign']) {
+    const omitted = { ...clean }; delete omitted[key];
+    assert.throws(() => gatewayMod.resolveConfig(omitted),
+      /Fabric-only gateway refuses unrelated host capabilities/);
+    for (const value of [undefined, null, 0, 'false', {}, { enabled: false }, true]) {
+      assert.throws(() => gatewayMod.resolveConfig({ ...clean, [key]: value }),
+        /Fabric-only gateway refuses unrelated host capabilities/);
+    }
+  }
+  const inherited = Object.create({ gitPublish: false, paperDesign: false });
+  inherited.fabricOnly = true;
+  assert.throws(() => gatewayMod.resolveConfig(inherited),
+    /Fabric-only gateway refuses unrelated host capabilities/);
+});
+
+test('Fabric-only input refuses forbidden own keys before disabled-value normalization', () => {
+  for (const key of ['fleetStatus', 'repositoryWorkspaces', 'commissionPublication']) {
+    for (const value of [undefined, null, false, {}, { enabled: false }, 'disabled']) {
+      assert.throws(() => gatewayMod.resolveConfig({
+        fabricOnly: true, gitPublish: false, paperDesign: false, [key]: value,
+      }), /Fabric-only gateway refuses unrelated host capabilities/);
+    }
+  }
+});
+
+test('Fabric-only validation uses the same copied values as capability resolution', () => {
+  const reads = { fabricOnly: 0, gitPublish: 0, paperDesign: 0 };
+  const cfg = gatewayMod.resolveConfig({
+    get fabricOnly() { reads.fabricOnly += 1; return reads.fabricOnly === 1; },
+    get gitPublish() { reads.gitPublish += 1; return reads.gitPublish === 1 ? false : true; },
+    get paperDesign() { reads.paperDesign += 1; return reads.paperDesign === 1 ? false : true; },
+  });
+  assert.deepEqual(reads, { fabricOnly: 1, gitPublish: 1, paperDesign: 1 });
+  assert.equal(cfg.fabricOnly, true);
+  assert.equal(cfg.gitPublish, null);
+  assert.equal(cfg.paperDesign, null);
 });

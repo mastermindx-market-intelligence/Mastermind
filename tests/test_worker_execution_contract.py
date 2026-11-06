@@ -120,6 +120,12 @@ _EXPECTED_CONSTRUCTOR_SITES = {
         "supervisor",
         2,
     ),
+    (
+        "scripts/executive_os_phase1c.py",
+        "_service_from_config.supervisor_factory",
+        "supervisor",
+        3,
+    ),
     ("scripts/executive_os_phase1c_worker.py", "_build_broker", "adapter", 1),
     ("scripts/executive_os_linux_worker.py", "build_linux_worker_broker", "adapter", 1),
     (
@@ -1043,7 +1049,7 @@ def test_constructor_source_law_covers_calibrated_sites_and_kills_each_mutant() 
 
     assert census.violations == ()
     assert {site.identity for site in census.sites} == _EXPECTED_CONSTRUCTOR_SITES
-    assert sum(site.kind == "supervisor" for site in census.sites) == 7
+    assert sum(site.kind == "supervisor" for site in census.sites) == 8
     assert sum(site.kind == "adapter" for site in census.sites) == 6
 
     killed: list[tuple[str, str, str, int]] = []
@@ -1058,7 +1064,7 @@ def test_constructor_source_law_covers_calibrated_sites_and_kills_each_mutant() 
         assert len(mutant.violations) == 1
         assert expected in mutant.violations[0]
         killed.append(site.identity)
-    assert len(killed) == 13
+    assert len(killed) == 14
 
 
 def test_constructor_source_law_preserves_alias_qualified_opaque_and_foreign_controls(

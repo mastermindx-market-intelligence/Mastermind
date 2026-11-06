@@ -1,0 +1,19 @@
+# Bounded Journal read — review contract
+
+This addition projects existing Agent OS records from Macro. It creates no journal store, event writer, Runtime lifecycle, current-owner claim or approval/acceptance/release authority.
+
+The public request is fixed GET `/workspace/project-journal/current?work_ref=WS:KEY`. Its selector is rootless and closed: no Job, attempt, source path, repository, commit, interpreter, provider or event category may be supplied by HTTP. It uses the incumbent Workspace READ authenticated principal. Unknown programmes do not reach source acquisition. No source record is returned after permission revocation, permission-binding changes, catalogue publication/document changes or a Macro source-commit mismatch.
+
+The installed `InstalledBootPacketCollector` issues the exact typed source facade and provides its existing source-root/materialization/code/Macro seal bracket. The fixed child captures canonical Git objects, executes the captured Macro `scripts/agentos.py` parser and record checkers, and projects explicit fields only. Raw Markdown bodies, transcript content, candidate reasoning and unrelated record fields stay outside the DTO. Every exposed entry retains the record's repository/commit/path/content digest.
+
+The source sample covers records touched by the last 128 canonical record commits plus explicit decision/discovery references authored on the selected workstream. At most128 candidate paths are inspected. Membership is established from actual parsed fields: decision `affects`, discovery `scope`, handoff `workstream` exactly naming the selected work reference. A path or filename never establishes membership. Coverage is bounded, with scanned/associated/omitted/invalid counts; an empty sample is not evidence of empty history. Explicitly cited records whose own scope does not directly name the workstream are not silently promoted into this first bounded association rule.
+
+Dates are not interchangeable. Decision rows label the authored decision date; discovery rows label the authored verification date; handoffs label their Git record commit time. These are source record facts, not a reconstructed time of worker completion, review, acceptance, delivery, installation or release. The list is named source records, and its current applicability remains unestablished. No selected record borrows current Mission fields to fill missing historical actor, next owner, return condition or consequence.
+
+The UI explicitly requests the read and clears responses on its selection/auth/source epoch, reader replacement or authorization loss. Journal can be opened for a catalogued programme with no resolved Runtime Job. Work detail and Mission Evidence continue to require their exact Mission root binding. Existing retained results and activity remain owner-qualified independent drilldowns.
+
+All response layers retain the fixed131072-byte ceiling. Malformed records, unknown keys, invalid selectors/source tuples, excess text and conflicting source identity fail closed. Existing action-handler ASTs and their eight pinned HTTP literals are unchanged; candidate metadata rebinding does not supply independent review. Root owns one scoped auth/source review, protected publication, installation and authenticated live acceptance. Current browser-capture and original09b controls remain unchanged.
+
+The owned implementation passes 268 joined source/plan/transport checks plus one focused canonical bare-citation check. Source-backed Journal UI and host composition have separate verification. This is not a claim that the endpoint is installed, enrolled, production-served or product-accepted.
+
+The original contract-worker export remains refused/unaccepted and quarantined. This DTO/projector was authored independently from the pre-dispatch interface and canonical producer under the assigning Root's explicit source-engineering ruling; no bytes or acceptance are inherited from the failed delivery.

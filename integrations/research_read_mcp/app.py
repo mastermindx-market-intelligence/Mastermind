@@ -276,6 +276,7 @@ def create_authenticated_research_server(
     allowed_hosts,
     allowed_origins=(),
     compatibility_port=None,
+    selection_scope=None,
 ) -> Starlette:
     """Return the inert Starlette app. The caller owns the HTTP lifecycle."""
 
@@ -295,6 +296,8 @@ def create_authenticated_research_server(
         raise ValueError("allowed_hosts is required")
     if compatibility_port is not None and type(compatibility_port) is not CompatibilityPortV1:
         raise ValueError('COMPATIBILITY_COMPOSITION_REFUSED')
+    if selection_scope is not None and not callable(selection_scope):
+        raise ValueError("selection_scope must be an explicit callable")
     selected = validate_resource_policy(policy)
     hosts = [str(host) for host in allowed_hosts]
     origins = [str(origin) for origin in allowed_origins]
@@ -417,25 +420,23 @@ def create_authenticated_research_server(
                 return 'NOT_ENTITLED', subject, report_ids, _tool_error('NOT_ENTITLED')
 
         try:
-            pending = (compatibility_port(name, validated, caller_context,
-                                          quote_limit_chars=entitlement.quote_limit_chars)
-                       if is_compatibility else port(name, validated, caller_context))
-        except ContractViolation as exc:
-            code = exc.code if exc.code in _PORT_REFUSAL else "INTERNAL_ERROR"
-            return code, subject, report_ids, _tool_error(code)
-        except Exception:
-            return "INTERNAL_ERROR", subject, report_ids, _tool_error("INTERNAL_ERROR")
-        if not inspect.isawaitable(pending):
-            return "INTERNAL_ERROR", subject, report_ids, _tool_error("INTERNAL_ERROR")
-        try:
-            observed = await pending
+            from contextlib import nullcontext
+            scope = selection_scope() if selection_scope is not None else nullcontext(None)
+            with scope as selected_capture:
+                pending = (compatibility_port(name, validated, caller_context,
+                                              quote_limit_chars=entitlement.quote_limit_chars)
+                           if is_compatibility else port(name, validated, caller_context))
+                if not inspect.isawaitable(pending):
+                    return "INTERNAL_ERROR", subject, report_ids, _tool_error("INTERNAL_ERROR")
+                observed = await pending
         except ContractViolation as exc:
             code = exc.code if exc.code in _PORT_REFUSAL else "INTERNAL_ERROR"
             return code, subject, report_ids, _tool_error(code)
         except Exception:
             return "INTERNAL_ERROR", subject, report_ids, _tool_error("INTERNAL_ERROR")
 
-        # Step 9. Last await is the authorization recheck. Nothing after it awaits.
+        # Recheck authorization, then the selected-source fence. Final grant
+        # and expiration decisions below occur after all awaited owner I/O.
         try:
             current = _clock()
             header = None if request is None else request.scope.get(_HEADER_SCOPE_KEY)
@@ -460,6 +461,11 @@ def create_authenticated_research_server(
                 report_ids,
                 _auth_tool_error(selected, AuthError(AuthErrorCode.TOKEN_CLAIMS_REFUSED)),
             )
+        if selected_capture is not None:
+            try:
+                await selected_capture.check()
+            except Exception:
+                return "SOURCE_UNAVAILABLE", subject, report_ids, _tool_error("SOURCE_UNAVAILABLE")
         try:
             refreshed_entitlement = entitlement_resolver(refreshed_projection)
         except Exception:
@@ -505,6 +511,24 @@ def create_authenticated_research_server(
             structuredContent=data,
             isError=False,
         )
+        # Final grant I/O may cross a token or grant deadline. Decide only after
+        # that synchronous owner read and serialization; no await follows.
+        try:
+            final_entitlement = entitlement_resolver(refreshed_projection)
+            if inspect.isawaitable(final_entitlement):
+                _close_awaitable(final_entitlement)
+                final_entitlement = None
+            if final_entitlement != refreshed_entitlement:
+                return "NOT_ENTITLED", subject, report_ids, _tool_error("NOT_ENTITLED")
+            decision_time = _clock()
+            if refreshed.expires_at <= decision_time:
+                return ("AUTHENTICATION_REQUIRED", subject, report_ids,
+                        _auth_tool_error(selected, AuthError(AuthErrorCode.TOKEN_EXPIRED)))
+            expires_at = getattr(final_entitlement, "expires_at", None)
+            if type(expires_at) is not int or expires_at <= decision_time:
+                return "NOT_ENTITLED", subject, report_ids, _tool_error("NOT_ENTITLED")
+        except Exception:
+            return "INTERNAL_ERROR", subject, report_ids, _tool_error("INTERNAL_ERROR")
         return "OK", subject, report_ids, result
 
     @server.call_tool(validate_input=False)
