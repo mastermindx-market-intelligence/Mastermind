@@ -243,6 +243,26 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 if g.digest(raw) != old[name]:
                     raise AssertionError('long-horizon historical inverse unqualified: '+name)
                 target.write_bytes(raw)
+            # A new current-generation census implementation must never be
+            # relabeled as the immutable historical paired-upgrade payload.
+            # Restore the exact old lane runtime from a byte-pinned fixture.
+            historic_path = (Path(__file__).resolve().parents[4] /
+                'tests/fixtures/native-historical-lane-runtime-61350902.json')
+            historic_raw = historic_path.read_bytes()
+            if g.digest(historic_raw) != '1d658364949b3089ecb35b1ca6f3f8ac79970de1ab44dcc17dd6198a1f1eb3c0':
+                raise AssertionError('historical lane runtime fixture changed')
+            historic = json.loads(historic_raw)
+            original_runtime = zlib.decompress(
+                base64.b64decode(historic['zlib_base64'], validate=True)
+            )
+            if (historic['schema'] != 'mastermind.native_historical_lane_runtime.v1'
+                    or historic['original_sha256'] != old['ext/lane_runtime.py']
+                    or historic['original_bytes'] != len(original_runtime)
+                    or g.digest(original_runtime) != old['ext/lane_runtime.py']):
+                raise AssertionError('historical lane runtime preimage unqualified')
+            (cls.built / 'native-code-stage/ext/lane_runtime.py').write_bytes(
+                original_runtime
+            )
             cls.manifest = old
             for name,wanted in cls.manifest.items():
                 if g.digest((cls.built / 'native-code-stage' / name).read_bytes()) != wanted:

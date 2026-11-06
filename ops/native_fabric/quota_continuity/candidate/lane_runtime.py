@@ -18,6 +18,7 @@ import os
 import re
 import signal
 import socket
+import sys
 import stat
 import subprocess
 import tempfile
@@ -324,6 +325,76 @@ def enforce_remote_first_lane_launch(
         "load_ratio_limit": float(load_gate) / float(cores),
     }
 
+def _linux_procfs_ps_lines(
+    argv: Sequence[str], *, proc_root: Path = Path("/proc")
+) -> tuple[str, ...]:
+    """One bounded kernel-backed census only after both ordinary ps probes time out.
+
+    This is not a source of worker START, cleanup proof or admission authority.
+    Reject unknown ps forms, inaccessible records, malformed identity and an
+    incomplete scan rather than treating unseen descendants as absent.
+    """
+    if not sys.platform.startswith("linux"):
+        raise ProcessCensusError("process_census_timeout")
+    columns = tuple(argv)
+    if columns == ("/bin/ps", "-axo", "pid=,stat="):
+        with_group = False
+    elif columns == ("/bin/ps", "-axo", "pid=,pgid=,stat="):
+        with_group = True
+    else:
+        raise ProcessCensusError("process_census_timeout")
+    deadline = time.monotonic() + 1.5
+    lines: list[str] = []
+    inspected = 0
+    try:
+        with os.scandir(proc_root) as entries:
+            for entry in entries:
+                if not entry.name.isascii() or not entry.name.isdecimal():
+                    continue
+                inspected += 1
+                if inspected > 32768 or time.monotonic() >= deadline:
+                    raise ProcessCensusError("process_census_timeout")
+                stat_path = proc_root / entry.name / "stat"
+                try:
+                    fd = os.open(stat_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+                    try:
+                        raw = os.read(fd, 4097)
+                    finally:
+                        os.close(fd)
+                except OSError as exc:
+                    # A PID can disappear during the non-atomic census. A
+                    # permission error or other IO failure is never absence.
+                    if exc.errno in (errno.ENOENT, errno.ESRCH, errno.ENOTDIR):
+                        continue
+                    raise ProcessCensusError("process_census_unavailable") from exc
+                if len(raw) > 4096:
+                    raise ProcessCensusError("process_census_malformed")
+                close = raw.rfind(b") ")
+                if close < 0:
+                    raise ProcessCensusError("process_census_malformed")
+                before, sep, comm = raw[:close].partition(b" (")
+                fields = raw[close + 2:].split()
+                if (not sep or not comm or before != entry.name.encode("ascii")
+                        or len(fields) < 4 or len(fields[0]) != 1):
+                    raise ProcessCensusError("process_census_malformed")
+                try:
+                    state = fields[0].decode("ascii")
+                    group = int(fields[2])
+                except (UnicodeError, ValueError) as exc:
+                    raise ProcessCensusError("process_census_malformed") from exc
+                if group <= 0 or not state.isalpha():
+                    raise ProcessCensusError("process_census_malformed")
+                lines.append(
+                    f"{entry.name} {group} {state}" if with_group
+                    else f"{entry.name} {state}"
+                )
+    except OSError as exc:
+        raise ProcessCensusError("process_census_unavailable") from exc
+    if not lines:
+        raise ProcessCensusError("process_census_empty")
+    return tuple(lines)
+
+
 def _run_ps_lines(argv: Sequence[str], *, timeout: float) -> tuple[str, ...]:
     # On busy shared CI hosts, a read-only ps call can briefly stall behind IO.
     # Retry that single observation once, with a bounded extended timeout.
@@ -344,7 +415,9 @@ def _run_ps_lines(argv: Sequence[str], *, timeout: float) -> tuple[str, ...]:
             break
         except subprocess.TimeoutExpired as exc:
             if attempt:
-                raise ProcessCensusError("process_census_timeout") from exc
+                # Only exact, read-only Linux ps enumeration requests have a
+                # bounded procfs alternative. Other failures still fail closed.
+                return _linux_procfs_ps_lines(argv)
         except OSError as exc:
             raise ProcessCensusError("process_census_unavailable") from exc
     if probe.returncode != 0:
