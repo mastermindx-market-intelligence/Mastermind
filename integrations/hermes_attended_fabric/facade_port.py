@@ -105,7 +105,7 @@ class FabricFacadePort:
             # from the originating request. Return a truthful unverified
             # observation without permitting a replacement submit or result.
             return {**self._identity(grant, run_id), "state": "UNVERIFIED",
-                    "reason": "FABRIC_ACTIVE_LINEAGE_NOT_PROVEN",
+                    "reason": "FABRIC_STATUS_LINEAGE_NOT_PROVEN",
                     "worker_started": False}
         effective = raw.get("effective_run_id")
         if type(effective) is not str or not effective:
