@@ -1533,7 +1533,7 @@ test('publication recovery: prepared-before-dispatch evidence stays held while a
       .update('mastermind.studio_git_push_current_branch.v1\0')
       .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
       .digest('hex');
-    const {createPublicationRecovery} = await import('./git-publish-recovery.mjs');
+    const {createPublicationRecovery} = await import('./git-publish.mjs');
     const recovery = await createPublicationRecovery({
       git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
       operationId:f.operationId, branch:f.branch, ref:'refs/heads/'+f.branch,
@@ -1570,7 +1570,7 @@ test('publication recovery: incomplete or torn terminal receipt never creates su
 test('publication recovery: PREPARED does not attribute an identical remote push by another writer', async () => {
   const f = await fixture();
   try {
-    const {createPublicationRecovery} = await import('./git-publish-recovery.mjs');
+    const {createPublicationRecovery} = await import('./git-publish.mjs');
     const actionRef = (await import('node:crypto')).createHash('sha256')
       .update('mastermind.studio_git_push_current_branch.v1\0')
       .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
@@ -1596,7 +1596,7 @@ test('publication recovery: PREPARED does not attribute an identical remote push
 test('publication recovery: DISPATCHING action can be reconciled after a later valid descendant tip', async () => {
   const f = await fixture();
   try {
-    const {createPublicationRecovery} = await import('./git-publish-recovery.mjs');
+    const {createPublicationRecovery} = await import('./git-publish.mjs');
     const actionRef = (await import('node:crypto')).createHash('sha256')
       .update('mastermind.studio_git_push_current_branch.v1\0')
       .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
@@ -1625,7 +1625,7 @@ test('publication recovery: DISPATCHING action can be reconciled after a later v
 test('publication recovery: unrelated remote branch advance is CONFLICT, not proven absence or retry clearance', async () => {
   const f = await fixture();
   try {
-    const {createPublicationRecovery} = await import('./git-publish-recovery.mjs');
+    const {createPublicationRecovery} = await import('./git-publish.mjs');
     const actionRef = (await import('node:crypto')).createHash('sha256')
       .update('mastermind.studio_git_push_current_branch.v1\0')
       .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
@@ -1660,7 +1660,7 @@ test('publication recovery: unrelated remote branch advance is CONFLICT, not pro
 test('publication recovery: wrong operation and wrong origin never match a retained action', async () => {
   const f = await fixture();
   try {
-    const {createPublicationRecovery} = await import('./git-publish-recovery.mjs');
+    const {createPublicationRecovery} = await import('./git-publish.mjs');
     const actionRef = (await import('node:crypto')).createHash('sha256')
       .update('mastermind.studio_git_push_current_branch.v1\0')
       .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
@@ -1801,7 +1801,7 @@ test('forward recovery: stale expected remote and missing ancestry are nonmutati
 test('forward recovery: outstanding journalled prior is not bypassed by legacy exception', async () => {
   const f = await legacyForwardFixture();
   try {
-    const {createPublicationRecovery} = await import('./git-publish-recovery.mjs');
+    const {createPublicationRecovery} = await import('./git-publish.mjs');
     const journal = await createPublicationRecovery({
       git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
       operationId:f.operationId, branch:f.branch,
