@@ -332,6 +332,45 @@ def _raw_index() -> dict:
         return {}
 
 
+def _admitted_snapshot(asof: str | None = None) -> tuple[dict, dict]:
+    """Read once and return that admitted snapshot with its availability record."""
+    rec = {"available": False, "reason": None, "artifact_asof": None,
+           "asof": asof, "age_days": None}
+    try:
+        ref = _ref_date(asof)
+    except ValueError:
+        rec["reason"] = "invalid_asof"
+        return {}, rec
+    try:
+        if not feed_enabled():
+            rec["reason"] = "flag_off"
+            return {}, rec
+        raw = _raw_index()
+        if not raw:
+            rec["reason"] = "artifact_absent_or_malformed"
+            return {}, rec
+        art_asof = raw.get("asof")
+        rec["artifact_asof"] = art_asof
+        age = _age_days(art_asof, ref)
+        rec["age_days"] = age
+        if age is None:
+            rec["reason"] = "artifact_asof_unparseable"
+            return {}, rec
+        if age < 0:
+            # the artifact post-dates the decision boundary — the split-clock leak this guards
+            rec["reason"] = "future_artifact"
+            return {}, rec
+        if age > _STALE_DAYS:
+            rec["reason"] = "stale"
+            return {}, rec
+        rec["available"] = True
+        return raw, rec
+    except Exception as e:  # noqa: BLE001 — fail-open: never raise into a build
+        log.debug("prophet_feed: availability(%r) failed (%s)", asof, e)
+        rec["reason"] = "error"
+        return {}, rec
+
+
 def availability(asof: str | None = None) -> dict:
     """The HONEST admissibility record for this artifact at decision boundary ``asof``.
 
@@ -355,41 +394,7 @@ def availability(asof: str | None = None) -> dict:
     so such a row would import post-boundary judgment about a pre-boundary plan. That would be
     manufacturing history the source does not have.
     """
-    rec = {"available": False, "reason": None, "artifact_asof": None,
-           "asof": asof, "age_days": None}
-    try:
-        ref = _ref_date(asof)
-    except ValueError:
-        rec["reason"] = "invalid_asof"
-        return rec
-    try:
-        if not feed_enabled():
-            rec["reason"] = "flag_off"
-            return rec
-        raw = _raw_index()
-        if not raw:
-            rec["reason"] = "artifact_absent_or_malformed"
-            return rec
-        art_asof = raw.get("asof")
-        rec["artifact_asof"] = art_asof
-        age = _age_days(art_asof, ref)
-        rec["age_days"] = age
-        if age is None:
-            rec["reason"] = "artifact_asof_unparseable"
-            return rec
-        if age < 0:
-            # the artifact post-dates the decision boundary — the split-clock leak this guards
-            rec["reason"] = "future_artifact"
-            return rec
-        if age > _STALE_DAYS:
-            rec["reason"] = "stale"
-            return rec
-        rec["available"] = True
-        return rec
-    except Exception as e:  # noqa: BLE001 — fail-open: never raise into a build
-        log.debug("prophet_feed: availability(%r) failed (%s)", asof, e)
-        rec["reason"] = "error"
-        return rec
+    return _admitted_snapshot(asof)[1]
 
 
 def index(asof: str | None = None) -> dict:
@@ -407,13 +412,13 @@ def index(asof: str | None = None) -> dict:
     Cached for the process lifetime; call ``_reset_cache()`` to force a fresh read (tests / intraday
     refresh). Never raises — a read/parse error logs at debug and yields ``{}``.
     """
-    av = availability(asof)
+    raw, av = _admitted_snapshot(asof)
     if not av["available"]:
         if av["reason"] not in (None, "artifact_absent_or_malformed", "flag_off"):
             log.debug("prophet_feed: inert (%s) artifact_asof=%s asof=%s age=%s",
                       av["reason"], av["artifact_asof"], asof, av["age_days"])
         return {}
-    return _raw_index()
+    return raw
 
 
 def plans(asof: str | None = None) -> list[dict]:
