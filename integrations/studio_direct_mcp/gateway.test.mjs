@@ -16,6 +16,9 @@
 // Run: node --test private-studio-mcp/gateway.test.mjs
 
 import { test, after } from 'node:test';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -1010,4 +1013,66 @@ test('Fabric-only validation uses the same copied values as capability resolutio
   assert.equal(cfg.fabricOnly, true);
   assert.equal(cfg.gitPublish, null);
   assert.equal(cfg.paperDesign, null);
+});
+
+
+test('actual direct CLI preserves explicit Fabric-only input through auth setup', { timeout: 30000 }, async () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'studio-fabric-direct-cli-'));
+  const configPath = resolve(dir, 'config.json');
+  const loaderPath = resolve(dir, 'fixture-auth-loader.mjs');
+  const gatewayPath = fileURLToPath(new URL('./gateway.mjs', import.meta.url));
+  const gatewayUrl = pathToFileURL(gatewayPath).href;
+
+  // The public auth owner is supplied by the embedding application. This
+  // test-only dependency refuses every protected request and reads no secret.
+  const authSource = 'export async function createAuth(options) {' +
+    'if (options.stateDir !== ' + JSON.stringify(resolve(dir, 'state')) +
+    ' || options.host !== "127.0.0.1" || options.port !== 0 || options.testMode !== true)' +
+    ' throw new Error("CLI auth options lost their validated paths");' +
+    'return {middleware(_req, res) {res.status(401).end();}};}';
+  const authUrl = 'data:text/javascript;base64,' + Buffer.from(authSource).toString('base64');
+  const loaderSource = 'export function resolve(specifier, context, nextResolve) {' +
+    'if (specifier === "./auth.mjs" && context.parentURL === ' + JSON.stringify(gatewayUrl) +
+    ') return {url:' + JSON.stringify(authUrl) + ',shortCircuit:true};' +
+    'return nextResolve(specifier, context);}';
+  await writeFile(loaderPath, loaderSource);
+  await writeFile(configPath, JSON.stringify({
+    host: '127.0.0.1', port: 0, testMode: true, cwd: '.', stateDir: 'state',
+    command: process.execPath, args: [],
+    fabricOnly: true, gitPublish: false, paperDesign: false,
+  }));
+  const bootstrap = 'import {register} from "node:module";register(' +
+    JSON.stringify(pathToFileURL(loaderPath).href) + ',import.meta.url);';
+  const child = spawn(process.execPath, [
+    '--import', 'data:text/javascript;base64,' + Buffer.from(bootstrap).toString('base64'),
+    gatewayPath, configPath,
+  ], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_OPTIONS: '' } });
+  let logs = '';
+  child.stderr.on('data', chunk => { logs += chunk.toString(); });
+  child.stdout.on('data', chunk => { logs += chunk.toString(); });
+  const exited = once(child, 'exit');
+  try {
+    const deadline = Date.now() + 20000;
+    while (!/gateway: listening on http:\/\/127\.0\.0\.1:\d+\/mcp/.test(logs) &&
+           child.exitCode === null && Date.now() < deadline) {
+      await delay(25);
+    }
+    const match = logs.match(/gateway: listening on (http:\/\/127\.0\.0\.1:\d+)\/mcp/);
+    assert.ok(match, 'valid Fabric-only CLI must start; exit=' + child.exitCode + '; logs=' + logs);
+    const response = await fetch(match[1] + '/healthz', { signal: AbortSignal.timeout(3000) });
+    assert.equal(response.status, 200);
+    child.kill('SIGTERM');
+    assert.deepEqual(await exited, [0, null]);
+    assert.match(logs, /gateway_stopped/);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      await Promise.race([exited, delay(2000)]);
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+        await exited;
+      }
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

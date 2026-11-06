@@ -2456,7 +2456,7 @@ async function main() {
     testMode: cfg.testMode,
   });
 
-  const gateway = await startGateway(cfg, auth);
+  const gateway = await startGateway(raw, auth);
   process.stderr.write(`gateway: listening on ${gateway.url}\n`);
 
   let shuttingDown = false;
