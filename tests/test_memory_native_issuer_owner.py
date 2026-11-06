@@ -1,7 +1,9 @@
 """Actual Control/Runtime/Event + root branch join with declared Linux fixture.
 
 Only kernel/installed-service qualification, SSH enrollment/exchange and Linux
-issuer response are inert source fixtures. No fixture authenticates deployed
+issuer response are inert source fixtures. The prior source-issuer component
+also assumes current paid admission; test_protected_memory_execution exercises
+the new join with real temporary OperatorOwner/Broker/ledger instead. No fixture authenticates deployed
 source, provider identity, actual service enrollment, scientific rights or study.
 """
 import copy
@@ -22,6 +24,12 @@ from tests.test_memory_native_wire import response, frame, rawpacket
 def joined(claimed,installed,monkeypatch):
     runtime,job,lease=claimed
     intent,_=prepare(runtime,lease,installed[0],monkeypatch)
+    from control_plane import protected_memory_economic_owner as economic
+    def paid_component_premise(value,request):
+        peer.require_protected_memory_intent(value)
+        assert request=={'action':'current','arguments':{}}
+        return {'phase':'RESERVED'}
+    monkeypatch.setattr(economic,'execute',paid_component_premise)
     count={'source':0,'actions':[],'pending':False,'absent':False,'unknown':False,'withdraw':False}
     projection=peer._CONTROL_ISSUED[intent].original
     fingerprint=response({'schema':'research_factory.market_memory_e0_native_issuer_request.v2','action':'prepare_case',

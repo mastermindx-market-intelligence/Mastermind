@@ -27,6 +27,7 @@ from control_plane import native_memory_admission as admission
 from control_plane import protected_memory_peer as peer
 from control_plane import protected_memory_profile as profile
 from control_plane import memory_native_issuer as issuer
+from control_plane import protected_memory_economic_client as economic
 from control_plane.worker_execution_contract import WorkerProcessRef,BinaryAttestation
 from control_plane.codex_worker import ProcessInspector
 
@@ -53,9 +54,11 @@ class _State:
     packet:bytes
     run_dir:Path
     original_projection:bytes
+    economic:object=None
     proc:object=None
     ref:object=None
     raw:bytes|None=None
+    accounted:bool=False
 
 
 def _private_directory(path):
@@ -98,6 +101,43 @@ def _event(state,kind,payload):
             worker_id=attempt.worker_id,quota_class=attempt.quota_class,actor='supervisor',command_id=command,payload=payload)
 
 
+def _receipt_event(state,kind,payload):
+    """One retained observation, immutable same-original duplicate read only."""
+    attempt=state.lease.attempt;command='memory-case:'+attempt.attempt_id+':'+kind.lower()
+    with state.runtime.store.transaction() as con:
+        rows=con.execute('SELECT event_type,job_id,attempt_id,payload_json FROM events WHERE command_id=?',(command,)).fetchall()
+        if rows:
+            if (len(rows)!=1 or rows[0]['event_type']!='MEMORY_'+kind or rows[0]['job_id']!=attempt.job_id
+                    or rows[0]['attempt_id']!=attempt.attempt_id or json.loads(rows[0]['payload_json'])!=payload):
+                raise MemoryExecutionRefused()
+            return
+        state.runtime.store.append_event(con,aggregate_type='attempt',aggregate_id=attempt.attempt_id,
+            event_type='MEMORY_'+kind,job_id=attempt.job_id,attempt_id=attempt.attempt_id,
+            worker_id=attempt.worker_id,quota_class=attempt.quota_class,actor='supervisor',command_id=command,payload=payload)
+
+
+def _retain_input(state):
+    """Exact bytes in the incumbent private Attempt directory, never UID501."""
+    path=state.run_dir/'memory-original-input'
+    try:fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+    except FileExistsError:fd=None
+    if fd is not None:
+        try:
+            pending=memoryview(state.packet)
+            while pending:
+                count=os.write(fd,pending)
+                if count<=0:raise MemoryExecutionUnknown()
+                pending=pending[count:]
+            os.fsync(fd)
+        finally:os.close(fd)
+    from control_plane.paid_fabric_backend import _private_read
+    if _private_read(path,65536)!=state.packet:raise MemoryExecutionRefused()
+    _receipt_event(state,'INPUT_RETAINED',{'schema':'mastermind.memory_original_input.v1',
+        'attempt_id':state.lease.attempt.attempt_id,
+        'pre_input_sha256':hashlib.sha256(state.original_projection).hexdigest(),
+        'input_sha256':hashlib.sha256(state.packet).hexdigest(),'input_bytes':len(state.packet)})
+
+
 def _current(value):
     if type(value) is not PreparedMemoryExecution or value not in _OWNED:raise MemoryExecutionRefused()
     state=_OWNED[value]
@@ -119,12 +159,15 @@ def prepare_memory_execution(runtime,lease):
     run_dir=runtime.store.root/'data/control_plane/runs'/lease.attempt.attempt_id
     _private_directory(run_dir)
     intent=peer.capture_control_memory_intent(claim,observed)
+    issuer.qualify_transport(intent)
+    paid=economic.acquire(intent,qualified,claim,observed)
     case=issuer.prepare_case(intent)
     packet=issuer.current_input(case,intent)
     state=_State(runtime,lease,claim,intent,qualified,observed,case,packet,run_dir,
-        peer.canonical(peer.require_control_memory_intent(intent)))
+        peer.canonical(peer.require_control_memory_intent(intent)),economic=paid)
     value=object.__new__(PreparedMemoryExecution);_OWNED[value]=state
     _current(value)
+    _retain_input(state)
     return value
 
 
@@ -134,19 +177,21 @@ def recover_memory_preparation(runtime,lease):
     observed=issuer.describe_control_owner();qualified=profile.load_protected_memory_profile(claim,observed)
     _source_binary();run_dir=runtime.store.root/'data/control_plane/runs'/lease.attempt.attempt_id;_private_directory(run_dir)
     intent=peer.capture_control_memory_intent(claim,observed)
+    paid=economic.recover(intent,qualified,claim,observed)
     result,case=issuer.read_original_case(intent)
     if result!='COMPLETE':return result,None
     packet=issuer.current_input(case,intent)
     value=object.__new__(PreparedMemoryExecution)
     _OWNED[value]=_State(runtime,lease,claim,intent,qualified,observed,case,packet,run_dir,
-        peer.canonical(peer.require_control_memory_intent(intent)))
-    _current(value);return 'COMPLETE',value
+        peer.canonical(peer.require_control_memory_intent(intent)),economic=paid)
+    _current(value);_retain_input(_OWNED[value]);_current(value);return 'COMPLETE',value
 
 
 def start_memory_execution(value):
     state=_current(value)
     if state.proc is not None:raise MemoryExecutionUnknown()
     config=profile.require_protected_memory_profile(state.profile,state.claim,state.observed)
+    economic.require(state.economic,state.intent)
     packet=issuer.current_input(state.case,state.intent)
     if packet!=state.packet:raise MemoryExecutionRefused()
     body=compile_memory_model_input(packet,model=config['model']);binary=_source_binary()
@@ -155,6 +200,8 @@ def start_memory_execution(value):
         'input_sha256':hashlib.sha256(packet).hexdigest(),'input_bytes':len(packet),
         'profile_sha256':hashlib.sha256(profile.canonical(config)).hexdigest(),
         'body_sha256':hashlib.sha256(body).hexdigest()}
+    economic.require(state.economic,state.intent,'bind_input',{
+        k:seal[k] for k in ('input_sha256','input_bytes','body_sha256')})
     current=state.runtime.attempts.get_attempt(state.lease.attempt.attempt_id)
     pinned=state.runtime.attempts.pin_remote_launch_identity(current.attempt_id,
         fence_generation=current.fence_generation,lease_token=state.lease.lease_token,
@@ -189,6 +236,9 @@ def start_memory_execution(value):
         state.runtime.attempts.mark_running(current.attempt_id,fence_generation=current.fence_generation,lease_token=state.lease.lease_token)
         admission.bind_memory_runtime_process(state.claim,ref);state.ref=ref
         _current(value)
+        receipt=economic.require(state.economic,state.intent,'consume',{
+            'attempt_id':ref.run_id,'process_ref_sha256':hashlib.sha256(wire.canonical(dataclasses.asdict(ref))).hexdigest()})
+        if receipt['phase']!='CONSUMED':raise MemoryExecutionRefused()
         # Sole release of exact input. Metadata/handshake alone cannot send it.
         envelope={'schema':'mastermind.protected_memory_model_request.v1','profile_sha256':seal['profile_sha256'],
             'input_sha256':seal['input_sha256'],'input_base64':base64.b64encode(packet).decode(),
@@ -210,21 +260,36 @@ def collect_original_memory_result(value):
     if state.proc is None or state.ref is None:raise MemoryExecutionUnknown()
     code=state.proc.poll()
     if code is None:return None
-    if code!=0:raise MemoryExecutionUnknown()
     _private_directory(state.run_dir)
     from control_plane.paid_fabric_backend import _private_read
+    if code!=0:
+        # Terminal failure is still original accounting. No raw body is
+        # disclosed and no failed/unknown model execution becomes retryable.
+        if not state.accounted:
+            path=Path(state.ref.result_path)
+            raw=_private_read(path,65536) if path.stat().st_size else b''
+            economic.require(state.economic,state.intent,'settle',{'rc':min(255,code if code>0 else 128-code),
+                'result_sha256':hashlib.sha256(raw).hexdigest(),'result_bytes':len(raw)})
+            state.accounted=True
+        raise MemoryExecutionUnknown()
     raw=_private_read(Path(state.ref.result_path),65536)
     if state.raw is not None and state.raw!=raw:raise MemoryExecutionRefused()
     _current(value)
+    if not state.accounted:
+        economic.require(state.economic,state.intent,'settle',{'rc':0,
+            'result_sha256':hashlib.sha256(raw).hexdigest(),'result_bytes':len(raw)})
+        state.accounted=True
     # Current Linux source permission authorizes only the exact original digest.
     issuer.authorize_result_disclosure(state.case,state.intent,state.ref.run_id,
         hashlib.sha256(state.packet).hexdigest(),{'sha256':hashlib.sha256(raw).hexdigest(),'bytes':len(raw)})
     if _private_read(Path(state.ref.result_path),65536)!=raw:raise MemoryExecutionRefused()
     _current(value);state.raw=raw
-    return {'schema':'mastermind.protected_memory_original_result.v1','attempt_id':state.ref.run_id,
+    receipt={'schema':'mastermind.protected_memory_original_result.v1','attempt_id':state.ref.run_id,
         'input_sha256':hashlib.sha256(state.packet).hexdigest(),
         'result_sha256':hashlib.sha256(raw).hexdigest(),'result_bytes':len(raw),
         'verification':dict(wire.FLAGS),'scientific_admission':False,'adjudicator_access':False}
+    _receipt_event(state,'ORIGINAL_RESULT_RETAINED',receipt)
+    return receipt
 
 
 def disclose_memory_result(value):
@@ -280,8 +345,11 @@ async def run_protected_memory_case(supervisor, lease):
         return result
     prepared=await attended(lambda:prepare_memory_execution(runtime,lease))
     await attended(lambda:start_memory_execution(prepared))
-    deadline=time.monotonic()+600
+    deadline=time.monotonic()+600;next_paid_heartbeat=0
     while True:
+        if time.monotonic()>=next_paid_heartbeat:
+            await attended(lambda:economic.require(_OWNED[prepared].economic,_OWNED[prepared].intent,'heartbeat'))
+            next_paid_heartbeat=time.monotonic()+5
         view=await attended(lambda:disclose_memory_result(prepared))
         if view is not None:break
         if time.monotonic()>=deadline:raise MemoryExecutionUnknown()

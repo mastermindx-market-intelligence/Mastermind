@@ -71,6 +71,13 @@ def main():
     if os.geteuid()!=450 or len(sys.argv)!=2 or not sys.argv[1].isdigit():return 75
     channel=socket.socket(fileno=int(sys.argv[1]))
     channel.settimeout(125)
+    from control_plane.executive_peer_identity import capture_peer_identity, require_installed_service_peer
+    from control_plane.executive_installed_peer import qualify_installed_peer
+    parent=capture_peer_identity(channel)
+    if parent.pid!=os.getppid() or parent.euid!=450:return 75
+    binding=qualify_installed_peer(parent,role='control')
+    context=require_installed_service_peer(parent,binding)
+    if context.service_label!='com.mastermind.executive.control':return 75
     # Child is inspected by parent BEFORE this handshake releases any input,
     # credential or provider call. No public socket/listener exists.
     channel.sendall(b'READY\n')
@@ -90,6 +97,7 @@ def main():
     config=profile._json(profile._read_config());selected=config.get('protected_memory_execution')
     if type(selected) is not dict or hashlib.sha256(profile.canonical(selected)).hexdigest()!=value['profile_sha256']:return 75
     decode_memory_model_input(body,expected_packet=packet,expected_model=selected['model'])
+    require_installed_service_peer(parent,binding)
     # No provider call can precede exact profile/body checks and parent release.
     result=_post(selected,body,_credential(selected))
     sys.stdout.buffer.write(result);sys.stdout.buffer.flush()

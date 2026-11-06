@@ -54,6 +54,15 @@ def describe_control_owner():
     return peer._owner_shape(response['owner'])
 
 
+def qualify_transport(intent):
+    """Fixed local installed metadata only; NOT Linux permission/read/auth."""
+    before=peer.require_control_memory_intent(intent)
+    response=_send({'schema':SCHEMA,'operation':'qualify_transport','projection':before})
+    if peer.require_control_memory_intent(intent)!=before:raise NativeCaseRefused()
+    if response!={'schema':SCHEMA,'state':'TRANSPORT_CONFIGURED','protocol':'memory.e0.native_issuer.v2'}:
+        raise NativeCaseRefused()
+
+
 def _request(intent, action, **extra):
     projection = peer.require_control_memory_intent(intent)
     digest = hashlib.sha256(peer.canonical(projection)).hexdigest()

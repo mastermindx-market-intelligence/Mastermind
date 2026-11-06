@@ -142,6 +142,21 @@ def handle_memory_exchange(raw, connection):
         if raw.get('operation') == 'describe':
             wire.exact(raw, 'schema operation')
             return {'schema':SCHEMA,'state':'OWNER_CURRENT','owner':observed}
+        if raw.get('operation') == 'qualify_transport':
+            wire.exact(raw, 'schema operation projection')
+            admitted = peer.accept_protected_memory_intent(raw['projection'], connection)
+            peer.require_protected_memory_intent(admitted)
+            before = _enrollment(observed)
+            from control_plane.protected_memory_economic_owner import qualify_helper_source
+            qualify_helper_source()
+            if peer.observe_control_owner(connection)!=observed or _enrollment(observed)!=before: fail()
+            return {'schema':SCHEMA,'state':'TRANSPORT_CONFIGURED','protocol':'memory.e0.native_issuer.v2'}
+        if raw.get('operation') == 'economic':
+            wire.exact(raw, 'schema operation projection request')
+            admitted = peer.accept_protected_memory_intent(raw['projection'], connection)
+            from control_plane import protected_memory_economic_owner as economic
+            receipt = economic.execute(admitted, raw['request'])
+            return {'schema':SCHEMA,'state':'ECONOMIC_OBSERVED','receipt':receipt}
         wire.exact(raw, 'schema operation projection request')
         if raw['operation'] != 'exchange': fail()
         admitted = peer.accept_protected_memory_intent(raw['projection'], connection)
@@ -149,6 +164,12 @@ def handle_memory_exchange(raw, connection):
         request = wire.validate_request(raw['request'])
         if (request['schema'] != 'research_factory.market_memory_e0_native_issuer_request.v2'
                 or request['operation_id'] != prepare['operation_id'] or request['intent'] != prepare['intent']): fail()
+        if request['action'] == 'prepare_case':
+            # Source reservation is downstream of REAL incumbent paid capacity,
+            # account, root/operator allowance and current child lease admission.
+            from control_plane import protected_memory_economic_owner as economic
+            receipt = economic.execute(admitted, {'action':'current', 'arguments':{}})
+            if receipt['phase'] != 'RESERVED': fail()
         before = _enrollment(observed)
         result = _exchange(wire.encode_request(request))
         response = wire.decode_response(result, request=request)

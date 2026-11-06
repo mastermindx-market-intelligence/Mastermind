@@ -275,6 +275,43 @@ class OperatorOwner:
                 refuse("child_binding_refused")
         return grant, dict(row)
 
+    def reserve_protected_memory(self, token, request):
+        """Delegate economic permission only, in the existing child row.
+
+        No packet, source capability, result or provider call is accepted here.
+        The later installed Control owner must independently match the exact
+        pre-input intent before the real broker can acquire a child lease.
+        Lost response consumes the original count; it never refunds/replays.
+        """
+        from fabric_operator_contract import validate_protected_launch
+        with self.transaction() as con:
+            grant, launch, lease, root = self._authorized(con, token)
+            used = con.execute('SELECT COUNT(*) FROM operator_child_authorizations WHERE operator_run=?',
+                               (grant['operator_run'],)).fetchone()[0]
+            root_used = con.execute('SELECT COUNT(*) FROM operator_child_authorizations WHERE root=?',
+                                    (grant['root'],)).fetchone()[0]
+            request = validate_protected_launch(grant, lease, launch, request, now=self.clock(),
+                used_children=used, root_children_remaining=root['child_limit'] - root_used)
+            from protected_memory_economic import require_economic_policy
+            require_economic_policy(self,request)
+            if min(root['expires'], grant['expires_at']) - self.clock() < OPERATOR_MIN_START_WINDOW_SECONDS:
+                refuse('operator_child_start_window_expired')
+            rid = request['run_id']
+            if con.execute('SELECT 1 FROM operator_child_authorizations WHERE run_id=?', (rid,)).fetchone():
+                refuse('RUN_EXISTS')
+            for suffix in ('.log', '.result', '.operator-packet', '.request.packet'):
+                path = self.here / 'state/remote_sub' / (rid + suffix)
+                if path.exists() or path.is_symlink(): refuse('RUN_EXISTS')
+            stored = {'schema': 'mastermind.fabric_bound_child_authorization.v3',
+                'economic': {'schema': 'mastermind.protected_memory_economic.v1',
+                    'request': request, 'phase': 'RESERVED', 'input': None,
+                    'launch': None, 'terminal': None}}
+            raw = canonical(stored)
+            con.execute('INSERT INTO operator_child_authorizations VALUES (?,?,?,?,?,?,NULL,NULL)',
+                (rid, grant['operator_run'], grant['root'], digest(raw.encode()), self.clock(), raw))
+        return {'root': grant['root'], 'parent': grant['operator_run'], 'run_id': rid,
+                'pre_input_sha256': request['pre_input_sha256'], 'retry_authorized': False}
+
     def child_binding(self, token, rid):
         grant, row = self._child_authorization(token, rid)
         from fabric_memory_view import require_generic_row
@@ -453,17 +490,34 @@ def validate_child_admission(con, run_id, root, *, now, admitted_lease_id=None, 
         refuse("operator_child_authorization_changed")
     if type(request) is not dict:
         refuse("operator_child_authorization_changed")
+    if request.get('schema') == 'mastermind.fabric_bound_child_authorization.v3':
+        from protected_memory_economic import validate_stored
+        from fabric_operator_contract import validate_protected_launch
+        economic = validate_stored(request)
+        request = economic['request']
+        validate_protected_launch(grant, lease, launch, request, now=now,
+                                 used_children=0, root_children_remaining=1)
+        if economic['phase'] not in ('RESERVED', 'BOUND'):
+            refuse('protected_memory_original_recovery_only')
+        if admitted_lease_id is None and economic['phase'] != 'RESERVED':
+            refuse('protected_memory_original_recovery_only')
+        protected = True
+    else:
+        protected = False
     if request.get("schema") == "mastermind.fabric_bound_child_authorization.v2":
         from fabric_participant_owner import unwrap
         request, _ = unwrap(None, grant, request, expected_run=run_id)
-    validate_launch(grant, lease, launch, request, now=now, used_children=0,
-                    root_children_remaining=1)
+    if not protected:
+        validate_launch(grant, lease, launch, request, now=now, used_children=0,
+                        root_children_remaining=1)
     if admitted_lease_id is not None:
         child = OperatorOwner.lease(con, admitted_lease_id)
         if (child['orchestrator_id'] != root or child['state'] not in ('held', 'rented')
                 or not child['last_heartbeat'] <= now < child['last_heartbeat'] + child['ttl']):
             refuse("operator_child_lease_unavailable")
-        if packet_sha256 is not None and packet_sha256 != digest((request['packet'] + CHILD_SUFFIX).encode()):
+        expected_packet = (economic['input']['input_sha256'] if protected and economic['input'] is not None
+                           else None if protected else digest((request['packet'] + CHILD_SUFFIX).encode()))
+        if packet_sha256 is not None and packet_sha256 != expected_packet:
             refuse('operator_child_packet_binding_mismatch')
         if start_binding is not None and (set(start_binding) != {'pool','model','account','host'} or any(child[k] != v for k,v in start_binding.items())):
             refuse('operator_child_launch_binding_mismatch')
@@ -499,6 +553,9 @@ def main():
         result = owner.wait(value["token"], args["run_id"], args["seconds"])
     elif action == "request":
         result = owner.dispatch(value["token"], args)
+    elif action == 'protected_memory_authorize':
+        # Economic delegation only; no case packet, source read or execution.
+        result = owner.reserve_protected_memory(value['token'], args)
     elif action == "participant_observation" and type(args) is dict and set(args) == {"run_id", "binding_sha256"}:
         result = owner.participant_observation(value["token"], args["run_id"], args["binding_sha256"])
     elif action == "participant_metadata" and type(args) is dict and set(args) == {"run_id", "binding_sha256", "object_id"}:

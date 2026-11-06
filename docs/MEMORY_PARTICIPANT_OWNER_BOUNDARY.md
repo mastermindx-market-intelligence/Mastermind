@@ -1,5 +1,51 @@
 # Prospective Memory participant owner boundary — P8.T1.S16
 
+## Current execution status
+
+The frozen 499 source was **not accepted for execution**: MEMORY-OWNER-PAID-1
+found that Runtime/profile custody did not establish incumbent paid admission.
+The successor source below adds that actual economic join. It is prospective,
+uninstalled, and remains subject to the same finite consequence review.
+No profile, key, grant, service, provider invocation or study is enabled.
+
+The existing operator bearer may authorize ONLY a closed pre-input economic
+record in the existing `operator_child_authorizations` row. It consumes the
+same immutable root/operator allowance and existing C0/C1 class/deadline laws;
+there is no new scientific/C2 allowance or relabelled native/Runtime root.
+Root's installed-Control boundary matches the exact original pre-input hash.
+A fixed root-source helper executes the actual OperatorOwner/Broker as UID501,
+with existing-only namespace opening, exact account/host/model, quota,
+fair-share and deadline gates. The long-lived kernel-qualified Control PID,
+not the short-lived helper PID, owns the new lease. No packet/result/key enters
+UID501. The inherited helper channel must have its actual kernel root parent;
+no caller dictionary or cached receipt grants this authority.
+
+Control records the original economic attempt/pre-input in existing Runtime
+Events before its helper call. Exact input binding and a unique committed
+provider-consumption phase precede private FD release. The runner additionally
+requires its actual installed Control parent before READY or credential access.
+Current account/host withdrawal refuses consumption. Actual terminal metadata
+uses the existing strict original outcome ledger before lease release; unknown
+accounting preserves the original count/lease and cannot refund/replay. Missing
+usage stays null, not a fabricated zero or acceptance.
+
+Two cross-repository facts remain explicitly missing. Frozen Linux wire v2 has
+no pre-budget read-only current-permission qualification; original-case recovery
+is not repurposed as preflight. Local transport/profile metadata is not Linux
+permission. The source owner must supply its prospective qualified seam before
+this path can be promoted for execution. Also original Control custody does
+not establish that the intended original recipient was that service. The new
+completed-reference loader checks actual terminal Runtime/Events and original
+hashes only, never reads private bodies, never clones an active lease, and
+reports `original_recipient: UNRECORDED`, `disclosure_authorized: false`.
+It is NOT a completed-read authority. A genuine original-recipient fact plus
+fresh authenticated receiver/current permission and independent Linux current
+grant are still mandatory; no policy stanza backfills an unrecorded recipient.
+
+Exact packet bytes are retained mode0600 only in the existing private Control
+Attempt directory, with input/result digest receipts in the existing Events.
+New metadata never changes original wire1/2 intent or c82 v1 binding meaning.
+
 This source component closes generic delivery for newly restricted v3 rows. It
 does not issue a Memory capability, implement selected source execution, install
 a service, or admit a study. Ordinary request v1 and metadata-only v2 keep their

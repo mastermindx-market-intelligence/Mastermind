@@ -33,9 +33,10 @@ from tests.test_protected_memory_peer import installed
 from tests.test_executive_peer_identity import owner_observation,bind_fixture
 from tests.test_memory_native_wire import response,frame
 from tests.test_memory_participant_view import packet
+from tests.test_protected_memory_economic import economy
 
 @pytest.fixture
-def joined(configured,installed,monkeypatch):
+def joined(configured,installed,monkeypatch,economy,request):
     runtime,job,_,config=configured
     attempt=runtime.attempts.list_attempts()[0]
     # The genuine opaque token remains in the source fixture claim, never
@@ -46,7 +47,11 @@ def joined(configured,installed,monkeypatch):
         return bind_fixture(capture,dataclasses.replace(owner_observation(capture),config_digest=config['owner']['configuration_sha256']))
     monkeypatch.setattr(peer,'qualify_installed_peer',qualified)
     actions=[];calls=[];done=threading.Event();errors=[];result={'bad':False,'late':False}
-    native=packet();sha=hashlib.sha256(native).hexdigest()
+    native=packet()
+    if getattr(request,'param',None)=='native-builder-vector':
+        native=(Path(__file__).parent/'fixtures/native_memory_packet_20261106/participant-input.bin').read_bytes()
+        assert hashlib.sha256(native).hexdigest()=='f4213c04dc827819ac476859803d462b27ddf4badb3d5855c52dbf701acd641f'
+    sha=hashlib.sha256(native).hexdigest()
     fingerprint=response({'schema':'request.v2','action':'prepare_case','operation_id':'x','intent':{}})['issuer']['broker_service_fingerprint']
     monkeypatch.setattr(root,'_enrollment',lambda _:(b'fixture',fingerprint,b'known',(1,2,3)))
     def exchange(raw):
@@ -59,6 +64,25 @@ def joined(configured,installed,monkeypatch):
                 **{k:req['result_ref'][k] for k in ('input_sha256','result_sha256','result_bytes')})
         return frame(value)
     monkeypatch.setattr(root,'_exchange',exchange)
+    from control_plane import protected_memory_economic_owner as economic_root
+    economic_owner,_,economic_engine,token,authorization,_,_,_,_=economy
+    # Explicit inert root->501 metadata-process boundary. Actual original
+    # bearer, count reservation, Broker lease, input consumption and ledger
+    # run against the real disposable incumbent owners, not receipt fixtures.
+    monkeypatch.setattr(root,'_read',lambda path,_maximum:config['raw'] if path==root.CONFIG else (_ for _ in ()).throw(ValueError()))
+    def economic_helper(value):
+        monkeypatch.setattr(peer.os,'geteuid',lambda:501)
+        try:
+            action=value['action'];selector=value['selector'];arguments=value['arguments']
+            if action=='acquire':
+                economic_owner.reserve_protected_memory(token,dict(authorization,**selector))
+                return economic_engine.acquire(selector,value['route'],controller_pid=value['controller_pid'])
+            economic_engine.require_route(selector,value['route'])
+            if action in ('current','heartbeat'):return getattr(economic_engine,action)(selector)
+            return getattr(economic_engine,action)(selector,arguments)
+        finally:monkeypatch.setattr(peer.os,'geteuid',lambda:0)
+    monkeypatch.setattr(economic_root,'_call_helper',economic_helper)
+    monkeypatch.setattr(economic_root,'qualify_helper_source',lambda:None)
     def send(value):
         monkeypatch.setattr(peer.os,'geteuid',lambda:0)
         try:return root.handle_memory_exchange(json.loads(wire.canonical(value)),installed[0])
@@ -111,6 +135,7 @@ def joined(configured,installed,monkeypatch):
         assert stat.S_IMODE(before.st_mode)==0o600 and 1<=len(raw)<=limit
         return raw
     monkeypatch.setattr(paid,'_private_read',retained)
+    result['economic_owner']=economic_owner;result['economic_engine']=economic_engine
     return runtime,job,lease,actions,calls,done,errors,result,run
 
 
@@ -159,6 +184,32 @@ def test_missing_protected_profile_refuses_before_linux_source_prepare(joined,mo
     assert not any(e.event_type=='MEMORY_PREPARE_ATTEMPT' for e in runtime.events.list_events())
 
 
+def test_actual_economic_grant_revocation_refuses_before_linux_prepare_or_process(joined):
+    runtime,_,lease,actions,calls,_,_,state,_=joined
+    owner=state['economic_owner']
+    with owner.transaction() as con:con.execute("UPDATE leases SET state='released'")
+    with pytest.raises(ValueError):execution.prepare_memory_execution(runtime,lease)
+    assert actions==[] and calls==[]
+    assert not any(e.event_type=='MEMORY_PREPARE_ATTEMPT' for e in runtime.events.list_events())
+    with owner.transaction() as con:assert con.execute('SELECT count(*) FROM operator_child_authorizations').fetchone()[0]==0
+
+
+def test_paid_permission_loss_after_source_preparation_refuses_before_provider_input_release(joined):
+    runtime,_,lease,actions,calls,_,_,state,_=joined
+    prepared=execution.prepare_memory_execution(runtime,lease)
+    owner=state['economic_owner']
+    with owner.transaction() as con:con.execute("UPDATE leases SET state='released' WHERE task_class='remote-glm'")
+    with pytest.raises(ValueError):execution.start_memory_execution(prepared)
+    assert actions==['prepare_case','current_input'] and calls==[]
+
+
+def test_same_preinput_reservation_cannot_be_spent_by_a_second_original_prepare(joined):
+    runtime,_,lease,actions,calls,_,_,_,_=joined
+    execution.prepare_memory_execution(runtime,lease)
+    with pytest.raises(ValueError):execution.prepare_memory_execution(runtime,lease)
+    assert actions==['prepare_case','current_input'] and calls==[]
+
+
 def test_actual_existing_supervisor_internal_entry_terminalizes_safe_runtime_receipt(joined):
     import asyncio
     from control_plane.executive_supervisor import ExecutiveSupervisor
@@ -176,3 +227,18 @@ def test_actual_existing_supervisor_internal_entry_terminalizes_safe_runtime_rec
     assert 'Fixture untrusted answer' not in json.dumps(result)
     assert 'context-0' not in json.dumps(result)
     assert sum(e.event_type=='MEMORY_RESULT_VIEW_OBSERVED' for e in runtime.events.list_events())==1
+
+
+@pytest.mark.parametrize('joined',['native-builder-vector'],indirect=True)
+def test_native_builder_whole_packet_through_actual_economic_runtime_and_private_result_owner(joined):
+    # Genuine supplied packet; installed peer/Linux grant/child are still the
+    # explicit inert premises above, NOT a full native issuer/provider claim.
+    runtime,_,lease,_,calls,done,errors,_,run=joined
+    prepared=execution.prepare_memory_execution(runtime,lease)
+    execution.start_memory_execution(prepared)
+    assert done.wait(3) and not errors
+    view=execution.disclose_memory_result(prepared)
+    held=(run/'memory-original-input').read_bytes()
+    assert len(held)==9856 and hashlib.sha256(held).hexdigest()=='f4213c04dc827819ac476859803d462b27ddf4badb3d5855c52dbf701acd641f'
+    assert view['citations']==[selected_descriptors(held)[0]] and len(calls)==1
+    assert view['verification']==wire.FLAGS and view['scientific_admission'] is False
