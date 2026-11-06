@@ -35,6 +35,10 @@ async function setup({hold=false,foreign=false}={}){
   const title=source.programs.control_room.work.find(row=>row.work_ref===source.work_ref)!.agent_os.title;
   fireEvent.click(await screen.findByRole('button',{name:`Open project ${title}`}));
   fireEvent.click(screen.getByRole('button',{name:'Project details'}));
+  expect(screen.getByRole('heading',{name:'Project overview'})).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'Read instructions'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'Check pause status'})).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:"Direction",exact:true}));
  };
  await open();return{open,finish,host:composed.host,calls:(name:string)=>invoke.mock.calls.filter(([command])=>command===name),
   notify:(name:string,payload:unknown)=>events.get(name)?.forEach(fn=>fn({payload})),invoke};
@@ -55,6 +59,14 @@ it('reads canonical accepted Direction/history with exact source revision, retur
  expect(screen.getByRole('article',{name:'Current accepted Direction'}).textContent).toContain(source.direction.direction.current.answer);
  fireEvent.click(screen.getByRole('button',{name:'View current Direction'}));
  expect(screen.getByRole('article',{name:'Selected current Direction, read only'}).textContent).toContain(source.direction.direction.current.answer);
+ fireEvent.click(screen.getByRole('button',{name:'← Back to project details'}));
+ expect(screen.getByRole('heading',{name:'Project overview'})).toBeTruthy();
+ expect(document.activeElement).toBe(screen.getByRole('button',{name:'Direction',exact:true}));
+ expect(screen.queryByRole('article',{name:'Current accepted Direction'})).toBeNull();
+ expect(e.calls('read_project_direction')).toHaveLength(1);
+ fireEvent.click(screen.getByRole('button',{name:'Direction',exact:true}));
+ expect(screen.getByRole('article',{name:'Current accepted Direction'})).toBeTruthy();
+ expect(e.calls('read_project_direction')).toHaveLength(1);
  await e.open();expect(screen.queryByRole('article',{name:'Current accepted Direction'})).toBeNull();
  expect(e.calls('read_project_direction')).toHaveLength(1);read();await screen.findByRole('article',{name:'Current accepted Direction'});
  expect(e.calls('read_project_direction')).toHaveLength(2);
