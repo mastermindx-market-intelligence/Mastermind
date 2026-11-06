@@ -24,6 +24,7 @@ class FakeFacade:
         self.root = "root-from-authenticated-host"
         self.parent = "root-from-authenticated-host"
         self.response = "verified result"
+        self.worker_started = False
         self.break_contract = None
 
     def call_tool(self, name, args):
@@ -39,7 +40,7 @@ class FakeFacade:
             }
             if self.state != "NOT_FOUND":
                 status.update(root_id=self.root, parent_run_id=self.parent,
-                              controller_lineage={"worker_started": True})
+                              controller_lineage={"worker_started": self.worker_started})
             raw = {
                 "schema": FABRIC_SCHEMA, "action": name, "run_id": run,
                 "effective_run_id": run, "status": status,
@@ -120,12 +121,22 @@ class TestFabricFacadePort(unittest.TestCase):
         self.assertEqual([name for name, _ in self.facade.calls], ["fabric_status"])
 
     def test_status_never_claims_start_from_controller_only(self):
-        self.ask("submit", **self.task())
-        self.assertEqual(self.facade.calls[-1][0], "fabric_request")
-        self.assertFalse(self.ask("submit", **self.task())["worker_started"] is False
-                         and False)  # no second dispatch; provenance is status-owned
+        submitted = self.ask("submit", **self.task())
+        self.assertEqual(submitted["state"], "CONTROLLER_CREATED")
+        self.assertFalse(submitted["worker_started"])
+        observed = self.ask("status")
+        self.assertEqual(observed["state"], "ACTIVE_OR_WAITING")
+        self.assertFalse(observed["worker_started"])
         self.assertEqual(len([x for x, _ in self.facade.calls
                               if x == "fabric_request"]), 1)
+
+    def test_status_projects_only_explicit_owner_start_evidence(self):
+        self.facade.state = "ACTIVE_OR_WAITING"
+        self.facade.worker_started = True
+        observed = self.ask("status")
+        self.assertTrue(observed["worker_started"])
+        self.assertEqual([name for name, _ in self.facade.calls],
+                         ["fabric_status"])
 
     def test_original_parent_result_bytes_and_digest(self):
         self.facade.state = "TERMINAL"
