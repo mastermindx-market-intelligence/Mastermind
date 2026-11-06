@@ -552,13 +552,13 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # permissions, not principals; each complete token and enclosing call was
 # inspected on these exact source bytes. No generic numeric rule changes.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': 'c3d96bf994aea0969161b25405db9e3623eb7d5047ebd81e7a06b68757e11e7f',
-    'sites': ((342, 24, 27, 'int', '501'),
-              (6847, 35, 37, 'int', '80'),
-              (6848, 50, 55, 'int', '0o755'),
-              (7385, 41, 46, 'int', '0o644'),
-              (8122, 64, 69, 'int', '0o644'),
-              (9524, 41, 46, 'int', '0o644')),
+    'sha256': 'dcc1bed3448a5a0d452c6c0413e246937041335957bc087668e378096a652096',
+    'sites': ((348, 24, 27, 'int', '501'),
+              (6888, 35, 37, 'int', '80'),
+              (6889, 50, 55, 'int', '0o755'),
+              (7426, 41, 46, 'int', '0o644'),
+              (8163, 64, 69, 'int', '0o644'),
+              (9565, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
