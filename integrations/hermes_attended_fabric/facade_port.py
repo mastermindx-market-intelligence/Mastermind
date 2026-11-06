@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from .native import FabricNativeRefusal, SessionGrant
+from .native import FabricNativeRefusal, FabricPreDispatchRefusal, SessionGrant
 
 FABRIC_SCHEMA = "mastermind.fabric_mcp.v1"
 STATUS_SCHEMA = "mastermind.fabric_task_status.v1"
@@ -33,6 +33,7 @@ class FabricFacadePort:
         self,
         call_tool: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
         *,
+        authorize_new_run: Callable[[SessionGrant, str], bool] | None = None,
         preview_route: Callable[[SessionGrant, str, str, str, str],
                                 Mapping[str, Any]] | None = None,
     ) -> None:
@@ -42,7 +43,12 @@ class FabricFacadePort:
             not callable(preview_route) or inspect.iscoroutinefunction(preview_route)
         ):
             raise FabricNativeRefusal("FABRIC_PREVIEW_OWNER_INVALID")
+        if authorize_new_run is not None and (
+                not callable(authorize_new_run)
+                or inspect.iscoroutinefunction(authorize_new_run)):
+            raise FabricNativeRefusal("FABRIC_SUBMISSION_GUARD_INVALID")
         self._call_tool = call_tool
+        self._authorize_new_run = authorize_new_run
         self._preview_route = preview_route
 
     def _call(self, name: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -120,6 +126,18 @@ class FabricFacadePort:
             args["pool"] = pool
             if model is not None:
                 args["model"] = model
+        # Current native session identity is not enough: the original owner
+        # must prove this precise run is freshly entitled, with no earlier
+        # attempted/unknown dispatch across process or connection generations.
+        # This is a callback to EXISTING admission, not a new state ledger.
+        if self._authorize_new_run is None:
+            raise FabricPreDispatchRefusal("FABRIC_ORIGINAL_ADMISSION_UNBOUND")
+        try:
+            authorized = self._authorize_new_run(grant, run_id)
+        except Exception:
+            raise FabricPreDispatchRefusal("FABRIC_ORIGINAL_ADMISSION_UNAVAILABLE") from None
+        if authorized is not True:
+            raise FabricPreDispatchRefusal("FABRIC_ORIGINAL_ADMISSION_REFUSED")
         raw = self._call("fabric_request", args)
         if (raw.get("run_id") != run_id
                 or raw.get("root_id") != grant.root_id
