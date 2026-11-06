@@ -145,3 +145,21 @@ Broad factor search requires a stronger evidentiary standard than isolated signi
 ## Open evidence obligations
 
 The original completed report and full bibliography remain unavailable. Comprehensive current commercial coverage/cost/rights comparisons, every adjacent owner's deployed capability, current evaluation trial balance, historical point-in-time economic comparability and predictive effects were not certified. Each is mapped to a specific masterplan gate rather than filled with assumptions. The independent data receipt, source snapshots and design recommendations must remain distinct when this packet is summarized or delegated.
+
+## Final additional source recovery
+
+### S11 — companion standard-Pro review, not the original report itself
+
+[Macro #8327](https://github.com/mastermindx-market-intelligence/macro/pull/8327), [immutable README](https://github.com/mastermindx-market-intelligence/macro/blob/b843d2388c550fc1cdcd581f7f169d701f4f5f29/research/alpha_intelligence/expectation_market_dynamics/reviews/2026-10-03-standard-pro-audit-c4/README.md), and [immutable audit](https://github.com/mastermindx-market-intelligence/macro/blob/b843d2388c550fc1cdcd581f7f169d701f4f5f29/research/alpha_intelligence/expectation_market_dynamics/reviews/2026-10-03-standard-pro-audit-c4/AUDIT.md).
+
+The README and audit's current-state and detailed mathematical/source findings were read at this exact revision. The companion reports reading the original report and rerunning the incumbent auditor plus 34 tests at source/data revision `9d3fb88f59af7896d1d6060854a9c8c51af89414`. That is attributed independent-session evidence, not this session's test execution or direct access to the original report. Its observed attempt count is 8,587, while our deliberately frozen input has 8,583. Do not relabel one revision's result as the other's.
+
+The companion's scalar-Jacobian/nullspace and compatibility-measure critiques were assessed mathematically and incorporated as explicit prospective tests. Its current Finance-route and F07 forward-model observations are owner-discovery leads to reconcile, not an independently repeated live deployment test by this audit. The two documentation packets do not create two operational roots or permit duplicate VAL-1/PAE-1 implementations.
+
+### S12 — detailed incumbent EXP-1 continuation and exact local source identity
+
+[Macro issue #8309](https://github.com/mastermindx-market-intelligence/macro/issues/8309), directly re-read including the detailed continuation and current execution frontier; issue updated-at observed `2026-10-03T10:13:04Z`.
+
+The detailed checkpoint supersedes its earlier introductory wording: it reports an accepted repaired raw consumer, 75 local tests, ten native cases, named code hashes and stopped helpers. It supplies operation `information-to-price-exp1-20261003-sol-001`, branch `claude/ssd-information-to-price-exp1-20261003-b4cff810e30514df`, engine/CLI/test/handoff paths, and a packaging frontier with no child commit/push/PR yet. Broader normalized EXP-1 remains PARTIAL and publication gated. These body-reported local hashes/results were not independently re-executed or promoted by this session. The full registered source must be checked through current custody at execution pickup.
+
+The same checkpoint reports four additional null attempts in its later source comparison, unchanged observations, and no natural partial-after-strict-success witness under the stricter consumer support rule. Preserve that narrower qualification; the frozen JBGS raw-retention check proves a different condition.
