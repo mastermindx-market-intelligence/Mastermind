@@ -197,12 +197,20 @@ def test_computation_input_error_does_not_leak_secret_or_account(client, monkeyp
 
 
 def test_router_registered_in_existing_app_and_operator_tier():
-    source = Path(__file__).resolve().parents[1] / "app/main.py"
-    parsed = ast.parse(source.read_text())
-    assert any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-               and node.func.attr == "include_router" and node.args
-               and ast.unparse(node.args[0]) == "portfolio_scenarios.router"
-               for node in ast.walk(parsed))
+    # The actual app mount is proven below. The audited executable root is
+    # SHA-pinned; only its existing web router may introduce this additive API.
+    import hashlib
+    from tests.executive_fabric_release_identity_review import REVIEWED_FILES
+    root = Path(__file__).resolve().parents[1]
+    main_source = (root / "app/main.py").read_text()
+    assert hashlib.sha256(main_source.encode()).hexdigest() == REVIEWED_FILES["app/main.py"]["sha256"]
+    def includes(source, expression):
+        return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                   and node.func.attr == "include_router" and node.args
+                   and ast.unparse(node.args[0]) == expression
+                   for node in ast.walk(ast.parse(source)))
+    assert includes(main_source, "web.router")
+    assert includes((root / "app/web.py").read_text(), "_portfolio_scenarios.router")
     assert api.PATH in auth._NON_LLM_OPERATOR_PATHS and api.PATH not in auth._LLM_OPERATOR_PATHS
 
 
