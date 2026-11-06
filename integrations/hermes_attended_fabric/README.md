@@ -119,7 +119,7 @@ python3 -m compileall -q integrations/hermes_attended_fabric
 
 M1 isolated source workspace:
 `/tmp/mmx-hermes-fabric-native-tests-20261106-c1`.
-Latest source qualification: **44 tests passed**, no provider calls before
+Latest source qualification: **45 tests passed**, no provider calls before
 the native-registry/admission revisions; rerun against the exact final source
 before using it as a delivery receipt. Fixture tests are not proof that an
 actual authorized M2 host connection exists.
