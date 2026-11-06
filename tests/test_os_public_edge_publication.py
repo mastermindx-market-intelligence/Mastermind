@@ -21,7 +21,8 @@ from ops.executive_os import os_public_edge_publication as m
 from ops.executive_os import os_release_assets as assets
 from ops.executive_os import release_manifest as seals
 from ops.executive_os.os_public_edge import (HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES,
-    GET_ROUTES, POST_ROUTES, SOURCE_POST_ROUTES, MCP_METADATA_ROUTE, MCP_ROUTES, asset_routes)
+    GET_ROUTES, POST_ROUTES, SOURCE_POST_ROUTES, MCP_METADATA_ROUTE, MCP_ROUTES,
+    COMPLETE_MCP_METADATA_ROUTES, COMPLETE_MCP_ROUTES, asset_routes)
 
 
 def git(repo, *args):
@@ -697,3 +698,91 @@ def test_original_publication_9_or_11_to_13_closes_the_entire_two_phase_path(inp
     assert "/os/assets/SourceMarkdown-fixture.js" in paths
     assert "/os/assets/SourceMarkdown-fixture.css" in paths
     assert "/os/assets/index-oldnoir.js" not in paths
+
+
+# --- Public COO route pair (#2120) ------------------------------------------------
+# The publisher is the existing owner of the whole-configuration capture. It
+# must stage the complete CEO+COO public-MCP pair and refuse a staged
+# configuration that no longer binds it.
+
+
+def public_mcp_branches(config):
+    """The two public-MCP matcher branches of a captured configuration."""
+    branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    metadata = [b for b in branches if b.get("match")
+                and b["match"][0]["method"] == ["GET"]
+                and b["match"][0]["path"][0].startswith("/.well-known/")]
+    transport = [b for b in branches if b.get("match")
+                 and b["match"][0]["method"] == ["POST"]
+                 and b["match"][0]["path"][0] == "/mcp"]
+    assert len(metadata) == 1 and len(transport) == 1
+    return metadata[0], transport[0]
+
+
+@pytest.mark.parametrize("inputs", [(False, False)], indirect=True)
+def test_publisher_stage_binds_the_complete_public_coo_route_pair(inputs):
+    result = m.stage_host(**inputs)
+    with m.private(inputs["out"]) as stage:
+        live = json.loads(stage.read("live.json"))
+        prepared = json.loads(stage.read("prepare.json"))
+        final = json.loads(stage.read("final.json"))
+    # The observed live configuration carries the CEO-only pair.
+    meta, transport = public_mcp_branches(live)
+    assert meta["match"][0]["path"] == [MCP_METADATA_ROUTE]
+    assert transport["match"][0]["path"] == list(MCP_ROUTES)
+    # Both staged configurations carry the complete CEO+COO pair, with the
+    # metadata branch on the public Host and the transport branch on the
+    # gateway's loopback Host under its 64000-byte cap.
+    for config in (prepared, final):
+        meta, transport = public_mcp_branches(config)
+        assert meta["match"][0]["path"] == list(COMPLETE_MCP_METADATA_ROUTES)
+        assert transport["match"][0]["path"] == list(COMPLETE_MCP_ROUTES)
+        assert meta["handle"][-1]["headers"]["request"]["set"]["Host"] == [HOST]
+        assert transport["handle"][-1]["headers"]["request"]["set"]["Host"] == ["127.0.0.1"]
+        assert transport["handle"][0] == {"handler": "request_body", "max_size": 64000}
+        assert meta["handle"][-1]["headers"]["request"]["delete"] == [
+            "Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+            "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP"]
+    assert result["published"] is False
+
+
+@pytest.mark.parametrize("inputs", [(False, False)], indirect=True)
+def test_publisher_stage_accepts_an_already_complete_public_coo_pair(inputs):
+    # An observed edge that already carries the complete pair is staged with
+    # exactly the same bytes: the transition is idempotent, not a widening.
+    live = json.loads(inputs["live_config"].read_bytes())
+    meta, transport = public_mcp_branches(live)
+    meta["match"][0]["path"] = list(COMPLETE_MCP_METADATA_ROUTES)
+    transport["match"][0]["path"] = list(COMPLETE_MCP_ROUTES)
+    inputs["live_config"].write_bytes(m.canonical(live))
+    m.stage_host(**inputs)
+    with m.private(inputs["out"]) as stage:
+        prepared = json.loads(stage.read("prepare.json"))
+        final = json.loads(stage.read("final.json"))
+    for config in (prepared, final):
+        meta, transport = public_mcp_branches(config)
+        assert meta["match"][0]["path"] == list(COMPLETE_MCP_METADATA_ROUTES)
+        assert transport["match"][0]["path"] == list(COMPLETE_MCP_ROUTES)
+
+
+@pytest.mark.parametrize("inputs", [(False, False)], indirect=True)
+def test_staged_prepare_without_the_coo_route_pair_is_refused(staged):
+    i, r, relay = staged
+    stage_path = i["out"]
+    # Drop the COO path pair from the staged prepare configuration and repair
+    # the descriptor's own recorded digest, so only the publisher's independent
+    # recomputation can detect the stale binding.
+    with m.private(stage_path) as stage:
+        prepared = json.loads(stage.read("prepare.json"))
+        meta, transport = public_mcp_branches(prepared)
+        meta["match"][0]["path"] = [MCP_METADATA_ROUTE]
+        transport["match"][0]["path"] = list(MCP_ROUTES)
+        raw = m.canonical(prepared)
+        descriptor = json.loads(stage.read(m.DESCRIPTOR))
+        descriptor["files"]["prepare.json"] = {"sha256": m.digest(raw), "bytes": len(raw)}
+        descriptor_raw = m.canonical(descriptor)
+    (stage_path / "prepare.json").write_bytes(raw)
+    (stage_path / m.DESCRIPTOR).write_bytes(descriptor_raw)
+    with pytest.raises(ValueError, match="transition bindings differ"):
+        publish(staged, stage_digest=m.digest(descriptor_raw))
+    assert ("POST", "config") not in relay.events

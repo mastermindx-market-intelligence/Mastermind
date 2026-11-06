@@ -31,6 +31,11 @@ def test_byok_get_transition_retains_complete_predecessor_and_other_sites(maker)
     expected = copy.deepcopy(live)
     method_routes(expected)[0]['match'][0]['path'] = sorted(set(edge.GET_ROUTES)|set(edge.asset_routes(manifest())))
     method_routes(expected)[1]['match'][0]['path'] = list(edge.POST_ROUTES)
+    for route in method_routes(expected)[3:5]:
+        route["match"][0]["path"] = (
+            list(edge.COMPLETE_MCP_METADATA_ROUTES)
+            if route["match"][0]["method"] == ["GET"]
+            else list(edge.COMPLETE_MCP_ROUTES))
     result = maker(fullconfig=live,current_manifest=manifest(),candidate_manifest=manifest(),relay_port=49152)
     assert result == expected and live == before
     for bad in (ROUTE+'/',ROUTE+'-other','/workspace/byok/*'):
