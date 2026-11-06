@@ -50,7 +50,7 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                                   456,
                                                   '0o710'))},
  '_handle_ceo_ingress_connection': {'node_type': 'AsyncFunctionDef',
-                                    'source_sha256': '5900a32f8015459135d14c1810da20701640f0f02ae1b76f98d3815c6a9bcafb',
+                                    'source_sha256': '005d094f4ffc2c396896bced0b7dcab92a56157831953a7b0f4508e7976633c0',
                                     'ast_sha256': '5677ceb33257852095fc7e9b2ba5c344cc79ea45a498130dd28858e108b28058',
                                     'sites': ((('body',
                                                 3,
@@ -121,3 +121,5 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
 
 # Parent reviewed the BYOK + protected Workspace composition at 49c2e1d.
 # The exact 136-node Fabric response branch and original three operands are unchanged.
+
+# Parent C17 composition preserves the protected8f ingress method AST and all exact status sites.

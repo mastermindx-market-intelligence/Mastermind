@@ -50,8 +50,10 @@ from control_plane.executive_agent_capabilities import (
 )
 from control_plane.executive_coo_cycle import CooCycle, CooCycleOutcome
 from control_plane.executive_runtime import (
+    Attempt,
     AttemptStatus,
     EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,
+    ExpectedChildSelection,
     Job,
     JobStatus,
     NATIVE_RETURN_TX5_EXECUTION_PROFILE,
@@ -78,6 +80,7 @@ from control_plane.executive_runtime import (
     _job_from_row,
     _strict_canonical_json_loads,
     _validated_role_completion_material,
+    expected_child_selection,
     normalize_executive_dialogue_source,
 )
 from control_plane.executive_dialogue_observation import (
@@ -7921,126 +7924,364 @@ class ExecutiveControlService:
     async def _dispatch_cycle_job_exact(
         self, job_id: str, command_id: str
     ) -> OrchestrationDispatchOutcome:
-        runtime = self._require_runtime()
         async with self._dispatch_lock:
-            async with self._workspace_lock:
-                live = {
-                    value
-                    for value, task in self._dispatch_tasks.items()
-                    if not task.done()
-                }
-                job = runtime.jobs.get_job(job_id)
-                if job is None:
-                    raise StateConflict(f"job {job_id!r} does not exist")
-                root = self._require_bound_coo_job(job)
-                if live and live != {job_id}:
-                    live_jobs = [runtime.jobs.get_job(value) for value in live]
-                    if (
-                        any(value is None for value in live_jobs)
-                        or any(
-                            value.root_job_id != job.root_job_id
-                            for value in live_jobs
-                            if value is not None
-                        )
-                        or any(
-                            value.status not in {
-                                JobStatus.RUNNING,
-                                JobStatus.CHECKPOINTED,
-                            }
-                            for value in live_jobs
-                            if value is not None
-                        )
-                    ):
-                        raise StateConflict(
-                            "the serialized worker already has another active dispatch"
-                        )
-                    for value in live_jobs:
-                        assert value is not None
-                        self._require_bound_coo_job(value)
-                if job.status not in {
-                    JobStatus.QUEUED,
+            return await self._dispatch_cycle_job_exact_locked(job_id, command_id)
+
+    async def _dispatch_cycle_job_exact_locked(
+        self, job_id: str, command_id: str
+    ) -> OrchestrationDispatchOutcome:
+        """The incumbent dispatch body; caller owns the existing dispatch lock."""
+        if not self._dispatch_lock.locked():
+            raise StateConflict("exact cycle dispatch requires its existing lock")
+        runtime = self._require_runtime()
+        async with self._workspace_lock:
+            live = {
+                value
+                for value, task in self._dispatch_tasks.items()
+                if not task.done()
+            }
+            job = runtime.jobs.get_job(job_id)
+            if job is None:
+                raise StateConflict(f"job {job_id!r} does not exist")
+            root = self._require_bound_coo_job(job)
+            if live and live != {job_id}:
+                live_jobs = [runtime.jobs.get_job(value) for value in live]
+                if (
+                    any(value is None for value in live_jobs)
+                    or any(
+                        value.root_job_id != job.root_job_id
+                        for value in live_jobs
+                        if value is not None
+                    )
+                    or any(
+                        value.status not in {
+                            JobStatus.RUNNING,
+                            JobStatus.CHECKPOINTED,
+                        }
+                        for value in live_jobs
+                        if value is not None
+                    )
+                ):
+                    raise StateConflict(
+                        "the serialized worker already has another active dispatch"
+                    )
+                for value in live_jobs:
+                    assert value is not None
+                    self._require_bound_coo_job(value)
+            if job.status not in {
+                JobStatus.QUEUED,
+                JobStatus.RUNNING,
+                JobStatus.CHECKPOINTED,
+            }:
+                # Resolve only an already-terminal command-bound ambiguity.
+                # No supervisor, placement selection, lease replay or provider
+                # start is involved, including after a service restart.
+                terminal = runtime.attempts.terminal_cycle_dispatch_outcome(
+                    job_id, command_id=command_id
+                )
+                await self._project_terminal_return(
+                    job_id, expected_attempt_id=terminal.attempt.attempt_id
+                )
+                return terminal
+            self._require_foreground_only_source(root.job_id)
+            if job.status is JobStatus.QUEUED:
+                from control_plane.executive_runtime import CHILD_WORKSPACE_POLICY, CHILD_WORKSPACE_POLICY_KEY
+                if (job.orchestration_role in {"work", "review", "repair"}
+                        and root.constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY):
+                    await self._run_physical(runtime.jobs.prepare_coo_child_workspace, job.job_id,
+                        source_repository=self.config.proof_source_repository,
+                        shared_gid=self.config.proof_shared_gid)
+                self._require_coo_workspace(job)
+            if runtime.operator_harness.is_interactive_job(job.job_id):
+                raise StateConflict(
+                    "interactive plan Jobs are not routed to the planner supervisor"
+                )
+            supervisor: Any = (
+                self._require_operator_supervisor()
+                if (
+                    job.orchestration_role == "plan"
+                    and self._coo_binding_for_root(root)["operator_harness_armed"]
+                )
+                else self._require_supervisor()
+            )
+            try:
+                async def start_current_cycle_job():
+                    # The physical cycle schedules a different callback
+                    # task. Recheck its inherited exact source immediately
+                    # before the synchronous canonical claim, not task-id
+                    # equality with the original request.
+                    self._require_foreground_only_source(root.job_id)
+                    return await supervisor.start_cycle_job(job_id, command_id=command_id)
+                started = await self._run_owned_coroutine(
+                    start_current_cycle_job()
+                )
+            except Exception as exc:
+                current = runtime.jobs.get_job(job_id)
+                if current is not None and current.status in {
                     JobStatus.RUNNING,
                     JobStatus.CHECKPOINTED,
+                    JobStatus.CANCEL_REQUESTED,
                 }:
-                    # Resolve only an already-terminal command-bound ambiguity.
-                    # No supervisor, placement selection, lease replay or provider
-                    # start is involved, including after a service restart.
-                    terminal = runtime.attempts.terminal_cycle_dispatch_outcome(
-                        job_id, command_id=command_id
+                    self._dispatch_errors[job_id] = (
+                        f"{type(exc).__name__}: ambiguous cycle worker start; "
+                        "restart reconciliation required"
                     )
+                    self._service_state = "QUARANTINED"
+                raise
+            if isinstance(started, OrchestrationDispatchOutcome):
+                if started.outcome == "TERMINAL":
                     await self._project_terminal_return(
-                        job_id, expected_attempt_id=terminal.attempt.attempt_id
+                        started.job_id,
+                        expected_attempt_id=started.attempt.attempt_id,
                     )
-                    return terminal
-                self._require_foreground_only_source(root.job_id)
-                if job.status is JobStatus.QUEUED:
-                    from control_plane.executive_runtime import CHILD_WORKSPACE_POLICY, CHILD_WORKSPACE_POLICY_KEY
-                    if (job.orchestration_role in {"work", "review", "repair"}
-                            and root.constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY):
-                        await self._run_physical(runtime.jobs.prepare_coo_child_workspace, job.job_id,
-                            source_repository=self.config.proof_source_repository,
-                            shared_gid=self.config.proof_shared_gid)
-                    self._require_coo_workspace(job)
-                if runtime.operator_harness.is_interactive_job(job.job_id):
-                    raise StateConflict(
-                        "interactive plan Jobs are not routed to the planner supervisor"
-                    )
-                supervisor: Any = (
-                    self._require_operator_supervisor()
-                    if (
-                        job.orchestration_role == "plan"
-                        and self._coo_binding_for_root(root)["operator_harness_armed"]
-                    )
-                    else self._require_supervisor()
+                return started
+            lease = getattr(started, "lease", None)
+            attempt = getattr(lease, "attempt", None)
+            token = getattr(lease, "lease_token", None)
+            if attempt is None or not token:
+                raise ServiceError("cycle supervisor returned no active leased Attempt")
+            task = asyncio.create_task(
+                self._finish_dispatched(job_id, started),
+                name=f"executive-cycle-finish-{job_id}",
+            )
+            self._dispatch_tasks[job_id] = task
+            return OrchestrationDispatchOutcome(
+                command_id=command_id,
+                job_id=job_id,
+                attempt=attempt,
+                outcome="ACTIVE",
+                lease_token=token,
+            )
+
+    async def dispatch_selected_child(
+        self, *, job_id: str, command_id: str,
+        expected_selection: ExpectedChildSelection, admission_guard: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        """Use the original command under the incumbent dispatch lock.
+
+        A concurrent request reobserves the first claim before workspace or
+        supervisor work. The private host guard travels in the existing task
+        binding and is repeated inside the canonical fresh claim transaction.
+        """
+        runtime = self._require_runtime()
+        if (type(expected_selection) is not ExpectedChildSelection
+                or expected_selection.job_id != job_id
+                or expected_selection.command_id != command_id):
+            raise StateConflict("selected child selection does not name this claim")
+        async with self._dispatch_lock:
+            job = runtime.jobs.get_job(job_id)
+            if job is None or job.orchestration_role not in {"work", "repair"}:
+                raise StateConflict("selected child role is not dispatchable")
+            if (job.parent_job_id != expected_selection.parent_job_id
+                    or job.root_job_id != expected_selection.root_job_id):
+                raise StateConflict("selected child is outside its frozen root")
+            observed = self._selected_child_attempt(job_id, command_id)
+            if observed is not None:
+                return self._selected_child_observation(job_id, command_id, observed)
+            self._require_selected_child_readiness()
+            if (not callable(admission_guard) or inspect.iscoroutinefunction(admission_guard)
+                    or inspect.iscoroutinefunction(getattr(admission_guard, "__call__", None))):
+                raise StateConflict("selected child admission guard must be synchronous")
+            guarded = admission_guard()
+            if guarded is not None:
+                if inspect.iscoroutine(guarded):
+                    guarded.close()
+                raise StateConflict("selected child admission guard refused")
+            root = self._require_bound_coo_job(job)
+            try:
+                with expected_child_selection(expected_selection, admission_guard=admission_guard):
+                    outcome = await self._dispatch_cycle_job_exact_locked(job_id, command_id)
+            except Exception:
+                # The original owner has returned. Only a successful canonical
+                # absence read proves that no child claim was committed. If
+                # that read fails, propagate ambiguity to the same command.
+                claimed = self._selected_child_attempt(job_id, command_id)
+                if claimed is None:
+                    return {"command_id": command_id, "job_id": job_id,
+                        "attempt_id": None, "attempt_status": None,
+                        "job_status": job.status.value, "state": "REFUSED",
+                        "reason": "EXECUTIVE_SELECTED_CHILD_CLAIM_REFUSED"}
+                self._record_selected_child_effect_unknown(root.job_id, job_id, command_id)
+                return self._selected_child_observation(job_id, command_id, claimed, uncertain=True)
+            attempt = self._selected_child_attempt(job_id, command_id)
+            if attempt is None:
+                attempt = outcome.attempt
+            return self._selected_child_observation(job_id, command_id, attempt)
+
+    async def selected_child_status(
+        self, *, job_id: str, command_id: str
+    ) -> dict[str, Any]:
+        """Resolve one selected child through its exact command and Attempt.
+
+        A completed status is sourced from the canonical validated role
+        completion. This read never replaces terminal-return ownership and
+        never delivers a second message.
+        """
+
+        runtime = self._require_runtime()
+        job = runtime.jobs.get_job(job_id)
+        if job is None:
+            raise StateConflict(f"job {job_id!r} does not exist")
+        if job.orchestration_role not in {"work", "repair"}:
+            raise StateConflict("selected child role is not dispatchable")
+        attempt = self._selected_child_attempt(job_id, command_id)
+        if attempt is None:
+            # Nothing durable is owned by this command yet. Answering that
+            # question is an authority question, so the incumbent readiness and
+            # host-authority fences apply.
+            self._require_selected_child_readiness()
+            return {
+                "command_id": command_id,
+                "job_id": job_id,
+                "root_job_id": job.root_job_id,
+                "orchestration_role": job.orchestration_role,
+                "job_status": job.status.value,
+                "attempt_id": None,
+                "attempt_number": None,
+                "attempt_status": None,
+                "state": "NOT_CLAIMED",
+                "reason": "EXECUTIVE_SELECTED_CHILD_NOT_CLAIMED",
+            }
+        return self._selected_child_observation(job_id, command_id, attempt)
+
+    def _require_selected_child_readiness(self) -> None:
+        """Apply the incumbent readiness and host-authority fences."""
+
+        if self._closing:
+            raise StateConflict("Executive control service is closing")
+        if not self.config.coo_autonomy_armed:
+            raise StateConflict(
+                "COO autonomy is not armed in reviewed host configuration"
+            )
+        self._require_current_autonomy()
+        if self._service_state != "READY":
+            raise StateConflict(
+                f"Executive control service is {self._service_state}"
+            )
+        self._require_coo_worker_composed()
+
+    def _selected_child_attempt(
+        self, job_id: str, command_id: str
+    ) -> Attempt | None:
+        """Return the canonical Attempt that owns this exact command."""
+
+        runtime = self._require_runtime()
+        event = runtime.events.get_event_by_command_id(command_id)
+        if event is None:
+            return None
+        if (
+            event.event_type != "JOB_CLAIMED"
+            or event.aggregate_id != job_id
+            or event.job_id != job_id
+            or not isinstance(event.attempt_id, str)
+        ):
+            raise StateConflict(
+                "selected child command is bound to another Job"
+            )
+        attempt = runtime.attempts.get_attempt(event.attempt_id)
+        if attempt is None or attempt.job_id != job_id:
+            raise StateConflict("selected child command lost its bound Attempt")
+        return attempt
+
+    def _record_selected_child_effect_unknown(
+        self, root_job_id: str, job_id: str, command_id: str
+    ) -> None:
+        """Retain ambiguity in the incumbent owner even if marker I/O fails."""
+        self._dispatch_errors.setdefault(job_id,
+            "selected child original dispatch requires reconciliation")
+        self._service_state = "QUARANTINED"
+        try:
+            self._require_runtime().jobs.record_cycle_dispatch_effect_unknown(
+                root_job_id, selected_job_id=job_id, dispatch_command_id=command_id)
+        except (StateConflict, PersistenceError):
+            # The per-job dispatch error remains until the original owner's
+            # reconciliation; a missing marker is never proof of no effect.
+            return
+
+    def _selected_child_observation(
+        self,
+        job_id: str,
+        command_id: str,
+        attempt: Attempt,
+        *,
+        uncertain: bool = False,
+    ) -> dict[str, Any]:
+        """Project one canonical selected-child fact without a second effect."""
+
+        runtime = self._require_runtime()
+        job = runtime.jobs.get_job(job_id)
+        body: dict[str, Any] = {
+            "command_id": command_id,
+            "job_id": job_id,
+            "root_job_id": job.root_job_id if job is not None else None,
+            "orchestration_role": (
+                job.orchestration_role if job is not None else None
+            ),
+            "job_status": job.status.value if job is not None else None,
+            "attempt_id": attempt.attempt_id,
+            "attempt_number": attempt.attempt_number,
+            "attempt_status": attempt.status.value,
+            "state": "ACTIVE",
+            "reason": None,
+        }
+        marker = runtime.events.get_event_by_command_id(
+            f"{command_id}:effect-unknown"
+        )
+        resolution = runtime.events.get_event_by_command_id(
+            f"{command_id}:reconciled"
+        )
+        if (
+            uncertain
+            or (resolution is None and (marker is not None
+                or (job is not None and job.current_attempt_id == attempt.attempt_id
+                    and job_id in self._dispatch_errors)))
+            or attempt.status is AttemptStatus.LOST
+        ):
+            body["state"] = "EFFECT_UNKNOWN"
+            body["reason"] = "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN"
+            return body
+        if attempt.status is AttemptStatus.COMPLETED:
+            if job is None or job.status is not JobStatus.COMPLETED:
+                # A completed Attempt whose Job is not complete is not a
+                # canonical completion.
+                body["state"] = "UNVERIFIED"
+                body["reason"] = "EXECUTIVE_COMPLETION_UNVERIFIED"
+                return body
+            try:
+                material = runtime.validated_role_completion(
+                    job_id, expected_attempt_id=attempt.attempt_id
                 )
-                try:
-                    async def start_current_cycle_job():
-                        # The physical cycle schedules a different callback
-                        # task. Recheck its inherited exact source immediately
-                        # before the synchronous canonical claim, not task-id
-                        # equality with the original request.
-                        self._require_foreground_only_source(root.job_id)
-                        return await supervisor.start_cycle_job(job_id, command_id=command_id)
-                    started = await self._run_owned_coroutine(
-                        start_current_cycle_job()
-                    )
-                except Exception as exc:
-                    current = runtime.jobs.get_job(job_id)
-                    if current is not None and current.status in {
-                        JobStatus.RUNNING,
-                        JobStatus.CHECKPOINTED,
-                        JobStatus.CANCEL_REQUESTED,
-                    }:
-                        self._dispatch_errors[job_id] = (
-                            f"{type(exc).__name__}: ambiguous cycle worker start; "
-                            "restart reconciliation required"
-                        )
-                        self._service_state = "QUARANTINED"
-                    raise
-                if isinstance(started, OrchestrationDispatchOutcome):
-                    if started.outcome == "TERMINAL":
-                        await self._project_terminal_return(
-                            started.job_id,
-                            expected_attempt_id=started.attempt.attempt_id,
-                        )
-                    return started
-                lease = getattr(started, "lease", None)
-                attempt = getattr(lease, "attempt", None)
-                token = getattr(lease, "lease_token", None)
-                if attempt is None or not token:
-                    raise ServiceError("cycle supervisor returned no active leased Attempt")
-                task = asyncio.create_task(
-                    self._finish_dispatched(job_id, started),
-                    name=f"executive-cycle-finish-{job_id}",
-                )
-                self._dispatch_tasks[job_id] = task
-                return OrchestrationDispatchOutcome(
-                    command_id=command_id,
-                    job_id=job_id,
-                    attempt=attempt,
-                    outcome="ACTIVE",
-                    lease_token=token,
-                )
+            except RuntimeProofError:
+                body["state"] = "UNVERIFIED"
+                body["reason"] = "EXECUTIVE_COMPLETION_UNVERIFIED"
+                return body
+            try:
+                candidate = reduce_terminal_return(material=material)
+            except TerminalReturnError:
+                body["state"] = "UNVERIFIED"
+                body["reason"] = "EXECUTIVE_COMPLETION_UNVERIFIED"
+                return body
+            body["state"] = "COMPLETED"
+            body["result_status"] = candidate.result_status
+            body["role"] = candidate.role
+            body["operation_key"] = candidate.operation_key
+            body["session_ref"] = candidate.session_ref
+            body["result_envelope_digest"] = candidate.result_envelope_digest
+            body["terminal_evidence_digest"] = candidate.terminal_evidence_digest
+            return body
+        if attempt.status is AttemptStatus.FAILED:
+            body["state"] = "FAILED"
+            return body
+        if attempt.status is AttemptStatus.CANCELLED:
+            body["state"] = "CANCELLED"
+            return body
+        if attempt.status is AttemptStatus.RATE_LIMITED:
+            body["state"] = "RATE_LIMITED"
+            return body
+        if attempt.status is AttemptStatus.CANCEL_REQUESTED:
+            body["state"] = "CANCEL_REQUESTED"
+            return body
+        return body
 
     def _native_return_source(self, root: Job):
         """Reuse the existing authenticated Company/Dialogue composition."""
