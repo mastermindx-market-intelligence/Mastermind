@@ -586,19 +586,18 @@ def build_installed_coo_settings(raw, source, config_path, executive, *, expecte
         authority_provider=client.authority, mission_provider=client.mission)
     publication = build_installed_selected_child_target(raw)
     if publication is not None:
-        # One frozen publication, re-read through the sealed installed
-        # projection loader. The block is not a rotatable projection, so a
-        # changed target refuses instead of silently retargeting a running
-        # App; nothing here rebuilds a target from a model argument.
+        # One frozen publication, read through the SHARED generation-bound
+        # reader. The block is not a rotatable projection: a replaced, relinked
+        # or rewritten installation refuses instead of silently retargeting a
+        # running App, and nothing here rebuilds a target from a model
+        # argument. The Control source reads the same publication through the
+        # very same reader, so both installed consumers prove one generation.
         uid = raw['service_uid'] if expected_uid is None else expected_uid
-        loader = current_projection_loader(config_path, source, raw,
-                                           'selected_child_target', None,
-                                           expected_uid=uid)
-        def currentness_guard():
-            if loader() != publication:
-                raise ValueError('installed selected child target changed')
-        settings['selected_child_target'] = build_selected_child_target(
-            publication, currentness_guard)
+        reader = fixed_selected_child_target_reader(
+            config_path, source, raw, expected_uid=uid)
+        if reader is None:
+            raise ValueError('installed selected child target is unavailable')
+        settings['selected_child_target'] = reader()
     return CooAppSettings(**settings)
 
 
@@ -681,6 +680,76 @@ def build_selected_child_target(publication, currentness_guard):
     if type(observed) is not str or observed != publication['material_digest']:
         raise ValueError('installed selected child target differs from its publication')
     return target
+
+
+def fixed_selected_child_target_reader(config_path, source, initial, *, expected_uid):
+    """Bind the frozen selected-child publication to one file generation.
+
+    This is the SHARED owner of the selected-child currentness proof. The
+    installed App settings and the installed Control source both read their
+    frozen publication through THIS reader, so one generation is proven in
+    one place instead of twice with two different laws.
+
+    It is deliberately not a rotatable registry. A replacement, an ABA
+    write, a relink, a symlink or a fork requires fresh host qualification,
+    even when the document returns to its old bytes. The guard proves the
+    FIXED publication and its legitimate read/source identity; it never
+    reruns fresh dispatch eligibility, recomputes an ordinal, requires the
+    original child to remain unclaimed, or calls the dialogue guard merely
+    to read the original command.
+
+    Only the selected-child target is narrowed this way. Every other
+    rotatable projection keeps its incumbent ``current_projection_loader``.
+    """
+    path, source = Path(config_path), Path(source)
+    publication = build_installed_selected_child_target(initial)
+    if publication is None:
+        return None
+    pid = os.getpid()
+
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_uid,
+                info.st_gid)
+
+    def file_identity(info):
+        return (*identity(info), info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    def observe():
+        if os.getpid() != pid or os.geteuid() != expected_uid:
+            raise ValueError('installed selected child target reader is not this identity')
+        require_sealed_path(source, directory=True)
+        require_sealed_path(path)
+        nodes = tuple(dict.fromkeys((source, *source.parents, *path.parents)))
+        namespace = tuple(identity(node.lstat()) for node in nodes)
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC), "rb") as handle:
+            before = os.fstat(handle.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                raise ValueError('installed selected child target is not one sealed object')
+            contents = handle.read()
+            after = os.fstat(handle.fileno())
+            require_sealed_path(source, directory=True)
+            require_sealed_path(path)
+            if (file_identity(before) != file_identity(after)
+                    or file_identity(after) != file_identity(path.lstat())
+                    or namespace != tuple(identity(node.lstat()) for node in nodes)):
+                raise ValueError('installed selected child target changed during the read')
+        current = validate_document(json.loads(contents))
+        if current != initial or source.name != current['release_sha']:
+            raise ValueError('installed selected child target changed')
+        return namespace, file_identity(after), hashlib.sha256(contents).digest()
+
+    generation = observe()
+
+    def currentness_guard():
+        if observe() != generation:
+            raise ValueError('installed selected child target changed')
+
+    target = build_selected_child_target(publication, currentness_guard)
+
+    def read():
+        currentness_guard()
+        return target
+    return read
 
 
 def main(argv=None):

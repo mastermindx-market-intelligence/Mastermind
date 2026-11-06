@@ -1485,6 +1485,15 @@ class WorkspaceReadService:
         budget, its one-selection discipline, its identity joins and its
         close receipt, so the admitted plan and the chosen children are
         always ONE coherent observation.
+
+        The observation is BRACKETED by the same current Control Room
+        evidence the incumbent admitted-plan read uses: the owner, the
+        instance, the publication, the published document, the source
+        validity and the cache currentness are read before and after the
+        Runtime observation and must be one coherent source. A missing,
+        unqualified or changing Workspace source refuses the capture even
+        when the COO row itself is unchanged, so a CCR responsibility or
+        root publication change can never freeze an old root.
         """
         from common.executive_workspace_contract import _check_job_id, _check_work_ref
         from control_plane.coo_principal_host import SELECTED_CHILD_SOURCE_SCHEMA
@@ -1501,6 +1510,17 @@ class WorkspaceReadService:
             raise ValueError("invalid_input")
         if any(type(item) is not str or not _check_job_id(item) for item in chosen):
             raise ValueError("invalid_input")
+        selection = {"work_ref": work_ref, "root_job_id": root_job_id}
+        try:
+            before = self.cache.snapshot()
+        except Exception:
+            raise ValueError("source_unavailable") from None
+        try:
+            _join(before.document, selection)
+        except LookupError:
+            raise ValueError("selection_not_found") from None
+        if not _qualified(before, selection):
+            raise ValueError("source_unavailable")
         try:
             policy_before = CooCyclePolicy.load()
         except CooCyclePolicyError:
@@ -1515,6 +1535,24 @@ class WorkspaceReadService:
             policy_after = CooCyclePolicy.load()
         except CooCyclePolicyError:
             raise ValueError("source_unavailable") from None
+        try:
+            after = self.cache.snapshot()
+        except Exception:
+            raise ValueError("source_unavailable") from None
+        try:
+            _join(after.document, selection)
+        except LookupError:
+            raise ValueError("source_unavailable") from None
+        if not _qualified(after, selection):
+            raise ValueError("source_unavailable")
+        if (before.owner is not after.owner
+                or before.instance != after.instance
+                or before.publication != after.publication
+                or digest(before.document) != digest(after.document)
+                or digest(_plan_validity_identity(before.validity))
+                != digest(_plan_validity_identity(after.validity))
+                or digest(before.currentness) != digest(after.currentness)):
+            raise ValueError("source_unavailable")
         plan = getattr(capture, "plan", None)
         admission = getattr(plan, "admission", None)
         if (not isinstance(capture, BoundedSelectedChildCapture)

@@ -9,13 +9,18 @@ only through patched ``launchctl`` and temp directories.
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import dataclasses
+import hashlib
 import http.client
 import itertools
 import json
 import os
 import plistlib
+import sys
+import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -178,6 +183,10 @@ class FakeHost:
         self.process_pids = None  # iterator of pids, one per observation (crash loop)
         self.observations = 0
         self.events = []  # read-side trace ("observe" / "probe") plus the start dispatch
+        # The installed preparation surface: the capture directory, the
+        # CeoIngress socket and the sealed capability registry.
+        self.capture_dir = None
+        self.socket_path = None
 
     # fault injection ---------------------------------------------------------------
 
@@ -252,6 +261,62 @@ class FakeHost:
                 raise m.UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE")
             digests[profile_id] = profile.profile_digest
         return digests
+
+    def installed_coo_source(self):
+        """The REAL installed COO source of the sealed configuration."""
+
+        from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+        from ops.executive_os.coo_principal_host import CooInstalledSource
+        document = json.loads(self.config)
+        block = document.get("coo")
+        if not isinstance(block, dict) or self.capability_registry is None:
+            raise m.UpdateRefused("PREPARATION_SOURCE_UNAVAILABLE")
+        registry = Path(self.capability_registry)
+        return CooInstalledSource(
+            lambda: copy.deepcopy(block),
+            lambda: ExecutionCapabilityRegistry.load(
+                registry, source_root=registry.parent.parent))
+
+    def ceo_ingress_socket_path(self):
+        return self.socket_path
+
+    def preparation_input_path(self, work_ref):
+        name = ("selected-child-target-"
+                + hashlib.sha256(work_ref.encode("utf-8")).hexdigest()[:16] + ".json")
+        return str(Path(self.capture_dir) / name)
+
+    def write_selected_child_input(self, publication, destination):
+        """The exclusive input write, without the ROOT OWNERSHIP seam.
+
+        The production writer is the incumbent root-owned one; only the
+        privileged ownership assertion is unavailable to this process.
+        """
+
+        raw = m.canonical(publication) + b"\n"
+        path = Path(destination)
+        flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                 | getattr(os, "O_NOFOLLOW", 0) | os.O_CLOEXEC)
+        try:
+            descriptor = os.open(path, flags, 0o600)
+        except FileExistsError:
+            raise m.UpdateRefused(
+                "PREPARATION_INPUT_REFUSED:selected child target input already exists")
+        try:
+            view = memoryview(raw)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise m.UpdateRefused(
+                        "PREPARATION_INPUT_REFUSED:not written whole")
+                view = view[written:]
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        with open(path, "rb") as handle:
+            if handle.read() != raw:
+                raise m.UpdateRefused("PREPARATION_INPUT_REFUSED:readback differs")
+        return {"publication": publication, "path": str(path),
+                "sha256": hashlib.sha256(raw).hexdigest()}
 
     def read_selected_child_input(self, path, sha256):
         """The paired capture input, read through a real descriptor.
@@ -2268,3 +2333,653 @@ def test_module_never_shells_out_beyond_launchctl():
     assert 'LAUNCHCTL = "/bin/launchctl"' in source
     assert "shell=True" not in source and "os.system" not in source
     assert "service-control" not in source.replace("service-control.sh`", "")
+
+
+# --- the frozen capability-profile transform -------------------------------------
+#
+# The transform is chosen ONCE, at plan/apply, from the exact sealed target
+# release registry.  The plan identity binds it and the transaction marker
+# retains it, so a recovery reproduces THAT after-image and never a
+# re-derived one.  An AUTHENTIC OLD marker predates the map and is recovered
+# with the legacy no-rewrite compilation, exactly as it was written.
+
+PRINCIPAL_PROFILE = "principal.claude-code.executive-coo.v1"
+
+
+def _coo_block(document):
+    """A COO block that shares the installed Executive resource and JWKS."""
+
+    from integrations.mastermind_executive_app.coo_binding import BINDING_SCHEMA, COO_SCOPES
+    read = document["policies"]["read"]
+    policy = dict(read)
+    policy["policy_id"] = "executive-coo"
+    policy["required_scopes"] = list(COO_SCOPES)
+    binding = {
+        "schema": BINDING_SCHEMA,
+        "enabled": True,
+        "binding": {
+            "policy_id": "executive-coo",
+            "issuer_digest": hashlib.sha256(read["issuer"].encode("utf-8")).hexdigest(),
+            "subject_digest": read["allowed_subject_digests"][0],
+            "client_ref": "c" * 64,
+            "resource": read["resource"],
+            "scopes": list(COO_SCOPES),
+            "permission_digest": "d" * 64,
+        },
+    }
+    return {"policy": policy, "binding": binding}
+
+
+def _mission_document(profile_digest, *, work_ref="WS:EXECUTIVE-CAPACITY-FABRIC"):
+    """An installed document with one COO mission at one profile digest."""
+
+    from integrations.mastermind_executive_app.coo_binding import _digest
+    document = prior_mcp_document()
+    coo = _coo_block(document)
+    coo["missions"] = [dict(
+        enabled=True, work_ref=work_ref,
+        principal_binding_digest=_digest(coo["binding"]["binding"]),
+        mission_authority_ref="authority:coo-test", outcome_ref="outcome:coo-test",
+        proof_contract_ref="proof:coo-test", capability_profile_id=PRINCIPAL_PROFILE,
+        capability_profile_digest=profile_digest,
+        execution_profiles=["research_only"], allowed_write_paths=[])]
+    document["coo"] = coo
+    return document
+
+
+def _registry(tmp_path, *, tool_schema_digest=None):
+    """A sealed target release registry, optionally with a changed projection."""
+
+    from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+    release_root = tmp_path / "release" / NEW_RELEASE
+    (release_root / "config").mkdir(parents=True, exist_ok=True)
+    registry = json.loads(
+        (Path(__file__).resolve().parents[1]
+         / "config/executive_claude_principal_capabilities.json").read_text())
+    if tool_schema_digest is not None:
+        registry["mcp_servers"]["mastermind-executive-coo-v1"]["tool_schema_digest"] = (
+            tool_schema_digest)
+    path = release_root / "config" / "executive_claude_principal_capabilities.json"
+    path.write_text(json.dumps(registry))
+    profile = ExecutionCapabilityRegistry.load(path, source_root=release_root)
+    return path, profile.profiles[PRINCIPAL_PROFILE].profile_digest
+
+
+def test_a_new_transaction_records_the_frozen_capability_profile_map(tmp_path):
+    """The chosen map is in the plan identity AND in the transaction marker."""
+
+    path, new_digest = _registry(tmp_path, tool_schema_digest="f" * 64)
+    _registry_path, old_digest = _registry(tmp_path / "old", tool_schema_digest=None)
+    assert new_digest != old_digest
+    document = _mission_document(old_digest)
+    host = FakeHost(config=mcp_bytes(document), plist=PRIOR_PLIST)
+    host.capability_registry = path
+    captured = {}
+    host.hooks[("marker_create", 1)] = lambda h: captured.update(h.marker)
+    planned = m.plan(host, release_sha=NEW_RELEASE, set_public=False)
+    assert planned["ok"] is True
+    assert planned["plan"]["capability_profile_digests"] == {PRINCIPAL_PROFILE: new_digest}
+    applied = m.apply(host, release_sha=NEW_RELEASE, set_public=False,
+                      plan_sha256=planned["plan_sha256"])
+    assert applied["ok"] is True
+    assert captured["capability_profile_digests"] == {PRINCIPAL_PROFILE: new_digest}
+    installed = json.loads(host.config)
+    assert installed["coo"]["missions"][0]["capability_profile_digest"] == new_digest
+    # Every other mission field is preserved byte for byte.
+    for key, value in document["coo"]["missions"][0].items():
+        if key == "capability_profile_digest":
+            continue
+        assert installed["coo"]["missions"][0][key] == value
+
+
+def test_a_source_only_transaction_records_the_empty_map_discriminator(tmp_path):
+    """The publication is NOT the discriminator: the map is recorded too."""
+
+    host = FakeHost()
+    captured = {}
+    host.hooks[("marker_create", 1)] = lambda h: captured.update(h.marker)
+    planned = m.plan(host, release_sha=NEW_RELEASE, set_public=False)
+    assert planned["plan"]["capability_profile_digests"] == {}
+    applied = m.apply(host, release_sha=NEW_RELEASE, set_public=False,
+                      plan_sha256=planned["plan_sha256"])
+    assert applied["ok"] is True
+    assert captured["capability_profile_digests"] == {}
+    assert "selected_child_target" not in captured
+
+
+def _interrupted_old_transaction(tmp_path, document, *, installed_after=False,
+                                 registry_available=False):
+    """An interrupted AUTHENTIC OLD transaction, built byte for byte.
+
+    The marker is the shape that existed BEFORE the frozen map: it carries
+    no ``capability_profile_digests`` member, and its after-image is the
+    LEGACY no-rewrite compilation, so the installed capability-profile
+    digest stays exactly as it was.
+    """
+
+    path, new_digest = _registry(tmp_path, tool_schema_digest="f" * 64)
+    _registry_path, old_digest = _registry(tmp_path / "old", tool_schema_digest=None)
+    assert new_digest != old_digest
+    host = FakeHost(config=mcp_bytes(document), plist=PRIOR_PLIST)
+    host.capability_registry = path
+    legacy = m.compile_candidate(mcp_bytes(document), PRIOR_PLIST, release_sha=NEW_RELEASE,
+                                 set_public_mcp_resource=False)
+    marker = {
+        "schema": m.MARKER_SCHEMA, "plan_sha256": "a" * 64,
+        "release_sha": NEW_RELEASE, "prior_release_sha": OLD_RELEASE,
+        "set_public_mcp_resource": False, "phase": "STOP_DISPATCHED",
+        "dispatched": ["stop"],
+        "config_before_sha256": digest(mcp_bytes(document)),
+        "config_after_sha256": digest(legacy.config_after),
+        "plist_before_sha256": digest(PRIOR_PLIST),
+        "plist_after_sha256": digest(expected_plist_after()),
+        "manifest_sha256": MANIFEST, "closure_sha256": CLOSURE,
+        "started_at": "2026-10-25T00:00:00Z", "last_verify": [],
+    }
+    tag = marker["plan_sha256"][:12]
+    host.marker = marker
+    host.preserved[("config", tag)] = mcp_bytes(document)
+    host.preserved[("plist", tag)] = PRIOR_PLIST
+    host.staged[("config", tag)] = legacy.config_after
+    host.staged[("plist", tag)] = expected_plist_after()
+    if installed_after:
+        # The original after-image is already installed and the service is up.
+        marker["phase"] = "START_DISPATCHED"
+        marker["dispatched"] = ["stop", "start"]
+        host.config = legacy.config_after
+        host.running = legacy.config_after
+        host.plist = expected_plist_after()
+        host.running_plist = expected_plist_after()
+        host.state = "REGISTERED"
+        host.disabled = False
+    else:
+        # The service was stopped and the files were not yet replaced.
+        host.state = "ABSENT"
+        host.disabled = True
+    # The registry reader is UNAVAILABLE unless the case asks for it: a
+    # recovery never reopens it.
+    if not registry_available:
+        host.capability_registry = None
+    return host, marker, legacy, old_digest, new_digest
+
+
+def test_an_authentic_old_marker_recovers_with_the_legacy_no_rewrite_compilation(tmp_path):
+    """The old transaction is reconciled, not refused with AFTER_IMAGE_DRIFTED.
+
+    The target release registry still declares D_NEW while the authentic old
+    transaction targeted D_OLD.  A recovery that reopened the registry would
+    compile a different after-image and refuse; the frozen member is absent,
+    so the legacy no-rewrite compilation reproduces the original bytes.
+    """
+
+    _registry_path, old_digest = _registry(tmp_path / "old", tool_schema_digest=None)
+    document = _mission_document(old_digest)
+    host, marker, legacy, old_digest, new_digest = _interrupted_old_transaction(
+        tmp_path, document)
+    assert "capability_profile_digests" not in marker
+    reconciled = m.reconcile(host, release_sha=NEW_RELEASE)
+    assert reconciled["ok"] is True and reconciled["outcome"] == "COMPLETE"
+    installed = json.loads(host.config)
+    # The legacy after-image is the installed one: the digest was NOT rewritten.
+    assert installed["coo"]["missions"][0]["capability_profile_digest"] == old_digest
+    assert installed["coo"]["missions"][0]["capability_profile_digest"] != new_digest
+
+
+def test_an_authentic_old_marker_reconciles_against_the_unchanged_registry(tmp_path):
+    """The concrete counterexample: the unchanged registry still declares D_NEW.
+
+    A recovery that reopened the registry would re-derive D_NEW, compile a
+    different after-image and refuse with AFTER_IMAGE_DRIFTED BEFORE the
+    original reconciliation could happen.  The frozen member is absent, so
+    the legacy no-rewrite compilation reproduces the original bytes and the
+    authentic old transaction is reconciled.
+    """
+
+    _registry_path, old_digest = _registry(tmp_path / "old", tool_schema_digest=None)
+    document = _mission_document(old_digest)
+    host, marker, legacy, old_digest, new_digest = _interrupted_old_transaction(
+        tmp_path, document, registry_available=True)
+    assert "capability_profile_digests" not in marker
+    reconciled = m.reconcile(host, release_sha=NEW_RELEASE)
+    assert reconciled["ok"] is True and reconciled["outcome"] == "COMPLETE"
+    installed = json.loads(host.config)
+    assert installed["coo"]["missions"][0]["capability_profile_digest"] == old_digest
+    assert installed["coo"]["missions"][0]["capability_profile_digest"] != new_digest
+
+
+def test_an_authentic_old_marker_with_the_afterimage_installed_reconciles(tmp_path):
+    """The original after-image is already installed: the recovery observes it."""
+
+    _registry_path, old_digest = _registry(tmp_path / "old", tool_schema_digest=None)
+    document = _mission_document(old_digest)
+    host, marker, legacy, old_digest, new_digest = _interrupted_old_transaction(
+        tmp_path, document, installed_after=True)
+    reconciled = m.reconcile(host, release_sha=NEW_RELEASE)
+    assert reconciled["ok"] is True and reconciled["outcome"] == "COMPLETE"
+    assert json.loads(host.config)["coo"]["missions"][0]["capability_profile_digest"] == old_digest
+
+
+def test_a_genuine_afterimage_drift_still_refuses(tmp_path):
+    """The frozen map never relaxes the after-image equality."""
+
+    _registry_path, old_digest = _registry(tmp_path / "old", tool_schema_digest=None)
+    document = _mission_document(old_digest)
+    host, marker, legacy, old_digest, new_digest = _interrupted_old_transaction(
+        tmp_path, document)
+    # A genuine drift of the recorded after-image is still a refusal.
+    marker["config_after_sha256"] = "e" * 64
+    with pytest.raises(m.TransactionEffectUnknown) as caught:
+        m.reconcile(host, release_sha=NEW_RELEASE)
+    assert caught.value.code == "AFTER_IMAGE_DRIFTED"
+
+
+def test_a_malformed_capability_map_is_a_malformed_marker():
+    """A malformed, extra or missing entry never becomes a partial rewrite."""
+
+    base = {
+        "schema": m.MARKER_SCHEMA, "plan_sha256": "a" * 64,
+        "release_sha": NEW_RELEASE, "prior_release_sha": OLD_RELEASE,
+        "set_public_mcp_resource": False, "phase": "INTENT", "dispatched": [],
+        "config_before_sha256": "b" * 64, "config_after_sha256": "c" * 64,
+        "plist_before_sha256": "d" * 64, "plist_after_sha256": "e" * 64,
+        "manifest_sha256": "f" * 64, "closure_sha256": "0" * 64,
+        "started_at": "2026-10-25T00:00:00Z", "last_verify": [],
+    }
+    m._validate_marker(dict(base))
+    m._validate_marker(dict(base, capability_profile_digests={}))
+    m._validate_marker(dict(base, capability_profile_digests={PRINCIPAL_PROFILE: "a" * 64}))
+    for bad in (
+        {PRINCIPAL_PROFILE: "A" * 64},
+        {PRINCIPAL_PROFILE: "a" * 63},
+        {PRINCIPAL_PROFILE: 1},
+        {"": "a" * 64},
+        "not-a-map",
+    ):
+        with pytest.raises(m.TransactionEffectUnknown) as caught:
+            m._validate_marker(dict(base, capability_profile_digests=bad))
+        assert caught.value.code == "MARKER_MALFORMED"
+
+
+def test_a_mission_profile_mismatch_refuses_the_candidate(tmp_path):
+    """The map must correspond EXACTLY to the preserved mission profiles."""
+
+    path, new_digest = _registry(tmp_path, tool_schema_digest="f" * 64)
+    _registry_path, old_digest = _registry(tmp_path / "old", tool_schema_digest=None)
+    document = _mission_document(old_digest)
+    host = FakeHost(config=mcp_bytes(document), plist=PRIOR_PLIST)
+    # A map that names a profile the installation does not carry.
+    with pytest.raises(m.UpdateRefused):
+        m.compile_candidate(mcp_bytes(document), PRIOR_PLIST, release_sha=NEW_RELEASE,
+                            set_public_mcp_resource=False,
+                            capability_profile_digests={"other.profile": new_digest})
+    # A map that misses the installation's own profile.
+    with pytest.raises(m.UpdateRefused):
+        m.compile_candidate(mcp_bytes(document), PRIOR_PLIST, release_sha=NEW_RELEASE,
+                            set_public_mcp_resource=False,
+                            capability_profile_digests={})
+    # An EXTRA entry beside the exact profile is a mismatch, never a rewrite.
+    with pytest.raises(m.UpdateRefused):
+        m.compile_candidate(mcp_bytes(document), PRIOR_PLIST, release_sha=NEW_RELEASE,
+                            set_public_mcp_resource=False,
+                            capability_profile_digests={PRINCIPAL_PROFILE: new_digest,
+                                                       "other.profile": new_digest})
+
+
+# --- the finite selected-child preparation entry ---------------------------------
+#
+# One operator entry: the installed source/config/principal association is
+# qualified, EXACTLY ONE request is issued through the existing admitted App
+# identity on the incumbent principal-facts transport, and the closed
+# returned capture is materialized with the existing exclusive input writer.
+# The plan/apply transaction then consumes that input and its digest.
+
+WORK_REF = "WS:EXECUTIVE-CAPACITY-FABRIC"
+
+
+@pytest.fixture
+def admitted(tmp_path):
+    """A real Runtime whose root carries one admitted plan and one work child."""
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    try:
+        import test_executive_finite_guards as finite
+    finally:
+        sys.path.pop(0)
+    clock = finite.MutableClock(1_800_000_000_000)
+    state = finite._drive_to_admitted(
+        tmp_path / "runtime", clock, steps=1, review_required=True,
+        intent_id="CEO-C37-OPERATOR-001")
+    state.control_room_root = tmp_path
+    return state
+
+
+class _ControlThread:
+    """A real Control service on the existing Unix ingress.
+
+    The service owns its own event loop in this thread, so the operator
+    entry runs synchronously in the caller's thread and reaches the real
+    socket with the real kernel peer credentials.
+    """
+
+    def __init__(self, service):
+        self.service = service
+        self.loop = None
+        self.error = None
+        self._ready = threading.Event()
+        self._thread = None
+
+    def __enter__(self):
+        def run():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self.loop = loop
+            try:
+                loop.run_until_complete(self.service.start())
+            except BaseException as exc:  # pragma: no cover - startup failure
+                self.error = exc
+                self._ready.set()
+                return
+            self._ready.set()
+            loop.run_forever()
+        self._thread = threading.Thread(target=run, daemon=True)
+        self._thread.start()
+        if not self._ready.wait(120) or self.error is not None:
+            raise AssertionError("the Control service did not start: %r" % (self.error,))
+        return self
+
+    def __exit__(self, *exc):
+        if self.loop is not None:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self.service.close(), self.loop).result(120)
+            except Exception:
+                pass
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            self._thread.join(60)
+        return False
+
+
+def _runtime_rows(runtime):
+    """Every row of every table of the disposable Runtime."""
+
+    with runtime.store.read() as connection:
+        tables = [row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+        return {name: [dict(row) for row in connection.execute(
+            "SELECT * FROM " + name)] for name in tables}
+
+
+def _operator_fixture(tmp_path, admitted, *, peer_uid=None, armed=True):
+    """The real installed source, the real Control Room and the real service."""
+
+    from types import SimpleNamespace
+    sys.path.insert(0, str(Path(__file__).parent))
+    try:
+        import test_hermes_selected_child_target as target
+    finally:
+        sys.path.pop(0)
+    from control_plane.coo_principal_host import CooHostProvider
+    from control_plane.executive_runtime import Runtime
+    from control_plane.executive_service import CeoIngressAppBinding, ExecutiveControlService
+    from control_plane.workspace_read_service import WorkspaceReadService
+    from tests.test_executive_service import _FakeSupervisor, _capture_projection, _config
+
+    # The AF_UNIX path is bounded by the platform, so the disposable socket
+    # root is an ordinary short system temporary directory.
+    socket_root = Path(tempfile.mkdtemp(prefix="mmx-c37-", dir="/tmp"))
+    socket_path = socket_root / "ceo-ingress.sock"
+    owners, _clock, cache, _document = target._control_room(
+        admitted.control_room_root, root_job_id=admitted.root.job_id)
+
+    registry_path, profile_digest = _registry(tmp_path / "target", tool_schema_digest=None)
+    document = _mission_document(profile_digest)
+    host = FakeHost(config=mcp_bytes(document), plist=PRIOR_PLIST)
+    host.capability_registry = registry_path
+    host.capture_dir = tmp_path / "captures"
+    host.capture_dir.mkdir(parents=True, exist_ok=True)
+    host.socket_path = str(socket_path)
+    holder = {"source": host.installed_coo_source(), "facts_calls": 0}
+
+    def factory(runtime):
+        provider = holder.get("provider")
+        if provider is None:
+            workspace = WorkspaceReadService(
+                cache=cache, runtime=runtime, authorize=None, armed={},
+                runtime_identity={})
+            provider = CooHostProvider(holder["source"], workspace)
+            original = provider.facts
+
+            def counted(frame):
+                holder["facts_calls"] += 1
+                return original(frame)
+            provider.facts = counted
+            holder["provider"] = provider
+        return provider
+
+    uid = os.geteuid()
+    binding = CeoIngressAppBinding(
+        peer_uid=uid if peer_uid is None else peer_uid, armed=False,
+        grounding_provider=SimpleNamespace(observe=lambda: {}),
+        principal_admission_armed=armed,
+        principal_admission_guard=lambda _value: None,
+        principal_facts_factory=factory)
+    config = _config(tmp_path, socket_root=socket_root, coo_autonomy_armed=True,
+                     coo_tick_interval_seconds=3600.0)
+    service = ExecutiveControlService(
+        config, supervisor_factory=_FakeSupervisor, autonomy_guard=(lambda: None),
+        terminal_return_projector=lambda candidate: _capture_projection([], candidate),
+        ceo_ingress_socket_path=socket_path,
+        ceo_ingress_peer_uid=uid + 1,
+        ceo_ingress_grounding_provider=SimpleNamespace(observe=lambda: {}),
+        ceo_ingress_armed=False, ceo_ingress_app_binding=binding,
+        runtime_factory=lambda path: Runtime.at(
+            path, clock=admitted.clock, create=False, existing_writable=True))
+    return host, service, holder
+
+
+def test_the_operator_entry_prepares_the_input_through_the_incumbent_transport(
+        tmp_path, admitted):
+    """operator entry -> transport -> FACT provider -> Runtime -> input -> plan/apply."""
+
+    host, service, holder = _operator_fixture(tmp_path, admitted)
+    with _ControlThread(service):
+        # The service is up; the capture itself must change nothing.
+        before = _runtime_rows(admitted.runtime)
+        result = m.prepare_selected_child(
+            host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+            child_job_ids=[admitted.work(0).job_id])
+        after = _runtime_rows(admitted.runtime)
+    # EXACTLY ONE capture, and no dispatch of any kind.
+    assert holder["facts_calls"] == 1
+    assert after == before
+    assert admitted.runtime.jobs.get_job(admitted.work(0).job_id).attempt_count == 0
+    # The closed publication is materialized and bound to its exact bytes.
+    assert result["ok"] is True and result["outcome"] == "PREPARED"
+    raw = Path(result["input_path"]).read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == result["sha256"]
+    publication = json.loads(raw)
+    assert publication["material_digest"] == result["selected_child_target"]["material_digest"]
+    assert publication["children"][0]["command_id"] == (
+        f"coo-cycle:{admitted.root.job_id}:dispatch:{admitted.work(0).job_id}:attempt:1")
+    # The existing plan/apply transaction consumes that input and its digest.
+    planned = m.plan(host, release_sha=NEW_RELEASE, set_public=False,
+                     selected_child_input=result["input_path"],
+                     selected_child_sha256=result["sha256"])
+    assert planned["ok"] is True and planned["outcome"] == "PLANNED"
+    assert planned["plan"]["selected_child_target"] == {
+        "work_ref": publication["work_ref"],
+        "root_job_id": publication["root_job_id"],
+        "material_digest": publication["material_digest"],
+    }
+    applied = m.apply(host, release_sha=NEW_RELEASE, set_public=False,
+                      plan_sha256=planned["plan_sha256"],
+                      selected_child_input=result["input_path"],
+                      selected_child_sha256=result["sha256"])
+    assert applied["ok"] is True and applied["outcome"] == "COMPLETE"
+    assert json.loads(host.config)["selected_child_target"] == publication
+    # A reconciliation never prepares: it recovers the recorded candidate and
+    # issues no preparation request at all.
+    facts_before = holder["facts_calls"]
+    with pytest.raises(m.UpdateRefused) as caught:
+        m.reconcile(host, release_sha=NEW_RELEASE)
+    assert caught.value.code == "NO_TRANSACTION"
+    assert holder["facts_calls"] == facts_before
+
+
+def test_the_operator_entry_refuses_a_wrong_peer(tmp_path, admitted):
+    """The kernel peer check is untouched: a foreign peer is refused.
+
+    The entry issues the request in the CALLING identity and never
+    authorizes a uid at the socket.  The Control admits exactly its App
+    peer, so a request from anybody else is refused before the frame is
+    read.  The incumbent workspace client cannot read the Control's
+    peer-denied envelope (it carries no ``status``), so the refusal
+    reaches the operator as an unavailable answer and NOTHING is captured.
+    """
+
+    host, service, holder = _operator_fixture(tmp_path, admitted, peer_uid=os.geteuid() + 7)
+    with _ControlThread(service):
+        with pytest.raises(m.UpdateRefused) as caught:
+            m.prepare_selected_child(
+                host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+                child_job_ids=[admitted.work(0).job_id])
+    assert caught.value.code in {"PREPARATION_REQUEST_PEER_DENIED",
+                                 "PREPARATION_REQUEST_UNAVAILABLE"}
+    assert holder["facts_calls"] == 0
+    assert host.events.count("read_selected_child_input") == 0
+    assert not list(Path(host.capture_dir).iterdir())
+
+
+def test_the_operator_entry_refuses_a_disarmed_mission(tmp_path, admitted):
+    """A disarmed mission is refused before any request is issued."""
+
+    host, service, holder = _operator_fixture(tmp_path, admitted, armed=False)
+    with _ControlThread(service):
+        with pytest.raises(m.UpdateRefused) as caught:
+            m.prepare_selected_child(
+                host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+                child_job_ids=[admitted.work(0).job_id])
+    assert caught.value.code == "PREPARATION_REQUEST_SOURCE_UNAVAILABLE"
+    assert holder["facts_calls"] == 0
+
+
+def test_the_operator_entry_refuses_a_disabled_mission_and_a_changed_installation(
+        tmp_path, admitted):
+    """A disabled mission and an inconsistent installation are refused first."""
+
+    host, service, holder = _operator_fixture(tmp_path, admitted)
+    disabled = json.loads(host.config)
+    disabled["coo"]["missions"][0]["enabled"] = False
+    host.config = mcp_bytes(disabled)
+    with _ControlThread(service):
+        with pytest.raises(m.UpdateRefused) as caught:
+            m.prepare_selected_child(
+                host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+                child_job_ids=[admitted.work(0).job_id])
+        assert caught.value.code in {"PREPARATION_MISSION_UNAVAILABLE",
+                                     "PREPARATION_CONFIG_INVALID"}
+        assert holder["facts_calls"] == 0
+    # A changed installation is refused by the incumbent document validator.
+    host, service, holder = _operator_fixture(tmp_path, admitted)
+    changed = json.loads(host.config)
+    changed["coo"]["binding"]["binding"]["client_ref"] = "rotated-client"
+    host.config = mcp_bytes(changed)
+    with _ControlThread(service):
+        with pytest.raises(m.UpdateRefused) as caught:
+            m.prepare_selected_child(
+                host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+                child_job_ids=[admitted.work(0).job_id])
+        assert caught.value.code.startswith("PREPARATION_")
+        assert holder["facts_calls"] == 0
+
+
+def test_the_operator_entry_refuses_a_foreign_child_and_an_occupied_destination(
+        tmp_path, admitted):
+    """A foreign child never captures, and a second preparation never overwrites."""
+
+    host, service, holder = _operator_fixture(tmp_path, admitted)
+    with _ControlThread(service):
+        with pytest.raises(m.UpdateRefused):
+            m.prepare_selected_child(
+                host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+                child_job_ids=["JOB-999999"])
+        result = m.prepare_selected_child(
+            host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+            child_job_ids=[admitted.work(0).job_id])
+        assert result["ok"] is True
+        # The destination is occupied: the entry refuses and never overwrites.
+        with pytest.raises(m.UpdateRefused) as caught:
+            m.prepare_selected_child(
+                host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+                child_job_ids=[admitted.work(0).job_id])
+        assert caught.value.code.startswith("PREPARATION_INPUT_REFUSED")
+    assert Path(result["input_path"]).exists()
+
+
+def test_the_operator_entry_refuses_an_invalid_selector(tmp_path, admitted):
+    """Duplicate, empty and oversized selectors are refused before any request."""
+
+    host, service, holder = _operator_fixture(tmp_path, admitted)
+    work = admitted.work(0)
+    with _ControlThread(service):
+        for children in ([], [work.job_id, work.job_id],
+                         ["JOB-999999"] * 4, [work.job_id] * 17):
+            with pytest.raises(m.UpdateRefused) as caught:
+                m.prepare_selected_child(
+                    host, work_ref=WORK_REF, root_job_id=admitted.root.job_id,
+                    child_job_ids=children)
+            assert caught.value.code == "PREPARATION_SELECTOR_INVALID"
+    assert holder["facts_calls"] == 0
+
+
+def test_the_service_control_preparation_verb_walks_a_closed_argv(tmp_path):
+    """The operator entry is reachable through the finite service-control owner.
+
+    The controller accepts only the bounded work/root/child selectors and
+    the release of the installed generation.  No destination, output path,
+    account, label, port or resource value is ever accepted, and the
+    rebuilt argv carries one validated value and no caller text.
+    """
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    try:
+        import test_executive_service_control as service_control
+    finally:
+        sys.path.pop(0)
+    sha = "d" * 40
+
+    def run(name, args):
+        case = tmp_path / name
+        case.mkdir(parents=True, exist_ok=True)
+        return service_control._component_run(case, "prepare-mcp-selected-child", args)
+
+    result, argv, _ = run(
+        "ok", ("--expected-sha", sha, "--work-ref", WORK_REF,
+               "--root-job-id", "JOB-001", "--child-job-id", "JOB-002",
+               "--child-job-id", "JOB-003"))
+    assert result[0] == 0, result[2]
+    assert argv[-9:] == ["prepare-selected-child", "--work-ref", WORK_REF,
+                         "--root-job-id", "JOB-001",
+                         "--child-job-id", "JOB-002",
+                         "--child-job-id", "JOB-003"]
+    # A repeated single-valued flag, a missing selector, an unknown flag and
+    # an out-of-grammar value are all refusals before the helper is reached.
+    for index, args in enumerate((
+            ("--expected-sha", sha, "--work-ref", WORK_REF),
+            ("--expected-sha", sha, "--root-job-id", "JOB-001",
+             "--child-job-id", "JOB-002"),
+            ("--expected-sha", sha, "--work-ref", WORK_REF,
+             "--root-job-id", "JOB-001"),
+            ("--expected-sha", sha, "--work-ref", WORK_REF,
+             "--root-job-id", "JOB-001", "--child-job-id", "JOB-002",
+             "--work-ref", WORK_REF),
+            ("--expected-sha", sha, "--work-ref", "not a work ref",
+             "--root-job-id", "JOB-001", "--child-job-id", "JOB-002"),
+            ("--expected-sha", sha, "--work-ref", WORK_REF,
+             "--root-job-id", "JOB-001", "--child-job-id", "JOB-002",
+             "--output", "/tmp/x"),
+            ("--expected-sha", sha, "--work-ref", WORK_REF,
+             "--root-job-id", "JOB-001", "--child-job-id", "not a job"))):
+        result, argv, _ = run(f"bad{index}", args)
+        assert result[0] == 64, (args, result)
+        assert argv is None

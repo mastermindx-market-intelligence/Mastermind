@@ -80,6 +80,7 @@ Exit codes: 0 COMPLETE (or PLANNED), 1 refused with no effect, 2 EFFECT_UNKNOWN,
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import dataclasses
 import errno
@@ -305,6 +306,11 @@ class Candidate:
     # The one frozen selected-child publication this candidate installs.
     # Absent preserves the existing source-only behaviour byte for byte.
     selected_child_target: dict[str, Any] | None = None
+    # The FROZEN capability-profile digest map this candidate applied, taken
+    # from the exact sealed target release registry at plan time.  It is
+    # bound into the plan identity and retained in the transaction marker so
+    # a recovery reproduces THIS after-image and never a re-derived one.
+    capability_profile_digests: dict[str, str] | None = None
 
     @property
     def config_before_sha256(self) -> str:
@@ -370,6 +376,39 @@ def compile_candidate(prior_config: bytes, prior_plist: bytes, *, release_sha: s
         raise UpdateRefused("CANDIDATE_REFUSED: " + str(error)[:160]) from None
 
 
+def _preserved_profile_ids(prior: dict[str, Any]) -> set[str]:
+    """The exact capability-profile ids of the preserved installed missions."""
+
+    block = prior.get("coo")
+    missions = block.get("missions") if isinstance(block, dict) else None
+    if not isinstance(missions, list):
+        return set()
+    return {row["capability_profile_id"] for row in missions
+            if isinstance(row, dict) and type(row.get("capability_profile_id")) is str}
+
+
+def _validate_capability_profile_map(
+    digests: Any, profile_ids: set[str],
+) -> dict[str, str]:
+    """The exact frozen map: one lowercase64hex digest per preserved profile.
+
+    The keys correspond EXACTLY to the relevant original preserved mission
+    profile ids: an extra entry, a missing entry or a malformed value is a
+    refusal, never a partial rewrite.
+    """
+
+    if type(digests) is not dict:
+        raise ValueError("capability profile digest map is not an object")
+    if set(digests) != set(profile_ids):
+        raise ValueError("capability profile digest map does not match the preserved missions")
+    for key, value in digests.items():
+        if type(key) is not str or not key:
+            raise ValueError("capability profile digest key is invalid")
+        if type(value) is not str or HEX64.fullmatch(value) is None:
+            raise ValueError("capability profile digest value is invalid")
+    return {key: digests[key] for key in sorted(digests)}
+
+
 def _apply_capability_profile_digests(
     prior: dict[str, Any], proposed: dict[str, Any],
     digests: dict[str, str] | None,
@@ -381,9 +420,23 @@ def _apply_capability_profile_digests(
     with it. ONLY that one field changes: every other mission field,
     principal action, scope and binding is preserved byte for byte, and no
     principal realm or permission is created.
+
+    ``None`` is the LEGACY no-rewrite compilation: it reproduces the
+    original behaviour byte for byte and is what a marker without the frozen
+    map member recovers with.  A supplied map is the frozen map of the
+    original transaction and is validated against the preserved missions
+    before a single field is rewritten.
     """
 
-    if not digests:
+    if digests is None:
+        # The legacy no-rewrite compilation: the installed digests stay
+        # exactly as they are.  This is the pre-C30 recovery behaviour and
+        # it is reproduced exactly, never approximated.
+        return
+    frozen = _validate_capability_profile_map(digests, _preserved_profile_ids(prior))
+    if not frozen:
+        # An installation without a preserved mission profile has nothing to
+        # rewrite.  The source-only behaviour is preserved byte for byte.
         return
     prior_block = prior.get("coo")
     proposed_block = proposed.get("coo")
@@ -399,7 +452,7 @@ def _apply_capability_profile_digests(
         if not isinstance(row, dict) or not isinstance(prior_row, dict):
             raise ValueError("candidate changed the installed mission set")
         profile_id = row.get("capability_profile_id")
-        digest = digests.get(profile_id) if type(profile_id) is str else None
+        digest = frozen.get(profile_id) if type(profile_id) is str else None
         if digest is None:
             continue
         if row.get("capability_profile_digest") != prior_row.get("capability_profile_digest"):
@@ -442,6 +495,9 @@ def _compile_candidate(prior_config: bytes, prior_plist_bytes: bytes, release_sh
         # forward byte for byte. It is never withdrawn and never rewritten.
         proposed["selected_child_target"] = copy.deepcopy(prior["selected_child_target"])
     _apply_capability_profile_digests(prior, proposed, capability_profile_digests)
+    frozen_digests = (None if capability_profile_digests is None
+                      else _validate_capability_profile_map(
+                          capability_profile_digests, _preserved_profile_ids(prior)))
     changed = {key for key in set(prior) | set(proposed) if prior.get(key, _MISSING) != proposed.get(key, _MISSING)}
     require(changed <= {"release_sha", "public_mcp_resource", "selected_child_target", "coo"},
             "candidate changed an unrelated config field")
@@ -466,6 +522,8 @@ def _compile_candidate(prior_config: bytes, prior_plist_bytes: bytes, release_sh
         probes_before=build_probes(prior),
         probes_after=build_probes(proposed),
         selected_child_target=copy.deepcopy(proposed.get("selected_child_target")),
+        capability_profile_digests=(None if frozen_digests is None
+                                    else dict(frozen_digests)),
     )
 
 
@@ -503,6 +561,11 @@ def plan_document(candidate: Candidate, *, manifest_sha256: str, closure_sha256:
             "root_job_id": candidate.selected_child_target["root_job_id"],
             "material_digest": candidate.selected_child_target["material_digest"],
         }
+    # The frozen capability-profile transform is part of the plan identity:
+    # the operator approves THIS exact map, and the after-image it produces
+    # is the one a recovery reproduces.  An empty map is still recorded.
+    document["capability_profile_digests"] = dict(
+        candidate.capability_profile_digests or {})
     return document
 
 
@@ -561,6 +624,11 @@ class Host(Protocol):
     def read_config(self) -> bytes: ...
     def read_plist(self) -> bytes: ...
     def read_selected_child_input(self, path: str, sha256: str) -> bytes: ...
+    def installed_coo_source(self) -> Any: ...
+    def ceo_ingress_socket_path(self) -> str: ...
+    def preparation_input_path(self, work_ref: str) -> str: ...
+    def write_selected_child_input(self, publication: dict[str, Any],
+                                   destination: str) -> dict[str, Any]: ...
     def derive_capability_profile_digests(
         self, release_sha: str, profile_ids: tuple[str, ...]
     ) -> dict[str, str]: ...
@@ -712,6 +780,59 @@ class ProductionHost:
         if digest(data) != sha256:
             raise UpdateRefused("SELECTED_CHILD_INPUT_DIGEST_MISMATCH")
         return data
+
+    def installed_coo_source(self) -> Any:
+        """The installed COO source of the sealed gateway configuration.
+
+        The source is the incumbent installed composition over the sealed
+        release: it re-proves the document, the mission, the capability
+        registry and the binding.  A changed, unreadable or withdrawn
+        installation is unavailable, never an inferred permission.
+        """
+        from ops.executive_os.coo_principal_host import CooInstalledSource
+        document = _strict_json(self.read_config(), "MCP_COMPONENT_CONFIG_MALFORMED")
+        release = document.get("release_sha") if type(document) is dict else None
+        if type(release) is not str or HEX40.fullmatch(release) is None:
+            raise UpdateRefused("PREPARATION_CONFIG_INVALID")
+        root = Path(installed._SERVICE_RELEASES) / release
+        try:
+            return CooInstalledSource.from_path(
+                CONFIG_PATH, root, expected_uid=os.geteuid())
+        except (ValueError, TypeError, KeyError, OSError):
+            raise UpdateRefused("PREPARATION_SOURCE_UNAVAILABLE") from None
+
+    def ceo_ingress_socket_path(self) -> str:
+        """The canonical CeoIngress socket of the installed configuration."""
+
+        document = _strict_json(self.read_config(), "MCP_COMPONENT_CONFIG_MALFORMED")
+        path = document.get("ceo_ingress_socket_path") if type(document) is dict else None
+        if type(path) is not str or not path.startswith("/"):
+            raise UpdateRefused("PREPARATION_CONFIG_INVALID")
+        return path
+
+    def preparation_input_path(self, work_ref: str) -> str:
+        """The one installed destination of a preparation."""
+
+        return preparation_destination(work_ref)
+
+    def write_selected_child_input(self, publication: dict[str, Any],
+                                   destination: str) -> dict[str, Any]:
+        """Materialize the closed publication with the exclusive writer.
+
+        The writer is the incumbent one: an exclusive, no-follow create of a
+        root-owned, single-link, group-0 file under a root-controlled parent
+        chain, with an exact readback.  It never overwrites an existing
+        file.
+        """
+        from ops.executive_os.coo_principal_host import write_selected_child_target_input
+        try:
+            os.makedirs(PREPARATION_CAPTURE_DIR, mode=0o755, exist_ok=True)
+        except OSError:
+            raise UpdateRefused("PREPARATION_INPUT_REFUSED") from None
+        try:
+            return write_selected_child_target_input(publication, destination)
+        except ValueError as error:
+            raise UpdateRefused("PREPARATION_INPUT_REFUSED:" + str(error)[:80]) from None
 
     def verify_release(self, release_sha: str) -> str:
         try:
@@ -1032,7 +1153,13 @@ _MARKER_KEYS = frozenset({
 })
 # The selected-child publication is OPTIONAL in the marker: a transaction
 # that carries none keeps the original marker shape byte for byte.
-_MARKER_OPTIONAL_KEYS = frozenset({"selected_child_target"})
+#
+# The frozen capability-profile digest map is OPTIONAL for the same reason:
+# an AUTHENTIC OLD marker predates the map and is recovered with the legacy
+# no-rewrite compilation.  Every NEW transaction records the exact chosen
+# map, including ``{}`` where there is no mission to rewrite, so the
+# after-image of a recovery never depends on the CURRENT registry.
+_MARKER_OPTIONAL_KEYS = frozenset({"selected_child_target", "capability_profile_digests"})
 
 
 def _unknown(code: str) -> TransactionEffectUnknown:
@@ -1070,6 +1197,19 @@ def _validate_marker(marker: Any) -> None:
             publication = marker["selected_child_target"]
             if publication is not None:
                 validate_selected_child_target(publication)
+        if "capability_profile_digests" in marker:
+            # The FROZEN map of the original transaction: one lowercase64hex
+            # digest per preserved mission profile id.  A malformed entry, an
+            # extra entry or a missing entry is a malformed marker, never a
+            # partially rewritten candidate.
+            frozen = marker["capability_profile_digests"]
+            if type(frozen) is not dict:
+                raise ValueError("marker capability profile map")
+            for key, value in frozen.items():
+                if type(key) is not str or not key:
+                    raise ValueError("marker capability profile key")
+                if type(value) is not str or HEX64.fullmatch(value) is None:
+                    raise ValueError("marker capability profile value")
     except (ValueError, KeyError, TypeError):
         raise _unknown("MARKER_MALFORMED") from None
 
@@ -1561,6 +1701,12 @@ def apply(host: Host, *, release_sha: str, set_public: bool, plan_sha256: str,
             # transaction, so a reconciliation recovers THIS candidate and
             # never reopens a replacement input.
             marker["selected_child_target"] = copy.deepcopy(candidate.selected_child_target)
+        # EVERY new transaction records the exact chosen capability-profile
+        # map, including the empty map.  The recovery then reproduces THIS
+        # after-image from the frozen map and never from the CURRENT
+        # registry, so an authentic old transaction is never re-derived.
+        marker["capability_profile_digests"] = dict(
+            candidate.capability_profile_digests or {})
         host.marker_create(marker)
         try:
             host.preserve("config", tag, candidate.config_before)
@@ -1587,12 +1733,20 @@ def _candidate_from_marker(host: Host, marker: dict) -> Candidate:
         # The ORIGINAL captured publication comes from the transaction
         # itself. A reconciliation never reopens an input, never recaptures
         # and never reselects a child.
-        digests = _mission_capability_profile_digests(
-            host, marker["release_sha"], config)
+        #
+        # The capability-profile transform is the FROZEN map of the original
+        # transaction.  The registry is NEVER reopened here: a new marker
+        # carries its own map, and an authentic OLD marker without the
+        # member is recovered with the legacy no-rewrite compilation, which
+        # reproduces the original after-image byte for byte.
+        if "capability_profile_digests" in marker:
+            frozen = dict(marker["capability_profile_digests"])
+        else:
+            frozen = None
         candidate = compile_candidate(config, plist, release_sha=marker["release_sha"],
                                       set_public_mcp_resource=marker["set_public_mcp_resource"],
                                       selected_child_target=marker.get("selected_child_target"),
-                                      capability_profile_digests=digests)
+                                      capability_profile_digests=frozen)
         if (candidate.config_after_sha256 != marker["config_after_sha256"]
                 or candidate.plist_after_sha256 != marker["plist_after_sha256"]):
             raise _unknown("AFTER_IMAGE_DRIFTED")
@@ -1631,6 +1785,184 @@ def reconcile(host: Host, *, release_sha: str) -> dict:
         host.release_lock()
 
 
+# --- the finite selected-child preparation entry -------------------------------
+#
+# One operator entry that makes the frozen selected-child publication
+# REACHABLE through the installed owner.  It qualifies the installed
+# source/config/principal association, issues EXACTLY ONE request through
+# the existing admitted App identity on the incumbent principal-facts
+# transport, and materializes the closed returned capture with the existing
+# exclusive root-owned 0600 input writer.
+#
+# It dispatches no Job, previews no CooCycle, opens no other Runtime,
+# creates no daemon and no auth store, and never recaptures an uncertain
+# answer.  The kernel peer check of the incumbent socket is untouched: only
+# an admitted peer is served, and a peer refusal is a refusal here too.
+
+PREPARATION_CAPTURE_DIR = installed._SERVICE_ROOT + "/captures"
+MAX_PREPARATION_CHILDREN = 16
+
+
+def preparation_destination(work_ref: str) -> str:
+    """The one installed destination of a preparation.
+
+    The destination is DERIVED from the work reference, never accepted from
+    the caller: no path, account, label or port is ever taken from the
+    command line.  It is deterministic, so a second preparation of the same
+    work scope finds the destination occupied and refuses.
+    """
+
+    name = "selected-child-target-" + hashlib.sha256(
+        work_ref.encode("utf-8")).hexdigest()[:16] + ".json"
+    return PREPARATION_CAPTURE_DIR + "/" + name
+
+
+def _preparation_principal(document: dict[str, Any], work_ref: str) -> dict[str, Any]:
+    """The installed admitted App identity of exactly one mission scope."""
+
+    block = document.get("coo")
+    missions = block.get("missions") if type(block) is dict else None
+    rows = [row for row in missions or []
+            if type(row) is dict and row.get("work_ref") == work_ref]
+    if len(rows) != 1 or rows[0].get("enabled") is not True:
+        raise UpdateRefused("PREPARATION_MISSION_UNAVAILABLE")
+    binding = block.get("binding")
+    inner = binding.get("binding") if type(binding) is dict else None
+    if type(inner) is not dict:
+        raise UpdateRefused("PREPARATION_BINDING_UNAVAILABLE")
+    principal = {
+        "policy_id": inner.get("policy_id"),
+        "issuer_digest": inner.get("issuer_digest"),
+        "subject_digest": inner.get("subject_digest"),
+        "client_ref": inner.get("client_ref"),
+        "resource": inner.get("resource"),
+        "scopes": list(inner.get("scopes") or []),
+    }
+    if (type(principal["policy_id"]) is not str
+            or type(principal["issuer_digest"]) is not str
+            or type(principal["subject_digest"]) is not str
+            or type(principal["client_ref"]) is not str
+            or type(principal["resource"]) is not str
+            or not principal["scopes"]):
+        raise UpdateRefused("PREPARATION_BINDING_UNAVAILABLE")
+    return principal
+
+
+def prepare_selected_child(host: Host, *, work_ref: str, root_job_id: str,
+                           child_job_ids: list[str]) -> dict[str, Any]:
+    """Prepare the frozen selected-child input of one work scope.
+
+    The entry is the installed operator path of the publication.  It
+    qualifies the installed source/config/principal association, issues
+    exactly ONE closed preparation request through the existing admitted App
+    identity on the incumbent principal-facts transport, and materializes
+    the returned capture with the existing exclusive root-owned 0600 input
+    writer.  The returned publication is the ONLY input the plan/apply
+    transaction may consume, and it is bound to its exact bytes.
+
+    The request is issued in the CALLING identity.  The incumbent kernel
+    peer check of the CeoIngress socket is untouched: no uid is authorized,
+    no peer is impersonated and no identity is switched.  The request
+    therefore reaches the Control only from an admitted peer, and the
+    installed App peer is the identity the Control's FACT handler requires.
+    The materialization is the incumbent root-owned writer, so the input
+    object is uid 0 by construction.
+    """
+
+    from common.executive_workspace_contract import _check_job_id, _check_work_ref
+    from control_plane.coo_principal_host import (
+        FACT_PREPARATION_SCHEMA, FACT_SCHEMA, build_selected_child_publication,
+        validate_facts_frame,
+    )
+    from integrations.mastermind_workspace_app.installed import CeoIngressWorkspaceClient
+
+    if not _check_work_ref(work_ref) or not _check_job_id(root_job_id):
+        raise UpdateRefused("PREPARATION_SELECTOR_INVALID")
+    if type(child_job_ids) is not list or not 1 <= len(child_job_ids) <= MAX_PREPARATION_CHILDREN:
+        raise UpdateRefused("PREPARATION_SELECTOR_INVALID")
+    if any(type(item) is not str or not _check_job_id(item) for item in child_job_ids):
+        raise UpdateRefused("PREPARATION_SELECTOR_INVALID")
+    if len(set(child_job_ids)) != len(child_job_ids):
+        raise UpdateRefused("PREPARATION_SELECTOR_INVALID")
+
+    host.require_root()
+    document = _strict_json(host.read_config(), "MCP_COMPONENT_CONFIG_MALFORMED")
+    if type(document) is not dict:
+        raise UpdateRefused("PREPARATION_CONFIG_INVALID")
+    try:
+        validate_document(document)
+    except (ValueError, TypeError, KeyError):
+        raise UpdateRefused("PREPARATION_CONFIG_INVALID") from None
+    principal = _preparation_principal(document, work_ref)
+
+    # The installed sealed source proves the association.  A revoked or
+    # rotated principal, a disabled mission or a changed installation is a
+    # refusal here, before any request is issued.
+    installed_source = host.installed_coo_source()
+    row, _fact, _authority = installed_source.for_principal(principal, work_ref)
+    if type(row) is not dict or row.get("enabled") is not True:
+        raise UpdateRefused("PREPARATION_MISSION_UNAVAILABLE")
+
+    frame = {
+        "schema": FACT_SCHEMA,
+        "operation": "mission",
+        "work_ref": work_ref,
+        "principal": principal,
+        "preparation": {
+            "schema": FACT_PREPARATION_SCHEMA,
+            "root_job_id": root_job_id,
+            "child_job_ids": list(child_job_ids),
+        },
+    }
+    validate_facts_frame(frame)
+    socket_path = host.ceo_ingress_socket_path()
+    if type(socket_path) is not str or not socket_path.startswith("/"):
+        raise UpdateRefused("PREPARATION_CONFIG_INVALID")
+    client = CeoIngressWorkspaceClient(socket_path)
+    try:
+        response = asyncio.run(client.request(frame))
+    except Exception:
+        # The request may or may not have reached the Control.  An
+        # uncertain answer is never recaptured: the operator retries the
+        # whole entry deliberately.
+        raise UpdateRefused("PREPARATION_REQUEST_UNAVAILABLE") from None
+    if type(response) is not dict or response.get("ok") is not True:
+        # The refusal of the incumbent ingress is reported PRECISELY: a peer
+        # that is not the admitted App peer is named as such, and nothing is
+        # ever recaptured to find out.
+        error = response.get("error") if type(response) is dict else None
+        code = error.get("code") if type(error) is dict else None
+        if type(code) is str and code:
+            raise UpdateRefused("PREPARATION_REQUEST_" + code.upper())
+        raise UpdateRefused("PREPARATION_REQUEST_REFUSED")
+    capture = response.get("result")
+    if (type(capture) is not dict
+            or set(capture) != {"work_ref", "root_job_id", "children", "source"}
+            or capture["work_ref"] != work_ref
+            or capture["root_job_id"] != root_job_id):
+        raise UpdateRefused("PREPARATION_RESPONSE_INVALID")
+    try:
+        publication = build_selected_child_publication(
+            work_ref=capture["work_ref"], root_job_id=capture["root_job_id"],
+            children=capture["children"], source=capture["source"])
+    except (ValueError, TypeError, KeyError):
+        raise UpdateRefused("PREPARATION_RESPONSE_INVALID") from None
+
+    destination = host.preparation_input_path(work_ref)
+    written = host.write_selected_child_input(publication, destination)
+    return {
+        "ok": True,
+        "outcome": "PREPARED",
+        "input_path": written["path"],
+        "sha256": written["sha256"],
+        "selected_child_target": {
+            "work_ref": publication["work_ref"],
+            "root_job_id": publication["root_job_id"],
+            "material_digest": publication["material_digest"],
+        },
+    }
+
+
 # --- closed command line ---
 
 _VERBS: dict[str, dict[str, bool]] = {
@@ -1641,9 +1973,44 @@ _VERBS: dict[str, dict[str, bool]] = {
     "reconcile": {"--release-sha": True},
 }
 
+#: The closed argv walk of the preparation entry.  Every flag is bounded and
+#: explicit; the child selector may repeat, every other flag may not.  No
+#: destination, path, account, label, port or release is ever accepted.
+_PREPARATION_FLAGS = ("--work-ref", "--root-job-id", "--child-job-id")
+
 
 class UsageError(ValueError):
     pass
+
+
+def parse_preparation_arguments(argv: list[str]) -> dict[str, Any]:
+    """The closed argv walk of the finite preparation entry."""
+
+    if not argv or argv[0] != "prepare-selected-child":
+        raise UsageError("verb")
+    values: dict[str, Any] = {"--work-ref": None, "--root-job-id": None,
+                               "--child-job-id": []}
+    index = 1
+    while index < len(argv):
+        flag = argv[index]
+        if flag not in _PREPARATION_FLAGS:
+            raise UsageError("flag")
+        index += 1
+        if index >= len(argv):
+            raise UsageError("value")
+        value = argv[index]
+        index += 1
+        if flag == "--child-job-id":
+            values[flag].append(value)
+        elif values[flag] is not None:
+            raise UsageError("flag")
+        else:
+            values[flag] = value
+    if values["--work-ref"] is None or values["--root-job-id"] is None:
+        raise UsageError("value")
+    if not values["--child-job-id"]:
+        raise UsageError("value")
+    return values
 
 
 def parse_arguments(argv: list[str]) -> tuple[str, dict[str, Any]]:
@@ -1697,6 +2064,29 @@ def _emit(document: dict) -> None:
 
 def main(argv: list[str] | None = None, host: Host | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:1] == ["prepare-selected-child"]:
+        try:
+            selection = parse_preparation_arguments(arguments)
+        except UsageError:
+            sys.stderr.write("usage: mcp_component_update.py prepare-selected-child "
+                             "--work-ref <work ref> --root-job-id <job id> "
+                             "--child-job-id <job id> [--child-job-id <job id> ...]\n")
+            return 64
+        host = host if host is not None else ProductionHost()
+        try:
+            result = prepare_selected_child(
+                host, work_ref=selection["--work-ref"],
+                root_job_id=selection["--root-job-id"],
+                child_job_ids=list(selection["--child-job-id"]))
+        except UpdateRefused as error:
+            _emit({"ok": False, "outcome": "REFUSED", "code": error.code})
+            return 1
+        except Exception as error:
+            _emit({"ok": False, "outcome": "REFUSED",
+                   "code": "UNEXPECTED_" + type(error).__name__.upper()})
+            return 1
+        _emit(result)
+        return 0
     try:
         verb, values = parse_arguments(arguments)
     except UsageError:

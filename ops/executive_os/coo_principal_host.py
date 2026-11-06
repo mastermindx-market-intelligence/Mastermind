@@ -82,6 +82,13 @@ def _fixed_original_target_reader(path, source, initial, *, expected_uid):
 def _fixed_selected_child_target_reader(path, source, initial, *, expected_uid):
     """Bind the frozen selected-child publication to this process and file generation.
 
+    The generation-bound law itself is owned ONCE, by the installed entry
+    owner, and is shared verbatim with the installed App settings
+    constructor. Both installed consumers therefore prove the SAME frozen
+    publication generation instead of two different laws: the App's
+    rotatable projection loader would have accepted a same-byte
+    replacement and an in-place A->B->A rewrite of the installation.
+
     This is deliberately not a rotatable registry. Replacement or ABA writes
     require fresh host qualification, even when the document returns to old
     bytes. The guard proves the FIXED publication and its legitimate
@@ -90,54 +97,8 @@ def _fixed_selected_child_target_reader(path, source, initial, *, expected_uid):
     or calls guard_dialogue merely to read the original command.
     """
     from ops.executive_os import executive_mcp_entry as entry
-    publication = entry.build_installed_selected_child_target(initial)
-    if publication is None:
-        return None
-    pid = os.getpid()
-
-    def identity(info):
-        return (info.st_dev, info.st_ino, info.st_mode, info.st_uid,
-                info.st_gid)
-
-    def file_identity(info):
-        return (*identity(info), info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
-
-    def observe():
-        if os.getpid() != pid or os.geteuid() != expected_uid:
-            _refuse()
-        entry.require_sealed_path(source, directory=True)
-        entry.require_sealed_path(path)
-        nodes = tuple(dict.fromkeys((source, *source.parents, *path.parents)))
-        namespace = tuple(identity(node.lstat()) for node in nodes)
-        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC), "rb") as handle:
-            before = os.fstat(handle.fileno())
-            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
-                _refuse()
-            contents = handle.read()
-            after = os.fstat(handle.fileno())
-            entry.require_sealed_path(source, directory=True)
-            entry.require_sealed_path(path)
-            if (file_identity(before) != file_identity(after)
-                    or file_identity(after) != file_identity(path.lstat())
-                    or namespace != tuple(identity(node.lstat()) for node in nodes)):
-                _refuse()
-        current = entry.validate_document(json.loads(contents))
-        if current != initial or source.name != current["release_sha"]:
-            _refuse()
-        return namespace, file_identity(after), hashlib.sha256(contents).digest()
-
-    generation = observe()
-
-    def currentness_guard():
-        if observe() != generation:
-            _refuse()
-
-    target = entry.build_selected_child_target(publication, currentness_guard)
-
-    def read():
-        currentness_guard()
-        return target
-    return read
+    return entry.fixed_selected_child_target_reader(
+        path, source, initial, expected_uid=expected_uid)
 
 
 class CooInstalledSource:
@@ -268,11 +229,10 @@ def prepare_selected_child_target(host_provider, *, principal, context, work_ref
 
     The production preparation hook of the selected-child publication. It
     calls the OWNER capture -- never a local re-derivation -- and writes
-    the EXACT publication bytes to ``destination``: an exclusive,
-    no-follow create of a root-owned, single-link, group-0 file under a
-    root-controlled parent chain, with an exact readback of the bytes
-    written. It never overwrites an existing file and never leaves behind
-    a file the publication's own trusted read would refuse.
+    the EXACT publication bytes to ``destination`` through the existing
+    exclusive root-owned writer. It never overwrites an existing file and
+    never leaves behind a file the publication's own trusted read would
+    refuse.
     """
     capture = host_provider.capture_selected_child_target(
         principal=principal, context=context, work_ref=work_ref,
@@ -280,6 +240,19 @@ def prepare_selected_child_target(host_provider, *, principal, context, work_ref
     publication = build_selected_child_publication(
         work_ref=capture["work_ref"], root_job_id=capture["root_job_id"],
         children=capture["children"], source=capture["source"])
+    return write_selected_child_target_input(publication, destination)
+
+
+def write_selected_child_target_input(publication, destination):
+    """The exclusive root-owned 0600 input writer of one publication.
+
+    The writer is the ONLY place a selected-child publication becomes an
+    installed input: an exclusive, no-follow create of a root-owned,
+    single-link, group-0 file under a root-controlled parent chain, with an
+    exact readback of the bytes written.  It never overwrites an existing
+    file and never leaves behind a file the publication's own trusted read
+    would refuse.
+    """
     raw = canonical(publication) + b"\n"
     path = Path(destination)
     if not path.is_absolute() or ".." in path.parts or str(path) != str(destination):
