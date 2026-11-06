@@ -4,13 +4,13 @@ import pytest
 from ops.executive_os import os_public_edge as edge
 from tests import test_os_public_edge_transition as fixture
 
-@pytest.mark.parametrize('fixed', [edge.PRE_MISSION_RESULT_GET_ROUTES,edge.GET_ROUTES])
+@pytest.mark.parametrize('fixed', [edge.PRE_MISSION_RESULT_GET_ROUTES,edge.MISSION_RESULT_GET_ROUTES])
 def test_whole_compound_get_profile_and_predecessor_preserve_caps_and_other_sites(fixed):
-    assert edge.GET_ROUTES==edge.PRE_MISSION_RESULT_GET_ROUTES+('/workspace/mission-result/current',)
-    assert edge.POST_ROUTES==edge.PRE_MISSION_RESULT_POST_ROUTES
+    assert edge.MISSION_RESULT_GET_ROUTES==edge.PRE_MISSION_RESULT_GET_ROUTES+('/workspace/mission-result/current',)
+    assert (edge.MISSION_RESULT_GET_ROUTES,edge.PRE_MISSION_RESULT_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
     live=fixture.fullconfig()
     fixture.get_paths_of(live)[:]=sorted(set(fixed)|set(edge.asset_routes(fixture.OLD)))
-    fixture.post_paths_of(live)[:]=list(edge.POST_ROUTES)
+    fixture.post_paths_of(live)[:]=list(edge.PRE_MISSION_RESULT_POST_ROUTES)
     fixture.expect_source_upgrade(fixture.inner_of(live))
     before=copy.deepcopy(live)
     planned,prepared,final=fixture.transition_values(live)

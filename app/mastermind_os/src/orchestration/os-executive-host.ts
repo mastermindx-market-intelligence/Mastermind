@@ -7,6 +7,8 @@ import type { OwnerContext, PendingPointerStore } from "./operation-controller";
 import type { DirectNativeTransport, DirectSelection, DirectTerminalSelection } from "../direct-native-result";
 import { DirectNativeCommandPort } from "./direct-native-command-port";
 import { closedReadFailurePhase, type DiagnosticPhase, type ExecutiveDiagnosticSnapshot } from "../diagnostic-state";
+import type { FreshConversationTransport } from "./fresh-conversation-transport";
+import type { ProjectPlanningTransport } from "../planning/project-planning-transport";
 
 /** Implemented inside the existing private web/Rust auth owner. No token getter. */
 export interface OsExecutiveTransport {
@@ -19,6 +21,8 @@ export interface OsExecutiveTransport {
   /** Observer-only closed diagnostics; a snapshot read performs no native call. */
   diagnostics?(): ExecutiveDiagnosticSnapshot;
   readonly directNative?: DirectNativeTransport;
+  readonly projectPlanning?: ProjectPlanningTransport;
+  readonly freshConversation?: FreshConversationTransport;
 }
 
 interface VerifiedContext {

@@ -52,7 +52,6 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/project-admission/current",
         "/workspace/project-instructions/current",
         "/workspace/project-access/current",
-        "/workspace/mission-result/current",
         "/workspace/project-admission/operation",
         "/workspace/projects/archive/current",
         "/workspace/project-knowledge/current",
@@ -60,6 +59,11 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/project-source/current",
         "/workspace/source-operation/context",
         "/workspace/source-operation/operation",
+        "/workspace/source-operation/options",
+        "/workspace/resources/host-observation/current",
+        "/workspace/mission-result/current",
+        "/workspace/native-draft-identity/current",
+        "/workspace/byok/roles/current",
         "/workspace/instruction-admission/current",
         "/workspace/instruction-admission/operation",
     }
@@ -71,6 +75,27 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/project-admission/pause",
         "/workspace/project-admission/resume",
         "/workspace/instruction-admission/pause",
+        "/os/executive/project-planning/submit",
+        "/os/executive/project-planning/status",
+        "/os/executive/project-planning/result",
+        "/os/executive/project-planning/consume",
+        "/os/executive/project-planning/prepare_proposal",
+        "/os/executive/session/history-context",
+        "/os/executive/session/conversations",
+        "/os/executive/session/conversation-read",
+        "/os/executive/session/fresh-conversations",
+        "/os/executive/session/fresh-conversation-read",
+        "/os/executive/conversation/preview",
+        "/os/executive/conversation/create",
+        "/os/executive/conversation/status",
+        "/os/executive/conversation/read",
+        "/os/executive/conversation/consume",
+        "/os/executive/conversation/turn",
+        "/os/executive/conversation/turn/status",
+        "/os/executive/conversation/turn/read",
+        "/os/executive/conversation/consume/status",
+        "/os/executive/conversation/turn/preview",
+        "/os/executive/session/send",
     }
     assert set(GET_ROUTES) == set(INCUMBENT_GET_ROUTES) | expected_get
     assert set(POST_ROUTES) == set(INCUMBENT_POST_ROUTES) | expected_post
@@ -112,13 +137,13 @@ def test_all_accepted_topologies_have_exact_routes(noir, notices, count):
     config = render(value, 49152)
     # OS GET, legacy POST, source POST and both MCP branches share one relay.
     assert config.count("reverse_proxy 127.0.0.1:49152") == 5
-    # All public POSTs are explicit paths. The new session routes are READ
-    # only; effectful session/send stays closed until the held F2 gate clears.
+    # All public POSTs are explicit paths. The historical reader tuple stays
+    # exact; qualified Session SEND is a separate final-profile addition.
     assert "path " + " ".join(POST_ROUTES) + "\n" in config
     assert INCUMBENT_POST_ROUTES == LEGACY_POST_ROUTES + (
         "/os/executive/session/context", "/os/executive/session/reply",
         "/os/executive/session/references")
-    assert "/os/executive/session/send" not in config
+    assert config.count("/os/executive/session/send") == 1
     assert config.count("max_size 64KB") == 2
     assert config.count("max_size 98304") == 1
     assert SOURCE_MAX_BODY == 98304
@@ -320,7 +345,7 @@ def test_real_caddy_adapter_preserves_exact_read_only_edge_routes(tmp_path, noir
     assert (("POST",), tuple(SOURCE_POST_ROUTES)) in by_paths
     assert (("GET",), (MCP_METADATA_ROUTE,)) in by_paths
     assert (("POST",), tuple(MCP_ROUTES)) in by_paths
-    assert "/os/executive/session/send" not in POST_ROUTES
+    assert POST_ROUTES.count("/os/executive/session/send") == 1
     os_get = [match for match in route_matchers
               if match["method"] == ["GET"] and match["path"] != [MCP_METADATA_ROUTE]]
     assert len(os_get) == 1
@@ -407,8 +432,9 @@ def test_instruction_read_profile_preserves_old_exact_profile_and_adds_only_get(
 
 
 def test_project_access_adds_one_fixed_read_and_preserves_full_instruction_predecessor():
-    from ops.executive_os.os_public_edge import PRE_PROJECT_ACCESS_GET_ROUTES,TRANSITION_ROUTE_PROFILES,PRE_MISSION_RESULT_GET_ROUTES
-    assert PRE_MISSION_RESULT_GET_ROUTES==PRE_PROJECT_ACCESS_GET_ROUTES+('/workspace/project-access/current',)
-    assert (PRE_PROJECT_ACCESS_GET_ROUTES,POST_ROUTES) in TRANSITION_ROUTE_PROFILES
+    from ops.executive_os.os_public_edge import (PRE_PROJECT_ACCESS_GET_ROUTES,TRANSITION_ROUTE_PROFILES,
+        PRE_JOURNEY_GET_ROUTES,PRE_JOURNEY_POST_ROUTES)
+    assert PRE_JOURNEY_GET_ROUTES==PRE_PROJECT_ACCESS_GET_ROUTES+('/workspace/project-access/current',)
+    assert (PRE_PROJECT_ACCESS_GET_ROUTES,PRE_JOURNEY_POST_ROUTES) in TRANSITION_ROUTE_PROFILES
     assert '/workspace/project-access/current' not in POST_ROUTES
     assert not any('/workspace/project-access/pause' in routes for profile in TRANSITION_ROUTE_PROFILES for routes in profile)

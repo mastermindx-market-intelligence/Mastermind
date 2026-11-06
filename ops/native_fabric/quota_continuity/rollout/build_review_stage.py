@@ -40,7 +40,8 @@ ADDITIONS = frozenset({"host_pull_daemon.sh", "host_pull_launchd.plist.template"
                       "linux_process_identity.py", "paid_controller_spawn.py", "paid_incumbent_state.py", "paid_host_qualification.py", "paid_initializer.py", "paid_initializer_token_data.py", "paid_initializer_nested_data.py", "paid_yaml_runtime.py", "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json",
                       "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py",
                       "post_failure_observation.py", "post_failure_observation_delivery.py",
-                      "participant_binding.py", "fabric_participant_owner.py"})
+                      "participant_binding.py", "fabric_participant_owner.py",
+                      "original_advertised_artifact.py"})
 # The retired credential-to-stdout helper is audit evidence only. It must never
 # be importable from source/ or selected as a runtime fallback. Its exact bytes
 # still have to match the installed preimage before the secure overlay is used.
@@ -66,7 +67,7 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 # Grok bases above as well as the
 # closed composed candidate bytes; neither source may silently replace the other.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
-    'artifact_delivery.py': '81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1',
+    'artifact_delivery.py': '6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d',
     'remote_sub_exec.py': '710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db',
     'pick.py': 'c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057',
     'remote_sub.sh': '2b0ac9e218642ed3b1d714164f22b5b16da8bb39597e1069fa9ad3f17937fe09',
@@ -223,8 +224,19 @@ BROKER_BUSY_DIGESTS = {
     "quota_circuit.py": "ba1f2582505a0350260d0bdc4a00f6374a2e1140bc4b6cead84368b606f9970e",
 }
 
+GO_ORIGINAL_ARTIFACT_ADDITIONS = {
+    "original_advertised_artifact.py": "46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0",
+}
+GO_ORIGINAL_ARTIFACT_PREIMAGE = "81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1"
+GO_ORIGINAL_ARTIFACT_DIGEST = "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d"
+
+# Exact protected107 process-census successor; prior namespaces retain their bytes.
+GO_CENSUS_RUNTIME_PREIMAGE = "61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329"
+GO_CENSUS_RUNTIME_DIGEST = "83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d"
+
+
 def validate_go_base_manifest(manifest, dependency_hashes):
-    """Accept exact historical102/prior104/current106 application compositions.
+    """Accept exact historical102/prior104/previous106/current107 compositions.
 
     Both the builder and installer compare A3 with their reviewed source
     component first. The picker successor is independently source-pinned by
@@ -233,23 +245,44 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     support changes, the exact protected diagnostic outcome correction, and
     the complete protected Ubuntu4/poll cohorts within the current diagnostic
     closure, the exact sparse-config executor successor, and the complete
-    protected participant cohort in the current106 namespace.
-    Every other member/key stays bound to actual395b.
+    protected participant cohort in the complete106 namespace. The exact
+    advertised-artifact recovery pair extends that closure to107 and is
+    projected back to106 before historical validation; it grants no new
+    application artifact access.
+    The exact current107 census successor is normalized without changing any
+    historical namespace or the caller manifest. Every other member/key stays
+    bound to actual395b.
     """
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
-    prior_expected = expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
+    previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
+    prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
     historical_expected = prior_expected - {"ext/" + name for name in GO_POST_FAILURE_ADDITIONS}
     if (type(manifest) is not dict
-            or frozenset(manifest) not in (frozenset(expected), frozenset(prior_expected),
+            or frozenset(manifest) not in (frozenset(expected), frozenset(previous_expected), frozenset(prior_expected),
                                           frozenset(historical_expected))
             or type(dependency_hashes) is not dict
             or set(dependency_hashes) != set(GO_APPLICATION_DEPENDENCIES)):
         raise ValueError("native Go base dependency closure differs")
-    current_diagnostics = set(manifest) != historical_expected
     normalized = dict(manifest)
+    runtime = manifest["ext/lane_runtime.py"]
+    if runtime == GO_CENSUS_RUNTIME_DIGEST:
+        if set(manifest) != expected:
+            raise ValueError("native Go census cannot relabel historical namespace")
+        normalized["ext/lane_runtime.py"] = GO_CENSUS_RUNTIME_PREIMAGE
+    elif runtime != GO_CENSUS_RUNTIME_PREIMAGE:
+        raise ValueError("native Go census is not the exact protected source")
     if set(manifest) == expected:
-        if (any(manifest["ext/" + name] != digest for name, digest in GO_PARTICIPANT_ADDITIONS.items())
-                or manifest["ext/fabric_operator_owner.py"] != GO_PARTICIPANT_OPERATOR):
+        if (any(manifest["ext/" + name] != digest for name, digest in GO_ORIGINAL_ARTIFACT_ADDITIONS.items())
+                or manifest["ext/artifact_delivery.py"] != GO_ORIGINAL_ARTIFACT_DIGEST):
+            raise ValueError("native Go original-artifact recovery is not one exact protected pair")
+        for name in GO_ORIGINAL_ARTIFACT_ADDITIONS:
+            del normalized["ext/" + name]
+        normalized["ext/artifact_delivery.py"] = GO_ORIGINAL_ARTIFACT_PREIMAGE
+    projected_namespace = set(normalized)
+    current_diagnostics = projected_namespace != historical_expected
+    if projected_namespace == previous_expected:
+        if (any(normalized["ext/" + name] != digest for name, digest in GO_PARTICIPANT_ADDITIONS.items())
+                or normalized["ext/fabric_operator_owner.py"] != GO_PARTICIPANT_OPERATOR):
             raise ValueError("native Go participant cohort is not the exact protected source")
         for name in GO_PARTICIPANT_ADDITIONS:
             del normalized["ext/" + name]
@@ -278,7 +311,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
                        for name, digest in GO_COMPLETED_POLL_PREIMAGES.items()})
     for name, original in GO_POST_FAILURE_PREIMAGES.items():
         exact = GO_POST_FAILURE_DIGESTS[name] if current_diagnostics else original
-        if manifest["ext/" + name] != exact:
+        if normalized["ext/" + name] != exact:
             raise ValueError("native Go post-failure cohort is not the exact protected source")
         historical["ext/" + name] = original
     if current_diagnostics:
@@ -321,12 +354,12 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     # Reapplying its newer preimage here would overwrite those older sealed
     # predecessor hashes and falsify historical102.
     # Preserve exact source hashes and deny partial/mixed custody receipts.
-    # The protected/current trio belongs to current diagnostic namespaces,
-    # never a newly relabelled historical102 closure.
+    # The protected/current trio belongs only to the complete current106
+    # namespace, never a relabelled historical102 or prior104 closure.
     custody = {name: historical["ext/" + name]
                for name in GO_PROTECTED_CUSTODY_PREIMAGES}
     if custody == GO_PROTECTED_CUSTODY_DIGESTS:
-        if not current_diagnostics:
+        if projected_namespace != previous_expected:
             raise ValueError("native Go custody cannot relabel historical namespace")
         historical.update({"ext/" + name: digest
                            for name, digest in GO_PROTECTED_CUSTODY_PREIMAGES.items()})
