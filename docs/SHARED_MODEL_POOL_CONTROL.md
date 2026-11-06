@@ -52,7 +52,7 @@ Primary source evidence: #983, #2060, #2082/#2085; #983 comments6672146510 and66
 | ID | Deliverable | State / next action |
 | --- | --- | --- |
 | C0 | Current consumer and owner audit with live-writer boundaries | Initial audit complete; independent bounded return may add source facts. |
-| C1 | Native configuration snapshot/validation/impact helper in incumbent Fabric namespace, secret-free and no effects | Freeze exact existing document grammar and implement on new additive paths, avoiding #2060/A-core live writers. |
+| C1 | Existing-owner configuration snapshot/validation/impact helpers, secret-free and no effects | First executable slice implemented in ModelRouter and operator CLI; native account/pool integration remains separate to avoid #2060/A-core live writers. |
 | C2 | Integrate coherent loader/configuration generations into incumbent owners after original path custody is clear | Preserve #2060 and new A-core/J/process-carrier effects; no overlapping writes. |
 | C3 | Mastermind OS authenticated shared-pool inventory/change preview consumer | Reuse existing Resources surface and owner routes; no browser credential authority. |
 | C4 | Existing publisher activation, key-reference rotation, drain/rollback and original-request recovery | Actual source/config grants and provider qualification required; no standalone installer. |
