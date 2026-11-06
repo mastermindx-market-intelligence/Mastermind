@@ -7,6 +7,12 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # POSIX stat.st_blocks is counted in 512-byte units, not account identity.
+    # Exact reviewed preview source/site only; any byte drift re-exposes it.
+    'ops/fleet_storage_cleanup/linux_cache_preview.py': {
+        'sha256': '1fc025101f08a052223a79f494fa28c489f48a85590bc9b37e8ef1af0ea3796d',
+        'sites': ((204, 43, 46, 'int', '512'),),
+    },
     # Reviewed application HTTP statuses, permission modes and bounded limits.
     # These exact 56 spans contain no account/principal identity. Byte drift
     # exposes the source to the original guard again.
