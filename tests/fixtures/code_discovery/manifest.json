@@ -1,0 +1,91 @@
+{
+  "schema_version": "mastermind.codeintel_index_manifest.v1",
+  "repositories": [
+    {
+      "repository_id": "mastermind",
+      "repository_name": "mastermindx-market-intelligence/Mastermind",
+      "source_snapshot_root": "/host-owned/immutable-snapshots/mastermind",
+      "ref_label": "master",
+      "commit_sha": "0000000000000000000000000000000000000000",
+      "included_prefixes": [
+        "control_plane/**",
+        "experiments/**",
+        "scripts/**",
+        "tests/**",
+        "docs/**",
+        "research/**",
+        ".github/workflows/**"
+      ],
+      "excluded_globs": [
+        "data/**",
+        "site/**",
+        "node_modules/**",
+        "vendor/**",
+        "**/*.zip",
+        "**/*.tar",
+        "**/*.gz"
+      ],
+      "source_tree_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "repository_id": "mastermind-terminal",
+      "repository_name": "mastermindx-market-intelligence/charting-app",
+      "source_snapshot_root": "/host-owned/immutable-snapshots/mastermind-terminal",
+      "ref_label": "master",
+      "commit_sha": "0000000000000000000000000000000000000000",
+      "included_prefixes": [
+        "src/**",
+        "app/**",
+        "lib/**",
+        "scripts/**",
+        "tests/**",
+        "docs/**",
+        "research/**",
+        ".github/workflows/**"
+      ],
+      "excluded_globs": [
+        "data/**",
+        "site/**",
+        "node_modules/**",
+        "vendor/**",
+        "**/*.zip",
+        "**/*.tar",
+        "**/*.gz"
+      ],
+      "source_tree_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "repository_id": "macro",
+      "repository_name": "mastermindx-market-intelligence/macro",
+      "source_snapshot_root": "/host-owned/immutable-snapshots/macro",
+      "ref_label": "main",
+      "commit_sha": "0000000000000000000000000000000000000000",
+      "included_prefixes": [
+        "engine/**",
+        "app/**",
+        "lib/**",
+        "scripts/**",
+        "tests/**",
+        "agentos/**",
+        ".github/workflows/**",
+        "docs/**",
+        "research/**",
+        "config/**",
+        "templates/**"
+      ],
+      "excluded_globs": [
+        "site/**",
+        "data/**",
+        "mockups/**",
+        "verify_shots/**",
+        "node_modules/**",
+        "vendor/**",
+        "**/*.zip",
+        "**/*.tar",
+        "**/*.gz",
+        "**/*.parquet"
+      ],
+      "source_tree_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}
