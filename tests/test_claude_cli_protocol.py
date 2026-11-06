@@ -1986,3 +1986,190 @@ def test_fake_controls_are_closed_and_fake_only(tmp_path: Path) -> None:
             fake_controls=_fake_controls(tmp_path),
         )
     assert captured.value.observation is ClaudeCliObservation.PROCESS_NOT_STARTED
+
+
+_NESTED_CACHE_ABSENT = object()
+
+
+def _nested_cache_usage(aggregate: int, breakdown=_NESTED_CACHE_ABSENT) -> dict:
+    usage = {
+        "input_tokens": 11,
+        "output_tokens": 7,
+        "cache_creation_input_tokens": aggregate,
+        "cache_read_input_tokens": 0,
+    }
+    if breakdown is not _NESTED_CACHE_ABSENT:
+        usage["cache_creation"] = breakdown
+    return usage
+
+
+@pytest.mark.parametrize(
+    ("aggregate", "breakdown"),
+    [
+        pytest.param(248, _NESTED_CACHE_ABSENT, id="absent"),
+        pytest.param(0, {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0}, id="zero"),
+        pytest.param(248, {"ephemeral_5m_input_tokens": 148, "ephemeral_1h_input_tokens": 100}, id="mixed"),
+        pytest.param(1_000_000_000, {"ephemeral_5m_input_tokens": 1_000_000_000, "ephemeral_1h_input_tokens": 0}, id="maximum-5m"),
+        pytest.param(1_000_000_000, {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 1_000_000_000}, id="maximum-1h"),
+        pytest.param(1_000_000_000, {"ephemeral_5m_input_tokens": 499_999_999, "ephemeral_1h_input_tokens": 500_000_001}, id="maximum-split"),
+    ],
+)
+def test_nested_cache_valid_breakdown_preserves_top_level_counters(aggregate, breakdown) -> None:
+    assert protocol._consume_usage_payload(_nested_cache_usage(aggregate, breakdown)) == (
+        11, 7, aggregate, 0
+    )
+
+
+@pytest.mark.parametrize(
+    "breakdown",
+    [
+        pytest.param(None, id="null"),
+        pytest.param({}, id="empty"),
+        pytest.param({"ephemeral_5m_input_tokens": 0}, id="missing-1h"),
+        pytest.param({"ephemeral_1h_input_tokens": 0}, id="missing-5m"),
+        pytest.param({"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0, "extra": 0}, id="extra"),
+        pytest.param([], id="list"),
+        pytest.param(0, id="scalar"),
+    ],
+)
+def test_nested_cache_present_shape_is_closed(breakdown) -> None:
+    with pytest.raises(protocol._StreamViolation) as captured:
+        protocol._consume_usage_payload(_nested_cache_usage(0, breakdown))
+    assert captured.value.code == "USAGE_INVALID"
+    assert captured.value.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+
+
+@pytest.mark.parametrize("key", ["ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"])
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        pytest.param(True, id="true"),
+        pytest.param(False, id="false"),
+        pytest.param(0.0, id="float"),
+        pytest.param("0", id="string"),
+        pytest.param(-1, id="negative"),
+        pytest.param(1_000_000_001, id="over-limit"),
+        pytest.param(None, id="null"),
+    ],
+)
+def test_nested_cache_counts_remain_strict_bounded_integers(key: str, invalid) -> None:
+    breakdown = {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0}
+    breakdown[key] = invalid
+    with pytest.raises(protocol._StreamViolation) as captured:
+        protocol._consume_usage_payload(_nested_cache_usage(0, breakdown))
+    assert captured.value.code == "USAGE_INVALID"
+    assert captured.value.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+
+
+@pytest.mark.parametrize(
+    ("aggregate", "five_minute", "one_hour"),
+    [
+        pytest.param(0, 100, 0, id="b1-understated-aggregate"),
+        pytest.param(248, 147, 100, id="subtotal-below-aggregate"),
+        pytest.param(248, 149, 100, id="subtotal-above-aggregate"),
+        pytest.param(1_000_000_000, 1_000_000_000, 1_000_000_000, id="subtotal-over-range"),
+    ],
+)
+def test_nested_cache_subtotal_must_equal_the_validated_aggregate(
+    aggregate: int, five_minute: int, one_hour: int
+) -> None:
+    breakdown = {
+        "ephemeral_5m_input_tokens": five_minute,
+        "ephemeral_1h_input_tokens": one_hour,
+    }
+    with pytest.raises(protocol._StreamViolation) as captured:
+        protocol._consume_usage_payload(_nested_cache_usage(aggregate, breakdown))
+    assert captured.value.code == "USAGE_INVALID"
+    assert captured.value.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+
+
+@pytest.mark.parametrize("version", ["2.1.248", "2.1.259"])
+@pytest.mark.parametrize(
+    ("placement", "scenario", "expected_failure"),
+    [
+        ("system", "usage_regression", None),
+        ("assistant", "assistant_usage_regression", None),
+        ("terminal-success", "ok", None),
+        ("terminal-provider-failure", "result_failure", "PROVIDER_FAILURE"),
+        ("terminal-permission-denial", "result_permission_denial", "PERMISSION_DENIED"),
+    ],
+)
+@pytest.mark.parametrize("case", ["valid", "contradiction", "null", "partial"])
+def test_nested_cache_shared_validator_on_real_fake_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str,
+    placement: str, scenario: str, expected_failure: str | None, case: str,
+) -> None:
+    policy, workspace, head, status = _policy(tmp_path, version=version)
+    command = compile_claude_cli_command(policy)
+    real_consume = protocol._StreamParser.consume
+    observed = []
+    aggregate = 248 if case == "valid" else 0
+    breakdown = {
+        "valid": {"ephemeral_5m_input_tokens": 148, "ephemeral_1h_input_tokens": 100},
+        "contradiction": {"ephemeral_5m_input_tokens": 100, "ephemeral_1h_input_tokens": 0},
+        "null": None,
+        "partial": {"ephemeral_5m_input_tokens": 0},
+    }[case]
+
+    def inject_usage(parser, raw_line: bytes) -> None:
+        # Keep the committed fake byte-exact. Inject controlled accounting
+        # evidence only at the existing parser boundary; run its real validator,
+        # process finalization and cleanup rather than replacing those owners.
+        event = json.loads(raw_line)
+        selected = (
+            placement == "system" and event.get("type") == "system"
+            and event.get("subtype") == "usage"
+        ) or (
+            placement == "assistant" and event.get("type") == "assistant"
+            and "usage" in event.get("message", {})
+        ) or (
+            placement.startswith("terminal-") and event.get("type") == "result"
+        )
+        if selected and not observed:
+            observed.append(placement)
+            if placement == "assistant":
+                event["message"]["usage"] = _nested_cache_usage(aggregate, breakdown)
+            else:
+                event["usage"] = _nested_cache_usage(aggregate, breakdown)
+            if placement.startswith("terminal-"):
+                event["modelUsage"][MODEL]["cacheCreationInputTokens"] = aggregate
+            raw_line = json.dumps(event, separators=(",", ":")).encode("utf-8")
+        return real_consume(parser, raw_line)
+
+    monkeypatch.setattr(protocol._StreamParser, "consume", inject_usage)
+    if case != "valid" or expected_failure is not None:
+        with pytest.raises(ClaudeCliProtocolError) as captured:
+            ClaudeCliRunner().run(command, fake_controls=_fake_controls(tmp_path, scenario, version=version))
+        error = captured.value
+        if case != "valid":
+            assert error.code == "USAGE_INVALID"
+            assert error.observation is ClaudeCliObservation.OUTCOME_UNRECONCILED
+            assert error.evidence is None
+        else:
+            assert error.code == expected_failure
+            assert error.observation is ClaudeCliObservation.TERMINAL_PROVIDER_FAILURE_OBSERVED
+            assert error.evidence is not None
+            assert error.evidence.cache_creation_input_tokens == aggregate
+            assert error.evidence.read_count == error.evidence.submission_count == 1
+        cleanup = error.cleanup
+    else:
+        receipt = ClaudeCliRunner().run(
+            command, fake_controls=_fake_controls(tmp_path, scenario, version=version)
+        )
+        assert receipt.observation is ClaudeCliObservation.TERMINAL_RESULT_OBSERVED
+        assert receipt.cache_creation_input_tokens == aggregate
+        assert receipt.read_count == receipt.submission_count == 1
+        cleanup = receipt.cleanup
+
+    assert observed == [placement]
+    assert cleanup is not None
+    assert cleanup.process_group_empty is True
+    assert cleanup.leader_reaped is True
+    assert cleanup.marked_descendants_empty is True
+    assert cleanup.reader_closed is True
+    assert cleanup.scratch_empty is True
+    assert cleanup.residue_rows == ()
+    state = json.loads((tmp_path / "fake-state.json").read_text())
+    assert state["starts"] == 1
+    assert state["network_attempts"] == state["writes"] == state["shells"] == state["mcp_calls"] == state["subagents"] == 0
+    _assert_workspace_unchanged(workspace, head, status)

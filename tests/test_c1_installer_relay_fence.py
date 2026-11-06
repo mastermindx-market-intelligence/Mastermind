@@ -1,0 +1,62 @@
+"""Installer must fence the dedicated C1 Relay across generation changes."""
+from __future__ import annotations
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+INSTALL = ROOT / "ops" / "executive_os" / "install.sh"
+RELAY_LABEL = "com.mastermind.executive.sol-state-relay"
+
+
+def _slice(source: str, start: str, end: str) -> str:
+    start_index = source.index(start)
+    end_index = source.index(end, start_index)
+    return source[start_index:end_index]
+
+
+def test_installer_fences_relay_before_any_release_mutation() -> None:
+    source = INSTALL.read_text(encoding="utf-8")
+    assert f'RELAY_LABEL="{RELAY_LABEL}"' in source, (
+        "missing dedicated C1 Relay label"
+    )
+
+    cleanup = _slice(
+        source,
+        "leave_installed_services_stopped() {",
+        "\n}\n",
+    )
+    mutation = _slice(
+        source,
+        "trap leave_installed_services_stopped EXIT",
+        'stage_sealed_release || exit 65',
+    )
+    relay_disable = '/bin/launchctl disable "system/$RELAY_LABEL"'
+    control_disable = '/bin/launchctl disable "system/$CONTROL_LABEL"'
+    relay_bootout = '/bin/launchctl bootout "system/$RELAY_LABEL"'
+    control_bootout = '/bin/launchctl bootout "system/$CONTROL_LABEL"'
+
+    for block in (cleanup, mutation):
+        assert relay_disable in block
+        assert relay_bootout in block
+        assert block.index(relay_disable) < block.index(control_disable)
+        assert block.index(relay_bootout) < block.index(control_bootout)
+
+    relay_loaded = 'wait_for_launchd_absent "$RELAY_LABEL" relay'
+    control_loaded = 'wait_for_launchd_absent "$CONTROL_LABEL" control'
+    assert relay_loaded in mutation
+    assert mutation.index(relay_loaded) < mutation.index(control_loaded)
+    assert '"$description LaunchDaemon absence was not proven after bootout"' in source
+
+    archive = '/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive'
+    assert archive in source
+    # Definitions are inert. The ordinary call follows the complete Relay fence;
+    # only explicit unselected stage-only mode calls it before service effects.
+    ordinary_call = source.index("stage_sealed_release || exit 65", source.index("trap leave_installed_services_stopped EXIT"))
+    assert source.index(relay_loaded) < ordinary_call
+    assert 'RELAY_PLIST=' not in source
+    assert '/bin/launchctl bootstrap "system/$RELAY_LABEL"' not in source
+
+
+if __name__ == "__main__":
+    test_installer_fences_relay_before_any_release_mutation()

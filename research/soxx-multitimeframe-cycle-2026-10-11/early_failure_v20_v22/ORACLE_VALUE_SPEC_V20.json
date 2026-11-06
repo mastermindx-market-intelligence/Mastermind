@@ -1,0 +1,23 @@
+{
+  "schema": "soxx.next_action_value_at_three_RTH_hours.v20",
+  "predeclared_before_evaluation": true,
+  "scope": "91 previously qualified historical parent turn entries SOXX, SMH, QQQ, AMD, NVDA, MU, INTC, AMAT, LRCX, KLAC, XLV, XLE. Exclude AVGO missing 15m warmup.",
+  "source": "existing private Terminal 5m and15m RTH OHLCV snapshots, receipt/source SHA verified; data rights/no PIT/actual quotes not qualified",
+  "baseline": "52 RTH hour timed exit or original1.5% hard stop whichever first, 25% partial at2%, next-open fills and5bp/side fees",
+  "treatment": "For any position still open after exactly 3 observed RTH hours, unconditionally sell all residual at NEXT observed 5m opening; original stop/partial preempts. Compare same entry counterfactual vs baseline.",
+  "oracle": "With hindsight choose max(base,treatment) separately on each alive trade. This is an upper bound on information value of one binary exit-at-3h decision, not a tradeable strategy or ultimate optimal stopping bound.",
+  "measure": [
+    "which positions already stopped before three hours",
+    "max possible mean return gain from oracle at 3h per original entry",
+    "gain per eligible decision",
+    "economic sacrifices if all live positions exited",
+    "upper-bound of avoidable losses",
+    "binary red (3h close below entry) vs green classification table",
+    "cost-sensitive confusion matrix and rank AUC for 3h return; no fitted threshold, no parameter search",
+    "asset cluster and calendar-week block descriptives"
+  ],
+  "source_gaps": "KLAC seven 5m missing source bars; refuse/censor any entry-to-either-counterfactual-exit path crossing one. Do not fill.",
+  "no_model_originated_sizing": true,
+  "NO_VENDOR_CALLS": true,
+  "NOT_LIVE_RECOMMENDATION": true
+}

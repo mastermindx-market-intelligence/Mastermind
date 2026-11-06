@@ -1199,20 +1199,22 @@ def _consume_usage_payload(value: Any) -> tuple[int, int, int, int]:
             "cache_read_input_tokens",
         )
     )
-    cache_creation = value.get("cache_creation")
-    if cache_creation is not None:
-        if not isinstance(cache_creation, dict):
+    if "cache_creation" in value:
+        cache_creation = value["cache_creation"]
+        duration_keys = ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
+        if not isinstance(cache_creation, dict) or set(cache_creation) != set(duration_keys):
             raise _StreamViolation(
                 "USAGE_INVALID",
                 ClaudeCliObservation.OUTCOME_UNRECONCILED,
                 "cache-creation usage was invalid",
             )
-        _expect_keys(
-            cache_creation,
-            frozenset({"ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"}),
-        )
-        for count in cache_creation.values():
-            _bounded_token_count(count)
+        duration_total = sum(_bounded_token_count(cache_creation[key]) for key in duration_keys)
+        if duration_total != counters[2]:
+            raise _StreamViolation(
+                "USAGE_INVALID",
+                ClaudeCliObservation.OUTCOME_UNRECONCILED,
+                "cache-creation usage contradicted its aggregate",
+            )
     server_tool_use = value.get("server_tool_use")
     if server_tool_use is not None:
         if not isinstance(server_tool_use, dict):

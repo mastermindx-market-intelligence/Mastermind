@@ -181,11 +181,14 @@ def test_shared_index_stays_group_readable_after_control_cleanliness(
     real_run_bytes = executive_workspace._run_bytes
 
     def observed_run_bytes(argv, *, cwd, env):
-        recorded_envs.append(dict(env))
-        recorded_argv.append(tuple(argv))
-        index = Path(cwd) / ".git" / "index"
-        if index.exists() and not index_mode_before_status:
-            index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
+        # Construction now reads the pinned profile from the source. This
+        # regression guards the distinct post-sharing workspace observations.
+        if Path(cwd) != source:
+            recorded_envs.append(dict(env))
+            recorded_argv.append(tuple(argv))
+            index = Path(cwd) / ".git" / "index"
+            if index.exists() and not index_mode_before_status:
+                index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
         return real_run_bytes(argv, cwd=cwd, env=env)
 
     monkeypatch.setattr(executive_workspace, "_run_bytes", observed_run_bytes)
@@ -510,6 +513,20 @@ def test_symlink_permission_repair_fails_closed_when_mode_does_not_change(
 
 
 def test_launch_cleanliness_definition_includes_ignored_untracked_material():
+    # Tracked-status observation must not recursively enumerate untracked files:
+    # the second observation already enumerates every untracked/ignored path.
+    assert executive_workspace.LAUNCH_CLEAN_STATUS_ARGS == (
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=no",
+    )
+    assert executive_workspace.LAUNCH_CLEAN_UNTRACKED_ARGS == (
+        "ls-files",
+        "--others",
+        "-z",
+    )
+
     calls: list[tuple[str, ...]] = []
 
     def observe(arguments):
@@ -577,6 +594,83 @@ def test_terminal_assignment_seal_fails_closed_for_unowned_or_world_boundary(
         seal_control_owned_paths({"workspace": workspace, "run": run_dir})
 
     assert stat.S_IMODE(run_dir.stat().st_mode) == 0o700
+
+
+def test_assignment_seal_binds_original_snapshot_and_retains_content(tmp_path):
+    from control_plane.executive_workspace import _seal_identity
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    (root / "result").write_text("retained")
+    before = _seal_identity(root, root.stat())
+    receipt = seal_control_owned_paths(
+        {"run": root}, expected_identities={"run": before}
+    )
+    assert receipt["paths"]["run"]["before"] == before
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
+    assert (root / "result").read_text() == "retained"
+
+
+def test_assignment_seal_rejects_replacement_before_chmod(tmp_path):
+    from control_plane.executive_workspace import _seal_identity
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    before = _seal_identity(root, root.stat())
+    root.rename(tmp_path / "original")
+    root.mkdir(mode=0o750)
+    with pytest.raises(AssignmentSealError, match="failed closed"):
+        seal_control_owned_paths({"run": root}, expected_identities={"run": before})
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
+
+
+@pytest.mark.parametrize("edge", ["label", "path", "bool_inode", "missing"])
+def test_assignment_seal_malformed_snapshot_has_no_effect(tmp_path, edge):
+    from control_plane.executive_workspace import _seal_identity
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    snapshot = {"run": _seal_identity(root, root.stat())}
+    if edge == "label":
+        snapshot["foreign"] = snapshot.pop("run")
+    elif edge == "path":
+        snapshot["run"]["path"] = str(tmp_path / "other")
+    elif edge == "bool_inode":
+        snapshot["run"]["inode"] = True
+    else:
+        snapshot["run"].pop("inode")
+    with pytest.raises(AssignmentSealError, match="snapshot"):
+        seal_control_owned_paths({"run": root}, expected_identities=snapshot)
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
+
+
+@pytest.mark.parametrize("replace_at", ["open", "chmod"])
+def test_assignment_seal_refuses_path_swap_around_pinned_fd(tmp_path, monkeypatch, replace_at):
+    import control_plane.executive_workspace as module
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    original_open, original_chmod = os.open, os.fchmod
+
+    def swap():
+        root.rename(tmp_path / "original")
+        root.mkdir(mode=0o750)
+
+    def swapped_open(path, flags, *args, **kwargs):
+        fd = original_open(path, flags, *args, **kwargs)
+        if Path(path) == root:
+            swap()
+        return fd
+
+    def swapped_chmod(fd, mode):
+        original_chmod(fd, mode)
+        swap()
+
+    monkeypatch.setattr(module.os, "open" if replace_at == "open" else "fchmod",
+                        swapped_open if replace_at == "open" else swapped_chmod)
+    with pytest.raises(AssignmentSealError, match="failed closed"):
+        seal_control_owned_paths({"run": root})
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
 
 
 # ---------------------------------------------------------------------------
@@ -711,7 +805,7 @@ _INSTALL_SH = Path(__file__).resolve().parents[1] / "ops" / "executive_os" / "in
 
 def test_install_sh_packs_the_administrative_checkout_outside_the_existence_guard():
     install_text = _INSTALL_SH.read_text(encoding="utf-8")
-    guard = 'if [ ! -d "$ADMIN_CHECKOUT/.git" ]; then'
+    guard = 'if [ "$NEED_CLONE" = "1" ]; then'
     assert guard in install_text
     _, after_guard = install_text.split(guard, 1)
     body, after_fi = after_guard.split("\nfi\n", 1)
@@ -749,6 +843,10 @@ def test_packing_collapses_the_local_clone_to_a_single_object_file(tmp_path):
     source = tmp_path / "loose"
     source.mkdir()
     _git(source, "init", "-q")
+    # This fixture must stay loose until the explicit repack below. Runner
+    # maintenance settings must not compact it while commits are created.
+    _git(source, "config", "gc.auto", "0")
+    _git(source, "config", "maintenance.auto", "false")
     _git(source, "config", "user.name", "Executive Test")
     _git(source, "config", "user.email", "executive@example.invalid")
     for index in range(40):
@@ -921,6 +1019,32 @@ def test_install_sh_prunes_unreachable_objects_after_repack_and_before_final_cho
     assert "not company state" in comment_block
 
 
+def test_install_sh_normalizes_safe_promisor_markers_after_prune_before_final_trust():
+    install_text = _INSTALL_SH.read_text(encoding="utf-8")
+
+    prune_marker = '/usr/bin/git -C "$ADMIN_CHECKOUT" prune --expire=now'
+    normalize_marker = '"$RELEASE_ROOT/ops/executive_os/admin_checkout.py" normalize'
+    final_chown = '/usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"'
+    loose_assertion = "administrative checkout still holds loose objects after repack"
+
+    prune_index = install_text.index(prune_marker)
+    normalize_index = install_text.index(normalize_marker, prune_index)
+    chown_index = install_text.index(final_chown, normalize_index)
+    assertion_index = install_text.index(loose_assertion, chown_index)
+    assert prune_index < normalize_index < chown_index < assertion_index
+
+    invocation_start = install_text.rindex('/usr/bin/sudo -u "$CONTROL_USER"', prune_index, normalize_index)
+    invocation = install_text[invocation_start:normalize_index + len(normalize_marker) + 320]
+    assert 'GIT_NO_LAZY_FETCH=1' in invocation
+    assert 'GIT_NO_REPLACE_OBJECTS=1' in invocation
+    assert 'GIT_TERMINAL_PROMPT=0' in invocation
+    assert '--checkout "$ADMIN_CHECKOUT"' in invocation
+    assert '--expected-commit "$EXPECTED_SHA"' in invocation
+    refusal = install_text[normalize_index:chown_index]
+    assert "administrative checkout promisor normalization refused" in refusal
+    assert "exit 65" in refusal
+
+
 def test_prune_after_repack_reaches_zero_loose_objects_and_stays_clonable(tmp_path: Path):
     """The full fix, proved end to end without root.
 
@@ -996,3 +1120,576 @@ def test_prune_after_repack_reaches_zero_loose_objects_and_stays_clonable(tmp_pa
     # Raises if the base commit object is missing from the clone result.
     _git(workspace, "cat-file", "-e", f"{expected_sha}^{{commit}}")
     assert _git(workspace, "rev-parse", "HEAD") == expected_sha
+
+
+def test_linked_workspace_shares_git_store_and_reuses_exact_operation(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "agent-workspaces"
+
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-001",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-001",
+    )
+    workspace = Path(receipt.workspace_path)
+
+    assert workspace == root / "web" / "web-op-001"
+    assert (workspace / ".git").is_file()
+    assert receipt.base_sha == base_sha
+    assert receipt.head_sha == base_sha
+    assert receipt.branch == "sol/web-op-001"
+    assert receipt.reused is False
+    source_common_raw = Path(_git(source, "rev-parse", "--git-common-dir"))
+    source_common = (source / source_common_raw).resolve() if not source_common_raw.is_absolute() else source_common_raw.resolve()
+    assert Path(receipt.common_git_dir) == source_common
+    assert _git(workspace, "status", "--porcelain=v1") == ""
+
+    reused = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-001",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-001",
+    )
+    assert reused.workspace_path == receipt.workspace_path
+    assert reused.reused is True
+
+
+def test_linked_workspace_hydration_has_a_finite_large_repo_budget(
+    tmp_path: Path, monkeypatch,
+):
+    """Only new worktree hydration needs extra time for a large sparse index.
+
+    An observed Macro checkout with >100k tracked paths exceeded the normal
+    60s git read-tree budget; other Git operations retain their 60s bound.
+    """
+    source, base_sha = _repository(tmp_path)
+    original_run = executive_workspace._run
+    observed: list[int] = []
+
+    def capture(argv, *, cwd, env, **kwargs):
+        if list(argv) == ["git", "read-tree", "-mu", "HEAD"]:
+            observed.append(kwargs.get("timeout_seconds", 60))
+        return original_run(argv, cwd=cwd, env=env, **kwargs)
+
+    monkeypatch.setattr(executive_workspace, "_run", capture)
+    receipt = executive_workspace.prepare_linked_worktree(
+        source, tmp_path / "agent-workspaces",
+        operation_id="hydration-budget-001", lane="web",
+        base_sha=base_sha, branch="sol/hydration-budget-001",
+    )
+    assert observed == [240], f"hydration timeout drift: {observed}"
+    assert Path(receipt.workspace_path).is_dir()
+    assert _git(Path(receipt.workspace_path), "status", "--porcelain=v1") == ""
+
+
+def test_linked_workspace_release_removes_clean_base_but_keeps_branch(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-002",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-002",
+    )
+
+    inspection = executive_workspace.inspect_linked_worktree(
+        source,
+        root,
+        receipt.workspace_path,
+        expected_operation_id="web-op-002",
+    )
+    assert inspection.state == "RELEASABLE"
+    assert inspection.recoverability == "UNCHANGED_FROM_ACQUIRED_BASE"
+
+    released = executive_workspace.release_linked_worktree(
+        source,
+        root,
+        receipt.workspace_path,
+        expected_operation_id="web-op-002",
+    )
+    assert released.state == "REMOVED"
+    assert released.removed is True
+    assert not Path(receipt.workspace_path).exists()
+    assert _git(source, "rev-parse", "refs/heads/sol/web-op-002") == base_sha
+
+
+def test_linked_workspace_release_preserves_dirty_work(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-003",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-003",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "uncommitted.txt").write_text("preserve me\n", encoding="utf-8")
+
+    released = executive_workspace.release_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id="web-op-003",
+    )
+    assert released.state == "PRESERVED_DIRTY"
+    assert released.dirty is True
+    assert released.removed is False
+    assert workspace.exists()
+
+
+def test_linked_workspace_release_preserves_local_only_commit(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-004",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-004",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "README.md").write_text("local only\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "local only")
+
+    released = executive_workspace.release_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id="web-op-004",
+    )
+    assert released.state == "PRESERVED_UNPUBLISHED"
+    assert released.dirty is False
+    assert released.removed is False
+    assert released.head_sha != base_sha
+    assert workspace.exists()
+
+
+def test_linked_workspace_refuses_unmanaged_or_mismatched_identity(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-005",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-005",
+    )
+
+    with pytest.raises(WorkspaceError, match="operation identity"):
+        executive_workspace.inspect_linked_worktree(
+            source,
+            root,
+            receipt.workspace_path,
+            expected_operation_id="web-op-other",
+        )
+
+    unmanaged = tmp_path / "unmanaged"
+    _git(source, "worktree", "add", "--detach", str(unmanaged), base_sha)
+    with pytest.raises(WorkspaceError, match="outside the managed"):
+        executive_workspace.inspect_linked_worktree(source, root, unmanaged)
+
+
+def test_linked_workspace_release_accepts_head_published_to_origin_branch(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    remote = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "master")
+
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="web-op-006",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-op-006",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "README.md").write_text("published\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "published")
+    head = _git(workspace, "rev-parse", "HEAD")
+    _git(workspace, "push", "-u", "origin", "sol/web-op-006")
+    assert _git(source, "rev-parse", "refs/remotes/origin/sol/web-op-006") == head
+
+    released = executive_workspace.release_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id="web-op-006",
+    )
+    assert released.state == "REMOVED"
+    assert released.recoverability == "HEAD_PUBLISHED_TO_ORIGIN_BRANCH"
+    assert released.removed is True
+    assert not workspace.exists()
+    assert _git(source, "rev-parse", "refs/heads/sol/web-op-006") == head
+
+
+@pytest.mark.parametrize("kind", ["tracked", "untracked", "ignored", "mixed"])
+def test_linked_release_explains_hidden_untracked_without_removing_files(tmp_path: Path, kind: str):
+    source, _base = _repository(tmp_path)
+    (source / ".gitignore").write_text(".pytest_cache/\n", encoding="utf-8")
+    _git(source, "add", ".gitignore")
+    _git(source, "commit", "-qm", "ignore generated test cache")
+    base = _git(source, "rev-parse", "HEAD")
+    root = tmp_path / "workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source, root, operation_id="dirty-explanation", lane="web", base_sha=base,
+        branch="sol/web-dirty-explanation",
+    )
+    workspace = Path(receipt.workspace_path)
+    payloads = {}
+    if kind in {"tracked", "mixed"}:
+        payloads["README.md"] = b"uncommitted source must survive\n"
+    if kind in {"untracked", "mixed"}:
+        payloads["private-filename-marker.txt"] = b"untracked evidence must survive\n"
+    if kind == "ignored":
+        payloads[".pytest_cache/private-filename-marker"] = b"ignored evidence is not automatically disposable\n"
+    for relative, payload in payloads.items():
+        target = workspace / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+    if kind == "ignored":
+        assert _git(workspace, "status", "--porcelain=v1") == ""
+    observed = executive_workspace.release_linked_worktree(
+        source, root, workspace, expected_operation_id="dirty-explanation",
+    )
+    assert observed.state == "PRESERVED_DIRTY"
+    assert observed.dirty is True and observed.removed is False
+    assert "including ignored files" in observed.reason
+    assert f"tracked_changes={'present' if kind in {'tracked', 'mixed'} else 'absent'}" in observed.reason
+    assert f"all_untracked={'absent' if kind == 'tracked' else 'present'}" in observed.reason
+    assert "git ls-files --others -z" in observed.reason
+    assert "retain needed source and evidence" in observed.reason
+    assert "No files were removed" in observed.reason
+    assert "private-filename-marker" not in observed.reason
+    assert len(observed.reason.encode("utf-8")) < 600
+    assert _git(workspace, "rev-parse", "HEAD") == base
+    for relative, payload in payloads.items():
+        assert (workspace / relative).read_bytes() == payload
+
+
+def test_linked_workspace_release_accepts_explicit_existing_pr_publication_branch(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    remote = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "master")
+
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="repair-existing-pr-001",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-repair-existing-pr-001",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "README.md").write_text("published to incumbent PR\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "repair incumbent PR")
+    head = _git(workspace, "rev-parse", "HEAD")
+    publication_branch = "sol/incumbent-existing-pr"
+    _git(workspace, "push", "origin", f"HEAD:refs/heads/{publication_branch}")
+    assert _git(source, "rev-parse", f"refs/remotes/origin/{publication_branch}") == head
+
+    # Existing behavior stays fail-closed without explicit publication evidence.
+    held = executive_workspace.inspect_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id="repair-existing-pr-001",
+    )
+    assert held.state == "PRESERVED_UNPUBLISHED"
+
+    inspection = executive_workspace.inspect_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id="repair-existing-pr-001",
+        published_branch=publication_branch,
+    )
+    assert inspection.state == "RELEASABLE"
+    assert inspection.recoverability == "HEAD_PUBLISHED_TO_DECLARED_ORIGIN_BRANCH"
+
+    released = executive_workspace.release_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id="repair-existing-pr-001",
+        published_branch=publication_branch,
+    )
+    assert released.state == "REMOVED"
+    assert released.removed is True
+    assert not workspace.exists()
+    assert _git(source, "rev-parse", f"refs/remotes/origin/{publication_branch}") == head
+
+
+def test_linked_workspace_declared_publication_branch_must_exactly_contain_head(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    remote = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "master")
+
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="repair-existing-pr-002",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-repair-existing-pr-002",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "README.md").write_text("local semantic repair\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "local semantic repair")
+
+    # Publish only the old base to the declared branch; it cannot recover HEAD.
+    _git(source, "push", "origin", f"{base_sha}:refs/heads/sol/wrong-pr")
+    held = executive_workspace.inspect_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id="repair-existing-pr-002",
+        published_branch="sol/wrong-pr",
+    )
+    assert held.state == "PRESERVED_UNPUBLISHED"
+    assert held.recoverability == "LOCAL_HEAD_NOT_RECOVERABLE_FROM_OBSERVED_ORIGIN_REFS"
+    assert workspace.exists()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        " ../escape",
+        "../escape",
+        "-option",
+        "/absolute",
+        ".hidden",
+        "sol//double",
+        "sol/../escape",
+        "sol/name.lock",
+        "sol/name.",
+        "sol/name@{1}",
+        "sol/name with space",
+        "sol/name~1",
+        "refs/heads/sol/not-a-plain-branch",
+    ],
+)
+def test_linked_workspace_refuses_invalid_declared_publication_branch(tmp_path: Path, value: str):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "agent-workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id="repair-existing-pr-invalid",
+        lane="web",
+        base_sha=base_sha,
+        branch="sol/web-repair-existing-pr-invalid",
+    )
+    with pytest.raises(WorkspaceError, match="published branch is invalid"):
+        executive_workspace.inspect_linked_worktree(
+            source,
+            root,
+            receipt.workspace_path,
+            expected_operation_id="repair-existing-pr-invalid",
+            published_branch=value,
+        )
+
+
+def test_linked_workspace_release_accepts_deleted_source_branch_via_exact_pull_ref(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    remote = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "master")
+
+    root = tmp_path / "agent-workspaces"
+    operation = "postmerge-pr-ref-001"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id=operation,
+        lane="web",
+        base_sha=base_sha,
+        branch=f"sol/web-{operation}",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "README.md").write_text("candidate head\\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "candidate")
+    head = _git(workspace, "rev-parse", "HEAD")
+    _git(workspace, "push", "origin", f"HEAD:refs/heads/sol/web-{operation}")
+    _git(remote, "update-ref", "refs/pull/818/head", head)
+    _git(workspace, "push", "origin", "--delete", f"sol/web-{operation}")
+
+    held = executive_workspace.inspect_linked_worktree(
+        source, root, workspace, expected_operation_id=operation
+    )
+    assert held.state == "PRESERVED_UNPUBLISHED"
+
+    observed = executive_workspace.inspect_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id=operation,
+        published_pull_request=818,
+    )
+    assert observed.state == "RELEASABLE"
+    assert observed.recoverability == "HEAD_PUBLISHED_TO_PULL_REQUEST_REF"
+
+    released = executive_workspace.release_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id=operation,
+        published_pull_request=818,
+    )
+    assert released.state == "REMOVED"
+    assert released.removed is True
+    assert not workspace.exists()
+    assert _git(remote, "rev-parse", "refs/pull/818/head") == head
+
+
+def test_linked_workspace_pull_ref_evidence_is_exact_and_unambiguous(tmp_path: Path):
+    source, base_sha = _repository(tmp_path)
+    remote = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", "-q", str(remote)],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    _git(source, "remote", "add", "origin", str(remote))
+    _git(source, "push", "-u", "origin", "master")
+    root = tmp_path / "agent-workspaces"
+    operation = "postmerge-pr-ref-002"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source,
+        root,
+        operation_id=operation,
+        lane="web",
+        base_sha=base_sha,
+        branch=f"sol/web-{operation}",
+    )
+    workspace = Path(receipt.workspace_path)
+    (workspace / "README.md").write_text("local only\\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "local candidate")
+    _git(remote, "update-ref", "refs/pull/819/head", base_sha)
+
+    held = executive_workspace.inspect_linked_worktree(
+        source,
+        root,
+        workspace,
+        expected_operation_id=operation,
+        published_pull_request=819,
+    )
+    assert held.state == "PRESERVED_UNPUBLISHED"
+    assert workspace.exists()
+
+    for invalid in (0, -1, True, 2_147_483_648):
+        with pytest.raises(WorkspaceError, match="published pull request is invalid"):
+            executive_workspace.inspect_linked_worktree(
+                source,
+                root,
+                workspace,
+                expected_operation_id=operation,
+                published_pull_request=invalid,
+            )
+
+    with pytest.raises(WorkspaceError, match="mutually exclusive"):
+        executive_workspace.inspect_linked_worktree(
+            source,
+            root,
+            workspace,
+            expected_operation_id=operation,
+            published_branch="sol/other",
+            published_pull_request=819,
+        )
+
+
+@pytest.mark.parametrize("control", ["\x00", "\x01", "\x1b", "\x7f"], ids=["NUL", "SOH", "ESC", "DEL"])
+def test_publication_control_bytes_are_typed_refusals_before_ref_lookup_or_removal(
+    tmp_path: Path, monkeypatch, control: str
+):
+    source, base_sha = _repository(tmp_path)
+    root = tmp_path / "workspaces"
+    operation = "publication-control-byte"
+    created = executive_workspace.prepare_linked_worktree(
+        source, root, operation_id=operation, lane="web", base_sha=base_sha,
+        branch=f"sol/web-{operation}",
+    )
+    workspace = Path(created.workspace_path)
+    (workspace / "README.md").write_text("retain this local commit\n", encoding="utf-8")
+    _git(workspace, "add", "README.md")
+    _git(workspace, "commit", "-qm", "local unpublished source")
+    before_bytes = (workspace / "README.md").read_bytes()
+    before_registration = _git(source, "worktree", "list", "--porcelain")
+    before_git_file = (workspace / ".git").read_bytes()
+    admin = Path(_git(workspace, "rev-parse", "--absolute-git-dir"))
+    before_lock = (admin / "locked").read_bytes()
+    invalid = f"sol/bad{control}branch"
+    publication_reads, removals = [], []
+    real_status, real_run = executive_workspace._run_status, executive_workspace._run
+
+    def record_status(argv, **kwargs):
+        if f"refs/remotes/origin/{invalid}" in argv:
+            publication_reads.append(tuple(argv))
+        return real_status(argv, **kwargs)
+
+    def record_run(argv, **kwargs):
+        if "worktree" in argv and "remove" in argv:
+            removals.append(tuple(argv))
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(executive_workspace, "_run_status", record_status)
+    monkeypatch.setattr(executive_workspace, "_run", record_run)
+    with pytest.raises(WorkspaceError, match="published branch is invalid"):
+        executive_workspace.release_linked_worktree(
+            source, root, workspace, expected_operation_id=operation,
+            published_branch=invalid,
+        )
+    assert publication_reads == []
+    assert removals == []
+    assert (workspace / "README.md").read_bytes() == before_bytes
+    assert (workspace / ".git").read_bytes() == before_git_file
+    assert (admin / "locked").read_bytes() == before_lock
+    assert _git(source, "worktree", "list", "--porcelain") == before_registration

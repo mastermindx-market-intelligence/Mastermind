@@ -54,6 +54,7 @@ from control_plane import chairman_control_room as ccr
 from control_plane import executive_orchestration_principal as principal
 from control_plane import executive_placement_selection as eps
 from control_plane import executive_steward as es
+from control_plane import sol_capability_status as cap
 from control_plane import surface_bindings as sb
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "chairman_control_room"
@@ -332,11 +333,19 @@ def test_output_keys_are_exactly_the_frozen_set(boot_packet, inbox, active_build
         # the canonical Steward-based responsibility view.  Additive only —
         # every C1-owned key above is untouched.
         "autonomy",
+        # C2 additive injected owner-evidence seam. The compositor carries
+        # already-collected CAP1 evidence and never probes Studio itself.
+        "runtime_capability_status",
     }
     # No facts document was supplied (the common case) -> no section, no
     # degraded entry named for it (CAP-C1).
     assert doc["placement_selection"] is None
     assert not any(entry.startswith("placement_selection:") for entry in doc["degraded"])
+    assert doc["runtime_capability_status"] is None
+    assert not any(
+        entry.startswith("runtime_capability_status:")
+        for entry in doc["degraded"]
+    )
     assert set(doc["sources"].keys()) == {
         "mastermind_sha", "mastermind_branch", "macro_sha", "macro_root",
         "executive_inbox_schema", "agent_os_brief_schema",
@@ -344,6 +353,42 @@ def test_output_keys_are_exactly_the_frozen_set(boot_packet, inbox, active_build
         "active_builds_schema", "active_builds_collected_at",
         "runtime_db_present", "bindings_path_present",
     }
+
+
+def test_runtime_capability_status_accepts_only_typed_cap1_envelope(
+    boot_packet, inbox, active_builds, bindings
+):
+    status = cap.project_sol_capability_status(
+        (),
+        observed_at="2026-08-21T00:09:59Z",
+        capability_generation="ccr-test-generation",
+    )
+
+    accepted = _compose(
+        boot_packet,
+        inbox,
+        active_builds,
+        bindings,
+        runtime_capability_status=status,
+    )
+    assert accepted["runtime_capability_status"] == status.to_dict()
+    assert not any(
+        entry.startswith("runtime_capability_status:")
+        for entry in accepted["degraded"]
+    )
+
+    refused = _compose(
+        boot_packet,
+        inbox,
+        active_builds,
+        bindings,
+        runtime_capability_status=status.to_dict(),
+    )
+    assert refused["runtime_capability_status"] is None
+    assert (
+        "runtime_capability_status: typed CAP1 envelope required"
+        in refused["degraded"]
+    )
 
 
 def test_no_overall_or_combined_status_field_anywhere(boot_packet, inbox, active_builds, bindings):
@@ -838,6 +883,93 @@ def test_falsifier_runtime_jobs_none_degrades_named_attention_jobs_survive(
         {"job_id": "job-alpha-001", "status": "failed", "workstream": "WS:ALPHA-ONE"}
     ]
     assert alpha["executive"]["joined_by"] == "ceo_intent_provenance"
+
+
+def test_control_room_heterogeneous_pair_degrades_by_name_and_never_claims_live(
+    boot_packet,
+    inbox,
+    active_builds,
+    agent_os_state,
+    bindings,
+    monkeypatch,
+):
+    runtime_jobs = [
+        {
+            "job_id": "JOB-HF1Q-CODEX",
+            "status": "RUNNING",
+            "workstream": "WS:HF1Q-HERMETIC-PAIR",
+        },
+        {
+            "job_id": "JOB-HF1Q-CLAUDE",
+            "status": "RUNNING",
+            "workstream": "WS:HF1Q-HERMETIC-PAIR",
+        },
+    ]
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("compose_control_room must not perform I/O")
+
+    monkeypatch.setattr("builtins.open", _boom)
+    monkeypatch.setattr(Path, "open", _boom)
+    degraded = ccr.compose_control_room(
+        inbox=inbox,
+        boot_packet=boot_packet,
+        active_builds=active_builds,
+        agent_os_state=None,
+        runtime_jobs=None,
+        bindings=bindings,
+        generated_at="2026-09-14T00:00:00Z",
+    )
+    assert any(
+        entry.startswith("agent_os_state: unavailable")
+        and "BUILT_NOT_PROVEN" in entry
+        and "not live" in entry
+        for entry in degraded["degraded"]
+    ), degraded["degraded"]
+    assert any(
+        entry.startswith("executive_runtime: unavailable")
+        and "BUILT_NOT_PROVEN" in entry
+        and "not live" in entry
+        for entry in degraded["degraded"]
+    ), degraded["degraded"]
+
+    surviving = ccr.compose_control_room(
+        inbox=inbox,
+        boot_packet=boot_packet,
+        active_builds=active_builds,
+        agent_os_state=agent_os_state,
+        runtime_jobs=runtime_jobs,
+        bindings=bindings,
+        generated_at="2026-09-14T00:00:00Z",
+    )
+    pair = next(
+        card
+        for card in surviving["work"]
+        if card["work_ref"] == "WS:HF1Q-HERMETIC-PAIR"
+    )
+    assert [job["job_id"] for job in pair["executive"]["jobs"]] == [
+        "JOB-HF1Q-CLAUDE",
+        "JOB-HF1Q-CODEX",
+    ]
+    assert all(job["status"] == "RUNNING" for job in pair["executive"]["jobs"])
+
+    def _walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                lowered = str(key).lower()
+                assert "combined" not in lowered, key
+                assert "overall" not in lowered, key
+                _walk(value)
+            return
+        if isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(degraded)
+    _walk(surviving)
+    lowered = json.dumps([degraded, surviving]).lower()
+    assert "proven_live" not in lowered
+    assert '"live"' not in lowered
 
 
 # ---------------------------------------------------------------------------
@@ -1401,46 +1533,59 @@ def test_module_boots_with_both_selector_modules_absent_at_import_time(tmp_path)
     the top of the module would make this test fail with ImportError —
     exactly the extracted-release regression class the optional import
     exists to prevent."""
-    import importlib
+    import subprocess
     import sys
+    import textwrap
 
-    blocked = {
-        "control_plane.executive_placement_selection",
-        "control_plane.executive_steward",
-    }
+    # A fresh import also changes attributes on the parent package. Keep the
+    # deliberately degraded module entirely outside this pytest interpreter.
+    probe = textwrap.dedent("""\
+        import importlib
+        import sys
+        from pathlib import Path
 
-    class _AbsenceFinder:
-        def find_spec(self, fullname, path=None, target=None):
-            if fullname in blocked:
-                raise ModuleNotFoundError(f"blocked for test: {fullname}")
-            return None
+        blocked = {
+            "control_plane.executive_placement_selection",
+            "control_plane.executive_steward",
+        }
 
-    saved = {name: sys.modules.get(name) for name in blocked}
-    saved["control_plane.chairman_control_room"] = sys.modules.get(
-        "control_plane.chairman_control_room"
-    )
-    finder = _AbsenceFinder()
-    sys.meta_path.insert(0, finder)
-    for name in blocked:
-        sys.modules.pop(name, None)
-    sys.modules.pop("control_plane.chairman_control_room", None)
-    try:
+        class _AbsenceFinder:
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname in blocked:
+                    raise ModuleNotFoundError(f"blocked for test: {fullname}")
+                return None
+
+        sys.meta_path.insert(0, _AbsenceFinder())
         fresh = importlib.import_module("control_plane.chairman_control_room")
         assert fresh.executive_placement_selection is None
         assert fresh.executive_steward is None
-        facts_path = tmp_path / "facts.json"
+        facts_path = Path(sys.argv[1]) / "facts.json"
         facts_path.write_text("{}", encoding="utf-8")
         result, failure = fresh._read_placement_selection(facts_path)
         assert result is None
         assert failure == "unavailable (module not shipped)"
-    finally:
-        sys.meta_path.remove(finder)
-        sys.modules.pop("control_plane.chairman_control_room", None)
-        for name, module in saved.items():
-            if module is not None:
-                sys.modules[name] = module
-            else:
-                sys.modules.pop(name, None)
+    """)
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", probe, str(tmp_path)],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("probe_name, args", [
+    ("test_module_boots_with_both_selector_modules_absent_at_import_time", ()),
+    ("test_module_boots_with_selector_present_but_steward_absent", ()),
+    ("test_module_fails_closed_when_any_selector_dependency_is_absent", ("executive_steward",)),
+])
+def test_absent_selector_import_probe_preserves_parent_module_identity(tmp_path, probe_name, args):
+    import sys
+    import control_plane
+
+    before = sys.modules["control_plane.chairman_control_room"]
+    globals()[probe_name](tmp_path, *args)
+    assert sys.modules["control_plane.chairman_control_room"] is before
+    assert control_plane.chairman_control_room is before
 
 
 # ---------------------------------------------------------------------------
@@ -2383,42 +2528,58 @@ def test_module_boots_with_selector_present_but_steward_absent(tmp_path):
     `control_plane.chairman_control_room` import — a hard crash instead of
     the documented fail-closed degrade.
     """
-    import importlib
+    import subprocess
     import sys
+    import textwrap
 
-    blocked = {"control_plane.executive_steward"}
-    dependent = "control_plane.executive_placement_selection"
+    # Do not leak this deliberately degraded import through package attributes.
+    probe = textwrap.dedent("""\
+        import sys
+        from pathlib import Path
+        tmp_path = Path(sys.argv[1])
+        import importlib
+        import sys
 
-    class _AbsenceFinder:
-        def find_spec(self, fullname, path=None, target=None):
-            if fullname in blocked:
-                raise ModuleNotFoundError(f"blocked for test: {fullname}")
-            return None
+        blocked = {"control_plane.executive_steward"}
+        dependent = "control_plane.executive_placement_selection"
 
-    names = blocked | {dependent, "control_plane.chairman_control_room"}
-    saved = {name: sys.modules.get(name) for name in names}
-    finder = _AbsenceFinder()
-    sys.meta_path.insert(0, finder)
-    for name in names:
-        sys.modules.pop(name, None)
-    try:
-        fresh = importlib.import_module("control_plane.chairman_control_room")
-        # fail CLOSED — both optional names absent, no crash
-        assert fresh.executive_steward is None
-        assert fresh.executive_placement_selection is None
-        facts_path = tmp_path / "facts.json"
-        facts_path.write_text("{}", encoding="utf-8")
-        result, failure = fresh._read_placement_selection(facts_path)
-        assert result is None
-        assert failure == "unavailable (module not shipped)"
-    finally:
-        sys.meta_path.remove(finder)
+        class _AbsenceFinder:
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname in blocked:
+                    raise ModuleNotFoundError(f"blocked for test: {fullname}")
+                return None
+
+        names = blocked | {dependent, "control_plane.chairman_control_room"}
+        saved = {name: sys.modules.get(name) for name in names}
+        finder = _AbsenceFinder()
+        sys.meta_path.insert(0, finder)
         for name in names:
             sys.modules.pop(name, None)
-        for name, module in saved.items():
-            if module is not None:
-                sys.modules[name] = module
-        importlib.import_module("control_plane.chairman_control_room")
+        try:
+            fresh = importlib.import_module("control_plane.chairman_control_room")
+            # fail CLOSED — both optional names absent, no crash
+            assert fresh.executive_steward is None
+            assert fresh.executive_placement_selection is None
+            facts_path = tmp_path / "facts.json"
+            facts_path.write_text("{}", encoding="utf-8")
+            result, failure = fresh._read_placement_selection(facts_path)
+            assert result is None
+            assert failure == "unavailable (module not shipped)"
+        finally:
+            sys.meta_path.remove(finder)
+            for name in names:
+                sys.modules.pop(name, None)
+            for name, module in saved.items():
+                if module is not None:
+                    sys.modules[name] = module
+            importlib.import_module("control_plane.chairman_control_room")
+    """)
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", probe, str(tmp_path)],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def _static_control_plane_imports(path) -> set[str]:
@@ -2580,51 +2741,68 @@ def test_module_fails_closed_when_any_selector_dependency_is_absent(tmp_path, ab
     Parametrized over EVERY declared dependency so this cannot pass for one
     and crash on another.
     """
-    import importlib
-    import importlib.util
+    import subprocess
     import sys
+    import textwrap
 
-    blocked = {f"control_plane.{absent}"}
-    touched = blocked | {
-        "control_plane.executive_placement_selection",
-        "control_plane.executive_steward",
-        "control_plane.executive_orchestration_principal",
-        "control_plane.chairman_control_room",
-    }
+    # Do not leak this deliberately degraded import through package attributes.
+    probe = textwrap.dedent("""\
+        import sys
+        from pathlib import Path
+        tmp_path = Path(sys.argv[1])
+        absent = sys.argv[2]
+        import importlib
+        import importlib.util
+        import sys
 
-    # A meta-path finder returning None means "I cannot handle this, try the
-    # next finder" — the real one then loads it. `importlib.util.find_spec`
-    # yields None only when NO finder locates the module, so patch that
-    # directly: this is precisely the `spec is None` branch
-    # `_optional_control_plane_module` takes for a genuinely unshipped file.
-    real_find_spec = importlib.util.find_spec
+        blocked = {f"control_plane.{absent}"}
+        touched = blocked | {
+            "control_plane.executive_placement_selection",
+            "control_plane.executive_steward",
+            "control_plane.executive_orchestration_principal",
+            "control_plane.chairman_control_room",
+        }
 
-    def _absent_find_spec(name, package=None):
-        if name in blocked:
-            return None
-        return real_find_spec(name, package)
+        # A meta-path finder returning None means "I cannot handle this, try the
+        # next finder" — the real one then loads it. `importlib.util.find_spec`
+        # yields None only when NO finder locates the module, so patch that
+        # directly: this is precisely the `spec is None` branch
+        # `_optional_control_plane_module` takes for a genuinely unshipped file.
+        real_find_spec = importlib.util.find_spec
 
-    saved = {name: sys.modules.get(name) for name in touched}
-    monkey = importlib.util.find_spec
-    importlib.util.find_spec = _absent_find_spec
-    for name in touched:
-        sys.modules.pop(name, None)
-    try:
-        fresh = importlib.import_module("control_plane.chairman_control_room")
-        assert fresh.executive_placement_selection is None
-        facts_path = tmp_path / "facts.json"
-        facts_path.write_text("{}", encoding="utf-8")
-        result, failure = fresh._read_placement_selection(facts_path)
-        assert result is None
-        assert failure == "unavailable (module not shipped)"
-    finally:
-        importlib.util.find_spec = monkey
+        def _absent_find_spec(name, package=None):
+            if name in blocked:
+                return None
+            return real_find_spec(name, package)
+
+        saved = {name: sys.modules.get(name) for name in touched}
+        monkey = importlib.util.find_spec
+        importlib.util.find_spec = _absent_find_spec
         for name in touched:
             sys.modules.pop(name, None)
-        for name, module in saved.items():
-            if module is not None:
-                sys.modules[name] = module
-        importlib.import_module("control_plane.chairman_control_room")
+        try:
+            fresh = importlib.import_module("control_plane.chairman_control_room")
+            assert fresh.executive_placement_selection is None
+            facts_path = tmp_path / "facts.json"
+            facts_path.write_text("{}", encoding="utf-8")
+            result, failure = fresh._read_placement_selection(facts_path)
+            assert result is None
+            assert failure == "unavailable (module not shipped)"
+        finally:
+            importlib.util.find_spec = monkey
+            for name in touched:
+                sys.modules.pop(name, None)
+            for name, module in saved.items():
+                if module is not None:
+                    sys.modules[name] = module
+            importlib.import_module("control_plane.chairman_control_room")
+    """)
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", probe, str(tmp_path), absent],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_a_mandatory_transitive_dependency_is_a_hard_failure_not_a_degrade():

@@ -27,7 +27,7 @@ from integrations.business_mcp_auth.contracts import (
 )
 
 
-_KID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_KID_RE = re.compile(r"^[A-Za-z0-9_-][A-Za-z0-9._:-]{0,127}$")
 _FORBIDDEN_HEADER_KEYS = frozenset({"jku", "x5u", "x5c", "jwk"})
 _REQUIRED_CLAIMS = frozenset({"iss", "sub", "aud", "iat", "exp", "scope"})
 _MAX_SCOPE_CHARS = 4096

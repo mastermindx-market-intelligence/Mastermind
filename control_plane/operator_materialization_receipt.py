@@ -25,6 +25,11 @@ from control_plane.operator_harness_contract import (
     ACCOUNT_REALM_STATUS,
     ObservedHarnessAttestation,
 )
+from control_plane.executive_orchestration_principal import (
+    OrchestrationPrincipalError,
+    base_process_identity,
+    validate_process_identity,
+)
 from control_plane.operator_harness_wire import (
     OperatorHarnessWireError,
     observed_harness_attestation,
@@ -347,7 +352,7 @@ def build_operator_materialization_receipt(
         worker_id=worker_id,
     )
     credentials = _process_credentials(process_credentials)
-    if credentials["process_identity"] != process:
+    if base_process_identity(credentials["process_identity"]) != process:
         raise OperatorMaterializationReceiptError(
             "process credentials and receipt process identity differ"
         )
@@ -699,8 +704,12 @@ def _process_identity(value: object) -> dict[str, Any]:
 
 def _process_credentials(value: object) -> dict[str, Any]:
     raw = _closed_mapping(value, "process credentials", _CREDENTIAL_FIELDS)
+    try:
+        identity = validate_process_identity(raw["process_identity"])
+    except OrchestrationPrincipalError as exc:
+        raise OperatorMaterializationReceiptError("process credential identity is invalid") from exc
     return {
-        "process_identity": _process_identity(raw["process_identity"]),
+        "process_identity": identity,
         "os_principal_name": _text(
             raw["os_principal_name"], "OS principal name"
         ),

@@ -49,6 +49,7 @@ from integrations.business_mcp_auth.contracts import (
 )
 from integrations.executive_mcp import schemas as mcp_schemas
 from integrations.mastermind_executive_app.admission import STATUS_ACCEPTED, STATUS_CONFLICT
+from integrations.mastermind_executive_app import app as app_module
 from integrations.mastermind_executive_app.app import AppSettings, create_app
 from integrations.mastermind_executive_app.gateway import AppPolicies, READ_SCOPE, SUBMIT_SCOPE
 
@@ -217,7 +218,10 @@ def _client(
     settings = AppSettings(
         policies=policies,
         mastermind_root=mastermind_root,
-        macro_root_flag=None,
+        # The reused read gateway consults os.environ independently of
+        # AppSettings.environ. An explicit absent root prevents ambient
+        # Macro discovery without replacing the real read path.
+        macro_root_flag=str(mastermind_root / "__absent_test_macro__"),
         environ={},
         ceo_ingress_socket_path=ceo_ingress_socket_path,
         jwks_cache=_FakeJwksCache(rsa_key),
@@ -225,6 +229,53 @@ def _client(
     )
     app = create_app(settings)
     return TestClient(app, raise_server_exceptions=False), settings
+
+
+def test_read_only_app_constructs_no_ingress_or_admission_surface(
+    rsa_key, tmp_path, monkeypatch
+):
+    """The E1 direct app is structurally incapable of constructing writers."""
+
+    def forbidden_writer(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("read-only E1 must not construct a writer")
+
+    monkeypatch.setattr(app_module, "CeoIngressClient", forbidden_writer)
+    monkeypatch.setattr(app_module, "AdmissionRequest", forbidden_writer)
+    settings = AppSettings(
+        policies=AppPolicies(read=_read_policy(), submit=_submit_policy()),
+        mastermind_root=tmp_path / "mastermind",
+        macro_root_flag=str(tmp_path / "macro"),
+        runtime_root=tmp_path / "runtime",
+        environ={},
+        ceo_ingress_socket_path=None,
+        read_only=True,
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+
+    app = create_app(settings)
+    paths = {route.path for route in app._app.routes}
+
+    assert "/v1/tools/submit_ceo_intent" not in paths
+    assert "/v1/tools/submit_ceo_intent/reconcile" not in paths
+    assert "/v1/tools/{tool_name}" in paths
+
+
+def test_read_only_app_requires_an_explicit_macro_root(rsa_key, tmp_path):
+    """Removing the explicit Macro root must refuse direct E1 construction."""
+
+    with pytest.raises(ValueError, match="macro_root_flag"):
+        AppSettings(
+            policies=AppPolicies(read=_read_policy(), submit=_submit_policy()),
+            mastermind_root=tmp_path / "mastermind",
+            macro_root_flag=None,
+            runtime_root=tmp_path / "runtime",
+            environ={},
+            ceo_ingress_socket_path=None,
+            read_only=True,
+            jwks_cache=_FakeJwksCache(rsa_key),
+            clock=lambda: NOW,
+        )
 
 
 # ===========================================================================
@@ -281,6 +332,77 @@ def test_wrong_resource_audience_refuses(rsa_key, tmp_path):
     )
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "resource_refused"
+
+
+def test_configured_exact_resource_variant_accepts_but_foreign_resource_refuses(
+    rsa_key,
+):
+    alternate_resource = "https://executive-app-c1.mastermind.example.test/mcp"
+    cache = _FakeJwksCache(rsa_key)
+    primary = app_module.JwtAuthenticator(
+        policy=_read_policy(), jwks_cache=cache
+    )
+    alternate = app_module.JwtAuthenticator(
+        policy=_read_policy(resource=alternate_resource), jwks_cache=cache
+    )
+    token = _read_token(rsa_key, aud=alternate_resource)
+    principal = asyncio.run(
+        app_module._verify_exact_resource_set(
+            (primary, alternate), f"Bearer {token}", now=NOW
+        )
+    )
+    assert principal.resource == alternate_resource
+
+    foreign = _read_token(
+        rsa_key, aud="https://executive-app-foreign.mastermind.example.test/mcp"
+    )
+    with pytest.raises(app_module.AuthError) as exc_info:
+        asyncio.run(
+            app_module._verify_exact_resource_set(
+                (primary, alternate), f"Bearer {foreign}", now=NOW
+            )
+        )
+    assert exc_info.value.code.value == "resource_refused"
+
+
+def test_app_settings_resource_variant_may_change_only_exact_resource(
+    rsa_key, tmp_path
+):
+    alternate_resource = "https://executive-app-c1.mastermind.example.test/mcp"
+    primary = AppPolicies(read=_read_policy(), submit=_submit_policy())
+    alternate = AppPolicies(
+        read=_read_policy(resource=alternate_resource),
+        submit=_submit_policy(resource=alternate_resource),
+    )
+    settings = AppSettings(
+        policies=primary,
+        additional_policies=(alternate,),
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+    assert settings.additional_policies == (alternate,)
+
+    widened = AppPolicies(
+        read=dataclasses.replace(
+            alternate.read, max_token_lifetime_seconds=800
+        ),
+        submit=alternate.submit,
+    )
+    with pytest.raises(ValueError, match="may differ only by resource"):
+        AppSettings(
+            policies=primary,
+            additional_policies=(widened,),
+            mastermind_root=tmp_path,
+            macro_root_flag=None,
+            environ={},
+            ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+            jwks_cache=_FakeJwksCache(rsa_key),
+            clock=lambda: NOW,
+        )
 
 
 def test_wrong_algorithm_none_refuses(rsa_key, tmp_path):
@@ -751,7 +873,7 @@ def test_oversized_body_refuses_413(rsa_key, tmp_path):
 # ===========================================================================
 
 
-def test_authenticated_read_call_reaches_the_existing_gateway(rsa_key, tmp_path):
+def test_authenticated_read_call_reaches_the_existing_gateway(rsa_key, tmp_path, monkeypatch):
     # A real (throwaway) git repo so ExecutiveMcpGateway's boot-packet read
     # has a real HEAD sha to report, exercising the ACTUAL reused read path
     # rather than a fake.
@@ -762,6 +884,14 @@ def test_authenticated_read_call_reaches_the_existing_gateway(rsa_key, tmp_path)
     subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
     subprocess.run(["git", "-C", str(tmp_path), "commit", "-q", "-m", "fixture"], check=True)
 
+    # A usable ambient Macro checkout must not escape this read fixture's
+    # explicit Macro selection, even though the reader consults os.environ.
+    ambient_macro = tmp_path / "ambient-macro"
+    (ambient_macro / "scripts").mkdir(parents=True)
+    (ambient_macro / "scripts" / "agentos.py").write_text('print("{}")\n')
+    (ambient_macro / "agentos").mkdir()
+    monkeypatch.setenv(ceo_boot_packet.ENV_MACRO_ROOT, str(ambient_macro))
+
     client, _ = _client(rsa_key, mastermind_root=tmp_path)
     token = _read_token(rsa_key)
     response = client.post(
@@ -769,9 +899,11 @@ def test_authenticated_read_call_reaches_the_existing_gateway(rsa_key, tmp_path)
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["ok"] is True
+    assert body["ok"] is True, body
     assert body["tool"] == "executive_state"
     assert body["schema"] == mcp_schemas.RESULT_SCHEMA
+
+    assert body["data"]["macro"] == {"root": None, "sha": None, "resolved_via": None}
 
 
 def test_all_five_tools_present_with_frozen_schema_digest():
@@ -1206,5 +1338,5 @@ def test_two_independent_app_instances_behave_identically(rsa_key, tmp_path):
     )
     assert response_one.status_code == response_two.status_code == 200
     # Neither instance's success depends on having seen the other's request.
-    assert response_one.json()["ok"] is True
-    assert response_two.json()["ok"] is True
+    assert response_one.json()["ok"] is True, response_one.json()
+    assert response_two.json()["ok"] is True, response_two.json()
