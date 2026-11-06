@@ -78,6 +78,46 @@ admission is unbound. The host must use its actual Hermes native PluginManager
 registration and release/installation provenance; imported source is not a
 registered tool.
 
+## Installed Hermes native MCP client — verified on M2
+
+The approved M2 diagnostic proved Hermes Agent v0.23.0, local checkout
+`2bd378ed1b8d` (November 6, 2026). An additional read of the installed
+`hermes_cli/plugins.py` verified
+`PluginContext.call_mcp(server, tool, arguments, timeout)` uses Hermes's
+**existing** MCP client, verifies the caller's per-plugin
+`plugins.entries.<plugin_id>.mcp_allowlist`, and produces a normalized
+`{ok, structuredContent?, result?, truncated?}` envelope. There is no need
+to create a second MCP client, socket, OAuth login, request queue or retry
+plane. The source adapter `hermes_mcp_client.py` binds precisely that API.
+
+The M2's installed `config.yaml` currently configures only
+`mastermind-fabric-capacity` under native MCP, and that server exposes only
+`fabric_capacity_catalog` and `fabric_route_preview`: **read-only**.
+It does NOT expose, authenticate or authorize `fabric_request`. The distinct
+execution server `mastermind-fabric-exec` is therefore **not enrolled**.
+The adapter default-refuses `HERMES_FABRIC_EXECUTION_NOT_ENROLLED` when its
+host lacks the exact, *separately authorized* plugin allowlist entry. Nothing
+copies or promotes the existing read-only server into execution authority.
+
+A qualified incumbent host installer must enroll the **already existing**
+Fabric-only execution MCP server under that exact profile-scoped name, establish
+the actual private-channel authentication and consent, and grant only this
+native plugin ID access to it using Hermes's normal profile configuration.
+The plugin must call:
+
+```python
+from integrations.hermes_attended_fabric.hermes_mcp_client import bind_native_mcp_client
+incumbent_authenticated_fabric_call = bind_native_mcp_client(qualified_hermes_plugin_context)
+```
+
+This call establishes only the native MCP *transport*. It is NOT itself the
+`authorize_session`, `currentness_guard` or
+`incumbent_original_effect_eligibility` required below. No configured
+principal means no live submit, even when the package imports and unit tests
+pass. The M2's native plugin isolation configuration was observed as default
+in-process, but that is not evidence that a particular plugin or session is
+currently loaded.
+
 ## Model-visible contract
 
 Native tool `mmx_fabric_worker` (toolset `mmx_fabric`) accepts:
@@ -119,9 +159,9 @@ python3 -m compileall -q integrations/hermes_attended_fabric
 
 M1 isolated source workspace:
 `/tmp/mmx-hermes-fabric-native-tests-20261106-c1`.
-Latest source qualification: **45 tests passed**, no provider calls before
-the native-registry/admission revisions; rerun against the exact final source
-before using it as a delivery receipt. Fixture tests are not proof that an
+Latest source qualification: **53 tests passed**, including the installed-M2 native client contract; no provider calls.
+Re-run on the exact final head in GitHub CI; fixture tests alone do not
+establish live M2 native admission. Fixture tests are not proof that an
 actual authorized M2 host connection exists.
 
 ## Remaining installed acceptance (blocking, not bypassable)
