@@ -29,7 +29,7 @@ from tests.test_workspace_read_app import rsa_key
 SELECTION = {"work_ref": "WS:ONE", "root_job_id": "JOB-1"}
 
 
-def fixture_mission(*, orphan=False, partial=False, wake=None):
+def fixture_mission(*, orphan=False, partial=False, wake=None, observation="SAME"):
     """Real Mission reducer over closed test-owned Control Room/Fabric inputs."""
     args = _owner_observation_inputs()
     fabric = args["fabric_view"]
@@ -76,6 +76,10 @@ def fixture_mission(*, orphan=False, partial=False, wake=None):
         snapshot_digest="c" * 64, generation=generation)
     args["fabric_view"] = {"schema": "mastermind.fabric_job_view.v3",
                            "fabric_view": fabric, "result_refs": index}
+    if observation == "MISSING":
+        args["owner_observation"] = None
+    elif observation == "CONFLICT":
+        args["owner_observation"].update(state="CONFLICT", control_room=None)
     return compose_mission_workspace_v3(**args)
 
 
@@ -189,7 +193,7 @@ def test_real_qualified_result_available_but_consumption_unproven(mission_owner)
 
 
 @pytest.mark.parametrize("defect", ["foreign_work", "foreign_root", "attempt", "envelope",
-                                   "role", "snapshot", "generation", "content", "oversized"])
+                                   "role", "snapshot", "generation", "content", "role_content", "oversized"])
 def test_foreign_tampered_or_oversized_result_refuses(mission_owner, defect):
     pair = actual_pair(mission_owner)
     mission = copy.deepcopy(pair["mission"])
@@ -209,6 +213,9 @@ def test_foreign_tampered_or_oversized_result_refuses(mission_owner, defect):
         pair["role_result"]["source_observation"]["runtime"]["source_identity"] = "f" * 32
     elif defect == "content":
         pair["role_result"]["result"]["content"]["role_result"]["verdict"] = "approve"
+    elif defect == "role_content":
+        pair["role_result"]["result"]["content"]["role_result"] = "reject"
+        pair["role_result"]["result"]["role_result_digest"] = hashlib.sha256(canonical("reject")).hexdigest()
     else:
         pair["role_result"]["result"]["content"]["summary"] = "x" * 17_000
     with pytest.raises(ValueError):
@@ -433,6 +440,132 @@ def test_concurrent_projections_are_deterministic_detached_and_pure():
     outputs[0]["cards"][1]["display_actions"].append("PRIVATE MUTATION")
     assert "PRIVATE MUTATION" not in repr(outputs[1])
     assert body == original
+
+
+@pytest.mark.parametrize("observation", ["MISSING", "CONFLICT"])
+def test_real_owner_unavailable_observation_remains_a_useful_view(observation):
+    body = fixture_mission(observation=observation)
+    original = copy.deepcopy(body)
+    assert body["read_state"]["state"] != "CURRENT"
+    assert body["source"]["owner_observation"]["state"] == (
+        "UNKNOWN" if observation == "MISSING" else "CONFLICT")
+    assert body["source"]["owner_observation"]["control_room"] is None
+    first = project(body)
+    assert first["currentness"]["state"] == "UNAVAILABLE"
+    assert first["currentness"]["owner_state"] == body["read_state"]["state"]
+    assert first["source"]["control_room_document_digest"] is None
+    assert first["coverage"]["unseen_population"] == "UNKNOWN"
+    assert all(c["decision_needed"] is None for c in first["cards"])
+    assert all(c["product_acceptance"]["accepted"] is None for c in first["cards"])
+    second = project(body, previous_fingerprint=first["fingerprint"])
+    assert second["currentness"]["state"] == "UNAVAILABLE"
+    assert second["attention"]["reasoning_wake_recommended"] is False
+    assert body == original
+
+
+@pytest.mark.parametrize("defect", ["same_without_receipts", "current_without_receipts",
+                                   "foreign_selection", "unknown_with_receipt", "bad_digest"])
+def test_nullable_observations_cannot_fabricate_qualified_source(defect):
+    body = fixture_mission(observation="MISSING" if defect != "bad_digest" else "CONFLICT")
+    observation = body["source"]["owner_observation"]
+    if defect == "same_without_receipts":
+        observation["state"] = "SAME"
+    elif defect == "current_without_receipts":
+        body["read_state"]["state"] = "CURRENT"
+    elif defect == "foreign_selection":
+        observation["selection"]["root_job_id"] = "JOB-999"
+    elif defect == "unknown_with_receipt":
+        observation["runtime"] = fixture_mission()["source"]["owner_observation"]["runtime"]
+    else:
+        observation["runtime"]["snapshot_digest"] = "not-a-digest"
+    with pytest.raises(ValueError):
+        project(body)
+
+
+def test_unchanged_full_display_can_expand_without_a_reasoning_wake():
+    body = fixture_mission()
+    first = project(body, limit=1)
+    expanded = project(body, previous_fingerprint=first["fingerprint"], limit=5,
+                       suppress_unchanged_details=False)
+    assert expanded["fingerprint"] == first["fingerprint"]
+    assert expanded["changed"] is False
+    assert expanded["attention"]["reasoning_wake_recommended"] is False
+    assert expanded["details_included"] is True
+    assert len(expanded["cards"]) == 5 and len(expanded["hierarchy"]) == 5
+    assert expanded["coverage"]["unchanged_suppressed_count"] == 0
+    assert expanded["coverage"]["display_omitted_count"] == 0
+    assert card(expanded, "JOB-3")["parent_job_id"] == "JOB-2"
+    assert expanded["cards"] == project(body)["cards"]
+
+
+def test_unchanged_compact_text_explains_suppression():
+    body = fixture_mission()
+    first = project(body)
+    quiet = project(body, previous_fingerprint=first["fingerprint"])
+    assert "Details unchanged; 5 cards suppressed" in render_operator_text(quiet)
+
+
+def test_full_display_retains_historical_truth_without_waking():
+    body = fixture_mission()
+    now = _parse_utc(body["generated_at"]) + 500
+    first = project(body, now=now)
+    second = project(body, now=now + 1, previous_fingerprint=first["fingerprint"],
+                     suppress_unchanged_details=False)
+    assert second["currentness"]["state"] == "HISTORICAL"
+    assert second["cards"] == first["cards"]
+    assert all(c["decision_needed"] is None for c in second["cards"])
+    assert second["attention"]["reasoning_wake_recommended"] is False
+
+
+@pytest.mark.parametrize("policy", [None, 0, 1, "false", []])
+def test_detail_policy_is_an_explicit_boolean(policy):
+    with pytest.raises(ValueError, match="invalid_detail_policy"):
+        project(fixture_mission(), suppress_unchanged_details=policy)
+
+
+def test_input_budget_precedes_whole_container_serialization(monkeypatch):
+    from integrations.secretary_team_access import team_projection as projection
+    body = fixture_mission()
+    shared = "x" * 600_000
+    body["program"]["attention_ids"] = [shared] * 5
+    encoder = projection.canonical
+    def bounded_encoder(value):
+        assert value is not body, "over-budget container reached the full encoder"
+        return encoder(value)
+    monkeypatch.setattr(projection, "canonical", bounded_encoder)
+    with pytest.raises(ValueError, match="mission_over_budget"):
+        project(body)
+
+
+@pytest.mark.parametrize("value", [
+    {"unicode": ["雪", "😀", "é"]},
+    {"escaped\nkey": "\u0000\n\t\"\\"},
+    {"scalar": [None, True, False, 12, -3, 0.125], "empty": [{}, []]},
+])
+def test_byte_budget_counts_utf8_escapes_tokens_and_trailing_lf(value):
+    from integrations.secretary_team_access.team_projection import _bounded_json
+    size = len(canonical(value)) + 1
+    assert _bounded_json(value, size, "budget") == value
+    with pytest.raises(ValueError, match="budget"):
+        _bounded_json(value, size - 1, "budget")
+
+
+@pytest.mark.parametrize("field", ["state", "wake_state", "terminal_state"])
+def test_non_scalar_wake_enum_refuses_with_value_error(field):
+    body = fixture_mission(wake="ACCEPTED")
+    body["transport"]["w3c"][field] = []
+    with pytest.raises(ValueError, match="invalid_wake"):
+        project(body)
+
+
+def test_unrepresentable_clock_and_untyped_source_time_are_conservative():
+    with pytest.raises(ValueError, match="invalid_now"):
+        project(fixture_mission(), now=10 ** 1000)
+    body = fixture_mission()
+    body["generated_at"] = 123
+    view = project_team(body, selection=SELECTION, now=123)
+    assert view["currentness"]["state"] == "UNAVAILABLE"
+    assert view["currentness"]["generated_at"] is None
 
 
 @pytest.mark.parametrize("revocation_stage", ["before_read", "after_owner_read"])

@@ -8,6 +8,10 @@ Source base: `b54cb10e4abdd3766c62d4088f6a576ecfe80437` in
 Branch: `sol/h24-06-team-projection-20261106`.
 Procedure pin: protected master `88a8b103a5a69e4b4e870a184655dde9fd5875c3`,
 `mastermind.sol_skillpack.v1`, version 1.0.1, bootstrap major 1.
+Continuation compatibility pin: protected master
+`28a894186eb56654ab4e833eb11a183d2eed46ae`; same schema/version/bootstrap.
+The changed governing files were checked; unchanged companions retain their verified
+contents. The immutable implementation base remains the packet's original base.
 
 This source delivery adds exactly three files:
 
@@ -51,7 +55,7 @@ The source contracts below are pinned to the immutable base above:
 | Concern | Existing owner / source | H24-06 use |
 | --- | --- | --- |
 | Primary mission | `control_plane/mission_workspace.py::compose_mission_workspace_v3` | Retain Mission v3 and its read state, lineage, missingness and result-reference partitions. |
-| Existing bounded Secretary facts | `integrations/secretary_team_access/mission.py::_consumed_facts`, `_fingerprint_facts` | Reuse the consumed-field and semantic-fact interpretation, then validate the additional H24 fields. No changes to that module. |
+| Existing bounded Secretary facts | `integrations/secretary_team_access/mission.py::_consumed_facts`, `_fingerprint_facts` | Reuse consumed fields and semantic facts. H24 consumes nullable owner subreceipts separately because the incumbent summary requires non-null subreceipts. No changes to that module. |
 | Source acquisition and authorization | `control_plane/workspace_read_service.py` | Host owns before/after authorization, source observations and bounded Runtime reads. |
 | Result association | `common/executive_workspace_mission_result_contract.py`, `WorkspaceReadService._mission_result_associated` | Consume the existing compound Mission/Result response; match its embedded Mission exactly. |
 | Result meaning | `control_plane/fabric_result_projection.py::project_fabric_role_result` | Consume its already-qualified public result and validate the fields used by this display. Do not revalidate raw Runtime envelopes in a second owner. |
@@ -82,6 +86,7 @@ view = project_team(
     request_message_key=None,
     previous_fingerprint=None,
     limit=8,
+    suppress_unchanged_details=False,  # Full display; True is the compact default.
 )
 text = render_operator_text(view)
 ```
@@ -107,9 +112,19 @@ Attempt, parent result-envelope digest, subject Job and subject result-envelope
 digest, qualified ruling and source-continuity declaration. The existing owner
 has already established the source bracket; H24 checks the consumed public facts.
 
-Malformed, foreign, contradictory and over-budget input raises `ValueError` before
-returning a view. Typed owner UNAVAILABLE responses remain unavailable. Lowering a
-display limit changes only visibility and omission counts, not source activity.
+Malformed structures, foreign or contradictory joins and over-budget input raise
+`ValueError` before returning a view. Missing/invalid source time is represented as
+UNAVAILABLE. Typed owner unavailability remains visible. Lowering a display limit
+changes only visibility and omission counts, not source activity.
+
+The actual Mission reducer can emit UNKNOWN observation with null Control Room and
+Runtime subreceipts, or CONFLICT observation with a missing subreceipt. These valid
+noncurrent responses retain their cards, missingness and unknowns in an UNAVAILABLE
+operator view; `decision_needed` is null. H24 validates the original nullable receipt
+and consumes other facts through the incumbent reducer without modifying the input
+Mission, minting a substitute receipt or making missing digests non-null. A forged
+CURRENT/SAME claim with missing receipts, a foreign selection or malformed digest
+is refused.
 
 ## Output schema
 
@@ -129,7 +144,7 @@ contract, not an Executive lifecycle or authorization schema.
 | `transport` | Mission scope, dispatch state, historical/watch facts, W3C state, wake/terminal states and receipt. |
 | `acceptance` | Owner state, reasons and receipt; separate from execution and review. |
 | `missingness`, `missingness_omitted_count` | Bounded original missingness rows with explicit remaining count. |
-| `display_only`, `details_included` | Display-only is always true. An unchanged view suppresses card details while retaining currentness and coverage. |
+| `display_only`, `details_included` | Display-only is always true. Compact mode suppresses unchanged details; full display mode returns the selected cards and hierarchy while the reasoning wake remains false. |
 
 Each card has these exact fields:
 
@@ -173,8 +188,9 @@ reason_codes: string[]
 ```
 
 Owner state is preserved. The effective display state can only become more
-conservative: incomplete observation or lineage is PARTIAL; an expired local
-freshness guard is HISTORICAL; invalid/future source time is UNAVAILABLE. CURRENT
+conservative: incomplete coverage or lineage is PARTIAL; an expired local
+freshness guard is HISTORICAL; invalid/future source time or an unqualified owner
+observation is UNAVAILABLE. CURRENT
 means the Mission observation qualifies, not that placement, result content or
 acceptance is available. Missing coverage is never zero activity.
 
@@ -212,11 +228,20 @@ aged reads remain quiet. Equal fingerprints recommend no reasoning wake and
 retain stale/partial warnings and omission counts. This is comparison only: no
 event cursor, grant, scheduler or actual wake is created.
 
+Use `suppress_unchanged_details=False` for a freshly authorized full display. The
+host can expand or repaint the card window without a synthetic source change or a
+reasoning wake. No previous card cache is required. The default True preserves the
+compact Secretary response; its text explicitly explains detail suppression so an
+empty detail window cannot be mistaken for zero observed activity. This presentation
+option is excluded from the semantic fingerprint and confers no permission.
+
 Bounds: 2,000,000 bytes per Mission/compound/acceptance input; at most 17 result
 pairs; each nested Result socket envelope including LF must fit 16,384 bytes;
 30,000 JSON nodes and depth 32 per input; at most 32 cards; default display 8;
 32,768-byte serialized output including LF. Over-limit data is refused, never
-silently truncated into a successful result. Public identity strings are validated
+silently truncated into a successful result. Cumulative UTF-8 JSON bytes, escape
+expansion, separators and trailing LF are counted before whole-container encoding;
+repeated references count at every occurrence. Public identity strings are validated
 and are not shortened into aliases. Display omissions have separate counts from
 source omissions and unchanged-detail suppression.
 
@@ -261,7 +286,7 @@ PARENT_RETURN_UNVERIFIED or PARENT_CONSUMPTION_UNPROVEN.
 | Product rejection | Product acceptance defines ACCEPTED/UNAVAILABLE; review defines approve/reject. | Keep review rejection distinct. Any broader product disposition belongs to the existing acceptance owner, not this read model. |
 | Original acceptance request key | Not present in Mission v3. | Existing host selects the original request and provides the complete v4 companion plus separately bound request_message_key. Never derive it from model text. |
 | Raw authenticated Mission at Secretary consumer seam | `SecretaryAccessClient.read_mission` currently returns an incumbent summary. | The owner of `integrations/secretary_team_access/client.py` can adopt `project_team` at the already-authorized raw response boundary. Preserve fixed endpoints, independent clients and before/after grant checks. This packet edits none of those files. |
-| UI adoption | Existing `app/mastermind_os/src/mission.ts` decodes v3 and v4; this packet adds no frontend code. | C33/UI owner keeps `decodeMissionv3`/`decodeMissionv4` unchanged, renders cards and coverage additively in the existing Mission surface, and treats display labels as text. Any later command must use the existing host-bound action owner with fresh authorization. |
+| UI adoption | Existing `app/mastermind_os/src/mission.ts` decodes v3 and v4; this packet adds no frontend code. | C33/UI owner keeps `decodeMissionv3`/`decodeMissionv4` unchanged, uses `suppress_unchanged_details=False` for freshly authorized full displays, renders cards and coverage additively in the existing Mission surface, and treats display labels as text. Any later command must use the existing host-bound action owner with fresh authorization. |
 
 `docs/GROK_SECRETARY_TEAM_INTEGRATION.md` and issue #2082 remain the consumer
 coordination references. H24 creates no new identity or coordination registry.
@@ -277,11 +302,13 @@ The multi-principal test uses the actual JWT verifier, sealed member authorizers
 Workspace service and Runtime fixtures; revocation before a read and after the owner
 read both refuse disclosure. No live credential or account enrollment is exercised.
 
-The combined H24 and existing-contract validation passed **104 tests in 57.98s**
-with exit code 0. The exact command was:
+The initial source checkpoint passed **104 tests in 57.98s** with exit code 0.
+The continuation adds 24 H24 cases and passes **128 tests in 38.66s**, exit code 0,
+using this exact command on an isolated archive of published head
+`b0c763c7e9622e48c7bab4d316d503354a41eabd` with only the two owned Python files replaced:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.11 -m pytest -o addopts= -q \
+PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.11 -m pytest -p no:cacheprovider -o addopts= -q \
   tests/test_h24_team_projection.py \
   tests/test_secretary_team_mission.py \
   tests/test_secretary_team_access.py \
@@ -294,6 +321,47 @@ absent. The already-installed Python 3.11 has the required dependencies; no pack
 installation or environment change was performed. An early fixture omitted required
 Fabric v2 child keys; another used noncanonical Wake receipt labels. Both fixtures
 were repaired against the existing owner contracts before qualification.
+
+The continuation first reproduced five failing regression cases against the
+published implementation: actual missing/conflicting source subreceipts, unchanged
+full display, explicit suppression text and pre-serialization input budgeting.
+The finished suite has 77 H24 cases, including false CURRENT/SAME claims with null
+receipts, foreign nullable receipts, exact UTF-8/escape/LF budgets and conservative
+malformed enum/time handling. A fixture initially used the noncanonical label
+CHANGED; it was corrected to the owner's CONFLICT value, and now asserts the actual
+owner-produced state before exercising the projection.
+
+The consumed Mission/result/acceptance contracts, Secretary modules and direct
+owner-fixture dependencies were compared between the immutable base and protected
+`28a894186eb56654ab4e833eb11a183d2eed46ae`; none of those paths changed. This bounded
+compatibility check does not claim full current-master or installed qualification.
+
+### Continuation publication and inherited CI
+
+The original managed checkout was already cleanly released. Its installed launcher
+returned `NOT_APPLIED` when asked to reopen the same operation because the retained
+branch existed without its former checkout. The permitted exact-head GitHub source
+route retains the original branch and ancestry. The isolated archive is only a test
+fixture, with no Git branch, installation, service or credential enrollment.
+
+PR #2120 merged after the initial checkpoint, and draft PR #2136 subsequently
+compared against master. That broader comparison contains the foundation's old
+ancestry; the authoritative H24 packet remains the three-path diff from the frozen
+base. This continuation neither rewrites the branch nor edits integration files.
+
+At the original H24 head, hosted Hermes harness run
+[42208283181](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42208283181)
+and Hermes runtime run
+[42208283053](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42208283053)
+passed. General CI run
+[42208283030](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42208283030)
+failed inherited SessionBridge/Secretary-forwarder and Executive fixture checks;
+Mastermind OS run
+[42208283106](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42208283106)
+failed the inherited ProjectConversations Open-button test. These failures are
+outside the three H24-owned files. No repair, rerun, queue or release of those
+lanes is performed by this packet, and no new-head hosted CI success is inferred
+from the local source/fixture result.
 
 Source handback includes immutable base, branch/head, exact three-file diff,
 SHA-256 of `git diff --binary <base> <head> -- <three-owned-paths>`, test results,

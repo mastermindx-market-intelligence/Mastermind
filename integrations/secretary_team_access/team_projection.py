@@ -69,25 +69,35 @@ def _closed(value: Any, keys: Any, reason: str) -> dict:
 
 def _bounded_json(value: Any, limit: int, reason: str) -> Any:
     """Bound shape before serialization; detach inputs and reject custom objects."""
-    stack, count = [(value, 0)], 0
-    while stack:
-        item, depth = stack.pop()
-        count += 1
-        _require(count <= MAX_INPUT_NODES and depth <= MAX_INPUT_DEPTH, reason)
-        if type(item) is dict:
-            _require(all(type(k) is str and len(k) <= 256 for k in item), reason)
-            _require(count + len(stack) + len(item) <= MAX_INPUT_NODES, reason)
-            stack.extend((v, depth + 1) for v in item.values())
-        elif type(item) is list:
-            _require(count + len(stack) + len(item) <= MAX_INPUT_NODES, reason)
-            stack.extend((v, depth + 1) for v in item)
-        elif type(item) is str:
-            _require(len(item) <= limit, reason)
-        elif type(item) is float:
-            _require(math.isfinite(item), reason)
-        else:
-            _require(item is None or type(item) in (bool, int), reason)
     try:
+        stack, count, size = [(value, 0)], 0, 1  # Include the socket's trailing LF.
+        while stack:
+            item, depth = stack.pop()
+            count += 1
+            _require(count <= MAX_INPUT_NODES and depth <= MAX_INPUT_DEPTH, reason)
+            if type(item) is dict:
+                _require(all(type(k) is str and len(k) <= 256 for k in item), reason)
+                _require(count + len(stack) + len(item) <= MAX_INPUT_NODES, reason)
+                size += 2 + max(0, len(item) - 1)
+                for key in item:
+                    size += len(canonical(key)) + 1
+                    _require(size <= limit, reason)
+                stack.extend((v, depth + 1) for v in item.values())
+            elif type(item) is list:
+                _require(count + len(stack) + len(item) <= MAX_INPUT_NODES, reason)
+                size += 2 + max(0, len(item) - 1)
+                stack.extend((v, depth + 1) for v in item)
+            else:
+                if type(item) is str:
+                    _require(len(item) <= limit - size, reason)
+                elif type(item) is float:
+                    _require(math.isfinite(item), reason)
+                else:
+                    _require(item is None or type(item) in (bool, int), reason)
+                size += len(canonical(item))
+            _require(size <= limit, reason)
+        # Repeated references count at every occurrence above. A large shared
+        # string cannot expand into an unbounded temporary JSON allocation here.
         raw = canonical(value)
         _require(len(raw) + 1 <= limit, reason)
         return json.loads(raw)
@@ -112,6 +122,11 @@ def _generation(value: Any, *, same: bool = False) -> dict:
     _require(value["schema"] == owner.RUNTIME_OBSERVATION_SCHEMA, "invalid_generation")
     _require(type(value["state"]) is str and value["state"] in owner.OWNER_OBSERVATION_STATES,
              "invalid_generation")
+    _require(value["source_identity"] is None or (
+        type(value["source_identity"]) is str and 1 <= len(value["source_identity"]) <= 128),
+        "invalid_generation")
+    _require(all(value[k] is None or _count(value[k]) for k in ("before", "after")),
+             "invalid_generation")
     if same or value["state"] == "SAME":
         _require(value["state"] == "SAME" and type(value["source_identity"]) is str
                  and 1 <= len(value["source_identity"]) <= 128
@@ -120,17 +135,59 @@ def _generation(value: Any, *, same: bool = False) -> dict:
     return value
 
 
+def _observation_facts(observation: Any, selected: dict) -> dict:
+    """Consume nullable owner receipts without manufacturing replacement receipts."""
+    observation = _closed(observation, owner.OWNER_OBSERVATION_KEYS, "invalid_observation")
+    _require(observation["schema"] == owner.OWNER_OBSERVATION_SCHEMA
+             and observation["selection"] == selected
+             and type(observation["state"]) is str
+             and observation["state"] in owner.OWNER_OBSERVATION_STATES, "invalid_observation")
+    control, runtime = observation["control_room"], observation["runtime"]
+    if observation["state"] == "UNKNOWN":
+        _require(control is None and runtime is None, "invalid_unknown_observation")
+    if observation["state"] == "SAME":
+        _require(control is not None and runtime is not None, "unqualified_current_mission")
+    if control is not None:
+        _closed(control, owner.OWNER_OBSERVATION_CONTROL_ROOM_KEYS, "invalid_control_observation")
+        for key in ("instance_before", "instance_after"):
+            _require(control[key] is None or (type(control[key]) is str
+                     and owner._OPAQUE_REF.fullmatch(control[key]) is not None),
+                     "invalid_control_observation")
+        for key in ("publication_before", "publication_after"):
+            _require(control[key] is None or (_count(control[key]) and control[key] >= 1),
+                     "invalid_control_observation")
+        for key in ("document_digest", "source_validity_digest", "cache_currentness_digest"):
+            _require(control[key] is None or _hash(control[key]), "invalid_control_observation")
+    if runtime is not None:
+        _closed(runtime, owner.OWNER_OBSERVATION_RUNTIME_KEYS, "invalid_runtime_observation")
+        _generation({k: runtime[k] for k in owner.FABRIC_V3_GENERATION_KEYS})
+        _require(runtime["snapshot_digest"] is None or _hash(runtime["snapshot_digest"]),
+                 "invalid_runtime_observation")
+    control, runtime = control or {}, runtime or {}
+    return {"state": observation["state"], "runtime_state": runtime.get("state", "UNKNOWN"),
+            "runtime_source_identity": runtime.get("source_identity"),
+            "runtime_snapshot_digest": runtime.get("snapshot_digest"),
+            "control_room_document_digest": control.get("document_digest"),
+            "source_validity_digest": control.get("source_validity_digest"),
+            "cache_currentness_digest": control.get("cache_currentness_digest")}
+
+
 def _mission(body: dict, selected: dict) -> dict:
     _closed(body, owner.OUTPUT_KEYS_V3, "invalid_mission_shape")
     _closed(body.get("source"), owner.SOURCE_KEYS_V2, "invalid_mission_source")
-    facts = _consumed_facts(body, selected)  # incumbent consumed-field validation
-    _require(body["acceptance"]["state"] == "NOT_PROJECTED", "v3_cannot_accept")
     observation = body["source"]["owner_observation"]
-    _require(observation["schema"] == owner.OWNER_OBSERVATION_SCHEMA,
-             "unsupported_owner_observation")
+    observed = _observation_facts(observation, selected)
+    # The incumbent summary assumes non-null subreceipts. Reuse all its other
+    # consumed-field checks and consume the owner's nullable subreceipts here.
+    # The original body remains unchanged for digests and compound association.
+    consumed_body = {**body, "source": {k: v for k, v in body["source"].items()
+                                      if k != "owner_observation"}}
+    facts = _consumed_facts(consumed_body, selected)
+    facts["source"]["owner_observation"] = observed
+    _require(body["acceptance"]["state"] == "NOT_PROJECTED", "v3_cannot_accept")
     runtime = observation["runtime"]
-    generation = {k: runtime[k] for k in owner.FABRIC_V3_GENERATION_KEYS}
-    _generation(generation)
+    generation = ({k: runtime[k] for k in owner.FABRIC_V3_GENERATION_KEYS}
+                  if runtime is not None else None)
     index = body["result_refs"]
     if index["availability"] != "UNAVAILABLE":
         _require(facts["read_state"]["state"] == "CURRENT"
@@ -209,6 +266,9 @@ def _currentness(body: dict, now: float) -> dict:
     elif freshness == "AGED" and state != "UNAVAILABLE":
         state = "HISTORICAL"
         reasons.append("LOCAL_FRESHNESS_EXPIRED")
+    if body["source"]["owner_observation"]["state"] != "SAME":
+        state = "UNAVAILABLE"
+        reasons.append("SOURCE_OBSERVATION_UNQUALIFIED")
     if state == "CURRENT" and (
         body["children"]["coverage"] not in ("COMPLETE", "NOT_APPLICABLE")
         or body["children"]["overflow_count"] not in (0,)
@@ -218,7 +278,8 @@ def _currentness(body: dict, now: float) -> dict:
         state = "PARTIAL"
         reasons.append("OBSERVATION_INCOMPLETE")
     return {"state": state, "owner_state": body["read_state"]["state"],
-            "freshness": freshness, "generated_at": body["generated_at"],
+            "freshness": freshness, "generated_at": (
+                body["generated_at"] if type(body["generated_at"]) is str else None),
             "age_seconds": age, "guard_seconds": LOCAL_FRESHNESS_GUARD_SECONDS,
             "reason_codes": sorted(set(reasons))}
 
@@ -235,7 +296,8 @@ def _wake(body: dict) -> dict:
         for key, allowed in (("state", owner.W3C_STATES),
                              ("wake_state", owner.W3C_WAKE_STATES),
                              ("terminal_state", owner.W3C_TERMINAL_STATES)):
-            _require(wake[key] is None or wake[key] in allowed, "invalid_wake")
+            _require(wake[key] is None or (type(wake[key]) is str and wake[key] in allowed),
+                     "invalid_wake")
         _require(wake["terminal_applied"] is None or type(wake["terminal_applied"]) is bool,
                  "invalid_wake")
         receipt = wake["source_receipt"]
@@ -308,7 +370,8 @@ def _result_pairs(body: dict, selected: dict, pairs: Any) -> dict:
         if available == "AVAILABLE":
             content = _closed(value["content"], ("role_result", "summary", "next_actions"),
                               "invalid_result_content")
-            _require(value["omitted"] == [] and _digest(content["role_result"])
+            _require(type(content["role_result"]) is dict and value["omitted"] == []
+                     and _digest(content["role_result"])
                      == value["role_result_digest"], "result_content_digest_mismatch")
         else:
             _require(value["content"] is None
@@ -442,7 +505,7 @@ def project_team(
     mission: Any, *, selection: dict, now: float,
     result_pairs: tuple | list = (), acceptance_companion: Any = None,
     request_message_key: str | None = None, previous_fingerprint: str | None = None,
-    limit: int = DEFAULT_CARDS,
+    limit: int = DEFAULT_CARDS, suppress_unchanged_details: bool = True,
 ) -> dict:
     """Project authorized owner bytes; fail closed on foreign or over-budget joins.
 
@@ -452,12 +515,18 @@ def project_team(
     never authorization, a durable cursor, or a wake/dispatch permission.
     """
     selected = v2_selection(selection, "mission_v3")
-    _require(type(now) in (int, float) and math.isfinite(now), "invalid_now")
+    _require(type(now) in (int, float), "invalid_now")
+    try:
+        clock = float(now)
+    except OverflowError:
+        raise ValueError("invalid_now") from None
+    _require(math.isfinite(clock), "invalid_now")
     _require(type(limit) is int and 0 <= limit <= MAX_CARDS, "invalid_limit")
+    _require(type(suppress_unchanged_details) is bool, "invalid_detail_policy")
     _require(previous_fingerprint is None or _hash(previous_fingerprint), "invalid_previous_fingerprint")
     body = _bounded_json(mission, MAX_RESPONSE_BYTES, "mission_over_budget")
     facts = _mission(body, selected)
-    currentness = _currentness(body, float(now))
+    currentness = _currentness(body, clock)
     wake = _wake(body)
     results = _result_pairs(body, selected, result_pairs)
     acceptance = _acceptance(body, selected, acceptance_companion, request_message_key)
@@ -479,7 +548,8 @@ def project_team(
                  "wake": semantic_wake, "acceptance": acceptance}
     fingerprint = _digest(semantics)
     changed = None if previous_fingerprint is None else fingerprint != previous_fingerprint
-    visible = cards[:limit] if changed is not False else []
+    suppress = changed is False and suppress_unchanged_details
+    visible = [] if suppress else cards[:limit]
     known = {card["job_id"] for card in visible}
     children = facts["children"]
     refs = facts["result_refs"]
@@ -500,7 +570,7 @@ def project_team(
         "result_omitted_job_ids": refs["omitted_job_ids"], "result_refs_truncated": refs["truncated"],
         "cards_in_snapshot": len(cards), "cards_visible": len(visible),
         "display_omitted_count": len(cards) - min(limit, len(cards)),
-        "unchanged_suppressed_count": min(limit, len(cards)) if changed is False else 0,
+        "unchanged_suppressed_count": min(limit, len(cards)) if suppress else 0,
         "unseen_population": "UNKNOWN",
         "missingness_count": len(facts["coverage"]["missingness_rows"]),
     }
@@ -508,7 +578,7 @@ def project_team(
         "schema": SCHEMA, "selection": selected, "currentness": currentness,
         "source": {"owner": "WORKSPACE_MISSION_V3", "mission_digest": _digest(body),
                    "snapshot_digest": refs["snapshot_digest"],
-                   "control_room_document_digest": body["source"]["owner_observation"]["control_room"]["document_digest"],
+                   "control_room_document_digest": facts["source"]["owner_observation"]["control_room_document_digest"],
                    "source_coverage": facts["source"]["source_coverage"]},
         "fingerprint": fingerprint, "changed": changed,
         "attention": {"reasoning_wake_recommended": changed is True, "dispatch_permitted": False},
@@ -519,7 +589,7 @@ def project_team(
         "principal": facts["principal"], "transport": wake, "acceptance": acceptance,
         "missingness": facts["coverage"]["missingness_rows"][:MAX_CARDS],
         "missingness_omitted_count": max(0, len(facts["coverage"]["missingness_rows"]) - MAX_CARDS),
-        "display_only": True, "details_included": changed is not False,
+        "display_only": True, "details_included": not suppress,
     }
     return _bounded_json(output, MAX_OUTPUT_BYTES, "projection_over_budget")
 
@@ -542,6 +612,9 @@ def render_operator_text(view: dict) -> str:
     rows.append(f"Coverage: {coverage['cards_visible']}/{coverage['cards_in_snapshot']} cards; "
                 f"source omitted={coverage['source_omitted_child_count']}; "
                 f"unjoined={coverage['unjoined_job_count']}; unseen population UNKNOWN")
+    if coverage["unchanged_suppressed_count"]:
+        rows.append(f"Details unchanged; {coverage['unchanged_suppressed_count']} cards suppressed; "
+                    "source coverage retained.")
     rows.append(f"Mission delivery: {view['transport']['dispatch_state']}; "
                 f"wake={view['transport']['wake_state']}; per-result consumption stays separate")
     rows.append("Display only. Each principal's host revalidates access; no action is dispatched.")
