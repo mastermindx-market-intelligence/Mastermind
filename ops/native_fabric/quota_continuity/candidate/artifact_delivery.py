@@ -24,7 +24,7 @@ from native_runtime_bindings import owner_path
 
 # Exact reviewed remote recovery program. Protected generation publication binds
 # this incumbent pin; neither request fields nor mutable module names set it.
-ADVERTISED_RECOVERY_SOURCE_SHA256 = 'a34c5cf3862ae11ed5d6ac1fb7de732af5988d4b1869e4b7cfbf183299cad704'
+ADVERTISED_RECOVERY_SOURCE_SHA256 = '46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0'
 
 HERE = Path(__file__).resolve().parent
 DESTINATION_ROOT = Path("/Volumes/Mastermind/evidence")
@@ -865,6 +865,14 @@ def qualify_native(request, raw):
     return {"lease_id": lease["id"], "mode": terminal.get("mode")}
 
 
+def advertised_recovery_source():
+    """One fixed source read checked by the protected incumbent, before use."""
+    raw = local_file(HERE / 'original_advertised_artifact.py', 131072)
+    if digest(raw) != ADVERTISED_RECOVERY_SOURCE_SHA256:
+        raise ValueError('advertised_remote_source_changed')
+    return raw
+
+
 def transport(alias, request, *, observer_source_hash=None, current_sources_sha256=None):
     # Fixed code, fixed interpreter, validated registry alias; paths travel in stdin.
     response_limit = reader.MAX_RESPONSE
@@ -887,10 +895,10 @@ def transport(alias, request, *, observer_source_hash=None, current_sources_sha2
     elif type(request) is dict and request.get("schema") == "mastermind.source_admitted_advertised_artifact_read.v1":
         # Exact source-admitted advertised artifact recovery: one closed scope,
         # one remote read, no producer attestation and no outcome acceptance.
-        import original_advertised_artifact
-        code = original_advertised_artifact.code_for_request(
-            request, expected_hash=ADVERTISED_RECOVERY_SOURCE_SHA256)
-        response_limit = original_advertised_artifact.MAX_RESPONSE
+        # Do not import or execute mutable module bytes to check themselves.
+        # The incumbent hashes one byte string, then transports that same string.
+        code = advertised_recovery_source().decode('utf-8')
+        response_limit = 1048576
     elif type(request) is dict and request.get("schema") == "mastermind.native_host_review_source_read.v1":
         if digest(local_file(HERE / "native_host_review_source_delivery.py", 65536)) != '3ec53fa0be3c69c28e265a1bb5b1cab3cc0ee3f6f6c03b93908d6c2685f2e902':
             raise ValueError("native_source_delivery_head_changed")

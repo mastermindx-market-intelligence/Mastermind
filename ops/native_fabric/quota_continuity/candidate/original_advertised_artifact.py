@@ -450,7 +450,7 @@ def _module_source():
     delivery = _delivery()
     # The generation's single module path is authoritative. A failed or denied
     # read never falls back to another source copy or an alternate carrier.
-    return _read_local(delivery.HERE / MODULE_NAME, MAX_LOCAL)
+    return delivery.advertised_recovery_source()
 
 
 def _qualified_module_source(expected_hash):

@@ -263,6 +263,12 @@ def _install(monkeypatch, incumbent):
     delivery.HERE = incumbent.root
     delivery.ADVERTISED_RECOVERY_SOURCE_SHA256 = _digest(_module_path().read_bytes())
     delivery.local_file = incumbent.local_file
+    def checked_source():
+        raw = delivery.local_file(delivery.HERE / MODULE_NAME, 131072)
+        if _digest(raw) != delivery.ADVERTISED_RECOVERY_SOURCE_SHA256:
+            raise ValueError('advertised_remote_source_changed')
+        return raw
+    delivery.advertised_recovery_source = checked_source
     delivery.digest = incumbent.digest
     delivery.validate_capsule_process = incumbent.validate_capsule_process
     delivery.transport = incumbent.transport
@@ -1167,7 +1173,7 @@ def test_the_incumbent_transport_carries_the_advertised_schema_branch():
     text = (paths[0] / 'artifact_delivery.py').read_text(encoding='utf-8')
     if 'mastermind.source_admitted_advertised_artifact_read.v1' not in text:
         pytest.skip('the two-hunk plumbing patch is not applied in this tree')
-    assert 'request, expected_hash=ADVERTISED_RECOVERY_SOURCE_SHA256)' in text
+    assert "code = advertised_recovery_source().decode('utf-8')" in text
     assert 'original_advertised_artifact.collect(args.run_id, args.destination)' in text
 
 
@@ -1199,7 +1205,7 @@ def test_module_source_failure_does_not_fall_back(monkeypatch, module, tmp_path)
     def denied(path, limit):
         calls.append(path)
         raise PermissionError('private detail must not cause another source read')
-    monkeypatch.setattr(module, '_read_local', denied)
+    monkeypatch.setattr(sys.modules['artifact_delivery'], 'local_file', denied)
     with pytest.raises(PermissionError):
         module.code_for_request(dict(fixture.scope), expected_hash=_digest(_module_path().read_bytes()))
     assert calls == [fixture.root / MODULE_NAME]
@@ -1289,7 +1295,8 @@ def test_transport_pin_matches_exact_shipped_module():
 def test_real_dispatcher_refuses_changed_source_before_ssh(monkeypatch, module, tmp_path):
     real = _import_incumbent('artifact_delivery')
     fixture, incumbent = _install_local(monkeypatch, module, tmp_path)
-    monkeypatch.setitem(sys.modules, 'original_advertised_artifact', module)
+    monkeypatch.setattr(real, 'HERE', fixture.root)
+    monkeypatch.setattr(real, 'local_file', incumbent.local_file)
     monkeypatch.setattr(real.subprocess, 'Popen', lambda *a, **k: pytest.fail('unqualified SSH launch'))
     path = fixture.root / MODULE_NAME
     path.write_bytes(path.read_bytes() + b'\n# inert unreviewed body\n')
@@ -1306,7 +1313,26 @@ def test_transport_source_bytes_are_not_reread_after_hash_check(monkeypatch, mod
         calls.append(path)
         assert len(calls) == 1, 'second unqualified source read'
         return raw
-    monkeypatch.setattr(module, '_read_local', once)
+    monkeypatch.setattr(sys.modules['artifact_delivery'], 'local_file', once)
     code = module.code_for_request(dict(fixture.scope), expected_hash=_digest(raw))
     assert code.encode() == raw
     assert calls == [fixture.root / MODULE_NAME]
+
+
+def test_real_dispatcher_never_imports_unchecked_remote_module(monkeypatch, module, tmp_path):
+    real = _import_incumbent('artifact_delivery')
+    fixture, incumbent = _install_local(monkeypatch, module, tmp_path)
+    monkeypatch.setattr(real, 'HERE', fixture.root)
+    monkeypatch.setattr(real, 'local_file', incumbent.local_file)
+    monkeypatch.setattr(real.subprocess, 'Popen', lambda *a, **k: pytest.fail('unqualified SSH launch'))
+    # The source retains the old function names but would have a top-level
+    # side effect and a lying validator if imported. The trusted dispatcher
+    # must reject its bytes without consulting either function.
+    marker = fixture.root / 'must-not-exist'
+    hostile = ("from pathlib import Path\nPath(" + repr(str(marker)) + ").touch()\n"
+               "def remote_main(): pass\ndef remote_read(): pass\n"
+               "def code_for_request(*a, **k): return 'forged remote code'\n")
+    (fixture.root / MODULE_NAME).write_text(hostile)
+    with pytest.raises(ValueError, match='advertised_remote_source_changed'):
+        real.transport('fixture-alias', dict(fixture.scope))
+    assert not marker.exists()

@@ -18,24 +18,24 @@
   },
   "candidate_files": {
     "ops/native_fabric/quota_continuity/candidate/artifact_delivery.py": {
-      "sha256": "efc9464f668b71fec01757b0e0a6ac686da0c59649e3b1c8a2af5d5f6500f906",
-      "bytes": 90982
+      "sha256": "e6a0710b656a140c069a2c13b06d07c04a55d1e2020f47ba237593c1c596156e",
+      "bytes": 91311
     },
     "ops/native_fabric/quota_continuity/candidate/original_advertised_artifact.py": {
-      "sha256": "a34c5cf3862ae11ed5d6ac1fb7de732af5988d4b1869e4b7cfbf183299cad704",
-      "bytes": 29135
+      "sha256": "46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0",
+      "bytes": 29121
     },
     "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": {
-      "sha256": "ce81fbfea56bb8f804d86c6dff37ca0e301b21a9aa24e6dbe7c9abb0ba1d35ab",
+      "sha256": "1d757a13a6152919c67f3c719b7318d0ade917ddb6b3d5a89789dd5935c34038",
       "bytes": 12552
     },
     "ops/native_fabric/quota_continuity/rollout/native-manifest.json": {
-      "sha256": "ca6fa80fbd5317f822f6a4608e965b7ff2e16d9daa4a625853c204f7ffa473ad",
+      "sha256": "13a4f9ece9d033d1a12eea28ee4e4c152bcc258447228a35de9b837140ba6451",
       "bytes": 10669
     }
   },
   "qualification": {
-    "focused_inert_tests": 86,
+    "focused_inert_tests": 87,
     "publisher_regression_tests": 11,
     "historical_artifact_producer_attestation": false,
     "original_artifact_read": false,
