@@ -99,7 +99,8 @@ def test_native_evaluation_cases_are_specifications_not_fabricated_results() -> 
 
 def test_new_roles_add_no_plugin_identity_tools_hooks_or_runtime_store() -> None:
     assert set(validator.EXPECTED_SKILLS) == {
-        "mastermind-sol", "mastermind-operator", "mastermind-cortex", "mastermind-navigator"
+        "mastermind-sol", "mastermind-operator", "mastermind-cortex", "mastermind-navigator",
+        "mastermind-reality"
     }
     assert validator.MANIFESTS["mastermind-sol"]["interface"]["capabilities"] == ["Read"]
     for name in SKILLS:
