@@ -231,3 +231,27 @@ def test_http_keeps_violating_alternative_ineligible_despite_favorable_scenario(
     assert cash["status"] == "INELIGIBLE" and "turnover_ceiling" in cash["constraints_breached"]
     assert cash["relative_to_hold"]["scenarios"][0]["net_return_delta"] > 0
     assert all(value is False for value in comparison["authority"].values())
+
+
+def test_actual_application_mount_uses_same_auth_and_api_without_startup(monkeypatch):
+    # TestClient without its lifespan context exercises the REAL app middleware
+    # and registered route, while never booting scheduler/jobs/runtime writers.
+    # The isolated source workspace intentionally has no vendored Macro engine.
+    # Stub only that external bootstrap path, not app composition/auth/valuation.
+    import sys
+    import types
+    deps = types.ModuleType("app.deps")
+    deps.data_dir = lambda: "/unused-synthetic-data-root"
+    monkeypatch.setitem(sys.modules, "app.deps", deps)
+    from app import main, scheduler
+    monkeypatch.setattr(scheduler, "start", Mock(side_effect=AssertionError("no scheduler during route proof")))
+    transport = TestClient(main.app)
+    refused = transport.post(api.PATH, json=payload())
+    assert refused.status_code == 401
+    accepted = transport.post(api.PATH, json=payload(), headers=HEADERS)
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "AVAILABLE"
+    assert accepted.json()["result"]["comparison"]["hold_baseline"]["source"] == "unchanged_supplied_book"
+    assert accepted.headers["cache-control"] == "private, no-store"
+    scheduler.start.assert_not_called()
+    transport.close()
