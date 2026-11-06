@@ -374,7 +374,7 @@ def test_compact_project_kernel_carries_adaptive_mode_and_rotation_boundary() ->
         "ACTIVE_EXECUTION 1B governs attended mode fit/stickiness",
         "Capabilities vary by action/session",
         "Extra High is a recovery candidate, not guaranteed access",
-        "Text cannot self-switch",
+        "Text cannot switch modes",
         "Bound unchanged-failure diagnosis",
         "Tool failure is not chat corruption",
         "HARD_ROTATION: repeated thinking/session failure",
