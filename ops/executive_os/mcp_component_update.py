@@ -10,6 +10,16 @@ gateway role and nothing else:
 * ``/Library/LaunchDaemons/com.mastermind.executive.mcp.plist`` - the release
   substitution of the closed installed gateway profile.
 
+OPTIONALLY, and only when the caller supplies the PAIRED selected-child
+publication selection: the one frozen ``selected_child_target`` projection of
+the installed gateway configuration.  The selection is ONE optional input to
+the SAME verbs: both coordinates absent preserve the source-only behaviour
+byte-for-byte, and exactly one of them refuses.  The publication is
+non-secret, is qualified by its own closed validator, and is retained in the
+transaction marker so a reconciliation recovers THAT candidate and never
+reopens a replacement input.  A source-only release update carries an
+installed publication forward byte for byte.
+
 Verbs (run as root through ``service-control.sh``; this tool never calls it):
 
 ``plan``       read-only: compile the candidate, verify the sealed target
@@ -292,6 +302,9 @@ class Candidate:
     plist_after: bytes
     probes_before: tuple[Probe, ...]
     probes_after: tuple[Probe, ...]
+    # The one frozen selected-child publication this candidate installs.
+    # Absent preserves the existing source-only behaviour byte for byte.
+    selected_child_target: dict[str, Any] | None = None
 
     @property
     def config_before_sha256(self) -> str:
@@ -342,10 +355,13 @@ def build_probes(document: dict) -> tuple[Probe, ...]:
 
 
 def compile_candidate(prior_config: bytes, prior_plist: bytes, *, release_sha: str,
-                      set_public_mcp_resource: bool) -> Candidate:
+                      set_public_mcp_resource: bool,
+                      selected_child_target: dict[str, Any] | None = None,
+                      capability_profile_digests: dict[str, str] | None = None) -> Candidate:
     """Compile the only permitted change set, or raise UpdateRefused."""
     try:
-        return _compile_candidate(prior_config, prior_plist, release_sha, set_public_mcp_resource)
+        return _compile_candidate(prior_config, prior_plist, release_sha, set_public_mcp_resource,
+                                  selected_child_target, capability_profile_digests)
     except UpdateRefused:
         raise
     except AuthError as error:
@@ -354,8 +370,54 @@ def compile_candidate(prior_config: bytes, prior_plist: bytes, *, release_sha: s
         raise UpdateRefused("CANDIDATE_REFUSED: " + str(error)[:160]) from None
 
 
+def _apply_capability_profile_digests(
+    prior: dict[str, Any], proposed: dict[str, Any],
+    digests: dict[str, str] | None,
+) -> None:
+    """Re-derive the installed missions' capability-profile digests.
+
+    The exact replacement comes from the TARGET sealed release registry, so
+    a legitimate tool-projection change moves the mission's stored digest
+    with it. ONLY that one field changes: every other mission field,
+    principal action, scope and binding is preserved byte for byte, and no
+    principal realm or permission is created.
+    """
+
+    if not digests:
+        return
+    prior_block = prior.get("coo")
+    proposed_block = proposed.get("coo")
+    if not isinstance(prior_block, dict) or not isinstance(proposed_block, dict):
+        raise ValueError("candidate changed the installed COO block")
+    prior_missions = prior_block.get("missions")
+    missions = proposed_block.get("missions")
+    if not isinstance(prior_missions, list) or not isinstance(missions, list):
+        raise ValueError("candidate changed the installed mission set")
+    if len(missions) != len(prior_missions):
+        raise ValueError("candidate changed the installed mission set")
+    for row, prior_row in zip(missions, prior_missions):
+        if not isinstance(row, dict) or not isinstance(prior_row, dict):
+            raise ValueError("candidate changed the installed mission set")
+        profile_id = row.get("capability_profile_id")
+        digest = digests.get(profile_id) if type(profile_id) is str else None
+        if digest is None:
+            continue
+        if row.get("capability_profile_digest") != prior_row.get("capability_profile_digest"):
+            raise ValueError("candidate changed an installed capability-profile digest")
+        row["capability_profile_digest"] = digest
+    left = copy.deepcopy(proposed_block)
+    right = copy.deepcopy(prior_block)
+    for block in (left, right):
+        for mission in block.get("missions") or []:
+            if isinstance(mission, dict):
+                mission["capability_profile_digest"] = None
+    if left != right:
+        raise ValueError("candidate changed an unrelated installed COO field")
+
+
 def _compile_candidate(prior_config: bytes, prior_plist_bytes: bytes, release_sha: str,
-                       set_public: bool) -> Candidate:
+                       set_public: bool, selected_child_target: dict[str, Any] | None = None,
+                       capability_profile_digests: dict[str, str] | None = None) -> Candidate:
     _sha(release_sha, HEX40, "target release sha shape")
     prior = _strict_json(prior_config, "MCP_COMPONENT_CONFIG_MALFORMED")
     prior_plist = _strict_plist(prior_plist_bytes)
@@ -370,8 +432,19 @@ def _compile_candidate(prior_config: bytes, prior_plist_bytes: bytes, release_sh
     if set_public:
         require("public_mcp_resource" not in prior, "public_mcp_resource is already configured")
         proposed["public_mcp_resource"] = PUBLIC_MCP_RESOURCE
+    if selected_child_target is not None:
+        # The frozen publication is qualified by its own closed validator
+        # before it reaches the candidate, and it may only be installed or
+        # replaced: a candidate never withdraws an installed target.
+        proposed["selected_child_target"] = copy.deepcopy(selected_child_target)
+    elif "selected_child_target" in prior:
+        # A source-only release update carries the INSTALLED publication
+        # forward byte for byte. It is never withdrawn and never rewritten.
+        proposed["selected_child_target"] = copy.deepcopy(prior["selected_child_target"])
+    _apply_capability_profile_digests(prior, proposed, capability_profile_digests)
     changed = {key for key in set(prior) | set(proposed) if prior.get(key, _MISSING) != proposed.get(key, _MISSING)}
-    require(changed <= {"release_sha", "public_mcp_resource"}, "candidate changed an unrelated config field")
+    require(changed <= {"release_sha", "public_mcp_resource", "selected_child_target", "coo"},
+            "candidate changed an unrelated config field")
     _, public_after = _semantic(proposed)
     config_after = canonical(proposed) + b"\n"
     require(_strict_json(config_after, "MCP_COMPONENT_CONFIG_MALFORMED") == proposed, "config round trip differs")
@@ -392,6 +465,7 @@ def _compile_candidate(prior_config: bytes, prior_plist_bytes: bytes, release_sh
         plist_after=plist_after,
         probes_before=build_probes(prior),
         probes_after=build_probes(proposed),
+        selected_child_target=copy.deepcopy(proposed.get("selected_child_target")),
     )
 
 
@@ -399,7 +473,7 @@ _MISSING = object()
 
 
 def plan_document(candidate: Candidate, *, manifest_sha256: str, closure_sha256: str) -> dict:
-    return {
+    document = {
         "schema": PLAN_SCHEMA,
         "release_sha": candidate.release_sha,
         "prior_release_sha": candidate.prior_release_sha,
@@ -421,6 +495,15 @@ def plan_document(candidate: Candidate, *, manifest_sha256: str, closure_sha256:
             "launchctl enable+bootstrap " + LAUNCHD_ROOT,
         ],
     }
+    if candidate.selected_child_target is not None:
+        # The frozen publication's identity, not its content: the operator
+        # approves this exact work scope, root and material digest.
+        document["selected_child_target"] = {
+            "work_ref": candidate.selected_child_target["work_ref"],
+            "root_job_id": candidate.selected_child_target["root_job_id"],
+            "material_digest": candidate.selected_child_target["material_digest"],
+        }
+    return document
 
 
 def plan_digest(plan: dict) -> str:
@@ -477,6 +560,10 @@ class Host(Protocol):
     def release_lock(self) -> None: ...
     def read_config(self) -> bytes: ...
     def read_plist(self) -> bytes: ...
+    def read_selected_child_input(self, path: str, sha256: str) -> bytes: ...
+    def derive_capability_profile_digests(
+        self, release_sha: str, profile_ids: tuple[str, ...]
+    ) -> dict[str, str]: ...
     def verify_release(self, release_sha: str) -> str: ...
     def verify_closure(self) -> str: ...
     def readback(self, release_sha: str) -> dict: ...
@@ -606,6 +693,26 @@ class ProductionHost:
     def read_plist(self) -> bytes:
         return self._trusted(PLIST_PATH, MAX_PLIST_BYTES, 0o644)
 
+    def read_selected_child_input(self, path: str, sha256: str) -> bytes:
+        """Read the PAIRED capture input through the incumbent trusted read.
+
+        The read is the existing no-follow, bounded, single-link,
+        root-controlled-ancestor pattern: the same custody the installed
+        configuration and plist already use. The supplied digest binds
+        those bytes to the caller's selection; it is never on its own a
+        proof of source authenticity, which comes from this custody read
+        together with the closed validator on the content and the derived
+        material digest over the frozen coordinates.
+        """
+        if type(path) is not str or not path or "\x00" in path or not path.startswith("/"):
+            raise UpdateRefused("SELECTED_CHILD_INPUT_PATH_INVALID")
+        if type(sha256) is not str or HEX64.fullmatch(sha256) is None:
+            raise UpdateRefused("SELECTED_CHILD_INPUT_DIGEST_INVALID")
+        data = self._trusted(path, MAX_CONFIG_BYTES, 0o600)
+        if digest(data) != sha256:
+            raise UpdateRefused("SELECTED_CHILD_INPUT_DIGEST_MISMATCH")
+        return data
+
     def verify_release(self, release_sha: str) -> str:
         try:
             topology = installed._role_topology("gateway")
@@ -615,6 +722,37 @@ class ProductionHost:
         except PeerIdentityError as error:
             raise UpdateRefused("RELEASE_UNVERIFIED:" + str(error)) from None
         return observed.manifest_digest
+
+    def derive_capability_profile_digests(
+        self, release_sha: str, profile_ids: tuple[str, ...]
+    ) -> dict[str, str]:
+        """The exact capability-profile digests of the TARGET sealed release.
+
+        The registry inside the sealed target release is the only source of
+        the replacement digest. A hand-authored digest, a copied prior digest
+        or a hardcoded tool-schema digest is never accepted, and no new
+        principal realm or permission is created here.
+        """
+        from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+        root = Path(installed._SERVICE_RELEASES) / release_sha
+        policy = root / "config" / "executive_claude_principal_capabilities.json"
+        try:
+            budget = self._budget()
+            before = installed._observe_ancestors(str(policy), budget)
+            registry = ExecutionCapabilityRegistry.load(policy, source_root=root)
+            after = installed._observe_ancestors(str(policy), budget)
+        except Exception as error:
+            raise UpdateRefused(
+                "CAPABILITY_PROFILE_UNAVAILABLE:" + type(error).__name__.upper()) from None
+        if before != after:
+            raise UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE:ANCESTORS_CHANGED")
+        digests: dict[str, str] = {}
+        for profile_id in profile_ids:
+            profile = registry.profiles.get(profile_id)
+            if profile is None or not profile.enabled:
+                raise UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE")
+            digests[profile_id] = profile.profile_digest
+        return digests
 
     def verify_closure(self) -> str:
         try:
@@ -892,6 +1030,9 @@ _MARKER_KEYS = frozenset({
     "dispatched", "config_before_sha256", "config_after_sha256", "plist_before_sha256",
     "plist_after_sha256", "manifest_sha256", "closure_sha256", "started_at", "last_verify",
 })
+# The selected-child publication is OPTIONAL in the marker: a transaction
+# that carries none keeps the original marker shape byte for byte.
+_MARKER_OPTIONAL_KEYS = frozenset({"selected_child_target"})
 
 
 def _unknown(code: str) -> TransactionEffectUnknown:
@@ -900,7 +1041,10 @@ def _unknown(code: str) -> TransactionEffectUnknown:
 
 def _validate_marker(marker: Any) -> None:
     try:
-        require(isinstance(marker, dict) and set(marker) == _MARKER_KEYS, "marker keys")
+        require(isinstance(marker, dict), "marker shape")
+        keys = set(marker)
+        require(_MARKER_KEYS <= keys and keys <= (_MARKER_KEYS | _MARKER_OPTIONAL_KEYS),
+                "marker keys")
         require(marker["schema"] == MARKER_SCHEMA, "marker schema")
         for key in ("plan_sha256", "config_before_sha256", "config_after_sha256", "plist_before_sha256",
                     "plist_after_sha256", "manifest_sha256", "closure_sha256"):
@@ -918,7 +1062,15 @@ def _validate_marker(marker: Any) -> None:
                     < marker["dispatched"].index("recover_enable_done"), "marker recover order")
         require(type(marker["set_public_mcp_resource"]) is bool, "marker flag")
         require(isinstance(marker["last_verify"], list), "marker verify")
-    except (ValueError, KeyError):
+        if "selected_child_target" in marker:
+            # The original captured publication, retained in the transaction
+            # so a reconciliation recovers THIS candidate and never a
+            # replacement input.
+            from control_plane.coo_principal_host import validate_selected_child_target
+            publication = marker["selected_child_target"]
+            if publication is not None:
+                validate_selected_child_target(publication)
+    except (ValueError, KeyError, TypeError):
         raise _unknown("MARKER_MALFORMED") from None
 
 
@@ -1243,7 +1395,7 @@ def _verify(host: Host, marker: dict, candidate: Candidate) -> dict:
 
 def _receipt(host: Host, marker: dict, candidate: Candidate, outcome: str, readback: dict,
              process: dict | None = None) -> dict:
-    return {
+    receipt = {
         "schema": RECEIPT_SCHEMA,
         "outcome": outcome,
         "release_sha": marker["release_sha"],
@@ -1262,32 +1414,117 @@ def _receipt(host: Host, marker: dict, candidate: Candidate, outcome: str, readb
         "before_images": [] if outcome == "ABORTED_UNCHANGED" else [_before_name(kind, _tag(marker)) for kind in KINDS],
         "recorded_at": host.now(),
     }
+    if candidate.selected_child_target is not None:
+        # The published publication's identity for the parent's readback.
+        receipt["selected_child_target"] = {
+            "work_ref": candidate.selected_child_target["work_ref"],
+            "root_job_id": candidate.selected_child_target["root_job_id"],
+            "material_digest": candidate.selected_child_target["material_digest"],
+        }
+    return receipt
 
 
-def build_plan(host: Host, release_sha: str, set_public: bool) -> tuple[dict, Candidate]:
-    candidate = compile_candidate(host.read_config(), host.read_plist(), release_sha=release_sha,
-                                  set_public_mcp_resource=set_public)
+def selected_child_selector(input_path: str | None, input_sha256: str | None) -> tuple[str, str] | None:
+    """The PAIRED selected-child publication input, or NOTHING.
+
+    The two coordinates are ONE selection: the exact qualified input path
+    and the exact digest of its raw bytes. Both absent preserve the
+    existing source-only behaviour byte for byte; exactly one of them is a
+    refusal and is never treated as an absent selection.
+    """
+
+    if input_path is None and input_sha256 is None:
+        return None
+    if input_path is None or input_sha256 is None:
+        raise UpdateRefused("SELECTED_CHILD_INPUT_INCOMPLETE")
+    if type(input_path) is not str or not input_path:
+        raise UpdateRefused("SELECTED_CHILD_INPUT_PATH_INVALID")
+    if type(input_sha256) is not str or HEX64.fullmatch(input_sha256) is None:
+        raise UpdateRefused("SELECTED_CHILD_INPUT_DIGEST_INVALID")
+    return (input_path, input_sha256)
+
+
+def _selected_child_publication(host: Host, selector: tuple[str, str] | None) -> dict[str, Any] | None:
+    """Qualify the paired capture input with the closed publication validator."""
+
+    if selector is None:
+        return None
+    raw = host.read_selected_child_input(selector[0], selector[1])
+    document = _strict_json(raw, "MCP_COMPONENT_SELECTED_CHILD_MALFORMED")
+    if type(document) is not dict:
+        raise UpdateRefused("SELECTED_CHILD_INPUT_INVALID")
+    from control_plane.coo_principal_host import validate_selected_child_target
+    try:
+        return validate_selected_child_target(document)
+    except (ValueError, TypeError, KeyError):
+        raise UpdateRefused("SELECTED_CHILD_INPUT_INVALID") from None
+
+
+def _mission_capability_profile_digests(
+    host: Host, release_sha: str, config: bytes
+) -> dict[str, str]:
+    """The target release's exact digests for the installed missions' profiles.
+
+    Derived from the sealed target release registry. An installation without
+    COO missions has no profile to re-derive and the source-only behaviour is
+    preserved byte for byte.
+    """
+
+    try:
+        document = _strict_json(config, "MCP_COMPONENT_CONFIG_MALFORMED")
+    except ValueError:
+        # An unreadable prior document is the candidate compiler's refusal,
+        # not a second trust decision here.
+        return {}
+    if not isinstance(document, dict):
+        return {}
+    block = document.get("coo")
+    missions = block.get("missions") if isinstance(block, dict) else None
+    if not isinstance(missions, list):
+        return {}
+    profile_ids = {row.get("capability_profile_id") for row in missions
+                    if isinstance(row, dict) and type(row.get("capability_profile_id")) is str}
+    if not profile_ids:
+        return {}
+    return host.derive_capability_profile_digests(release_sha, tuple(sorted(profile_ids)))
+
+
+def build_plan(host: Host, release_sha: str, set_public: bool,
+               selector: tuple[str, str] | None = None) -> tuple[dict, Candidate]:
+    publication = _selected_child_publication(host, selector)
+    prior = host.read_config()
+    digests = _mission_capability_profile_digests(host, release_sha, prior)
+    candidate = compile_candidate(prior, host.read_plist(), release_sha=release_sha,
+                                  set_public_mcp_resource=set_public,
+                                  selected_child_target=publication,
+                                  capability_profile_digests=digests)
     manifest = host.verify_release(release_sha)
     closure = host.verify_closure()
     return plan_document(candidate, manifest_sha256=manifest, closure_sha256=closure), candidate
 
 
-def plan(host: Host, *, release_sha: str, set_public: bool) -> dict:
+def plan(host: Host, *, release_sha: str, set_public: bool,
+         selected_child_input: str | None = None,
+         selected_child_sha256: str | None = None) -> dict:
     host.require_root()
     host.receipts_ready()
-    document, _ = build_plan(host, release_sha, set_public)
+    selector = selected_child_selector(selected_child_input, selected_child_sha256)
+    document, _ = build_plan(host, release_sha, set_public, selector)
     return {"ok": True, "outcome": "PLANNED", "plan": document, "plan_sha256": plan_digest(document),
             "warnings": list(WARNINGS)}
 
 
-def apply(host: Host, *, release_sha: str, set_public: bool, plan_sha256: str) -> dict:
+def apply(host: Host, *, release_sha: str, set_public: bool, plan_sha256: str,
+          selected_child_input: str | None = None,
+          selected_child_sha256: str | None = None) -> dict:
     host.require_root()
     host.receipts_ready()
+    selector = selected_child_selector(selected_child_input, selected_child_sha256)
     host.acquire_lock()
     try:
         if host.marker_read() is not None:
             raise UpdateRefused("TRANSACTION_PRESENT")
-        document, candidate = build_plan(host, release_sha, set_public)
+        document, candidate = build_plan(host, release_sha, set_public, selector)
         if plan_digest(document) != plan_sha256:
             raise UpdateRefused("PLAN_DIGEST_MISMATCH")
         tag = plan_sha256[:12]
@@ -1319,6 +1556,11 @@ def apply(host: Host, *, release_sha: str, set_public: bool, plan_sha256: str) -
             "started_at": host.now(),
             "last_verify": [],
         }
+        if candidate.selected_child_target is not None:
+            # The ORIGINAL captured publication is retained in the
+            # transaction, so a reconciliation recovers THIS candidate and
+            # never reopens a replacement input.
+            marker["selected_child_target"] = copy.deepcopy(candidate.selected_child_target)
         host.marker_create(marker)
         try:
             host.preserve("config", tag, candidate.config_before)
@@ -1342,8 +1584,15 @@ def _candidate_from_marker(host: Host, marker: dict) -> Candidate:
             raise _unknown("BEFORE_IMAGE_MISSING")
         if digest(config) != marker["config_before_sha256"] or digest(plist) != marker["plist_before_sha256"]:
             raise _unknown("BEFORE_IMAGE_DRIFTED")
+        # The ORIGINAL captured publication comes from the transaction
+        # itself. A reconciliation never reopens an input, never recaptures
+        # and never reselects a child.
+        digests = _mission_capability_profile_digests(
+            host, marker["release_sha"], config)
         candidate = compile_candidate(config, plist, release_sha=marker["release_sha"],
-                                      set_public_mcp_resource=marker["set_public_mcp_resource"])
+                                      set_public_mcp_resource=marker["set_public_mcp_resource"],
+                                      selected_child_target=marker.get("selected_child_target"),
+                                      capability_profile_digests=digests)
         if (candidate.config_after_sha256 != marker["config_after_sha256"]
                 or candidate.plist_after_sha256 != marker["plist_after_sha256"]):
             raise _unknown("AFTER_IMAGE_DRIFTED")
@@ -1385,8 +1634,10 @@ def reconcile(host: Host, *, release_sha: str) -> dict:
 # --- closed command line ---
 
 _VERBS: dict[str, dict[str, bool]] = {
-    "plan": {"--release-sha": True, "--set-public-mcp-resource": False},
-    "apply": {"--release-sha": True, "--set-public-mcp-resource": False, "--plan-sha256": True},
+    "plan": {"--release-sha": True, "--set-public-mcp-resource": False,
+             "--selected-child-target-input": True, "--selected-child-target-sha256": True},
+    "apply": {"--release-sha": True, "--set-public-mcp-resource": False, "--plan-sha256": True,
+              "--selected-child-target-input": True, "--selected-child-target-sha256": True},
     "reconcile": {"--release-sha": True},
 }
 
@@ -1421,6 +1672,21 @@ def parse_arguments(argv: list[str]) -> tuple[str, dict[str, Any]]:
         plan_value = values.get("--plan-sha256")
         if not isinstance(plan_value, str) or HEX64.fullmatch(plan_value) is None:
             raise UsageError("plan")
+    # The selected-child publication input is PAIRED: the exact qualified
+    # input path and the exact digest of its raw bytes are ONE selection.
+    # Both absent preserve the source-only behaviour; exactly one refuses.
+    has_input = "--selected-child-target-input" in values
+    has_digest = "--selected-child-target-sha256" in values
+    if has_input != has_digest:
+        raise UsageError("selected child target input")
+    if has_input:
+        path_value = values["--selected-child-target-input"]
+        digest_value = values["--selected-child-target-sha256"]
+        if (not isinstance(path_value, str) or not path_value.startswith("/")
+                or "\x00" in path_value or ".." in path_value.split("/")):
+            raise UsageError("selected child target input")
+        if not isinstance(digest_value, str) or HEX64.fullmatch(digest_value) is None:
+            raise UsageError("selected child target input")
     return verb, values
 
 
@@ -1435,16 +1701,24 @@ def main(argv: list[str] | None = None, host: Host | None = None) -> int:
         verb, values = parse_arguments(arguments)
     except UsageError:
         sys.stderr.write("usage: mcp_component_update.py plan|apply|reconcile --release-sha <40hex> "
-                         "[--set-public-mcp-resource] [--plan-sha256 <64hex>]\n")
+                         "[--set-public-mcp-resource] [--plan-sha256 <64hex>] "
+                         "[--selected-child-target-input <absolute path> "
+                         "--selected-child-target-sha256 <64hex>]\n")
         return 64
     host = host if host is not None else ProductionHost()
     release = values["--release-sha"]
     public = bool(values.get("--set-public-mcp-resource", False))
+    child_input = values.get("--selected-child-target-input")
+    child_digest = values.get("--selected-child-target-sha256")
     try:
         if verb == "plan":
-            result = plan(host, release_sha=release, set_public=public)
+            result = plan(host, release_sha=release, set_public=public,
+                          selected_child_input=child_input,
+                          selected_child_sha256=child_digest)
         elif verb == "apply":
-            result = apply(host, release_sha=release, set_public=public, plan_sha256=values["--plan-sha256"])
+            result = apply(host, release_sha=release, set_public=public, plan_sha256=values["--plan-sha256"],
+                           selected_child_input=child_input,
+                           selected_child_sha256=child_digest)
         else:
             result = reconcile(host, release_sha=release)
     except UpdateRefused as error:

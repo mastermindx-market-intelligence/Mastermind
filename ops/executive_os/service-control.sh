@@ -29,6 +29,7 @@ usage() {
   /bin/echo "publish-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --expected-mcp-config-sha256 <64 lowercase hex> --expected-mcp-plist-sha256 <64 lowercase hex> and exactly one of --expected-grant-sha256 <64 lowercase hex> or --expected-grant-absent" >&2
   /bin/echo "reconcile-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --transaction-id autonomy-<12 lowercase hex>" >&2
   /bin/echo "plan-mcp-component requires --expected-sha <40 lowercase hex> and optionally --set-public-mcp-resource; apply-mcp-component additionally requires --plan-sha256 <64 lowercase hex>; reconcile-mcp-component requires only --expected-sha" >&2
+  /bin/echo "plan-mcp-component and apply-mcp-component optionally accept the PAIRED --selected-child-target-input <absolute canonical path> and --selected-child-target-sha256 <64 lowercase hex>; both or neither" >&2
   /bin/echo "plan-control-component and reconcile-control-component require --expected-sha <40 lowercase hex>; apply-control-component additionally requires --plan-sha256 <64 lowercase hex>" >&2
   /bin/echo "plan-control-component and apply-control-component optionally accept the PAIRED --hermes-role-metadata-read-input <absolute canonical path> and --hermes-role-metadata-read-sha256 <64 lowercase hex>; both or neither" >&2
   exit 64
@@ -554,12 +555,16 @@ dispatch_os_gateway() {
 }
 
 # Closed MCP component-update argv walk. Every flag is accepted at most once and
-# every value is a bounded digest. The helper's argv is rebuilt from fixed words
-# plus the two validated digests, so no caller text reaches it. No path, label,
-# account, port, resource value or verified boolean is ever accepted here.
+# every value is a bounded digest, except the ONE paired selected-child
+# publication input: the exact qualified input path and the exact digest of
+# its raw bytes, which are ONE selection. The helper's argv is rebuilt from
+# fixed words plus the validated values, so no caller text reaches it. No
+# output destination, label, account, port, resource value or verified
+# boolean is ever accepted here.
 MCP_COMPONENT_ARGV=()
 mcp_component_args() {
   local verb="$1" flag value seen="" sha="" plan="" public=0 helper_verb
+  local child_input="" child_sha=""
   shift
   while [ "$#" -gt 0 ]; do
     flag="$1"
@@ -576,6 +581,9 @@ mcp_component_args() {
         ;;
       --expected-sha) ;;
       --plan-sha256) [ "$verb" = "apply-mcp-component" ] || return 1 ;;
+      --selected-child-target-input|--selected-child-target-sha256)
+        [ "$verb" = "plan-mcp-component" ] || [ "$verb" = "apply-mcp-component" ] || return 1
+        ;;
       *) return 1 ;;
     esac
     [ "$#" -ge 1 ] || return 1
@@ -587,6 +595,14 @@ mcp_component_args() {
         [[ "$value" =~ ^[0-9a-f]{40}$ ]] || return 1
         sha="$value"
         ;;
+      --selected-child-target-input)
+        valid_component_input_path "$value" || return 1
+        child_input="$value"
+        ;;
+      --selected-child-target-sha256)
+        [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+        child_sha="$value"
+        ;;
       *)
         [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
         plan="$value"
@@ -594,6 +610,12 @@ mcp_component_args() {
     esac
   done
   [ -n "$sha" ] || return 1
+  # The selected-child publication input is PAIRED: one coordinate alone is
+  # a refusal, never an absent selection.
+  if [ -n "$child_input" ] || [ -n "$child_sha" ]; then
+    [ -n "$child_input" ] || return 1
+    [ -n "$child_sha" ] || return 1
+  fi
   case "$verb" in
     plan-mcp-component) helper_verb="plan" ;;
     apply-mcp-component)
@@ -605,6 +627,10 @@ mcp_component_args() {
   MCP_COMPONENT_ARGV=("$helper_verb" --release-sha "$sha")
   [ "$public" -eq 0 ] || MCP_COMPONENT_ARGV+=(--set-public-mcp-resource)
   [ -z "$plan" ] || MCP_COMPONENT_ARGV+=(--plan-sha256 "$plan")
+  if [ -n "$child_input" ]; then
+    MCP_COMPONENT_ARGV+=(--selected-child-target-input "$child_input")
+    MCP_COMPONENT_ARGV+=(--selected-child-target-sha256 "$child_sha")
+  fi
   GATEWAY_EXPECTED_SHA="$sha"
   return 0
 }

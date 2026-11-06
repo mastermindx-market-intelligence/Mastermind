@@ -1476,6 +1476,79 @@ class WorkspaceReadService:
         except Exception:
             return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
 
+    def capture_selected_child_target(self, *, work_ref, root_job_id, child_job_ids):
+        """Freeze one trusted host's chosen children through the incumbent read.
+
+        This is a HOST-INTERNAL entry, not an HTTP frame: it takes no
+        principal, it admits nothing and it never dispatches a Job. It
+        reuses the incumbent bounded admitted-plan observation, its VM
+        budget, its one-selection discipline, its identity joins and its
+        close receipt, so the admitted plan and the chosen children are
+        always ONE coherent observation.
+        """
+        from common.executive_workspace_contract import _check_job_id, _check_work_ref
+        from control_plane.coo_principal_host import SELECTED_CHILD_SOURCE_SCHEMA
+        from control_plane.executive_coo_policy import CooCyclePolicy, CooCyclePolicyError
+        from control_plane.executive_runtime import (
+            BoundedSelectedChildCapture,
+        )
+        if not _check_work_ref(work_ref) or not _check_job_id(root_job_id):
+            raise ValueError("invalid_input")
+        if type(child_job_ids) not in (list, tuple):
+            raise ValueError("invalid_input")
+        chosen = tuple(child_job_ids)
+        if not 1 <= len(chosen) <= 16 or len(set(chosen)) != len(chosen):
+            raise ValueError("invalid_input")
+        if any(type(item) is not str or not _check_job_id(item) for item in chosen):
+            raise ValueError("invalid_input")
+        try:
+            policy_before = CooCyclePolicy.load()
+        except CooCyclePolicyError:
+            raise ValueError("source_unavailable") from None
+        bounded = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
+        with bounded.observe_bounded_read() as observation:
+            capture = observation.read_selected_child_target_bounded(
+                root_job_id, child_job_ids=chosen)
+        # The receipt exists only after the physical close of the observation.
+        receipt = observation.receipt
+        try:
+            policy_after = CooCyclePolicy.load()
+        except CooCyclePolicyError:
+            raise ValueError("source_unavailable") from None
+        plan = getattr(capture, "plan", None)
+        admission = getattr(plan, "admission", None)
+        if (not isinstance(capture, BoundedSelectedChildCapture)
+                or plan.root_job_id != root_job_id
+                or plan.root_metadata.work_ref not in (None, work_ref)
+                or type(admission) is not dict
+                or policy_before.policy_sha256 != policy_after.policy_sha256
+                or policy_before.source_sha256 != policy_after.source_sha256
+                or receipt.state not in {"SAME", "UNKNOWN"}):
+            raise ValueError("source_unavailable")
+        try:
+            # The admitted policy is the CURRENT policy of its own version.
+            # An unrecognized or stale policy digest is a refusal, never an
+            # upgrade of an existing root.
+            admitted = CooCyclePolicy.for_digest(admission.get("policy_sha"))
+        except CooCyclePolicyError:
+            raise ValueError("source_unavailable") from None
+        if admitted.policy_sha256 != admission.get("policy_sha"):
+            raise ValueError("source_unavailable")
+        return {
+            "work_ref": work_ref,
+            "root_job_id": root_job_id,
+            "children": [dict(child) for child in capture.children],
+            "source": {
+                "schema": SELECTED_CHILD_SOURCE_SCHEMA,
+                "plan_attempt_id": admission["plan_attempt_id"],
+                "plan_digest": admission["plan_digest"],
+                "policy_sha": admission["policy_sha"],
+                "reservation_digest": admission["reservation_digest"],
+                "observation_state": receipt.state,
+                "observation_source_identity": receipt.source_identity,
+            },
+        }
+
     async def _handle_v3_frame(self, frame):
         try:
             validate_v3_frame(frame)

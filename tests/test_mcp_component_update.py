@@ -16,6 +16,7 @@ import itertools
 import json
 import os
 import plistlib
+from pathlib import Path
 
 import pytest
 
@@ -169,6 +170,9 @@ class FakeHost:
         self.disabled = False
         self.enabled_calls = 0
         self.running_plist = plist  # the plist the live process was launched from
+        # The TARGET sealed release registry that owns the mission's
+        # capability-profile digest. Absent means no COO mission.
+        self.capability_registry = None
         self.process_error = None  # raised by every launchd observation
         self.process_override = {}  # fields overlaid on the observed process
         self.process_pids = None  # iterator of pids, one per observation (crash loop)
@@ -229,6 +233,68 @@ class FakeHost:
 
     def read_plist(self):
         return self.plist
+
+    def derive_capability_profile_digests(self, release_sha, profile_ids):
+        """The TARGET sealed release registry is the only source of a digest.
+
+        The real registry loader runs against a real file, so the derived
+        digest is the exact one the installed release will observe.
+        """
+        if self.capability_registry is None:
+            raise m.UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE")
+        from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+        path = Path(self.capability_registry)
+        registry = ExecutionCapabilityRegistry.load(path, source_root=path.parent.parent)
+        digests = {}
+        for profile_id in profile_ids:
+            profile = registry.profiles.get(profile_id)
+            if profile is None or not profile.enabled:
+                raise m.UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE")
+            digests[profile_id] = profile.profile_digest
+        return digests
+
+    def read_selected_child_input(self, path, sha256):
+        """The paired capture input, read through a real descriptor.
+
+        The production reader needs a root-owned, no-follow, single-link
+        object under a root-controlled parent chain. Only that privileged
+        ownership seam is unavailable here, so this reads the SAME bytes
+        through a real descriptor and proves the same inode, size, mtime and
+        content identity the production read proves.
+        """
+        import stat as _stat
+        if not isinstance(path, str) or not path.startswith("/") or "\x00" in path:
+            raise m.UpdateRefused("SELECTED_CHILD_INPUT_PATH_INVALID")
+        if not isinstance(sha256, str) or m.HEX64.fullmatch(sha256) is None:
+            raise m.UpdateRefused("SELECTED_CHILD_INPUT_DIGEST_INVALID")
+        self.events.append("read_selected_child_input")
+        visible = os.lstat(path)
+        if not _stat.S_ISREG(visible.st_mode):
+            raise m.UpdateRefused("SELECTED_CHILD_INPUT_INVALID")
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            before = os.fstat(descriptor)
+            chunks = []
+            while True:
+                block = os.read(descriptor, 65536)
+                if not block:
+                    break
+                chunks.append(block)
+            after = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        data = b"".join(chunks)
+        if (len(data) != before.st_size
+                or before.st_ino != after.st_ino
+                or before.st_size != after.st_size
+                or before.st_mtime_ns != after.st_mtime_ns
+                or before.st_ctime_ns != after.st_ctime_ns
+                or visible.st_ino != after.st_ino
+                or visible.st_size != after.st_size):
+            raise m.UpdateRefused("SELECTED_CHILD_INPUT_CHANGED")
+        if digest(data) != sha256:
+            raise m.UpdateRefused("SELECTED_CHILD_INPUT_DIGEST_MISMATCH")
+        return data
 
     def verify_release(self, release_sha):
         if self.release_error is not None:

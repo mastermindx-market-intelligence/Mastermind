@@ -10,8 +10,10 @@ import os
 import hashlib
 import stat
 from pathlib import Path
-from common.executive_workspace_contract import _check_work_ref
-from control_plane.coo_principal_host import _refuse, _authority, validate_missions
+from common.executive_workspace_contract import canonical, _check_work_ref
+from control_plane.coo_principal_host import (
+    _refuse, _authority, build_selected_child_publication, validate_missions,
+)
 from control_plane.coo_principal_mandate import PrincipalFact
 from control_plane.executive_agent_capabilities import (
     CLAUDE_PRINCIPAL_AUTH_REALM,
@@ -77,6 +79,67 @@ def _fixed_original_target_reader(path, source, initial, *, expected_uid):
     return read
 
 
+def _fixed_selected_child_target_reader(path, source, initial, *, expected_uid):
+    """Bind the frozen selected-child publication to this process and file generation.
+
+    This is deliberately not a rotatable registry. Replacement or ABA writes
+    require fresh host qualification, even when the document returns to old
+    bytes. The guard proves the FIXED publication and its legitimate
+    read/source identity; it never reruns fresh dispatch eligibility,
+    recomputes an ordinal, requires the original child to remain unclaimed,
+    or calls guard_dialogue merely to read the original command.
+    """
+    from ops.executive_os import executive_mcp_entry as entry
+    publication = entry.build_installed_selected_child_target(initial)
+    if publication is None:
+        return None
+    pid = os.getpid()
+
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_uid,
+                info.st_gid)
+
+    def file_identity(info):
+        return (*identity(info), info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    def observe():
+        if os.getpid() != pid or os.geteuid() != expected_uid:
+            _refuse()
+        entry.require_sealed_path(source, directory=True)
+        entry.require_sealed_path(path)
+        nodes = tuple(dict.fromkeys((source, *source.parents, *path.parents)))
+        namespace = tuple(identity(node.lstat()) for node in nodes)
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC), "rb") as handle:
+            before = os.fstat(handle.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                _refuse()
+            contents = handle.read()
+            after = os.fstat(handle.fileno())
+            entry.require_sealed_path(source, directory=True)
+            entry.require_sealed_path(path)
+            if (file_identity(before) != file_identity(after)
+                    or file_identity(after) != file_identity(path.lstat())
+                    or namespace != tuple(identity(node.lstat()) for node in nodes)):
+                _refuse()
+        current = entry.validate_document(json.loads(contents))
+        if current != initial or source.name != current["release_sha"]:
+            _refuse()
+        return namespace, file_identity(after), hashlib.sha256(contents).digest()
+
+    generation = observe()
+
+    def currentness_guard():
+        if observe() != generation:
+            _refuse()
+
+    target = entry.build_selected_child_target(publication, currentness_guard)
+
+    def read():
+        currentness_guard()
+        return target
+    return read
+
+
 class CooInstalledSource:
     def __init__(self, load_coo, registry_loader):
         if not callable(load_coo) or not callable(registry_loader):
@@ -84,6 +147,7 @@ class CooInstalledSource:
         self._load_coo = load_coo
         self._registry_loader = registry_loader
         self._original_acceptance_target_reader = None
+        self._selected_child_target_reader = None
 
     @classmethod
     def from_path(cls, path, source, *, expected_uid):
@@ -103,11 +167,18 @@ class CooInstalledSource:
         owner = cls(loader, registry)
         owner._original_acceptance_target_reader = _fixed_original_target_reader(
             path, source, initial, expected_uid=expected_uid)
+        owner._selected_child_target_reader = _fixed_selected_child_target_reader(
+            path, source, initial, expected_uid=expected_uid)
         return owner
 
     def original_acceptance_target(self):
         """Only the genuine installed producer can supply this fixed target."""
         reader = self._original_acceptance_target_reader
+        return reader() if reader is not None else None
+
+    def selected_child_target(self):
+        """The same frozen publication, read through a fixed currentness reader."""
+        reader = self._selected_child_target_reader
         return reader() if reader is not None else None
 
     def snapshot(self, work_ref):
@@ -189,6 +260,61 @@ class CooInstalledSource:
                 or authority.work_ref != work_ref):
             _refuse()
         return row, fact, authority
+
+
+def prepare_selected_child_target(host_provider, *, principal, context, work_ref,
+                                  root_job_id, child_job_ids, destination):
+    """Capture through the owner and publish the closed material.
+
+    The production preparation hook of the selected-child publication. It
+    calls the OWNER capture -- never a local re-derivation -- and writes
+    the EXACT publication bytes to ``destination``: an exclusive,
+    no-follow create of a root-owned, single-link, group-0 file under a
+    root-controlled parent chain, with an exact readback of the bytes
+    written. It never overwrites an existing file and never leaves behind
+    a file the publication's own trusted read would refuse.
+    """
+    capture = host_provider.capture_selected_child_target(
+        principal=principal, context=context, work_ref=work_ref,
+        root_job_id=root_job_id, child_job_ids=child_job_ids)
+    publication = build_selected_child_publication(
+        work_ref=capture["work_ref"], root_job_id=capture["root_job_id"],
+        children=capture["children"], source=capture["source"])
+    raw = canonical(publication) + b"\n"
+    path = Path(destination)
+    if not path.is_absolute() or ".." in path.parts or str(path) != str(destination):
+        raise ValueError("selected child target input path is invalid")
+    for parent in path.parents:
+        info = parent.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+                or stat.S_IMODE(info.st_mode) & 0o022):
+            raise ValueError("selected child target input parent is not root-controlled")
+    flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL
+             | getattr(os, "O_NOFOLLOW", 0) | os.O_CLOEXEC)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except FileExistsError:
+        raise ValueError("selected child target input already exists") from None
+    try:
+        view = memoryview(raw)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise ValueError("selected child target input was not written whole")
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+            or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+        raise ValueError("selected child target input is not the root-owned object the publication reads")
+    with open(path, "rb") as handle:
+        written_back = handle.read()
+    if written_back != raw:
+        raise ValueError("selected child target input readback differs")
+    return {"publication": publication, "path": str(path),
+            "sha256": hashlib.sha256(raw).hexdigest()}
 
 
 def validate_control_coo(raw):

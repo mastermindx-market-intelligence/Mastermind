@@ -43,7 +43,7 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource', 'selected_child_target'}):
         raise ValueError('installed MCP configuration fields differ')
     if type(raw.get('reply_events_armed',False)) is not bool:
         raise ValueError('event receiver selection must be boolean')
@@ -78,6 +78,7 @@ def validate_document(raw):
     build_os_commission_client(raw)
     validate_optional_mounts(raw)
     build_installed_principal_ruling_target(raw)
+    build_installed_selected_child_target(raw)
     return raw
 
 
@@ -572,7 +573,7 @@ class PolicyAuditSink:
             sink.close()
 
 
-def build_installed_coo_settings(raw, source, config_path, executive):
+def build_installed_coo_settings(raw, source, config_path, executive, *, expected_uid=None):
     """Use the canonical App-peer fact transport; never open Runtime in MCP."""
     if not raw.get('coo', {}).get('missions'):
         return None
@@ -580,9 +581,25 @@ def build_installed_coo_settings(raw, source, config_path, executive):
     from integrations.mastermind_executive_app.coo import CooAppSettings
     from integrations.mastermind_executive_app.coo_installed import CooFactsClient
     client = CooFactsClient(raw['ceo_ingress_socket_path'])
-    return CooAppSettings(executive=executive, policy=optional_policies(raw)['coo'],
+    settings = dict(executive=executive, policy=optional_policies(raw)['coo'],
         load_binding=current_projection_loader(config_path, source, raw, 'coo', 'binding'),
         authority_provider=client.authority, mission_provider=client.mission)
+    publication = build_installed_selected_child_target(raw)
+    if publication is not None:
+        # One frozen publication, re-read through the sealed installed
+        # projection loader. The block is not a rotatable projection, so a
+        # changed target refuses instead of silently retargeting a running
+        # App; nothing here rebuilds a target from a model argument.
+        uid = raw['service_uid'] if expected_uid is None else expected_uid
+        loader = current_projection_loader(config_path, source, raw,
+                                           'selected_child_target', None,
+                                           expected_uid=uid)
+        def currentness_guard():
+            if loader() != publication:
+                raise ValueError('installed selected child target changed')
+        settings['selected_child_target'] = build_selected_child_target(
+            publication, currentness_guard)
+    return CooAppSettings(**settings)
 
 
 def build_installed_principal_ruling_target(raw):
@@ -607,6 +624,63 @@ def build_installed_principal_ruling_target(raw):
             if type(row) is dict and row.get('work_ref') == selected.work_ref]) != 1):
         raise ValueError('principal ruling requires the exact installed COO mission')
     return selected
+
+
+def build_installed_selected_child_target(raw):
+    """The frozen selected-child publication and its exact installed mission.
+
+    Absence preserves every installed route and every existing document.
+    A present publication is a closed projection whose material digest is
+    over exactly the frozen coordinates, and it must name exactly one
+    installed COO mission: the installed mission is the host's own
+    association, never a supplied selector.
+    """
+    if 'selected_child_target' not in raw:
+        return None
+    from control_plane.coo_principal_host import validate_selected_child_target
+    publication = validate_selected_child_target(raw['selected_child_target'])
+    missions = raw.get('coo', {}).get('missions', [])
+    if len([row for row in missions
+            if type(row) is dict and row.get('work_ref') == publication['work_ref']]) != 1:
+        raise ValueError('selected child target requires the exact installed COO mission')
+    return publication
+
+
+def build_selected_child_target(publication, currentness_guard):
+    """Construct the selected-child target from one qualified publication.
+
+    The published material is reconstructed into the target's own frozen
+    children, and the target's own material digest must equal the published
+    digest. The guard proves the FIXED publication and its legitimate
+    read/source identity; it never reruns dispatch eligibility, recomputes
+    an ordinal, requires the original child to remain unclaimed or calls
+    the dialogue guard merely to read the original command.
+    """
+    from integrations.hermes_delegate.executive import (
+        ExecutiveChildSelection, ExecutiveSelectedChild, ExecutiveSelectedChildTarget,
+    )
+    children = []
+    for item in publication['children']:
+        selection = ExecutiveChildSelection(
+            root_job_id=item['root_job_id'],
+            parent_job_id=item['parent_job_id'],
+            job_id=item['job_id'],
+            plan_attempt_id=item['plan_attempt_id'],
+            plan_digest=item['plan_digest'],
+            plan_step_id=item['plan_step_id'],
+            repair_round=item['repair_round'],
+            expected_current_attempt_id=item['expected_current_attempt_id'],
+        )
+        children.append(ExecutiveSelectedChild(
+            selection=selection, attempt_ordinal=item['attempt_ordinal']))
+    target = ExecutiveSelectedChildTarget(
+        work_ref=publication['work_ref'], children=tuple(children),
+        currentness_guard=currentness_guard)
+    digest = getattr(target, 'material_digest', None)
+    observed = digest() if callable(digest) else digest
+    if type(observed) is not str or observed != publication['material_digest']:
+        raise ValueError('installed selected child target differs from its publication')
+    return target
 
 
 def main(argv=None):
