@@ -273,6 +273,34 @@ class PreviewInstallTests(unittest.TestCase):
         with self.assertRaisesRegex(self.mod.InstallHeld, "prior_install_unknown_no_replay"):
             self.install(self.mod.digest(self.payload))
 
+    def test_failed_unknown_companion_cannot_turn_verified_into_reinstall_grant(self):
+        original = self.mod._write_new
+        def late_marker_and_full_disk(fd, name, raw):
+            if name.endswith(".unknown"):
+                raise OSError("inert disk pressure")
+            original(fd, name, raw)
+            if name.endswith(".verified"):
+                (self.active / "late-hold").touch()
+        with mock.patch.object(self.mod, "_write_new", side_effect=late_marker_and_full_disk):
+            with self.assertRaisesRegex(self.mod.InstallHeld, "install_effect_unknown_no_replay"):
+                self.install()
+        self.assertEqual(len(list(self.state.glob("*.verified"))), 1)
+        self.assertEqual(list(self.state.glob("*.unknown")), [])
+        (self.active / "late-hold").unlink()
+        before = self.mod.digest(self.payload)
+        self.payload += b"\n# independent next fixture version\n"
+        with self.assertRaisesRegex(self.mod.InstallHeld, "prior_install_record_requires_reconciliation"):
+            self.install(before)
+
+    def test_verified_history_also_requires_owner_reconciliation_before_new_id(self):
+        self.install()
+        before = self.mod.digest(self.payload)
+        self.payload += b"\n# independent next fixture version\n"
+        with self.assertRaisesRegex(self.mod.InstallHeld, "prior_install_record_requires_reconciliation"):
+            self.install(before)
+        observed = self.mod.inspect_target("linux-preview", self.binding, **self.kw)
+        self.assertEqual(observed["preimage"], before)
+
     def test_unknown_dynamic_or_accountless_mapping_never_falls_back(self):
         registry, config = self.configs()
         for bad in [b"", config + b"Include dynamic.conf\n", config.replace(b"fixture-user", b"root")]:

@@ -151,6 +151,11 @@ An unresolved PREPARED record holds later installs, including new IDs. After an
 uncertain effect there is no automatic rollback or replay: the same owner must
 reconcile the target and retained backup/receipt. Installing does not itself
 authorize a preview or cleanup, and does not prove physical capacity recovery.
+This narrow installer is one-shot: even a prior VERIFIED record requires fresh
+existing-owner reconciliation before a new install ID/version. A written terminal
+artifact is not proof that its last fence/fsync returned; it never grants another
+effect. Fixed read-only inspection remains available and does not clear history.
+No history-removal or automatic reconciliation command is supplied here.
 
 Hermetic installer checks: `python3 -m unittest tests.test_storage_preview_install`.
 The source candidate and prepared operation packet have not installed anything

@@ -227,6 +227,10 @@ def _prior_install_hold(fd, uid):
             unknown = _read(fd, entry.name + ".unknown", uid)
             if (unknown is not None or terminal is None or json.loads(terminal) != dict(before, state="VERIFIED")):
                 raise InstallHeld("prior_install_unknown_no_replay")
+            # A written terminal artifact alone cannot prove its final fence or
+            # directory fsync succeeded. This installer is deliberately one-shot:
+            # ALL prior records need fresh owner reconciliation before a new ID.
+            raise InstallHeld("prior_install_record_requires_reconciliation")
 
 
 def inspect_target(role, binding, *, home=None, uid=None, platform=None, account=None, hostname=None):
