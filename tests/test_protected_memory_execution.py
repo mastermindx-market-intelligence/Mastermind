@@ -52,6 +52,7 @@ def joined(configured,installed,monkeypatch,economy,request):
     if getattr(request,'param',None)=='native-builder-vector':
         native=(Path(__file__).parent/'fixtures/native_memory_packet_20261106/participant-input.bin').read_bytes()
         assert hashlib.sha256(native).hexdigest()=='f4213c04dc827819ac476859803d462b27ddf4badb3d5855c52dbf701acd641f'
+    result['native_packet']=native
     sha=hashlib.sha256(native).hexdigest()
     fingerprint=response({'schema':'request.v2','action':'prepare_case','operation_id':'x','intent':{}})['issuer']['broker_service_fingerprint']
     monkeypatch.setattr(root,'_enrollment',lambda _:(config['raw'],fingerprint,b'known',(1,2,3)))
@@ -133,10 +134,10 @@ def joined(configured,installed,monkeypatch,economy,request):
                     assert int.from_bytes(raw[:4],'big')==len(raw)-4
                     envelope=wire.parse(bytes(raw[4:]),400000)
                     actual=base64.b64decode(envelope['input_base64'])
-                    assert actual==native
+                    assert actual==result['native_packet']
                     body=json.loads(base64.b64decode(envelope['body_base64']))
                     assert body['input'].encode()==native and body['input'].encode().count(wire.SUFFIX)==1
-                    chosen=selected_descriptors(native)[0]
+                    chosen=selected_descriptors(actual)[0]
                     if result['bad']:chosen['context_id']='foreign-arm'
                     original=wire.canonical({'schema':'research_factory.market_memory_e0_participant_result.v1','answer':'Fixture untrusted answer','citations':[chosen]})
                     os.write(out,original);os.fsync(out)

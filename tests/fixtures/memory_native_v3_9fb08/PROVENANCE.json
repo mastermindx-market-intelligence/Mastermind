@@ -1,0 +1,10 @@
+{
+  "schema": "mastermind.memory_native_v3_vector_source.v1",
+  "macro_source_commit": "9fb08c079c0048f3f9fe9549208b2afc1316119b",
+  "macro_source_tree": "bdd7d20520f827d4a8f768a8a9dbf39982d95a35",
+  "source_archive_sha256": "f56814dee2d810c99e34878e9ed3eac2457c3a8cec44eff0ef8e9745fe7d3079",
+  "source_manifest_sha256": "23dc4b963ffb160789de767db419dd454824007cb5be7f559752da22dc0f7dc4",
+  "vector_manifest_sha256": "899cca958901757b7d7d736c195f022abe769c6d656a025055c8dbf3123ac6f5",
+  "original_held_pr": "https://github.com/mastermindx-market-intelligence/macro/pull/10768",
+  "claim": "Exact original synthetic source-produced DATA vectors; no installed host/service/current grant/provider/scientific proof; fixed a*64 preinput is not M2 Runtime authority."
+}
