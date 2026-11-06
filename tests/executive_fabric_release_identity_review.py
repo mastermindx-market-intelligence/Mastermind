@@ -602,4 +602,13 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
 
 # C16: fixed observation-only TLS directory; root owner and canonical Control
 # group retain the exact private traversal mode. Whole-source and token-bound.
-REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '053f801d4b28ed8cbd033c69869f1b12b2ea83c66d6d21f85fbb8d096b97ec03', 'sites': ((660, 71, 76, 'int', '0o750'),)}
+# C20 attended-parent source review: native composition preserves the exact
+# ensure_directories AST and its whole permission token at this same site.
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'b8a7cf9edd2746c8981dcb0a7ce1f1adf8c0b0067e9a49b949a7f48a85799139', 'sites': ((660, 71, 76, 'int', '0o750'),)}
+
+# Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
+# One exact multiplication operand; full-source drift restores the ordinary guard.
+REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
+    "sha256": "4f6ba0e1e4995e5aee1e4ffd377daa29e9172295dd237e0ca76d9576f64bad71",
+    "sites": ((23, 17, 20, "int", "512"),),
+}

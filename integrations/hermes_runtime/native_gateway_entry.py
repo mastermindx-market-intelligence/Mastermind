@@ -57,7 +57,7 @@ def _vendor_module(name: str, root: Path):
 def bind_native_api(module, *, vendor: Path, role_home: Path, role: str,
                     host: str, port: int) -> None:
     _selection(role, host, port)
-    if getattr(module, "_mastermind_role_api_bound", False):
+    if getattr(module, "_mmx_role_api_bound", False):
         raise RuntimeRefusal("NATIVE_API_ALREADY_BOUND")
     original = module.start_gateway_api
     if _digest(vendor / "gateway/run_api.py", maximum=128 * 1024) != RUN_API_SHA256:
@@ -79,7 +79,7 @@ def bind_native_api(module, *, vendor: Path, role_home: Path, role: str,
         return await original(runner, host=host, port=port)
 
     module.start_gateway_api = start_role_gateway_api
-    module._mastermind_role_api_bound = True
+    module._mmx_role_api_bound = True
 
 
 def native_git_environment(vendor: Path) -> dict[str, str]:
