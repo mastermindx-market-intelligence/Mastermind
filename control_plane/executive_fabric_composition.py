@@ -21,6 +21,8 @@ from control_plane.executive_worker_broker import BrokerStateError
 CONFIG_SCHEMA_VERSION = "mastermind.executive_fabric_bindings/v1"
 REMOTE_CONFIG_SCHEMA_VERSION = "mastermind.executive_fabric_bindings/v2"
 HOST_READ_CONFIG_SCHEMA_VERSION = "mastermind.executive_fabric_bindings/v3"
+SECRETARY_CONFIG_SCHEMA_VERSION = "mastermind.executive_fabric_bindings/v4"
+HERMES_SECRETARY_HOST_SCHEMA = "mastermind.hermes_secretary_host_binding/v1"
 HERMES_HOST_READ_SCHEMA = "mastermind.hermes_role_metadata_host_binding/v1"
 MAX_CONFIG_BYTES = 64 * 1024
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -167,6 +169,51 @@ class HermesHostObservationBinding:
                    value['expected_host_binding_sha256'], value['expected_implementation_sha'])
 
 
+
+@dataclasses.dataclass(frozen=True)
+class HermesSecretaryHostBinding:
+    """One native conversation selected by the installed composition owner."""
+
+    host_ref: str
+    root_id: str
+    root_job_id: str
+    work_ref: str
+    session_id: str
+    profile_id: str
+    principal_id: str
+    transport: object
+    expected_host_binding_sha256: str
+    expected_implementation_sha: str
+
+    @classmethod
+    def from_document(cls, value):
+        fields = {'schema', 'host_ref', 'root_id', 'root_job_id', 'work_ref', 'session_id',
+                  'profile_id', 'principal_id', 'transport',
+                  'expected_host_binding_sha256', 'expected_implementation_sha'}
+        if (type(value) is not dict or set(value) != fields
+                or value['schema'] != HERMES_SECRETARY_HOST_SCHEMA):
+            raise FabricCompositionError('Secretary selection differs from its closed schema')
+        from control_plane.remote_worker_transport import (
+            TransportValidationError, validate_secretary_native_id, validate_secretary_root_id,
+        )
+        try:
+            validate_secretary_root_id(value['root_id'])
+            validate_secretary_root_id(value['root_job_id'])
+            for key in ('work_ref', 'session_id', 'profile_id', 'principal_id'):
+                validate_secretary_native_id(value[key])
+        except TransportValidationError:
+            raise FabricCompositionError('Secretary selection identity is invalid') from None
+        observation = HermesHostObservationBinding.from_document({
+            'schema': HERMES_HOST_READ_SCHEMA,
+            **{key: value[key] for key in ('host_ref', 'transport',
+                    'expected_host_binding_sha256', 'expected_implementation_sha')},
+        })
+        return cls(value['host_ref'], value['root_id'], value['root_job_id'], value['work_ref'],
+                   value['session_id'], value['profile_id'], value['principal_id'],
+                   observation.transport, observation.expected_host_binding_sha256,
+                   observation.expected_implementation_sha)
+
+
 def _remote_transports(values, bindings):
     index = {(b.host_ref, b.worker_id): b for b in bindings}
     from control_plane.fabric_remote_transport import FabricRemoteTransport
@@ -183,6 +230,23 @@ def _remote_transports(values, bindings):
 
 def _composition(raw):
     document = _document(raw)
+    if type(document) is dict and document.get('schema_version') == SECRETARY_CONFIG_SCHEMA_VERSION:
+        expected = {'schema_version', 'bindings', 'remote_transports',
+                    'hermes_role_metadata_read', 'hermes_secretary_conversation'}
+        if set(document) != expected:
+            raise FabricCompositionError('Secretary composition differs from its closed schema')
+        secretary = HermesSecretaryHostBinding.from_document(document['hermes_secretary_conversation'])
+        legacy = {key: value for key, value in document.items() if key != 'hermes_secretary_conversation'}
+        legacy['schema_version'] = HOST_READ_CONFIG_SCHEMA_VERSION
+        bindings, transports, observation, _ = _composition(
+            json.dumps(legacy, ensure_ascii=False, allow_nan=False).encode())
+        if (type(observation) is not HermesHostObservationBinding
+                or secretary.host_ref != observation.host_ref
+                or secretary.transport != observation.transport
+                or secretary.expected_host_binding_sha256 != observation.expected_host_binding_sha256
+                or secretary.expected_implementation_sha != observation.expected_implementation_sha):
+            raise FabricCompositionError('Secretary and observation require the same qualified host source')
+        return bindings, transports, observation, secretary
     if type(document) is dict and document.get('schema_version') == HOST_READ_CONFIG_SCHEMA_VERSION:
         if (set(document) != {'schema_version', 'bindings', 'remote_transports', 'hermes_role_metadata_read'}
                 or type(document['bindings']) is not list
@@ -196,7 +260,7 @@ def _composition(raw):
         if any(key[0] == observation.host_ref and transport.binding != observation.transport.binding
                for key, transport in transports.items()):
             raise FabricCompositionError('Conflicting transports for the same observation host are forbidden')
-        return bindings, transports, observation
+        return bindings, transports, observation, None
     if type(document) is dict and document.get('schema_version') == REMOTE_CONFIG_SCHEMA_VERSION:
         if (set(document) not in (
                     {'schema_version', 'bindings', 'remote_transports'},
@@ -224,8 +288,8 @@ def _composition(raw):
             except RoleStatusError as exc:
                 raise FabricCompositionError('Hermes observation requires exact source pins') from exc
             observation = MappingProxyType(dict(value))
-        return bindings, transports, observation
-    return _bindings(raw), MappingProxyType({}), None
+        return bindings, transports, observation, None
+    return _bindings(raw), MappingProxyType({}), None, None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -238,6 +302,7 @@ class FabricBindingSource:
     _index: Mapping[tuple[str, str], FabricHostBinding] = dataclasses.field(repr=False, compare=False)
     _remote_index: Mapping = dataclasses.field(repr=False, compare=False)
     _hermes_role_metadata_read: Mapping | HermesHostObservationBinding | None = dataclasses.field(default=None, repr=False, compare=False)
+    _hermes_secretary_conversation: HermesSecretaryHostBinding | None = dataclasses.field(default=None, repr=False, compare=False)
 
     @classmethod
     def from_path(cls, path: str | Path, expected_sha256: str) -> "FabricBindingSource":
@@ -247,10 +312,10 @@ class FabricBindingSource:
             raise FabricCompositionError("Fabric composition requires a filesystem path")
         fixed_path = _absolute_path(str(path))
         raw, identity = _read_pinned(fixed_path, expected_sha256)
-        bindings, remote_index, observation = _composition(raw)
+        bindings, remote_index, observation, secretary = _composition(raw)
         return cls(fixed_path, expected_sha256, bindings, identity,
                    MappingProxyType({(b.host_ref, b.worker_id): b for b in bindings}),
-                   remote_index, observation)
+                   remote_index, observation, secretary)
 
     def require_current(self) -> None:
         _, identity = _read_pinned(self.path, self.expected_sha256)
@@ -269,6 +334,22 @@ class FabricBindingSource:
             return self._index[(host_ref, worker_id)]
         except KeyError as exc:
             raise FabricCompositionError("Exact Fabric host/worker binding is not installed") from exc
+
+    def hermes_secretary_selection(self) -> HermesSecretaryHostBinding | None:
+        self.require_current()
+        selection = self._hermes_secretary_conversation
+        if selection is not None:
+            selection.transport.require_current()
+        return selection
+
+    def hermes_secretary_client(self, *, root_id: str, session_id: str):
+        """One exact installed conversation; no caller-selected endpoint or identity."""
+        selection = self.hermes_secretary_selection()
+        if selection is None:
+            return None
+        if root_id != selection.root_id or session_id != selection.session_id:
+            raise FabricCompositionError('Secretary conversation is not the installed selection')
+        return _PinnedSecretaryClient(self, selection)
 
     def hermes_roles_reader(self):
         """Compose the fixed host read without admitting a Worker or Attempt."""
@@ -324,3 +405,45 @@ class FabricBindingSource:
             return _fixed_client(physical)
         from control_plane.fabric_remote_transport import PinnedFabricRemoteClient
         return PinnedFabricRemoteClient(self, physical, payload, remote)
+
+
+class _PinnedSecretaryClient:
+    """Currentness around the existing transport and its exact prewrite guard."""
+
+    def __init__(self, source: FabricBindingSource, selection: HermesSecretaryHostBinding):
+        from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
+        self._source, self._selection = source, selection
+        self._client = RemoteWorkerBrokerClient.for_secretary_conversation(
+            selection.transport.binding, host_ref=selection.host_ref,
+            root_id=selection.root_id, session_id=selection.session_id,
+            expected_host_binding_sha256=selection.expected_host_binding_sha256,
+            expected_implementation_sha=selection.expected_implementation_sha,
+        )
+
+    def _require_current(self):
+        if self._source.hermes_secretary_selection() != self._selection:
+            raise FabricCompositionError('Secretary selection changed')
+
+    async def request_secretary(self, request, *, before_write=None):
+        from control_plane.remote_worker_transport import TransportEffect, TransportError
+        modifying = type(request) is dict and request.get('operation') == 'submit'
+        try:
+            self._require_current()
+        except Exception:
+            raise TransportError('secretary_binding_changed', TransportEffect.NO_EFFECT) from None
+
+        def guarded(operation, sealed_request):
+            self._require_current()
+            result = before_write(operation, sealed_request)
+            self._require_current()
+            return result
+
+        result = await self._client.request_secretary(
+            request, before_write=guarded if before_write is not None else None,
+        )
+        try:
+            self._require_current()
+        except Exception:
+            raise TransportError('secretary_binding_changed',
+                TransportEffect.EFFECT_UNKNOWN if modifying else TransportEffect.NO_EFFECT) from None
+        return result

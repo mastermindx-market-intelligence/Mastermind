@@ -20,7 +20,8 @@ import time
 from pathlib import Path
 
 from common.hermes_role_status_contract import (
-    MAX_SAFE_INTEGER, ROLES, UNITS, RoleStatusError, decode_status_v2_text, validate_custody,
+    MAX_SAFE_INTEGER, ROLES, UNITS, RoleStatusError, decode_status_custody_text, validate_custody,
+    STATUS_SCHEMA_V3, validate_gateway_listener,
     project_observation, validate_observation, validate_source_pins,
 )
 # The release owner is the same package; its held-source class and manifest
@@ -101,7 +102,7 @@ def _decode_pid1(raw: bytes) -> list[dict]:
         rows.append({"role": role, "unit": unit, "main_pid": _number(value["MainPID"]),
                      "main_start_monotonic_us": _number(value["ExecMainStartTimestampMonotonic"]),
                      "invocation_id": value["InvocationID"],
-                     "status": decode_status_v2_text(value["StatusText"], expected_role=role),
+                     "status": decode_status_custody_text(value["StatusText"], expected_role=role),
                      "notify_access": value["NotifyAccess"], "active_state": value["ActiveState"],
                      "sub_state": value["SubState"], "unit_properties": value})
     return rows
@@ -284,7 +285,7 @@ class _HeldRoleQualification:
                 or properties["WorkingDirectory"] != approved["state_dir"]
                 or properties["NotifyAccess"] != "main"):
             raise RoleStatusError()
-        published = decode_status_v2_text(properties["StatusText"], expected_role=role)
+        published = decode_status_custody_text(properties["StatusText"], expected_role=role)
         if (published["host_boot_id"] != boot_id
                 or published["implementation_sha"] != self.implementation_sha
                 or published["invocation_id"] != properties["InvocationID"]):
@@ -311,6 +312,8 @@ class _HeldRoleQualification:
             "effective_gid": identity["effective_gid"],
             "image_sha256": identity["image_sha256"],
             "manifest_sha256": identity["manifest_sha256"],
+            **({"gateway_listener": published["gateway_listener"]}
+               if published["schema"] == STATUS_SCHEMA_V3 else {}),
         }
 
     @staticmethod
@@ -415,6 +418,45 @@ def qualify_pair(before, after, *, host_binding_sha256: str, implementation_sha:
 def _check_deadline(deadline: float) -> None:
     if asyncio.get_running_loop().time() >= deadline:
         raise RoleStatusError()
+
+
+async def qualify_secretary_listener(held: _HeldRoleQualification, *,
+                                      gateway_port: int, deadline: float) -> dict:
+    """Join the main-only socket witness to its unique current kernel listener.
+
+    Reuses the release/unit/process owner and the bounded kernel-row parser.
+    This reads no private role configuration, secret, environment or cross-UID
+    descriptor directory. A v2 metadata witness cannot authorize this path.
+    """
+    from integrations.hermes_runtime.isolation_probe import _kernel_listeners
+
+    _check_deadline(deadline)
+    held.check()
+    boot = _boot_id()
+    rows = await _query_fixed_pid1()
+    row = next(item for item in rows if item["role"] == "mmsecretary")
+    status = row["status"]
+    if (row["notify_access"] != "main" or row["active_state"] != "active"
+            or row["sub_state"] != "running" or status["schema"] != STATUS_SCHEMA_V3):
+        raise RoleStatusError()
+    listener = validate_gateway_listener(status["gateway_listener"])
+    if (listener["port"] != gateway_port
+            or status["observed_monotonic_ms"] * 1000 < row["main_start_monotonic_us"]):
+        raise RoleStatusError()
+    facts = held.role_facts("mmsecretary", row["unit_properties"], boot)
+    monotonic_age = time.monotonic_ns() // 1_000_000 - status["observed_monotonic_ms"]
+    wall_age = time.time_ns() // 1_000_000 - status["observed_at_ms"]
+    if not 0 <= monotonic_age <= 30_000 or wall_age < 0 or abs(wall_age - monotonic_age) > 5_000:
+        raise RoleStatusError("SOURCE_STALE")
+    held.check()
+    if boot != _boot_id():
+        raise RoleStatusError("SOURCE_CHANGED")
+    current = [item for item in _kernel_listeners(gateway_port)
+               if item["host"] in {listener["host"], "0.0.0.0"}]
+    if current != [{"host": listener["host"], "port": gateway_port, "inode": int(listener["inode"])}]:
+        raise RoleStatusError("SOURCE_CHANGED")
+    _check_deadline(deadline)
+    return {"facts": facts, "listener": listener}
 
 
 class HermesRoleMetadataObserver:

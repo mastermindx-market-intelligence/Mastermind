@@ -33,6 +33,7 @@ from control_plane.remote_worker_transport import (
     build_host_observation_request,
     build_secretary_request,
     decode_host_observation_response,
+    decode_secretary_request,
     decode_secretary_response,
     secretary_request_session_id,
     validate_host_ref,
@@ -206,7 +207,10 @@ class RemoteWorkerBrokerClient:
             wire = build_secretary_request(
                 host_ref, root_id, expected_binding, expected_implementation, operation,
             )
-            frame = encode_frame(self._canonical_bytes(wire))
+            sealed = self._canonical_bytes(wire)
+            wire = decode_secretary_request(sealed)
+            operation = wire["request"]
+            frame = encode_frame(sealed)
         except TransportValidationError as exc:
             raise TransportError(
                 "secretary_request_invalid", TransportEffect.NO_EFFECT
@@ -237,12 +241,16 @@ class RemoteWorkerBrokerClient:
                     # immediately before the single framed write.  A refusal or
                     # a failure here has produced no effect.
                     try:
-                        if before_write(operation["operation"], operation) is not None:
+                        callback_request = json.loads(self._canonical_bytes(operation))
+                        if (before_write(operation["operation"], callback_request) is not None
+                                or self._canonical_bytes(callback_request) != self._canonical_bytes(operation)):
                             raise ValueError("invalid local foreground guard")
                     except Exception:
                         raise TransportError(
                             "before_write_refused", TransportEffect.NO_EFFECT
                         ) from None
+                if loop.time() >= deadline:
+                    raise asyncio.TimeoutError()
                 write_started = True
                 writer.write(frame)
                 await writer.drain()
@@ -257,6 +265,8 @@ class RemoteWorkerBrokerClient:
                     )
                 raw = await reader.readexactly(size)
                 response = decode_secretary_response(raw, wire)
+                if loop.time() >= deadline:
+                    raise asyncio.TimeoutError()
                 if response["outcome"] == "refused":
                     # A refusal proven before forwarding is not an effect.
                     raise TransportError("refused", TransportEffect.NO_EFFECT)
@@ -266,11 +276,10 @@ class RemoteWorkerBrokerClient:
         except asyncio.CancelledError as exc:
             # The framed write may already have reached the Secretary owner.
             # Cancellation cannot authorize another submit.
-            if write_started and modifying:
-                raise TransportError(
-                    "secretary_request_cancelled", TransportEffect.EFFECT_UNKNOWN
-                ) from exc
-            raise
+            raise TransportError(
+                "secretary_request_cancelled",
+                TransportEffect.EFFECT_UNKNOWN if write_started and modifying else TransportEffect.NO_EFFECT,
+            ) from exc
         except (
             asyncio.IncompleteReadError,
             asyncio.TimeoutError,

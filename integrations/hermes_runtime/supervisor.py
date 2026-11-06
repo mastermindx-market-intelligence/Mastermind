@@ -15,7 +15,8 @@ import subprocess
 import threading
 import time
 
-from .constants import HEALTH_SCHEMA, LOOPBACK_HOST, PINNED_UPSTREAM_SHA
+from .constants import (HEALTH_SCHEMA, LOOPBACK_HOST, PINNED_UPSTREAM_SHA,
+                        SECRETARY_ROLE_REQUEST_SCHEMA, SECRETARY_ROLE_RESPONSE_SCHEMA)
 from .egress import ROLE_PROXY_HOST
 from .hermes_config import render_hermes_config
 from .errors import RuntimeRefusal
@@ -201,6 +202,14 @@ class ServiceRuntime:
             self.health_snapshot,
             **gateway_options,
         )
+        if (gateway_options and self._role_status_publisher is not None
+                and self._role_status_publisher.custody_observer is not None):
+            from dataclasses import replace
+            self._role_status_publisher = replace(
+                self._role_status_publisher, listener_observer=self.gateway.listener_custody,
+            )
+            self._next_role_status_publication = 0.0
+            self._publish_role_status_if_due(time.monotonic())
         self._thread = threading.Thread(target=self._loop_guarded, name="hermes-runtime-supervisor", daemon=True)
         self._thread.start()
 
@@ -258,13 +267,13 @@ class ServiceRuntime:
     def _native_conversation(self, request: dict) -> dict:
         """Existing role gateway -> actual selected native private owner."""
         from .native_session_control import NativeSecretaryClient, SCHEMA
-        response_schema = "mastermind.hermes_secretary_role_response/v1"
+        response_schema = SECRETARY_ROLE_RESPONSE_SCHEMA
         implementation = self._native_launch.owner.root.name
         def reply(status, **fields):
             return {"schema": response_schema, "implementation_sha": implementation,
                     "result": {"schema": SCHEMA, "status": status, **fields}}
         if (type(request) is not dict or set(request) != {"schema", "implementation_sha", "request"}
-                or request["schema"] != "mastermind.hermes_secretary_role_request/v1"
+                or request["schema"] != SECRETARY_ROLE_REQUEST_SCHEMA
                 or request["implementation_sha"] != implementation or type(request["request"]) is not dict):
             return reply("REFUSED", reason="SOURCE_OR_REQUEST_MISMATCH")
         with self._lock:

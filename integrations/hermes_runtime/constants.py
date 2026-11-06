@@ -45,6 +45,8 @@ QUALIFIED_VISION_ROUTE = {"provider": "zai", "model": "glm-5.3-flash"}
 GATEWAY_TOKEN_ENV = "HERMES_GATEWAY_TOKEN"
 SECRETARY_CONVERSATION_TOKEN_ENV = "HERMES_SECRETARY_CONVERSATION_TOKEN"
 SECRETARY_PATH = "/api/secretary/v1"
+SECRETARY_ROLE_REQUEST_SCHEMA = "mastermind.hermes_secretary_role_request/v1"
+SECRETARY_ROLE_RESPONSE_SCHEMA = "mastermind.hermes_secretary_role_response/v1"
 DASHBOARD_USERNAME_ENV = "HERMES_DASHBOARD_BASIC_AUTH_USERNAME"
 DASHBOARD_PASSWORD_ENV = "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD"
 # Always passed to the Hermes child when present. WP2 registers provider

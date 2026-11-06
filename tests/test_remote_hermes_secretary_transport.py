@@ -833,7 +833,7 @@ async def test_secretary_server_refusal_is_no_effect(binding, monkeypatch):
     assert attempts == 1
 
 
-async def test_secretary_cancellation_before_the_write_propagates(binding, monkeypatch):
+async def test_secretary_cancellation_before_the_write_is_no_effect(binding, monkeypatch):
     client = _client(binding)
     writer = _Writer()
 
@@ -847,8 +847,10 @@ async def test_secretary_cancellation_before_the_write_propagates(binding, monke
     )
     await asyncio.sleep(0)
     task.cancel()
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(TransportError) as raised:
         await task
+    assert raised.value.classification is TransportEffect.NO_EFFECT
+    assert raised.value.code == "secretary_request_cancelled"
     assert bytes(writer.written) == b""
 
 
@@ -924,3 +926,59 @@ async def test_secretary_native_result_is_returned_without_upgrading_it(binding,
     result = await client.request_secretary(_submit(), before_write=lambda *_: None)
     assert result == native
     assert result["status"] == "EFFECT_UNKNOWN"
+
+
+async def test_secretary_seals_nested_request_before_connect(binding, monkeypatch):
+    client = _client(binding)
+    original = _submit()
+    sealed = json.loads(_canonical(original))
+    writer = _Writer()
+    native = _native_result("ADMITTED", admission={"admission_id": "admission-0001"})
+    reader = _answering_pair(writer, lambda request: transport.build_secretary_response(
+        request, outcome="ok", result=native))
+    seen = []
+
+    async def exchange():
+        original["target"]["session_id"] = "caller-mutated-after-seal"
+        original["text"] = "changed outside the sealed operation"
+        return reader, writer
+
+    def commit(operation, request):
+        seen.append((operation, request))
+
+    monkeypatch.setattr(client, "_open_connection", exchange)
+    assert await client.request_secretary(original, before_write=commit) == native
+    transmitted = transport.decode_secretary_request(bytes(writer.written[4:]))
+    assert seen == [("submit", sealed)]
+    assert transmitted["request"] == sealed
+
+
+async def test_secretary_callback_cannot_mutate_the_sealed_submission(binding, monkeypatch):
+    client = _client(binding)
+    writer = _Writer()
+    async def exchange():
+        return _Reader(), writer
+    def mutate(operation, request):
+        request["target"]["revision"] += 1
+    monkeypatch.setattr(client, "_open_connection", exchange)
+    with pytest.raises(TransportError) as failure:
+        await client.request_secretary(_submit(), before_write=mutate)
+    assert failure.value.classification is TransportEffect.NO_EFFECT
+    assert failure.value.code == "before_write_refused"
+    assert bytes(writer.written) == b""
+
+
+async def test_secretary_deadline_after_commit_callback_prevents_write(binding, monkeypatch):
+    import time
+    client = _client(binding)
+    writer = _Writer()
+    async def exchange():
+        return _Reader(), writer
+    def slow_commit(operation, request):
+        time.sleep(0.03)
+    monkeypatch.setattr(client, "_open_connection", exchange)
+    monkeypatch.setattr(client_module, "_SECRETARY_TOTAL_BUDGET_SECONDS", 0.02)
+    with pytest.raises(TransportError) as failure:
+        await client.request_secretary(_submit(), before_write=slow_commit)
+    assert failure.value.classification is TransportEffect.NO_EFFECT
+    assert bytes(writer.written) == b""

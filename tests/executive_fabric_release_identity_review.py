@@ -612,3 +612,10 @@ REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
     "sha256": "4f6ba0e1e4995e5aee1e4ffd377daa29e9172295dd237e0ca76d9576f64bad71",
     "sites": ((23, 17, 20, "int", "512"),),
 }
+
+# Fixed Secretary wire-response byte ceiling, not an OS identity. The complete
+# NUMBER token is the left operand of MAX_SECRETARY_RESPONSE_BYTES = 512 * 1024.
+REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
+    "sha256": "b977481fddffb008064a2760699af3564c1748abea74a381860d5da5ee667280",
+    "sites": ((34, 31, 34, "int", "512"),),
+}

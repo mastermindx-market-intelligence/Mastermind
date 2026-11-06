@@ -4,6 +4,9 @@ from __future__ import annotations
 from collections.abc import Callable
 import hmac
 import json
+import os
+import stat
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import socket
 import threading
@@ -52,6 +55,7 @@ class Gateway:
                     (type(conversation_token) is not str or not 16 <= len(conversation_token) <= 256
                      or conversation_token == token or not callable(conversation_handler)))):
             raise RuntimeRefusal("SECRETARY_GATEWAY_CAPABILITY_INVALID")
+        self._process_pid = os.getpid()
         self._conversation_token = conversation_token
         self._conversation_handler = conversation_handler
         self._token = token
@@ -70,6 +74,27 @@ class Gateway:
         if not self._started.wait(timeout=2):
             self.close()
             raise RuntimeRefusal("GATEWAY_START_FAILED")
+
+    def listener_custody(self) -> dict:
+        """Measure this main process's existing listening socket, never a config label."""
+        from common.hermes_role_status_contract import validate_gateway_listener
+        try:
+            channel = self._httpd.socket
+            identity = os.fstat(channel.fileno())
+            if (sys.platform != "linux" or os.getpid() != self._process_pid
+                    or self._conversation_handler is None
+                    or channel.family != socket.AF_INET or channel.type != socket.SOCK_STREAM
+                    or not stat.S_ISSOCK(identity.st_mode) or identity.st_uid != os.geteuid()
+                    or channel.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) != 1
+                    or channel.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR) != 0
+                    or channel.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT) != 0
+                    or channel.get_inheritable()
+                    or channel.getsockname() != (self.host, self.port)):
+                raise ValueError()
+            return validate_gateway_listener({"host": self.host, "port": self.port,
+                                              "inode": str(identity.st_ino)})
+        except Exception:
+            raise RuntimeRefusal("SECRETARY_LISTENER_UNQUALIFIED") from None
 
     def close(self) -> None:
         self._httpd.shutdown()
