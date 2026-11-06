@@ -31,7 +31,7 @@ function document(): MissionDocument {
 function complete() {
   const d = document();
   const e = {
-    owner: "EXECUTIVE_OS",
+    owner: "EXECUTIVE_OS" as const,
     ref: "job:JOB-100",
     field: "transport",
     source_revision: "revision-1",
