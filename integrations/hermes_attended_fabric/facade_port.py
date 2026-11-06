@@ -1,0 +1,154 @@
+"""Typed binding to the incumbent Subagent Fabric-only MCP owner.
+
+This is *not* a new MCP transport/client, account, provider, worker scheduler,
+credential reader, result store, or retry loop. The authenticated Hermes host
+injects its already-enrolled synchronous, single-owner MCP call function.
+Unknown, old, or unauthenticated generations are refused by the caller.
+"""
+from __future__ import annotations
+
+import hashlib
+import inspect
+import re
+from collections.abc import Callable, Mapping
+from typing import Any
+
+from .native import FabricNativeRefusal, SessionGrant
+
+FABRIC_SCHEMA = "mastermind.fabric_mcp.v1"
+STATUS_SCHEMA = "mastermind.fabric_task_status.v1"
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+MAX_PARENT_RESULT_BYTES = 8192
+
+
+class FabricFacadePort:
+    """Read and submit only through the qualified existing Fabric-only facade.
+
+    The host owns `call_tool`, authentication, transport and connection
+    lifecycle. This class has no endpoint configuration, token, credential
+    fallback, model access or shell execution path.
+    """
+
+    def __init__(
+        self,
+        call_tool: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
+        *,
+        preview_route: Callable[[SessionGrant, str, str, str, str],
+                                Mapping[str, Any]] | None = None,
+    ) -> None:
+        if not callable(call_tool) or inspect.iscoroutinefunction(call_tool):
+            raise FabricNativeRefusal("FABRIC_AUTHENTICATED_CLIENT_UNBOUND")
+        if preview_route is not None and (
+            not callable(preview_route) or inspect.iscoroutinefunction(preview_route)
+        ):
+            raise FabricNativeRefusal("FABRIC_PREVIEW_OWNER_INVALID")
+        self._call_tool = call_tool
+        self._preview_route = preview_route
+
+    def _call(self, name: str, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        raw = self._call_tool(name, dict(arguments))
+        if (not isinstance(raw, Mapping) or raw.get("schema") != FABRIC_SCHEMA
+                or raw.get("action") != name):
+            raise FabricNativeRefusal("FABRIC_FACADE_RESPONSE_INVALID")
+        if raw.get("error") is not None:
+            # No error detail, packet or raw stderr is reflected to the model.
+            raise FabricNativeRefusal("FABRIC_FACADE_OBSERVATION_REFUSED")
+        return raw
+
+    @staticmethod
+    def _identity(grant: SessionGrant, run_id: str) -> dict[str, Any]:
+        return {"run_id": run_id, "root_id": grant.root_id,
+                "parent_id": grant.parent_id}
+
+    def preview(self, grant: SessionGrant, run_id: str, task_class: str,
+                complexity: str, reason: str) -> Mapping[str, Any]:
+        if self._preview_route is None:
+            raise FabricNativeRefusal("FABRIC_PREVIEW_OWNER_UNBOUND")
+        raw = self._preview_route(grant, run_id, task_class, complexity, reason)
+        if (not isinstance(raw, Mapping) or raw.get("state") != "PREVIEW_ONLY"
+                or raw.get("reserved") is not False):
+            raise FabricNativeRefusal("FABRIC_PREVIEW_NOT_PROVEN")
+        return {**self._identity(grant, run_id), "state": "PREVIEW_ONLY",
+                "worker_started": False}
+
+    def status(self, grant: SessionGrant, run_id: str) -> Mapping[str, Any]:
+        raw = self._call("fabric_status", {"run_id": run_id,
+                                            "root_id": grant.root_id})
+        status = raw.get("status")
+        if (raw.get("run_id") != run_id or not isinstance(status, Mapping)
+                or status.get("schema") != STATUS_SCHEMA
+                or type(status.get("state")) is not str):
+            raise FabricNativeRefusal("FABRIC_STATUS_INVALID")
+        if status.get("state") == "NOT_FOUND":
+            # The incumbent facade has only observed absence. This result
+            # cannot be used to infer absence after a lost possible write.
+            if raw.get("root_verified") is True or status.get("result_available") is not False:
+                raise FabricNativeRefusal("FABRIC_STATUS_ABSENCE_INVALID")
+            return {**self._identity(grant, run_id), "state": "NOT_FOUND",
+                    "reason": "ORIGINAL_ID_OBSERVED_NOT_FOUND",
+                    "worker_started": False}
+        if (raw.get("root_verified") is not True
+                or status.get("root_id") != grant.root_id
+                or status.get("parent_run_id") != grant.parent_id):
+            raise FabricNativeRefusal("FABRIC_STATUS_LINEAGE_UNVERIFIED")
+        effective = raw.get("effective_run_id")
+        if type(effective) is not str or not effective:
+            raise FabricNativeRefusal("FABRIC_STATUS_EFFECTIVE_ID_INVALID")
+        state = status["state"]
+        # A status label alone never proves worker START.
+        start_proven = (
+            status.get("controller_lineage", {}).get("worker_started") is True
+            if isinstance(status.get("controller_lineage"), Mapping) else False
+        )
+        return {**self._identity(grant, run_id), "state": state,
+                "reason": None, "worker_started": start_proven,
+                "effective_run_id": effective}
+
+    def submit(self, grant: SessionGrant, run_id: str, task_class: str,
+               complexity: str, packet: str, reason: str) -> Mapping[str, Any]:
+        args = {**self._identity(grant, run_id),
+                "task_class": task_class, "task_complexity": complexity,
+                "work_packet": packet}
+        if reason:
+            args["escalation_reason"] = reason
+        raw = self._call("fabric_request", args)
+        if (raw.get("run_id") != run_id
+                or raw.get("root_id") != grant.root_id
+                or raw.get("parent_id") != grant.parent_id):
+            raise FabricNativeRefusal("FABRIC_REQUEST_IDENTITY_MISMATCH")
+        if (raw.get("delivery") != "CONTROLLER_CREATED"
+                or type(raw.get("controller_pid")) is not int
+                or raw.get("controller_pid") <= 0
+                or raw.get("worker_start_proven") is not False):
+            raise FabricNativeRefusal("FABRIC_REQUEST_RECEIPT_UNVERIFIED")
+        return {**self._identity(grant, run_id), "state": "CONTROLLER_CREATED",
+                "reason": "WORKER_START_NOT_YET_PROVEN", "worker_started": False}
+
+    def result(self, grant: SessionGrant, run_id: str) -> Mapping[str, Any]:
+        observed = self.status(grant, run_id)
+        # This is only a bounded original-parent *read*; no acceptance,
+        # acknowledgement, approval or duplicate worker is triggered.
+        if observed["state"] != "TERMINAL":
+            raise FabricNativeRefusal("FABRIC_RESULT_NOT_TERMINAL")
+        raw = self._call("fabric_result", {"run_id": run_id,
+                                          "root_id": grant.root_id,
+                                          "max_bytes": MAX_PARENT_RESULT_BYTES})
+        if (raw.get("run_id") != run_id
+                or raw.get("root_id") != grant.root_id
+                or raw.get("effective_run_id") != observed["effective_run_id"]
+                or raw.get("accept_run_id") != observed["effective_run_id"]):
+            raise FabricNativeRefusal("FABRIC_RESULT_IDENTITY_MISMATCH")
+        body, digest, count = (
+            raw.get("adapter_response"), raw.get("response_sha256"),
+            raw.get("response_bytes"),
+        )
+        if (type(body) is not str or type(digest) is not str
+                or SHA256.fullmatch(digest) is None or type(count) is not int
+                or not 0 <= count <= MAX_PARENT_RESULT_BYTES):
+            raise FabricNativeRefusal("FABRIC_RESULT_TRANSFER_INVALID")
+        data = body.encode("utf-8")
+        if len(data) != count or hashlib.sha256(data).hexdigest() != digest:
+            raise FabricNativeRefusal("FABRIC_RESULT_DIGEST_MISMATCH")
+        return {**self._identity(grant, run_id), "state": "TERMINAL",
+                "result_digest": digest, "result_text": body,
+                "worker_started": False}
