@@ -22,6 +22,7 @@ def test_native_authoring_is_explicit_and_distinct_from_host_workspace() -> None
         "compare-and-swap",
         "current file blob SHA",
         "without a local runner",
+        "GitHub-native authors without a local test runner may publish",
         "An ambiguous mutation response requires original-branch",
         "an explicit safety/permission denial is final",
         "No local `git push` or launcher receipt is",

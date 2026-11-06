@@ -95,13 +95,17 @@ review claim. No additional non-author arming ceremony follows a completed quali
 The optional automatic review host remains OFF until separately enabled; its absence
 adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.md).
 
-1. Run the smallest relevant local test set while iterating. Publish a truthful
-   candidate once its scoped source is stable and the relevant local qualification passes.
-   When a native GitHub rule or authorized explicit manual request actually requires a review, mark a qualified Draft PR **Ready for Review
-   before asking the reviewer**. No risk tier dispatches a reviewer merely to satisfy an obsolete universal-review habit. Hosted CI may still be queued or running: full required
-   CI is a merge/release gate, not a prerequisite for review readiness. Keep unfinished
-   or locally failing work in Draft; do not imply a reviewer is working just because
-   a request exists.
+1. Run the smallest relevant **available** local tests when a runner exists.
+   Publish an honest candidate when scoped source and available qualification
+   are stable. GitHub-native authors without a local test runner may publish a
+   reviewable PR for hosted CI: no local worktree or unexecutable local test is
+   itself a source-publishing hold. Never claim tests that did not run.
+   When an enforced GitHub rule or explicit authorized request requires review,
+   mark a qualified Draft PR **Ready for Review before requesting the review**.
+   No risk tier dispatches a reviewer solely for an obsolete universal-review
+   rule. Pending hosted CI is a merge/release gate, not a prerequisite for PR
+   publication or review readiness. Keep incomplete or actually failing work in
+   Draft; do not imply review merely because a request exists.
 2. On a local checkout, review `git diff --check`, `git status` and the
    staged diff. On a GitHub-native branch, inspect exact-head changed-file
    enumeration, complete diff and file preimages using available GitHub reads.
