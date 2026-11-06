@@ -7,6 +7,9 @@ import asyncio
 import copy
 import json
 import os
+import sys
+
+import pytest
 from pathlib import Path
 
 import httpx
@@ -26,7 +29,8 @@ from control_plane.executive_service import ExecutiveControlService,CeoIngressAp
 from tests.test_executive_ceo_ingress import _FakeGrounding,_config
 
 
-def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(owner,identity,tmp_path,monkeypatch,rsa_key,short_socket_root,settings):
+@pytest.mark.parametrize('child_runtime',['qualified_hosted','missing_issued'])
+def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(owner,identity,tmp_path,monkeypatch,rsa_key,short_socket_root,settings,child_runtime):
     o=owner
     # Complete the input record's pre-existing DEC reference before pinning C;
     # no projected row/source identity is altered after qualification.
@@ -37,7 +41,29 @@ def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(own
     git(o['env'].clone,'commit','-m','Complete canonical fixture decision association')
     git(o['env'].clone,'push','origin','main')
     o['request']['source_commit']=rev_parse(o['env'].clone,'HEAD')
+    from tests import test_knowledge_installed_source_join as issuer
+    from tests.test_project_discovery_installed_plan import _qualified_source_python
+    from ops.executive_os import capacity_source_contract
+    # This portable source test exercises the real hosted branch: the native
+    # CF1 installation is absent, so qualify this interpreter via real -I yaml
+    # BEFORE issuing the compiler/collector. Never mutate an issued binding or
+    # fall back after a selected interpreter fails.
+    missing=tmp_path/'absent-native-cf1-python'
+    assert not missing.exists()
+    monkeypatch.setattr(capacity_source_contract,'PYTHON_BINARY',missing)
+    selected=missing if child_runtime=='missing_issued' else _qualified_source_python()
+    if child_runtime=='qualified_hosted':assert selected==Path(sys.executable)
+    monkeypatch.setattr(issuer,'PYTHON_BINARY',selected)
     collector,git_owner=configured(o,identity,tmp_path,monkeypatch)
+    failures=[]
+    if child_runtime=='missing_issued':
+        original_runner=collector._runner
+        def observe_missing_child(argv,**bounds):
+            try:return original_runner(argv,**bounds)
+            except FileNotFoundError:
+                failures.append((str(argv[0]),'FileNotFoundError'))
+                raise
+        monkeypatch.setattr(collector,'_runner',observe_missing_child)
     async def run():
         auth=_authenticator(rsa_key);token=_workspace_token(rsa_key)
         who=await auth.verify_authorization_header('Bearer '+token,now=NOW)
@@ -86,6 +112,15 @@ def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(own
                     return accepted
                 programs=await get('/workspace/programs/current')
                 assert any(row['work_ref']=='WS:ALPHA' for row in programs['control_room']['work'])
+                if child_runtime=='missing_issued':
+                    events_before=o['runtime'].events.list_events()
+                    refused=await client.get('/workspace/project-knowledge/current',params={'work_ref':'WS:ALPHA'})
+                    assert refused.status_code==503 and refused.json()['reason_codes']==['SOURCE_UNAVAILABLE']
+                    assert refused.json()['source'] is None and refused.json()['project'] is None
+                    assert failures and all(item==(str(selected),'FileNotFoundError') for item in failures)
+                    assert o['pr'].create_calls==0 and o['runtime'].jobs.list_jobs()==[]
+                    assert o['runtime'].events.list_events()==events_before
+                    return
                 initial=await catalogue()
                 file_request=copy.deepcopy(o['request'])
                 file_preview=await prepare(file_request,'add_project_file');file_proposal=await submit(file_preview)
@@ -127,3 +162,16 @@ def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(own
                 if destination:Path(destination).write_text(json.dumps(output,ensure_ascii=False,sort_keys=True))
         finally:await host.close()
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('configured_present',[True,False])
+def test_memory_source_selected_interpreter_failure_never_falls_back(tmp_path,monkeypatch,configured_present):
+    import subprocess
+    from ops.executive_os import capacity_source_contract
+    from tests.test_project_discovery_installed_plan import _qualified_source_python
+    failed=tmp_path/'selected-python'
+    failed.write_text('#!/bin/sh\nexit 7\n');failed.chmod(0o700)
+    monkeypatch.setattr(capacity_source_contract,'PYTHON_BINARY',failed if configured_present else tmp_path/'absent-cf1')
+    if not configured_present:monkeypatch.setattr(sys,'executable',str(failed))
+    with pytest.raises(subprocess.CalledProcessError) as error:_qualified_source_python()
+    assert error.value.returncode==7 and error.value.cmd[0]==str(failed)
