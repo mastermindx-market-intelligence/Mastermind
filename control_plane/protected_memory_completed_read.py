@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
+import time
 import weakref
 from common import memory_native_wire as wire
 from control_plane import protected_memory_original as original
@@ -30,12 +31,13 @@ class _State:
 
 def _permission(material,owner):
     if os.geteuid()!=450:raise CompletedReadRefused()
+    process=os.getpid()
     if issuer.describe_control_owner()!=owner:raise CompletedReadRefused()
     raw=profile._read_config()
     if hashlib.sha256(raw).hexdigest()!=owner['configuration_sha256']:raise CompletedReadRefused()
     config=profile._json(raw)
     if config.get('runtime_root')!=material['namespace']:raise CompletedReadRefused()
-    access.validate_access_document(config.get('memory_original_result_access'))
+    policy=access.validate_access_document(config.get('memory_original_result_access'))
     result=issuer._send({'schema':issuer.SCHEMA,'operation':'completed_result','material':material})
     wire.exact(result,'schema state receipt')
     if result['schema']!=issuer.SCHEMA or result['state']!='COMPLETED_READ_CURRENT':raise CompletedReadRefused()
@@ -43,6 +45,11 @@ def _permission(material,owner):
         'reference_sha256':hashlib.sha256(wire.canonical(material['reference'])).hexdigest(),
         'owner':owner,'receiver_kind':'native_broker_service','retry_authorized':False}
     if result['receipt']!=expected or issuer.describe_control_owner()!=owner:raise CompletedReadRefused()
+    # No blocking read/probe follows this exact validated local window check.
+    # The owner/config digest above binds these policy facts to this service.
+    if (os.geteuid()!=450 or os.getpid()!=process
+            or not policy['not_before_seconds']<=time.time()<policy['expires_at_seconds']):
+        raise CompletedReadRefused()
 
 def _runtime_read_permission(reference):
     held=original._REFERENCES[reference]

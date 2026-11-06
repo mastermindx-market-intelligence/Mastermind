@@ -129,6 +129,22 @@ def test_policy_withdrawal_during_final_same_byte_result_reread_never_escapes_vi
     assert len(result_reads)==2 and result_reads[0]==result_reads[1]
 
 
+def test_service_window_expiry_during_last_blocking_owner_probe_refuses_view(completed_service,monkeypatch):
+    _,_,lease,_,_,_,_,state,_=completed_service
+    cap=reader.capture_completed_memory_read(state['supervisor'],lease.attempt.attempt_id)
+    from control_plane import memory_native_issuer as facade
+    from control_plane import protected_memory_result_access as access
+    deadline=json.loads(state['config']['raw'])['memory_original_result_access']['expires_at_seconds']
+    actual=facade.describe_control_owner;probes=[]
+    def expire_after_last_probe():
+        value=actual();probes.append(value)
+        if len(probes)==6:monkeypatch.setattr(access.time,'time',lambda:deadline)
+        return value
+    monkeypatch.setattr(facade,'describe_control_owner',expire_after_last_probe)
+    with pytest.raises(ValueError):reader.read_completed_memory_result(cap)
+    assert len(probes)==6
+
+
 def test_v3_completed_access_advancement_keeps_original_native_grant_immutable(completed_service):
     _,_,lease,_,_,_,_,state,_=completed_service
     state['access_advanced']=True
