@@ -85,7 +85,7 @@ class TestFabricFacadePort(unittest.TestCase):
         self.facade = FakeFacade()
         self.grant = SessionGrant("main", "session-owned", self.facade.root,
                                   self.facade.parent, "generation-current")
-        self.port = FabricFacadePort(self.facade.call_tool)
+        self.port = FabricFacadePort(self.facade.call_tool, authorize_new_run=lambda g, r: True)
         self.handle = native_handler(
             profile_id="main", authorize_session=lambda session: self.grant,
             port=self.port, currentness_guard=lambda grant: True)
@@ -196,7 +196,7 @@ class TestFabricFacadePort(unittest.TestCase):
                 self.facade.calls.append((name, dict(args)))
                 raise TimeoutError("controller return lost")
             return original(name, args)
-        self.port = FabricFacadePort(interrupted)
+        self.port = FabricFacadePort(interrupted, authorize_new_run=lambda g, r: True)
         self.handle = native_handler(
             profile_id="main", authorize_session=lambda session: self.grant,
             port=self.port, currentness_guard=lambda grant: True)
@@ -204,6 +204,48 @@ class TestFabricFacadePort(unittest.TestCase):
         self.assertEqual(got["state"], "EFFECT_UNKNOWN")
         self.assertEqual([name for name, _ in self.facade.calls],
                          ["fabric_status", "fabric_request"])
+
+    def test_fabric_admission_unbound_is_proven_no_send(self):
+        port = FabricFacadePort(self.facade.call_tool)
+        handle = native_handler(
+            profile_id="main", authorize_session=lambda s: self.grant,
+            port=port, currentness_guard=lambda g: True)
+        got = json.loads(handle(
+            {"action": "submit", "task_key": "build-once", **self.task()},
+            session_id=self.grant.session_id))
+        self.assertEqual(got["state"], "REFUSED")
+        self.assertEqual(got["reason"], "FABRIC_ORIGINAL_ADMISSION_UNBOUND")
+        self.assertEqual([n for n, _ in self.facade.calls], ["fabric_status"])
+
+    def test_host_admission_revocation_before_send_is_no_effect(self):
+        port = FabricFacadePort(self.facade.call_tool,
+                                authorize_new_run=lambda g, r: False)
+        handle = native_handler(
+            profile_id="main", authorize_session=lambda s: self.grant,
+            port=port, currentness_guard=lambda g: True)
+        got = json.loads(handle(
+            {"action": "submit", "task_key": "build-once", **self.task()},
+            session_id=self.grant.session_id))
+        self.assertEqual(got["state"], "REFUSED")
+        self.assertEqual(got["reason"], "FABRIC_ORIGINAL_ADMISSION_REFUSED")
+        self.assertEqual([n for n, _ in self.facade.calls], ["fabric_status"])
+
+    def test_strict_manual_grant_reaches_native_facade(self):
+        grant = SessionGrant("main", "session-owned", self.grant.root_id,
+                             self.grant.parent_id, "generation-current",
+                             manual_pools=("minimax",),
+                             manual_models=(("minimax", "MiniMax-M3"),))
+        handle = native_handler(
+            profile_id="main", authorize_session=lambda s: grant,
+            port=self.port, currentness_guard=lambda g: True)
+        got = json.loads(handle({
+            "action": "submit", "task_key": "build-once",
+            "pool": "minimax", "model": "MiniMax-M3", **self.task()},
+            session_id=grant.session_id))
+        self.assertEqual(got["state"], "CONTROLLER_CREATED")
+        request = self.facade.calls[-1][1]
+        self.assertEqual(request["pool"], "minimax")
+        self.assertEqual(request["model"], "MiniMax-M3")
 
     def test_preview_without_host_preview_owner_is_unavailable(self):
         got = self.ask("preview", task_class="mechanical",
@@ -213,7 +255,7 @@ class TestFabricFacadePort(unittest.TestCase):
 
     def test_preview_with_host_preview_owner_is_read_only(self):
         port = FabricFacadePort(
-            self.facade.call_tool,
+            self.facade.call_tool, authorize_new_run=lambda g, r: True,
             preview_route=lambda g, r, tc, co, reason: {
                 "state": "PREVIEW_ONLY", "reserved": False,
                 "pool": "minimax", "model": "MiniMax-M3"})
