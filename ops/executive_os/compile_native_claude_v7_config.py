@@ -7,11 +7,14 @@ a separate privileged effect that must compare the compiled source digests again
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from scripts import executive_os_phase1c_worker as worker
 
@@ -185,6 +188,89 @@ def compile_from_paths(
     }
 
 
+def _write_new_artifacts(
+    artifacts: tuple[tuple[Path, bytes], ...],
+    *,
+    sources: tuple[Path, ...],
+    validate_first: Callable[[Path], None] | None = None,
+) -> None:
+    """Reserve a fresh pair, retaining partial artifacts on any later refusal.
+
+    Existing destinations are never overwritten. Directory and file descriptors
+    bind writes to the newly created files; path checks bind successful return
+    to the names the caller requested. No failure unlinks a raced destination.
+    """
+    paths = [Path(path).absolute() for path, _ in artifacts]
+    resolved = [path.parent.resolve(strict=True) / path.name for path in paths]
+    inputs = {Path(path).resolve(strict=True) for path in sources}
+    if len(set(resolved)) != len(paths) or inputs.intersection(resolved):
+        raise NativeClaudeV7CompileError("artifact paths alias an output or source")
+    for path in paths:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        raise NativeClaudeV7CompileError("artifact destinations must be new paths")
+
+    with ExitStack() as stack:
+        opened = []
+        for path, (_, raw) in zip(paths, artifacts):
+            parent = os.open(
+                path.parent.resolve(strict=True),
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            )
+            stack.callback(os.close, parent)
+            descriptor = os.open(
+                path.name,
+                os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=parent,
+            )
+            stream = stack.enter_context(os.fdopen(descriptor, "w+b"))
+            opened.append((path, parent, stream, raw))
+
+        def verify_bindings() -> None:
+            for path, parent, stream, _ in opened:
+                directory = os.fstat(parent)
+                requested_parent = path.parent.stat()
+                current = os.fstat(stream.fileno())
+                bound = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+                requested = path.stat(follow_symlinks=False)
+                if (
+                    (directory.st_dev, directory.st_ino)
+                    != (requested_parent.st_dev, requested_parent.st_ino)
+                    or not stat.S_ISREG(current.st_mode)
+                    or current.st_nlink != 1
+                    or any(
+                        not stat.S_ISREG(info.st_mode)
+                        or (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino)
+                        for info in (bound, requested)
+                    )
+                ):
+                    raise NativeClaudeV7CompileError("artifact path changed during publication")
+
+        def verify_bytes(stream, raw: bytes) -> None:
+            stream.seek(0)
+            if stream.read() != raw:
+                raise NativeClaudeV7CompileError("published artifact bytes changed")
+
+        for index, (path, _, stream, raw) in enumerate(opened):
+            verify_bindings()
+            if stream.write(raw) != len(raw):
+                raise NativeClaudeV7CompileError("artifact write was incomplete")
+            stream.flush()
+            os.fsync(stream.fileno())
+            verify_bindings()
+            verify_bytes(stream, raw)
+            if index == 0 and validate_first is not None:
+                validate_first(path)
+                verify_bindings()
+                verify_bytes(stream, raw)
+        verify_bindings()
+        for _, _, stream, raw in opened:
+            verify_bytes(stream, raw)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Compile one enrolled native Claude v6 worker config to sealed v7."
@@ -195,8 +281,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-validation-sha256", required=True)
     parser.add_argument("--sealed-worker-model", default=_FIRST_MODEL)
     parser.add_argument("--managed-policy-generation", type=int, required=True)
-    parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--receipt-out", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True, help="New artifact path; never overwrite")
+    parser.add_argument("--receipt-out", type=Path, required=True, help="Distinct new receipt path")
     return parser
 
 
@@ -212,10 +298,6 @@ def main(argv: list[str] | None = None) -> int:
             managed_policy_generation=args.managed_policy_generation,
         )
         output = _canonical(result)
-        # Validate exact emitted bytes through the production parser without
-        # requiring root ownership; the privileged installer owns custody.
-        args.out.write_bytes(output)
-        worker._load_config(args.out.resolve(), require_root_owner=False)
         receipt_doc = {
             "schema_version": SCHEMA,
             **receipt,
@@ -225,7 +307,17 @@ def main(argv: list[str] | None = None) -> int:
             "sealed_worker_model": args.sealed_worker_model,
             "managed_policy_generation": args.managed_policy_generation,
         }
-        args.receipt_out.write_bytes(_canonical(receipt_doc))
+        def validate_output(path: Path) -> None:
+            # The parser validates the same path/bytes held by the publisher.
+            parsed = worker._load_config(path, require_root_owner=False)
+            if parsed != result:
+                raise NativeClaudeV7CompileError("parsed artifact differs from compiled config")
+
+        _write_new_artifacts(
+            ((args.out, output), (args.receipt_out, _canonical(receipt_doc))),
+            sources=(args.source_v6, args.validation_config),
+            validate_first=validate_output,
+        )
         return 0
     except (NativeClaudeV7CompileError, worker.WorkerConfigError, OSError, ValueError):
         return 2

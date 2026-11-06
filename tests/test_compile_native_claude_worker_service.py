@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import plistlib
 from pathlib import Path
 
 import pytest
 
 from ops.executive_os import compile_native_claude_worker_service as service
-from ops.executive_os.capacity_broker_topology import canonical_json
+from ops.executive_os import compile_native_claude_v7_config as config_compiler
 from scripts import executive_os_phase1c_worker as worker
 from test_native_worker_factory import sealed_claude_config
 
@@ -46,7 +48,7 @@ def _template() -> bytes:
 
 def test_render_reuses_existing_worker_plist_owner_for_native_slot(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    raw = canonical_json(config)
+    raw = config_compiler._canonical(config)
     sha = hashlib.sha256(raw).hexdigest()
     release_sha = "a" * 40
     root = Path(
@@ -107,7 +109,7 @@ def test_render_refuses_nonsealed_or_unknown_native_slot(
 ) -> None:
     config = _config(tmp_path)
     mutation(config)
-    raw = canonical_json(config)
+    raw = config_compiler._canonical(config)
     with pytest.raises(service.NativeClaudeServiceArtifactError):
         service.render_service(
             config,
@@ -122,7 +124,7 @@ def test_render_refuses_nonsealed_or_unknown_native_slot(
 
 def test_render_refuses_stale_config_digest_or_noncanonical_release(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    raw = canonical_json(config)
+    raw = config_compiler._canonical(config)
     good_sha = hashlib.sha256(raw).hexdigest()
 
     with pytest.raises(service.NativeClaudeServiceArtifactError, match="digest"):
@@ -148,7 +150,7 @@ def test_render_refuses_stale_config_digest_or_noncanonical_release(tmp_path: Pa
 def test_cli_emits_plist_and_secret_free_receipt(tmp_path: Path) -> None:
     config = _config(tmp_path)
     config_path = (tmp_path / "worker.json").resolve()
-    raw = canonical_json(config)
+    raw = config_compiler._canonical(config)
     config_path.write_bytes(raw)
     release_sha = "b" * 40
     template_path = (
@@ -185,3 +187,120 @@ def test_cli_emits_plist_and_secret_free_receipt(tmp_path: Path) -> None:
     receipt_text = receipt_out.read_text()
     assert "credential" not in receipt_text.lower()
     assert "token" not in receipt_text.lower()
+
+
+def _cli_inputs(root: Path):
+    config = root / "worker.json"
+    template = root / "template.plist"
+    config.write_bytes(config_compiler._canonical(_config(root)))
+    template.write_bytes(_template())
+    return config, template
+
+
+def _cli_args(config: Path, template: Path, plist: Path, receipt: Path):
+    release_sha = "b" * 40
+    return [
+        "--config", str(config),
+        "--expected-config-sha256", hashlib.sha256(config.read_bytes()).hexdigest(),
+        "--release-root", "/Library/Application Support/MastermindExecutive/releases/" + release_sha,
+        "--expected-release-sha", release_sha,
+        "--template", str(template),
+        "--plist-out", str(plist), "--receipt-out", str(receipt),
+    ]
+
+
+@pytest.mark.parametrize("link_kind", ["same", "resolved", "symlink", "hardlink"])
+@pytest.mark.parametrize("destination,target", [
+    ("plist", "receipt"),
+    ("plist", "config"),
+    ("plist", "template"),
+    ("receipt", "config"),
+    ("receipt", "template"),
+])
+def test_cli_rejects_artifact_aliases_before_writing(
+    tmp_path: Path, destination: str, target: str, link_kind: str
+) -> None:
+    config, template = _cli_inputs(tmp_path)
+    paths = {"config": config, "template": template,
+             "plist": tmp_path / "worker.plist", "receipt": tmp_path / "receipt.json"}
+    alias, original = paths[destination], paths[target]
+    if link_kind == "same":
+        paths[destination] = original
+    elif link_kind == "resolved":
+        (tmp_path / "alias-parent").mkdir()
+        paths[destination] = tmp_path / "alias-parent" / ".." / original.name
+    elif link_kind == "symlink":
+        alias.symlink_to(original)
+    else:
+        if not original.exists():
+            original.write_bytes(b"existing artifact must survive\n")
+        os.link(original, alias)
+    before = {path: path.read_bytes() for path in paths.values() if path.is_file()}
+    rc = service.main(_cli_args(config, template, paths["plist"], paths["receipt"]))
+    assert all(path.read_bytes() == raw for path, raw in before.items())
+    assert rc == 2
+
+
+@pytest.mark.parametrize("format_name", ["no_lf", "crlf", "pretty", "extra_lf"])
+def test_cli_refuses_noncanonical_config_bytes_with_their_actual_digest(
+    tmp_path: Path, format_name: str
+) -> None:
+    config, template = _cli_inputs(tmp_path)
+    canonical = config.read_bytes()
+    variants = {
+        "no_lf": canonical[:-1],
+        "crlf": canonical[:-1] + b"\r\n",
+        "pretty": (json.dumps(json.loads(canonical), indent=2) + "\n").encode(),
+        "extra_lf": canonical + b"\n",
+    }
+    raw = variants[format_name]
+    config.write_bytes(raw)
+    plist, receipt = tmp_path / "worker.plist", tmp_path / "receipt.json"
+    assert service.main(_cli_args(config, template, plist, receipt)) == 2
+    assert config.read_bytes() == raw
+    assert not plist.exists() and not receipt.exists()
+
+
+def test_cli_consumes_real_producer_artifact_and_receipt_unchanged(tmp_path: Path) -> None:
+    from test_compile_native_claude_v7_config import _validation
+
+    source = _config(tmp_path)
+    source["schema_version"] = worker.NATIVE_CONFIG_SCHEMA_VERSION
+    for field in (
+        "sealed_worker_model", "managed_policy_generation",
+        "validation_codex_binary", "validation_codex_attestation_receipt",
+        "validation_allowed_codex_versions", "validation_required_team_identifier",
+    ):
+        del source[field]
+    source_path, validation_path = tmp_path / "source-v6.json", tmp_path / "validation.json"
+    source_raw = config_compiler._canonical(source)
+    validation_raw = config_compiler._canonical(_validation(tmp_path))
+    source_path.write_bytes(source_raw)
+    validation_path.write_bytes(validation_raw)
+    config_path, config_receipt = tmp_path / "produced-v7.json", tmp_path / "producer-receipt.json"
+    assert config_compiler.main([
+        "--source-v6", str(source_path),
+        "--expected-source-sha256", hashlib.sha256(source_raw).hexdigest(),
+        "--validation-config", str(validation_path),
+        "--expected-validation-sha256", hashlib.sha256(validation_raw).hexdigest(),
+        "--managed-policy-generation", "1",
+        "--out", str(config_path), "--receipt-out", str(config_receipt),
+    ]) == 0
+    produced = config_path.read_bytes()
+    producer_receipt = json.loads(config_receipt.read_bytes())
+    assert produced.endswith(b"\n")
+    assert producer_receipt["compiled_v7_sha256"] == hashlib.sha256(produced).hexdigest()
+    template_path = tmp_path / "template.plist"
+    template_path.write_bytes(_template())
+    plist, receipt = tmp_path / "worker.plist", tmp_path / "service-receipt.json"
+    args = _cli_args(config_path, template_path, plist, receipt)
+    args[args.index("--expected-config-sha256") + 1] = producer_receipt["compiled_v7_sha256"]
+    assert service.main(args) == 0
+    assert config_path.read_bytes() == produced
+    result = json.loads(receipt.read_bytes())
+    assert result["config_sha256"] == producer_receipt["compiled_v7_sha256"]
+    assert result["plist_sha256"] == hashlib.sha256(plist.read_bytes()).hexdigest()
+    assert result["launchd_state"] == "disabled_unloaded"
+    assert result["socket_node_state"] == "absent"
+    assert source_path.read_bytes() == source_raw
+    assert validation_path.read_bytes() == validation_raw

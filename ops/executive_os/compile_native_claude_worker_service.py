@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ops.executive_os import compile_native_claude_v7_config as config_compiler
 from ops.executive_os.capacity_broker_topology import (
     _slot_paths,
     canonical_json,
@@ -59,9 +60,9 @@ def render_service(
         or config.get("operator_harness_armed") is not False
     ):
         raise NativeClaudeServiceArtifactError("config is not the sealed native Claude lane")
-    config_bytes = canonical_json(config)
+    config_bytes = config_compiler._canonical(config)
     if _digest(config_bytes) != config_sha256:
-        raise NativeClaudeServiceArtifactError("config digest differs from canonical v7 bytes")
+        raise NativeClaudeServiceArtifactError("config digest differs from canonical v7 bytes plus LF")
     try:
         slot = native_slot_from_config(config)
     except Exception as exc:
@@ -102,15 +103,22 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--release-root", type=Path, required=True)
     parser.add_argument("--expected-release-sha", required=True)
     parser.add_argument("--template", type=Path, required=True)
-    parser.add_argument("--plist-out", type=Path, required=True)
-    parser.add_argument("--receipt-out", type=Path, required=True)
+    parser.add_argument("--plist-out", type=Path, required=True, help="New artifact path; never overwrite")
+    parser.add_argument("--receipt-out", type=Path, required=True, help="Distinct new receipt path")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        document, raw = config_compiler._read_exact_json(
+            args.config, args.expected_config_sha256
+        )
+        if raw != config_compiler._canonical(document):
+            raise NativeClaudeServiceArtifactError("config must be canonical v7 bytes plus LF")
         config = worker._load_config(args.config.resolve(), require_root_owner=False)
+        if config != document:
+            raise NativeClaudeServiceArtifactError("parsed config differs from digest-bound artifact")
         plist, receipt = render_service(
             config,
             config_sha256=args.expected_config_sha256,
@@ -118,8 +126,10 @@ def main(argv: list[str] | None = None) -> int:
             expected_release_sha=args.expected_release_sha,
             template_bytes=args.template.read_bytes(),
         )
-        args.plist_out.write_bytes(plist)
-        args.receipt_out.write_bytes(canonical_json(receipt))
+        config_compiler._write_new_artifacts(
+            ((args.plist_out, plist), (args.receipt_out, canonical_json(receipt))),
+            sources=(args.config, args.template),
+        )
         return 0
     except (
         NativeClaudeServiceArtifactError,
