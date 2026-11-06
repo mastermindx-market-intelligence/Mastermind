@@ -1412,6 +1412,7 @@ class ExecutiveWorkerBroker:
         operator_resource_factory: OperatorResourceFactory | None = None,
         operator_harness_armed: bool = False,
         autonomy_guard: Callable[[], None] | None = None,
+        native_realm_guard: Callable[[], None] | None = None,
         autonomy_canary_factory: Callable[
             [Mapping[str, Any]], Mapping[str, Any]
         ]
@@ -1506,6 +1507,14 @@ class ExecutiveWorkerBroker:
         self.operator_resource_factory = operator_resource_factory
         self.operator_harness_armed = bool(operator_harness_armed)
         self.autonomy_guard = autonomy_guard
+        # Consume the incumbent host-owned native-realm check. Do not invent a
+        # second provider identity, credential source, or Operator arm.
+        if self.adapter_id == "claude-code":
+            if self.operator_harness_armed or not callable(native_realm_guard):
+                raise WorkerBrokerError("flat Claude requires native realm guard")
+        elif native_realm_guard is not None:
+            raise WorkerBrokerError("native realm guard requires flat Claude")
+        self.native_realm_guard = native_realm_guard
         self.autonomy_canary_factory = autonomy_canary_factory
         if subscription_realm_owner is not None:
             from control_plane.codex_provider_realm import SubscriptionRealmOwner
@@ -1554,6 +1563,24 @@ class ExecutiveWorkerBroker:
         self.startup_sweep: UIDSweepReceipt | None = None
         self.last_sweep: UIDSweepReceipt | None = None
 
+    def _require_current_native_realm(self) -> None:
+        """Recheck the existing host realm immediately before native flat admission.
+
+        A revoked realm is quarantined against later starts; cancellation and
+        collection remain available for any previously admitted process.
+        """
+        if self.adapter_id != "claude-code":
+            return
+        if self._quarantined_reason == "native_realm_refused":
+            raise BrokerStateError("native realm refused")
+        try:
+            if not callable(self.native_realm_guard):
+                raise RuntimeError("native realm guard unavailable")
+            self.native_realm_guard()
+        except Exception:
+            self._quarantined_reason = "native_realm_refused"
+            raise BrokerStateError("native realm refused") from None
+
     def _require_current_autonomy(self) -> None:
         """Revalidate current arm authority without exposing receipt diagnostics."""
 
@@ -1575,6 +1602,7 @@ class ExecutiveWorkerBroker:
             return self.startup_sweep
         if self._quarantined_reason is not None:
             raise BrokerStateError("worker startup requires original-owner reconciliation")
+        self._require_current_native_realm()
         self._require_current_autonomy()
         if os.geteuid() != self.policy.worker_uid or os.getegid() != self.policy.worker_gid:
             raise DedicatedUIDError("broker process does not match the configured worker UID/GID")
@@ -3394,6 +3422,9 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError("the worker broker already has active work")
             if spec.run_id in self._runs:
                 raise BrokerStateError("run_id cannot be reused")
+            # Same host-owned identity check at every new START, not merely
+            # construction; do not gate post-revocation cancel/collect.
+            self._require_current_native_realm()
             self._starting = True
         started = False
         try:
