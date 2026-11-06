@@ -80,6 +80,10 @@ CHANGES = (
 # predecessors above. Only the offline legacy-role transform changes; explicit
 # APPLICATION observations keep their existing quota-only semantics.
 APPLICATION_PICKER_SHA256 = "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892"
+# A separate closed AUTO prelease fallback adds pool-exclusion selector code.
+# Its exact full-source SHA is admitted here without treating an arbitrary
+# caller-edited picker as a qualified installed/manual Cursor predecessor.
+BROKER_BUSY_PICKER_SHA256 = "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057"
 APPLICATION_AFFINITY_BEFORE = '''    if model != "cursor-grok-4.6-high":
         return False
     if exhausted is None:
@@ -124,7 +128,9 @@ def apply_reviewed_hunks(raw: bytes) -> bytes:
     text = raw.decode("utf-8")
     original_overlay = HISTORICAL_OVERLAY.read_text(encoding="utf-8")
     changes = CHANGES
-    if sha(raw) == APPLICATION_PICKER_SHA256:
+    if sha(raw) in (APPLICATION_PICKER_SHA256, BROKER_BUSY_PICKER_SHA256):
+        # Only two fully hash-bound application source epochs may take the
+        # closed affinity-specific transform; unrelated drift still refuses.
         old, new = APPLICATION_AFFINITY_BEFORE, APPLICATION_AFFINITY_AFTER
         if text.count(old) != 1 or text.count(new) != 0:
             raise ValueError("reviewed_application_selector_hunk_identity_mismatch")

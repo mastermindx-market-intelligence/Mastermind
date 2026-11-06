@@ -26,6 +26,8 @@ PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179
 PRE_POLL255_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
 PRE_POLL255_WITH_UBUNTU4_TASK_SHA = "36fbd16469befa0f4ade8d75fe15b3384a042b726668879c59ae03c82d194058"
 CURRENT_TASK_SHA = "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
+BUSY_TASK_SHA = "9a087570b7456a1d893fb0f3b73b68abc45b6328e9b2ecacdbe992e74918a1d1"
+BUSY_PICK_SHA = "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -50,6 +52,54 @@ def _preobserver_picker():
     assert len(raw) == value["bytes"] == 118474
     assert hashlib.sha256(raw).hexdigest() == value["sha256"] == "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b"
     return raw
+
+
+def _pre_busy_task(value: bytes) -> bytes:
+    """Undo only the hash-pinned prelease capacity additions in a copy.
+
+    Retain the exact previous native source for the frozen F1/Poll255 inverse.
+    Never rewrite the candidate, runtime or historical fixture.
+    """
+    assert hashlib.sha256(value).hexdigest() == BUSY_TASK_SHA
+    inverses = (
+        (
+            b'            proof = quota_circuit.validate_prelease_refusal(here, rid, root, parent,\n'
+            b'                                                           packet_limit=MAX_RESULT_BYTES)\n'
+            b'            busy = proof["kind"] == "prelease_broker_busy"\n',
+            b'            quota_circuit.validate_prelease_refusal(here, rid, root, parent,\n'
+            b'                                                   packet_limit=MAX_RESULT_BYTES)\n',
+        ),
+        (
+            b'                "state": "TERMINAL_FAILURE", "rc": 75,\n'
+            b'                "signal": "capacity" if busy else "quota",\n'
+            b'                "reason": proof["kind"], "root_id": root, "parent_run_id": parent,\n',
+            b'                "state": "TERMINAL_FAILURE", "rc": 75, "signal": "quota",\n'
+            b'                "reason": "prelease_quota_cooldown", "root_id": root, "parent_run_id": parent,\n',
+        ),
+        (b'    capacity_excluded_pools: list[str] | None = None,\n', b''),
+        (
+            b'    if capacity_excluded_pools is not None:\n'
+            b'        if (type(capacity_excluded_pools) is not list\n'
+            b'                or not 1 <= len(capacity_excluded_pools) < 3\n'
+            b'                or any(type(p) is not str or p not in pick._HOST_POOL_MODES\n'
+            b'                       for p in capacity_excluded_pools)\n'
+            b'                or len(set(capacity_excluded_pools)) != len(capacity_excluded_pools)\n'
+            b'                or request_capacity_preflight is not True\n'
+            b'                or pool is not None or requested_model is not None\n'
+            b'                or prefer is not None or strict_manual_pin):\n'
+            b'            raise FabricTaskError("CAPACITY_EXCLUSION_NOT_QUALIFIED")\n',
+            b'',
+        ),
+        (
+            b'                **({"excluded_pools": capacity_excluded_pools} if capacity_excluded_pools else {}),\n',
+            b'',
+        ),
+    )
+    for newer, older in inverses:
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == CURRENT_TASK_SHA
+    return value
 
 
 def _pre_ubuntu4_task(value: bytes) -> bytes:
@@ -151,13 +201,14 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
         current = source.read_bytes()
         assert (stage / relative).read_bytes() == current
         if relative == "ext/pick.py":
-            assert sha(source) == COMPOSED_PICK
+            assert sha(source) == BUSY_PICK_SHA
             current = _inverse_judgment(_preobserver_picker())
         elif relative == "ext/fabric_task.py":
-            assert sha(source) == CURRENT_TASK_SHA
-            # Restore the exact pre-poll-qualifier epoch first. The historical
+            assert sha(source) == BUSY_TASK_SHA
+            # Undo only the exact busy fallback additions in disposable bytes.
+            # Restore the exact pre-poll-qualifier epoch afterwards. The historical
             # manual-auto fixture and every subsequent inverse stay immutable.
-            latest = source.read_bytes()
+            latest = _pre_busy_task(source.read_bytes())
             start = b'# These reviewed wrapper bytes classify normal SSH255 as controller uncertainty\n'
             end = b'def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]:\n'
             hook = (b'    if state == "EFFECT_UNKNOWN" and _qualify_completed_poll255(rid, original_log, **owner):\n'
@@ -207,8 +258,8 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     # The historical F1 regression is preserved; independently verify R28
     # judgment routing stays present in the CURRENT composed native source.
     assert all(sha(stage / name) == digest for name, digest in AFTER.items())
-    assert sha(NATIVE / "candidate/pick.py") == COMPOSED_PICK
-    assert sha(NATIVE / "candidate/fabric_task.py") == CURRENT_TASK_SHA
+    assert sha(NATIVE / "candidate/pick.py") == BUSY_PICK_SHA
+    assert sha(NATIVE / "candidate/fabric_task.py") == BUSY_TASK_SHA
     assert b'if tc not in {"review", "audit"}' in (
         NATIVE / "candidate/pick.py").read_bytes()
     # Neither stage nor source is published/selected by this test.
