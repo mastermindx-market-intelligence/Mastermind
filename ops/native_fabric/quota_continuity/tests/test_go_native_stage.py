@@ -124,6 +124,10 @@ def before_census_runtime(manifest):
 
 def before_original_artifact_recovery(manifest):
     prior = before_census_runtime(manifest)
+    assert prior["ext/original_delivery_collector.py"] in {
+        "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183",
+        "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83"}
+    prior["ext/original_delivery_collector.py"] = "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183"
     assert len(prior) == 107
     assert prior.pop("ext/original_advertised_artifact.py") == "46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0"
     assert prior["ext/artifact_delivery.py"] == "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d"
@@ -217,7 +221,7 @@ def test_exact_historical_picker_remains_a_valid_base_but_no_arbitrary_fourth_me
         builder.validate_go_base_manifest(bad, captured)
 
 
-@pytest.mark.parametrize("corruption", ["handler", "dependency", "base", "picker", "executor", "ubuntu4", "provider-outcome", "post-failure", "post-failure-old-observer", "post-failure-old-delivery", "other-member", "entry-symlink"])
+@pytest.mark.parametrize("corruption", ["handler", "dependency", "base", "picker", "executor", "original-collector", "ubuntu4", "provider-outcome", "post-failure", "post-failure-old-observer", "post-failure-old-delivery", "other-member", "entry-symlink"])
 def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path, corruption):
     output = tmp_path / "copy"
     shutil.copytree(builds.default, output)
@@ -235,6 +239,8 @@ def test_closed_component_drift_refuses_before_go_pair_creation(builds, tmp_path
         manifest["ext/pick.py"] = "0" * 64
     elif corruption == "executor":
         manifest["ext/remote_sub_exec.py"] = "0" * 64
+    elif corruption == "original-collector":
+        manifest["ext/original_delivery_collector.py"] = "0" * 64
     elif corruption == "ubuntu4":
         manifest["ext/fabric_host_qualification.py"] = builder.GO_UBUNTU4_PREIMAGES["fabric_host_qualification.py"]
     elif corruption == "provider-outcome":
@@ -431,6 +437,39 @@ def test_participant_cohort_preserves_prior_104_and_input_identity(builds):
     builder.validate_go_base_manifest(prior, captured)
     builder.validate_go_base_manifest(current, captured)
     assert current == original
+
+
+def test_original_collection_successor_preserves_prior_releases_without_backdating(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    key = "ext/original_delivery_collector.py"
+    old = "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183"
+    new = "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83"
+    assert current[key] == new
+    for digest in (old, new):
+        exact = dict(current, **{key: digest})
+        before = dict(exact)
+        builder.validate_go_base_manifest(exact, captured)
+        assert exact == before
+    prior = before_participant_cohort(current)
+    historical = dict(prior)
+    for mapping in (builder.GO_UBUNTU4_PREIMAGES, builder.GO_COMPLETED_POLL_PREIMAGES,
+                    builder.GO_POST_FAILURE_PREIMAGES):
+        historical.update({"ext/" + name: digest for name, digest in mapping.items()})
+    for name in builder.GO_POST_FAILURE_ADDITIONS:
+        del historical["ext/" + name]
+    assert len(prior) == 104 and len(historical) == 102
+    previous = before_original_artifact_recovery(current)
+    assert len(previous) == 106
+    for predecessor in (previous, prior, historical):
+        assert predecessor[key] == old
+        builder.validate_go_base_manifest(predecessor, captured)
+        backdated = dict(predecessor, **{key: new})
+        with pytest.raises(ValueError, match="original collector"):
+            builder.validate_go_base_manifest(backdated, captured)
+    for digest in ("f" * 64, "", None):
+        with pytest.raises(ValueError, match="original collector"):
+            builder.validate_go_base_manifest(dict(current, **{key: digest}), captured)
 
 
 @pytest.mark.parametrize("corruption", ["binding-absent", "owner-absent", "binding-hash",
