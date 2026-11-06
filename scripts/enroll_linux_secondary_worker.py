@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+from contextlib import nullcontext
+import fcntl
 import grp
 import hashlib
 import json
@@ -60,6 +62,14 @@ RELEASE_PATHS = (
     "ops/executive_os",
     "scripts/executive_os_linux_worker.py",
     "scripts/executive_os_remote_worker_gateway.py",
+    # The existing broker/result import closure used by both Linux entrypoints.
+    # Include the exact import closure without fixture servers, assets or runners.
+    "scripts/ohf/__init__.py",
+    "scripts/ohf/redaction.py",
+    "scripts/ohf/capability_skill_projection.py",
+    "scripts/ohf/laboratory.py",
+    "scripts/ohf/protocol.py",
+    "scripts/ohf/fixtures/__init__.py",
     # First-party runtime/native-BYOK source and role data only. This does not
     # install third-party dependencies, enroll credentials, attest a running
     # interpreter/unit, or package the broader hermesctl delegation CLI.
@@ -124,6 +134,7 @@ class Args:
     component: str = "secondary-worker"
     gateway_config_file: Path | None = None
     gateway_config_sha256: str | None = None
+    expected_gateway_unit_sha256: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -151,6 +162,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--gateway-config-file", type=Path,
                         help="Root-staged observation input, root:gateway 0440 in a protected 0750 directory")
     parser.add_argument("--gateway-config-sha256", help="SHA-256 of the exact input bytes")
+    parser.add_argument(
+        "--expected-gateway-unit-sha256",
+        help="Replace only the exact inactive gateway unit; preserve its installed observation config",
+    )
     parser.add_argument(
         "--hermes-runtime-json",
         help=("Optional approved Hermes runtime installation input as one JSON "
@@ -981,9 +996,9 @@ def expected_hermes_role_units(release_commit: str,
 
 def render_systemd_units(
     *, release_root: Path, codex_binary: Path | None, identities: ServiceIdentities,
-    gateway_only: bool = False,
+    gateway_only: bool = False, source_root: Path | None = None,
 ) -> dict[str, str]:
-    template_root = release_root / "ops/executive_os"
+    template_root = (release_root if source_root is None else source_root) / "ops/executive_os"
     replacements = {
         "__WORKER_ID__": "codex-01",
         "__WORKER_SOCKET_UNIT__": "mastermind-executive-worker-codex-01.socket",
@@ -1040,7 +1055,199 @@ def render_systemd_units(
     return rendered
 
 
-def _write_root_unit(path: Path, data: bytes) -> None:
+_GATEWAY_UNIT = "mastermind-executive-remote-worker-gateway.service"
+
+
+def _assert_gateway_inert() -> None:
+    expected = {
+        "Id": _GATEWAY_UNIT, "LoadState": "loaded", "ActiveState": "inactive",
+        "SubState": "dead", "UnitFileState": "static", "MainPID": "0",
+        "ControlPID": "0", "Job": "", "FragmentPath": os.fspath(UNIT_ROOT / _GATEWAY_UNIT),
+        "DropInPaths": "",
+    }
+    result = _run(
+        ["/usr/bin/systemctl", "show", "--no-pager",
+         *(f"--property={key}" for key in expected), _GATEWAY_UNIT],
+        check=False, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+    )
+    try:
+        rows = result.stdout.decode("utf-8").splitlines()
+        pairs = [row.split("=", 1) for row in rows]
+        if (result.returncode != 0 or len(result.stdout) > 16384
+                or len(pairs) != len(expected) or any(len(pair) != 2 for pair in pairs)
+                or len({pair[0] for pair in pairs}) != len(expected)
+                or dict(pairs) != expected):
+            raise EnrollmentError("gateway_predecessor_not_inert")
+    except UnicodeError as exc:
+        raise EnrollmentError("gateway_predecessor_not_inert") from exc
+
+
+class _InertGatewayReplacement:
+    """One exact predecessor transition in the existing unit publisher.
+
+    Role/source custody remains held independently of the replaced unit inode.
+    An exact desired postimage can be observed after an interrupted original call;
+    that observation never claims which historical call performed the write.
+    """
+
+    def __init__(self, args: Args, raw: bytes, config, identities: ServiceIdentities):
+        from ops.executive_os.release_manifest import (
+            _HeldReleaseSources, _held_identity, _linux_source_acl, ReleaseManifestError,
+        )
+        self.args, self.raw, self.identities = args, raw, identities
+        self.role_sha = config.hermes_role_metadata_read.implementation_sha
+        self.path = UNIT_ROOT / _GATEWAY_UNIT
+        self.published = False
+        self.recovered = False
+        self.replacement_sha256: str | None = None
+        self.owner = None
+        self.fd = None
+        try:
+            self.desired = render_systemd_units(
+                release_root=RELEASES_ROOT / args.expected_sha, codex_binary=None,
+                identities=identities, gateway_only=True, source_root=args.source_repo,
+            )[_GATEWAY_UNIT].encode("utf-8")
+            self.owner = _HeldReleaseSources(RELEASES_ROOT / self.role_sha)
+            if self.owner.hermes_runtime_input() != args.hermes_runtime:
+                raise EnrollmentError("gateway_predecessor_role_input_conflict")
+            self.parent_fd = self.owner.hold(UNIT_ROOT, directory=True)
+            self.fd = os.open(self.path.name,
+                              os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+                              dir_fd=self.parent_fd)
+            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _linux_source_acl(self.fd, False)
+            info = os.fstat(self.fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+                    or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != _MODE_ROOT_FILE
+                    or not 0 < info.st_size <= 64 * 1024):
+                raise EnrollmentError("gateway_predecessor_unit_conflict")
+            self.unit_identity = _held_identity(info, False)
+            data = os.pread(self.fd, info.st_size + 1, 0)
+            self.unit_sha256 = hashlib.sha256(data).hexdigest()
+            if len(data) != info.st_size:
+                raise EnrollmentError("gateway_predecessor_unit_conflict")
+            if data == self.desired:
+                self.published = self.recovered = True
+                self.replacement_sha256 = self.unit_sha256
+            elif self.unit_sha256 != args.expected_gateway_unit_sha256:
+                raise EnrollmentError("gateway_predecessor_unit_conflict")
+            self.check()
+        except (OSError, ReleaseManifestError) as exc:
+            self.close()
+            raise EnrollmentError("gateway_predecessor_unqualified") from exc
+        except BaseException:
+            self.close()
+            raise
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _kind, error, _traceback):
+        self.close()
+        if self.published and isinstance(error, (EnrollmentError, OSError)):
+            raise EnrollmentError("gateway_replacement_postimage_requires_reconciliation") from error
+
+    def close(self) -> None:
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+        if self.owner is not None:
+            self.owner.close()
+
+    def check(self) -> None:
+        from ops.executive_os.release_manifest import (
+            _held_identity, _linux_source_acl, ReleaseManifestError,
+        )
+        try:
+            self.owner.check()
+            if (self.fd is None
+                    or _held_identity(os.fstat(self.fd), False) != self.unit_identity
+                    or _held_identity(os.stat(self.path.name, dir_fd=self.parent_fd,
+                                             follow_symlinks=False), False) != self.unit_identity):
+                raise EnrollmentError("gateway_predecessor_changed")
+            _linux_source_acl(self.fd, False)
+            current, _ = _observation_input(self.args, self.identities)
+            if current != self.raw or not _observation_config_adoption(self.raw, self.identities):
+                raise EnrollmentError("gateway_predecessor_config_changed")
+            _assert_gateway_inert()
+            if not _observation_config_adoption(self.raw, self.identities):
+                raise EnrollmentError("gateway_predecessor_config_changed")
+            # The source manifest, ancestors AND current unit stay qualified
+            # through the last potentially blocking config/manager observation.
+            self.owner.check()
+            if (_held_identity(os.fstat(self.fd), False) != self.unit_identity
+                    or _held_identity(os.stat(self.path.name, dir_fd=self.parent_fd,
+                                             follow_symlinks=False), False) != self.unit_identity):
+                raise EnrollmentError("gateway_predecessor_changed")
+        except (OSError, ReleaseManifestError) as exc:
+            raise EnrollmentError("gateway_predecessor_changed") from exc
+
+    def publish(self, path: Path, data: bytes) -> None:
+        from ops.executive_os.release_manifest import _held_identity, _linux_source_acl, ReleaseManifestError
+        if path != self.path or data != self.desired or not 0 < len(data) <= 64 * 1024:
+            raise EnrollmentError("gateway_replacement_target_invalid")
+        if self.published:
+            if not self.recovered:
+                raise EnrollmentError("gateway_predecessor_already_consumed")
+            self.check()
+            return
+        self.check()
+        fd, temporary = tempfile.mkstemp(prefix=f".{_GATEWAY_UNIT}.", dir=UNIT_ROOT)
+        temporary_name = Path(temporary).name
+        created = os.fstat(fd)
+        created_inode = (created.st_dev, created.st_ino)
+        replaced = False
+        try:
+            # Keep the postimage inode locked before it becomes the named unit.
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _write_all(fd, data)
+            os.fchown(fd, 0, 0)
+            os.fchmod(fd, _MODE_ROOT_FILE)
+            os.fsync(fd)
+            _linux_source_acl(fd, False)
+            staged_identity = _held_identity(os.fstat(fd), False)
+            self.check()
+            if (_held_identity(os.stat(temporary_name, dir_fd=self.parent_fd,
+                                      follow_symlinks=False), False) != staged_identity):
+                raise EnrollmentError("gateway_replacement_staging_changed")
+            os.replace(temporary_name, path.name,
+                       src_dir_fd=self.parent_fd, dst_dir_fd=self.parent_fd)
+            replaced = self.published = True
+            os.close(self.fd)
+            self.fd, fd = fd, None
+            self.unit_identity = _held_identity(os.fstat(self.fd), False)
+            self.unit_sha256 = hashlib.sha256(data).hexdigest()
+            os.fsync(self.parent_fd)
+            info = os.fstat(self.fd)
+            if ((info.st_dev, info.st_ino) != created_inode
+                    or self.unit_identity[:-1] != staged_identity[:-1]
+                    or info.st_size != len(data)
+                    or os.pread(self.fd, len(data) + 1, 0) != data):
+                raise EnrollmentError("gateway_replacement_readback_failed")
+            self.check()
+            self.replacement_sha256 = self.unit_sha256
+        except (OSError, ReleaseManifestError, EnrollmentError) as exc:
+            if self.published:
+                raise EnrollmentError("gateway_replacement_postimage_requires_reconciliation") from exc
+            if isinstance(exc, EnrollmentError):
+                raise
+            raise EnrollmentError("gateway_replacement_io_failed") from exc
+        finally:
+            if fd is not None:
+                os.close(fd)
+            if not replaced:
+                try:
+                    info = os.stat(temporary_name, dir_fd=self.parent_fd, follow_symlinks=False)
+                    if (info.st_dev, info.st_ino) == created_inode:
+                        os.unlink(temporary_name, dir_fd=self.parent_fd)
+                except FileNotFoundError:
+                    pass
+
+
+def _write_root_unit(path: Path, data: bytes, *, predecessor: _InertGatewayReplacement | None = None) -> None:
+    if predecessor is not None:
+        predecessor.publish(path, data)
+        return
     if path.exists() or path.is_symlink():
         info = path.lstat()
         if (
@@ -1077,8 +1284,11 @@ def _write_root_unit(path: Path, data: bytes) -> None:
 
 
 def install_inert_units(
-    release_root: Path, codex_binary: Path | None, identities: ServiceIdentities, *, gateway_only: bool = False
+    release_root: Path, codex_binary: Path | None, identities: ServiceIdentities, *, gateway_only: bool = False,
+    predecessor: _InertGatewayReplacement | None = None,
 ) -> tuple[str, ...]:
+    if predecessor is not None and not gateway_only:
+        raise EnrollmentError("gateway_replacement_component_invalid")
     rendered = render_systemd_units(
         release_root=release_root, codex_binary=codex_binary, identities=identities, gateway_only=gateway_only
     )
@@ -1090,7 +1300,7 @@ def install_inert_units(
             verify_paths.append(os.fspath(path))
         _run(["/usr/bin/systemd-analyze", "verify", *verify_paths])
     for name, text in rendered.items():
-        _write_root_unit(UNIT_ROOT / name, text.encode("utf-8"))
+        _write_root_unit(UNIT_ROOT / name, text.encode("utf-8"), predecessor=predecessor)
     return tuple(sorted(rendered))
 
 
@@ -1109,8 +1319,13 @@ def _observation_input(args: Args, identities: ServiceIdentities):
         if hashlib.sha256(raw).hexdigest() != args.gateway_config_sha256:
             raise EnrollmentError("host_observation_input_changed")
         config = gateway.decode_host_observation_gateway_config(raw, expected_group_gid=identities.control_gid)
-        if config.hermes_role_metadata_read.implementation_sha != args.expected_sha:
-            raise EnrollmentError("host_observation_release_pin_mismatch")
+        if args.expected_gateway_unit_sha256 is None:
+            if config.hermes_role_metadata_read.implementation_sha != args.expected_sha:
+                raise EnrollmentError("host_observation_release_pin_mismatch")
+        elif (type(args.expected_gateway_unit_sha256) is not str
+              or re.fullmatch(r"[0-9a-f]{64}", args.expected_gateway_unit_sha256) is None
+              or not _observation_config_adoption(raw, identities)):
+            raise EnrollmentError("gateway_predecessor_config_required")
         return raw, config
     except (OSError, ValueError, TypeError) as exc:
         raise EnrollmentError("host_observation_input_unqualified") from exc
@@ -1165,31 +1380,55 @@ def _apply_host_observation(args: Args, identity, identities: ServiceIdentities)
     if (args.hermes_runtime is None or any(value is not None for value in
             (args.codex_source_binary, args.codex_version, args.codex_sha256))):
         raise EnrollmentError("host_observation_component_inputs_invalid")
-    raw, _ = _observation_input(args, identities)
+    raw, config = _observation_input(args, identities)
     _observation_config_adoption(raw, identities)
-    expected_units = expected_hermes_role_units(args.expected_sha, args.hermes_runtime)
-    _assert_release_input_adoption(args.source_repo, args.expected_sha, args.expected_tree, args.hermes_runtime)
-    classify_identity_plan(read_identity_state(), identities, gateway_only=True)
-    ensure_service_identities(identities, gateway_only=True)
-    ensure_directories(identities, gateway_only=True)
-    release = install_release(args.source_repo, args.expected_sha, args.expected_tree,
-                              hermes_runtime=args.hermes_runtime)
-    current_raw, _ = _observation_input(args, identities)
-    if current_raw != raw:
-        raise EnrollmentError("host_observation_input_changed")
-    digest = _install_observation_config(raw, identities)
-    units = install_inert_units(release, None, identities, gateway_only=True)
-    assert_central_control_absent()
-    return {
-        "schema": "mastermind.linux_secondary_worker_enrollment/v1",
-        "component": "hermes-host-observation",
-        "outcome": "HOST_OBSERVATION_INSTALLED_INERT",
-        "release_sha": identity["commit"], "release_tree": identity["tree"],
-        "gateway_config_sha256": args.gateway_config_sha256,
-        "gateway_config_canonical_sha256": digest,
-        "units_installed_inert": list(units), "services_activated": False,
-        "hermes_role_units_expected": expected_units,
-    }
+    replacement = (
+        _InertGatewayReplacement(args, raw, config, identities)
+        if args.expected_gateway_unit_sha256 is not None else None
+    )
+    with replacement if replacement is not None else nullcontext():
+        role_sha = replacement.role_sha if replacement is not None else args.expected_sha
+        expected_units = expected_hermes_role_units(role_sha, args.hermes_runtime)
+        _assert_release_input_adoption(args.source_repo, args.expected_sha, args.expected_tree, args.hermes_runtime)
+        classify_identity_plan(read_identity_state(), identities, gateway_only=True)
+        ensure_service_identities(identities, gateway_only=True)
+        ensure_directories(identities, gateway_only=True)
+        release = install_release(args.source_repo, args.expected_sha, args.expected_tree,
+                                  hermes_runtime=args.hermes_runtime)
+        current_raw, _ = _observation_input(args, identities)
+        if current_raw != raw:
+            raise EnrollmentError("host_observation_input_changed")
+        if replacement is None:
+            digest = _install_observation_config(raw, identities)
+            units = install_inert_units(release, None, identities, gateway_only=True)
+        else:
+            # Replacement never creates or rewrites the original fixed config.
+            from ops.executive_os.remote_worker_gateway_service import remote_worker_gateway_config_digest
+            replacement.check()
+            digest = remote_worker_gateway_config_digest(config)
+            units = install_inert_units(release, None, identities, gateway_only=True,
+                                        predecessor=replacement)
+        assert_central_control_absent()
+        if replacement is not None:
+            replacement.check()
+        receipt = {
+            "schema": "mastermind.linux_secondary_worker_enrollment/v1",
+            "component": "hermes-host-observation",
+            "outcome": "HOST_OBSERVATION_INSTALLED_INERT",
+            "release_sha": identity["commit"], "release_tree": identity["tree"],
+            "gateway_config_sha256": args.gateway_config_sha256,
+            "gateway_config_canonical_sha256": digest,
+            "units_installed_inert": list(units), "services_activated": False,
+            "hermes_role_units_expected": expected_units,
+        }
+        if replacement is not None:
+            receipt.update(
+                gateway_predecessor_unit_sha256=args.expected_gateway_unit_sha256,
+                gateway_unit_sha256=replacement.replacement_sha256,
+                gateway_publication_state=("POSTIMAGE_OBSERVED" if replacement.recovered else "PUBLISHED"),
+                preserved_role_implementation_sha=role_sha,
+            )
+        return receipt
 
 
 def apply_enrollment(args: Args) -> dict[str, Any]:
@@ -1208,7 +1447,8 @@ def apply_enrollment(args: Args) -> dict[str, Any]:
     if (args.component != "secondary-worker" or args.codex_source_binary is None
             or type(args.codex_version) is not str or _VERSION.fullmatch(args.codex_version) is None
             or type(args.codex_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", args.codex_sha256) is None
-            or args.gateway_config_file is not None or args.gateway_config_sha256 is not None):
+            or args.gateway_config_file is not None or args.gateway_config_sha256 is not None
+            or args.expected_gateway_unit_sha256 is not None):
         raise EnrollmentError("secondary_worker_component_inputs_invalid")
     source_info = inspect_codex_source(args.codex_source_binary)
     if source_info["sha256"] != args.codex_sha256:
@@ -1253,12 +1493,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if (ns.codex_source_binary is None or type(ns.codex_version) is not str
                 or _VERSION.fullmatch(ns.codex_version) is None
                 or type(ns.codex_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", ns.codex_sha256) is None
-                or ns.gateway_config_file is not None or ns.gateway_config_sha256 is not None):
+                or ns.gateway_config_file is not None or ns.gateway_config_sha256 is not None
+                or ns.expected_gateway_unit_sha256 is not None):
             sys.stderr.write("invalid secondary Worker component inputs\n")
             return 64
     elif (ns.gateway_config_file is None or type(ns.gateway_config_sha256) is not str
             or re.fullmatch(r"[0-9a-f]{64}", ns.gateway_config_sha256) is None
-            or any(value is not None for value in (ns.codex_source_binary, ns.codex_version, ns.codex_sha256))):
+            or any(value is not None for value in (ns.codex_source_binary, ns.codex_version, ns.codex_sha256))
+            or (ns.expected_gateway_unit_sha256 is not None and
+                re.fullmatch(r"[0-9a-f]{64}", ns.expected_gateway_unit_sha256) is None)):
         sys.stderr.write("invalid host observation component inputs\n")
         return 64
     try:
@@ -1278,6 +1521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         component=ns.component,
         gateway_config_file=ns.gateway_config_file,
         gateway_config_sha256=ns.gateway_config_sha256,
+        expected_gateway_unit_sha256=ns.expected_gateway_unit_sha256,
     )
     try:
         receipt = apply_enrollment(args)
