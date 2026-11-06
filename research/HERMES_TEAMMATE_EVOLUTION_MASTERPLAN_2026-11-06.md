@@ -156,6 +156,18 @@ Use design reference and original implementation when extraction would require m
 
 An open adapter does not establish entitlement to a proprietary service. Every selected provider still uses its authorized account and existing Capacity/model eligibility.
 
+### 4.4 Additional memory and tool components
+
+| Candidate at inspected revision | Evidence and reuse boundary | Recommendation |
+|---|---|---|
+| Letta Code, 5473a6639bd3b76fef74e293f6eed9ed6c2e9ad3 | Apache-2.0. A reviewed helper constructs a bounded projected-memory snapshot for reflection. Current Letta repository documentation redirects development to Letta Code. | Consider the projection/reflection technique or a small qualified helper. Preserve Agent OS and the existing runtime as owners. [O10] |
+| Graphiti, 747b480ec6b12ecb718f1e2bc588b20ee36ea9c2 | Apache-2.0 at this pin. Episodic/entity and temporal relationship machinery are relevant to historical relationship retrieval. | Optional derived index only after it beats a simple retrieval baseline on a defined failure set. [O11] |
+| Mem0, f1791daa86d469249c9b002f62644d58a1eb96a0 | Apache-2.0 OSS. Current README distinguishes managed proprietary optimizations from OSS results and describes agent-confirmed facts receiving equal weight. | Optional extraction/retrieval component; do not import hosted benchmark claims or treat an assistant's claim as verified execution evidence. [O12] |
+| Playwright, 530161aae0ba59643dbbfa3c1b8c929874cc18ec | Apache-2.0. | Use where it fits the existing browser owner; it is not a replacement for task or credential authority. [O13] |
+| browser-use b49a68e4060acb226da8f784194fef301c53a6d7; Stagehand c91e16776c3fb9964bbb9df6b9fe65a8f077ae7d | MIT licenses verified; current execution/session implementations were not audited end to end in this research. | Optional future workers for a demonstrated gap; neither is a required first-release dependency. [O14] |
+
+Do not combine several independent memory platforms simply to collect features. The next experiment should answer a specific question: for example, whether temporal graph retrieval resolves historical ownership questions that the existing index misses.
+
 ## 5. Architecture and ownership
 
 ### 5.1 One owner for each durable responsibility
@@ -402,7 +414,20 @@ Expose per-role permissions, last use, revoke, and secure entry in Mastermind OS
 
 Browser cookies and authenticated profiles also confer authority. They need scope, lifecycle, and revocation; they are not harmless files to clone across the fleet.
 
-### 9.3 Browser and desktop execution
+### 9.3 Newer Hermes source to reuse and qualify
+
+At the inspected comparison revision 6b21d0564de0492e2ebd0d8f63fca86c03b5c892, Hermes already includes a browser vault tool, a login-backend registry, native keychain support, and 1Password/Bitwarden adapters. Its browser fill path checks origin and rechecks desktop control before a write. Reuse that implementation where compatible, after comparing it with the exact installed revision. [H7][H8]
+
+Two concrete donor behaviors need attention before broad enrollment:
+
+- The external-backend discovery code includes installed password managers unless disabled. Mastermind should instead bind an explicit backend/account allowlist from the existing credential owner. Availability is not an access grant. [H8]
+- The computer permission helper's _child_env falls back to dict(os.environ) when sanitization raises. Qualify a fail-closed or minimal-environment path before running that donor helper with a secret-bearing parent environment. This is a finding in the inspected upstream source, not a claim that a deployed Mastermind host leaked credentials. [H9]
+
+Keychain mode improves key custody for backups or copied home directories, but its source expressly notes that same-user or in-process code can still access the key. Treat plugins as trusted executable code and use the existing isolated credential boundary where stronger separation is needed. A website receiving an autofilled password can read it; “model-blind” refers to the model's visibility, not secrecy from the destination. [H8]
+
+The newer computer backend distinguishes confirmed, unverifiable, and suspected-noop effects and supports a selected computer provider. Those semantics fit Mastermind's existing result discipline. Per-host OS permissions and native application access still require live proof. [H9]
+
+### 9.4 Browser and desktop execution
 
 Use the strongest available structured interface:
 
@@ -418,7 +443,7 @@ For a consequential interaction, capture the relevant precondition, perform the 
 
 Human takeover pauses automation. Returning control requires a fresh observation and renewed task continuity, not replay of the last queued click.
 
-### 9.4 A bounded canary
+### 9.5 A bounded canary
 
 Begin with an internal browser workflow that has reversible state and an authoritative readback. Prove:
 
@@ -679,6 +704,9 @@ Public product documentation was checked on 6 November 2026. It can change; prod
 - **[H4]** [Selected Hermes skill guards](https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/tools/skill_manager_guards.py).
 - **[H5]** [Selected Hermes MIT license](https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/LICENSE); [newer comparison snapshot](https://github.com/NousResearch/hermes-agent/tree/6b21d0564de0492e2ebd0d8f63fca86c03b5c892).
 - **[H6]** [Checkpoint contract tests](https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/tests/agent/test_pre_compress_checkpoint_contract.py). Tests were inspected as source, not executed in this research.
+- **[H7]** [Newer Hermes browser vault tool](https://github.com/NousResearch/hermes-agent/blob/6b21d0564de0492e2ebd0d8f63fca86c03b5c892/tools/browser_vault_tool.py).
+- **[H8]** [Newer keychain implementation](https://github.com/NousResearch/hermes-agent/blob/6b21d0564de0492e2ebd0d8f63fca86c03b5c892/agent/vault_keychain.py), [login backend selection](https://github.com/NousResearch/hermes-agent/blob/6b21d0564de0492e2ebd0d8f63fca86c03b5c892/agent/vault_backends/base.py), [1Password adapter](https://github.com/NousResearch/hermes-agent/blob/6b21d0564de0492e2ebd0d8f63fca86c03b5c892/agent/vault_backends/onepassword.py), and [Bitwarden adapter](https://github.com/NousResearch/hermes-agent/blob/6b21d0564de0492e2ebd0d8f63fca86c03b5c892/agent/vault_backends/bitwarden.py).
+- **[H9]** [Newer computer backend](https://github.com/NousResearch/hermes-agent/blob/6b21d0564de0492e2ebd0d8f63fca86c03b5c892/tools/computer_use/backend.py) and [permission helper](https://github.com/NousResearch/hermes-agent/blob/6b21d0564de0492e2ebd0d8f63fca86c03b5c892/tools/computer_use/permissions.py).
 
 ### Other reusable source
 
@@ -691,3 +719,9 @@ Public product documentation was checked on 6 November 2026. It can change; prod
 - **[O7]** [NanoClaw snapshot](https://github.com/nanocoai/nanoclaw/tree/b6266ec9667ec3c1478a651987089b28714a729a) and [MIT license](https://github.com/nanocoai/nanoclaw/blob/b6266ec9667ec3c1478a651987089b28714a729a/LICENSE).
 - **[O8]** [OpenHands SDK repository boundaries](https://github.com/OpenHands/software-agent-sdk/blob/039e5926d9655fd9b69b8c85604ec28ef17699bb/README.md) and [MIT license](https://github.com/OpenHands/software-agent-sdk/blob/039e5926d9655fd9b69b8c85604ec28ef17699bb/LICENSE).
 - **[O9]** [OpenManus snapshot](https://github.com/FoundationAgents/OpenManus/tree/3309bf4e416fb1c74b008f3e86494439a31bad53) and [MIT license](https://github.com/FoundationAgents/OpenManus/blob/3309bf4e416fb1c74b008f3e86494439a31bad53/LICENSE).
+
+- **[O10]** [Letta current source direction](https://github.com/letta-ai/letta/blob/8816d3a8516893bfdc0fa14bfb1235226012e295/README.md), [Letta Code reflection snapshot helper](https://github.com/letta-ai/letta-code/blob/5473a6639bd3b76fef74e293f6eed9ed6c2e9ad3/src/cli/helpers/reflection-memory-v2.ts), and [Apache-2.0 license](https://github.com/letta-ai/letta-code/blob/5473a6639bd3b76fef74e293f6eed9ed6c2e9ad3/LICENSE).
+- **[O11]** [Graphiti implementation](https://github.com/getzep/graphiti/blob/747b480ec6b12ecb718f1e2bc588b20ee36ea9c2/graphiti_core/graphiti.py) and [Apache-2.0 license at inspected pin](https://github.com/getzep/graphiti/blob/747b480ec6b12ecb718f1e2bc588b20ee36ea9c2/LICENSE).
+- **[O12]** [Mem0 README and OSS/managed distinction](https://github.com/mem0ai/mem0/blob/f1791daa86d469249c9b002f62644d58a1eb96a0/README.md) and [Apache-2.0 license](https://github.com/mem0ai/mem0/blob/f1791daa86d469249c9b002f62644d58a1eb96a0/LICENSE).
+- **[O13]** [Playwright Apache-2.0 license](https://github.com/microsoft/playwright/blob/530161aae0ba59643dbbfa3c1b8c929874cc18ec/LICENSE).
+- **[O14]** [browser-use MIT license](https://github.com/browser-use/browser-use/blob/b49a68e4060acb226da8f784194fef301c53a6d7/LICENSE) and [Stagehand MIT license](https://github.com/browserbase/stagehand/blob/c91e16776c3fb9964bbb9df6b9fe65a8f077ae7d/LICENSE).
