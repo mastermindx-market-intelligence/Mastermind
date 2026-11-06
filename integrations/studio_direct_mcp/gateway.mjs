@@ -79,6 +79,8 @@ import { isLegacyRequest } from '@modelcontextprotocol/server';
 import { toNodeHandler, toWebRequest } from '@modelcontextprotocol/node';
 import { createModernFabricHandler } from './modern-fabric-http.mjs';
 import { createCommissionService } from './commission-service.mjs';
+import { originalCollectionConfig, createOriginalDelivery, ORIGINAL_ACCOUNT,
+  ORIGINAL_PRINCIPAL, ORIGINAL_TOOLS, ORIGINAL_TOOL_NAMES } from './original-delivery.mjs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -431,6 +433,7 @@ export function resolveConfig(partial = {}) {
     throw new TypeError('modern Fabric protocol requires the private Fabric-only shared backend');
   }
 
+  cfg.originalCollection = originalCollectionConfig(cfg);
   return cfg;
 }
 
@@ -848,6 +851,8 @@ class BackendOwner {
     Object.assign(this, { principalKey, principalTag, cfg, stats });
     this.generation = randomUUID();
     this.outputPager = new TextOutputPager();
+    this.originalDelivery = cfg.originalCollection
+      ? createOriginalDelivery(cfg.originalCollection, principalKey) : null;
     this.outputToolSchemas = new Map();
     this.state = 'idle';
     this.client = null;
@@ -914,6 +919,9 @@ class BackendOwner {
     this.state = 'broken';
     this.limiter.drain('Backend closed');
     this.closePromise = (async () => {
+      // A disposable HTTP exchange never closes this owner. Even an actual
+      // owner shutdown waits for its original helper, without replaying it.
+      await this.originalDelivery?.close();
       try { await this.client?.close(); } catch {}
       try { await this.transport?.close(); } catch {}
       // A connecting child must finish cleanup before its owner is released.
@@ -1131,7 +1139,14 @@ class GatewaySession {
         signal: extra?.signal,
       });
       const tools = sanitizeToolList(result.tools);
+      if (tools.some(tool => ORIGINAL_TOOL_NAMES.has(tool.name))) {
+        throw new McpError(ErrorCode.InternalError, 'Backend exposed a reserved original collection tool');
+      }
       const localTools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
+      if (this.owner?.originalDelivery && this.principalKey === ORIGINAL_PRINCIPAL &&
+          this.owner.principalKey === this.principalKey) {
+        localTools.push(...ORIGINAL_TOOLS.map(tool => ({ ...tool })));
+      }
       if (this.fleetStatus) {
         localTools.push({ ...STUDIO_FLEET_STATUS_TOOL });
       }
@@ -1171,6 +1186,26 @@ class GatewaySession {
     const name = request?.params?.name;
     const requestLog = fabricRequestLogFields(name, request?.params?.arguments);
     const started = Date.now();
+
+    if (ORIGINAL_TOOL_NAMES.has(name)) {
+      if (!this.owner?.originalDelivery || this.principalKey !== ORIGINAL_PRINCIPAL ||
+          this.owner.principalKey !== this.principalKey) {
+        throw new McpError(ErrorCode.InvalidParams, 'Original collection is not enabled for this owner');
+      }
+      return this.withBackendSlot(async () => {
+        this.bumpTool(name);
+        let result;
+        try {
+          // No request metadata, user-supplied identity or abort signal enters
+          // the fixed helper. The owner retains work across exchange churn.
+          result = await this.owner.originalDelivery.call(name,
+            request?.params?.arguments ?? {}, this.principalKey);
+        } catch {
+          throw new McpError(ErrorCode.InvalidParams, 'Original collection arguments or principal refused');
+        }
+        return projectOutputSafely(this.outputPager, result, { toolName: name, hasOutputSchema: false });
+      }, { kind: 'tools/call', tool: name, started });
+    }
 
     if (name === OUTPUT_PAGE_TOOL.name) {
       this.touch();
@@ -1634,6 +1669,10 @@ class GatewaySession {
  */
 export async function startGateway(partialConfig = {}, auth = {}) {
   const cfg = resolveConfig(partialConfig);
+  if (cfg.originalCollection && (auth.accountLabel !== ORIGINAL_ACCOUNT ||
+      auth.principal !== 'tunnel:' + ORIGINAL_ACCOUNT)) {
+    throw new TypeError('original collection requires its installed private tunnel principal');
+  }
   if (cfg.modernFabricProtocol && !cfg.testMode &&
       (auth.accountLabel !== cfg.accountLabel || typeof auth.accountLabel !== 'string' ||
        !auth.accountLabel || auth.principal !== 'tunnel:' + auth.accountLabel)) {
@@ -1768,6 +1807,7 @@ export async function startGateway(partialConfig = {}, auth = {}) {
   const modernToolNames = new Set(['fabric_capabilities', 'fabric_request', 'fabric_status',
     'fabric_wait', 'fabric_result', 'fabric_result_page', 'fabric_accept', 'fabric_controller_output',
     'studio_ping', 'studio_output_page']);
+  if (cfg.originalCollection) for (const name of ORIGINAL_TOOL_NAMES) modernToolNames.add(name);
   const modernHandler = cfg.modernFabricProtocol ? createModernFabricHandler({
     serverInfo: { name: 'mastermind-subagent-fabric', version: GATEWAY_VERSION },
     acquireScope: async ({ authInfo }) => {

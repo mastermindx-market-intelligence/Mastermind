@@ -20,20 +20,26 @@ def _project_instructions(source: str) -> str:
     )[1].split("\n```", 1)[0]
 
 
+
 def test_web_project_instruction_block_loads_review_guide_within_budget():
     kernel = _read("docs/sol_skills/BOOTSTRAP_KERNEL.md")
     block = _project_instructions(kernel)
     assert block.startswith("MASTERMIND SOL BOOTSTRAP")
     assert "protected master docs/sol_skills/INDEX.md" in block
-    assert GUIDE in block, "outside-fence Markdown is not installed Project text"
-    assert "Review: load " + GUIDE in block
-    assert "at pin" in block
-    assert "Fabric block" in block
-    assert "never native Sol labor" in block
+    # The compact Project carries enforceable review safety; the optional
+    # detail guide remains discoverable from protected source, not a forced hop.
+    for required in (
+        "5A. CHATGPT WEB REVIEW WAIVER, all tiers:",
+        "Real non-author APPROVED only where required",
+        "Native review != GitHub APPROVED",
+        "No extra review/handoff ceremony",
+    ):
+        assert required in block, required
+    assert GUIDE in kernel
+    assert "docs/SESSION_LOCAL_REVIEW_POLICY.md" in kernel
     assert len(block) <= 8000
     assert len(block.encode("utf-8")) <= 8000
     assert (ROOT / GUIDE).is_file()
-
 
 def test_protected_index_routes_review_at_same_pinned_source():
     # Existing Shared Project instructions already bootstrap the protected
@@ -48,19 +54,18 @@ def test_protected_index_routes_review_at_same_pinned_source():
     assert "does not install" in section
 
 
+
 def test_outside_fence_only_pointer_fails_project_consumer():
     kernel = _read("docs/sol_skills/BOOTSTRAP_KERNEL.md")
-    block = _project_instructions(kernel)
-    assert GUIDE in block
-    # Simulate accidentally moving the only review pointer to supporting
-    # Markdown outside the actual Project instruction code fence.
-    moved = kernel.replace("Review: load " + GUIDE + " at pin.", "")
-    assert GUIDE not in _project_instructions(moved)
-    assert GUIDE in moved, "supporting Markdown should still contain the guide"
-    assert GUIDE not in _project_instructions(moved), (
-        "a guide mentioned elsewhere in the file must not pass installation"
-    )
-
+    guard = "5A. CHATGPT WEB REVIEW WAIVER, all tiers:"
+    assert guard in _project_instructions(kernel)
+    # Moving an actual waiver marker outside the installed fence cannot
+    # count as a Project instruction, even if it remains in Markdown.
+    moved = kernel.replace(guard, "", 1) + "\n" + guard
+    assert moved != kernel
+    assert guard not in _project_instructions(moved)
+    assert guard in moved
+    assert GUIDE in moved
 
 def test_existing_session_bootstraps_and_review_skill_link_to_one_guide():
     expected = {
@@ -163,16 +168,16 @@ def test_session_local_review_all_tiers_preserves_actual_native_gates():
     assert "Source text does not prove" in guide and "installation" in guide
 
 
+
 def test_project_installed_fence_separates_native_review_from_formal_approval():
     block = _project_instructions(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
     for guard in (
-        "Native child != GitHub APPROVED",
-        "child != GitHub APPROVED",
-        "denied/EFFECT_UNKNOWN reroute",
-        "no second armer",
-        "No impersonation, self-approval, duplicate or denied/EFFECT_UNKNOWN reroute",
-        "Review: load " + GUIDE + " at pin.",
-        "docs/SESSION_LOCAL_REVIEW_POLICY.md",
+        "Native review != GitHub APPROVED",
+        "Real non-author APPROVED only where required",
+        "No denied-effect/EFFECT_UNKNOWN carrier swap",
+        "No extra review/handoff ceremony",
+        "No impersonation/duplicate/uncertain review",
+        "GitHub/CODEOWNERS/security/release holds bind",
     ):
         assert guard in block, f"uninstalled outside-fence safeguard: {guard}"
     assert len(block.encode("utf-8")) <= 8000
@@ -180,22 +185,21 @@ def test_project_installed_fence_separates_native_review_from_formal_approval():
 
 def test_project_kernel_explicit_all_tier_web_waiver_and_handoff_exemption():
     block = _project_instructions(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
-    assert "5A. CHATGPT WEB REVIEW WAIVER (FAST/STANDARD/CRITICAL)" in block
+    assert "5A. CHATGPT WEB REVIEW WAIVER, all tiers:" in block
     for guard in (
-        "No blanket independent technical/source review for code, tests, docs, PRs or delivery",
-        "Self-check exact diff, focused tests, required CI and real-path proof",
-        "GitHub/CODEOWNERS, security/release holds bind",
-        "never self-approve, bypass protection, falsify or duplicate active/uncertain review",
+        "no blanket independent technical/source review",
+        "Self-check diff, focused tests, required CI/proof",
+        "GitHub/CODEOWNERS/security/release holds bind",
+        "never self-approve/self-merge/falsify/bypass",
         "No independent review solely for handoff",
         "HANDOFF_SOURCE_LINK_V1",
-        "9A. Macro",
+        "9A. ONE-PASS DELIVERY",
     ):
         assert guard in block, f"required actual Project-fence clause missing: {guard}"
     numbered = [line.split(".", 1)[0] for line in block.splitlines() if line[:1].isdigit()]
     assert set(map(str, range(1, 41))).issubset(numbered)
     assert {"5A", "6A", "9A"}.issubset(numbered)
     assert len(block.encode("utf-8")) <= 8000
-
 
 def test_session_finishes_original_pr_not_draft_or_ci_handoff():
     policy = _read("docs/SESSION_LOCAL_REVIEW_POLICY.md")
