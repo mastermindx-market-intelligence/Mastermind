@@ -1,15 +1,20 @@
 """Actual installed compiler/publisher/READ Memory edit, one coherent fixture.
 
 Temporary Git/Runtime/socket only. Existing root source seal, credential/PR owner
-and Workspace enrollment are inert. Projection rows and DTOs are never rewritten.
+and Workspace enrollment are inert. The explicit physical-child interpreter is
+this test's Python, not evidence of an installed native CF1 runtime. Projection
+rows and DTOs are never rewritten.
 """
 import asyncio
 import copy
 import json
 import os
+import sys
 from pathlib import Path
 
 import httpx
+import pytest
+from tests import test_knowledge_installed_source_join as installed_fixture
 from tests.test_installed_knowledge_canonical_journey import configured,owner,env,isolated_git_env,identity,rsa_key,short_socket_root,settings
 from tests.test_workspace_read_app import _authenticator,_workspace_token,NOW
 from tests.test_workspace_project_authoring_grant import project_bindings
@@ -26,7 +31,8 @@ from control_plane.executive_service import ExecutiveControlService,CeoIngressAp
 from tests.test_executive_ceo_ingress import _FakeGrounding,_config
 
 
-def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(owner,identity,tmp_path,monkeypatch,rsa_key,short_socket_root,settings):
+@pytest.mark.parametrize('runtime_kind', ['portable', 'missing_interpreter'])
+def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(owner,identity,tmp_path,monkeypatch,rsa_key,short_socket_root,settings,runtime_kind):
     o=owner
     # Complete the input record's pre-existing DEC reference before pinning C;
     # no projected row/source identity is altered after qualification.
@@ -37,7 +43,25 @@ def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(own
     git(o['env'].clone,'commit','-m','Complete canonical fixture decision association')
     git(o['env'].clone,'push','origin','main')
     o['request']['source_commit']=rev_parse(o['env'].clone,'HEAD')
+    # The donor fixture supplies this argument to the existing collector
+    # constructor. Its module's native-runtime skip mark is not inherited by
+    # this test; choose the current interpreter explicitly instead of relying
+    # on a Darwin-only /Library installation being present in Linux CI.
+    python = Path(sys.executable).absolute()
+    if runtime_kind == 'missing_interpreter':
+        python = tmp_path/'absent-native-runtime'/'bin'/'python3.12'
+        assert not python.exists()
+    monkeypatch.setattr(installed_fixture, 'PYTHON_BINARY', python)
     collector,git_owner=configured(o,identity,tmp_path,monkeypatch)
+    assert collector._python == python
+    original_runner, children = collector._runner, []
+    def observe_child(argv, **options):
+        if any(str(value).endswith(('/scripts/agentos_project_knowledge_entry.py',
+                                   '/scripts/agentos_project_knowledge_recipe_entry.py')) for value in argv):
+            assert argv[:3] == [str(python), '-I', '-B']
+            children.append(tuple(argv))
+        return original_runner(argv, **options)
+    monkeypatch.setattr(collector, '_runner', observe_child)
     async def run():
         auth=_authenticator(rsa_key);token=_workspace_token(rsa_key)
         who=await auth.verify_authorization_header('Bearer '+token,now=NOW)
@@ -86,6 +110,14 @@ def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(own
                     return accepted
                 programs=await get('/workspace/programs/current')
                 assert any(row['work_ref']=='WS:ALPHA' for row in programs['control_room']['work'])
+                if runtime_kind == 'missing_interpreter':
+                    refused=await client.get('/workspace/project-knowledge/current',params={'work_ref':'WS:ALPHA'})
+                    assert refused.status_code==503,refused.text
+                    assert refused.json()['reason_codes']==['SOURCE_UNAVAILABLE']
+                    assert refused.json()['project'] is None and refused.json()['source'] is None
+                    assert len(children)==1 and o['pr'].create_calls==0
+                    assert o['runtime'].jobs.list_jobs()==[]
+                    return
                 initial=await catalogue()
                 file_request=copy.deepcopy(o['request'])
                 file_preview=await prepare(file_request,'add_project_file');file_proposal=await submit(file_preview)
@@ -119,6 +151,24 @@ def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(own
                 file_after=await get('/workspace/project-source/current',work_ref='WS:ALPHA',source_ref=current_file_row['source_ref'],expected_revision=current_file_row['revision'])
                 assert file_after['document']['content_utf8']==file_request['file']['content_utf8']
                 assert o['pr'].create_calls==3 and o['runtime'].jobs.list_jobs()==[]
+                # References bind the canonical commit and blob. The old
+                # reference is no longer a member; even the new reference must
+                # refuse the old revision before opening a body.
+                assert row['source_ref']!=before_ref['source_ref']
+                old_ref=await client.get('/workspace/project-source/current',params={'work_ref':'WS:ALPHA',
+                    'source_ref':before_ref['source_ref'],'expected_revision':before_ref['revision']})
+                assert old_ref.status_code==503 and old_ref.json()['reason_codes']==['RECORD_NOT_FOUND'],old_ref.text
+                stale=await client.get('/workspace/project-source/current',params={'work_ref':'WS:ALPHA',
+                    'source_ref':row['source_ref'],'expected_revision':before_ref['revision']})
+                assert stale.status_code==503 and stale.json()['reason_codes']==['SOURCE_CHANGED'],stale.text
+                # Revocation denies before another isolated reader is invoked.
+                before_denial=len(children);slot['enabled']=False
+                denied=await client.get('/workspace/project-memory/current',params={'work_ref':'WS:ALPHA'})
+                assert denied.status_code==403,denied.text
+                assert len(children)==before_denial
+                slot['enabled']=True
+                assert {Path(argv[3]).name for argv in children}=={
+                    'agentos_project_knowledge_entry.py','agentos_project_knowledge_recipe_entry.py'}
                 output={'programs':programs,'context':context,'file_context':file_context,'before':before,'memory_before':before_memory,
                     'request':request,'preview':preview,'proposal_status':proposal,'pr_only_catalogue':pr_only,'accepted_status':accepted,
                     'after':after,'memory_after':after_memory,'source_after':source,'source_before':source_before,

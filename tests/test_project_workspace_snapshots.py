@@ -161,8 +161,19 @@ def test_snapshot_observation_preserves_shared_index_and_unknown_index_is_refuse
         data=b"unrelated staged object", mutate=True).strip()
     workspace_owner._project_git(workspace, "update-index", "-z", "--index-info",
         data=b"100644 " + other + b"\tsrc/result.txt\0", mutate=True)
+    # Git creates its replacement index under the caller's umask (0644 at 022).
+    # Restore the fixture's service custody so this exercises unknown contents,
+    # rather than the earlier refusal of a world-readable Git control file.
+    unknown_index = index.read_bytes()
+    index.chmod(before.st_mode & 0o777)
+    unknown_before = index.stat()
+    assert git(workspace, "rev-parse", ":src/result.txt") == other.decode()
     with pytest.raises(workspace_owner.WorkspaceError, match="original interrupted parent"):
         handoff(workspace, base, [value])
+    assert index.read_bytes() == unknown_index
+    unknown_after = index.stat()
+    assert (unknown_before.st_ino, unknown_before.st_mode, unknown_before.st_mtime_ns) == (
+        unknown_after.st_ino, unknown_after.st_mode, unknown_after.st_mtime_ns)
     assert git(workspace, "rev-parse", "HEAD") == adopted["commit"]
 
 
