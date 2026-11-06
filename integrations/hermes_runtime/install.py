@@ -278,9 +278,10 @@ def _write_release(
     home = release / "hermes-home"
     role_dir = home / "profiles" / profile.role
     role_dir.mkdir(parents=True, mode=0o700)
+    consumer = (native_installation or {}).get("executive_consumer")
     if native_installation is not None and hermes_config_renderer is None:
-        from integrations.hermes_harness.native_byok import render_disarmed_native_byok
-        hermes_config_renderer = render_disarmed_native_byok
+        from integrations.hermes_harness.native_byok import expected_native_config
+        hermes_config_renderer = lambda profile: expected_native_config(profile, consumer)
     config = (
         hermes_config_renderer(profile)
         if hermes_config_renderer is not None
@@ -289,10 +290,13 @@ def _write_release(
     if not isinstance(config, str) or len(config.encode("utf-8")) > 64 * 1024:
         raise RuntimeRefusal("NATIVE_CONFIG_INVALID")
     if native_installation is not None:
-        from integrations.hermes_harness.native_byok import render_disarmed_native_byok
-        if config != render_disarmed_native_byok(profile):
+        from integrations.hermes_harness.native_byok import expected_native_config
+        if config != expected_native_config(profile, consumer):
             raise RuntimeRefusal("NATIVE_GATEWAY_CONFIG_MISMATCH")
     _atomic_write(role_dir / "config.yaml", config.encode("utf-8"), 0o600)
+    plugin_digest = None
+    if consumer is not None:
+        plugin_digest = _install_consumer_plugin(role_dir, consumer)
     soul = _soul_bytes(profile.role)
     _atomic_write(role_dir / "SOUL.md", soul, 0o600)
     dumped = dump_profile(profile)
@@ -318,7 +322,44 @@ def _write_release(
                        native_launcher_sha256=hashlib_sha256(bin_path.read_bytes()),
                        native_adapter_sha256=hashlib_sha256(
                            (repo_root() / "integrations/hermes_runtime/native_gateway_entry.py").read_bytes()))
+        if plugin_digest is not None:
+            # What the normal install writer actually installed. The launch
+            # owner proves it against the sealed publication before the
+            # native loader may import the package.
+            receipt.update(native_consumer_plugin_sha256=plugin_digest)
     _atomic_write(release / "install-receipt.json", _json(receipt), 0o600)
+
+
+def _install_consumer_plugin(role_dir: Path, consumer: dict) -> str:
+    """Install the sealed consumer plugin package into the role's plugin root.
+
+    The bytes come from the held release source, are owner-only, and are
+    proven against the publication's sealed digest before they are written.
+    A digest in an installation document is a claim; this is the check that
+    the installed bytes are the release source it names.
+    """
+    from integrations.hermes_harness.native_executive_consumer import (
+        CONSUMER_PLUGIN_NAME,
+        plugin_package_digest,
+    )
+
+    source = repo_root() / "integrations" / "hermes_harness" / CONSUMER_PLUGIN_NAME
+    try:
+        observed = plugin_package_digest(source)
+    except RuntimeRefusal:
+        raise
+    if observed != consumer["plugin"]["digest"]:
+        raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_SOURCE_MISMATCH")
+    target = role_dir / "plugins" / CONSUMER_PLUGIN_NAME
+    target.mkdir(parents=True, mode=0o700)
+    os.chmod(target, 0o700)
+    for name in ("plugin.yaml", "__init__.py"):
+        data = (source / name).read_bytes()
+        _atomic_write(target / name, data, 0o600)
+    installed = plugin_package_digest(target)
+    if installed != observed:
+        raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_PACKAGE_MISMATCH")
+    return installed
 
 
 def _soul_bytes(role: str) -> bytes:

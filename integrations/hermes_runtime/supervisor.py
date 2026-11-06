@@ -97,12 +97,14 @@ def build_serve_argv(hermes_bin: Path, role: str, backend_port: int, host: str =
     return argv
 
 
-def expected_disabled_mcp(profile: RuntimeProfile) -> dict[str, tuple[str, ...]] | None:
+def expected_disabled_mcp(profile: RuntimeProfile, consumer=None) -> dict[str, tuple[str, ...]] | None:
     """Require exact on-disk native config before trusting any CLI summary.
 
     A displayed MCP summary is not a connection or admission receipt.
     The only accepted additional config is the reviewed, *disabled*
-    Steward source. No unknown or enabled MCP/server plugin is allowed.
+    Steward source, plus - for a qualified optional consumer - the exact
+    reviewed Executive entry whose tool filter is empty. No unknown or
+    enabled MCP/server plugin is allowed.
     """
     path = profile.hermes_home / "profiles" / profile.role / "config.yaml"
     if not path.exists() and not path.is_symlink():
@@ -134,16 +136,30 @@ def expected_disabled_mcp(profile: RuntimeProfile) -> dict[str, tuple[str, ...]]
 
     if profile.extension_allowlist:
         raise RuntimeRefusal("NATIVE_EXTENSION_NOT_INSTALLED")
-    from integrations.hermes_harness.native_byok import render_disarmed_native_byok
+    from integrations.hermes_harness.native_byok import (
+        expected_native_config,
+        render_disarmed_native_byok,
+    )
     allowed_native = {render_disarmed_native_byok(profile).encode("utf-8")}
     # An explicit persisted selection cannot downgrade to a legacy or
     # model-less config. Only selector-free historical profiles retain
     # the earlier source-compatible config forms.
     if profile.native_provider_id is None:
         allowed_native.add(render_disarmed_native_config(profile).encode("utf-8"))
+    expected_mcp: dict[str, tuple[str, ...]] = {"mastermind_steward": tuple(ALLOWED_TOOLS)}
+    if consumer is not None:
+        from integrations.hermes_harness.native_executive_consumer import (
+            publication_from_document,
+        )
+        publication = publication_from_document(consumer)
+        allowed_native.add(expected_native_config(profile, consumer).encode("utf-8"))
+        # The upstream census renders an empty include list as "(none)". The
+        # Executive entry registers no model-facing tool at all, so the
+        # summary must show exactly that.
+        expected_mcp[publication.mcp.server] = ("(none)",)
     if raw not in allowed_native:
         raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_DRIFT")
-    return {"mastermind_steward": tuple(ALLOWED_TOOLS)}
+    return expected_mcp
 
 
 class ServiceRuntime:
@@ -177,6 +193,8 @@ class ServiceRuntime:
         self._next_role_status_publication = 0.0
         self._native_launch = native_launch
         self._native_home: Path | None = None
+        self._extension_observed: dict | None = None
+        self._extension_proved = False
 
     def start(self) -> None:
         # Check native BYOK/alias policy before *any* Hermes subprocess,
@@ -257,6 +275,11 @@ class ServiceRuntime:
                 "slack_roundtrip_verified": False,
                 "child_pid": self.child_pid,
                 "memory_high_water_kib": 0 if self.memory is None else self.memory.high_water,
+                # The serving-process extension proof is a read-back of the
+                # actual scoped entry in the running child. It is separate
+                # from the static no-credential built-in census and it never
+                # clears the extension hold by itself.
+                "native_extension_proved": self._extension_proved,
                 "loopback": True,
                 "gateway_host": self.profile.gateway_host,
                 "allowlist": sorted(self.profile.tool_allowlist),
@@ -311,6 +334,51 @@ class ServiceRuntime:
             return reply(uncertain)
         return {"schema": response_schema, "implementation_sha": implementation, "result": result}
 
+    def _observe_consumer_extension(self, child_pid: int) -> dict | None:
+        """Read the serving process's actual scoped native extension entry.
+
+        The read happens only after the launch owner proved that this is the
+        original actual child. It is a finite read-only observation over the
+        existing same-UID private socket: it starts no owner, creates no
+        session and clears no hold.
+        """
+        home = self._native_home
+        launch = self._native_launch
+        if home is None or launch is None:
+            return None
+        try:
+            launch.observe_child(child_pid)
+            from .native_session_control import NativeSecretaryClient
+            result = NativeSecretaryClient(home, expected_pid=child_pid).consumer_extension()
+        except Exception:
+            return None
+        if not isinstance(result, dict) or result.get("status") != "OBSERVED":
+            return None
+        extension = result.get("extension")
+        return extension if isinstance(extension, dict) else None
+
+    def _consume_consumer_extension(self, child_pid: int) -> None:
+        """Record the serving-process extension proof for this child."""
+        from .registry import assert_extension_proof_exact
+        from .native_session_control import CONSUMER_EXTENSION_TOOL
+        from integrations.hermes_harness.native_executive_consumer import schema_digest
+        from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
+
+        extension = self._observe_consumer_extension(child_pid)
+        with self._lock:
+            self._extension_observed = extension
+            self._extension_proved = False
+        if extension is None:
+            return
+        try:
+            verdict = assert_extension_proof_exact(
+                extension, expected_tool=CONSUMER_EXTENSION_TOOL,
+                expected_schema_sha256=schema_digest(NATIVE_TOOL_SCHEMA))
+        except RuntimeRefusal:
+            return
+        with self._lock:
+            self._extension_proved = verdict["installed"] is True
+
     def _env(self) -> dict[str, str]:
         # CLI/tool census receives no model provider credential.
         return child_env(self.secrets, home=self.profile.hermes_home, extra=self.extra_child_env)
@@ -361,12 +429,16 @@ class ServiceRuntime:
                 raise RuntimeRefusal("NATIVE_PROFILE_HOME_CHANGED")
         self._expected_disabled_mcp()
         native = self.profile.hermes_home / "profiles" / self.profile.role / "config.yaml"
-        from integrations.hermes_harness.native_byok import render_disarmed_native_byok
+        from integrations.hermes_harness.native_byok import expected_native_config
         env = self._env()
         if self.profile.gateway_backend == "native-session-authority":
             from .native_gateway_entry import native_git_environment
             env.update(native_git_environment(Path(self._native_launch.recipe["vendor_root"])))
-        if native.is_file() and native.read_bytes() == render_disarmed_native_byok(self.profile).encode("utf-8"):
+        expected_config = None
+        if native.is_file():
+            expected_config = expected_native_config(
+                self.profile, self._consumer_publication())
+        if expected_config is not None and native.read_bytes() == expected_config.encode("utf-8"):
             # load_secrets historically defaults dashboard Basic-Auth password
             # to the gateway token. The model child receives that password;
             # refusing this alias prevents disclosure under a *different*
@@ -375,7 +447,8 @@ class ServiceRuntime:
             if self.secrets.dashboard_password == self.secrets.token:
                 raise RuntimeRefusal("NATIVE_GATEWAY_PASSWORD_ALIAS_REFUSED")
             from integrations.hermes_harness.native_model_credential import primary_model_env
-            model_keys = primary_model_env(self.profile, self.secrets.values)
+            model_keys = primary_model_env(self.profile, self.secrets.values,
+                                           self._consumer_publication())
             # Slack bot authority must not travel to the model-serving child
             # under a different credential name, including dashboard Basic Auth
             # (which the native Hermes child necessarily receives).
@@ -397,8 +470,22 @@ class ServiceRuntime:
         assert_no_supervisor_notification_env(env)
         return env
 
+    def _consumer_publication(self):
+        """The optional qualified consumer input this runtime was installed with.
+
+        It is absent by default. A malformed or absent member leaves the
+        runtime disarmed; it never invents an extension.
+        """
+        launch = self._native_launch
+        if launch is None:
+            return None
+        recipe = getattr(launch, "recipe", None)
+        if not isinstance(recipe, dict):
+            return None
+        return recipe.get("executive_consumer")
+
     def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:
-        return expected_disabled_mcp(self.profile)
+        return expected_disabled_mcp(self.profile, self._consumer_publication())
 
     def _check_registry(self) -> None:
         expected_disabled_mcp = self._expected_disabled_mcp()
@@ -514,6 +601,7 @@ class ServiceRuntime:
                 self._backend_ready = False
             next_memory_sample = 0.0
             poll_sec = min(0.25, self.profile.memory_sample_interval_sec)
+            extension_checked = False
             while not self._stop.is_set() and proc.poll() is None:
                 if self.profile.gateway_backend == "native-session-authority":
                     try:
@@ -530,6 +618,11 @@ class ServiceRuntime:
                 with self._lock:
                     if self._child is proc:
                         self._backend_ready = backend_ready
+                if backend_ready and not extension_checked:
+                    # The serving-process extension proof is read once, after
+                    # the launch owner proved this is the original child.
+                    extension_checked = True
+                    self._consume_consumer_extension(proc.pid)
                 now = time.monotonic()
                 if now >= next_memory_sample:
                     rss = read_rss_kib(proc.pid)

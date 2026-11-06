@@ -306,6 +306,90 @@ ENROLLMENT_SCHEMA = "mastermind.hermes_secretary_session_enrollment/v1"
 ENROLLMENT_RESULT_SCHEMA = "mastermind.hermes_secretary_enrollment_result/v1"
 _ENROLLMENT_STATUSES = frozenset({"ENROLLED", "ABSENT", "REFUSED", "UNAVAILABLE", "EFFECT_UNKNOWN"})
 
+# The one native extension tool the qualified consumer may install. It is a
+# model-facing tool of the plugin, not an MCP server tool: the raw Executive
+# tools of that server stay non-model-facing.
+CONSUMER_EXTENSION_TOOL = "mmx_delegate"
+
+# The process-local held-release owner identity. It is bound exactly once, by
+# the native gateway entry that entered this process through the held
+# release, and it is what the plugin loader checks the owner-private
+# consumer slot against. It is never replaced and never derived from a role
+# label.
+_RUNTIME_OWNER: str | None = None
+_RUNTIME_OWNER_LOCK = threading.Lock()
+
+
+def install_runtime_owner(implementation_sha: str) -> str:
+    """Bind this process's held-release owner identity, exactly once."""
+    global _RUNTIME_OWNER
+    value = _implementation(implementation_sha)
+    with _RUNTIME_OWNER_LOCK:
+        if _RUNTIME_OWNER is None:
+            _RUNTIME_OWNER = value
+        elif _RUNTIME_OWNER != value:
+            raise RuntimeRefusal("NATIVE_RUNTIME_OWNER_CONFLICT")
+    return _RUNTIME_OWNER
+
+
+def current_runtime_owner() -> str | None:
+    """The held-release owner identity of this process, when it is bound."""
+    return _RUNTIME_OWNER
+
+
+def _callable_identity(value) -> str | None:
+    """A stable identity for one registered callable, never its source."""
+    if value is None:
+        return None
+    module = getattr(value, "__module__", None)
+    name = getattr(value, "__qualname__", None) or getattr(value, "__name__", None)
+    if type(module) is not str or type(name) is not str:
+        return None
+    return f"{module}:{name}"
+
+
+def _consumer_extension(runner, home: Path) -> dict:
+    """Read the serving process's actual scoped native extension entry.
+
+    This is the *serving-process extension proof*. It reads the live tool
+    registry of THIS process, in the scope the actual per-profile plugin
+    manager owns. It never accepts a caller-selected target or route, never
+    writes the registry and never clears the extension hold: an absent entry
+    is reported as absent.
+    """
+    descriptor = runner.session_runtime_descriptor
+    if descriptor.get("state") != "ready" or runner._draining:
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_NOT_READY")
+    try:
+        from hermes_cli.plugins import get_plugin_manager
+        from tools.registry import registry
+        manager = get_plugin_manager()
+        scope = getattr(manager, "scope_key", None)
+        if type(scope) is not str or not scope:
+            raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_SCOPE_UNAVAILABLE")
+        entry = registry.snapshot_registration(CONSUMER_EXTENSION_TOOL, scope=scope)
+    except RuntimeRefusal:
+        raise
+    except Exception:
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE") from None
+    from integrations.hermes_harness.native_executive_consumer import schema_digest
+    result = {
+        "tool": CONSUMER_EXTENSION_TOOL,
+        "scope": scope,
+        "profile_id": str(home),
+        "present": entry is not None,
+        "instance_id": descriptor.get("instance_id"),
+        "authority_epoch": descriptor.get("authority_epoch"),
+    }
+    if entry is not None:
+        result.update({
+            "toolset": entry.toolset,
+            "schema_sha256": schema_digest(entry.schema),
+            "handler": _callable_identity(entry.handler),
+            "check_fn": _callable_identity(entry.check_fn),
+        })
+    return result
+
 
 def _implementation(value):
     if (type(value) is not str or len(value) != 40
@@ -367,7 +451,8 @@ def enrollment_result(implementation_sha, request_id, status, target=None):
         "request_id": request_id, "status": status, "target": target})
 
 
-def _inspect_enrollment(runner, home, implementation_sha, request_id, principal, *, own_task=None):
+def _inspect_enrollment(runner, home, implementation_sha, request_id, principal, *, own_task=None,
+                        route_out=None):
     """Read one bounded native snapshot; never restore or create."""
     from hermes_state_keys import local_identity
     from hermes_state_local import POLICY_PREFIX, same_create_retry
@@ -467,12 +552,33 @@ def _inspect_enrollment(runner, home, implementation_sha, request_id, principal,
                     "profile_id": str(home), "session_id": sid, "principal_id": principal,
                     "instance_id": epoch["instance_id"], "authority_epoch": epoch["epoch"],
                     "revision": row["runtime_revision"], "execution_generation": row["runtime_generation"]})
+                if route_out is not None:
+                    # The route key the native owner bound to this session. It
+                    # is read from the same bounded snapshot, never recomputed.
+                    route_out["route"] = route
                 return result("ENROLLED", target)
             finally:
                 conn.rollback()
     except Exception:
         # Corruption, storage failure and unknown native state are never absence.
         return result("UNAVAILABLE")
+
+def read_enrolled_session(runner, home: Path, implementation_sha, request_id,
+                          principal) -> dict:
+    """The bounded ENROLLED facts of the original native session.
+
+    This reads the same bounded snapshot the enrollment result uses. It never
+    creates, restores or resumes a session: an absent enrollment is ABSENT,
+    and anything unknown is UNAVAILABLE, never absence.
+    """
+    route_out: dict = {}
+    outcome = _inspect_enrollment(runner, home, implementation_sha, request_id,
+                                   principal, route_out=route_out)
+    if outcome["status"] != "ENROLLED":
+        return {"status": outcome["status"], "target": None, "route": None}
+    return {"status": "ENROLLED", "target": outcome["target"],
+            "route": route_out.get("route")}
+
 
 async def _create_enrollment(runner, home, params, principal):
     """The existing authority creates once and owns all work through detach."""
@@ -606,6 +712,13 @@ def install_private_control(runner, home: Path, role: str, *,
                 return _result("TARGET", target=_target(runner, home, _id(params["session_id"]), peer_subject))
             if operation == "read_original":
                 return _read_original(home, params, peer_subject)
+            if operation == "consumer_extension":
+                # A finite read-only qualification of the serving process. The
+                # caller selects no target and no route: the profile is the
+                # one this private socket belongs to.
+                if set(params) != {"operation", "profile_id"} or params["profile_id"] != str(home):
+                    raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_REQUEST_INVALID")
+                return _result("OBSERVED", extension=_consumer_extension(runner, home))
             if operation != "submit" or set(params) != {"operation", "target", "submission_id", "text", "ticket"}:
                 raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
             _id(params["submission_id"])
@@ -655,6 +768,8 @@ class NativeSecretaryClient:
         if type(request) is not dict:
             raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
         operation = request.get("operation")
+        if operation == "consumer_extension" and set(request) == {"operation"}:
+            return self.consumer_extension()
         if operation == "observe" and set(request) == {"operation", "session_id"}:
             return self.observe(request["session_id"])
         if operation == "submit" and set(request) == {"operation", "target", "submission_id", "text"}:
@@ -763,3 +878,12 @@ class NativeSecretaryClient:
         return self._call({"operation": "read_original", "profile_id": str(self.home),
                            "session_id": _id(session_id), "submission_id": _id(submission_id),
                            "input_sha256": input_sha256, "admission_id": admission_id})
+
+    def consumer_extension(self):
+        """Read the serving process's actual scoped native extension entry.
+
+        This is the serving-process extension proof. It is a finite read-only
+        observation over the existing same-UID private socket: it starts no
+        owner, creates no session and mutates nothing.
+        """
+        return self._call({"operation": "consumer_extension", "profile_id": str(self.home)})

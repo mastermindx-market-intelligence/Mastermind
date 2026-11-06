@@ -10,6 +10,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from integrations.hermes_harness.native_mcp import render_disarmed_native_config
 from integrations.hermes_harness.stack import compose_profile
@@ -114,6 +115,74 @@ class NativeSupervisorTests(unittest.TestCase):
         with self.assertRaises(RuntimeRefusal) as caught:
             self._runtime()._check_registry()
         self.assertIn("MCP_SERVER_SUMMARY_MISMATCH", caught.exception.code)
+
+    def test_the_default_runtime_stays_disarmed(self) -> None:
+        """No qualified consumer means no extension and no serving proof."""
+        runtime = self._runtime()
+        self.assertIsNone(runtime._consumer_publication())
+        self.assertEqual(runtime._expected_disabled_mcp(),
+                         {"mastermind_steward": tuple(ALLOWED_TOOLS)})
+        self.assertFalse(runtime._extension_proved)
+        status, payload = runtime.health_snapshot()
+        self.assertEqual(status, 503)
+        self.assertFalse(payload["native_extension_proved"])
+
+    def test_the_extension_proof_needs_the_original_actual_child(self) -> None:
+        """The proof is read only after the launch owner proved the child."""
+        class _Launch:
+            recipe = {"vendor_root": "/nonexistent"}
+
+            def __init__(self) -> None:
+                self.observed = 0
+
+            def observe_child(self, pid):
+                self.observed += 1
+
+            def check(self):
+                return None
+
+        runtime = self._runtime()
+        launch = _Launch()
+        runtime._native_launch = launch
+        runtime._native_home = self.home
+        runtime._consume_consumer_extension(4242)
+        self.assertEqual(launch.observed, 1)
+        # No serving process answered, so there is no proof and no hold change.
+        self.assertIsNone(runtime._extension_observed)
+        self.assertFalse(runtime._extension_proved)
+
+    def test_a_proved_scoped_entry_is_recorded(self) -> None:
+        from integrations.hermes_harness.native_executive_consumer import schema_digest
+        from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
+        from integrations.hermes_runtime import native_session_control
+
+        class _Launch:
+            recipe = {"vendor_root": "/nonexistent"}
+
+            def observe_child(self, pid):
+                return None
+
+            def check(self):
+                return None
+
+        class _Client:
+            def __init__(self, home, expected_pid=None):
+                self.expected_pid = expected_pid
+
+            def consumer_extension(self):
+                return {"schema": native_session_control.SCHEMA, "status": "OBSERVED",
+                        "extension": {"tool": "mmx_delegate", "present": True,
+                                      "scope": "/profile",
+                                      "schema_sha256": schema_digest(NATIVE_TOOL_SCHEMA)}}
+
+        runtime = self._runtime()
+        runtime._native_launch = _Launch()
+        runtime._native_home = self.home
+        with mock.patch.object(native_session_control, "NativeSecretaryClient", _Client):
+            runtime._consume_consumer_extension(4242)
+        self.assertTrue(runtime._extension_proved)
+        status, payload = runtime.health_snapshot()
+        self.assertTrue(payload["native_extension_proved"])
 
 
 if __name__ == "__main__":

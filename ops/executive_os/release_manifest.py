@@ -280,7 +280,9 @@ def _hermes_native_gateway(value: Any) -> dict[str, Any]:
         raise ReleaseManifestError("Hermes native installation is invalid")
     version = value.get("schema")
     enrollment = None
-    if version == "mastermind.hermes_native_gateway_installation/v2":
+    consumer = None
+    if version in ("mastermind.hermes_native_gateway_installation/v2",
+                   "mastermind.hermes_native_gateway_installation/v3"):
         keys = keys | {"session_enrollment"}
         enrollment = value.get("session_enrollment")
         if (type(enrollment) is not dict
@@ -295,6 +297,23 @@ def _hermes_native_gateway(value: Any) -> dict[str, Any]:
             request_id.encode("utf-8", "strict")
         except UnicodeError:
             raise ReleaseManifestError("Hermes enrollment request identity is invalid") from None
+        if version == "mastermind.hermes_native_gateway_installation/v3":
+            # The optional qualified consumer. It is a closed, non-secret
+            # document: the frozen target material, the mission joins, the
+            # approved MCP/public client metadata, the installed enrollment
+            # identity and the sealed plugin package. A credential, a bearer
+            # template or a client secret cannot be carried by it.
+            keys = keys | {"executive_consumer"}
+            consumer = value.get("executive_consumer")
+            if consumer is None:
+                raise ReleaseManifestError("Hermes executive consumer is invalid")
+            try:
+                from integrations.hermes_harness.native_executive_consumer import (
+                    validate_consumer_publication,
+                )
+                consumer = validate_consumer_publication(consumer)
+            except Exception:
+                raise ReleaseManifestError("Hermes executive consumer is invalid") from None
     elif version != "mastermind.hermes_native_gateway_installation/v1":
         raise ReleaseManifestError("Hermes native installation is invalid")
     if set(value) != keys:
@@ -324,7 +343,9 @@ def _hermes_native_gateway(value: Any) -> dict[str, Any]:
             "vendor_root": vendor, "import_roots": roots,
             "dependency_inventory": {"path": inventory_path, "sha256": inventory["sha256"],
                                      "size": inventory["size"]},
-            **({"session_enrollment": dict(enrollment)} if enrollment is not None else {})}
+            **({"session_enrollment": dict(enrollment)} if enrollment is not None else {}),
+            **({"executive_consumer": json.loads(json.dumps(consumer))}
+               if consumer is not None else {})}
 
 
 def _hermes_roles(value: Any) -> list[dict[str, Any]]:
@@ -345,6 +366,11 @@ def _hermes_roles(value: Any) -> list[dict[str, Any]]:
                   if "native_gateway" in row else None)
         if native is not None and "session_enrollment" in native and role != "mmsecretary":
             raise ReleaseManifestError("Hermes session enrollment requires Secretary")
+        if native is not None and "executive_consumer" in native and role != "mmsecretary":
+            # The smallest existing supported consumer is the Secretary.
+            # Another role needs its own real native-session owner; it never
+            # reuses another role's enrollment or session facts.
+            raise ReleaseManifestError("Hermes executive consumer requires Secretary")
         uid, gid = row["uid"], row["gid"]
         if type(uid) is not int or not 1 <= uid <= 2 ** 31 - 1:
             raise ReleaseManifestError("Hermes runtime role uid is invalid")
@@ -937,6 +963,14 @@ class _NativeGatewayLaunch:
                 or receipt.get("upstream_attested") is not True
                 or receipt.get("sha") != profile.sha or receipt.get("role") != profile.role):
             raise RuntimeRefusal("NATIVE_GATEWAY_RECEIPT_MISMATCH")
+        consumer = self.recipe.get("executive_consumer")
+        if consumer is not None:
+            # The installed plugin package must be the sealed one the
+            # publication names. A raw hash in an installation document is
+            # not source authenticity: the receipt records what the normal
+            # install writer actually installed.
+            if receipt.get("native_consumer_plugin_sha256") != consumer["plugin"]["digest"]:
+                raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_UNPROVEN")
         self.check()
 
     def argv(self, profile, hermes_bin, *, tools=False):
