@@ -90,6 +90,7 @@ def test_adapter_retains_distinct_same_evaluation_causes(route_modules, monkeypa
     with pytest.raises(task.FabricTaskError, match="^NONE reason=no_operator_available$"):
         request(task)
     row = receipt(task)
+    assert row["refusal_code"] == "NO_OPERATOR_AVAILABLE"
     facts = row["selection_diagnostics"]
     assert facts["schema"] == "mastermind.fabric_selection_diagnostics.v1"
     assert facts["coverage"] == "judgment_rejection_branches"

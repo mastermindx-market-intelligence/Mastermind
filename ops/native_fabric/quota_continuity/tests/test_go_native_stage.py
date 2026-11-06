@@ -106,8 +106,15 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.path[:] = path_before
 
 
-def before_remote_cwd_task(manifest):
+def before_request_refusal_task(manifest):
     prior = dict(manifest)
+    if prior["ext/fabric_task.py"] == builder.GO_REQUEST_REFUSAL_TASK_DIGEST:
+        prior["ext/fabric_task.py"] = builder.GO_REMOTE_CWD_TASK_DIGEST
+    return prior
+
+
+def before_remote_cwd_task(manifest):
+    prior = before_request_refusal_task(manifest)
     if prior["ext/fabric_task.py"] == builder.GO_REMOTE_CWD_TASK_DIGEST:
         prior["ext/fabric_task.py"] = builder.GO_UBUNTU4_DIGESTS["fabric_task.py"]
     return prior
@@ -166,7 +173,7 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     assert default["ext/provider_outcome.py"] == builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256
     historical["ext/provider_outcome.py"] = builder.GO_BASE_PROVIDER_OUTCOME_SHA256
     for name, original in builder.GO_UBUNTU4_PREIMAGES.items():
-        expected = (builder.GO_REMOTE_CWD_TASK_DIGEST if name == "fabric_task.py"
+        expected = (builder.GO_REQUEST_REFUSAL_TASK_DIGEST if name == "fabric_task.py"
                     else builder.GO_UBUNTU4_DIGESTS[name])
         assert default["ext/" + name] == expected
         historical["ext/" + name] = original
@@ -599,10 +606,9 @@ def test_unknown_census_bytes_refuse_without_changing_the_manifest(builds, diges
 
 
 def test_exact_remote_cwd_task_preserves_original_107_and_caller_manifest(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_request_refusal_task(json.loads((builds.default / "native-manifest.json").read_bytes()))
     before = dict(current)
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-    assert current["ext/fabric_task.py"] == g.digest((ROOT / "candidate/fabric_task.py").read_bytes())
     assert current["ext/fabric_task.py"] == "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
     previous = before_remote_cwd_task(current)
     previous_before = dict(previous)
@@ -619,7 +625,11 @@ def test_exact_remote_cwd_task_preserves_original_107_and_caller_manifest(builds
 
 
 @pytest.mark.parametrize("namespace", ["106", "104", "102"])
-def test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace(builds, namespace):
+@pytest.mark.parametrize("task_digest,error", [
+    (builder.GO_REMOTE_CWD_TASK_DIGEST, "remote-cwd task cannot relabel"),
+    (builder.GO_REQUEST_REFUSAL_TASK_DIGEST, "refusal task cannot relabel"),
+])
+def test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace(builds, namespace, task_digest, error):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     prior = before_original_artifact_recovery(current) if namespace == "106" else before_participant_cohort(current)
@@ -631,9 +641,9 @@ def test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace(builds, n
             del prior["ext/" + name]
     assert len(prior) == int(namespace)
     builder.validate_go_base_manifest(prior, captured)
-    prior["ext/fabric_task.py"] = builder.GO_REMOTE_CWD_TASK_DIGEST
+    prior["ext/fabric_task.py"] = task_digest
     before = dict(prior)
-    with pytest.raises(ValueError, match="remote-cwd task cannot relabel"):
+    with pytest.raises(ValueError, match=error):
         builder.validate_go_base_manifest(prior, captured)
     assert prior == before
 
@@ -642,8 +652,11 @@ def test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace(builds, n
     ("fabric_host_qualification.py",), ("remote_sub.sh",),
     ("fabric_host_qualification.py", "remote_sub.sh"),
 ])
-def test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort(builds, members):
+@pytest.mark.parametrize("task_digest", [builder.GO_REMOTE_CWD_TASK_DIGEST,
+                                         builder.GO_REQUEST_REFUSAL_TASK_DIGEST])
+def test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort(builds, members, task_digest):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current["ext/fabric_task.py"] = task_digest
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     for member in members:
         current["ext/" + member] = builder.GO_UBUNTU4_PREIMAGES[member]
@@ -653,12 +666,48 @@ def test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort(builds, memb
     assert current == before
 
 
-@pytest.mark.parametrize("digest", ["f" * 64, ""])
+@pytest.mark.parametrize("digest", ["f" * 64, "",
+    "0a6cb393fc30d978a78686b9e588f6f51b1b9ec191e291aea4ccf96a4d7bdaa0"])
 def test_unknown_remote_cwd_task_bytes_refuse_without_changing_the_manifest(builds, digest):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     current["ext/fabric_task.py"] = digest
     before = dict(current)
     with pytest.raises(ValueError):
+        builder.validate_go_base_manifest(current, captured)
+    assert current == before
+
+
+def test_refusal_diagnostics_preserve_exact_remote_cwd_107_and_raw_identity(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    assert len(current) == 107
+    assert current["ext/fabric_task.py"] == builder.GO_REQUEST_REFUSAL_TASK_DIGEST
+    assert current["ext/fabric_task.py"] == g.digest((ROOT / "candidate/fabric_task.py").read_bytes())
+    previous = before_request_refusal_task(current)
+    assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == "c7cf946bc1d8f13ef7b512d071d85097e1ddc58979af76bf367a7707aa90617d"
+    for manifest in (current, previous):
+        before = dict(manifest)
+        builder.validate_go_base_manifest(manifest, captured)
+        assert manifest == before
+
+
+def test_refusal_task_cannot_mix_the_predecessor_poll_helper(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    current["ext/remote_sub_helpers.py"] = builder.GO_COMPLETED_POLL_PREIMAGES["remote_sub_helpers.py"]
+    before = dict(current)
+    with pytest.raises(ValueError, match="completed-poll cohort"):
+        builder.validate_go_base_manifest(current, captured)
+    assert current == before
+
+
+@pytest.mark.parametrize("missing", ["pool", "ext/participant_binding.py"])
+def test_refusal_task_requires_the_complete_raw_namespace(builds, missing):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    del current[missing]
+    before = dict(current)
+    with pytest.raises(ValueError, match="dependency closure"):
         builder.validate_go_base_manifest(current, captured)
     assert current == before
