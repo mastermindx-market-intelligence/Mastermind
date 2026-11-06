@@ -602,3 +602,6 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'fa4f167aa76089356d6a476c30dfd8027c972d644cfb7e5821eebdba44835473', 'sites': ((3322, 68, 71, 'int', '503'), (3327, 69, 72, 'int', '503'), (3331, 67, 70, 'int', '503'))}
+
+# Reviewed Session Unicode-scalar input bound, never an OS identity.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'cd31cfc2d232e8d3b432ba059209a8a5f8479fd7dc5a811d1897ca664207645f', 'sites': ((13, 118, 121, 'int', '700'),)}

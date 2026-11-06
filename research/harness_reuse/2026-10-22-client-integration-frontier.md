@@ -64,9 +64,11 @@ JavaScript transport before native replacement; assumption disposition
 `f798437613a5ca351ca7796fdfd21c2055b1e2d923589932662d37b824d23d1c`
 does not claim unconditional JavaScript/private-native epoch equality.
 
-The new public exposure and current caller require their one finite consequence
-review before this source gate is cleared. That exposure review is pending in
-the current candidate; the earlier native verdict alone does not clear it.
+The new public exposure and current caller passed their one finite consequence
+review at source `57b9e6b291afd95475f121ece31a204f8c2e9404`:
+`c063e02126c0ee2a7760db019afccbca587fa0499edcdd20669c86ab7bcc4c45`,
+SOURCE_COMPONENT_RISK_PASS with no findings. This clears only the scoped
+public Session SEND source gate; the earlier native verdict alone did not clear it.
 All complete predecessor GET/POST profiles, request caps, fixed upstream and
 the existing Session owner's authentication and UNKNOWN/original-key behavior
 remain required.
