@@ -7,6 +7,21 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # Frozen GLM account-admission evidence: these are elapsed-time bounds,
+    # not user identities. Whole-file hashes and exact sites fail closed on
+    # any changed meaning, added identity, or modified retained traceback.
+    "research/fabric_glm_account_admission_20261014/baseline.quota_remote.py": {
+        "sha256": "80ce4151a5d3f05528bc3c5e9af214d510ad9d9f17803c62f01a4c2d818ec5ff",
+        "sites": ((22, 10, 13, "int", "600"),),
+    },
+    "research/fabric_glm_account_admission_20261014/quota_remote.py": {
+        "sha256": "a1dab11da10264836e6271955b375b8e6508c23f23d0444c99d96464deb70f2b",
+        "sites": ((22, 10, 13, "int", "600"),),
+    },
+    "research/fabric_glm_account_admission_20261014/BASELINE.xml": {
+        "sha256": "538923697693ccd4c5e836de20466cbe2f4d2ae1f0ca189da194a5b0d0d5b64a",
+        "sites": ((19, 46, 49, "int", "600"),),
+    },
     # R2 AEAD source candidate: the existing Control UID remains fixed at this
     # single exact site. Independent source acceptance remains a release gate;
     # these static test pins do not establish it or grant a new identity.

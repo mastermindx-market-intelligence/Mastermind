@@ -1,0 +1,59 @@
+--- a/quota_remote.py
++++ b/quota_remote.py
+@@ -526,6 +526,56 @@
+         return []
+ 
+ 
++def cached_glm_account_parked(account: str, *, now_ts: Optional[float] = None,
++                              cache_path: Optional[str] = None) -> bool:
++    """Narrow existing admission from a fresh authoritative account observation.
++
++    No network, credential access, cache refresh or lease mutation. Unknown data
++    preserves the incumbent decision; a passed reset never retains an old hold.
++    Use the same 95-percent park threshold as glm_quota_decision, per account.
++    """
++    if not isinstance(account, str) or not account:
++        return False
++    now = _utc_now().timestamp() if now_ts is None else now_ts
++    if type(now) not in (int, float) or not (0 < now < float("inf")):
++        return False
++    try:
++        cache = _load_cache(cache_path or CACHE_PATH)
++        entry = cache["glm"]["accounts"][account]
++        refreshed = entry.get("refreshed_at")
++        if (type(refreshed) not in (int, float)
++                or not 0 <= now - refreshed <= FRESH_S):
++            return False
++        states = entry.get("states")
++        if not isinstance(states, list):
++            return False
++        for state in states:
++            if (not isinstance(state, dict) or state.get("provider") != "glm"
++                    or state.get("source") != "PROVIDER_AUTHORITATIVE"
++                    or state.get("window") not in ("5h", "weekly")):
++                continue
++            remaining = state.get("remaining_pct")
++            if type(remaining) not in (int, float) or not 0 <= remaining <= 5:
++                continue
++            observed = _iso(state.get("observed_at"))
++            if not observed:
++                continue
++            stamp = datetime.fromisoformat(observed.replace("Z", "+00:00")).timestamp()
++            if not 0 <= now - stamp <= FRESH_S:
++                continue
++            reset = state.get("reset_at")
++            if reset is not None:
++                parsed_reset = _iso(reset)
++                if not parsed_reset or datetime.fromisoformat(
++                    parsed_reset.replace("Z", "+00:00")
++                ).timestamp() <= now:
++                    continue
++            return True
++    except (KeyError, TypeError, ValueError, AttributeError, OverflowError, OSError):
++        pass
++    return False
++
++
+ def glm_accounts_state(
+     now_ts: Optional[float] = None,
+     cache_path: Optional[str] = None,
