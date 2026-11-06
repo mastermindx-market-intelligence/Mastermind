@@ -82,6 +82,8 @@ test('incomplete capability probe has a finite same-handle read budget and never
  const e=engine([pending(741),...Array.from({length:4},()=>pending(741))]);
  const out=unwrap(await facade(e).call('fabric_capabilities',{}));
  assert.equal(out.error,'OBSERVATION_INCOMPLETE');
+ assert.equal(out.failure_diagnosis.classification,'TECHNICAL_INTERFACE_OR_TRANSPORT');
+ assert.equal(out.failure_diagnosis.policy_denial_evidence,'NOT_ESTABLISHED');
  assert.equal(out.controller_pid,741);
  assert.equal(out.execution_absence_proven,false);
  assert.equal(out.retry_allowed,false);
