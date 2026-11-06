@@ -1807,6 +1807,43 @@ def test_collector_reproduces_studio_like_unsafe_state(tmp_path: Path) -> None:
     assert _blocking(report) == ["auto_restart_after_power_loss"]
 
 
+def test_collector_recognizes_host_suffixed_desktop_commander(
+    tmp_path: Path,
+) -> None:
+    launch_agents_dir = tmp_path / "mini1" / "Library" / "LaunchAgents"
+    launch_agents_dir.mkdir(parents=True)
+    base_label = "com.mastermind.desktop-commander.remote"
+    (launch_agents_dir / f"{base_label}.mini1.plist").write_text(
+        "", encoding="utf-8"
+    )
+
+    observation = _collect(
+        runner=_runner_for(pmset=PMSET_READY, fdesetup="FileVault is Off.\n"),
+        launch_agents_dir=launch_agents_dir,
+        host_ref=HOST_REF,
+    )
+    report = _classify(observation)
+
+    assert observation["user_session_agents_present"] == 1
+    assert report["predicates"]["user_session_surfaces"] == {
+        "requirement": "ADVISORY",
+        "status": "ADVISORY",
+        "code": "USER_SESSION_LOGIN_REQUIRED",
+        "evidence_class": "USER_SESSION_DEPENDENCY",
+        "measurement": 1,
+    }
+
+    # Compatibility and canonical forms represent the same logical surface and
+    # must never be double-counted.
+    (launch_agents_dir / f"{base_label}.plist").write_text("", encoding="utf-8")
+    duplicate_observation = _collect(
+        runner=_runner_for(pmset=PMSET_READY, fdesetup="FileVault is Off.\n"),
+        launch_agents_dir=launch_agents_dir,
+        host_ref=HOST_REF,
+    )
+    assert duplicate_observation["user_session_agents_present"] == 1
+
+
 def test_collector_reproduces_ready_state(tmp_path: Path) -> None:
     observation = _collect(
         runner=_runner_for(pmset=PMSET_READY, fdesetup="FileVault is Off.\n"),

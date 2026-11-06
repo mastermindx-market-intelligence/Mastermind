@@ -173,7 +173,11 @@ decision:
   LaunchAgents. They cannot exist before a console login, so
   `user_session_surfaces` is `ADVISORY` with
   `USER_SESSION_LOGIN_REQUIRED` rather than pretending system-boot
-  availability.
+  availability. The observer recognizes the canonical Desktop Commander label
+  and the fleet installer's bounded compatibility form
+  `com.mastermind.desktop-commander.remote.<local-short-user>`; those two
+  filenames count as one logical surface, and the observer never scans the
+  LaunchAgents directory for arbitrary matches.
 - **FileVault-on recovery is conditional, not generic.** A host with FileVault
   on stops at the preboot unlock screen after a restart, and only one platform
   generation can be unlocked from there without a human at the keyboard. The
@@ -201,8 +205,11 @@ decision:
   unlocked at preboot over Remote Login, never that anything can reach it. The
   checker opens no socket and performs no reachability probe, so external
   network path, bastion, and tunnel reachability remain a separate acceptance
-  journey with its own evidence. A green `preboot_remote_unlock` plus an
-  unreachable network is still an unrecoverable host.
+  journey with its own evidence. The reviewed operator-side journey is
+  `docs/FLEET_EXTERNAL_RECOVERY.md`; before unattended travel its external
+  route probe must be current alongside this local readiness report. A green
+  `preboot_remote_unlock` plus an unreachable network is still an
+  unrecoverable host.
 - **`auto_restart_after_power_loss` stays independent.** Preboot unlock decides
   whether a returning host can be opened; `autorestart` decides whether it
   returns at all. Neither substitutes for the other, and a host missing both
