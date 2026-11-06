@@ -189,5 +189,68 @@ class PaperV20StatusSuccessorTests(unittest.TestCase):
                     self.fake, account, self.roots, self.before_bytes)
 
 
+class C1FormattedStatusSuccessorTests(unittest.TestCase):
+    def setUp(self):
+        PaperV20StatusSuccessorTests.setUp(self)
+        self.fake.C1_GIT_FAILURE_COMPAT_PREDECESSOR_SHA256 = "a" * 64
+        self.fake.C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256 = "c" * 64
+        self.formatted = copy.deepcopy(self.paper_manifest)
+        self.formatted["files"]["gateway.mjs"] = "c" * 64
+        self.formatted_bytes = encode(self.formatted)
+        self.formatted_status = copy.deepcopy(self.formatted)
+        self.formatted_status["files"]["fleet-status.mjs"] = sha(self.new_status)
+        for attr, value in (
+            ("C1_FORMATTED_STATUS_PRE_SHA256", sha(self.formatted_bytes)),
+            ("C1_FORMATTED_STATUS_POST_RAW_SHA256", sha(encode(self.formatted_status))),
+            ("C1_FORMATTED_STATUS_POST_CANONICAL_SHA256", sha(json.dumps(
+                self.formatted_status, sort_keys=True, separators=(",", ":")).encode())),
+        ):
+            patch = mock.patch.object(s, attr, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_c1_formatter_can_precede_status_only_on_exact_source(self):
+        receipt = s.qualify_exact_predecessor(self.account,
+            manifest_bytes=self.formatted_bytes, config_bytes=self.paper_config,
+            module_before_bytes=self.old_status, source_module_bytes=self.new_status)
+        self.assertEqual(receipt.manifest_after_bytes, encode(self.formatted_status))
+        self.assertIsNone(s._require_paper_v20_origin(
+            self.fake, self.account, self.roots, self.formatted_bytes))
+        self.assertEqual(self.planner_calls, [self.account])
+
+    def test_unreviewed_gateway_fingerprint_never_becomes_cohort(self):
+        changed = copy.deepcopy(self.formatted)
+        changed["files"]["gateway.mjs"] = "d" * 64
+        with self.assertRaisesRegex(s.SourceRefused, "PREDECESSOR_MANIFEST_CHANGED"):
+            s.qualify_exact_predecessor(self.account, manifest_bytes=encode(changed),
+                config_bytes=self.paper_config, module_before_bytes=self.old_status,
+                source_module_bytes=self.new_status)
+
+    def test_wrong_original_formatter_does_not_qualify_hash_match(self):
+        self.fake.C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256 = "d" * 64
+        with self.assertRaisesRegex(SystemExit, "C1_FORMATTER_ORIGIN_CHANGED"):
+            s._require_paper_v20_origin(
+                self.fake, self.account, self.roots, self.formatted_bytes)
+
+    def test_c1_formatted_source_cannot_be_relabelled_to_other_account(self):
+        for account in ("chatgpt2-business", "chatgpt3", "other"):
+            with self.assertRaises(s.SourceRefused):
+                s._cohort_pin(account, sha(self.formatted_bytes))
+
+    def test_original_paper_preformatter_path_stays_accepted(self):
+        receipt = s.qualify_exact_predecessor(self.account,
+            manifest_bytes=self.before_bytes, config_bytes=self.paper_config,
+            module_before_bytes=self.old_status, source_module_bytes=self.new_status)
+        self.assertEqual(receipt.manifest_after_bytes, self.after_bytes)
+        self.assertIsNone(s._require_paper_v20_origin(
+            self.fake, self.account, self.roots, self.before_bytes))
+
+    def test_corrupted_original_pin_refuses_even_on_exact_formatted_bytes(self):
+        (self.pinned / "manifest.after.json").write_bytes(b"forged")
+        with self.assertRaisesRegex(SystemExit, "PAPER_V20_ORIGIN_UNQUALIFIED"):
+            s._require_paper_v20_origin(
+                self.fake, self.account, self.roots, self.formatted_bytes)
+
+
 if __name__ == "__main__":
     unittest.main()

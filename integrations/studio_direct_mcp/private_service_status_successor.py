@@ -89,6 +89,12 @@ PAPER_V20_POST_MANIFEST_CANONICAL_SHA256 = {
     "chatgpt4": "d6f2abd26a14a7ce9a04a1f9ff4c272c8542498e3b5737b00c4098b5346ef817",
 }
 
+# One additional CLOSED C1 post-formatter state, after the existing reviewed
+# Paper-v20 generation and its original owner-managed gateway successor.
+C1_FORMATTED_STATUS_PRE_SHA256 = "5ff72148b24a0503c2ca53aba840d2660f28345a1b8a1ad111aab1f8ead6da45"
+C1_FORMATTED_STATUS_POST_RAW_SHA256 = "f84edc7c958037e8d701138c585452ad9ff98679a01c7f14ad725081def29240"
+C1_FORMATTED_STATUS_POST_CANONICAL_SHA256 = "ee70bbdafcc8502ffac60ff1b2897b2903522bfc2d87dab2c4a6be5b58245eb1"
+
 
 class SourceRefused(ValueError):
     """Qualification failed, no file/process/manifest effect permitted."""
@@ -157,6 +163,11 @@ def _cohort_pin(account, observed_manifest_sha256):
         return (PAPER_V20_PREDECESSOR_MANIFEST_SHA256[account],
                 PAPER_V20_POST_MANIFEST_RAW_SHA256[account],
                 PAPER_V20_POST_MANIFEST_CANONICAL_SHA256[account], True)
+    if (account == "chatgpt1"
+            and observed_manifest_sha256 == C1_FORMATTED_STATUS_PRE_SHA256):
+        return (C1_FORMATTED_STATUS_PRE_SHA256,
+                C1_FORMATTED_STATUS_POST_RAW_SHA256,
+                C1_FORMATTED_STATUS_POST_CANONICAL_SHA256, True)
     raise SourceRefused("PREDECESSOR_MANIFEST_CHANGED")
 
 
@@ -407,15 +418,30 @@ def _require_paper_v20_origin(svc, account, roots, original_status_manifest):
             home=svc._user_root())
     except ValueError:
         fail("PAPER_V20_ORIGIN_UNQUALIFIED")
-    if (original_status_manifest != candidate["manifestBytes"]
+    paper_base = manifest_from(candidate["manifestBytes"])
+    expected = candidate["manifestBytes"]
+    if (account == "chatgpt1"
+            and digest(original_status_manifest) == C1_FORMATTED_STATUS_PRE_SHA256):
+        # Re-derive only the frozen gateway successor from the ORIGINAL
+        # selector; a hash match without original Paper/C1 owner proof refuses.
+        before = getattr(svc, "C1_GIT_FAILURE_COMPAT_PREDECESSOR_SHA256", None)
+        after = getattr(svc, "C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256", None)
+        if (paper_base["files"].get("gateway.mjs") != before
+                or not isinstance(after, str) or len(after) != 64):
+            fail("C1_FORMATTER_ORIGIN_CHANGED")
+        projected = copy.deepcopy(paper_base)
+        projected["files"]["gateway.mjs"] = after
+        expected = encoded_manifest(projected)
+        if digest(expected) != C1_FORMATTED_STATUS_PRE_SHA256:
+            fail("C1_FORMATTER_ORIGIN_CHANGED")
+    if (original_status_manifest != expected
             or svc._fabric_release_bytes(roots["config"], limit=65536)
                != candidate["configBytes"]
             or digest(candidate["manifestBytes"])
                != PAPER_V20_PREDECESSOR_MANIFEST_SHA256[account]
             or digest(candidate["configBytes"])
                != PAPER_V20_PREDECESSOR_CONFIG_SHA256[account]
-            or manifest_from(earlier_manifest)["files"]
-               != manifest_from(original_status_manifest)["files"]):
+            or manifest_from(earlier_manifest)["files"] != paper_base["files"]):
         fail("PAPER_V20_ORIGIN_CHANGED")
 
 
