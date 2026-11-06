@@ -14,6 +14,10 @@ import json
 import os
 import time
 import traceback
+import tempfile
+import fcntl
+import httpx
+from tests.test_project_planning_transport import OsExecutiveTransportApp,DirectNativeResultClient,CeoIngressClient
 from pathlib import Path
 import pytest
 from tests.project_plan_proposal_consumer_supplier import completed,joined,owner,env,isolated_git_env,identity
@@ -21,6 +25,45 @@ from tests.test_mastermind_executive_app_asgi import rsa_key
 from tests.test_workspace_project_git_publisher import git,rev_parse
 from integrations.mastermind_workspace_app.contract import principal_frame
 from common.workspace_source_operation_wire import FRAME_SCHEMA
+
+
+# Exact accepted8cd custody-aware test helper. No production/namespace guard is removed.
+async def _exercise_existing_custody(parts,action,*,existing_custody=None):
+    factory,args,clock,audit,calls,auth,verifier,workspace,bearer,*_=parts
+    with tempfile.TemporaryDirectory(prefix='mm-plan-',dir='/tmp') as short:
+        from control_plane.runtime_namespace_custody import ServiceRuntimeNamespaceCustody
+        runtime=factory.service.runtime;directory=runtime.store.path.parent
+        fd=None
+        if existing_custody is None:
+            lock=directory/'executive-service.lock';fd=os.open(lock,os.O_CREAT|os.O_RDWR,0o600)
+            fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            marker=directory/'executive-service.running'
+            marker.write_text(json.dumps(dict(instance_id='planning-test',pid=os.getpid())));marker.chmod(0o600)
+            custody=ServiceRuntimeNamespaceCustody(runtime=runtime,service_lock_fd=fd,lock_path=lock,marker_path=marker,instance_id='planning-test')
+            custody.start();factory.service._namespace_custody=custody
+        else:
+            assert type(existing_custody) is ServiceRuntimeNamespaceCustody
+            assert factory.service._namespace_custody is existing_custody
+            assert existing_custody.bound_runtime(runtime).store.path.samefile(runtime.store.path)
+            custody=existing_custody
+        sock=Path(short)/'ceo.sock'
+        server=await asyncio.start_unix_server(factory.service._handle_ceo_ingress_connection,path=str(sock),limit=73728)
+        edge=OsExecutiveTransportApp(lambda *args:None,submit_authenticator=auth,submit_verifier=verifier,
+            clock=lambda:clock[0],workspace_app=workspace,
+            direct_result_client=DirectNativeResultClient(sock,CeoIngressClient(read_timeout=5)))
+        token=bearer(factory.policies.submit);second=bearer(factory.workspace_policy)
+        headers=[('authorization','Bearer '+token),('x-mastermind-workspace-authorization','Bearer '+second)]
+        arguments={k:v for k,v in args.items() if k!='principal'}
+        arguments['private_request']=arguments['private_request'].decode()
+        try:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=edge),base_url='https://mcp.mastermind-x.com') as client:
+                await action(client,headers,arguments,token,second)
+        finally:
+            server.close();await server.wait_closed()
+            tasks=list(factory.service._ceo_ingress_tasks)
+            if tasks:await asyncio.wait_for(asyncio.gather(*tasks,return_exceptions=True),5)
+            if fd is not None:
+                custody.close();os.close(fd)
 
 
 def _observed_ingress_owner(builder,factory,emit):
@@ -132,6 +175,12 @@ def test_same_run_installed_s24_complete_consumer_fixture(completed,monkeypatch,
             'Replay/render may freeze this fixture timestamp. Original expiry/scopes/response schemas are never rewritten.',
             'No DEFAULT_COMMIT_WRITTEN schema is invented; actual SOURCE_OBSERVED Event and default Git postimages retained.'])
     locals_for_record['packet']=packet
+    # Preserve the genuine initial operands even if HTTP setup fails. Export
+    # only after all source scopes have closed; no captured payload escapes early.
+    partial=Path(output).with_name(Path(output).stem+'.'+j['tmp_path'].parent.name+'.partial.json')
+    temporary=partial.with_suffix('.atomic.tmp')
+    temporary.write_text(json.dumps(dict(packet,capture_state='PARTIAL_UNQUALIFIED'),ensure_ascii=False,indent=2)+'\n')
+    os.replace(temporary,partial)
     async def action(client,headers,arguments,*tokens):
         async def post(operation,arguments):
             path='/os/executive/project-planning/'+operation
@@ -225,4 +274,4 @@ def test_same_run_installed_s24_complete_consumer_fixture(completed,monkeypatch,
         raw=json.dumps(packet,ensure_ascii=False,sort_keys=True,indent=2)
         for token in tokens:assert token not in raw
         temporary=Path(output).with_suffix('.atomic.tmp');temporary.write_text(raw+'\n');os.replace(temporary,Path(output))
-    asyncio.run(transport.exercise(parts,action,existing_custody=factory.service._namespace_custody))
+    asyncio.run(_exercise_existing_custody(parts,action,existing_custody=factory.service._namespace_custody))
