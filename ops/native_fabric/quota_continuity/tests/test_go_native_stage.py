@@ -135,6 +135,9 @@ def test_default_build_stays_exact_reviewed_106_and_go_adds_only_the_fixed_pair(
     for name, original in builder.GO_UBUNTU4_PREIMAGES.items():
         assert default["ext/" + name] == builder.GO_UBUNTU4_DIGESTS[name]
         historical["ext/" + name] = original
+    for name, original in builder.GO_PROTECTED_CUSTODY_PREIMAGES.items():
+        assert default["ext/" + name] == builder.GO_PROTECTED_CUSTODY_DIGESTS[name]
+        historical["ext/" + name] = original
     for name, original in builder.GO_COMPLETED_POLL_PREIMAGES.items():
         assert historical["ext/" + name] == builder.GO_COMPLETED_POLL_DIGESTS[name]
         historical["ext/" + name] = original
@@ -340,6 +343,34 @@ def test_ubuntu4_runtime_cohort_preserves_prior_generation_and_rejects_mixtures(
         builder.validate_go_base_manifest(historical_namespace, captured)
     assert current == original
 
+
+
+def test_protected_process_custody_is_one_exact_reversible_source_cohort(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    original = dict(current)
+    captured = {name: current["ext/" + name]
+                for name in builder.GO_APPLICATION_DEPENDENCIES}
+    before = dict(current)
+    before.update({"ext/" + name: digest
+                   for name, digest in builder.GO_PROTECTED_CUSTODY_PREIMAGES.items()})
+    # Both exact historical/source-current members are admitted, but a
+    # fabricated hybrid, missing version, or foreign source hash is not.
+    builder.validate_go_base_manifest(current, captured)
+    builder.validate_go_base_manifest(before, captured)
+    names = tuple(builder.GO_PROTECTED_CUSTODY_PREIMAGES)
+    for count in (1, 2):
+        for changed in itertools.combinations(names, count):
+            mixed = dict(before)
+            mixed.update({"ext/" + name: builder.GO_PROTECTED_CUSTODY_DIGESTS[name]
+                          for name in changed})
+            with pytest.raises(ValueError, match="custody cohort"):
+                builder.validate_go_base_manifest(mixed, captured)
+    for name in names:
+        forged = dict(current)
+        forged["ext/" + name] = "f" * 64
+        with pytest.raises(ValueError, match="custody cohort"):
+            builder.validate_go_base_manifest(forged, captured)
+    assert current == original
 
 def test_sparse_config_executor_successor_is_exact_and_does_not_mutate_manifest(builds):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
