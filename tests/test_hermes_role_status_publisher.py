@@ -93,8 +93,14 @@ def test_context_uses_actual_process_and_explicit_implementation_label(tmp_path,
     assert context.host_boot_id == BOOT and context.invocation_id == INVOCATION
     assert context.process_pid == os.getpid()
     assert publisher._notification_address("@systemd-notify") == "\0systemd-notify"
-    from ops.executive_os.hermes_role_metadata_observer import _installed_source_identity
-    assert _installed_source_identity(SHA) is None
+    # The installed-source qualification is request-scoped now: without a held
+    # release and an approved installation input it refuses, and it never
+    # reports an installed-source identity on its own.
+    from ops.executive_os import hermes_role_metadata_observer as observer
+    assert not hasattr(observer, "_installed_source_identity")
+    with pytest.raises(wire.RoleStatusError, match="SOURCE_UNAVAILABLE"):
+        with observer._HeldRoleQualification(SHA):
+            pass
 
 
 def test_real_unix_datagrams_reread_metadata_and_preserve_original_observation(tmp_path, monkeypatch):
