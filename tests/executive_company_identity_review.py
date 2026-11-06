@@ -34,56 +34,16 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
         # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": 'b82f61a07a8191e5935fbf64dab5cdb1d1238eae309812fa41fbf59f6d04c2aa',
-        "ast_sha256": '83aef0bdc6356c12bab0fcce640c7d0a7dcbd91a313a3f99d7ad6d0e1da0997a',
-        "sites": ((('body', 3, 'body', 48, 'body', 3, 'orelse', 0, 'body', 2, 'body', 0, 'value', 'args', 1),
-  'int',
-  403,
-  '403'),
- (('body',
-   3,
-   'body',
-   48,
-   'body',
-   3,
-   'orelse',
-   0,
-   'body',
-   2,
-   'orelse',
-   0,
-   'body',
-   4,
-   'body',
-   0,
-   'value',
-   'args',
-   1),
-  'int',
-  403,
-  '403'),
- (('body',
-   3,
-   'body',
-   48,
-   'body',
-   3,
-   'orelse',
-   0,
-   'body',
-   2,
-   'orelse',
-   0,
-   'handlers',
-   0,
-   'body',
-   0,
-   'value',
-   'args',
-   1),
-  'int',
-  503,
-  '503')),
+        "source_sha256": "625374a65b885101ad90fb490fdcfc5cfd8e1a51cbdf59c596d4b4a7b14c684d",
+        "ast_sha256": "170f64c7d11e88cb87736aa688b9e0a376ddd0e44ca6e739ff3beb4aff30f709",
+        "sites": (
+            (("body", 3, "body", 58, "body", 3, "orelse", 0, "body", 2,
+              "body", 0, "value", "args", 1), "int", 403, "403"),
+            (("body", 3, "body", 58, "body", 3, "orelse", 0, "body", 2,
+              "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
+            (("body", 3, "body", 58, "body", 3, "orelse", 0, "body", 2,
+              "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
+        ),
     },
 }
 
@@ -94,3 +54,10 @@ REVIEWED_ANCHORS = {
 
 # Parent reviewed the BYOK + protected Workspace composition at 49c2e1d.
 # The exact 136-node Fabric response branch and original three operands are unchanged.
+
+# 2026-11-06 composed-source audit: qualified project execution/planning and
+# bounded project conversation/Fresh READ coexist with protected BYOK and host
+# observation. The whole Company listener AST and exact 136-node protected
+# Fabric response branch are unchanged; only the enclosing ingress composition
+# and mapped sites change. These fixed pins are a new source-drift qualification,
+# not inherited native SEND approval or installation/release authority.

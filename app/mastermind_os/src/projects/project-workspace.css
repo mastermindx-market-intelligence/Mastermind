@@ -258,11 +258,24 @@
     align-items: stretch;
   }
 
+  .mm-project-workspace__disclosure-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .mm-project-workspace__disclosure-head > .mm-project-workspace__section-title {
+    min-width: 0;
+  }
+
   .mm-project-workspace__close {
-    width: 100%;
+    width: auto;
+    min-width: var(--sp-8);
   }
 
   .mm-project-workspace__disclosure {
     padding: var(--sp-5);
   }
 }
+
+.mm-project-workspace__launch { min-width: 0; }
+.mm-project-workspace__launch:empty { display: none; }

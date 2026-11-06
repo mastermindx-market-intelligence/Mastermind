@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Mapping
 import hashlib
 import json
 from pathlib import Path
@@ -18,7 +19,16 @@ from .secrets import load_secrets
 from .supervisor import ServiceRuntime
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *,
+         custody_observer: Callable[[], Mapping[str, object]] | None = None) -> int:
+    """Run one operator command.
+
+    ``custody_observer`` is the private in-process dependency of the main
+    supervisor: a plain callable supplied by the caller, never a CLI flag, an
+    environment variable, a serialized callback, a model output or a separate
+    configuration field.  It is handed unchanged to the supervisor's existing
+    publisher construction; no other command consumes it.
+    """
     parser = argparse.ArgumentParser(prog="hermes-runtime")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -77,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "check-registry":
             payload = _check(args.profile, args.tool_list, args.stderr)
         elif args.command == "supervise":
-            return _supervise(args)
+            return _supervise(args, custody_observer=custody_observer)
         elif args.command == "canary":
             return _canary(args.profile, args.hermes_bin)
         elif args.command == "text-turn":
@@ -234,7 +244,8 @@ def _text_turn(profile_path: Path, hermes_bin: Path) -> int:
 
 
 
-def _supervise(args: argparse.Namespace) -> int:
+def _supervise(args: argparse.Namespace, *,
+               custody_observer: Callable[[], Mapping[str, object]] | None = None) -> int:
     profile = load_profile(args.profile, state_dir=args.state, secrets_file=args.secrets_file)
     # systemd --user cannot attach IPAddressDeny eBPF on Ubuntu1. Never read
     # a provider credential or spawn Hermes from that ineffective manager.
@@ -248,7 +259,7 @@ def _supervise(args: argparse.Namespace) -> int:
         assert_role_credential_isolation(profile)
         enforce_role_tcp_ports(profile)
         from .role_status_publisher import publisher_from_process
-        publisher = publisher_from_process(profile)
+        publisher = publisher_from_process(profile, custody_observer=custody_observer)
     except RuntimeRefusal as exc:
         print(exc.code, file=sys.stderr)
         return CONFIG_EXIT

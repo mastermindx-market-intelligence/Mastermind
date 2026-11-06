@@ -43,12 +43,19 @@ def _materialize(root):
 @pytest.fixture(scope="module")
 def archived(tmp_path_factory):
     parent = tmp_path_factory.mktemp("paid-real-release-archive")
+    # Darwin temporary roots inherit group 0 even for a non-root fixture.
+    # Set the fixture owner's actual group before creating archive descendants;
+    # the release qualifier still verifies every member's exact ownership.
+    os.chown(parent, -1, os.getegid())
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT,
                                      text=True).strip()
     tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT,
                                    text=True).strip()
     root = parent / "system/releases" / commit
     root.mkdir(parents=True, mode=0o755)
+    # Match the real installer's explicit traverse mode, independent of the
+    # caller's private umask; the production seal must still enforce it.
+    root.chmod(0o755)
     archive = parent / "source.tar"
     with archive.open("wb") as handle:
         subprocess.run(["git", "archive", "--format=tar", commit], cwd=ROOT,
@@ -80,6 +87,38 @@ def test_archived_builder_is_sealed_and_normal_release_qualifier_consumes_it(arc
     assert set(manifest) == {"ext/"+name for name in builder.BASE_FILES|builder.ADDITIONS}|{"pool"}
     expected_new = {(RELATIVE_ROLLOUT / "native-code-stage" / name).as_posix()
                     for name in manifest}
+    # The same builder also captures the existing nested Go handler owner.
+    # These exact three files are release inputs, never an installed handler
+    # or evidence of service selection. Arbitrary additions still fail below.
+    component_root = rollout / "external-go-component"
+    component_names = {"source-go_shim.py", "go_shim.py", "component.json"}
+    expected_new |= {(RELATIVE_ROLLOUT / "external-go-component" / name).as_posix()
+                     for name in component_names}
+    assert {p.name for p in component_root.iterdir()} == component_names
+    native = rollout.parent
+    predecessor = (native / "source/go_shim.py").read_bytes()
+    candidate = (native / "candidate/go_shim.py").read_bytes()
+    assert (component_root / "source-go_shim.py").read_bytes() == predecessor
+    assert (component_root / "go_shim.py").read_bytes() == candidate
+    assert hashlib.sha256(predecessor).hexdigest() == builder.GO_INSTALLED_PREIMAGE
+    inventory = json.loads(records["native-source-inventory.json"])
+    component = json.loads((component_root / "component.json").read_bytes())
+    assert component["schema"] == "native-external-go-component.v1"
+    assert component["component"] == "go_application_handler"
+    assert component["destination_relative_to_stable_ext"] == "go_shim/go_shim.py"
+    assert component["stable_ext"] == inventory["stable_ext"]
+    assert component["installed_preimage_sha256"] == builder.GO_INSTALLED_PREIMAGE
+    assert component["candidate_source"] == "candidate/go_shim.py"
+    assert component["candidate_sha256"] == hashlib.sha256(candidate).hexdigest()
+    assert component["candidate_bytes"] == len(candidate)
+    assert component["installation_state"] == "HELD_REQUIRES_PROTECTED_RELEASE_AND_EXISTING_OWNER_INSTALLATION"
+    assert set(component["dependencies"]) == set(builder.GO_APPLICATION_DEPENDENCIES)
+    assert component["native_stage_dependencies"] == {
+        name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    for name, row in component["dependencies"].items():
+        data = (native / "candidate" / name).read_bytes()
+        assert row == {"source": "candidate/" + name, "bytes": len(data),
+                       "sha256": hashlib.sha256(data).hexdigest()}
     after = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
     assert after - before == expected_new
     assert before <= after
