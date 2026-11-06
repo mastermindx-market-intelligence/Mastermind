@@ -104,7 +104,60 @@ class BackendReleaseFixture:
         self.backend.write_bytes(backend_source.read_bytes())
         self.args = SimpleNamespace(account=self.account, expected_manifest_sha256=svc._sha256_file(self.roots['manifest']),
             release_commit=self.commit, backend_sha256=svc._sha256_file(self.backend),
-            expected_plan_sha256=None, preflight_only=True)
+            expected_plan_sha256=None, preflight_only=True,
+            source_provenance=svc.FABRIC_RELEASE_LOCAL_PROVENANCE)
+
+    def enable_public(self):
+        self.args.source_provenance = svc.FABRIC_RELEASE_PUBLIC_PROVENANCE
+        self.tree_sha = self.git('rev-parse', self.commit + '^{tree}').strip()
+        self.source_sha = self.git('rev-parse', self.commit + ':' + svc.FABRIC_BACKEND_SOURCE).strip()
+        self.source_size = self.backend.stat().st_size
+        self.public_calls = []
+        self.public_override = None
+        self.local_git_fail_closed = mock.patch.object(svc, '_fabric_release_local_source',
+            side_effect=AssertionError('public mode entered local Git'))
+        self.local_git_fail_closed.start()
+        self.addCleanup(self.local_git_fail_closed.stop)
+
+        def metadata(url):
+            self.public_calls.append(url)
+            if self.public_override is not None:
+                return self.public_override(url)
+            prefix = svc.FABRIC_PUBLIC_API_ROOT
+            if url == prefix + '/git/ref/heads/master':
+                return {'ref': svc.FABRIC_PUBLIC_REF, 'object': {'type': 'commit', 'sha': self.commit}}
+            if url == prefix + '/git/commits/' + self.commit:
+                return {'sha': self.commit, 'tree': {'sha': self.tree_sha}}
+            if url == prefix + '/git/trees/' + self.tree_sha:
+                return {'sha': self.tree_sha, 'truncated': False, 'tree': [
+                    {'path': 'integrations', 'mode': '040000', 'type': 'tree', 'sha': '1' * 40}]}
+            if url == prefix + '/git/trees/' + '1' * 40:
+                return {'sha': '1' * 40, 'truncated': False, 'tree': [
+                    {'path': 'studio_direct_mcp', 'mode': '040000', 'type': 'tree', 'sha': '2' * 40}]}
+            if url == prefix + '/git/trees/' + '2' * 40:
+                return {'sha': '2' * 40, 'truncated': False, 'tree': [
+                    {'path': 'fabric-backend.mjs', 'mode': '100644', 'type': 'blob',
+                     'sha': self.source_sha, 'size': self.source_size}]}
+            raise AssertionError('non-canonical public metadata URL: ' + url)
+
+        def raw_metadata(url):
+            saved = self.public_override
+            self.public_override = None
+            try:
+                return metadata(url)
+            finally:
+                self.public_override = saved
+        self.raw_metadata = raw_metadata
+        self.metadata = mock.patch.object(svc, '_fabric_public_https_json', side_effect=metadata)
+        self.metadata.start()
+        self.addCleanup(self.metadata.stop)
+
+    def assert_public_refused_without_write(self, pattern='Fabric'):
+        with self.assertRaisesRegex(SystemExit, pattern):
+            self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
 
     def git(self, *argv):
         return subprocess.run([svc.TYPED_GIT_BINARY, '-C', str(self.repo), *argv],
@@ -432,7 +485,7 @@ class BackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
         launcher.chmod(0o700)
         base = svc._fleet_status_config(self.home)
 
-        cases = (
+        cases = [
             ({**base, 'enabled': 1}, 'legacy fleetStatus field types'),
             ({**base, 'enabled': None}, 'legacy fleetStatus field types'),
             ({**base, 'enabled': False}, 'legacy fleetStatus field types'),
@@ -444,10 +497,10 @@ class BackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
             ({**base, 'launcherSha256': 12345}, 'legacy fleetStatus field types'),
             ({**base, 'launcherSha256': None}, 'legacy fleetStatus field types'),
             ({**base, 'extra': 'unauthorized'}, 'legacy fleetStatus requires exact'),
-        )
+        ]
         missing = dict(base)
         missing.pop('launcherSha256')
-        all_cases = cases + ((missing, 'legacy fleetStatus requires exact'),)
+        all_cases = cases + [(missing, 'legacy fleetStatus requires exact')]
         for value, expected_message in all_cases:
             self._reseal_with_fleet_status(value)
             with self.assertRaisesRegex(SystemExit, expected_message):
@@ -596,7 +649,7 @@ class ModernBackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
     def test_modern_13_file_preview_apply_preserves_every_other_byte(self):
         self.assertEqual(self.account, 'fabric-c3-570f6f34')
         original_manifest = json.loads(self.before[self.roots['manifest']])
-        self.assertEqual(len(original_manifest['files']), 13)
+        self.assertEqual(len(original_manifest['files']), len(svc.STAGE_FILES))
         self.assertIn('modern-fabric-http.mjs', original_manifest['files'])
         original_config = json.loads(self.before[self.roots['config']])
         self.assertIs(original_config['modernFabricProtocol'], True)
@@ -613,6 +666,78 @@ class ModernBackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
             'backendHash': self.args.backend_sha256,
             'configHash': hashlib.sha256(expected_config_bytes).hexdigest()}
         self.assertEqual(self.roots['manifest'].read_bytes(), svc._fabric_release_json(expected_manifest))
+
+    def test_public_provenance_modern_preview_apply_and_zero_private_git(self):
+        self.enable_public()
+        self.repo.rename(self.home / 'forbidden-public-mode-repo-must-not-be-read')
+        preview = self.preview()
+        proof = preview['releaseProvenance']
+        self.assertEqual(proof['sourceProvenance'], 'github_public_protected_v1')
+        self.assertEqual(proof['repository'], 'mastermindx-market-intelligence/Mastermind')
+        self.assertEqual(proof['ref'], 'refs/heads/master')
+        self.assertEqual(proof['commitTree'], self.tree_sha)
+        self.assertEqual(proof['backendGitBlob'], self.source_sha)
+        self.assertEqual(proof['backendSize'], self.source_size)
+        self.assertEqual(proof['stagedBackendPath'], str(self.backend))
+        self.prepare_apply()
+        result = self.capture(lambda: svc.cmd_fabric_backend_release(self.args))
+        self.assertEqual(result['effect'], 'APPLIED')
+        self.assertEqual(json.loads((self.transaction() / 'intent.json').read_text())['releaseProvenance'], proof)
+
+    def test_public_provenance_refuses_source_drift_and_never_falls_back(self):
+        self.enable_public()
+        self.prepare_apply()
+        original = self.public_override
+        self.public_override = lambda url: ({'ref': svc.FABRIC_PUBLIC_REF,
+            'object': {'type': 'commit', 'sha': 'f' * 40}}
+            if url.endswith('/git/ref/heads/master') else original(url))
+        with self.assertRaisesRegex(SystemExit, 'protected master'):
+            svc.cmd_fabric_backend_release(self.args)
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_public_provenance_refuses_wrong_tree_path_mode_blob_sha_and_size(self):
+        self.enable_public()
+        cases = (
+            ('commitSha', {'sha': 'f' * 40, 'tree': {'sha': self.tree_sha}}),
+            ('rootTree', {'sha': self.tree_sha, 'truncated': False, 'tree': []}),
+            ('treeType', {'sha': self.tree_sha, 'truncated': False, 'tree': [
+                {'path': 'integrations', 'mode': '040000', 'type': 'blob', 'sha': '1' * 40}]}),
+        )
+        for name, value in cases:
+            with self.subTest(case=name):
+                self.public_override = lambda url, value=value: value if (
+                    (name in ('commitSha', 'commitTree') and '/git/commits/' in url)
+                    or (name == 'ref' and '/git/ref/' in url)
+                    or (name in ('rootTree', 'treeType') and '/git/trees/' in url)
+                ) else self.raw_metadata(url)
+                self.assert_public_refused_without_write()
+        self.public_override = None
+        for key, value in (('mode', '120000'), ('type', 'tree'), ('sha', '0' * 40), ('size', self.source_size + 1)):
+            with self.subTest(field=key, value=value):
+                entry = {'path': 'fabric-backend.mjs', 'mode': '100644', 'type': 'blob',
+                         'sha': self.source_sha, 'size': self.source_size}
+                entry[key] = value
+                self.public_override = lambda url, entry=entry: {'sha': '2' * 40, 'truncated': False,
+                    'tree': [entry]} if url.endswith('/git/trees/' + '2' * 40) else self.raw_metadata(url)
+                self.assert_public_refused_without_write()
+
+    def test_public_provenance_refuses_staged_bytes_and_inode_replacement(self):
+        self.enable_public()
+        original = self.backend.read_bytes()
+        self.backend.write_bytes(original + b'// drift\n')
+        self.assert_public_refused_without_write('differs from the public source')
+
+    def test_public_provenance_refuses_staged_inode_replacement_before_write(self):
+        self.enable_public()
+        self.prepare_apply()
+        replacement = self.backend.with_suffix('.replacement')
+        replacement.write_bytes(self.backend.read_bytes())
+        replacement.replace(self.backend)
+        with self.assertRaisesRegex(SystemExit, 'preview plan|changed before write'):
+            svc.cmd_fabric_backend_release(self.args)
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
 
     def test_neighbor_accounts_cannot_release_or_acquire_enrolled_lock(self):
         for account in ('fabric-c3-570f6f35', 'fabric-c3-other', 'subagent-fabric-c3-extra'):
@@ -760,6 +885,50 @@ class ModernBackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
                     ['launchctl', 'print', target],
                 ])
                 self.assertEqual(self.snapshot(), self.before)
+
+
+class PublicProvenanceTransportTests(unittest.TestCase):
+    URL = svc.FABRIC_PUBLIC_API_ROOT + '/git/ref/heads/master'
+
+    def run_transport(self, payload=b'{}', response_error=None):
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit=-1):
+                if self.served: return b''
+                self.served = True
+                return payload[:limit] if limit >= 0 else payload
+            def __init__(self): self.served = False
+        class Opener:
+            def open(self, request, timeout):
+                self.request, self.timeout = request, timeout
+                if response_error: raise response_error
+                return Response()
+        opener = Opener()
+        with mock.patch.object(svc.urllib.request, 'build_opener', return_value=opener):
+            return svc._fabric_public_https_json(self.URL), opener
+
+    def test_strict_json_no_credentials_bounded_deadline_and_size(self):
+        value, opener = self.run_transport(b'{"object":{"type":"commit"}}')
+        self.assertEqual(value['object']['type'], 'commit')
+        self.assertEqual(opener.timeout, svc.FABRIC_PUBLIC_TIMEOUT_SECONDS)
+        self.assertFalse(opener.request.has_header('Authorization'))
+        for payload in (b'{', b'{"x":1,"x":2}', b'[]', b'{"x":NaN}',
+                        b' ' * (svc.FABRIC_PUBLIC_JSON_LIMIT + 1)):
+            with self.subTest(size=len(payload)):
+                with self.assertRaises(SystemExit):
+                    self.run_transport(payload)
+
+    def test_redirect_timeout_and_noncanonical_url_fail_closed(self):
+        for error in (TimeoutError('deadline'), OSError('redirect refused')):
+            with self.subTest(error=type(error).__name__):
+                with self.assertRaises(SystemExit):
+                    self.run_transport(response_error=error)
+        for url in ('https://example.invalid/x', svc.FABRIC_PUBLIC_API_ROOT + '/../other'):
+            with self.subTest(url=url):
+                with self.assertRaises(SystemExit):
+                    svc._fabric_public_https_json(url)
 
 
 if __name__ == '__main__':

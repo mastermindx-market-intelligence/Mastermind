@@ -244,6 +244,18 @@ and the exact preview plan; apply requires the original service to be unloaded.
 It updates only `config.args[0]` and the corresponding three manifest fields,
 preserving the gateway bundle, private SDK, account, tunnel, port and selected
 protocol. The generic `upgrade` retains its same-backend-path requirement.
+For an independently authorized public-source release, the closed selector
+`--source-provenance github_public_protected_v1` reads only unauthenticated,
+certificate-verified GitHub metadata for the canonical
+`mastermindx-market-intelligence/Mastermind` `refs/heads/master`; it never reads or
+falls back to the legacy local-Git source. The observed protected commit must equal
+the requested release commit, and the fixed tree path must be a regular blob.
+The already staged backend is verified against that blob identity, SHA256, size,
+physical file and inode without downloading or executing it. Provenance and staged
+identity are included in the reviewed plan and revalidated before mutation. Metadata
+is strict JSON with duplicate-key rejection, bounded bytes/deadline and no retry or
+redirect. The default `local_git_v1` remains available only for separately
+authorized local-Git contexts.
 The operator separately reconciles existing controllers, then stops and starts
 this original service through the same owner. See
 `ops/native_fabric/quota_continuity/README.md` for native evidence, retention and

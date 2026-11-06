@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
@@ -61,6 +62,13 @@ TYPED_GIT_WORKSPACE_CLI_REL = Path(".local/bin/mmx-workspace")
 TYPED_GIT_SOURCE_REPOSITORY_REL = Path("Documents/GitHub/Mastermind")
 TYPED_GIT_BINARY = "/usr/bin/git"
 TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Mastermind.git"
+FABRIC_RELEASE_PUBLIC_PROVENANCE = "github_public_protected_v1"
+FABRIC_RELEASE_LOCAL_PROVENANCE = "local_git_v1"
+FABRIC_PUBLIC_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+FABRIC_PUBLIC_REF = "refs/heads/master"
+FABRIC_PUBLIC_API_ROOT = "https://api.github.com/repos/" + FABRIC_PUBLIC_REPOSITORY
+FABRIC_PUBLIC_JSON_LIMIT = 1024 * 1024
+FABRIC_PUBLIC_TIMEOUT_SECONDS = 10
 # Host-owned identities; these match the existing mmx-workspace repository catalog.
 # No caller-supplied path, remote, repository or credential is admitted.
 TYPED_GIT_CLOSED_PROFILES = (
@@ -4377,7 +4385,7 @@ def _fabric_release_bytes(path: Path, *, limit: int = 2 * 1024 * 1024) -> bytes:
         os.close(fd)
 
 
-def _fabric_release_source(release_commit: str, expected_sha: str) -> tuple[Path, dict]:
+def _fabric_release_local_source(release_commit: str, expected_sha: str) -> tuple[Path, dict]:
     """Bind the sole backend path to a commit already in observed protected master.
 
     The operator refreshes the fixed source-admin repository and checks protected
@@ -4423,6 +4431,117 @@ def _fabric_release_source(release_commit: str, expected_sha: str) -> tuple[Path
         raise SystemExit("Fabric release backend differs from the merged source or pinned SHA256")
     return backend, {"releaseCommit": release_commit, "backendGitBlob": blob,
                      "backendSha256": expected_sha, "observedProtectedMaster": observed}
+
+
+def _fabric_public_json_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _fabric_public_https_json(url: str) -> dict:
+    """Read one fixed GitHub JSON document; never retry or follow redirects."""
+    if not isinstance(url, str) or not url.startswith(FABRIC_PUBLIC_API_ROOT + "/"):
+        raise SystemExit("Fabric public release: non-canonical metadata URL refused")
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    opener = urllib.request.build_opener(NoRedirect())
+    request = urllib.request.Request(url, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "studio-direct-mcp-public-release-provenance",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }, method="GET")
+    try:
+        with opener.open(request, timeout=FABRIC_PUBLIC_TIMEOUT_SECONDS) as response:
+            if response.status != 200:
+                raise SystemExit("Fabric public release: GitHub metadata refused")
+            raw = response.read(FABRIC_PUBLIC_JSON_LIMIT + 1)
+            if len(raw) > FABRIC_PUBLIC_JSON_LIMIT or response.read(1):
+                raise SystemExit("Fabric public release: GitHub metadata too large")
+    except SystemExit:
+        raise
+    except Exception as exc:
+        raise SystemExit("Fabric public release: bounded GitHub metadata unavailable") from exc
+    try:
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_fabric_public_json_pairs,
+                           parse_constant=lambda value: (_ for _ in ()).throw(ValueError("non-finite JSON")))
+    except (ValueError, UnicodeError) as exc:
+        raise SystemExit("Fabric public release: strict GitHub JSON required") from exc
+    if type(value) is not dict:
+        raise SystemExit("Fabric public release: GitHub JSON object required")
+    return value
+
+
+def _fabric_public_provenance(release_commit: str, expected_sha: str) -> tuple[Path, dict]:
+    """Read fixed public metadata only, with no local-Git fallback or checkout."""
+    if (not isinstance(release_commit, str)
+            or re.fullmatch(r"[0-9a-f]{40}", release_commit) is None
+            or not _sha256_hex(expected_sha)):
+        raise SystemExit("Fabric release requires an exact commit and backend SHA256")
+    ref = _fabric_public_https_json(FABRIC_PUBLIC_API_ROOT + "/git/ref/heads/master")
+    if (ref.get("ref") != FABRIC_PUBLIC_REF or type(ref.get("object")) is not dict
+            or ref["object"].get("type") != "commit"
+            or ref["object"].get("sha") != release_commit):
+        raise SystemExit("Fabric public release: protected master does not equal requested commit")
+    commit = _fabric_public_https_json(FABRIC_PUBLIC_API_ROOT + "/git/commits/" + release_commit)
+    if (commit.get("sha") != release_commit or type(commit.get("tree")) is not dict
+            or re.fullmatch(r"[0-9a-f]{40}", commit["tree"].get("sha", "")) is None):
+        raise SystemExit("Fabric public release: exact commit/tree evidence required")
+    tree_sha = commit["tree"]["sha"]
+    current_sha, entry, components = tree_sha, None, FABRIC_BACKEND_SOURCE.split("/")
+    for component in components:
+        tree = _fabric_public_https_json(FABRIC_PUBLIC_API_ROOT + "/git/trees/" + current_sha)
+        if (tree.get("sha") != current_sha or tree.get("truncated") is not False
+                or type(tree.get("tree")) is not list):
+            raise SystemExit("Fabric public release: complete exact tree required")
+        matches = [item for item in tree["tree"]
+                   if type(item) is dict and item.get("path") == component]
+        if len(matches) != 1:
+            raise SystemExit("Fabric public release: fixed backend path missing or ambiguous")
+        entry = matches[0]
+        if component != components[-1]:
+            if entry.get("type") != "tree" or entry.get("mode") != "040000":
+                raise SystemExit("Fabric public release: fixed backend parent is not a tree")
+            current_sha = entry.get("sha", "")
+    if (entry.get("type") != "blob" or entry.get("mode") not in ("100644", "100755")
+            or re.fullmatch(r"[0-9a-f]{40}", entry.get("sha", "")) is None
+            or type(entry.get("size")) is not int or entry["size"] < 0):
+        raise SystemExit("Fabric public release: backend must be one regular public Git blob")
+    backend = _user_root() / FABRIC_BACKEND_RELEASES_REL / ("fabric-c3-" + release_commit) / FABRIC_BACKEND_SOURCE
+    before = backend.lstat()
+    raw = _fabric_release_bytes(backend)
+    after = backend.lstat()
+    if ((before.st_dev, before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+            != (after.st_dev, after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+        raise SystemExit("Fabric public release: staged backend inode changed during observation")
+    blob = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
+    if (hashlib.sha256(raw).hexdigest() != expected_sha or blob != entry["sha"]
+            or len(raw) != entry["size"]):
+        raise SystemExit("Fabric release backend differs from the public source or pinned SHA256")
+    return backend, {
+        "sourceProvenance": FABRIC_RELEASE_PUBLIC_PROVENANCE,
+        "repository": FABRIC_PUBLIC_REPOSITORY, "ref": FABRIC_PUBLIC_REF,
+        "releaseCommit": release_commit, "observedProtectedMaster": release_commit,
+        "commitTree": tree_sha, "backendGitBlob": entry["sha"],
+        "backendMode": entry["mode"], "backendSha256": expected_sha,
+        "backendSize": len(raw), "stagedBackendPath": str(backend),
+        "stagedBackendDevice": after.st_dev, "stagedBackendInode": after.st_ino,
+    }
+
+
+def _fabric_release_source(release_commit: str, expected_sha: str,
+                           provenance: str = FABRIC_RELEASE_LOCAL_PROVENANCE) -> tuple[Path, dict]:
+    if provenance == FABRIC_RELEASE_PUBLIC_PROVENANCE:
+        return _fabric_public_provenance(release_commit, expected_sha)
+    if provenance == FABRIC_RELEASE_LOCAL_PROVENANCE:
+        return _fabric_release_local_source(release_commit, expected_sha)
+    raise SystemExit("Fabric backend release: closed source provenance selector required")
 
 
 def _fabric_release_new(path: Path, data: bytes) -> None:
@@ -4556,7 +4675,8 @@ def cmd_fabric_backend_release(args) -> int:
             or argv[0] != prior["backend"] or type(old_config.get("childEnv")) is not dict
             or old_config["childEnv"].get("MMX_FABRIC_SDK_PACKAGE") != str(roots["base"] / "package.json")):
         raise SystemExit("Fabric backend release: original restricted profile or SDK binding differs")
-    backend, source = _fabric_release_source(args.release_commit, args.backend_sha256)
+    backend, source = _fabric_release_source(args.release_commit, args.backend_sha256,
+        getattr(args, "source_provenance", FABRIC_RELEASE_LOCAL_PROVENANCE))
     if str(backend) == prior["backend"]:
         raise SystemExit("Fabric backend release: backend already selected; no replay")
     new_config = {**old_config, "args": [str(backend), *argv[1:]]}
@@ -4574,6 +4694,7 @@ def cmd_fabric_backend_release(args) -> int:
         "originalBackend": prior["backend"], "originalBackendSha256": prior["backendHash"],
         "targetBackend": str(backend), "targetBackendSha256": args.backend_sha256,
         "releaseCommit": source["releaseCommit"], "backendGitBlob": source["backendGitBlob"],
+        "releaseProvenance": source,
         "preservedGatewayFiles": len(prior["files"]), "preservedDependencyTreeSha256": prior["dependencyTreeHash"],
         "preservedPlistSha256": prior["plistHash"], "serviceStarted": False,
         "changedConfigFields": ["args[0]"], "changedManifestFields": ["backend", "backendHash", "configHash"],
@@ -4590,7 +4711,9 @@ def cmd_fabric_backend_release(args) -> int:
         print(json.dumps({**plan, "planSha256": plan_sha, "preflight": True,
                           "effect": "NOT_APPLIED", "observedProtectedMaster": source["observedProtectedMaster"]}, sort_keys=True))
         return 0
-    if not _sha256_hex(args.expected_plan_sha256) or args.expected_plan_sha256 != plan_sha:
+    if not _sha256_hex(args.expected_plan_sha256):
+        raise SystemExit("Fabric backend release: exact reviewed preview plan is required")
+    if args.expected_plan_sha256 != plan_sha:
         raise SystemExit("Fabric backend release: exact reviewed preview plan is required")
     if _lifecycle_inspect(account, label, roots) is not None:
         raise SystemExit("refusing Fabric backend release while service is loaded; stop first")
@@ -4598,7 +4721,9 @@ def cmd_fabric_backend_release(args) -> int:
             or _fabric_release_bytes(manifest_path) != before_manifest
             or _fabric_release_bytes(config_path) != before_config):
         raise SystemExit("Fabric backend release: original runtime changed before write")
-    _fabric_release_source(args.release_commit, args.backend_sha256)
+    if _fabric_release_source(args.release_commit, args.backend_sha256,
+            getattr(args, "source_provenance", FABRIC_RELEASE_LOCAL_PROVENANCE))[1] != source:
+        raise SystemExit("Fabric backend release: protected source or staged bytes changed before write")
     if _lifecycle_inspect(account, label, roots) is not None:
         raise SystemExit("refusing Fabric backend release while service is loaded; stop first")
     _ensure_secure_dir(evidence_root)
@@ -4881,6 +5006,9 @@ def build_parser() -> argparse.ArgumentParser:
     fabric.add_argument("--release-commit", required=True,
                         help="exact protected merged commit for the fixed Fabric backend release path")
     fabric.add_argument("--backend-sha256", required=True)
+    fabric.add_argument("--source-provenance", choices=(FABRIC_RELEASE_LOCAL_PROVENANCE,
+                        FABRIC_RELEASE_PUBLIC_PROVENANCE), default=FABRIC_RELEASE_LOCAL_PROVENANCE,
+                        help="closed release source; public mode never reads a local Git source or falls back")
     fabric.add_argument("--expected-plan-sha256",
                         help="exact plan digest returned by the reviewed read-only preview; required for apply")
     fabric.add_argument("--preflight-only", action="store_true")
