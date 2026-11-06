@@ -247,8 +247,18 @@ SERVICE_ADMIN_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v4"
 SERVICE_SET_SCHEMA = "mastermind.native_go_application_service.v5"
 SERVICE_SET_ENROLLMENT_SCHEMA = "native-go-service-enrollment.v5"
 SERVICE_SET_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v5"
+SERVICE_FAMILY_SCHEMA = "mastermind.native_go_application_service.v6"
+SERVICE_FAMILY_ENROLLMENT_SCHEMA = "native-go-service-enrollment.v6"
+SERVICE_FAMILY_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v6"
 SERVICE_CREDENTIAL_REF = "MACRO_FABRIC_APPLICATION_TOKEN"
 SERVICE_TEXT_CREDENTIAL_REF = "MASTERMIND_FABRIC_APPLICATION_TOKEN"
+SERVICE_FAMILY_ROLES = (
+    ("admin", "admin-orchestrator", "site_interactive", SERVICE_CREDENTIAL_REF),
+    ("text", "mastermind-text", "site_batch", SERVICE_TEXT_CREDENTIAL_REF),
+    ("chat", "mastermind-chat", "site_interactive", "MASTERMIND_FABRIC_CHAT_TOKEN"),
+    ("brain", "brain", "site_interactive", "MACRO_BRAIN_FABRIC_APPLICATION_TOKEN"),
+    ("ask", "ask-brain", "site_interactive", "MACRO_ASK_FABRIC_APPLICATION_TOKEN"),
+)
 SERVICE_SCOPE_FIELDS = frozenset({"principal_id", "caller_host", "native_host", "workload",
     "credential_ref", "capability_lane", "workload_profile", "account_profile"})
 SERVICE_IDENTITY_FIELDS = frozenset({"dev", "ino", "uid", "gid", "mode", "nlink", "size",
@@ -424,7 +434,59 @@ def _validate_service_set(startup, document):
     return bindings, common["native_host"], Path(common["account_profile"])
 
 
+
+def _service_family_scope_binding(startup, scope, credential, role):
+    """One of five source-defined roles; no caller-defined role or authority."""
+    mapping = {row[0]: row[1:] for row in SERVICE_FAMILY_ROLES}
+    if role not in mapping:
+        raise ValueError("native application service family role refused")
+    if type(scope) is not dict:
+        raise ValueError("native application service family scope refused")
+    if role in ("admin", "text"):
+        return _service_scope_binding(startup, scope, credential, admin=role == "admin")
+    selected = "selection_purpose" in scope
+    expected = SERVICE_SCOPE_FIELDS | ({"selection_purpose"} if selected else set())
+    if (set(scope) != expected or type(scope["account_profile"]) is not str
+            or (scope["capability_lane"], scope["workload_profile"], scope["credential_ref"]) != mapping[role]):
+        raise ValueError("native application service family mapping refused")
+    for key in ("principal_id", "caller_host", "native_host", "workload", "credential_ref"):
+        if type(scope[key]) is not str or IDENTITY.fullmatch(scope[key]) is None:
+            raise ValueError("native application service family identity refused")
+    profile = Path(scope["account_profile"])
+    if not profile.is_absolute() or ".." in profile.parts:
+        raise ValueError("native application service family profile refused")
+    return startup.handler.ApplicationServiceBinding(scope["principal_id"], scope["caller_host"],
+        scope["workload"], scope["credential_ref"], credential, pool="go",
+        selection_purpose=startup.handler.ApplicationSelectionPurpose(scope["selection_purpose"]) if selected else None)
+
+
+def _validate_service_family(startup, document):
+    fields = {"schema", "operation_id", "plan_digest", "source_generation", "ingress_digest",
+              "scopes", "owners", "credentials"}
+    if (set(document) != fields or document["schema"] != SERVICE_FAMILY_SCHEMA
+            or document["owners"] != application_service_owners(startup)
+            or type(document["scopes"]) is not list or len(document["scopes"]) != 5
+            or type(document["credentials"]) is not list or len(document["credentials"]) != 5):
+        raise ValueError("native application service family projection refused")
+    for key in ("plan_digest", "source_generation", "ingress_digest"):
+        if type(document[key]) is not str or re.fullmatch(r"[0-9a-f]{64}", document[key]) is None:
+            raise ValueError("native application service commitment refused")
+    if type(document["operation_id"]) is not str or IDENTITY.fullmatch(document["operation_id"]) is None:
+        raise ValueError("native application service operation refused")
+    bindings = tuple(_service_family_scope_binding(startup, scope, credential, role[0])
+        for role, scope, credential in zip(SERVICE_FAMILY_ROLES, document["scopes"], document["credentials"]))
+    first = document["scopes"][0]
+    if (any(scope["native_host"] != first["native_host"]
+            or scope["account_profile"] != first["account_profile"] for scope in document["scopes"])
+            or len({(binding.principal_id, binding.host, binding.workload) for binding in bindings}) != 5
+            or len({binding.credential for binding in bindings}) != 5):
+        raise ValueError("native application closed service family differs")
+    return bindings, first["native_host"], Path(first["account_profile"])
+
+
 def validate_application_service_document(startup, document):
+    if type(document) is dict and document.get("schema") == SERVICE_FAMILY_SCHEMA:
+        return _validate_service_family(startup, document)
     if type(document) is dict and document.get("schema") == SERVICE_SET_SCHEMA:
         return _validate_service_set(startup, document)
     """Parse only stable authentication/profile projection; no grant lookup."""
@@ -489,7 +551,8 @@ def validate_completed_application_records(startup, raw, binding_identity, inten
     """Validate the same completed enrollment chain from retained private bytes."""
     document, intent, receipt = map(_service_json, (raw, intent_raw, receipt_raw))
     result = validate_application_service_document(startup, document)
-    service_set = document["schema"] == SERVICE_SET_SCHEMA
+    family = document["schema"] == SERVICE_FAMILY_SCHEMA
+    service_set = document["schema"] in (SERVICE_SET_SCHEMA, SERVICE_FAMILY_SCHEMA)
     http = document["schema"] == SERVICE_HTTP_SCHEMA
     admin = document["schema"] == SERVICE_ADMIN_SCHEMA
     selected = document["schema"] in (SERVICE_SELECTED_SCHEMA, SERVICE_ADMIN_SCHEMA)
@@ -499,10 +562,10 @@ def validate_completed_application_records(startup, raw, binding_identity, inten
                       scope_field, "binding_sha256", "binding_identity", "accounts_sha256", "accounts_identity"}
     if http:
         receipt_fields |= {"application_recipe_digest", "source_projection_sha256", "provider_profile_identity"}
-    if (set(intent) != intent_fields or intent["schema"] != (SERVICE_SET_ENROLLMENT_SCHEMA if service_set else SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
+    if (set(intent) != intent_fields or intent["schema"] != (SERVICE_FAMILY_ENROLLMENT_SCHEMA if family else SERVICE_SET_ENROLLMENT_SCHEMA if service_set else SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
             SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
             SERVICE_SELECTED_ENROLLMENT_SCHEMA if selected else SERVICE_ENROLLMENT_SCHEMA)
-            or set(receipt) != receipt_fields or receipt["schema"] != (SERVICE_SET_RECEIPT_SCHEMA if service_set else SERVICE_HTTP_RECEIPT_SCHEMA if http else
+            or set(receipt) != receipt_fields or receipt["schema"] != (SERVICE_FAMILY_RECEIPT_SCHEMA if family else SERVICE_SET_RECEIPT_SCHEMA if service_set else SERVICE_HTTP_RECEIPT_SCHEMA if http else
                 SERVICE_ADMIN_RECEIPT_SCHEMA if admin else
                 SERVICE_SELECTED_RECEIPT_SCHEMA if selected else SERVICE_RECEIPT_SCHEMA)
             or any(intent[key] != document[key] or receipt[key] != document[key]

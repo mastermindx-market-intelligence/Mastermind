@@ -990,6 +990,8 @@ SERVICE_HTTP_SPEC_SCHEMA = "native-go-service-enrollment-specification.v2"
 SERVICE_SELECTED_SPEC_SCHEMA = "native-go-service-enrollment-specification.v3"
 SERVICE_ADMIN_SPEC_SCHEMA = "native-go-service-enrollment-specification.v4"
 SERVICE_SET_SPEC_SCHEMA = "native-go-service-enrollment-specification.v5"
+SERVICE_FAMILY_SPEC_SCHEMA = "native-go-service-enrollment-specification.v6"
+_SERVICE_FAMILY_NAMES = ("admin", "text", "chat", "brain", "ask")
 _SERVICE_PLAN_FIELDS = frozenset({"schema", "operation_id", "go_ingress_bundle", "ingress_digest",
     "source_generation", "store", "selection", "installer_sha256", "entry_sha256", "scope",
     "owners", "owner_identities", "accounts_before", "accounts_after_sha256", "grant_sha256", "digest"})
@@ -1102,6 +1104,10 @@ def _service_specification(entry, specification, startup=None, *, allow_inactive
     if isinstance(specification, (str, Path)):
         specification = _successor_json(Path(specification))
     fields = {"schema", "operation_id", "scope", "grant"}
+    if type(specification) is dict and specification.get("schema") == SERVICE_FAMILY_SPEC_SCHEMA:
+        specification = generation.unique_json(generation.canonical(specification))
+        _validate_service_family_specification(entry, specification, startup)
+        return specification
     service_set = type(specification) is dict and specification.get("schema") == SERVICE_SET_SPEC_SCHEMA
     if service_set:
         specification = generation.unique_json(generation.canonical(
@@ -1218,7 +1224,134 @@ def _validate_service_set_specification(entry, specification, startup):
     return roles
 
 
-def _service_set_after(startup, specification, before, *, predecessor):
+
+def _service_family_retained(schema):
+    """Only an authenticated completed Go predecessor determines retained roles."""
+    if schema is None:
+        return 0
+    if type(schema) is not str:
+        raise ValueError("service family predecessor schema refused")
+    if schema in ("mastermind.native_go_application_service.v1",
+                  "mastermind.native_go_application_service.v3",
+                  "mastermind.native_go_application_service.v4"):
+        return 1
+    if schema == "mastermind.native_go_application_service.v5":
+        return 2
+    raise ValueError("service family predecessor schema refused")
+
+
+def _validate_service_family_specification(entry, specification, startup):
+    if (type(specification) is not dict
+            or set(specification) != {"schema", "operation_id", *_SERVICE_FAMILY_NAMES}
+            or specification["schema"] != SERVICE_FAMILY_SPEC_SCHEMA
+            or type(specification["operation_id"]) is not str
+            or entry.IDENTITY.fullmatch(specification["operation_id"]) is None
+            or startup is None):
+        raise ValueError("invalid service family enrollment specification")
+    scopes = []
+    for name in _SERVICE_FAMILY_NAMES:
+        role = specification[name]
+        if type(role) is not dict or set(role) not in ({"scope"}, {"scope", "grant"}):
+            raise ValueError("invalid service family role fields")
+        scope = role["scope"]
+        entry._service_family_scope_binding(startup, scope, "review-scope-" + name + "-" + "x" * 32, name)
+        scopes.append(scope)
+        if "grant" not in role:
+            continue
+        if name == "text" and "selection_purpose" not in scope:
+            raise ValueError("new Text service requires an explicit selection purpose")
+        if name == "admin" and "admin_pool_view" in scope and "selection_purpose" not in scope:
+            raise ValueError("new Admin metadata permission requires an explicit selection purpose")
+        grant = role["grant"]
+        if (type(grant) is not dict
+                or grant.get("principal_id") != scope["principal_id"]
+                or grant.get("credential_ref") != scope["credential_ref"]
+                or grant.get("caller_hosts") != [scope["caller_host"]]
+                or grant.get("workloads") != [scope["workload"]]
+                or grant.get("purpose") != "APPLICATION" or grant.get("enabled") is not True
+                or grant.get("pool") != "go" or grant.get("route") != "/v1/chat/completions"
+                or grant.get("stream") is not False
+                or type(grant.get("models")) is not list or len(grant["models"]) != 1):
+            raise ValueError("service family grant mapping differs")
+    if (len({(scope["principal_id"], scope["caller_host"], scope["workload"]) for scope in scopes}) != 5
+            or any(scope["native_host"] != scopes[0]["native_host"]
+                or scope["account_profile"] != scopes[0]["account_profile"] for scope in scopes)):
+        raise ValueError("service family distinct roles or common owners required")
+    return [specification[name] for name in _SERVICE_FAMILY_NAMES]
+
+
+def _service_family_roles(specification, retained):
+    roles = [specification[name] for name in _SERVICE_FAMILY_NAMES]
+    for index, role in enumerate(roles):
+        if set(role) != ({"scope"} if index < retained else {"scope", "grant"}):
+            raise ValueError("service family retained authority must be scope-only")
+    return roles
+
+
+def _service_family_after(startup, specification, before, predecessor_schema):
+    count = _service_family_retained(predecessor_schema)
+    roles = _service_family_roles(specification, count)
+    document = startup.policy_snapshot.parse_policy(before)
+    after = before
+    for role in roles[count:]:
+        if role["grant"].get("enabled") is not True:
+            raise ValueError("new service grant must be enabled")
+        after, document = _service_candidate(startup, role, generation.canonical(document) + b"\n")
+    return after, document
+
+
+def _service_family_candidate(entry, startup, specification, before, completed):
+    scopes = [specification[name]["scope"] for name in _SERVICE_FAMILY_NAMES]
+    predecessor_schema, credentials = None, None
+    if completed is not None:
+        raw, _ = _service_snapshot(entry, entry.application_enrollment_paths(startup)["binding"], mode=0o600)
+        predecessor = entry._service_json(raw)
+        predecessor_schema = predecessor["schema"]
+        count = _service_family_retained(predecessor_schema)
+        retained_scopes = predecessor["scopes"] if count == 2 else [predecessor["scope"]]
+        credentials = predecessor["credentials"] if count == 2 else [predecessor["credential"]]
+        projected = tuple(entry._service_family_scope_binding(startup, scope, credential, name)
+            for name, scope, credential in zip(_SERVICE_FAMILY_NAMES, retained_scopes, credentials))
+        if (len(completed[0]) != count or retained_scopes != scopes[:count]
+                or projected != completed[0]
+                or completed[1] != scopes[0]["native_host"]
+                or completed[2] != Path(scopes[0]["account_profile"])):
+            raise ValueError("service family completed predecessor authentication differs")
+    after, document = _service_family_after(startup, specification, before, predecessor_schema)
+    return after, document, credentials, predecessor_schema
+
+
+def _service_set_contract(entry, plan):
+    if plan["schema"] == entry.SERVICE_SET_ENROLLMENT_SCHEMA:
+        if type(plan["predecessor"]) is not bool:
+            raise ValueError("service-set predecessor discriminator refused")
+        return (("admin", "text"), SERVICE_SET_SPEC_SCHEMA, entry.SERVICE_SET_SCHEMA,
+                entry.SERVICE_SET_ENROLLMENT_SCHEMA, entry.SERVICE_SET_RECEIPT_SCHEMA,
+                int(plan["predecessor"]))
+    if plan["schema"] == entry.SERVICE_FAMILY_ENROLLMENT_SCHEMA:
+        return (_SERVICE_FAMILY_NAMES, SERVICE_FAMILY_SPEC_SCHEMA, entry.SERVICE_FAMILY_SCHEMA,
+                entry.SERVICE_FAMILY_ENROLLMENT_SCHEMA, entry.SERVICE_FAMILY_RECEIPT_SCHEMA,
+                _service_family_retained(plan["predecessor_schema"]))
+    raise ValueError("service-set enrollment schema refused")
+
+
+def _service_set_grants(specification, retained):
+    if specification["schema"] == SERVICE_FAMILY_SPEC_SCHEMA:
+        return [role["grant"] for role in _service_family_roles(specification, retained)[retained:]]
+    return [specification[name]["grant"] for name in ("admin", "text")]
+
+
+def _service_set_credentials_match(plan, credentials):
+    if plan["schema"] == "native-go-service-enrollment.v6":
+        count = _service_family_retained(plan["predecessor_schema"])
+        expected = plan.get("predecessor_credential_sha256s", [])
+        return [generation.digest(value.encode("utf-8")) for value in credentials[:count]] == expected
+    return not plan["predecessor"] or generation.digest(credentials[0].encode("utf-8")) == plan["predecessor_credential_sha256"]
+
+
+def _service_set_after(startup, specification, before, *, predecessor, predecessor_schema=None):
+    if specification["schema"] == SERVICE_FAMILY_SPEC_SCHEMA:
+        return _service_family_after(startup, specification, before, predecessor_schema)
     """Derive reviewed accounts bytes without consulting mutable enrollment files."""
     roles = _validate_service_set_specification_entry(startup, specification)
     selected_roles = roles[1:] if predecessor else roles
@@ -1260,7 +1393,8 @@ def _validate_service_set_specification_entry(startup, specification):
 
 
 def _service_set_payload(entry, startup, plan, specification, scopes, credentials):
-    return {"schema": entry.SERVICE_SET_SCHEMA, "operation_id": plan["operation_id"],
+    return {"schema": (entry.SERVICE_FAMILY_SCHEMA if plan["schema"] == entry.SERVICE_FAMILY_ENROLLMENT_SCHEMA
+                       else entry.SERVICE_SET_SCHEMA), "operation_id": plan["operation_id"],
         "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
         "ingress_digest": plan["ingress_digest"], "scopes": scopes, "owners": plan["owners"],
         "credentials": credentials}
@@ -1270,8 +1404,10 @@ def _service_set_public(payload):
     return {key: value for key, value in payload.items() if key != "credentials"}
 
 
-def _service_set_expiry(specification, *, predecessor=False):
-    names = ("text",) if predecessor else ("admin", "text")
+def _service_set_expiry(specification, *, predecessor=False, predecessor_schema=None):
+    names = (_SERVICE_FAMILY_NAMES[_service_family_retained(predecessor_schema):]
+             if specification["schema"] == SERVICE_FAMILY_SPEC_SCHEMA
+             else ("text",) if predecessor else ("admin", "text"))
     return min(specification[name]["grant"]["expires_at"] for name in names)
 
 
@@ -1293,13 +1429,16 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
     with generation.publication_lock(store), _service_source(go_ingress_bundle) as context:
         ingress, selection, metadata, entry, startup = context
         specification = _service_specification(entry, specification, startup)
-        service_set = specification["schema"] == SERVICE_SET_SPEC_SCHEMA
+        family = specification["schema"] == SERVICE_FAMILY_SPEC_SCHEMA
+        service_set = specification["schema"] in (SERVICE_SET_SPEC_SCHEMA, SERVICE_FAMILY_SPEC_SCHEMA)
+        role_names = _SERVICE_FAMILY_NAMES if family else ("admin", "text")
+        predecessor_schema = None
         http = specification["schema"] == SERVICE_HTTP_SPEC_SCHEMA
         admin = specification["schema"] == SERVICE_ADMIN_SPEC_SCHEMA
         selected = specification["schema"] in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA)
         paths = entry.application_enrollment_paths(startup)
         if service_set:
-            scopes = [specification[name]["scope"] for name in ("admin", "text")]
+            scopes = [specification[name]["scope"] for name in role_names]
             profile = Path(scopes[0]["account_profile"])
             completed = entry.load_completed_application_startup(startup) if any(os.path.lexists(path) for path in paths.values()) else None
         else:
@@ -1309,7 +1448,10 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
         owners = _service_owner_identities(entry, startup, profile, application_http=http)
         before, identity = _service_snapshot(entry, startup.paths["accounts_path"])
         with startup.yaml_runtime.held_yaml(startup.yaml_archive, startup.yaml_provenance, startup.yaml_check):
-            if service_set:
+            if family:
+                after, document, credentials, predecessor_schema = _service_family_candidate(
+                    entry, startup, specification, before, completed)
+            elif service_set:
                 after, document, credentials = _service_set_candidate(entry, startup, specification, before, completed)
             else:
                 after, document = _service_candidate(startup, specification, before)
@@ -1319,14 +1461,15 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
             generation.atomic_bytes(output / "accounts.after.yaml", after, 0o600)
             if startup.broker_module._read_application_accounts(output / "accounts.after.yaml") != document:
                 raise ValueError("service candidate parser disagreement")
-        expires = (_service_set_expiry(specification, predecessor=completed is not None)
+        expires = (_service_set_expiry(specification, predecessor=completed is not None,
+                                      predecessor_schema=predecessor_schema)
                    if service_set else specification["grant"]["expires_at"])
         if expires <= time.time():
             raise ValueError("service grant is already expired")
         if (_service_snapshot(entry, startup.paths["accounts_path"]) != (before, identity)
                 or _service_owner_identities(entry, startup, profile, application_http=http) != owners):
             raise ValueError("service owners changed during preparation")
-        plan = {"schema": entry.SERVICE_SET_ENROLLMENT_SCHEMA if service_set else
+        plan = {"schema": entry.SERVICE_FAMILY_ENROLLMENT_SCHEMA if family else entry.SERVICE_SET_ENROLLMENT_SCHEMA if service_set else
                 entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else entry.SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
                 entry.SERVICE_SELECTED_ENROLLMENT_SCHEMA if selected else entry.SERVICE_ENROLLMENT_SCHEMA,
             "operation_id": specification["operation_id"], "go_ingress_bundle": str(go_ingress_bundle),
@@ -1338,10 +1481,18 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
             "accounts_before": {"sha256": generation.digest(before), "identity": identity},
             "accounts_after_sha256": generation.digest(after)}
         if service_set:
+            retained_count = _service_family_retained(predecessor_schema) if family else int(completed is not None)
             plan.update(scopes=scopes, grant_sha256=generation.digest(generation.canonical(
-                [specification[name]["grant"] for name in ("admin", "text")])), predecessor=(completed is not None))
+                _service_set_grants(specification, retained_count))))
+            if family:
+                plan["predecessor_schema"] = predecessor_schema
+            else:
+                plan["predecessor"] = completed is not None
             if credentials is not None:
-                plan["predecessor_credential_sha256"] = generation.digest(credentials[0].encode())
+                if family:
+                    plan["predecessor_credential_sha256s"] = [generation.digest(value.encode()) for value in credentials]
+                else:
+                    plan["predecessor_credential_sha256"] = generation.digest(credentials[0].encode())
                 custody, retained = {}, {}
                 for name in ("binding", "intent", "receipt"):
                     raw, identity = _service_snapshot(entry, paths[name], mode=0o600)
@@ -1376,17 +1527,20 @@ def _read_service_plan(bundle):
     bundle = _successor_directory(bundle)
     plan = _successor_json(bundle / "PLAN.json")
     http = type(plan) is dict and plan.get("schema") == "native-go-service-enrollment.v2"
-    service_set = type(plan) is dict and plan.get("schema") == "native-go-service-enrollment.v5"
-    fields = (_SERVICE_PLAN_FIELDS - {"scope"} | {"scopes", "predecessor"}) if service_set else _SERVICE_PLAN_FIELDS
+    family = type(plan) is dict and plan.get("schema") == "native-go-service-enrollment.v6"
+    service_set = type(plan) is dict and plan.get("schema") in ("native-go-service-enrollment.v5", "native-go-service-enrollment.v6")
+    retained_count = _service_family_retained(plan.get("predecessor_schema")) if family else int(bool(plan.get("predecessor"))) if service_set else 0
+    fields = (_SERVICE_PLAN_FIELDS - {"scope"} | {"scopes", "predecessor_schema" if family else "predecessor"}) if service_set else _SERVICE_PLAN_FIELDS
     fields = fields | {"application_recipe", "application_accounts"} if http else fields
-    if service_set and plan.get("predecessor"):
-        fields |= {"predecessor_credential_sha256", "predecessor_custody", "predecessor_private"}
+    if retained_count:
+        fields |= {"predecessor_credential_sha256s" if family else "predecessor_credential_sha256",
+                   "predecessor_custody", "predecessor_private"}
     if type(plan) is not dict or set(plan) != fields:
         raise ValueError("service enrollment plan shape differs")
     if generation.digest(generation.canonical({k: v for k, v in plan.items() if k != "digest"})) != plan["digest"]:
         raise ValueError("service enrollment plan digest differs")
     names = {p.name for p in bundle.iterdir()}
-    retained = {_SERVICE_PREDECESSOR} if service_set and plan.get("predecessor") else set()
+    retained = {_SERVICE_PREDECESSOR} if retained_count else set()
     required = _SERVICE_PREPARED_FILES | retained
     if not required <= names or names - required - {_SERVICE_PRIVATE}:
         raise ValueError("service enrollment bundle set differs")
@@ -1507,9 +1661,8 @@ def _publish_service_target(entry, path, raw, before, progress, prepared, plan_d
 
 def _service_set_predecessor(entry, startup, *, bundle, plan, require_live=False):
     """Authenticate retained predecessor bytes without exposing credentials in a plan."""
-    if type(plan["predecessor"]) is not bool:
-        raise ValueError("service-set predecessor discriminator refused")
-    if not plan["predecessor"]:
+    _, _, _, _, _, retained_count = _service_set_contract(entry, plan)
+    if not retained_count:
         return None
     custody = plan["predecessor_custody"]
     commitment = plan["predecessor_private"]
@@ -1537,19 +1690,31 @@ def _service_set_predecessor(entry, startup, *, bundle, plan, require_live=False
         retained["binding"].encode("utf-8"), custody["binding"]["identity"],
         retained["intent"].encode("utf-8"), retained["receipt"].encode("utf-8"))
     document = entry._service_json(retained["binding"].encode("utf-8"))
-    if (document["schema"] not in {entry.SERVICE_SCHEMA, entry.SERVICE_SELECTED_SCHEMA, entry.SERVICE_ADMIN_SCHEMA}
-            or len(completed[0]) != 1 or document["scope"] != plan["scopes"][0]
-            or completed[1] != plan["scopes"][0]["native_host"]
-            or completed[2] != Path(plan["scopes"][0]["account_profile"])
-            or generation.digest(document["credential"].encode("utf-8")) != plan["predecessor_credential_sha256"]):
-        raise ValueError("service-set completed predecessor authentication differs")
+    family = plan["schema"] == entry.SERVICE_FAMILY_ENROLLMENT_SCHEMA
+    if family:
+        scopes = document["scopes"] if retained_count == 2 else [document["scope"]]
+        credential = document["credentials"] if retained_count == 2 else [document["credential"]]
+        if (document["schema"] != plan["predecessor_schema"]
+                or len(completed[0]) != retained_count or scopes != plan["scopes"][:retained_count]
+                or completed[1] != plan["scopes"][0]["native_host"]
+                or completed[2] != Path(plan["scopes"][0]["account_profile"])
+                or not _service_set_credentials_match(plan, credential)):
+            raise ValueError("service family completed predecessor authentication differs")
+    else:
+        if (document["schema"] not in {entry.SERVICE_SCHEMA, entry.SERVICE_SELECTED_SCHEMA, entry.SERVICE_ADMIN_SCHEMA}
+                or len(completed[0]) != 1 or document["scope"] != plan["scopes"][0]
+                or completed[1] != plan["scopes"][0]["native_host"]
+                or completed[2] != Path(plan["scopes"][0]["account_profile"])
+                or generation.digest(document["credential"].encode("utf-8")) != plan["predecessor_credential_sha256"]):
+            raise ValueError("service-set completed predecessor authentication differs")
+        credential = document["credential"]
     if require_live:
         paths = entry.application_enrollment_paths(startup)
         for name in custody:
             if _service_snapshot(entry, paths[name], mode=0o600) != (
                     retained[name].encode("utf-8"), custody[name]["identity"]):
                 raise ValueError("service-set live predecessor changed")
-    return document["credential"]
+    return credential
 
 
 def _service_set_before(entry, path, commitment):
@@ -1564,7 +1729,7 @@ def _service_set_before(entry, path, commitment):
 
 
 def _service_set_transaction(bundle, plan, specification, before, after, *, reconcile_only=False):
-    """Complete one finite v5 transition using the incumbent publication owners."""
+    """Complete one closed v5/v6 transition using the incumbent publication owners."""
     store = Path(plan["store"])
     original_ingress, _, _, _ = _completed_go_for_service(plan["go_ingress_bundle"])
     if original_ingress["store"] != str(store):
@@ -1572,11 +1737,10 @@ def _service_set_transaction(bundle, plan, specification, before, after, *, reco
     with generation.publication_lock(store), _service_source(plan["go_ingress_bundle"]) as context:
         ingress, selection, metadata, entry, startup = context
         specification = _service_specification(entry, specification, startup)
-        scopes = [specification[name]["scope"] for name in ("admin", "text")]
+        role_names, spec_schema, binding_schema, enrollment_schema, receipt_schema, retained_count = _service_set_contract(entry, plan)
+        scopes = [specification[name]["scope"] for name in role_names]
         profile = Path(scopes[0]["account_profile"])
-        if (specification["schema"] != SERVICE_SET_SPEC_SCHEMA
-                or plan["schema"] != entry.SERVICE_SET_ENROLLMENT_SCHEMA
-                or type(plan["predecessor"]) is not bool
+        if (specification["schema"] != spec_schema
                 or ingress["digest"] != plan["ingress_digest"]
                 or startup.generation != plan["source_generation"] or selection != plan["selection"]
                 or plan["store"] != ingress["store"]
@@ -1585,17 +1749,17 @@ def _service_set_transaction(bundle, plan, specification, before, after, *, reco
                 or entry.application_service_owners(startup) != plan["owners"]
                 or _service_owner_identities(entry, startup, profile) != plan["owner_identities"]
                 or generation.digest(generation.canonical(
-                    [specification[name]["grant"] for name in ("admin", "text")])) != plan["grant_sha256"]):
+                    _service_set_grants(specification, retained_count))) != plan["grant_sha256"]):
             raise ValueError("service-set plan no longer binds its original owners")
         with startup.yaml_runtime.held_yaml(startup.yaml_archive, startup.yaml_provenance, startup.yaml_check):
             expected_after, document = _service_set_after(startup, specification, before,
-                predecessor=plan["predecessor"])
+                predecessor=bool(retained_count), predecessor_schema=plan.get("predecessor_schema"))
             if (after != expected_after
                     or startup.broker_module._read_application_accounts(bundle / "accounts.after.yaml") != document):
                 raise ValueError("service-set enrollment candidate differs")
         paths = entry.application_enrollment_paths(startup)
         previous = plan.get("predecessor_custody", {})
-        intent = {"schema": entry.SERVICE_SET_ENROLLMENT_SCHEMA, "operation_id": plan["operation_id"],
+        intent = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
             "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
             "ingress_digest": plan["ingress_digest"], "bundle": str(bundle)}
         intent_raw = generation.canonical(intent) + b"\n"
@@ -1609,9 +1773,9 @@ def _service_set_transaction(bundle, plan, specification, before, after, *, reco
         stages = {name: path.parent / (".application-service-" + plan["digest"] + "." + path.name)
                   for name, path in target_paths.items()}
         private_receipt = store / "bootstrap" / (plan["digest"] + ".service-private.json")
-        public = {"schema": entry.SERVICE_SET_ENROLLMENT_SCHEMA, "operation_id": plan["operation_id"],
+        public = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
                   "plan_digest": plan["digest"]}
-        expected_public = {"schema": entry.SERVICE_SET_SCHEMA, "operation_id": plan["operation_id"],
+        expected_public = {"schema": binding_schema, "operation_id": plan["operation_id"],
             "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
             "ingress_digest": plan["ingress_digest"], "scopes": scopes, "owners": plan["owners"]}
 
@@ -1623,8 +1787,7 @@ def _service_set_transaction(bundle, plan, specification, before, after, *, reco
             payload = entry._service_json(raw)
             entry.validate_application_service_document(startup, payload)
             if (_service_set_public(payload) != expected_public
-                    or plan["predecessor"] and generation.digest(payload["credentials"][0].encode("utf-8"))
-                        != plan["predecessor_credential_sha256"]):
+                    or not _service_set_credentials_match(plan, payload["credentials"])):
                 raise ValueError("original service-set credential payload differs")
             return raw, identity
 
@@ -1659,6 +1822,8 @@ def _service_set_transaction(bundle, plan, specification, before, after, *, reco
             if _service_owner_identities(entry, startup, profile) != plan["owner_identities"]:
                 raise ValueError("service owners changed before publication")
             retained_credential = _service_set_predecessor(entry, startup, bundle=bundle, plan=plan)
+            retained_credentials = (retained_credential if plan["schema"] == entry.SERVICE_FAMILY_ENROLLMENT_SCHEMA
+                                    else [retained_credential] if retained_count else []) or []
             state, _ = _service_target(entry, paths["intent"], intent_raw, previous.get("intent"),
                 progress["intent"], prepared["intent"], plan["digest"])
             started = state.startswith("committed")
@@ -1678,10 +1843,11 @@ def _service_set_transaction(bundle, plan, specification, before, after, *, reco
                         raise ValueError("service-set original credential is missing; regeneration refused")
                     if reconcile_only:
                         return dict(public, disposition="prepared")
-                    if _service_set_expiry(specification, predecessor=plan["predecessor"]) <= time.time():
+                    if _service_set_expiry(specification, predecessor=bool(retained_count),
+                            predecessor_schema=plan.get("predecessor_schema")) <= time.time():
                         raise ValueError("service grant expired before its original intent")
-                    credentials = ([retained_credential, secrets.token_urlsafe(48)] if plan["predecessor"]
-                        else [secrets.token_urlsafe(48), secrets.token_urlsafe(48)])
+                    credentials = retained_credentials + [
+                        secrets.token_urlsafe(48) for _ in range(len(role_names) - retained_count)]
                     payload = _service_set_payload(entry, startup, plan, specification, scopes, credentials)
                     entry.validate_application_service_document(startup, payload)
                     # Commit private custody before replacing working Admin
@@ -1692,7 +1858,8 @@ def _service_set_transaction(bundle, plan, specification, before, after, *, reco
                 raw, private_identity = original_private()
                 if reconcile_only:
                     return dict(public, disposition="staged")
-                if _service_set_expiry(specification, predecessor=plan["predecessor"]) <= time.time():
+                if _service_set_expiry(specification, predecessor=bool(retained_count),
+                            predecessor_schema=plan.get("predecessor_schema")) <= time.time():
                     raise ValueError("service grant expired before its original intent")
                 custody(raw, private_identity, intent_started=False)
                 _service_set_predecessor(entry, startup, bundle=bundle, plan=plan, require_live=True)
@@ -1729,7 +1896,7 @@ def _service_set_transaction(bundle, plan, specification, before, after, *, reco
             final = {name: _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])[1]
                      for name, path, data, old, _ in targets}
             custody(raw, private_identity, intent_started=True)
-            receipt = {"schema": entry.SERVICE_SET_RECEIPT_SCHEMA, "operation_id": plan["operation_id"],
+            receipt = {"schema": receipt_schema, "operation_id": plan["operation_id"],
                 "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
                 "ingress_digest": plan["ingress_digest"], "scopes": scopes,
                 "binding_sha256": generation.digest(raw), "binding_identity": final["binding"],
@@ -1744,7 +1911,7 @@ def _service_set_transaction(bundle, plan, specification, before, after, *, reco
 
 def _service_transaction(bundle, *, reconcile_only=False):
     bundle, plan, specification, before, after = _read_service_plan(bundle)
-    if plan["schema"] == "native-go-service-enrollment.v5":
+    if plan["schema"] in ("native-go-service-enrollment.v5", "native-go-service-enrollment.v6"):
         return _service_set_transaction(bundle, plan, specification, before, after, reconcile_only=reconcile_only)
     store = Path(plan["store"])
     # Derive the lock owner from authenticated original lineage before opening
