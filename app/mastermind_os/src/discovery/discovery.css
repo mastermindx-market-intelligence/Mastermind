@@ -288,3 +288,11 @@
 .discovery-sources-view details[open] > summary { list-style-type: disclosure-open; }
 .discovery-sources-view .discovery-limitations-list { grid-template-columns: minmax(0, 1fr); }
 .discovery-sources-view .discovery-limitation { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+
+/* Narrow Sources inspectors give each literal metadata value its full row. */
+@media (max-width: 480px) {
+  .discovery-sources-view .discovery-preview .discovery-meta-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
