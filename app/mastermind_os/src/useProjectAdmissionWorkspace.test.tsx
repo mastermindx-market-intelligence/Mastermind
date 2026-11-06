@@ -172,3 +172,34 @@ it("withdraws the old controller when its actual store disappears and restores o
   expect(await e.store.read(scope)).toEqual(pointer);
   expect(e.transport.pause).not.toHaveBeenCalled();expect(e.transport.resume).not.toHaveBeenCalled();
 });
+
+
+it.each(["host-currentness", "source-generation"] as const)("refuses a detached action when %s changes without a React notification",async change=>{
+  random();const e=environment();let allowed=true,generation=1;
+  e.props.canRead=()=>allowed;e.props.sourceGeneration=()=>generation;
+  render(<Driver {...e.props}/>);await readCurrent();
+  const pause=screen.getByRole("button",{name:"Pause new work"});
+  await waitFor(()=>expect(pause).toHaveProperty("disabled",false));
+  if(change==="host-currentness")allowed=false;else generation=2;
+  fireEvent.click(pause);
+  expect(screen.getByText("Request in progress…")).toBeTruthy();
+  await waitFor(()=>expect(screen.queryByText("Request in progress…")).toBeNull());
+  expect(e.transport.pause).not.toHaveBeenCalled();
+  expect(e.transport.resume).not.toHaveBeenCalled();
+  expect(await e.store.read(scope)).toBeNull();
+});
+
+
+it("withholds a completed current read if its actual owner was withdrawn without notification",async()=>{
+  const e=environment();let allowed=true,finish!:(value:unknown)=>void;
+  e.props.canRead=()=>allowed;
+  e.read.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+  render(<Driver {...e.props}/>);
+  fireEvent.click(screen.getByRole("button",{name:"Check pause status"}));
+  allowed=false;
+  await act(async()=>{finish(fixture.open);});
+  expect(screen.queryByRole("button",{name:"Pause new work"})).toBeNull();
+  expect(screen.queryByText("New work is not paused here. Other limits and permissions still apply.")).toBeNull();
+  expect(screen.queryByRole("button",{name:"Reading…"})).toBeNull();
+  expect(e.transport.pause).not.toHaveBeenCalled();
+});

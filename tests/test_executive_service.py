@@ -11068,7 +11068,9 @@ def test_cycle_supervisor_selection_uses_root_binding_not_global_arm(tmp_path, s
             plan=dataclasses.replace(root,job_id="JOB-plan",parent_job_id=root.job_id,
                                      depth=1,orchestration_role="plan")
             service.config=dataclasses.replace(service.config,coo_autonomy_armed=True,coo_operator_harness_armed=True)
-            monkeypatch.setattr(service.runtime.jobs,"get_job",lambda job_id:plan)
+            actual_get_job=service.runtime.jobs.get_job
+            monkeypatch.setattr(service.runtime.jobs,"get_job",
+                                lambda job_id:plan if job_id==plan.job_id else actual_get_job(job_id))
             monkeypatch.setattr(service,"_require_bound_coo_job",lambda job:root)
             monkeypatch.setattr(service,"_require_coo_workspace",lambda job:{})
             monkeypatch.setattr(service,"_coo_binding_for_root",lambda job:dict(operator_harness_armed=frozen))

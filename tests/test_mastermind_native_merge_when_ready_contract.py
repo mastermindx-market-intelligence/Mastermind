@@ -52,6 +52,8 @@ def _assert_release_contract(release: str) -> None:
         "A changed head requires fresh source, hold, review and CI qualification",
         "Only GitHub's enforced PR-head checks and native `merge_group`",
         "Read the actual merged PR and commit before claiming release",
+        "Branch cleanup remains queue/repository-owned after merge; the native CLI"
+        " does not support `--delete-branch` during queue enrollment",
     ):
         assert required in source, required
 
@@ -61,7 +63,7 @@ def _assert_release_contract(release: str) -> None:
     assert shlex.split(command) == [
         "gh", "pr", "merge", "<PR>",
         "--repo", "mastermindx-market-intelligence/Mastermind",
-        "--auto", "--squash", "--delete-branch",
+        "--auto", "--squash",
         "--match-head-commit", "<CURRENT_40_HEX_HEAD>",
     ], "Wrong repository, missing --auto/head lease or unsafe native release flags"
 
@@ -101,7 +103,7 @@ def test_removing_a_binding_native_release_gate_fails_closed(required: str) -> N
 
 
 @pytest.mark.parametrize("removed", [
-    "--auto", "--squash", "--delete-branch", "--match-head-commit",
+    "--auto", "--squash", "--match-head-commit",
     "mastermindx-market-intelligence/Mastermind",
     "<CURRENT_40_HEX_HEAD>",
 ])
