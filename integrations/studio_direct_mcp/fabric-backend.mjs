@@ -531,9 +531,16 @@ export function createFabricFacade(engine, options={}) {
     // A reused native PID cannot retain an older root's output authority.
     if(pid) loseControllerBinding(pid);
     if(!parsed && pid) {
-      // One bounded read of the same incumbent handle, never another command.
-      const read=await engine.callTool({name:'read_process_output',arguments:{pid,timeout_ms:1000,offset:0,length:200}});
-      text=engineText(read); parsed=completedOutput(text);
+      // Native --help/status can outlive start_process's initial output window
+      // on a busy M2. Reobserve ONLY this exact process handle. These are
+      // bounded read-only observations, never an adapter command retry or a
+      // second controller/worker dispatch. Keep an incomplete PID as evidence.
+      for(let readNo=0;readNo<4 && !parsed;readNo++) {
+        const read=await engine.callTool({name:'read_process_output',arguments:{
+          pid,timeout_ms:3000,offset:0,length:200
+        }});
+        text=engineText(read); parsed=completedOutput(text);
+      }
     }
     if(!parsed) fail('OBSERVATION_INCOMPLETE',{controller_pid:pid});
     return parsed;
