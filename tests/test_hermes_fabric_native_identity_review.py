@@ -16,9 +16,9 @@ def _source():
 def _added_diff(source: str) -> str:
     lines = source.splitlines(keepends=True)
     return (
-        f"diff --git a/{PATH} b/{PATH}\\n"
-        f"new file mode 100644\\n--- /dev/null\\n+++ b/{PATH}\\n"
-        f"@@ -0,0 +1,{len(lines)} @@\\n"
+        f"diff --git a/{PATH} b/{PATH}\n"
+        f"new file mode 100644\n--- /dev/null\n+++ b/{PATH}\n"
+        f"@@ -0,0 +1,{len(lines)} @@\n"
         + "".join("+" + line for line in lines)
     )
 
@@ -34,10 +34,10 @@ def test_exact_source_reviews_only_two_reason_limit_tokens():
 def test_modified_source_or_limit_cannot_inherit_review():
     source = _source()
     for changed in (
-        source + "\\n# drift\\n",
+        source + "\n# drift\n",
         source.replace('"maxLength": 500', '"maxLength": 501', 1),
         source.replace('len(reason) > 500', 'len(reason) > 501', 1),
-        source + "\\nnew_peer_uid = 501\\n",
+        source + "\nnew_peer_uid = 501\n",
     ):
         assert changed != source
         assert reviewed_literal_spans(PATH, changed) == ()
