@@ -301,15 +301,301 @@ async def _submit(runner, home, params, principal):
                 reset_transport(token)
 
 
-def install_private_control(runner, home: Path, role: str) -> None:
+
+ENROLLMENT_SCHEMA = "mastermind.hermes_secretary_session_enrollment/v1"
+ENROLLMENT_RESULT_SCHEMA = "mastermind.hermes_secretary_enrollment_result/v1"
+_ENROLLMENT_STATUSES = frozenset({"ENROLLED", "ABSENT", "REFUSED", "UNAVAILABLE", "EFFECT_UNKNOWN"})
+
+
+def _implementation(value):
+    if (type(value) is not str or len(value) != 40
+            or any(c not in "0123456789abcdef" for c in value)):
+        raise RuntimeRefusal("NATIVE_ENROLLMENT_IMPLEMENTATION_INVALID")
+    return value
+
+
+def _enrollment_id(value):
+    if (type(value) is not str or not 1 <= len(value) <= 256
+            or any(ord(c) < 32 or ord(c) == 127 for c in value)):
+        raise RuntimeRefusal("NATIVE_ENROLLMENT_ID_INVALID")
+    try:
+        value.encode("utf-8", "strict")
+    except UnicodeError:
+        raise RuntimeRefusal("NATIVE_ENROLLMENT_ID_INVALID") from None
+    return value
+
+
+def validate_enrollment_capability(value):
+    if (type(value) is not dict or set(value) != {"schema", "request_id"}
+            or value["schema"] != ENROLLMENT_SCHEMA):
+        raise RuntimeRefusal("NATIVE_ENROLLMENT_CAPABILITY_INVALID")
+    return {"schema": ENROLLMENT_SCHEMA, "request_id": _enrollment_id(value["request_id"])}
+
+
+def validate_enrollment_result(value, *, implementation_sha=None, request_id=None,
+                               profile_id=None, principal_id=None):
+    if (type(value) is not dict
+            or set(value) != {"schema", "implementation_sha", "request_id", "status", "target"}
+            or value["schema"] != ENROLLMENT_RESULT_SCHEMA
+            or type(value["status"]) is not str or value["status"] not in _ENROLLMENT_STATUSES):
+        raise RuntimeRefusal("NATIVE_ENROLLMENT_RESULT_INVALID")
+    _implementation(value["implementation_sha"])
+    _enrollment_id(value["request_id"])
+    if ((implementation_sha is not None and value["implementation_sha"] != implementation_sha)
+            or (request_id is not None and value["request_id"] != request_id)):
+        raise RuntimeRefusal("NATIVE_ENROLLMENT_RESULT_MISMATCH")
+    target = value["target"]
+    if value["status"] == "ENROLLED":
+        target = validate_target(target)
+        if ((profile_id is not None and target["profile_id"] != profile_id)
+                or (principal_id is not None and target["principal_id"] != principal_id)):
+            raise RuntimeRefusal("NATIVE_ENROLLMENT_RESULT_MISMATCH")
+    elif target is not None:
+        raise RuntimeRefusal("NATIVE_ENROLLMENT_RESULT_INVALID")
+    result = dict(value, target=target)
+    try:
+        if len(_canonical(result)) > 16 * 1024:
+            raise ValueError()
+    except (ValueError, UnicodeError):
+        raise RuntimeRefusal("NATIVE_ENROLLMENT_RESULT_INVALID") from None
+    return result
+
+
+def enrollment_result(implementation_sha, request_id, status, target=None):
+    return validate_enrollment_result({
+        "schema": ENROLLMENT_RESULT_SCHEMA, "implementation_sha": implementation_sha,
+        "request_id": request_id, "status": status, "target": target})
+
+
+def _inspect_enrollment(runner, home, implementation_sha, request_id, principal, *, own_task=None):
+    """Read one bounded native snapshot; never restore or create."""
+    from hermes_state_keys import local_identity
+    from hermes_state_local import POLICY_PREFIX, same_create_retry
+    from hermes_state_local_lineage import validate_local_lineage
+    from hermes_state_mutation_retirement import retired_in
+    from hermes_state_runtime import _epoch
+    from gateway.session import SessionEntry
+    from gateway.session_local_recovery import local_source
+    from gateway.session_runtime_workers import mutation_tasks
+
+    def result(status, target=None):
+        return enrollment_result(implementation_sha, request_id, status, target)
+
+    try:
+        authority = runner.session_authority
+        descriptor = runner.session_runtime_descriptor
+        if (authority.profile_id != str(home) or descriptor.get("state") != "ready"
+                or runner._draining or descriptor.get("instance_id") != authority.instance_id
+                or type(descriptor.get("authority_epoch")) is not int
+                or descriptor["authority_epoch"] != authority.epoch):
+            return result("UNAVAILABLE")
+        sid = local_identity(str(home), principal, request_id)
+        source = local_source(authority, sid, principal)
+        route = runner.session_store._generate_session_key(source)
+        with authority.db._read_ctx(reopen=False) as conn:
+            # Native pooled-reader acquisition alone is not a snapshot.
+            # Own only this read transaction and release it before any await.
+            if conn.in_transaction:
+                return result("UNAVAILABLE")
+            conn.execute("BEGIN")
+            try:
+                _epoch(conn, authority.epoch)
+                epoch = conn.execute(
+                    "SELECT epoch,instance_id FROM runtime_epoch WHERE singleton=1").fetchone()
+                if (epoch is None or type(epoch["epoch"]) is not int
+                        or epoch["epoch"] != authority.epoch
+                        or epoch["instance_id"] != authority.instance_id):
+                    return result("UNAVAILABLE")
+                receipt_row = conn.execute(
+                    "SELECT CASE WHEN length(CAST(value AS BLOB))<=65536 THEN value END "
+                    "FROM state_meta WHERE key=?", (POLICY_PREFIX + sid,)).fetchone()
+                row = conn.execute(
+                    "SELECT id,source,user_id,session_key,chat_id,runtime_revision,runtime_generation "
+                    "FROM sessions WHERE id=?", (sid,)).fetchone()
+                route_row = conn.execute(
+                    "SELECT CASE WHEN length(CAST(entry_json AS BLOB))<=65536 THEN entry_json END "
+                    "FROM gateway_routing WHERE scope='' AND session_key=?", (route,)).fetchone()
+                if retired_in(conn, sid):
+                    return result("REFUSED")
+                if receipt_row is None:
+                    if row is not None or route_row is not None:
+                        return result("REFUSED")
+                    if any(task is not own_task for task in mutation_tasks(authority)):
+                        return result("EFFECT_UNKNOWN")
+                    return result("ABSENT")
+                # Parse the exact bounded value; no helper may reopen its receipt.
+                receipt = json.loads(receipt_row[0])
+                if (type(receipt) is not dict or "legacy_session_id" in receipt
+                        or any(receipt.get(k) != v for k, v in {
+                            "profile_id": str(home), "principal_id": principal, "request_id": request_id,
+                            "session_id": sid, "route": route}.items())
+                        or type(receipt.get("policy")) is not dict
+                        or receipt["policy"].get("source") != "tool"
+                        or not same_create_retry(receipt["policy"], '{"source":"tool"}', {})):
+                    return result("REFUSED")
+                if (row is None or row["id"] != sid or row["source"] != "tool"
+                        or row["user_id"] != principal or row["session_key"] != route
+                        or row["chat_id"] != sid or route_row is None):
+                    return result("REFUSED")
+                lineage = receipt.get("lineage", [sid])
+                if type(lineage) is not list or not lineage:
+                    return result("UNAVAILABLE")
+                # Bound the native lineage helper's auxiliary JSON reads in the
+                # same snapshot. Its own identity/rotation rules remain native.
+                for node in lineage:
+                    _id(node)
+                    bounded = conn.execute(
+                        "SELECT length(CAST(COALESCE(model_config,'') AS BLOB))<=65536 "
+                        "AND length(CAST(COALESCE(end_reason,'') AS BLOB))<=256 "
+                        "AND length(CAST(COALESCE(parent_session_id,'') AS BLOB))<=1024 "
+                        "FROM sessions WHERE id=?", (node,)).fetchone()
+                    if bounded is None or bounded[0] != 1:
+                        return result("UNAVAILABLE")
+                tip = validate_local_lineage(conn, receipt)
+                physical = conn.execute(
+                    "SELECT session_key,chat_id,user_id FROM sessions WHERE id=?", (tip,)).fetchone()
+                if physical is None or tuple(physical) != (route, sid, principal):
+                    return result("REFUSED")
+                for captured in (receipt["entry"], json.loads(route_row[0])):
+                    entry = SessionEntry.from_dict(captured)
+                    if "profile" not in captured["origin"]:
+                        entry.origin.profile = source.profile
+                    if (entry.session_id != tip or entry.session_key != route
+                            or entry.origin.to_dict() != source.to_dict()):
+                        return result("REFUSED")
+                target = validate_target({
+                    "profile_id": str(home), "session_id": sid, "principal_id": principal,
+                    "instance_id": epoch["instance_id"], "authority_epoch": epoch["epoch"],
+                    "revision": row["runtime_revision"], "execution_generation": row["runtime_generation"]})
+                return result("ENROLLED", target)
+            finally:
+                conn.rollback()
+    except Exception:
+        # Corruption, storage failure and unknown native state are never absence.
+        return result("UNAVAILABLE")
+
+async def _create_enrollment(runner, home, params, principal):
+    """The existing authority creates once and owns all work through detach."""
+    from gateway.session_controls import AuthorityConnection
+    from gateway.run_api import _embedded_chat_enabled
+    from gateway.session_authorities import owner_scope
+    from gateway.run_idle_exit import attached_client
+    from tui_gateway.transport import StdioTransport, bind_transport, reset_transport
+    implementation_sha, request_id = params["implementation_sha"], params["request_id"]
+    own_task = asyncio.current_task()
+
+    def inspect():
+        return _inspect_enrollment(runner, home, implementation_sha, request_id,
+                                   principal, own_task=own_task)
+
+    prior = inspect()
+    if prior["status"] != "ABSENT":
+        return prior
+    if not _embedded_chat_enabled():
+        return enrollment_result(implementation_sha, request_id, "REFUSED")
+    try:
+        grant = runner.session_ticket_store.redeem(
+            params["ticket"], profile_id=str(home), purpose="interactive")
+    except PermissionError:
+        return enrollment_result(implementation_sha, request_id, "REFUSED")
+    if (grant.get("subject") != principal or grant.get("scope") != "profile"
+            or grant.get("profile_id") != str(home)
+            or grant.get("instance_id") != runner.session_authority.instance_id):
+        return enrollment_result(implementation_sha, request_id, "REFUSED")
+    identity = {"user_id": grant["subject"], "provider": "local", "profile_id": grant["profile_id"],
+                "instance_id": grant["instance_id"], "capabilities": grant["capabilities"],
+                "native_bootstrap": True, "profile_scope": "profile"}
+    stream, lock = _ReceiptStream(), threading.Lock()
+    transport = StdioTransport(lambda: stream, lock)
+    explicit_refusal = False
+    with owner_scope(runner.session_authority), attached_client(runner):
+        token = bind_transport(transport)
+        connection = None
+        try:
+            connection = AuthorityConnection(runner.session_authority, transport, identity, operator=False)
+            reply = await connection.dispatch({
+                "jsonrpc": "2.0", "id": 1, "method": "session.create",
+                "params": {"request_id": request_id, "source": "tool"}})
+            explicit_refusal = type(reply) is dict and "error" in reply
+        except Exception:
+            pass
+        finally:
+            try:
+                if connection is not None:
+                    await connection.close()
+            finally:
+                with lock:
+                    stream.close()
+                transport.close()
+                reset_transport(token)
+    observed = inspect()
+    if observed["status"] == "ENROLLED":
+        return observed
+    if explicit_refusal and observed["status"] in {"ABSENT", "REFUSED"}:
+        return enrollment_result(implementation_sha, request_id, "REFUSED")
+    return enrollment_result(implementation_sha, request_id, "EFFECT_UNKNOWN")
+
+
+async def _enrollment_operation(runner, home, params, principal):
+    if params["operation"] == "inspect_enrollment":
+        return _inspect_enrollment(runner, home, params["implementation_sha"], params["request_id"], principal)
+    from gateway.session_runtime_workers import track_mutation
+    # The native task set covers create, resume and cleanup. A private response
+    # deadline cannot cancel it or make another observer infer absence.
+    task = track_mutation(runner.session_authority, _create_enrollment(runner, home, params, principal))
+    return await asyncio.shield(task)
+
+
+def install_private_control(runner, home: Path, role: str, *,
+                            implementation_sha: str | None = None,
+                            session_enrollment: dict | None = None) -> None:
     if role != "mmsecretary":
         return
     server = runner.session_control_server
     if VERB in server.private_handlers:
         raise RuntimeRefusal("NATIVE_SECRETARY_CONTROL_ALREADY_INSTALLED")
     loop = asyncio.get_running_loop()
+    frozen = None
+    if session_enrollment is not None:
+        _implementation(implementation_sha)
+        frozen = validate_enrollment_capability(session_enrollment)
+
+    def enrollment(params, peer_subject):
+        # V1 has no enrollment capability. The native server, not caller input,
+        # supplies the held implementation and original request identity.
+        try:
+            _implementation(implementation_sha)
+            request_id = _enrollment_id(params.get("request_id"))
+        except RuntimeRefusal:
+            return _result("REFUSED")
+        refused = enrollment_result(implementation_sha, request_id, "REFUSED")
+        keys = {"operation", "profile_id", "implementation_sha", "request_id"}
+        modifying = params["operation"] == "enroll_session"
+        if modifying:
+            keys.add("ticket")
+        if (peer_subject != f"uid:{os.getuid()}" or set(params) != keys
+                or params["profile_id"] != str(home)
+                or params["implementation_sha"] != implementation_sha
+                or frozen is None or request_id != frozen["request_id"]
+                or (modifying and (type(params["ticket"]) is not str
+                                   or not 1 <= len(params["ticket"]) <= 256))):
+            return refused
+        coroutine = _enrollment_operation(runner, home, dict(params), peer_subject)
+        try:
+            future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+        except Exception:
+            coroutine.close()
+            return refused
+        try:
+            return future.result(timeout=25)
+        except Exception:
+            # No cancel: the original native mutation remains tracked.
+            return enrollment_result(implementation_sha, request_id,
+                                     "EFFECT_UNKNOWN" if modifying else "UNAVAILABLE")
 
     def handle(params, peer_subject):
+        if type(params) is dict and params.get("operation") in {"inspect_enrollment", "enroll_session"}:
+            return enrollment(params, peer_subject)
         if peer_subject != f"uid:{os.getuid()}" or type(params) is not dict:
             return _result("REFUSED", reason="PEER_REFUSED")
         operation = params.get("operation")
@@ -384,7 +670,7 @@ class NativeSecretaryClient:
             return self.read_original(**{key: value for key, value in request.items() if key != "operation"})
         raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
 
-    def _call(self, params):
+    def _call(self, params, *, result_schema=SCHEMA):
         from hermes_cli.gateway_runtime_discovery import connect_private
         if self.expected_pid is not None:
             observed = self._identify()
@@ -409,9 +695,47 @@ class NativeSecretaryClient:
         response = json.loads(raw)
         value = response.get("result")
         if (response.get("ok") is not True or response.get("protocol") != 1 or response.get("id") != 1
-                or type(value) is not dict or value.get("schema") != SCHEMA):
+                or type(value) is not dict or value.get("schema") != result_schema):
             raise RuntimeRefusal("NATIVE_SECRETARY_RESPONSE_INVALID")
+        if result_schema == ENROLLMENT_RESULT_SCHEMA:
+            return validate_enrollment_result(
+                value, implementation_sha=params["implementation_sha"], request_id=params["request_id"],
+                profile_id=str(self.home), principal_id=f"uid:{os.getuid()}")
         return value
+
+    def inspect_enrollment(self, implementation_sha: str, request_id: str):
+        _implementation(implementation_sha)
+        _enrollment_id(request_id)
+        if self.expected_pid is None:
+            raise RuntimeRefusal("NATIVE_ENROLLMENT_QUALIFIED_OWNER_REQUIRED")
+        try:
+            return self._call({
+                "operation": "inspect_enrollment", "profile_id": str(self.home),
+                "implementation_sha": implementation_sha, "request_id": request_id},
+                result_schema=ENROLLMENT_RESULT_SCHEMA)
+        except Exception:
+            return enrollment_result(implementation_sha, request_id, "UNAVAILABLE")
+
+    def enroll_session(self, implementation_sha: str, request_id: str):
+        _implementation(implementation_sha)
+        _enrollment_id(request_id)
+        if self.expected_pid is None:
+            raise RuntimeRefusal("NATIVE_ENROLLMENT_QUALIFIED_OWNER_REQUIRED")
+        from hermes_cli.gateway_client import _session_ticket
+        try:
+            observed = self._identify()
+            if observed.state != "ready" or observed.endpoint is None:
+                return enrollment_result(implementation_sha, request_id, "UNAVAILABLE")
+            ticket = _session_ticket(self.home, observed.endpoint)
+        except Exception:
+            return enrollment_result(implementation_sha, request_id, "UNAVAILABLE")
+        try:
+            return self._call({
+                "operation": "enroll_session", "profile_id": str(self.home),
+                "implementation_sha": implementation_sha, "request_id": request_id, "ticket": ticket},
+                result_schema=ENROLLMENT_RESULT_SCHEMA)
+        except Exception:
+            return enrollment_result(implementation_sha, request_id, "EFFECT_UNKNOWN")
 
     def observe(self, session_id: str):
         return self._call({"operation": "observe", "profile_id": str(self.home), "session_id": _id(session_id)})

@@ -76,7 +76,17 @@ def _number(value: str) -> int:
     return number
 
 
-def _decode_pid1(raw: bytes) -> list[dict]:
+def _fixed_role_units(role: str | None = None) -> tuple:
+    pairs = tuple(zip(ROLES, UNITS))
+    if role is None:
+        return pairs
+    if type(role) is not str or role not in ROLES:
+        raise RoleStatusError()
+    return tuple(pair for pair in pairs if pair[0] == role)
+
+
+def _decode_pid1(raw: bytes, *, role: str | None = None) -> list[dict]:
+    selected = _fixed_role_units(role)
     if type(raw) is not bytes or not 0 < len(raw) <= _MAX_PID1_BYTES:
         raise RoleStatusError()
     try:
@@ -94,10 +104,10 @@ def _decode_pid1(raw: bytes) -> list[dict]:
         if set(document) != set(_PROPERTIES) or document["Id"] in records:
             raise RoleStatusError()
         records[document["Id"]] = document
-    if set(records) != set(UNITS):
+    if set(records) != {unit for _, unit in selected}:
         raise RoleStatusError()
     rows = []
-    for role, unit in zip(ROLES, UNITS):
+    for role, unit in selected:
         value = records[unit]
         rows.append({"role": role, "unit": unit, "main_pid": _number(value["MainPID"]),
                      "main_start_monotonic_us": _number(value["ExecMainStartTimestampMonotonic"]),
@@ -155,11 +165,13 @@ async def _await_query_cleanup(cleanup):
         raise asyncio.CancelledError()
 
 
-async def _query_fixed_pid1() -> list[dict]:
-    """Only the two fixed units and explicit property allowlist; no shell."""
+async def _query_fixed_pid1(*, role: str | None = None) -> list[dict]:
+    """Only selected fixed roles and the explicit property allowlist; no shell."""
+    selected = _fixed_role_units(role)
     process = await asyncio.create_subprocess_exec(
         "/usr/bin/systemctl", "show", "--no-pager",
-        *("--property=" + name for name in _PROPERTIES), "--", *UNITS,
+        *("--property=" + name for name in _PROPERTIES), "--",
+        *(unit for _, unit in selected),
         stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL,
         env={"PATH": "/usr/bin:/bin", "LC_ALL": "C", "LANG": "C", "SYSTEMD_PAGER": ""},
@@ -174,7 +186,7 @@ async def _query_fixed_pid1() -> list[dict]:
             chunks.extend(block)
         if len(chunks) > _MAX_PID1_BYTES or await process.wait() != 0:
             raise RoleStatusError()
-        return _decode_pid1(bytes(chunks))
+        return _decode_pid1(bytes(chunks), role=role)
     finally:
         cleanup = asyncio.create_task(_settle_owned_query(process))
         await _await_query_cleanup(cleanup)

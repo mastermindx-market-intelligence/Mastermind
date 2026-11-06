@@ -497,11 +497,11 @@ class RuntimeSessionReturn:
                     return await self.read_hermes(principal, read_ref)
             if self.hermes is None:
                 raise BridgeError("backend_unavailable", "installed Secretary owner is unavailable")
-            self.hermes.require_submit(value["binding"])
-            if _principal(principal, submit=True) != identity:
-                raise ValueError("Executive authorization changed")
             result = None
             try:
+                self.hermes.require_submit(value["binding"])
+                if _principal(principal, submit=True) != identity:
+                    raise ValueError("Executive authorization changed")
                 result = await self.hermes.request(
                     value["binding"], value["native_request"],
                     before_write=lambda operation_name, native_request: self._begin_hermes_commit(

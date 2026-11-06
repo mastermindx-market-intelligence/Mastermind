@@ -46,7 +46,7 @@ def test_fixed_api_uses_original_factory_and_private_control_without_vendor_clas
     module = SimpleNamespace(start_gateway_api=factory, GatewayRuntimeAPI=native_class)
     monkeypatch.setattr(entry, "_digest", lambda *a, **k: entry.RUN_API_SHA256)
     installed = []
-    monkeypatch.setattr(control, "install_private_control", lambda *args: installed.append(args))
+    monkeypatch.setattr(control, "install_private_control", lambda *args, **kwargs: installed.append((args, kwargs)))
     home = tmp_path / "role-home"
     runner = SimpleNamespace(session_authority=SimpleNamespace(profile_id=str(home), instance_id="i", epoch=7),
                              session_runtime_descriptor=dict(instance_id="i", authority_epoch=7),
@@ -55,7 +55,8 @@ def test_fixed_api_uses_original_factory_and_private_control_without_vendor_clas
                           host="127.0.0.2", port=18766)
     assert asyncio.run(module.start_gateway_api(runner)) is handle
     assert calls == [(runner, "127.0.0.2", 18766)]
-    assert installed == [(runner, home, "mmsecretary")]
+    assert installed == [((runner, home, "mmsecretary"),
+                          {"implementation_sha": None, "session_enrollment": None})]
     assert module.GatewayRuntimeAPI is native_class
     with pytest.raises(TypeError):
         module.start_gateway_api(runner, port=0)

@@ -276,8 +276,28 @@ def _hermes_restart(value: Any) -> int | float:
 
 def _hermes_native_gateway(value: Any) -> dict[str, Any]:
     keys = {"schema", "python", "startup", "vendor_root", "import_roots", "dependency_inventory"}
-    if (type(value) is not dict or set(value) != keys
-            or value["schema"] != "mastermind.hermes_native_gateway_installation/v1"):
+    if type(value) is not dict:
+        raise ReleaseManifestError("Hermes native installation is invalid")
+    version = value.get("schema")
+    enrollment = None
+    if version == "mastermind.hermes_native_gateway_installation/v2":
+        keys = keys | {"session_enrollment"}
+        enrollment = value.get("session_enrollment")
+        if (type(enrollment) is not dict
+                or set(enrollment) != {"schema", "request_id"}
+                or enrollment.get("schema") != "mastermind.hermes_secretary_session_enrollment/v1"):
+            raise ReleaseManifestError("Hermes session enrollment is invalid")
+        request_id = enrollment["request_id"]
+        if (type(request_id) is not str or not 1 <= len(request_id) <= 256
+                or any(ord(c) < 32 or ord(c) == 127 for c in request_id)):
+            raise ReleaseManifestError("Hermes enrollment request identity is invalid")
+        try:
+            request_id.encode("utf-8", "strict")
+        except UnicodeError:
+            raise ReleaseManifestError("Hermes enrollment request identity is invalid") from None
+    elif version != "mastermind.hermes_native_gateway_installation/v1":
+        raise ReleaseManifestError("Hermes native installation is invalid")
+    if set(value) != keys:
         raise ReleaseManifestError("Hermes native installation is invalid")
     binary = _hermes_binary(value["python"])
     startup = _hermes_startup(value["startup"])
@@ -303,7 +323,8 @@ def _hermes_native_gateway(value: Any) -> dict[str, Any]:
     return {"schema": value["schema"], "python": binary, "startup": startup,
             "vendor_root": vendor, "import_roots": roots,
             "dependency_inventory": {"path": inventory_path, "sha256": inventory["sha256"],
-                                     "size": inventory["size"]}}
+                                     "size": inventory["size"]},
+            **({"session_enrollment": dict(enrollment)} if enrollment is not None else {})}
 
 
 def _hermes_roles(value: Any) -> list[dict[str, Any]]:
@@ -320,6 +341,10 @@ def _hermes_roles(value: Any) -> list[dict[str, Any]]:
             raise ReleaseManifestError("Hermes runtime role row is invalid")
         if row["role"] != role:
             raise ReleaseManifestError("Hermes runtime role order is invalid")
+        native = (_hermes_native_gateway(row["native_gateway"])
+                  if "native_gateway" in row else None)
+        if native is not None and "session_enrollment" in native and role != "mmsecretary":
+            raise ReleaseManifestError("Hermes session enrollment requires Secretary")
         uid, gid = row["uid"], row["gid"]
         if type(uid) is not int or not 1 <= uid <= 2 ** 31 - 1:
             raise ReleaseManifestError("Hermes runtime role uid is invalid")
@@ -336,8 +361,7 @@ def _hermes_roles(value: Any) -> list[dict[str, Any]]:
             "restart_sec": _hermes_restart(row["restart_sec"]),
             "start_limit_burst": burst,
             "start_limit_interval_sec": interval,
-            **({"native_gateway": _hermes_native_gateway(row["native_gateway"])}
-               if "native_gateway" in row else {}),
+            **({"native_gateway": native} if native is not None else {}),
         })
     if rows[0]["uid"] == rows[1]["uid"] or rows[0]["gid"] == rows[1]["gid"]:
         raise ReleaseManifestError("Hermes runtime role identities are not distinct")
@@ -939,10 +963,12 @@ class _NativeGatewayLaunch:
             raise ReleaseManifestError("Hermes native child identity changed")
         self.runtime.check()
         self.owner.check()
+        return measured
 
 
 def _hermes_runtime(argv: list[str]) -> int:
-    if (not argv or argv[0] not in {"supervise", "canary", "isolation-probe", "native-gateway"}
+    if (not argv or argv[0] not in {"supervise", "canary", "isolation-probe", "native-gateway",
+                                    "enroll-secretary-session"}
             or not _HERMES_EARLY_NO_SITE or not _hermes_recipe_is_qualified()
             or any(name not in sys.modules or sys.modules[name] is not None
                    for name in _HERMES_SITE_NAMES)):

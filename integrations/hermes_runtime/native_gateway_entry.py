@@ -55,7 +55,8 @@ def _vendor_module(name: str, root: Path):
 
 
 def bind_native_api(module, *, vendor: Path, role_home: Path, role: str,
-                    host: str, port: int) -> None:
+                    host: str, port: int, implementation_sha: str | None = None,
+                    session_enrollment: dict | None = None) -> None:
     _selection(role, host, port)
     if getattr(module, "_mmx_role_api_bound", False):
         raise RuntimeRefusal("NATIVE_API_ALREADY_BOUND")
@@ -75,7 +76,9 @@ def bind_native_api(module, *, vendor: Path, role_home: Path, role: str,
                 or getattr(runner.config, "multiplex_profiles", False)):
             raise RuntimeRefusal("NATIVE_PROFILE_AUTHORITY_MISMATCH")
         from .native_session_control import install_private_control
-        install_private_control(runner, role_home, role)
+        install_private_control(runner, role_home, role,
+                                implementation_sha=implementation_sha,
+                                session_enrollment=session_enrollment)
         return await original(runner, host=host, port=port)
 
     module.start_gateway_api = start_role_gateway_api
@@ -164,7 +167,9 @@ def run(launch, argv: list[str]) -> int:
     if is_gateway:
         api = _vendor_module("gateway.run_api", vendor)
         bind_native_api(api, vendor=vendor, role_home=role_home, role=role,
-                        host=profile.gateway_host, port=profile.backend_port)
+                        host=profile.gateway_host, port=profile.backend_port,
+                        implementation_sha=launch.owner.root.name,
+                        session_enrollment=launch.recipe.get("session_enrollment"))
     launch.check()
     result = native_main.main()
     return result if type(result) is int else 0
