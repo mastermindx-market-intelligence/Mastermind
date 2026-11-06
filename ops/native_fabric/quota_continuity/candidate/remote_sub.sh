@@ -1645,6 +1645,13 @@ if [ "$MODE" = go-codex ] && [ "$DRY_RUN" -eq 0 ]; then
   fi
 else
 REMOTE_INNER='umask 077 || exit; python3 "$LANE_DIRECTORY/support-releases/$SUPPORT_DIGEST/ext/remote_sub_exec.py" "$KEY" "$MODE" "$PACKET" "$REMOTE_CWD" "$MODEL"; echo $? > "$RC_FILE"'
+# The central GLM-Codex route is exact: Ubuntu4 plus the glm-codex executor
+# mode. It carries only the short-lived broker-bound capability capsule, so
+# this route never enrolls a local provider and never reads a local key.
+GLM_CENTRAL_ROUTE=0
+if [ "$MODE" = "glm-codex" ] && [ "$HOST_ARG" = "ubuntu4" ]; then
+  GLM_CENTRAL_ROUTE=1
+fi
 HOST_ENV="source $REMOTE_LANES_Q/ext/HOST_ENV.sh 2>/dev/null"
 if [ "$PLAIN_PHYSICAL_OWNER" -eq 1 ]; then
   # Host initialization may prepend a mutable home alias. Restore only the
@@ -1654,6 +1661,13 @@ fi
 # Only the explicit canonical model profile uses the qualified initializer.
 # Never source a mutable hook in this branch or fall back to the old shell.
 if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then HOST_ENV=:; fi
+if [ "$GLM_CENTRAL_ROUTE" -eq 1 ]; then
+  # The mutable host hook may export a controller bearer, and the central
+  # capsule must be the only credential for this route. Keep the frozen
+  # venv/.local PATH and the digest-pinned support launcher; drop the hook.
+  HOST_ENV="unset GLM_SHIM_TOKEN; export PATH=\$HOME/.npm-global/bin:\$HOME/.local/bin:$REMOTE_LANES_Q/venv/bin:\$PATH"
+fi
+# Central GLM route end: this exact route never sources the mutable host hook.
 
 if [ "$DRY_RUN" -eq 1 ]; then
   show_args "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" "<launch: $REMOTE_PACKET -> $(basename "$REMOTE_PACKET")>"
@@ -1724,11 +1738,27 @@ PY_GLM_REMOTE_META
       exit "$RC"
     fi
     log "GLM_CAPABILITY_READY lease=$LEASE_ID ttl=$CAP_TTL transport=ssh-stdin"
+  elif [ "$GLM_CENTRAL_ROUTE" -eq 1 ]; then
+    # The central route has no local provider credential to fall back to.
+    # Refuse before any legacy credential read or provider launch; the
+    # lease-v1 central capability is the only admitted credential.
+    RC=78
+    log "GLM_CENTRAL_CAPABILITY host=$HOST_ARG capability=lease-v1 state=unavailable"
+    log "GLM_CENTRAL_CAPABILITY_REQUIRED host=$HOST_ARG"
+    exit "$RC"
   elif commission_run credential-ready "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS"       'curl -fsS --max-time 3 http://127.0.0.1:4141/health >/dev/null && { { test -s "$HOME/.glm/config.json" && test -s "$HOME/lanes/ext/glm_shim/.token"; } || test -s "$HOME/lanes/ext/.host_glm_token.sh"; }'       >/dev/null 2>&1; then
     log "GLM_LEGACY_LOCAL_CREDENTIAL host=$HOST_ARG"
   else
     RC=78
     log "GLM_REMOTE_AUTH_UNAVAILABLE host=$HOST_ARG"
+    exit "$RC"
+  fi
+  if [ "$GLM_CENTRAL_ROUTE" -eq 1 ] && [ -z "$GLM_CAP_REMOTE" ]; then
+    # The issued capsule is the only credential for this route. No local key,
+    # no inherited bearer and no second fallback may reach the executor.
+    RC=78
+    log "GLM_CENTRAL_CAPABILITY host=$HOST_ARG capability=lease-v1 state=absent"
+    log "GLM_CENTRAL_CAPABILITY_REQUIRED host=$HOST_ARG"
     exit "$RC"
   fi
 fi

@@ -25,7 +25,7 @@ HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102
 PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
 PRE_POLL255_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
 PRE_POLL255_WITH_UBUNTU4_TASK_SHA = "36fbd16469befa0f4ade8d75fe15b3384a042b726668879c59ae03c82d194058"
-CURRENT_TASK_SHA = "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
+CURRENT_TASK_SHA = "c132a163aa6071eb577d8ecea0749d47ef2377b58c92dacb5fcc4a34c8dbc9a7"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -50,6 +50,24 @@ def _preobserver_picker():
     assert len(raw) == value["bytes"] == 118474
     assert hashlib.sha256(raw).hexdigest() == value["sha256"] == "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b"
     return raw
+
+
+def _pre_central_glm_task(value: bytes) -> bytes:
+    """Restore the exact pre-central epoch only in the private F1 fixture."""
+    assert hashlib.sha256(value).hexdigest() == CURRENT_TASK_SHA
+    pairs = (
+        (b'r"(?:GLM_REMOTE_AUTH_UNAVAILABLE|GLM_CENTRAL_CAPABILITY_REQUIRED) host=(?P=host)"',
+         b'r"GLM_REMOTE_AUTH_UNAVAILABLE host=(?P=host)"'),
+        (b'if pool not in ("grok", "minimax", "glm") or artifact_names or native_return or requested_model or prefer:',
+         b'if pool not in ("grok", "minimax") or artifact_names or native_return or requested_model or prefer:'),
+        (b'(Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4, central GLM-Codex on Ubuntu4)',
+         b'(Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4)'),
+    )
+    for newer, older in pairs:
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
+    return value
 
 
 def _pre_ubuntu4_task(value: bytes) -> bytes:
@@ -157,7 +175,7 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
             assert sha(source) == CURRENT_TASK_SHA
             # Restore the exact pre-poll-qualifier epoch first. The historical
             # manual-auto fixture and every subsequent inverse stay immutable.
-            latest = source.read_bytes()
+            latest = _pre_central_glm_task(source.read_bytes())
             start = b'# These reviewed wrapper bytes classify normal SSH255 as controller uncertainty\n'
             end = b'def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]:\n'
             hook = (b'    if state == "EFFECT_UNKNOWN" and _qualify_completed_poll255(rid, original_log, **owner):\n'

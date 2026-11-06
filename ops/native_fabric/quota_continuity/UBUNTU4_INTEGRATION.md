@@ -3,20 +3,152 @@
 Source task tree for the existing fleet integration record [Mastermind #539](https://github.com/mastermindx-market-intelligence/Mastermind/issues/539).
 Organizational context: WS:EXECUTIVE-CAPACITY-FABRIC; this file does not create a workstream or runtime registry.
 Original host qualification root: `ubuntu4-fabric-hardening-20261023`.
-Current assigned source operation: `ubuntu4-fabric-integration-20261103-c3`.
+Current assigned source operation: `ubuntu4-central-provider-20261106-c3`.
+Original task parent: `ubuntu4-fabric-integration-20261103-c3`.
 Original procedure/source base: `d47cdb5652096e038a8bfb24e431ebe48ccf7ff2`.
-Current recovery pin is recorded below. Updated: 2026-11-05; task-tree revision is the containing Git commit.
+Current recovery pin is recorded below. Updated: 2026-11-06; task-tree revision is the containing Git commit.
 The existing Agent OS handoff links this task tree in proposed Macro PR #10661; protected organizational adoption remains separate.
 
 ## Objective and completion
 
 Make Ubuntu4 usable by the existing Fabric for real bounded tasks and repository sessions.
-Completion requires an enrolled provider, admitted Ubuntu4 worker START, useful retained result,
-settled lease, original-parent acceptance, narrow automatic-mode promotion and a successful normal
-routed task. Repository-work parity additionally requires the receiving host's own qualified Macro
-donor and a successful exact-commit sparse worktree job. Source changes alone do not establish this.
+Completion requires an admitted Ubuntu4 worker START on a qualified route, a useful retained
+result, settled lease, original-parent acceptance, narrow automatic-mode promotion and a
+successful normal routed task. Provider enrollment is adapter-specific, not a universal
+Ubuntu4 gate: adapters that use host-local account credentials require their own enrollment, while the central
+GLM-Codex route enrolls no local provider and uses the existing lease-v1 central capability
+instead. Repository-work parity additionally requires the receiving host's own qualified Macro
+donor and a successful exact-commit sparse worktree job. Source changes alone do not establish
+this.
 
-## Current completion frontier — 2026-11-05 post-reboot
+## Current completion frontier — 2026-11-06 central GLM-Codex route
+
+The parent selected the existing `glm` pool and `glm-codex` executor after exact source
+review of the [corrected census](https://github.com/mastermindx-market-intelligence/Mastermind/issues/539#issuecomment-6673652154).
+The controller retains long-lived provider credentials. The remote executor receives an
+existing lease-v1 capability bound to root, lease, account, model, run and host. Local
+MiniMax/Grok/GLM enrollment is not required for this route. This does not change the separate
+credential requirements of other adapters or force every task class into the GLM pool.
+
+PR #2008 is merged and installed at native sequence 33, generation
+`177118be6675cf5a292524610afaaf4d5afc33dc6a150c22291240e3b6245fcd`.
+The existing collector is rebound to that generation. Do not redo that accepted release.
+
+**Ubuntu4 remains physically HELD.** The reconciled original memtester result is rc 6 with
+37,900 comparison failures; [the physical gate](https://github.com/mastermindx-market-intelligence/Mastermind/issues/1632#issuecomment-6673308194)
+supersedes the earlier post-reboot UNKNOWN assessment. A reboot, successful package/Git checks
+and fresh scheduling telemetry do not establish memory recovery. No new Ubuntu4 connection,
+diagnostic or worker is part of this central-provider source wave.
+
+The controller-only registry preparation is complete: `glm-codex` was added to BOTH
+`allowed_modes` and `qualification_only_modes`, preserving all seven prior holds and every
+other host entry. Registry SHA256 is
+`80a5ee6499bca98a70ae927797f13bd71d8ab68a82cc8f55798507855806d35d`;
+[exact mutation and placement receipt](https://github.com/mastermindx-market-intelligence/Mastermind/issues/539#issuecomment-6674055277).
+All EIGHT modes remain held. Placement shows mode allowed but
+`automatic-qualification=explicit-canary-only`, Ubuntu4 ineligible, and no eligible remote
+GLM-Codex host. The restored incumbent central shim reports lease-v1 health only; this is
+not provider authentication, worker START or task acceptance.
+
+### Source delta and outstanding executor repair
+
+Starting at protected source `58e319d26195e01d1b9c0edc06fe50006a9c9d65`:
+
+- The closed qualifier admits pool `glm` only on Ubuntu4/Linux through actual mode
+  `glm-codex`. It requires original root/parent, a pending mode hold and well-formed,
+  duplicate-free hold list. It removes only that mode in a transient view, preserving
+  every other hold and the existing host and provider gates.
+- The task adapter admits that pool through the existing qualification option and
+  recognizes the typed central-capability refusal. Existing qualification exclusions
+  and ordinary AUTO/sparse/session policy remain.
+- The controller's exact Ubuntu4 + GLM-Codex route requires lease-v1, excludes the mutable
+  host auth hook and refuses before legacy credential probing when central readiness
+  is absent. This is controller enforcement; it does not establish downstream executor proof.
+- The actual `glm_codex_exec.sh` still needs the confirmed GNU/Linux stat correction and
+  a missing-capability refusal on the Ubuntu4 route. The original exact source-edit
+  command was rejected with “Command not allowed”; same-target readback proved unchanged
+  bytes. That mutation was not replayed. Independently permitted qualification/controller
+  edits do not clear this fence. The [inert repair artifact](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2119#issuecomment-6675182036)
+  is accepted and passed all eight parent-run GNU/Linux wrapper tests, but remains unapplied.
+
+The [executor finding and source-effect receipt](https://github.com/mastermindx-market-intelligence/Mastermind/issues/539#issuecomment-6674712011)
+and [unaccepted worker proposal](https://github.com/mastermindx-market-intelligence/Mastermind/issues/539#issuecomment-6674751268)
+record the precise gaps. The first worker's downstream no-fallback assertion was incorrect.
+This source slice is not a complete, released or production-qualified central route.
+
+### Candidate verification at this boundary
+
+The managed-source focused qualification/controller suites passed all 38 cases under Python
+3.12, including malformed-hold refusal before host evaluation. The accepted builder produced
+106 members / 2,889,951 bytes. Exactly three members differ from the protected base:
+`fabric_host_qualification.py`, `fabric_task.py` and `remote_sub.sh`; the other 103,
+including `glm_codex_exec.sh`, are unchanged. Current manifest SHA256 is
+`406baeb2b82342468990af8658518aeb81d992b49f1c5ca3255e82c59edbb96d`;
+source inventory SHA256 is
+`28d5836d5df4443e9ca7036975bbdb8ee5f08379dce18c72d1379f18c53654a9`.
+
+Current source/manifest, host-pull staging, initializer-member and historical manual-AUTO
+checks ran in the bounded follow-up selection. That aggregate was **not green**: 32 sparse
+security-composition cases failed on the Mac controller with
+`FABRIC_SPARSE_GIT_OBSERVATION_UNQUALIFIED`. The failing `remote_sub_exec.py` is byte-identical
+to the protected base (SHA256
+`9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1`).
+A bounded diagnostic confirmed the unchanged bytes and different installed Git versions,
+but the ephemeral fixture had already been removed; the exact failure cause is unproven.
+No test or source guard was weakened to hide it. The source remains a held candidate;
+exact-head Linux CI, application of the accepted executor repair and live proof remain
+distinct outstanding evidence.
+
+The separate ordinary-routing module passed all 13 cases on the managed source. It uses the
+actual request/router/economic/host-gate code with synthetic provider observations and an
+inert transport. C1 census/mechanical and C2 fix_build are selectable when admitted; held,
+stale or full Ubuntu4 is excluded; alternate eligible hosts remain usable; original lineage
+and sparse-mode forwarding survive. The C2 build escalation and declared class-policy
+refusal remain enforced. These fixtures do not promote live Ubuntu4 or override pool policy.
+
+`tests/test_ubuntu4_central_glm_ci.py` makes both canonical native regression modules
+discoverable by hosted CI and runs them in isolated interpreters. Both CI entry-point cases
+passed on the managed workspace (36.46seconds). No test body or runtime router is duplicated.
+
+A read-only incumbent runtime preview for C2 fix_build / pool glm returned
+`PREVIEW_ONLY`, `reserved=false`, host ubuntu2, mode glm, model glm-5.3-flash.
+This confirms current class eligibility, not central GLM-Codex or Ubuntu4 execution.
+The executor proposal separately passed8 parent-run Linux tests; its two key regressions
+failed against the exact current wrapper. Proposed wrapper SHA256
+`58d88481dbc54bff84bbe0edd57c2a29d84b6261a53bd908ddaa1ca57f4077f0`
+is evidence for a future authorized edit, not an installed/source-head claim.
+
+### Remaining acceptance sequence
+
+1. Resolve the exact executor source-edit fence; integrate the reviewed portable check and
+   missing-capability guard through an authorized source action. Finish deterministic
+   qualification, actual-wrapper and ordinary-routing checks, rebuild the existing
+   106-member native closure, preserve historical fixtures, and satisfy actual GitHub
+   delivery/CI/release requirements. No source or test result substitutes for host recovery.
+2. Complete the physical recovery gate through the available physical owner: preserve
+   storage/boot settings, return memory settings to a supported baseline, obtain offline
+   zero-error multipass memory proof, and validate package/filesystem/Git/runtime integrity.
+   No repeated denied stress/direct-I/O action, blind firmware reset or BIOS flash is authorized.
+3. Once physical and accepted-source gates clear, use the existing controller-side
+   `glm_tunnel.sh ubuntu4 install-agent` owner for the loopback reverse SSH path.
+   The existing install action starts its agent; do not create a duplicate service or
+   copy/provision a static provider/shim token on Ubuntu4.
+4. Run one explicit central qualification under the original root and parent. Require
+   real lease/provider START, useful retained result, lease settlement and original-parent
+   acceptance. Only then may the existing registry owner remove the `glm-codex` hold.
+   Preserve the other seven holds.
+5. Prove ordinary capacity-aware AUTO routing and a retained sparse repository/session task
+   on Ubuntu4 at an exact commit, using its own qualified Macro donor. A synthetic routing
+   fixture, successful preview or shim health does not satisfy these live journeys.
+
+The existing 7200-second execution and at-most-7500-second capability limits, provider
+economics, source custody, result acceptance and original-effect reconciliation remain
+unchanged. No new gateway, queue, credential plane, host registry or watcher is created.
+
+## Historical post-reboot completion frontier — 2026-11-05
+
+The following is dated historical evidence. The current Nov6 frontier supersedes its
+UNKNOWN memory assessment, native-generation status and seven-mode registry count.
 
 The Chairman rebooted Ubuntu4 and confirmed automatic desktop login. The original
 RDC device and M2 SSH alias are reachable again. The existing parent accepted
@@ -151,11 +283,11 @@ No native deployment, provider enrollment, host promotion or real Ubuntu4 task i
 
 | ID | Dependency | Objective and evidence | Editorial state |
 |---|---|---|---|
-| U4.1 | none | Post-reboot trusted library/package comparison, full donor integrity, ordinary process health and canonical physical gates pass. Preserve earlier incident uncertainty and observe qualification. | scoped recovery accepted |
-| U4.2 | none for source work | Admit Ubuntu4 to the two sparse Macro host-name guards, preserve all admission/lifecycle fences, integrate current protected source and qualify exact closure/tests. Live use still depends on U4.1. | protected observer composition under qualification |
-| U4.3 | U4.1 | Existing credential owner completes real Ubuntu4 provider enrollment and current-key canary through accepted owners. No secret transfer or fabricated receipts. | blocked |
-| U4.4 | U4.1, U4.3, accepted native source | One distinct supported Grok or MiniMax qualification through the existing native qualifier; verify lease, START, result, settlement and same-parent acceptance. | blocked |
-| U4.5 | U4.4 | Original registry owner removes only the accepted provider mode from the qualification hold with exact-preimage fencing; normal routing succeeds. | blocked |
+| U4.1 | none | Original memtester rc6/37,900 comparison failures is reconciled. Physical memory recovery, zero-error offline proof and subsequent integrity validation are required before any Ubuntu4 worker. Earlier reboot/package/Git checks remain historical evidence. | physical recovery required |
+| U4.2 | none for independent source work | PR2008 Ubuntu4 sparse-host changes are merged and installed at sequence33. Central qualification/controller source is being integrated; executor repair, exact current closure/tests and delivery remain. Live use also depends on U4.1. | prior release installed; central delta incomplete |
+| U4.3 | adapter-dependent | Central GLM-Codex uses the existing controller provider and short-lived capability, with no local provider enrollment. Host-local credential adapters retain their own enrollment requirements. | not required for the selected central route |
+| U4.4 | U4.1, accepted native source | One distinct central GLM-Codex qualification through the existing native qualifier (pool `glm`, executor mode `glm-codex`, exact host `ubuntu4`); verify lease, START, result, settlement and same-parent acceptance. | blocked on the hardware hold |
+| U4.5 | U4.4 | Original registry owner removes only the accepted `glm-codex` qualification hold with exact-preimage fencing; normal routing succeeds. | blocked |
 | U4.6 | U4.2, U4.5 | Accepted source release, qualified Ubuntu4-local Macro donor, real sparse repository task and retained result. | blocked |
 
 ## Historical source and host evidence — 2026-11-03
@@ -200,11 +332,10 @@ and helper negative tests; current native manifest and staged-source closure.
 The current assigned session owns recovery and source integration in the original operation.
 Paid Fabric can supply bounded evidence; the Web-session waiver does not impose an
 additional independent technical-review prerequisite. Current GitHub rules, source custody,
-required checks and binding release holds still apply. A stable qualified candidate can
-become Ready under the delivery owner; preserve the existing review request and the
-actual independent release-actor fence. Never self-approve, self-merge or use an
-alternate account to manufacture independence. The native queue alone does not prove
-that an independent approval gate is enforced.
+required checks and binding release holds still apply. Obtain formal non-author approval
+only when the actual GitHub rules require it. Never self-approve, self-merge, bypass a
+protected queue or use an alternate account to manufacture independence. No new review
+ceremony is required merely to preserve this source frontier.
 
 Use the existing runtime and registry owners for live effects, retaining original run, root,
 parent and lease custody. An archived writer is not an approver. This file records source
