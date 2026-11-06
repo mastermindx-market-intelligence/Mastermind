@@ -273,12 +273,12 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         raise ValueError("native Go provider outcome is not the exact protected source")
     historical["ext/provider_outcome.py"] = GO_BASE_PROVIDER_OUTCOME_SHA256
     # Preserve exact source hashes and deny partial/mixed custody receipts.
-    # The protected/current trio belongs to current diagnostic namespaces,
-    # never a newly relabelled historical102 closure.
+    # The protected/current trio belongs only to the complete current106
+    # namespace, never a relabelled historical102 or prior104 closure.
     custody = {name: historical["ext/" + name]
                for name in GO_PROTECTED_CUSTODY_PREIMAGES}
     if custody == GO_PROTECTED_CUSTODY_DIGESTS:
-        if not current_diagnostics:
+        if set(manifest) != expected:
             raise ValueError("native Go custody cannot relabel historical namespace")
         historical.update({"ext/" + name: digest
                            for name, digest in GO_PROTECTED_CUSTODY_PREIMAGES.items()})

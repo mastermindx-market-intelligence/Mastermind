@@ -108,6 +108,8 @@ def loaded_entry(published, *, clean_yaml=False):
 
 def before_participant_cohort(manifest):
     prior = dict(manifest)
+    prior.update({"ext/" + name: digest
+                  for name, digest in builder.GO_PROTECTED_CUSTODY_PREIMAGES.items()})
     assert prior.pop("ext/participant_binding.py") == "09aafda1390914e283915204459e37900123cd54a3d0f4e9116102f3a8921f56"
     assert prior.pop("ext/fabric_participant_owner.py") == "1619505962de4c73f415312871cc407777bf6c04ba6d02fb9be62c9d54a5545c"
     assert prior["ext/fabric_operator_owner.py"] == "90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f55c5f72c0c7"
@@ -421,3 +423,22 @@ def test_participant_cohort_cannot_relabel_legacy_namespace(builds, corruption):
         for name in builder.GO_POST_FAILURE_ADDITIONS: del bad["ext/" + name]
         assert len(bad) == 104
     with pytest.raises(ValueError): builder.validate_go_base_manifest(bad, captured)
+
+
+@pytest.mark.parametrize("count", [104, 102])
+def test_protected_custody_cannot_relabel_prior_namespace(builds, count):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    prior = before_participant_cohort(current)
+    if count == 102:
+        for cohort in (builder.GO_UBUNTU4_PREIMAGES, builder.GO_COMPLETED_POLL_PREIMAGES,
+                       builder.GO_POST_FAILURE_PREIMAGES):
+            prior.update({"ext/" + name: digest for name, digest in cohort.items()})
+        for name in builder.GO_POST_FAILURE_ADDITIONS:
+            del prior["ext/" + name]
+    assert len(prior) == count
+    builder.validate_go_base_manifest(prior, captured)
+    wrong = dict(prior)
+    wrong.update({"ext/" + name: digest for name, digest in builder.GO_PROTECTED_CUSTODY_DIGESTS.items()})
+    with pytest.raises(ValueError, match="custody cannot relabel historical namespace"):
+        builder.validate_go_base_manifest(wrong, captured)
