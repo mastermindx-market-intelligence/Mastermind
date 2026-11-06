@@ -59,9 +59,10 @@ def source_owners(tmp_path_factory):
     assert retained['schema'] == 'mastermind.test_native_catalog_predecessor102/v1'
     assert retained['source_commit'] == '58083bf128fdac2d8eab374641c78bb403e7d18c'
     historical_manifest = retained['manifest']
-    added = {'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py'}
+    added = {'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py',
+                'ext/participant_binding.py', 'ext/fabric_participant_owner.py'}
     assert set(manifest) == set(historical_manifest) | added
-    # Remove only the two reviewed S14 additions inside this disposable102
+    # Remove only the two reviewed S14 and two participant additions inside this disposable102
     # inverse, after proving each is the actual current staged payload.
     for name in added:
         path = target / 'native-code-stage' / name
@@ -131,8 +132,18 @@ def source_owners(tmp_path_factory):
     assert observer['schema'] == 'mastermind.test_native_observer_historical95/v1'
     assert observer['source_commit'] == '48ca51f882338c58e377a0acf16931066c703384'
     assert set(observer['files']) == {'ext/run_observation.py', 'ext/run_observation_delivery.py'}
+    # Ubuntu4 Grok qualification changes CURRENT policy only. Keep the exact
+    # historical B11 policy bytes bound to their protected source and digest.
+    qualification_raw = (ROLLOUT.parents[3] / 'tests/fixtures/ubuntu4-grok-qualification-predecessor-f374289e.json').read_bytes()
+    assert g.digest(qualification_raw) == '93f5285a758f1045be1f178f35d17e792459f167d2d631ff2914778253b64ebb'
+    qualification = json.loads(qualification_raw)
+    assert qualification['schema'] == 'fabric.ubuntu4-qualification-predecessor.v1'
+    assert qualification['commit'] == 'f374289eb74587eaa755f5bc8e5a3252d00850e0'
+    assert qualification['blob'] == 'f72b12eac939143b1b2ed298139d55b06667a2c2'
+    assert qualification['path'] == 'ops/native_fabric/quota_continuity/candidate/fabric_host_qualification.py'
     predecessor_files = {**retained['files'], **diagnostic['files'],
-                         **observer['files'], 'ext/pick.py': selection}
+                         **observer['files'], 'ext/pick.py': selection,
+                         'ext/fabric_host_qualification.py': qualification}
     assert {name for name in manifest if manifest[name] != historical_manifest[name]} == (
         set(predecessor_files) | new_names
     )

@@ -1847,6 +1847,7 @@ def _service_from_config(
     fabric_attended_probe_source: Any | None = None,
     attended_work_placements: tuple = (),
     paid_worker_binding_source: Any | None = None,
+    byok_roles_reader: Callable[..., Any] | None = None,
 ) -> ExecutiveControlService:
     if "workspace_acquisition" in raw:
         # Closed unix/launchd stanza only. validate_workspace_control_room
@@ -2577,6 +2578,9 @@ def _service_from_config(
             from integrations.mastermind_workspace_app.project_admission_permissions import project_admission_permissions,instruction_admission_permissions
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
+                # No control.json/browser selection or local M2 fallback. Until a
+                # trusted remote host observer is supplied this remains unbound.
+                byok_roles_reader=byok_roles_reader,
                 project_admission_permissions=project_admission_permissions(policy=policy,load_bindings=workspace_acquisition_loader),
                 instruction_admission_permissions=instruction_admission_permissions(policy=policy,load_bindings=workspace_acquisition_loader),
                 authorize_discovery=authorize_discovery, authorize_actions=authorize_actions,
@@ -3314,6 +3318,7 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     service = _service_from_config(
         raw,
         fabric_worker_binding_source=physical_source if attended_work_placements else None,
+        byok_roles_reader=physical_source.hermes_roles_reader() if physical_source is not None else None,
         paid_worker_binding_source=paid_source,
         attended_work_placements=attended_work_placements,
         fabric_attended_probe_source=(

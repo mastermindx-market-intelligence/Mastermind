@@ -22,9 +22,11 @@ from control_plane.remote_worker_transport import (
 )
 
 REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA = "mastermind.remote_worker_gateway_config/v1"
+HERMES_ROLE_METADATA_READ_SCHEMA = "mastermind.hermes_role_metadata_read_binding/v1"
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
+_SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 WORKER_BROKER_TARGET = "worker-broker"
 FABRIC_BROKER_TARGET = "attended-fabric"
@@ -40,6 +42,27 @@ FABRIC_ALLOWED_OPERATIONS = frozenset(
         "assignment-seal-finalize",
     }
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class HermesRoleMetadataReadBinding:
+    """An optional fixed read capability; this claim is not source attestation."""
+
+    implementation_sha: str
+
+    def __post_init__(self) -> None:
+        if type(self.implementation_sha) is not str or _SHA_RE.fullmatch(self.implementation_sha) is None:
+            raise ValueError("Hermes metadata read binding is invalid")
+
+    @classmethod
+    def from_wire(cls, value) -> HermesRoleMetadataReadBinding:
+        if (type(value) is not dict or set(value) != {"schema", "implementation_sha"}
+                or value["schema"] != HERMES_ROLE_METADATA_READ_SCHEMA):
+            raise ValueError("Hermes metadata read binding is invalid")
+        return cls(value["implementation_sha"])
+
+    def to_wire(self) -> dict[str, str]:
+        return {"schema": HERMES_ROLE_METADATA_READ_SCHEMA, "implementation_sha": self.implementation_sha}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -62,8 +85,13 @@ class RemoteWorkerGatewayConfig:
     assignment_control: AssignmentControlBinding | None = None
     broker_target: str = WORKER_BROKER_TARGET
     expected_broker_peer_uid: int | None = None
+    hermes_role_metadata_read: HermesRoleMetadataReadBinding | None = None
 
     def __post_init__(self) -> None:
+        if self.hermes_role_metadata_read is not None and not isinstance(
+            self.hermes_role_metadata_read, HermesRoleMetadataReadBinding
+        ):
+            raise ValueError("Hermes metadata read binding is invalid")
         if self.schema != REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA:
             raise ValueError("remote worker gateway config schema is unsupported")
         try:

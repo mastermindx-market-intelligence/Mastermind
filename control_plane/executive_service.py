@@ -5691,15 +5691,23 @@ class ExecutiveControlService:
             from common import workspace_autonomy_read_contract as autonomy_wire
             from common import workspace_resource_capacity_contract as capacity_wire
             from common import workspace_host_observation_contract as host_observation_wire
+            from common import workspace_byok_read_contract as byok_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
                     ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
-                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA}:
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == instructions_wire.FRAME_SCHEMA:
+                if parsed.get("schema") == byok_wire.FRAME_SCHEMA:
+                    ceiling = byok_wire.MAX_RESPONSE_BYTES
+                    try:
+                        byok_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == instructions_wire.FRAME_SCHEMA:
                     ceiling = instructions_wire.MAX_RESPONSE_BYTES
                     try: instructions_wire.validate_frame(parsed)
                     except (TypeError, ValueError):
@@ -5912,6 +5920,29 @@ class ExecutiveControlService:
                             result = await owner.read_workspace_retained_activity(parsed)
                         except Exception:
                             result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
+                elif parsed.get("schema") == byok_wire.FRAME_SCHEMA:
+                    try:
+                        from control_plane.workspace_read_service import WorkspaceReadService
+                        runtime = self._require_runtime()
+                        def byok_host_ready():
+                            return (self._ceo_ingress_app_binding is app_binding
+                                    and app_binding.workspace_read_provider_factory is factory
+                                    and callable(factory) and self._require_runtime() is runtime
+                                    and not self._closing and self._ceo_ingress_ready
+                                    and self._service_state in {"READY", "AWAITING_CANARY"})
+                        if not byok_host_ready():
+                            raise ValueError("installed BYOK read owner retired")
+                        provider = factory(runtime)
+                        if (type(provider) is not WorkspaceReadService or provider.runtime is not runtime
+                                or not byok_host_ready()):
+                            raise ValueError("installed BYOK read owner unavailable")
+                        result = await provider.handle_frame(parsed)
+                        if not byok_host_ready():
+                            raise ValueError("installed BYOK read owner changed")
+                        if result.get("ok") is True:
+                            result = {"ok": True, "result": byok_wire.validate_body(result["result"])}
+                    except Exception:
+                        result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 elif factory is None:
                     result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 else:

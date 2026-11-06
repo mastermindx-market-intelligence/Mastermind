@@ -1,6 +1,7 @@
 import { decodeNativeExecutiveObservation, type NativeExecutiveObservation } from "./native-executive-observation";
 import {hostObservationHostMethods,hostObservationPublicSelection,type HostObservationRawMethods,type HostObservationHostMethods} from "./resources/host-observation-host";
 import {freshConversationArguments, freshConversationNeedsWorkspace, type FreshConversationTransport} from "./orchestration/fresh-conversation-transport";
+import { decodeByokRolesRead, type ByokRolesRead } from "./meta-ceo/byok-roles-read";
 import { createLazyTerminalSharingHost, type TerminalSharingSource } from "./terminal/terminal-sharing-host";
 import { createNativeDraftRecoveryOwner, type NativeDraftRecoveryOwner } from "./auth-recovery/native-draft-owner";
 import {projectAccessHostMethods,projectAccessPublicSelection,type ProjectAccessRawMethods,type ProjectAccessHostMethods} from "./access/project-access-host";
@@ -127,6 +128,8 @@ export interface RawClient extends Partial<HostObservationRawMethods>,Partial<Pr
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
   /** Fixed authenticated one-cache Control Room state; no operator writes. */
   readControlRoomState?(request: { signal: AbortSignal }): Promise<unknown>;
+  /** Fixed secret-free role-pair metadata; no enrollment or provider operation. */
+  readByokRoles?(request: { signal: AbortSignal }): Promise<unknown>;
   /** Independent read with a separately sealed Discovery grant; never an action grant. */
   readControlRoomDiscovery?(request: { signal: AbortSignal }): Promise<unknown>;
   /** Each original mutation has one fixed, optional host method and one owner. */
@@ -215,6 +218,7 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
   readPrograms?: ProgramRead;
   readControlRoomState?: (request: { signal: AbortSignal }) => Promise<ControlRoomRead>;
+  readByokRoles?: (request: { signal: AbortSignal }) => Promise<ByokRolesRead>;
   readControlRoomDiscovery?: (request: { signal: AbortSignal }) => Promise<ControlRoomDiscovery>;
   openControlRoomSurface?: (request: { payload: Record<string, unknown>; signal: AbortSignal }) => Promise<ControlRoomActionResult>;
   bindControlRoomSurface?: (request: { payload: Record<string, unknown>; signal: AbortSignal }) => Promise<ControlRoomActionResult>;
@@ -799,6 +803,29 @@ export function bindMissionHost(
       check(signal, started);
       return decodeProgramsEnvelope(raw);
     },
+    ...(client.readByokRoles && client.invalidationGeneration ? {
+      async readByokRoles({ signal }: { signal: AbortSignal }) {
+        const started = epoch;
+        const source = client.invalidationGeneration!();
+        const read = client.readByokRoles!;
+        const generation = client.invalidationGeneration!;
+        const verify = () => {
+          check(signal, started);
+          if (!Number.isSafeInteger(source) || generation !== client.invalidationGeneration ||
+              source !== generation.call(client) || read !== client.readByokRoles)
+            throw new Error("READ_CANCELLED");
+          const state = client.getState();
+          if (state.status !== "signed_in" || !state.acquisition)
+            throw new Error("BYOK_READ_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await read.call(client, { signal });
+        verify();
+        const result = decodeByokRolesRead(raw);
+        verify();
+        return result;
+      },
+    } : {}),
     ...(client.readControlRoomState ? {
       async readControlRoomState({ signal }: { signal: AbortSignal }) {
         const started = epoch;
@@ -1080,6 +1107,7 @@ export async function createNativeClient(
     command:
       | "executive_auth_status"
       | "read_programs"
+      | "read_byok_roles"
       | "read_work"
       | "read_mission"
       | "read_mission_v3"
@@ -1216,6 +1244,7 @@ export async function createNativeClient(
     },
   ),
     readPrograms: ({ signal }) => read("read_programs", signal),
+    readByokRoles: ({ signal }) => read("read_byok_roles", signal),
     readWork: ({ signal }) => read("read_work", signal),
     readAttendedFabricCatalog: ({ signal }) => read("read_fabric_catalog", signal),
     readAttendedFabric: ({ rootId, runId, signal }) => {

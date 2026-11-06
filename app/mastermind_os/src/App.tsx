@@ -35,6 +35,8 @@ import privateEntryArt from "./auth-entry/private-entry.jpg";
 import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
 import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
+import { useByokRoleObservation } from "./meta-ceo/use-byok-role-observation";
+import { byokRoleView } from "./meta-ceo/byok-role-view";
 import { qualifyExecutiveOfficeSession, SESSION_TARGET_REF } from "./meta-ceo/session-context";
 import { Projects } from "./projects/Projects";
 import { ProjectPlanningJourney } from "./projects/ProjectPlanningJourney";
@@ -1851,6 +1853,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     native?!!sessionOwner:signedIn, selection, sessionBinding,
   );
   const office = useOfficeProjection(authRevision, selection, officeSession);
+  const byokRoles = useByokRoleObservation({
+    active: active === "Meta-CEO",
+    acquisition: signedIn && authState?.acquisition === true,
+    authRevision,
+  });
   // The Office draft is part of the unsent-text signal. It is read after the
   // session-qualified projection exists, never before.
   hasUnsentUserText.current = Boolean(freshDraft.hasUnsentDraft() || freshTurnDraft.hasUnsentDraft() || hasFreshAttendedOriginal() || projectJourney.hasUnsentDraft() || office.draft.text ||
@@ -4858,6 +4865,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           key={JSON.stringify([authRevision, selection, officeSession.sessionRef, officeSession.bindingGeneration])}
           locale={locale}
           projection={office.projection}
+          byokObservation={byokRoleView(byokRoles)}
+          canRefreshByok={byokRoles.canRefresh}
+          onRefreshByok={byokRoles.refresh}
           programmeDirection={{selection: projectWorkRef ? {work_ref: projectWorkRef} : null,
             read: projectReaders.plan, sourceGeneration: projectReaders.generation, canRead: projectReaders.canRead}}
           draft={office.draft}

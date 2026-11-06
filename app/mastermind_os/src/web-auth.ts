@@ -1,5 +1,6 @@
 import {hostObservationWebMethods} from "./resources/host-observation-web";
 import {freshConversationArguments,FRESH_CONVERSATION_PATHS} from "./orchestration/fresh-conversation-transport";
+import { BYOK_ROLES_RESPONSE_CAP } from "./meta-ceo/byok-roles-read";
 import {projectAccessPublicSelection} from "./access/project-access-host";
 import {instructionPublicRequest,instructionQuery,type InstructionPauseRequest} from "./instructions/instruction-host";
 import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
@@ -1277,6 +1278,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     restore,
     readPrograms: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/programs/current`, signal),
+    readByokRoles: ({ signal }) =>
+      read("acquisition", `${ORIGIN}/workspace/byok/roles/current`, signal, { cap: BYOK_ROLES_RESPONSE_CAP, typedUnavailableSchema: null }),
     readControlRoomState: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/control-room/state/current`, signal),
     readControlRoomDiscovery: ({ signal }) =>

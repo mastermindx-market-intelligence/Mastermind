@@ -198,3 +198,93 @@ def test_exact_original_coordinates_cannot_be_retargeted(tmp_path, root_stats, m
     mutation(p)
     with pytest.raises(module.FabricCompositionError):
         asyncio.run(client.request('status', p))
+
+
+def observation_document(tmp_path):
+    data = remote_document(tmp_path)
+    data['hermes_role_metadata_read'] = {
+        'host_ref': data['bindings'][0]['host_ref'],
+        'worker_id': data['bindings'][0]['worker_id'],
+        'expected_host_binding_sha256': 'b' * 64,
+        'expected_implementation_sha': 'c' * 40,
+    }
+    return data
+
+
+def observation_source(tmp_path):
+    data = observation_document(tmp_path)
+    path, digest = installed(tmp_path, json.dumps(data).encode())
+    return module.FabricBindingSource.from_path(path, digest), data
+
+
+@pytest.mark.parametrize('version', ['local', 'remote'])
+def test_no_explicit_hermes_selection_has_no_reader_or_network(tmp_path, root_stats, monkeypatch, version):
+    from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
+    def forbidden(*a, **kw): pytest.fail('unselected source acquired a host client')
+    monkeypatch.setattr(RemoteWorkerBrokerClient, 'for_host_observation', forbidden)
+    data = document() if version == 'local' else remote_document(tmp_path)
+    path, digest = installed(tmp_path, json.dumps(data).encode())
+    assert module.FabricBindingSource.from_path(path, digest).hermes_roles_reader() is None
+
+
+@pytest.mark.parametrize('mutation', [
+    lambda d: d.update(hermes_role_metadata_read=None),
+    lambda d: d.update(hermes_role_metadata_read=[]),
+    lambda d: d['hermes_role_metadata_read'].update(unknown=True),
+    lambda d: d['hermes_role_metadata_read'].pop('expected_implementation_sha'),
+    lambda d: d['hermes_role_metadata_read'].update(expected_implementation_sha='bad'),
+    lambda d: d['hermes_role_metadata_read'].update(expected_host_binding_sha256='A' * 64),
+    lambda d: d['hermes_role_metadata_read'].update(host_ref='different-host'),
+    lambda d: d['hermes_role_metadata_read'].update(worker_id='different-worker'),
+    lambda d: d['hermes_role_metadata_read'].update(worker_id=[]),
+    lambda d: d.update(schema_version=module.CONFIG_SCHEMA_VERSION),
+])
+def test_hermes_selection_is_closed_and_cannot_choose_another_transport(tmp_path, root_stats, mutation):
+    data = observation_document(tmp_path); mutation(data)
+    path, digest = installed(tmp_path, json.dumps(data).encode())
+    with pytest.raises(module.FabricCompositionError):
+        module.FabricBindingSource.from_path(path, digest)
+
+
+def test_hermes_reader_uses_one_existing_host_only_client(tmp_path, root_stats, monkeypatch):
+    from common import workspace_byok_read_contract as wire
+    from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
+    selected, data = observation_source(tmp_path)
+    calls = []
+    async def read(client):
+        calls.append(client)
+        assert client.identity == {} and client.allowed_operations == frozenset()
+        assert client._host_observation == (
+            data['bindings'][0]['host_ref'], 'b' * 64, 'c' * 40)
+        assert client.binding is selected._remote_index[
+            (data['bindings'][0]['host_ref'], data['bindings'][0]['worker_id'])].binding
+        return wire.unavailable()
+    def forbidden(*a, **kw): pytest.fail('host observation acquired an Attempt client')
+    monkeypatch.setattr(module.FabricBindingSource, 'client_for', forbidden)
+    monkeypatch.setattr(RemoteWorkerBrokerClient, 'request', forbidden)
+    monkeypatch.setattr(RemoteWorkerBrokerClient, 'read_hermes_roles', read)
+    reader = selected.hermes_roles_reader()
+    assert asyncio.iscoroutinefunction(reader)
+    assert asyncio.run(reader()) == wire.unavailable()
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('when', ['before', 'during'])
+@pytest.mark.parametrize('changed', ['composition', 'certificate'])
+def test_hermes_reader_discards_changed_source_or_transport(tmp_path, root_stats, monkeypatch, when, changed):
+    from pathlib import Path
+    from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
+    from common import workspace_byok_read_contract as wire
+    selected, data = observation_source(tmp_path)
+    calls = []
+    path = selected.path if changed == 'composition' else Path(data['remote_transports'][0]['client_cert_path'])
+    def change(): path.write_bytes(path.read_bytes() + b' ')
+    async def read(client):
+        calls.append(client)
+        if when == 'during': change()
+        return wire.unavailable()
+    monkeypatch.setattr(RemoteWorkerBrokerClient, 'read_hermes_roles', read)
+    reader = selected.hermes_roles_reader()
+    if when == 'before': change()
+    assert asyncio.run(reader()) == wire.unavailable('SOURCE_CHANGED')
+    assert len(calls) == (0 if when == 'before' else 1)
