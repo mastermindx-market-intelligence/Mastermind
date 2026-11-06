@@ -191,71 +191,31 @@ permission. Do not reopen an already-denied protected-result operation.
 
 ## Step 4C — Safe forward progress after legacy Git-push uncertainty
 
-This is the **narrow Git-source exception to indefinite historical-receipt waiting**, not an
-exception to the one-carrier, permission, denial, source-writer, or no-blind-retry laws.
-The original action and its historical `EFFECT_UNKNOWN` stay recorded. The current
-source state can nevertheless be reconciled sufficiently to authorize a **new,
-explicitly identified, forward-only transition** on the same original managed
-workspace/publisher/branch. Never resubmit the old action ID or represent the new
-transition as an outcome receipt for the old one.
+The original action and its historical `EFFECT_UNKNOWN` remain recorded. **Do
+not replay, rehome, force-push, or claim old-call rejection.** A distinct **new
+forward-only Git ref operation** may be admitted on the *same original registered
+workspace, publisher, branch, and origin* when all of these are proven:
 
-Classify effects before applying this path:
+1. Original push process ended/fenced; no active writer, conflicting lease,
+   queued publication, safety/permission denial or pending external effect.
+2. Exact current remote ref and PR head freshly observed; immutable proposed
+   head is a strict descendant of both the remote head and relevant original
+   intended commit. Preserve original source; divergence is a HOLD.
+3. The **installed** publisher advertises the specific recovery schema,
+   validates prior legacy action identity, uses a **new stable action ID** and
+   durable receipt, and executes only an atomic **non-force fast-forward** ref
+   update. Stale ref, wrong target, protected branch and concurrent non-FF
+   advance are refused. No force, force-with-lease or alternate carrier.
+4. New result is read back against the exact remote/PR. A lost new callback
+   is reconciled by *that* ID, never another push. An old action's historical
+   outcome is not reclassified because a new publication succeeded.
 
-| Effect | Recovery default |
-|---|---|
-| Read / pre-dispatch technical failure proven no-effect | Resume ordinary work under its existing authorization; no invented unknown effect |
-| Pure Git source-ref publication, with immutable commit IDs and server-enforced no-force ref update | One bounded same-carrier forward-progress qualification below |
-| Reversible local source/edit/test with no overlapping active writer | Continue independently, preserving the uncertain publication |
-| Deployment, external message, payment, trade, job start, release/merge, privilege, credential, destructive write, or uncertain process with further side effects | No implicit duplicate or new effect; resolve through the actual owner and gates |
-| Explicit permission/safety refusal | Stop that exact refused action, regardless of this exception |
-
-For an eligible Git ref, one **bounded** qualification suffices; do not demand a
-historical receipt that the old implementation never recorded:
-
-1. Bind the existing operation, installed publisher, original branch/ref and
-   canonical origin, intended old/new immutable SHAs and original unknown action.
-   Preserve its uncertainty and identify any active writer/lease/queued controller.
-   The original push process must be confirmed ended or fenced from further
-   mutations. An uninspectable live/uncertain process is a HOLD, not a timeout waiver.
-2. Read the current remote ref through the original authorized route and verify
-   the PR head; inspect the local candidate, actual commit ancestry and current
-   source custody. A missing remote activity row or a stale cached status is not
-   sufficient. If the remote already contains the intended commit, adopt that
-   **current-state observation** without pushing or claiming the old call returned
-   `APPLIED`.
-3. If the remote differs, require a proposed immutable head which is a strict
-   descendant of the **fresh remote head** and (where still relevant) the original
-   intended commit. Disjoint committed changes must not be silently lost.
-   Divergence, another active writer, protected-ref targets, branch replacement,
-   unknown lease, or unresolved authority/permission are a HOLD.
-4. Only a **currently installed and authorized** same-carrier publisher that
-   explicitly supports this recovery contract may accept a **new stable action ID**
-   referencing the old uncertain one. It must re-read the exact remote ref, perform
-   an atomic **non-force fast-forward ref update** using Git's expected-old-ref
-   transaction, and refuse if the ref changed. No force, force-with-lease, reset,
-   branch recreation, alternate account/provider/tool, or direct protected push.
-   The expected-ref fence plus no-force ancestry ensures that an old late push
-   cannot overwrite the newer head.
-5. Retain a durable new-action receipt and verify remote/PR head afterwards.
-   Do not infer CI, review, merge, deployment, or product acceptance. If this new
-   effect's return is ambiguous, preserve its own identity and reconcile that
-   exact action; do not start a third operation.
-6. Existing binding GitHub rules, codeowner/formal review, explicit HOLD, and
-   accepted release policy apply unchanged. A source release is not installation:
-   an uninstalled feature or unadvertised input schema cannot qualify the action.
-
-This exception does **not** authorize the present legacy Studio typed push tool
-to process #9596: its documented inputs include only the local head, and its
-present result lacks the old-action disposition and safe-forward contract.
-Until the owner ships/tests/installs the qualified recovery method, source/test
-preparation may proceed but its affected branch publication stays held.
-
-Acceptance requires adversarial coverage for lost-response after remote success,
-pre-dispatch failure, legitimate remote advance, concurrent writer, late old
-process, wrong repository/ref, stale expected SHA, already-contained SHA,
-divergent commit graph, explicit denial and interrupted new-action receipt.
-The tests must prove zero duplicate publish, zero remote history loss, and no
-unauthorized merge/deploy. See `docs/runbooks/uncertain-git-publication-recovery.md`.
+**Explicit permission/safety refusal**, irreversibles (trades, payments,
+messages, runtime deploys/merges), and uninspectable active processes stay
+held. Source/tests/research on disjoint lanes continue. Full qualification,
+failure matrix and #9596 references:
+`docs/runbooks/uncertain-git-publication-recovery.md`. No source-only policy
+grants installation, CI waiver, review, merge or production acceptance.
 
 ## Step 5 — Duplicate/conflict semantics
 
