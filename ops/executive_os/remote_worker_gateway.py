@@ -30,6 +30,8 @@ from control_plane.remote_worker_transport import (
 from common.hermes_role_status_contract import RoleStatusError
 from ops.executive_os.remote_worker_gateway_config import (
     FABRIC_BROKER_TARGET,
+    GatewayConfig,
+    HostObservationGatewayConfig,
     RemoteWorkerGatewayConfig,
 )
 from ops.executive_os.remote_assignment_control import seal_original_assignment
@@ -38,9 +40,16 @@ from ops.executive_os.remote_assignment_control import seal_original_assignment
 class RemoteWorkerGateway:
     """One-request-per-connection authenticated gateway with no durable state."""
 
-    def __init__(self, config: RemoteWorkerGatewayConfig) -> None:
+    def __init__(self, config: GatewayConfig) -> None:
+        if type(config) not in (RemoteWorkerGatewayConfig, HostObservationGatewayConfig):
+            raise TypeError("config must be a closed gateway profile")
         self.config = config
         self._host_observer = None
+        self._broker_client = None
+        self.broker_call = self._call_broker
+        self._ssl_context = self._build_server_ssl_context()
+        if type(config) is HostObservationGatewayConfig:
+            return
         client_arguments: dict[str, Any] = {}
         if config.broker_target == FABRIC_BROKER_TARGET:
             # Only the explicit Fabric target pins the broker peer uid; the
@@ -54,8 +63,6 @@ class RemoteWorkerGateway:
         )
         # Deliberate seam for hermetic tests; production uses the fixed AF_UNIX
         # WorkerBrokerClient above and never accepts a caller-supplied socket.
-        self.broker_call = self._call_broker
-        self._ssl_context = self._build_server_ssl_context()
 
     def _build_server_ssl_context(self) -> ssl.SSLContext:
         try:
@@ -85,6 +92,8 @@ class RemoteWorkerGateway:
         )
 
     async def _call_broker(self, operation: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if type(self.config) is HostObservationGatewayConfig or self._broker_client is None:
+            raise ValueError("host observation profile has no broker capability")
         return await self._broker_client.request(
             operation,
             payload,
@@ -92,6 +101,8 @@ class RemoteWorkerGateway:
         )
 
     async def _dispatch_authenticated(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        if type(self.config) is HostObservationGatewayConfig:
+            raise ValueError("host observation profile has no broker capability")
         if request["broker_operation"] == "assignment-seal":
             binding = self.config.assignment_control
             if binding is None:
@@ -144,6 +155,14 @@ class RemoteWorkerGateway:
                         host_response_sent = True
                 except (asyncio.TimeoutError, TransportValidationError, OSError):
                     return
+                return
+
+            if type(self.config) is HostObservationGatewayConfig:
+                # Refuse before entering the Worker grammar or any broker
+                # callback, including authenticated status/collect requests.
+                refusal = self._bound_response(document, outcome="refused", broker_response=None)
+                if refusal is not None:
+                    await self._write_response(writer, refusal)
                 return
 
             try:

@@ -1,5 +1,5 @@
 {
-  "protected_source": "c571acc9d7d5a2b28b7b9a250163da8667cf5364",
+  "protected_source": "6fa7838d811e305c10035f6531e75d8e547d9d03",
   "installed_preimage_generation": "177118be6675cf5a292524610afaaf4d5afc33dc6a150c22291240e3b6245fcd",
   "files": {
     "artifact_delivery.py": {
@@ -30,7 +30,7 @@
       "bytes": 12552
     },
     "ops/native_fabric/quota_continuity/rollout/native-manifest.json": {
-      "sha256": "a8da45b5f8e38aaf340f7fae27f85173237b41968d4f62802047584165f001e5",
+      "sha256": "febca585a589a7e933650a380b30531fb17e814c0429941853bc9930707fbb2a",
       "bytes": 10669
     }
   },
@@ -44,6 +44,8 @@
     "accepted_protected_participant_source": "58e319d26195e01d1b9c0edc06fe50006a9c9d65",
     "participant_activation": "explicit owner invocation only; no old/plain automatic row, lease or provider mutation",
     "participant_native_parent_authenticated": false,
-    "participant_scientific_or_served_proof": "UNQUALIFIED"
+    "participant_scientific_or_served_proof": "UNQUALIFIED",
+    "accepted_protected_initializer_component": "PR2103 / 6fa7838d811e305c10035f6531e75d8e547d9d03",
+    "affected_canonical_staging_and_historical_transition_tests": 56
   }
 }

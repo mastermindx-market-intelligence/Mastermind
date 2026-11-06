@@ -60,9 +60,10 @@ def source_owners(tmp_path_factory):
     assert retained['source_commit'] == '58083bf128fdac2d8eab374641c78bb403e7d18c'
     historical_manifest = retained['manifest']
     added = {'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py',
-                'ext/participant_binding.py', 'ext/fabric_participant_owner.py'}
+                'ext/participant_binding.py', 'ext/fabric_participant_owner.py',
+                'ext/original_advertised_artifact.py'}
     assert set(manifest) == set(historical_manifest) | added
-    # Remove only the two reviewed S14 and two participant additions inside this disposable102
+    # Remove only the two reviewed S14, two participant and one recovery additions inside this disposable102
     # inverse, after proving each is the actual current staged payload.
     for name in added:
         path = target / 'native-code-stage' / name
@@ -113,6 +114,14 @@ def source_owners(tmp_path_factory):
         # Restore only this disposable historical102 payload, not CURRENT.
         'ext/lease_broker.py':
             fixture.with_name('native-lease-broker-pre-fair-share-899ac3a9.py.txt'),
+        # Protected49c2 custody predecessors are immutable fixture data.
+        # The existing loop joins each complete payload to the frozen102 map.
+        'ext/linux_process_identity.py':
+            fixture.parent / 'native_historical_payloads/linux_process_identity.py.txt',
+        'ext/paid_host_qualification.py':
+            fixture.parent / 'native_historical_payloads/paid_host_qualification.py.txt',
+        'ext/paid_initializer.py':
+            fixture.parent / 'native_historical_payloads/paid_initializer.py.txt',
     }
     new_names = long_names | set(base_paths)
     # S9 also changes the CURRENT picker. Bind its authentic protected
