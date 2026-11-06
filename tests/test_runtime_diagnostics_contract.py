@@ -293,7 +293,8 @@ def test_direct_validation_refuses_noncanonical_timestamp(observed_at: str) -> N
 @pytest.mark.parametrize(
     "event_id",
     [
-        str(uuid.uuid1()),
+        # Fixed UUIDv1: generating one during collection breaks xdist worker parity.
+        str(uuid.UUID("6c7b3e1c-8d54-11f1-9c2b-0242ac120002")),
         str(uuid.uuid5(uuid.NAMESPACE_DNS, "mastermind")),
         str(FIXED_UUID).upper(),
         "not-a-uuid",
