@@ -146,10 +146,11 @@ test('composed invalid request adds useful diagnosis without dispatch',async()=>
 });
 
 test('capabilities explain replay scope without granting runtime authority',async()=>{
-  const e=engine();const out=unwrap(await createFabricFacade(e,{adapterPath:'/host/fabric_task.py'})
+  const e=engine([captured('request status result accept')]);const out=unwrap(await createFabricFacade(e,{adapterPath:'/host/fabric_task.py'})
     .call('fabric_capabilities',{}));
   assert.equal(out.recovery_semantics.acceptance_reason_is_admission_denial,false);
   assert.equal(out.recovery_semantics.caller_replay_authorized,false);
   assert.equal(out.recovery_semantics.technical_repair_owner,'existing_authorized_owner');
-  assert.equal(out.retry_allowed,false);assert.equal(e.calls.length,0);
+  assert.equal(out.retry_allowed,false);assert.equal(e.calls.length,1);
+  assert.match(e.calls[0].arguments.command,/'--help'/);
 });
