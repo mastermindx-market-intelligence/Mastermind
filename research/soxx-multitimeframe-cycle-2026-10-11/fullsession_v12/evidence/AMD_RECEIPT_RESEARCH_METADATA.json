@@ -1,0 +1,43 @@
+{
+  "actual_quote_fills_proven": false,
+  "by_trading_date_completed_30m": {
+    "2026-10-08": 8,
+    "2026-10-09": 16
+  },
+  "capture_day_utc": "2026-10-11",
+  "full_24h_eligible": false,
+  "market_data_rows_emitted": 0,
+  "nightly_coverage": [
+    {
+      "complete_24h_proven": false,
+      "complete_overnight": false,
+      "expected_minutes": 480,
+      "marketable_quote_replay_proven": false,
+      "missing_minutes": 240,
+      "night_start_et": "2026-10-07",
+      "observed_minutes": 240
+    },
+    {
+      "complete_24h_proven": false,
+      "complete_overnight": true,
+      "expected_minutes": 480,
+      "marketable_quote_replay_proven": false,
+      "missing_minutes": 0,
+      "night_start_et": "2026-10-08",
+      "observed_minutes": 480
+    }
+  ],
+  "no_duplicate_collector_or_archive": true,
+  "point_in_time_eligible": false,
+  "redistribution_authorized": false,
+  "research_retrospective_only": true,
+  "source": "macro-tiingo-dataos-read_research_view",
+  "source_receipt_id": "7e6758ed42cfad5800046a6dbee467465eaa526d82b91c425062083d87de7cee",
+  "source_rows": 720,
+  "source_sha256": "ae742fbb3d8427d25c200104070c17d7b332c8be6d6250306b31560383389d03",
+  "status": "EXISTING_ARCHIVE_READ_ONLY_CONSUMED",
+  "strict_complete_30m_bars": 24,
+  "symbol": "AMD",
+  "venue_scope": "single_ats",
+  "withheld_partial_30m_buckets": 0
+}

@@ -19,6 +19,7 @@ RESERVED = (
     owner.CONFIG_ROOT / "agent-relay.json",
     Path("/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist"),
     Path("/var/run/mastermind-agent-relay/agent-relay.sock"),
+    Path("/var/db/mastermind-agent-relay/socket/agent-relay.sock"),
 )
 
 

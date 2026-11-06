@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+import subprocess
+import sys
 
 PACKAGE = Path(__file__).resolve().parents[2] / "integrations" / "research_read_mcp"
 WRITE_NAMES = frozenset({
@@ -135,6 +137,26 @@ def _package_sources() -> list[tuple[str, str]]:
         (path.name, path.read_text(encoding="utf-8"))
         for path in sorted(PACKAGE.glob("*.py"))
     ]
+
+
+def test_f2_compatibility_helper_imports_without_sdk_or_transport():
+    """The helper's transitive imports stay pure, beyond the direct AST fence."""
+    program = """
+import importlib.abc
+import sys
+sys.path.insert(0, sys.argv[1])
+class RefuseEdge(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.', 1)[0] in {'mcp', 'starlette'}:
+            raise AssertionError('SDK_EDGE_IMPORTED_BY_PURE_HELPER')
+sys.meta_path.insert(0, RefuseEdge())
+from integrations.research_read_mcp.compatibility_v1 import CompatibilityPortV1, INPUT_SCHEMAS
+assert set(INPUT_SCHEMAS) == {'search', 'fetch'}
+assert CompatibilityPortV1.__module__ == 'integrations.research_read_mcp.compatibility_v1'
+"""
+    result = subprocess.run([sys.executable, "-I", "-c", program, str(PACKAGE.parents[1])],
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_f1_package_has_no_write_surface():

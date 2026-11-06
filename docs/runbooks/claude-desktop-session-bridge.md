@@ -50,6 +50,59 @@ The browser sends only:
 
 The browser never supplies the project path, Claude session id, CLI path, URL, or argv. Those are resolved server-side from the validated binding and server configuration.
 
+## Multiple Parall Desktop accounts (October 19, 2026 repair)
+
+Parall's numbered Claude wrappers can have distinct outer bundle identifiers
+and private user-data-dir paths while their underlying Claude runtime still
+uses the shared Anthropic Desktop identity. The wrappers also register
+claude:// as the same URL scheme. A generic native Desktop handoff therefore
+cannot reliably choose the account that owns a bound session.
+
+On macOS hosts with at least two numbered Parall wrappers installed,
+open_claude_code_in_desktop now refuses the native Desktop handoff with
+failure_kind=ambiguous before invoking the PTY handoff. Likewise,
+open_claude_desktop refuses claude:// URLs before asking LaunchServices
+to select a handler. No app is launched or credential inspected, and there
+is no retry under another account. The existing binding vocabulary has no
+authorized exact Parall account selector: adding such a selector requires
+explicit account-to-session qualification, not an arbitrary default.
+
+Ordinary Claude Code CLI operations (claude, claude -p, claude --resume)
+and HTTPS browser navigation are unchanged. The 2026-10-01 single-handler
+Desktop handoff canary below predates this safety repair and must not be
+interpreted as proof of multi-account selection. Source publication alone
+is not installed-runtime acceptance.
+
+### Existing M2 account-wide shell guard
+
+The same repair extends the **existing** `mastermind_fabric_routing_guard.py`
+used by Claude and Codex, not a second watcher or provider control plane.
+It blocks generic Desktop launches, the shared Anthropic bundle-ID route,
+raw Parall runtime launches, ambiguous `claude://` opens, and native
+`claude --desktop` use within covered Mastermind shell calls. Ordinary
+headless and resume CLI commands remain permitted. Its scope includes both
+`/Volumes/Mastermind/agent-workspaces` and the current
+`/Volumes/Mastermind 2/agent-workspaces` external SSD root.
+
+The reviewed source fragments are under `ops/claude_parall_isolation/`.
+The drift-checked installer operates only on the incumbent guard and the
+two existing account instruction files. It defaults to read-only verification.
+For an actual authorized installation, use:
+
+```sh
+python3 scripts/install_claude_parall_isolation.py
+python3 scripts/install_claude_parall_isolation.py --apply --evidence /absolute/new/evidence-directory
+```
+
+It only upgrades the known pre-isolation guard hash or validates the exact
+installed fragment. Unrecognized host drift refuses without replacing
+another owner's configuration; applies use private backups and atomic
+per-file writes. No background daemon, CLI binary change, provider login,
+or Parall account data modification occurs. A shell PreToolUse guard is
+not comprehensive OS-level enforcement: GUI/browser/native launch paths
+outside supported shell hooks still require the application-level account
+selection repair and real-path proof.
+
 ## Remote-use boundary
 
 This handoff is local to the Mac that runs Claude Desktop. It is the path for remotely commanding the M2 to open an M2-local Desktop session.

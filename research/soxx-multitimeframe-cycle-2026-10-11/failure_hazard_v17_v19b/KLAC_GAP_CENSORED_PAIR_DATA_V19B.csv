@@ -1,0 +1,11 @@
+symbol,episode,week,status,entry_ET,base_net_pct,intervention_net_pct,delta_pctpoints,baseline_reason,intervention_reason,check_eligible,prior_stop_before_check,check_no_ignition_exit,helped_original_loser,harmed_existing_winner,created_winner,destroyed_winner,buyer_loss_avoided_pct,winner_sacrificed_pct
+KLAC,3h_medium:1:392:405,2025-12-15,resolved,2025-12-15T12:30:00-05:00,-1.59925,-0.90847,0.69078,stop,no_ignition_after_3h,True,False,True,True,False,False,False,0.69078,0
+KLAC,3h_medium:1:431:439,2025-12-29,resolved,2026-01-02T12:30:00-05:00,9.78605,9.78605,0.0,scheduled_next_open,scheduled_next_open,True,False,False,False,False,False,False,0,0
+KLAC,3h_medium:1:474:476,2026-01-19,resolved,2026-01-21T15:30:00-05:00,-0.72469,0.08783,0.81251,stop,no_ignition_after_3h,True,False,True,True,False,True,False,0.81251,0
+KLAC,3h_medium:1:498:500,2026-02-02,resolved,2026-02-02T15:30:00-05:00,-0.72469,-0.72469,0.0,stop,stop,False,True,False,False,False,False,False,0,0
+KLAC,3h_medium:1:611:613,2026-03-30,resolved,2026-03-30T09:30:00-04:00,-1.59925,-1.59925,0.0,stop,stop,False,True,False,False,False,False,False,0,0
+KLAC,3h_medium:1:717:721,2026-05-18,resolved,2026-05-19T15:30:00-04:00,8.40323,8.40323,0.0,scheduled_next_open,scheduled_next_open,True,False,False,False,False,False,False,0,0
+KLAC,3h_medium:1:759:761,2026-06-08,resolved,2026-06-08T12:30:00-04:00,-0.72469,-0.55051,0.17418,stop,no_ignition_after_3h,True,False,True,True,False,False,False,0.17418,0
+KLAC,3h_medium:1:780:782,2026-06-15,resolved,2026-06-17T15:30:00-04:00,-1.59925,-1.59925,0.0,stop,stop,False,True,False,False,False,False,False,0,0
+KLAC,3h_medium:1:792:794,2026-06-22,resolved,2026-06-25T09:30:00-04:00,-1.59925,-1.59925,0.0,stop,stop,False,True,False,False,False,False,False,0,0
+KLAC,3h_medium:1:811:813,2026-07-06,resolved,2026-07-06T12:30:00-04:00,-1.59925,-1.59925,0.0,stop,stop,False,True,False,False,False,False,False,0,0

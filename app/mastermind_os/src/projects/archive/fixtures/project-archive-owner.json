@@ -1,0 +1,47 @@
+{
+  "schema": "mastermind.workspace_project_archive.v1",
+  "availability": "AVAILABLE",
+  "catalogue": {
+    "document_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "macro_sha": "04ea499af73536a3f02ea2272e0b4b4b7486bf03",
+    "work_refs": [
+      "WS:ARCHIVE-TEST",
+      "WS:UNDECLARED-TEST"
+    ],
+    "qualified_catalogue_count": 2
+  },
+  "sample": {
+    "schema": "agentos.project_archive_sample.v1",
+    "source_commit": "04ea499af73536a3f02ea2272e0b4b4b7486bf03",
+    "coverage": {
+      "kind": "QUALIFIED_CATALOGUE_SAMPLE",
+      "supplied_count": 2,
+      "observed_count": 2,
+      "company_total": null
+    },
+    "availability": "AVAILABLE",
+    "reason": null,
+    "items": [
+      {
+        "work_ref": "WS:ARCHIVE-TEST",
+        "title": "Source-backed programme",
+        "objective": "An authored objective is not accepted Direction.",
+        "archive": {
+          "schema": "agentos.workstream_archive.v1",
+          "state": "ARCHIVED",
+          "archived_on": "2026-11-04",
+          "archived_by": "Synthetic archive fixture principal",
+          "reason": "Explicit source declaration only."
+        },
+        "source": {
+          "repository": "macro",
+          "commit": "04ea499af73536a3f02ea2272e0b4b4b7486bf03",
+          "path": "agentos/workstreams/WS-ARCHIVE-TEST.md",
+          "content_sha256": "7d5816937326655c63033216a7738e50e4877a964c036270ac6b252a74b0b331"
+        }
+      }
+    ],
+    "can_restore": false
+  },
+  "reason_codes": []
+}

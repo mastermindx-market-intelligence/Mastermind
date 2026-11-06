@@ -5,9 +5,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   LaunchOrchestrator,
+  composeAcceptanceGoal,
+  type LaunchDetailsDraft,
   type LaunchCompletion,
   type LaunchForm,
 } from "./LaunchOrchestrator";
+import { canNavigateForAutomaticSignIn } from "../../auth-navigation-guard";
 
 const makeProps = (overrides = {}) => ({
   projects: [
@@ -39,6 +42,42 @@ afterEach(() => {
 });
 
 describe("LaunchOrchestrator", () => {
+  it("prevents automatic Auth0 navigation during an unsent or in-flight launch", () => {
+    const view = render(<LaunchOrchestrator {...makeProps()} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Keep this private launch goal." } });
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "" } });
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    view.rerender(<LaunchOrchestrator {...makeProps({ submitting: true })} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    view.unmount();
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+  });
+  it("keeps real project/profile/CEO controls and one-shot guard in composer presentation", async () => {
+    const user = userEvent.setup();
+    const props = makeProps({ frontierModels: [{ ref: "ceo-a", label: "Requested CEO A" }] });
+    render(<LaunchOrchestrator {...props} presentation="composer" />);
+    await user.type(screen.getByLabelText("Goal"), "Review the project sources");
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-gamma");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
+    expect((screen.getByLabelText("Requested CEO") as HTMLSelectElement).value).toBe("ceo-a");
+    fireEvent.submit(goalForm());
+    fireEvent.submit(goalForm());
+    expect(props.onSubmit).toHaveBeenCalledTimes(1);
+    expect(props.onSubmit.mock.calls[0][0]).toEqual({ goal: "Review the project sources", projectRef: "proj-gamma", profileRef: "prof-2", frontierModelAlias: "ceo-a" });
+    expect(pendingLaunchButton().disabled).toBe(true);
+  });
+
+  it("keeps unavailable and stale choices blocked in composer presentation", () => {
+    const props = makeProps({ projects: [{ ref: "unavailable", label: "Unavailable project", unavailableReason: "Read only" }] });
+    render(<LaunchOrchestrator {...props} presentation="composer" />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Do not launch" } });
+    fireEvent.submit(goalForm());
+    expect(launchButton().disabled).toBe(true);
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
   describe("rendering", () => {
     it("renders project and profile selects with all choices", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
@@ -282,10 +321,10 @@ describe("LaunchOrchestrator", () => {
       expect(btn.disabled).toBe(true);
     });
 
-    it("shows byte length error when goal exceeds the adapter-compatible 4000 bytes", () => {
+    it("shows byte length error when goal exceeds 16384 bytes", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
       const textarea = screen.getByLabelText("Goal") as HTMLTextAreaElement;
-      fireEvent.change(textarea, { target: { value: "a".repeat(4001) } });
+      fireEvent.change(textarea, { target: { value: "a".repeat(16385) } });
       expect(screen.getByText(/bytes/)).toBeTruthy();
       expect(launchButton().disabled).toBe(true);
     });
@@ -293,7 +332,7 @@ describe("LaunchOrchestrator", () => {
     it("allows submit when goal is exactly at the ASCII byte limit", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
       const textarea = screen.getByLabelText("Goal") as HTMLTextAreaElement;
-      fireEvent.change(textarea, { target: { value: "a".repeat(4000) } });
+      fireEvent.change(textarea, { target: { value: "a".repeat(16384) } });
       expect(screen.queryByText(/bytes/)).toBeNull();
       expect(launchButton().disabled).toBe(false);
     });
@@ -301,12 +340,12 @@ describe("LaunchOrchestrator", () => {
     it("counts multi-byte UTF-8 characters against the byte ceiling", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
       const textarea = screen.getByLabelText("Goal") as HTMLTextAreaElement;
-      // é is two bytes: 2000 chars = 4000 bytes, exactly at the ceiling
-      fireEvent.change(textarea, { target: { value: "é".repeat(2000) } });
+      // é is two bytes: 8192 chars = 16384 bytes, exactly at the ceiling
+      fireEvent.change(textarea, { target: { value: "é".repeat(8192) } });
       expect(screen.queryByText(/bytes/)).toBeNull();
       expect(launchButton().disabled).toBe(false);
 
-      fireEvent.change(textarea, { target: { value: "é".repeat(2001) } });
+      fireEvent.change(textarea, { target: { value: "é".repeat(8193) } });
       expect(screen.getByText(/bytes/)).toBeTruthy();
       expect(launchButton().disabled).toBe(true);
     });
@@ -1196,5 +1235,219 @@ describe("LaunchOrchestrator stale selection retention", () => {
     expect(
       (screen.getByLabelText("Project") as HTMLSelectElement).value,
     ).toBe("proj-gamma");
+  });
+});
+
+describe("requested CEO selection", () => {
+
+  it("omits the planner CEO for a native launch and retains the unsent draft", () => {
+    const onSubmit = vi.fn();
+    const onDraftChange = vi.fn();
+    const initialDraft = "Previously retained launch draft";
+    const goal = "Preserve this native research goal";
+    render(<LaunchOrchestrator {...makeProps({
+      onSubmit, onDraftChange, initialDraft, frontierModels,
+      profiles: [
+        { ref: "research_only", label: "Research only" },
+        { ref: "native_research_only", label: "Native research" },
+      ],
+    })} />);
+    const goalInput = screen.getByLabelText("Goal") as HTMLTextAreaElement;
+    expect(goalInput.value).toBe(initialDraft);
+    fireEvent.change(goalInput, { target: { value: goal } });
+    expect(onDraftChange).toHaveBeenLastCalledWith(goal);
+    fireEvent.change(screen.getByLabelText("Requested CEO"), { target: { value: "frontier.two" } });
+    fireEvent.change(screen.getByLabelText("Profile"), { target: { value: "native_research_only" } });
+    expect(screen.queryByLabelText("Requested CEO")).toBeNull();
+    expect(goalInput.value).toBe(goal);
+    expect(launchButton().disabled).toBe(false);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      goal, projectRef: "proj-alpha", profileRef: "native_research_only",
+    });
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("frontierModelAlias");
+    act(() => onSubmit.mock.calls[0][1]({ status: "refused" }));
+    expect(goalInput.value).toBe(goal);
+    expect(launchButton().disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("Profile"), { target: { value: "research_only" } });
+    expect((screen.getByLabelText("Requested CEO") as HTMLSelectElement).value).toBe("frontier.two");
+    expect(goalInput.value).toBe(goal);
+  });
+  const frontierModels = [{ ref: "frontier.one", label: "First CEO" }, { ref: "frontier.two", label: "Second CEO" }];
+  it("submits the explicit choice and preserves it after a refusal", () => {
+    const onSubmit = vi.fn();
+    render(<LaunchOrchestrator {...makeProps({ onSubmit, frontierModels })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build a project" } });
+    fireEvent.change(screen.getByLabelText("Requested CEO"), { target: { value: "frontier.two" } });
+    fireEvent.submit(goalForm());
+    expect(onSubmit.mock.calls[0][0].frontierModelAlias).toBe("frontier.two");
+    act(() => onSubmit.mock.calls[0][1]({ status: "refused" }));
+    expect((screen.getByLabelText("Requested CEO") as HTMLSelectElement).value).toBe("frontier.two");
+  });
+  it("blocks a selected CEO removed from the current catalog", () => {
+    const onSubmit = vi.fn();
+    const view = render(<LaunchOrchestrator {...makeProps({ onSubmit, frontierModels })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build a project" } });
+    fireEvent.change(screen.getByLabelText("Requested CEO"), { target: { value: "frontier.two" } });
+    view.rerender(<LaunchOrchestrator {...makeProps({ onSubmit, frontierModels: [frontierModels[0]] })} />);
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+  it("blocks all unavailable choices and leaves legacy launches unchanged", () => {
+    const view = render(<LaunchOrchestrator {...makeProps({ frontierModels: [
+      { ref: "frontier.one", label: "First CEO", unavailableReason: "Not qualified" },
+    ] })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build a project" } });
+    expect(launchButton().disabled).toBe(true);
+    view.unmount();
+    render(<LaunchOrchestrator {...makeProps()} />);
+    expect(screen.queryByLabelText("Requested CEO")).toBeNull();
+  });
+});
+
+describe("project goal character boundary", () => {
+  it.each(["en", "zh-CN"] as const)("retains full Unicode goals and explains the actual limit in %s", locale => {
+    const onSubmit = vi.fn();
+    render(<LaunchOrchestrator {...makeProps({onSubmit})} locale={locale} projectExecution />);
+    const input = screen.getByLabelText(locale === "zh-CN" ? "目标" : "Goal") as HTMLTextAreaElement;
+    const goal = "𠮷".repeat(4000);
+    fireEvent.change(input, {target:{value:goal}});
+    expect(input.getAttribute("aria-invalid")).toBe("false");
+    fireEvent.submit(input.closest("form")!);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0].goal).toBe(goal);
+    act(() => onSubmit.mock.calls[0][1]({status:"refused"}));
+    fireEvent.change(input, {target:{value:goal + "一"}});
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText(locale === "zh-CN"
+      ? "目标最多为 4,000 个字符。" : "Keep the goal within 4,000 characters.")).toBeTruthy();
+    expect(screen.queryByText(/byte UTF-8/)).toBeNull();
+    fireEvent.submit(input.closest("form")!);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("acceptance criteria with current draft and preview owners", () => {
+  const criteriaBox = () => screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement;
+  const details = (acceptanceCriteria: string): LaunchDetailsDraft => ({
+    acceptanceCriteria, handoffText: "", writePathsText: "", testTargetsText: "",
+    diffCheck: true, projectRef: "", profileRef: "",
+  });
+
+  it("uses UTF-16 criterion bounds and the tagged UTF-8 ceiling without shrinking ordinary Unicode goals", () => {
+    expect(composeAcceptanceGoal("Goal", "😀".repeat(250))).not.toBeNull();
+    expect(composeAcceptanceGoal("Goal", "😀".repeat(251))).toBeNull();
+    const goal = "𠮷".repeat(4000);
+    expect(composeAcceptanceGoal(goal, "")).toBe(goal);
+    expect(composeAcceptanceGoal(goal, "Verify")).toBeNull();
+    const suffixBytes = new TextEncoder().encode(' [MASTERMIND_ACCEPTANCE_CRITERIA_V1:["Verify"]]').length;
+    const bounded = "a".repeat(4000 - suffixBytes);
+    expect(new TextEncoder().encode(composeAcceptanceGoal(bounded, "Verify")!)).toHaveLength(4000);
+    expect(composeAcceptanceGoal(bounded + "a", "Verify")).toBeNull();
+  });
+
+  it.each(["\ud800", "bad\u2028criterion", "bad\u2029criterion", "bad\u0000criterion"])(
+    "rejects a criterion outside the protected Unicode contract: %j", criterion => {
+      expect(composeAcceptanceGoal("Goal", criterion)).toBeNull();
+    },
+  );
+
+  it("holds criteria-only drafts and releases an empty ordinary envelope", () => {
+    const onDetailsChange = vi.fn();
+    render(<LaunchOrchestrator {...makeProps({ onDetailsChange })} />);
+    fireEvent.change(criteriaBox(), { target: { value: "Retain even before the goal" } });
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    expect(onDetailsChange).toHaveBeenLastCalledWith(details("Retain even before the goal"));
+    fireEvent.change(criteriaBox(), { target: { value: "" } });
+    expect(onDetailsChange).toHaveBeenLastCalledWith(null);
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+  });
+
+  it.each([false, true])("restores exact user input after a same-owner remount (project=%s), without restoring preview", projectExecution => {
+    let retainedGoal = "";
+    let retainedDetails: LaunchDetailsDraft | null = null;
+    const previewRequest = vi.fn(() => ({ state: "UNAVAILABLE" as const }));
+    const props = makeProps({ projectExecution, previewRequest,
+      onDraftChange: (text: string) => { retainedGoal = text; },
+      onDetailsChange: (draft: LaunchDetailsDraft | null) => { retainedDetails = draft; },
+    });
+    const view = render(<LaunchOrchestrator {...props} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "  Original\ngoal  " } });
+    fireEvent.change(criteriaBox(), { target: { value: "  First proof\nSecond proof  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview requested scope" }));
+    expect(previewRequest).toHaveBeenCalledTimes(1);
+    view.unmount();
+    render(<LaunchOrchestrator {...props} initialDraft={retainedGoal} initialDetails={retainedDetails} />);
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("  Original\ngoal  ");
+    expect(criteriaBox().value).toBe("  First proof\nSecond proof  ");
+    expect(screen.queryByText("Launch request not prepared")).toBeNull();
+    expect(previewRequest).toHaveBeenCalledTimes(1);
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("invalidates preview on a criteria-only edit and previews exactly the submitted objective", () => {
+    const previewRequest = vi.fn((form: LaunchForm) => ({ state: "PREPARED" as const,
+      goal: form.goal, projectRef: form.projectRef, profileRef: form.profileRef,
+      frontierModelAlias: null, targetKey: "workstream" }));
+    const props = makeProps({ previewRequest });
+    render(<LaunchOrchestrator {...props} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build" } });
+    fireEvent.change(criteriaBox(), { target: { value: "First proof" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview requested scope" }));
+    expect(screen.getByText("Launch request preview")).toBeTruthy();
+    fireEvent.change(criteriaBox(), { target: { value: "Changed proof" } });
+    expect(screen.queryByText("Launch request preview")).toBeNull();
+    expect(previewRequest).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Preview requested scope" }));
+    fireEvent.click(launchButton());
+    expect(props.onSubmit.mock.calls[0][0]).toEqual(previewRequest.mock.calls[1][0]);
+    expect(props.onSubmit.mock.calls[0][0].goal).toBe(composeAcceptanceGoal("Build", "Changed proof"));
+  });
+
+  it("keeps the later criteria draft on a stale accepted handle and clears only its matching accepted outcome", () => {
+    const onDetailsChange = vi.fn();
+    const props = makeProps({ onDetailsChange });
+    render(<LaunchOrchestrator {...props} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Goal" } });
+    fireEvent.change(criteriaBox(), { target: { value: "First proof" } });
+    fireEvent.click(launchButton());
+    const first = props.onSubmit.mock.calls[0][1] as LaunchCompletion;
+    act(() => first({ status: "refused" }));
+    fireEvent.change(criteriaBox(), { target: { value: "Later proof" } });
+    fireEvent.click(launchButton());
+    act(() => first({ status: "accepted" }));
+    expect(criteriaBox().value).toBe("Later proof");
+    expect(pendingLaunchButton().disabled).toBe(true);
+    act(() => props.onSubmit.mock.calls[1][1]({ status: "accepted" }));
+    expect(criteriaBox().value).toBe("");
+    expect(onDetailsChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it("neither appends nor consumes retained initial criteria during a follow-up", () => {
+    const onDetailsChange = vi.fn();
+    const props = makeProps({ projectExecution: true, onDetailsChange });
+    const view = render(<LaunchOrchestrator {...props} initialDetails={details("Initial requirement")} />);
+    view.rerender(<LaunchOrchestrator {...props} projectFollowUp initialDetails={details("Initial requirement")} />);
+    expect(screen.queryByLabelText(/Acceptance criteria/)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Follow-up message"), { target: { value: "Continue the original work" } });
+    fireEvent.click(launchButton());
+    expect(props.onSubmit.mock.calls[0][0].goal).toBe("Continue the original work");
+    act(() => props.onSubmit.mock.calls[0][1]({ status: "accepted" }));
+    expect(onDetailsChange.mock.calls.at(-1)?.[0]?.acceptanceCriteria).toBe("Initial requirement");
+    view.rerender(<LaunchOrchestrator {...props} initialDetails={details("Initial requirement")} />);
+    expect(criteriaBox().value).toBe("Initial requirement");
+  });
+
+  it("localizes the new criteria controls and connects help and validation", () => {
+    render(<LaunchOrchestrator {...makeProps()} locale="zh-CN" />);
+    const input = screen.getByLabelText("验收条件（可选，每行一项）") as HTMLTextAreaElement;
+    expect(input.getAttribute("aria-describedby")).toContain("-help");
+    fireEvent.change(screen.getByLabelText("目标"), { target: { value: "实现目标" } });
+    fireEvent.change(input, { target: { value: "条件\n".repeat(7) } });
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(input.getAttribute("aria-describedby")).toContain("-error");
+    expect(screen.getByRole("alert").textContent).toContain("最多填写六项条件");
   });
 });

@@ -31,6 +31,25 @@ def digest(value):
     return hashlib.sha256(canonical(value)).hexdigest()
 
 
+def validate_physical_release(value, *, run_id):
+    """Validate retained original LaneReleaseReceipt, never manufacture release.
+
+    Call only on the authenticated original backend's response. Shape and
+    digests alone convey no physical ownership, cleanup or account settlement.
+    """
+    fields = {'schema', 'key', 'marker_device', 'marker_inode', 'parent_device',
+              'parent_inode', 'released_at', 'marker_absent', 'parent_synced'}
+    if (type(value) is not dict or set(value) != fields
+            or value['schema'] != 'mastermind.lane.owned_release/v1'
+            or value['key'] != run_id
+            or value['marker_absent'] is not True or value['parent_synced'] is not True
+            or any(type(value[k]) is not int or value[k] < 0 for k in (
+                'marker_device', 'marker_inode', 'parent_device', 'parent_inode'))
+            or type(value['released_at']) is not str or not value['released_at']):
+        raise AssignmentObservationError('original physical release is unconfirmed')
+    return json.loads(canonical(value))
+
+
 def require_worker_principal(policy):
     if (os.geteuid() != policy.worker_uid or os.getegid() != policy.worker_gid
             or os.getuid() != policy.worker_uid or os.getgid() != policy.worker_gid

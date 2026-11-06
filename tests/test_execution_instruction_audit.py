@@ -96,3 +96,39 @@ class InstructionAuditTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class ManagedBriefAuditTests(InstructionAuditTests):
+    brief = 'Proceed with assigned work. Preserve real permission gates.'
+
+    def block(self, body=None):
+        return ('<!-- mastermind-assigned-execution-v1 -->\n' +
+                (self.brief if body is None else body) +
+                '\n<!-- /mastermind-assigned-execution-v1 -->\n')
+
+    def test_marker_alone_is_not_complete_managed_brief(self):
+        p = self.put(self.root / 'AGENTS.md', '<!-- mastermind-assigned-execution-v1 -->\nincomplete')
+        r = inspect_markdown(p)
+        self.assertEqual(r.get('execution_brief', {}).get('state'), 'MALFORMED')
+
+    def test_balanced_block_has_digest_and_exact_offsets(self):
+        data = 'é user preference\n' + self.block() + 'tail\n'
+        p = self.put(self.root / 'AGENTS.md', data)
+        r = inspect_markdown(p)
+        b = r.get('execution_brief', {})
+        self.assertEqual(b.get('state'), 'PRESENT_UNCOMPARED')
+        self.assertEqual(b.get('start_byte'), len('é user preference\n'.encode()))
+        self.assertEqual(b.get('end_byte'), len(('é user preference\n' + self.block()).encode()) - 1)
+        self.assertEqual(b.get('body_sha256'), __import__('hashlib').sha256(self.brief.encode()).hexdigest())
+
+    def test_budget_cut_cannot_claim_complete_brief_selection(self):
+        self.put(self.root / 'AGENTS.md', 'x' * 100 + self.block())
+        r = self.audit(project_max_bytes=20)['chain'][0]
+        self.assertFalse(r.get('execution_brief_fully_eligible', True))
+        self.assertFalse(r.get('assigned_execution_marker_eligible', True))
+
+    def test_override_records_shadowed_expected_file(self):
+        expected = self.put(self.home / 'AGENTS.md', self.block())
+        self.put(self.home / 'AGENTS.override.md', 'old unrelated rules')
+        r = self.audit()
+        self.assertEqual(r.get('shadowed_files', [{}])[0].get('path'), str(expected))
+        self.assertEqual(r.get('shadowed_files', [{}])[0].get('reason'), 'HIGHER_PRIORITY_FILENAME')

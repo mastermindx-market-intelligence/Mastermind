@@ -1,10 +1,11 @@
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {startGateway} from './gateway.mjs';
-const fixture=new URL('./fixtures/shared-state-backend.mjs',import.meta.url).pathname;
+const fixture=fileURLToPath(new URL('./fixtures/shared-state-backend.mjs',import.meta.url));
 const auth={middleware(req,_res,next){const principal=req.headers.authorization;
   if(!['alice','bob'].includes(principal))throw Object.assign(new Error('unauthorized'),{statusCode:401});
   req.auth={principal,clientId:principal,scopes:['studio.control']};next();}};

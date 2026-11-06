@@ -40,6 +40,7 @@ broker reconciliation; it never replaces either.
 from __future__ import annotations
 
 import dataclasses
+import contextlib
 import hashlib
 import json
 import os
@@ -85,6 +86,10 @@ INCIDENT_AUTHORITY_REFERENCE = "mastermind.due10_incident_recovery/v1"
 INCIDENT_POLICY_SCHEMA = "mastermind.executive_provider_incident_policy/v1"
 INCIDENT_GRANT_SCHEMA = "mastermind.executive_provider_incident_grant/v1"
 INCIDENT_COMMITMENT_SCHEMA = "mastermind.executive_provider_incident_commitment/v1"
+# The closed v2 commitment schema of the dormant forward protocol.  This
+# module owns the constant; provider_incident_forward re-exports it, so v1
+# schema dispatch below never imports the optional forward module.
+COMMITMENT_V2_SCHEMA = "mastermind.executive_provider_incident_commitment/v2"
 INCIDENT_ALLOCATION_SCHEMA = "mastermind.executive_provider_incident_allocation/v1"
 INCIDENT_RECOVERY_CLASS = "due10_incident"
 INCIDENT_ISSUER_ACTION = "executive.worker_auth.issue_due10_incident_grant"
@@ -783,6 +788,114 @@ def validate_grant_document(
     return grant
 
 
+def _directory_identity(info: os.stat_result) -> tuple[int, ...]:
+    # Directory size/timestamps/link count change when this installer creates
+    # its child. Ownership, permissions and inode identity must never change.
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
+
+
+def _check_recovery_directory(path: Path, descriptor: int, *, private: bool) -> None:
+    before = os.fstat(descriptor)
+    if (not stat.S_ISDIR(before.st_mode)
+            or before.st_uid != CUSTODY_UID or before.st_gid != CUSTODY_GID
+            or (stat.S_IMODE(before.st_mode) != 0o700 if private
+                else bool(stat.S_IMODE(before.st_mode) & 0o022))):
+        raise RecoveryError("recovery_custody_parent_unsafe")
+    if _directory_identity(path.lstat()) != _directory_identity(before):
+        raise RecoveryError("recovery_custody_parent_changed")
+    _readiness._assert_no_macos_acl(path)
+    if (_directory_identity(path.lstat()) != _directory_identity(before)
+            or _directory_identity(os.fstat(descriptor)) != _directory_identity(before)):
+        raise RecoveryError("recovery_custody_parent_changed")
+
+
+@contextlib.contextmanager
+def _recovery_directory_chain(*, create_missing: bool = False):
+    """Hold the fixed chain below the already-qualified Executive state root.
+
+    Only the installer may create missing private directories. Existing
+    directories are checked, never normalized; no custody document is touched.
+    Darwin's system-owned /var alias is outside this existing state-root join.
+    """
+    records: list[tuple[Path, int, bool]] = []
+    identities: list[tuple[int, ...]] = []
+
+    def revalidate() -> None:
+        for (path, descriptor, private), identity in zip(records, identities):
+            _check_recovery_directory(path, descriptor, private=private)
+            if _directory_identity(os.fstat(descriptor)) != identity:
+                raise RecoveryError("recovery_custody_parent_changed")
+
+    try:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        root = RECOVERY_STATE_ROOT.parent.parent
+        descriptor = os.open(root, flags)
+        records.append((root, descriptor, False))
+        identities.append(_directory_identity(os.fstat(descriptor)))
+        revalidate()
+        for path in (RECOVERY_STATE_ROOT.parent, RECOVERY_STATE_ROOT):
+            revalidate()
+            parent_descriptor = records[-1][1]
+            created = False
+            try:
+                os.stat(path.name, dir_fd=parent_descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                if not create_missing:
+                    raise RecoveryError("recovery_custody_parent_missing") from None
+                # A concurrent occupant must refuse rather than be adopted.
+                os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor)
+                created = True
+            descriptor = os.open(path.name, flags, dir_fd=parent_descriptor)
+            records.append((path, descriptor, True))
+            identities.append(_directory_identity(os.fstat(descriptor)))
+            revalidate()
+            if created:
+                os.fsync(descriptor)
+                os.fsync(parent_descriptor)
+                revalidate()
+        yield records[-1][1]
+        revalidate()
+    except FileNotFoundError as exc:
+        raise RecoveryError("recovery_custody_parent_missing") from exc
+    except (OSError, _readiness.ReadinessError) as exc:
+        raise RecoveryError("recovery_custody_unreadable") from exc
+    finally:
+        for _path, descriptor, _private in reversed(records):
+            os.close(descriptor)
+
+
+def prepare_recovery_custody() -> None:
+    """Installer-only creation of the two fixed missing custody directories.
+
+    This does not admit an issuer, alter an existing marker, or authorize
+    recovery of any earlier unknown operation.
+    """
+    if os.geteuid() != CUSTODY_UID:
+        raise RecoveryError("recovery_custody_installer_owner_mismatch")
+    with _recovery_directory_chain(create_missing=True):
+        pass
+
+
+def preflight_recovery_custody() -> None:
+    """Read-only custody and empty-slot check before a fresh issuer marker.
+
+    Missing parents are not empty records. Any occupant blocks fresh issuance;
+    a matching grant is not a terminal replay receipt or a resume capability.
+    Post-preflight races still meet the unchanged create-only write path.
+    """
+    slots = (RECOVERY_GRANT_PATH, RECOVERY_INCIDENT_GRANT_PATH,
+             RECOVERY_INCIDENT_COMMITMENT_PATH, RECOVERY_ALLOCATION_PATH)
+    with _recovery_directory_chain() as descriptor:
+        for path in slots:
+            if path.parent != RECOVERY_STATE_ROOT:
+                raise RecoveryError("recovery_custody_path_unreviewed")
+            try:
+                os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                continue
+            raise RecoveryError("recovery_custody_slot_occupied")
+
+
 def _validate_state_directory(path: Path) -> None:
     """Require the fixed root-owned custody chain, without following symlinks."""
 
@@ -1379,11 +1492,35 @@ def read_grant_for_admission(
 
 
 def read_incident_commitment() -> tuple[dict[str, Any], bytes]:
-    """Return the custody-checked issuance commitment and its exact bytes."""
+    """Return the custody-checked issuance commitment and its exact bytes.
+
+    Dispatch is strictly by the CLOSED commitment schema: v1 keeps the exact
+    original law; the dormant forward protocol's v2 document is validated by
+    its own closed validator.  Every other schema stays malformed.
+    """
 
     raw = _read_custody_bytes(
         RECOVERY_INCIDENT_COMMITMENT_PATH, maximum=_GRANT_MAX_BYTES
     )
+    parsed = _read_custody_json(raw)
+    if parsed.get("schema_version") == COMMITMENT_V2_SCHEMA:
+        # v2 documents alone resolve the optional forward module; the v1 path
+        # above never imports it.  An unavailable module typed-refuses.
+        try:
+            forward = _forward_module()
+        except ImportError as exc:
+            raise RecoveryError("recovery_custody_schema_malformed") from exc
+        commitment = _require_exact_fields(
+            parsed, forward._COMMITMENT_V2_FIELDS,
+            "recovery_grant_fields_malformed",
+        )
+        try:
+            forward.validate_v2_commitment_structure(
+                commitment, commitment_bytes=raw,
+            )
+        except forward.ForwardRecoveryError as exc:
+            raise RecoveryError("recovery_custody_schema_malformed") from exc
+        return commitment, raw
     commitment = _read_custody_document(raw, schema=INCIDENT_COMMITMENT_SCHEMA)
     _require_exact_fields(
         commitment, _INCIDENT_COMMITMENT_FIELDS, "recovery_grant_fields_malformed"
@@ -1399,17 +1536,55 @@ def read_incident_commitment() -> tuple[dict[str, Any], bytes]:
     return commitment, raw
 
 
+def _forward_module():
+    from ops.executive_os import provider_incident_forward as forward
+
+    return forward
+
+
+def read_incident_grant_with_bytes() -> tuple[dict[str, Any], bytes]:
+    """Custody-checked historical incident grant together with its bytes."""
+
+    raw = _read_custody_bytes(
+        RECOVERY_INCIDENT_GRANT_PATH, maximum=_GRANT_MAX_BYTES
+    )
+    grant = _validate_incident_grant_document(
+        _read_custody_document(raw, schema=INCIDENT_GRANT_SCHEMA)
+    )
+    return grant, raw
+
+
 def validate_incident_issuance_join(
     grant: Mapping[str, Any], *, grant_sha256: str
 ) -> dict[str, Any]:
     """Join one incident grant to its complete actual issuance terminal.
 
-    Required, in order: the custody-checked commitment binds this exact grant
-    digest, designated successor and issuer identity; the issuer request has
-    no in-flight or reconciliation record; and one root-owned terminal broker
-    receipt SUCCEEDED with a stdout digest that binds the exact commitment
-    bytes.  A root-owned handwritten JSON grant alone is insufficient.
+    Live law: a dormant forward policy refuses, so live admission can never
+    consume a v2 join.  Read-only historical inspection of already-consumed
+    evidence uses :func:`_validate_incident_issuance_join_historical`, which
+    is private and not caller-selectable from any admission path.
     """
+    return _incident_issuance_join(grant, grant_sha256=grant_sha256, historical=False)
+
+
+def _validate_incident_issuance_join_historical(
+    grant: Mapping[str, Any], *, grant_sha256: str
+) -> dict[str, Any]:
+    """Private historical verifier for already-consumed incident evidence.
+
+    Identical to the live join except that the live forward-policy activation
+    predicate is skipped, so a consumed allocation stays readable after the
+    amendment is deactivated.  Everything else — custody, commitment, grant,
+    reservation, terminal, guard and identity joins — runs unchanged, and no
+    admission path selects this verifier.
+    """
+    return _incident_issuance_join(grant, grant_sha256=grant_sha256, historical=True)
+
+
+def _incident_issuance_join(
+    grant: Mapping[str, Any], *, grant_sha256: str, historical: bool
+) -> dict[str, Any]:
+    """Shared join body; ``historical`` skips only the live policy predicate."""
 
     from control_plane import executive_privileged_broker as broker
 
@@ -1418,6 +1593,12 @@ def validate_incident_issuance_join(
             grant["issuer_request_id"], "recovery_grant_successor_malformed"
         )
         commitment, commitment_raw = read_incident_commitment()
+        if commitment.get("schema_version") == COMMITMENT_V2_SCHEMA:
+            return _validate_v2_issuance_join(
+                grant, grant_sha256=grant_sha256,
+                commitment=commitment, commitment_raw=commitment_raw,
+                historical=historical,
+            )
         if commitment["authorization"] != grant["authorization"]:
             raise RecoveryError("incident_commitment_mismatch")
         if commitment["grant_sha256"] != grant_sha256:
@@ -1463,6 +1644,65 @@ def validate_incident_issuance_join(
     except (OSError, ValueError, broker.BrokerTrustError) as exc:
         raise RecoveryError("incident_issuance_unverified") from exc
     return {"terminal": result, "commitment_sha256": hashlib.sha256(commitment_raw).hexdigest()}
+
+
+def _validate_v2_issuance_join(
+    grant: Mapping[str, Any],
+    *,
+    grant_sha256: str,
+    commitment: Mapping[str, Any],
+    commitment_raw: bytes,
+    historical: bool = False,
+) -> dict[str, Any]:
+    """Closed v2 forward-protocol issuance join; v1 law is untouched.
+
+    Requires the exact live forward policy amendment, the complete permanent
+    reservation, the still-present unchanged original marker with no original
+    terminal or reconciliation, the exclusive SUCCEEDED forward terminal whose
+    stdout binds the exact v2 commitment bytes, and an ABSENT forward guard.
+    Returns the same existing join result shape as v1.  ``historical`` skips
+    only the live-policy predicate for read-only inspection of already
+    consumed evidence; it is never selectable from live admission.
+    """
+    from control_plane import executive_privileged_broker as broker
+
+    from types import SimpleNamespace
+    try:
+        forward = _forward_module()
+    except ImportError as exc:
+        raise RecoveryError("recovery_custody_schema_malformed") from exc
+    try:
+        if not historical:
+            policy = forward.PRODUCTION_FORWARD_RECOVERY_POLICY
+            if policy is None:
+                raise RecoveryError("forward_policy_dormant")
+            if commitment["forward_recovery"]["amendment_authorization"] != (
+                policy.amendment_authorization()
+            ):
+                raise RecoveryError("forward_policy_binding_mismatch")
+        forward.validate_v2_commitment_document(
+            commitment, commitment_bytes=commitment_raw,
+            grant=grant, grant_sha256=grant_sha256,
+        )
+        env = SimpleNamespace(
+            receipt_root=broker._RECEIPT_ROOT,
+            require_root=False,
+            custody_uid=CUSTODY_UID,
+            custody_gid=CUSTODY_GID,
+        )
+        join = forward.validate_complete_forward_join(
+            env, grant=grant, grant_sha256=grant_sha256,
+            commitment=commitment, commitment_bytes=commitment_raw,
+        )
+    except RecoveryError:
+        raise
+    except (forward.ForwardRecoveryError, broker.BrokerTrustError, OSError,
+            ValueError) as exc:
+        raise RecoveryError("incident_issuance_unverified") from exc
+    return {
+        "terminal": join["terminal"],
+        "commitment_sha256": join["commitment_sha256"],
+    }
 
 
 def admit_recovery_context(
@@ -1570,7 +1810,9 @@ def _validate_incident_allocation_document(value: Any) -> dict[str, Any]:
         raise RecoveryError("recovery_allocation_not_consumed")
     _readiness._timestamp(record["claimed_at"], code="recovery_allocation_fields_malformed")
     grant = _read_incident_historical_grant(expected_digest=record["grant_sha256"])
-    join = validate_incident_issuance_join(grant, grant_sha256=record["grant_sha256"])
+    join = _validate_incident_issuance_join_historical(
+        grant, grant_sha256=record["grant_sha256"]
+    )
     expected = {
         "policy_id": grant["authorization"]["policy_id"],
         "issuer_request_id": grant["issuer_request_id"],
@@ -1604,6 +1846,17 @@ def _claim_incident_allocation(
 
     _hex_digest(predecessor_receipt_sha256, "recovery_predecessor_digest_malformed")
     _validate_state_directory(path)
+    # Existing custody is classified historically by the caller, including
+    # after policy deactivation.  An absent slot still requires the live join:
+    # earlier admission is not authority to create a new allocation now.
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise RecoveryError("recovery_allocation_unreadable") from exc
+    else:
+        raise FileExistsError(path)
     join = validate_incident_issuance_join(grant, grant_sha256=grant_sha256)
     evidence = grant["evidence"]
     if predecessor_receipt_sha256 != evidence["readiness_receipt_sha256"]:
