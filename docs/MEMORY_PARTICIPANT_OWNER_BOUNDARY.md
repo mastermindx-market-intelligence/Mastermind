@@ -5,8 +5,10 @@
 The frozen 499 source was **not accepted for execution**: MEMORY-OWNER-PAID-1
 found that Runtime/profile custody did not establish incumbent paid admission.
 The b73 economic successor closed that finding in a scoped independent review
-(77 unique retained checks). The new V3 ordering/configuration/service-reader
-delta remains prospective and subject to the same reviewer continuation.
+(77 unique retained checks). The V3 ordering/configuration/service-reader successor c2b0614 closed its
+scoped currentness finding (191 accepted cases); a90919b added the accepted
+Macro9fb-to-M2 source interoperability join (19 new cases). Neither source
+acceptance nor inert fixtures establish actual enrollment or study authority.
 No profile, key, grant, service, provider invocation or study is enabled.
 
 The existing operator bearer may authorize ONLY a closed pre-input economic
@@ -246,8 +248,9 @@ its wrapper is the prospective packet contract, not an observed Linux issuer
 packet. There is no claim of deployed identity, real credential/provider call,
 source/E0 read, installation, study, actual blinding or final scientific acceptance.
 
-Remaining source acceptance is the one actual Macro S6 implementation/vector join
-and consequential coherent review. Runtime installation/enrollment and any real
+The original-case component/currentness review is accepted at c2b0614; the
+actual Macro9fb-to-M2 source vector join is accepted at a90919b. Those unchanged
+source proofs are reused, rather than reopened by this annotation decision. Runtime installation/enrollment and any real
 study/provider effect remain separately held. Public product/API routing and
 completed-case cross-process recovery need their actual current admission owner;
 the source does not expose a generic result endpoint or manufacture that grant.
@@ -273,3 +276,112 @@ not historic loaded-environment attestation. Linux current service permission
 must bind the exact original recipient, not an end user inferred from Control.
 All five flags, scientific admission, adjudicator access and retry remain false;
 no live study/provider/private source or original held operation is touched.
+
+
+## S10 annotation authority: exact enabling producer boundary
+
+This is the source integration decision for P8.T1.S16.S1, not an annotation
+implementation or a new grant. It consumes the parent-reviewed [S10 contract](https://github.com/mastermindx-market-intelligence/macro/pull/10768#issuecomment-6697748537),
+SHA256 `43c1346226fe8b1fdf62952d0bca1226e3ec3998cde5cf15847b1134ba613a0f`.
+The source basis is Macro9fb08c079c0048f3f9fe9549208b2afc1316119b and
+M2c2b0614381959ab3092ea2407c851144511b65dc, carried unchanged through a90919b.
+All five verification flags, scientific admission and adjudicator access stay false.
+No three-owner wrapper or always-refusing API has been added.
+
+### What the actual existing issuers establish
+
+| Existing owner / source | Genuine bounded fact | Missing fact for S10 |
+| --- | --- | --- |
+| `protected_memory_original.completed_original_reference` / `current_reference` | Exact original Runtime Job/root/Attempt, ordered Events and private byte identities | Reviewer identity, expertise, independence and exposure are not in those receipts |
+| `protected_memory_completed_read` | Current installed Control, global READ, exact SERVICE policy, fresh Linux permission, original private byte integrity, final-window disclosure fence | The SERVICE is not either reviewer or an adjudicator; current permission is for the original result only |
+| `fabric_participant_owner.validate_payload` / `metadata` | Owner-scoped, hash/size-bound declared metadata; peer metadata withheld, adjudicator refused | `declared_competencies` and `declared_distinct_from` are display-only; no authenticated underlying qualification/independence/exposure issuer |
+| `executive_orchestration_principal` / `paid_model_execution_principal` | Process/provider-home/placement correlation or closed paid execution DATA; actual paid claim remains separate | An OS/process/account/model identity is not the registered reviewer's qualification or prior-exposure witness; paid DATA explicitly mints no authority |
+| `reviewed_role_input` / `product_acceptance_review_owner` | Existing Runtime review role is bound to a specific subject/criteria/result digest | Review scheduling/subject custody does not authenticate this scientific evaluation's participant identity, qualifications or peer-rating isolation |
+| Macro `market_memory_e0_native_case._resolve_current_case` | Current registered SERVICE/source recipient, selected case and declared reviewer assignment | Its `original_reviewer_recipient_required` admits only declared plan reviewers, not adjudicator delegation; the declaration validator expressly leaves authentication false |
+
+One new inert discriminator demonstrates the precise non-equivalence: two
+structurally valid reviewer-principal declarations may describe the same
+execution identity under distinct refs. Both validate as **display-only**, with
+all flags false. This is not an observation of a real actor or proof of either
+independence or non-independence. It establishes that these metadata reads
+cannot serve as the missing authenticated-actor issuer. No source, paid budget,
+private rating or provider is read or reserved by that test.
+
+### The minimal complete extension and its current missing input
+
+The first missing enabling interface is a source-qualified **native evaluation
+assignment issuer**, at the existing native registration/control owner. Before
+any new annotation admission or input release, it must join an actually
+authenticated reviewer execution to the original registered participant, the
+original qualification evidence and the registered independence rule. It must
+observe exposure through the incumbent protected input channel, not accept a
+reported principal/ref, a callback, a Boolean, an Attempt ID or a SERVICE grant.
+Neither inspected repository exposes that issuer today. The current reviewer
+plan/metadata declaration family must not be relabelled as its implementation.
+A genuine producer must bind current permission and immutable assignment/evidence
+facts; transport/process authentication and competence evidence are separate
+conjuncts. No generic identity registry or reviewer queue is needed or proposed.
+
+Once that enabling interface exists, the same protected owner can supply the
+reviewed contract's three APIs without another lifecycle/store:
+
+1. At the existing `protected_memory_execution` admission/FD-release seam,
+   consume the exact current native review-assignment capability and a distinct
+   current source-purpose authorization. Record the original subject, guide,
+   private assignment, authenticated actor/evidence and actual input-release
+   receipt in the existing Attempt/Event/private namespace. Qualification
+   failure occurs before economic reservation or disclosure. Existing paid
+   accounting remains a separate mandatory gate, never a competence witness.
+2. Add a separately versioned typed annotation collector, retaining actual
+   original annotation input/result bytes and their exposure/completion order.
+   Derive decoded-answer UTF8 bytes from the retained original result without
+   normalization; bind raw-result, answer-text, packet and source-snapshot hash
+   domains separately. The exact guide taxonomy and selected-descriptor byte
+   membership stay authoritative. Participant-result v1 remains exactly
+   `schema/answer/citations`; rating-shaped answer prose stays untrusted prose.
+3. `capture_retained_annotation_pair` can then reopen both genuine completed
+   annotation operations, their author/evidence/assignment/exposure receipts,
+   original subject and source permission. Seal an immutable pair observation
+   in existing Events/private custody in registered reviewer order. Compare by
+   exact answer-byte span or registered facet, not local claim labels; preserve
+   segmentation/unmatched/unresolved entries and both original rating bodies.
+4. `prepare_retained_adjudication` needs a genuinely distinct authenticated
+   adjudicator assignment and **separate prospective source-use permission**.
+   The Linux native source owner must qualify this distinct recipient/use through
+   an explicitly versioned extension. Frozen v1/v2/v3 original-child SERVICE
+   actions and grants cannot authorize it. No peer provisional ratings may
+   escape to either reviewer on any input/result/artifact/log/status channel.
+5. `read_retained_resolution` can join the original pair, exact admitted
+   adjudicator input/result/Attempt and immutable reasons through existing
+   custody; append corrections, never overwrite originals. Recheck current
+   Control, native recipient/source purpose and local expiry after blocking
+   rereads. Unknown/pending/absent never authorizes another operation/retry.
+
+The present source cannot truthfully issue step 1's actor/qualification/exposure
+capability or step 4's distinct-use grant. Implementing the three facade names,
+parsing supplied ratings, or treating a synthetic identity fixture as a genuine
+issuer would not close those gaps. This return therefore supplies the exact
+integration boundary, not a completed authenticated pair/adjudication journey.
+It does not ask for live enrollment or change any held study/operation.
+
+### Contract falsifiers: scope of the available evidence
+
+| S10 case | Current source evidence / remaining proof |
+| --- | --- |
+| 1 genuine full positive | Not implemented: requires the native assignment and distinct-use issuers above; no fabricated positive |
+| 2 distinct actual authors/adjudicator | New declaration-collision discriminator + actual owner all-false/served-origin-unavailable boundary; authentic actor evidence still required |
+| 3 nominal clone/transplant | Accepted c2 original/completed capabilities cover their own scope only; no annotation capability is claimed |
+| 4 complete pair/stage order | Existing original completion order is qualified; annotation/exposure/pair events do not yet exist |
+| 5 exact subject/plan/guide/purpose | Original custody joins are accepted; annotation assignment and new purpose must be added explicitly |
+| 6 spans/descriptors/UTF8 | Accepted packet/extractor closure is reused; annotation answer-span issuer is not implemented |
+| 7 segmentation/alignment | Prospective comparison rule above; no invented agreement or denominator |
+| 8 peer channels/stage | Accepted manual metadata and protected original-result channel restrictions reused; new annotation branch must retain them |
+| 9 currentness | Accepted c2 final policy/owner/window fences reused; not promoted to annotation permission |
+| 10 same-original recovery | Accepted c2 and 9fb/a909 source join reused; new annotation lineage still needed |
+| 11 reasons/critical findings | No resolution is issued; both originals/reasons and holds must survive the future collector |
+| 12 before-budget qualifier | Existing V3-before-economic ordering reused for original cases; new annotation use must precede the same economic gate |
+
+Actual runtime, participant credentials/qualification evidence, new source use,
+provider execution, study/ratings, scientific decisions and original held
+operations remain untouched. Root carries the precise missing producer contract
+to the original Memory owner; no live publication occurs from this task.
