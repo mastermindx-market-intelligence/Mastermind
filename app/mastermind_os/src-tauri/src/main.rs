@@ -131,6 +131,7 @@ fn main() {
             auth::read_admitted_plan,
             auth::read_retained_activity,
             auth::read_resource_capacity,
+            auth::read_model_configuration,
             auth::read_fabric_catalog,
             auth::read_fabric_status,
             auth::read_result,

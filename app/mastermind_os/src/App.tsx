@@ -104,6 +104,7 @@ import { ControlRoomPanel } from "./ControlRoomPanel";
 import { SessionEstate } from "./session-estate/SessionEstate";
 import { ResourcesSystemsPanel } from "./resources/ResourcesSystemsPanel";
 import { ResourceCapacityRead } from "./resources/ResourceCapacityRead";
+import { ModelConfigurationRead } from "./resources/ModelConfigurationRead";
 import { selectedCurrentCapacityAttempt } from "./resource-capacity-selection";
 import { SupervisionLedger } from "./supervision/SupervisionLedger";
 import { SupervisionTrace } from "./supervision/SupervisionTrace";
@@ -4764,6 +4765,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       <>
       <ResourcesSystemsPanel controlRoom={currentControlRoom} work={workState} locale={locale}
         onReviewSources={() => setActive("Sources")}/>
+      <ModelConfigurationRead key={`models:${authRevision}`} host={window.MastermindMissionHost} locale={locale}/>
       <ResourceCapacityRead host={retainedResultHost} locale={locale}
         selection={selectedCurrentCapacityAttempt(office.projection, selection,
           resultState.kind === "READY" ? resultState.selection : null, authRevision)}/>

@@ -11,6 +11,7 @@ import {decodeSourceOperationStatus} from './planning/plan-adoption-status';
 import {instructionHostMethods,instructionPublicRequest,type InstructionRawMethods,type InstructionHostMethods} from "./instructions/instruction-host";
 import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
+import { decodeModelConfiguration, type ModelConfigurationRead } from "./resources/model-configuration";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
 import { decodeProjectJournal, validJournalSelection, type JournalSelection, type ProjectJournalDocument } from "./project-journal";
 import { decodeAcceptedDirection, validDirectionSelection, type DirectionSelection, type AcceptedDirectionRead } from "./direction/accepted-direction";
@@ -110,6 +111,7 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods>,Partial<I
   readProjectKnowledgeSource?(request: KnowledgeSourceSelection & { signal: AbortSignal }): Promise<unknown>;
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readResourceCapacity?(request: ResourceCapacityReadSelection & { signal: AbortSignal }): Promise<unknown>;
+  readModelConfiguration?(request: { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
   /** Optional authorized recent-run metadata; no source endpoint is implied by this interface. */
@@ -196,6 +198,7 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods>,Partia
   readProjectKnowledgeSource?: (request: KnowledgeSourceSelection & { signal: AbortSignal }) => Promise<unknown>;
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readResourceCapacity?: (request: ResourceCapacityReadSelection & { signal: AbortSignal }) => Promise<ResourceCapacityRead>;
+  readModelConfiguration?: (request: { signal: AbortSignal }) => Promise<ModelConfigurationRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
   readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
@@ -597,6 +600,22 @@ export function bindMissionHost(
         const raw = await client.readAdmittedPlan!({ ...selected, signal: request.signal });
         if (!authorized()) throw new Error("READ_CANCELLED");
         return decodeAdmittedPlan(raw, selected);
+      },
+    } : {}),
+    ...(client.readModelConfiguration && client.invalidationGeneration ? {
+      async readModelConfiguration({ signal }: { signal: AbortSignal }) {
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readModelConfiguration!;
+        const verify = () => {
+          const state = client.getState();
+          if (signal.aborted || epoch !== started || !Number.isSafeInteger(source)
+            || source !== client.invalidationGeneration?.() || reader !== client.readModelConfiguration)
+            throw new Error("READ_CANCELLED");
+          if (state.status !== "signed_in" || !state.acquisition) throw new Error("MODEL_CONFIGURATION_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await reader.call(client, { signal });
+        verify();
+        return decodeModelConfiguration(raw);
       },
     } : {}),
     ...(client.readResourceCapacity && client.invalidationGeneration ? {
@@ -1035,6 +1054,7 @@ export async function createNativeClient(
       | "read_admitted_plan"
       | "read_retained_activity"
       | "read_resource_capacity"
+      | "read_model_configuration"
       | "read_fabric_catalog"
       | "read_fabric_status"
       | "read_result"
@@ -1256,6 +1276,7 @@ export async function createNativeClient(
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
     },
+    readModelConfiguration: ({ signal }) => read("read_model_configuration", signal),
     readResourceCapacity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
       const selection = { work_ref, root_job_id, job_id, attempt_id };
       if (!validResourceCapacitySelection(selection))
