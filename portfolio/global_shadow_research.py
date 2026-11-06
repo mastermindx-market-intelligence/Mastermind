@@ -192,7 +192,7 @@ def _context_status(ctx: Mapping[str, Any], as_of: datetime) -> tuple[str | None
             elif raw.get("comparison_status") == "OBSERVED":
                 relative = _number(raw.get("relative_return"))
                 kind = raw.get("classification")
-                if relative is None or kind not in _CLASS:
+                if relative is None or not isinstance(kind, str) or kind not in _CLASS:
                     return "context_relative_invalid", "UNAVAILABLE", {}
                 comp += 1
             elif (raw.get("comparison_status") not in ("UNAVAILABLE", None) or

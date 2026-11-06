@@ -410,6 +410,13 @@ def test_wrong_benchmark_total_return_refused():
     assert_refused(evaluate(c=c), "context_benchmark_mismatch")
 
 
+@pytest.mark.parametrize("malformed", [{}, [], 42])
+def test_unhashable_or_malformed_classification_refused_without_exception(malformed):
+    c=context(); em=next(x for x in c["rows"] if x["instrument_id"]=="EEM")
+    em["classification"]=malformed
+    assert_refused(evaluate(c=c), "context_relative_invalid")
+
+
 def test_wrong_relative_wealth_math_refused():
     c=context(); em=next(x for x in c["rows"] if x["instrument_id"]=="EEM")
     em["relative_return"]=.42
