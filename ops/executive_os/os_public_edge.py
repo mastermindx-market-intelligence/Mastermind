@@ -153,7 +153,18 @@ PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES = PRE_NATIVE_SESSION_SEND_GET_ROUTES
 PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES = PRE_NATIVE_SESSION_SEND_POST_ROUTES + PROJECT_EXECUTION_POST_ROUTES
 POST_ROUTES = PRE_PROJECT_EXECUTION_POST_ROUTES + PROJECT_EXECUTION_POST_ROUTES
 
-# Preserve exactly the profiles admitted by the two predecessor contracts.
+# Native result, consumption and governed correction retain their existing
+# authenticated backend owners. Preserve the complete current predecessor;
+# these three paths extend only the normal bounded POST branch.
+PRE_DIRECT_NATIVE_GET_ROUTES = GET_ROUTES
+PRE_DIRECT_NATIVE_POST_ROUTES = POST_ROUTES
+DIRECT_NATIVE_POST_ROUTES = (
+    "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
+    "/os/executive/direct-native/correction",
+)
+POST_ROUTES = PRE_DIRECT_NATIVE_POST_ROUTES + DIRECT_NATIVE_POST_ROUTES
+
+# Preserve exactly the profiles admitted by the predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
 # The source-context profile is the installed predecessor of GET_ROUTES and
@@ -189,6 +200,7 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_BYOK_ROLES_GET_ROUTES, PRE_BYOK_ROLES_POST_ROUTES),
     (PRE_PROJECT_EXECUTION_GET_ROUTES, PRE_PROJECT_EXECUTION_POST_ROUTES),
     (PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES, PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES),
+    (PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 
