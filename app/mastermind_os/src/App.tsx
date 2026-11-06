@@ -3812,8 +3812,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const retainedLaunchDetails = retainedComposerDrafts.launchDetails;
   const changeHeldLaunchDetails = (change: Partial<LaunchDetailsDraft>) => {
     const held = retainedComposerRef.current.launchDetails;
-    if (!signedIn && passiveExpiryHold.current && held)
-      updateRetainedComposer("launchDetails", { ...held, ...change });
+    if (!signedIn && passiveExpiryHold.current && held) {
+      const next = { ...held, ...change };
+      const hasDetails = next.acceptanceCriteria || next.handoffText || next.writePathsText ||
+        next.testTargetsText || !next.diffCheck || next.projectRef || next.profileRef;
+      updateRetainedComposer("launchDetails", hasDetails ? next : null);
+    }
   };
   const commandPanel =
     !signedIn && passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails) ? (
@@ -3824,7 +3828,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <textarea id="retained-launch-goal" value={retainedComposerDrafts.launch}
           onChange={event => updateRetainedComposer("launch", event.target.value)}
           rows={4} />
-        {retainedLaunchDetails ? <fieldset className="project-execution-scope">
+        {retainedLaunchDetails?.acceptanceCriteria ? <div className="form-field">
+          <label htmlFor="retained-launch-criteria">{locale === "zh-CN" ? "验收条件（可选，每行一项）" : "Acceptance criteria (optional, one per line)"}</label>
+          <textarea id="retained-launch-criteria" value={retainedLaunchDetails.acceptanceCriteria} rows={3}
+            onChange={event => changeHeldLaunchDetails({ acceptanceCriteria: event.target.value })}/>
+        </div> : null}
+        {retainedLaunchDetails && (launchHandoff?.kind === "project" || retainedLaunchDetails.handoffText ||
+          retainedLaunchDetails.writePathsText || retainedLaunchDetails.testTargetsText || retainedLaunchDetails.profileRef) ? <fieldset className="project-execution-scope">
           <legend>{locale === "zh-CN" ? "未发送的交接与范围" : "Unsent handoff and scope"}</legend>
           <div className="form-field">
             <label htmlFor="retained-launch-handoff">{locale === "zh-CN" ? "交接说明（可选）" : "Handoff (optional)"}</label>
@@ -3905,17 +3915,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           profiles={launchView.profiles}
           frontierModels={launchView.frontierModels}
           initialDraft={presentedComposerDrafts.launch}
-          initialDetails={launchHandoff?.kind === "project" ? presentedComposerDrafts.launchDetails : null}
+          initialDetails={presentedComposerDrafts.launchDetails}
           onDetailsChange={details => {
             const liveBinding = completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
             const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
-            if (launchHandoff?.kind === "project" && authRevisionRef.current === authRevision &&
+            if (authRevisionRef.current === authRevision &&
                 window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
                 liveBinding === commandBinding &&
                 liveOwner?.principalScope === ownerContext?.principalScope &&
                 liveOwner?.generation === ownerContext?.generation) {
               retainedComposerScope.current = liveComposerScope;
               updateRetainedComposer("launchDetails", details);
+              if (details && !retainedComposerRef.current.launchWorkstream && launchView.defaultWorkstream)
+                updateRetainedComposer("launchWorkstream", launchView.defaultWorkstream);
             }
           }}
           onDraftChange={text => {
