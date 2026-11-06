@@ -1,4 +1,4 @@
-"""Closed capability policy for the attended Claude COO principal."""
+"""Closed capability policy for explicit Executive COO principals."""
 from __future__ import annotations
 
 import copy
@@ -36,7 +36,7 @@ POLICY = ROOT / "config/executive_claude_principal_capabilities.json"
 DEFAULT_POLICY = ROOT / "config/executive_agent_capabilities.json"
 PROFILE_ID = "principal.claude-code.executive-coo.v1"
 GRANT_ID = "mastermind-executive-coo-v1"
-EXPECTED_POLICY_DIGEST = "3a900805a88973c168583110762301ea3591f63d3ff47786522686ca9272e532"
+EXPECTED_POLICY_DIGEST = "978f7badb8c1ac32ccb74423b1bca3766a664819aa292c0149be78d76cce1d3d"
 EXPECTED_PROFILE_DIGEST = "5d4a2b7e89c5fee0e34be6a623a4a19e5d91b5d743c7365826ef3384af8bf217"
 # The incumbent Claude config projection for the current COO tool catalog.
 # Adding Hermes preserves the existing Claude surface and grant projection;
@@ -132,13 +132,9 @@ def hermes_profile():
 
 
 def hermes_policy_document():
-    """The shipped principal policy plus one opt-in Hermes principal profile.
-
-    The MCP grant is the incumbent one, unchanged: the Hermes profile holds
-    exactly the existing Executive COO OAuth grant rather than a new server.
-    """
+    """Use the actual shipped profile for bounded mutation tests."""
     raw = json.loads(POLICY.read_text())
-    raw["profiles"][HERMES_NATIVE_PRINCIPAL_PROFILE_ID] = hermes_profile()
+    assert raw["profiles"][HERMES_NATIVE_PRINCIPAL_PROFILE_ID] == hermes_profile()
     return raw
 
 
@@ -272,10 +268,8 @@ def test_principal_policy_cannot_widen_into_worker_or_ambient_authority(tmp_path
         ExecutionCapabilityRegistry.load(path, source_root=ROOT)
 
 
-def test_hermes_native_principal_profile_parses_with_its_own_surface_and_digest(tmp_path):
-    registry = ExecutionCapabilityRegistry.load(
-        write_policy(tmp_path, hermes_policy_document()), source_root=ROOT
-    )
+def test_hermes_native_principal_profile_parses_with_its_own_surface_and_digest():
+    registry = load()
     hermes = registry.resolve(HERMES_NATIVE_PRINCIPAL_PROFILE_ID)
     claude = registry.resolve(PROFILE_ID)
 
@@ -454,7 +448,7 @@ def test_hermes_native_principal_has_no_worker_or_launch_eligibility(tmp_path):
         hermes.app_server_config_overrides()
 
 
-def test_hermes_native_principal_is_not_published_in_any_shipped_policy():
+def test_hermes_native_principal_is_explicitly_shipped_outside_worker_policy():
     default = ExecutionCapabilityRegistry.load(DEFAULT_POLICY, source_root=ROOT)
     assert HERMES_NATIVE_PRINCIPAL_PROFILE_ID not in default.profiles
     assert HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE not in {
@@ -462,7 +456,7 @@ def test_hermes_native_principal_is_not_published_in_any_shipped_policy():
     }
 
     registry = load()
-    assert HERMES_NATIVE_PRINCIPAL_PROFILE_ID not in registry.profiles
+    assert HERMES_NATIVE_PRINCIPAL_PROFILE_ID in registry.profiles
     assert registry.production_armed is False
     assert registry.policy_digest == EXPECTED_POLICY_DIGEST
     assert registry.resolve(PROFILE_ID).profile_digest == EXPECTED_PROFILE_DIGEST
