@@ -9,7 +9,8 @@ import sqlite3
 import time
 from pathlib import Path
 
-from go_lease_capability import authorize, mint, authorize_application, mint_application
+from go_lease_capability import (authorize, mint, authorize_application, mint_application,
+    mint_native_dispatch, authorize_native_dispatch, NATIVE_APPLICATION_KIND, NATIVE_APPLICATION_POOLS)
 
 
 class LeaseGatewayError(ValueError):
@@ -56,7 +57,8 @@ class ApplicationSelectionProfile:
 class GoLeaseGateway:
     def __init__(self, db_path, accounts, models, *, clock=time.time, signing_key=None,
                  application_broker=None, application_http_recipes=(), application_http_accounts=(),
-                 application_selection_profile=None):
+                 application_selection_profile=None, application_native_recipes=(),
+                 application_native_accounts=None):
         db_path = Path(db_path)
         if not db_path.is_absolute():
             raise LeaseGatewayError("lease capability refused")
@@ -82,6 +84,27 @@ class GoLeaseGateway:
                 raise LeaseGatewayError("application transport refused") from None
         if bool(self._application_http_recipes) != bool(self._application_http_accounts):
             raise LeaseGatewayError("application transport refused")
+        self._application_native_recipes = {}
+        self._application_native_accounts = {}
+        try:
+            from lease_broker import _application_native_recipe, _application_id
+            for recipe in application_native_recipes:
+                encoded, digest = _application_native_recipe(recipe, pool=recipe["pool"], model=recipe["model"])
+                key = (recipe["pool"], recipe["model"])
+                if key in self._application_native_recipes:
+                    raise ValueError("duplicate native recipe")
+                self._application_native_recipes[key] = (encoded, digest)
+            accounts = {} if application_native_accounts is None else application_native_accounts
+            if type(accounts) is not dict or set(accounts) != {key[0] for key in self._application_native_recipes}:
+                raise ValueError("native account envelope mismatch")
+            for pool, names in accounts.items():
+                if type(names) not in (list, tuple, set, frozenset) or not names or len(names) > 128:
+                    raise ValueError("native account envelope invalid")
+                self._application_native_accounts[pool] = frozenset(_application_id(name) for name in names)
+            if self._application_native_recipes and type(self) is not GoLeaseGateway:
+                raise ValueError("native owner context unavailable")
+        except Exception:
+            raise LeaseGatewayError("application native transport refused") from None
         self._clock = clock
         self._application_broker = application_broker
         if application_selection_profile is not None and type(application_selection_profile) is not ApplicationSelectionProfile:
@@ -92,6 +115,8 @@ class GoLeaseGateway:
             from lease_broker import Broker
             if not isinstance(application_broker, Broker):
                 raise LeaseGatewayError("application owner unavailable")
+            if self._application_native_recipes and type(application_broker) is not Broker:
+                raise LeaseGatewayError("application native owner unavailable")
             try:
                 if (self._db_path != Path(application_broker.db_path).resolve()
                         or not os.path.samefile(self._db_path, application_broker.db_path)):
@@ -231,7 +256,8 @@ class GoLeaseGateway:
     def application_recipe(self, pool, model):
         """Fresh immutable copy of the sealed transport projection, not authority."""
         try:
-            encoded, digest = self._application_http_recipes[(pool, model)]
+            recipes = self._application_native_recipes if pool in NATIVE_APPLICATION_POOLS else self._application_http_recipes
+            encoded, digest = recipes[(pool, model)]
             return json.loads(encoded), digest
         except (KeyError, TypeError):
             raise LeaseGatewayError("application transport unavailable") from None
@@ -240,7 +266,8 @@ class GoLeaseGateway:
         if pool == "go" and model in self._models:
             return self._accounts, None, None
         recipe, digest = self.application_recipe(pool, model)
-        return self._application_http_accounts, recipe, digest
+        accounts = self._application_native_accounts[pool] if pool in NATIVE_APPLICATION_POOLS else self._application_http_accounts
+        return accounts, recipe, digest
 
     def application_pool_view(self, *, principal_id, host, workload, credential_ref,
                               bound_pool, source, go_models):
@@ -402,7 +429,7 @@ class GoLeaseGateway:
         try:
             broker = self._application_owner()
             if (not isinstance(request, dict) or set(request) != {"workload", "turn_id", "pool", "model"}
-                    or request["pool"] not in ("go", "bailian") or path != "/v1/chat/completions"
+                    or request["pool"] not in ({"go", "bailian"} | NATIVE_APPLICATION_POOLS) or path != "/v1/chat/completions"
                     or not isinstance(payload, dict) or payload.get("stream", False) is not False
                     or payload.get("model") != request["model"]):
                 raise LeaseGatewayError("application recovery refused")
@@ -453,7 +480,8 @@ class GoLeaseGateway:
                     principal_id=principal_id, host=host, turn_id=turn_id,
                     model=payload["model"], now=self._clock(), recovery_only=True, expected_pool=expected_pool)
                 recovered = broker.recover_application_request(principal_id=principal_id, turn_id=turn_id,
-                    request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest())
+                    request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest(),
+                    transport_commitment=transport_commitment, verify_native_commitment=True)
                 if recovered is not None:
                     return recovered
                 # Only a new step requires current execution permission. A prior
@@ -469,20 +497,70 @@ class GoLeaseGateway:
             if (claims["account"] not in accounts
                     or expected_pool != "go" and claims["recipe_digest"] != digest):
                 raise LeaseGatewayError("application request refused")
+            frozen = json.loads(raw)["payload"]
             prepared = broker.prepare_application_request(principal_id=principal_id, turn_id=turn_id,
                 request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest(),
-                transport_commitment=transport_commitment)
+                transport_commitment=transport_commitment,
+                native_payload=frozen if expected_pool in NATIVE_APPLICATION_POOLS else None)
             if prepared.get("dispatch_permitted"):
                 # The original handler sends these immutable, digest-bound bytes.
                 # They are internal dispatch material, never a public receipt/log.
-                frozen = json.loads(raw)["payload"]
                 prepared["payload_bytes"] = json.dumps(frozen, sort_keys=True, separators=(",", ":"),
                     ensure_ascii=False, allow_nan=False).encode("utf-8")
+                if expected_pool in NATIVE_APPLICATION_POOLS:
+                    from lease_broker import _application_native_payload
+                    if type(self) is not GoLeaseGateway:
+                        raise LeaseGatewayError("application native owner unavailable")
+                    connection = self._connection()
+                    try:
+                        connection.row_factory = sqlite3.Row
+                        connection.execute("BEGIN")
+                        turn = self._application_turn_lookup(connection, principal_id, turn_id)
+                        lease = self._lease_lookup(connection, turn["lease_id"])
+                        request = connection.execute("SELECT * FROM application_requests WHERE dispatch_id=?",
+                            (prepared["dispatch_id"],)).fetchone()
+                        if request is None:
+                            raise LeaseGatewayError("application native dispatch unavailable")
+                        token = mint_native_dispatch(self._signing_key, lease, turn, dict(request), now=self._clock())
+                        stored_invocation = json.loads(request["invocation_json"])
+                        stored_invocation["invocation_digest"] = request["invocation_digest"]
+                        if stored_invocation != prepared["native_invocation"]:
+                            raise LeaseGatewayError("application native dispatch changed")
+                    finally:
+                        connection.close()
+                    # These bytes are private launch material. Recovery neither
+                    # remints the capability nor returns another launch permit.
+                    prepared["native_dispatch_capability"] = token
+                    prepared["native_input_bytes"] = _application_native_payload(recipe, frozen)[0]
             return prepared
         except LeaseGatewayError:
             raise
         except Exception:
             raise LeaseGatewayError("application request refused") from None
+
+    def authorize_native_dispatch(self, token, *, principal_id, caller_host, turn_id, request_id, invocation):
+        """The incumbent authenticated controller join; no caller-selected key."""
+        try:
+            from lease_broker import Broker
+            if type(self) is not GoLeaseGateway or type(self._application_owner()) is not Broker:
+                raise LeaseGatewayError("application native owner unavailable")
+            connection = self._connection()
+            try:
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                def request_lookup(principal, turn, request):
+                    row = connection.execute("SELECT * FROM application_requests WHERE principal_id=? AND turn_id=? AND request_id=?",
+                        (principal, turn, request)).fetchone()
+                    return dict(row) if row is not None else None
+                return authorize_native_dispatch(token, self._signing_key,
+                    lambda lease: self._lease_lookup(connection, lease),
+                    lambda principal, turn: self._application_turn_lookup(connection, principal, turn),
+                    request_lookup, principal_id=principal_id, caller_host=caller_host, turn_id=turn_id,
+                    request_id=request_id, invocation=invocation, now=self._clock())
+            finally:
+                connection.close()
+        except Exception:
+            raise LeaseGatewayError("application native dispatch refused") from None
 
     def complete_application(self, dispatch_id, *, terminal_receipt):
         """Original handler only; this is not a caller-facing settlement route."""
