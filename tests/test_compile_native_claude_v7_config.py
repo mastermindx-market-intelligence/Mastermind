@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -214,3 +215,132 @@ def test_cli_emits_canonical_v7_and_receipt_without_mutating_sources(
     assert receipt["validation_config_sha256"] == _sha(validation_raw)
     assert receipt["compiled_v7_sha256"] == _sha(output_path.read_bytes())
     assert "credential" not in json.dumps(receipt).lower()
+
+
+def _cli_inputs(root: Path):
+    source = root / "source.json"
+    validation = root / "validation.json"
+    source.write_bytes(_canonical(_source(root)))
+    validation.write_bytes(_canonical(_validation(root)))
+    return source, validation
+
+
+def _cli_args(source: Path, validation: Path, output: Path, receipt: Path):
+    return [
+        "--source-v6", str(source),
+        "--expected-source-sha256", _sha(source.read_bytes()),
+        "--validation-config", str(validation),
+        "--expected-validation-sha256", _sha(validation.read_bytes()),
+        "--managed-policy-generation", "1",
+        "--out", str(output), "--receipt-out", str(receipt),
+    ]
+
+
+@pytest.mark.parametrize("link_kind", ["same", "resolved", "symlink", "hardlink"])
+@pytest.mark.parametrize("destination,target", [
+    ("output", "receipt"),
+    ("output", "source"),
+    ("output", "validation"),
+    ("receipt", "source"),
+    ("receipt", "validation"),
+])
+def test_cli_rejects_artifact_aliases_before_writing(
+    tmp_path: Path, destination: str, target: str, link_kind: str
+) -> None:
+    source, validation = _cli_inputs(tmp_path)
+    paths = {"source": source, "validation": validation,
+             "output": tmp_path / "compiled.json", "receipt": tmp_path / "receipt.json"}
+    alias, original = paths[destination], paths[target]
+    if link_kind == "same":
+        paths[destination] = original
+    elif link_kind == "resolved":
+        (tmp_path / "alias-parent").mkdir()
+        paths[destination] = tmp_path / "alias-parent" / ".." / original.name
+    elif link_kind == "symlink":
+        alias.symlink_to(original)
+    else:
+        if not original.exists():
+            original.write_bytes(b"existing artifact must survive\n")
+        os.link(original, alias)
+    before = {path: path.read_bytes() for path in paths.values() if path.is_file()}
+    rc = compiler.main(_cli_args(source, validation, paths["output"], paths["receipt"]))
+    assert all(path.read_bytes() == raw for path, raw in before.items())
+    assert rc == 2
+
+
+@pytest.mark.parametrize("destination", ["output", "receipt"])
+def test_cli_preserves_existing_distinct_artifact(tmp_path: Path, destination: str) -> None:
+    source, validation = _cli_inputs(tmp_path)
+    paths = {"output": tmp_path / "compiled.json", "receipt": tmp_path / "receipt.json"}
+    paths[destination].write_bytes(b"existing artifact\n")
+    before = {path: path.read_bytes() for path in (source, validation, paths[destination])}
+    assert compiler.main(_cli_args(source, validation, paths["output"], paths["receipt"])) == 2
+    assert all(path.read_bytes() == raw for path, raw in before.items())
+    assert not paths["receipt" if destination == "output" else "output"].exists()
+
+
+@pytest.mark.parametrize("destination", ["output", "receipt"])
+def test_cli_refuses_link_created_after_preflight(
+    tmp_path: Path, monkeypatch, destination: str
+) -> None:
+    source, validation = _cli_inputs(tmp_path)
+    paths = {"output": tmp_path / "compiled.json", "receipt": tmp_path / "receipt.json"}
+    source_raw, validation_raw = source.read_bytes(), validation.read_bytes()
+    original_open = compiler.os.open
+    entered = False
+
+    def race(path, flags, *args, **kwargs):
+        nonlocal entered
+        if flags & os.O_EXCL and path == paths[destination].name and not entered:
+            entered = True
+            paths[destination].symlink_to(source)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(compiler.os, "open", race)
+    assert compiler.main(_cli_args(source, validation, paths["output"], paths["receipt"])) == 2
+    assert entered
+    assert source.read_bytes() == source_raw
+    assert validation.read_bytes() == validation_raw
+    if destination == "receipt":
+        assert paths["output"].read_bytes() == b""
+
+
+def test_cli_refuses_output_replaced_during_parser_validation(tmp_path: Path, monkeypatch) -> None:
+    source, validation = _cli_inputs(tmp_path)
+    output, receipt = tmp_path / "compiled.json", tmp_path / "receipt.json"
+    source_raw, validation_raw = source.read_bytes(), validation.read_bytes()
+    load_config = worker._load_config
+
+    def replace_after_read(path, **kwargs):
+        parsed = load_config(path, **kwargs)
+        output.unlink()
+        output.symlink_to(source)
+        return parsed
+
+    monkeypatch.setattr(worker, "_load_config", replace_after_read)
+    assert compiler.main(_cli_args(source, validation, output, receipt)) == 2
+    assert source.read_bytes() == source_raw
+    assert validation.read_bytes() == validation_raw
+    assert receipt.read_bytes() == b""
+
+
+def test_cli_refuses_parent_replaced_during_validation(tmp_path: Path, monkeypatch) -> None:
+    source, validation = _cli_inputs(tmp_path)
+    directory = tmp_path / "artifacts"
+    directory.mkdir()
+    output, receipt = directory / "compiled.json", directory / "receipt.json"
+    source_raw, validation_raw = source.read_bytes(), validation.read_bytes()
+    load_config = worker._load_config
+
+    def replace_parent(path, **kwargs):
+        parsed = load_config(path, **kwargs)
+        directory.rename(tmp_path / "retained-partial")
+        directory.mkdir()
+        return parsed
+
+    monkeypatch.setattr(worker, "_load_config", replace_parent)
+    assert compiler.main(_cli_args(source, validation, output, receipt)) == 2
+    assert source.read_bytes() == source_raw
+    assert validation.read_bytes() == validation_raw
+    assert not output.exists() and not receipt.exists()
+    assert (tmp_path / "retained-partial" / "receipt.json").read_bytes() == b""
