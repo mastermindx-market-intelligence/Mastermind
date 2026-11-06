@@ -205,3 +205,17 @@ The installed role/proxy/provider/canary/cutover restrictions remain separate
 from source completion. Independent review is not a blanket prerequisite for
 this Web-session source work; required source/release rules and actual effect
 reconciliation still apply.
+
+
+### Installed enrollment compatibility
+
+The existing finite enrollment command accepts both the held v2 enrollment
+recipe and the held v3 recipe with an Executive consumer. Each repeated profile
+qualification checks the exact consumer-aware native configuration from that
+same held recipe. Earlier recipes without an enrollment capability remain
+disarmed, and only qualified absence can create the original session.
+
+The v3 renderer preserves the approved, disabled Steward environment placeholder.
+The added Executive MCP connection and plugin grant separately reject bearer
+material; neither carries a credential. This source compatibility does not
+execute an installed enrollment or satisfy the held host/provider proof.

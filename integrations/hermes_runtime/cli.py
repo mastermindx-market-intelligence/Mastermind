@@ -262,7 +262,9 @@ def _enroll_secretary_session(profile_path: Path, hermes_bin: Path, *, native_la
             or profile.sha != PINNED_UPSTREAM_SHA
             or profile_path != profile.state_dir / "current/profile.yaml"
             or not profile_path.is_absolute()
-            or native_launch.recipe.get("schema") != "mastermind.hermes_native_gateway_installation/v2"):
+            or native_launch.recipe.get("schema") not in (
+                "mastermind.hermes_native_gateway_installation/v2",
+                "mastermind.hermes_native_gateway_installation/v3")):
         raise RuntimeRefusal("NATIVE_ENROLLMENT_INSTALLATION_REQUIRED")
     capability = validate_enrollment_capability(native_launch.recipe.get("session_enrollment"))
     request_id = capability["request_id"]
@@ -281,7 +283,7 @@ def _enroll_secretary_session(profile_path: Path, hermes_bin: Path, *, native_la
         assert_role_network_profile(current)
         assert_role_credential_isolation(current)
         enforce_role_tcp_ports(current)
-        expected_disabled_mcp(current)
+        expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"))
 
     qualify_profile()
     home = (profile.hermes_home.resolve(strict=True) / "profiles" / profile.role).resolve(strict=True)

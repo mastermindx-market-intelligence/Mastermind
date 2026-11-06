@@ -168,11 +168,17 @@ def render_qualified_native_byok(profile: RuntimeProfile, publication) -> str:
         checked = _load_unique_yaml(rendered.encode("utf-8"))
     except ValueError:
         raise RuntimeRefusal("NATIVE_BYOK_CONFIG_INVALID") from None
-    if checked != native or any(
+    # The independently validated, disabled Steward entry retains its exact
+    # approved environment placeholder. Only the new Executive connection and
+    # plugin grant must contain no bearer template at all.
+    import json
+    consumer_text = json.dumps(
+        {"server": server, "plugins": plugins}, ensure_ascii=False).lower()
+    if (checked != native or any(
         forbidden in rendered.lower()
         for forbidden in ("api_key:", "fallback_model:", "api/coding", "access_token:",
-                          "client_secret:", "bearer ")
-    ):
+                          "client_secret:")
+    ) or "bearer " in consumer_text):
         raise RuntimeRefusal("NATIVE_BYOK_CONFIG_INVALID")
     if checked["mcp_servers"][publication.mcp.server] != server:
         raise RuntimeRefusal("NATIVE_CONSUMER_MCP_CONFIG_INVALID")
