@@ -101,7 +101,7 @@ adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.m
    reviewable PR for hosted CI: no local worktree or unexecutable local test is
    itself a source-publishing hold. Never claim tests that did not run.
    When an enforced GitHub rule or explicit authorized request requires review,
-   mark a qualified Draft PR **Ready for Review before requesting the review**.
+   mark a qualified Draft PR **Ready for Review before asking the reviewer**.
    No risk tier dispatches a reviewer solely for an obsolete universal-review
    rule. Pending hosted CI is a merge/release gate, not a prerequisite for PR
    publication or review readiness. Keep incomplete or actually failing work in
