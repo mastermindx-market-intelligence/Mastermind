@@ -331,3 +331,54 @@ In ChatGPT, the supported private connection flow is **Plugins -> Add custom MCP
 Publication, protected merge, host installation, tunnel readiness, plugin creation, individual account installation, tool snapshot exposure and native invocation are separate evidence. A passing local test or successful creation does not prove adoption across all six Web accounts. The final native acceptance requires this tool catalog, one admitted bounded worker, retained result consumption and explicit verified acceptance from the connected Web session. No Web turn is a daemon; unattended return requires its existing real owner and return path.
 
 Official connection references: https://developers.openai.com/api/docs/guides/secure-mcp-tunnels and https://developers.openai.com/plugins/deploy/connect-chatgpt .
+# Fixed original collection on the existing modern C3 service
+
+The source supports an explicit, default-off `--original-collection` selection
+in the existing `private_service stage` / `upgrade` owner. It is limited to
+`fabric-c3-570f6f34` on `127.0.0.1:45280`, with `modernFabricProtocol`,
+`fabricOnly`, and the shared-account backend. It does not enroll the older C3
+service or any other Studio account. The gateway's actual private-tunnel
+principal authorizes these operations; arguments, headers, `_meta`, root labels
+and helper stdin are never identity assertions.
+
+The only source-qualified runs are
+`fabric-app-native-drivers-j-20261105-01` and
+`fabric-app-application-process-carrier-20261105-01`. The local tools accept
+`run_id` only, except that result reading also requires `receipt_sha256`:
+
+* `fabric_collect_original` retains one collection operation in the existing
+  `BackendOwner` and uses the native collector's exclusive destination fence.
+* `fabric_original_collection_status` reads that destination without transport.
+  Missing or partial evidence is not permission to repeat collection.
+* `fabric_original_collection_result` verifies a COMPLETE receipt and its files,
+  decodes UTF-8 without replacement, and uses the existing output pager.
+
+Native CLI callers still require genuine native caller context. The internal
+installed-control helper has only the two closed run selectors; it verifies the
+sealed control bundle, interpreter, native generation and collector dependencies
+before importing the collector. Its stdin supplies correlation, not authority.
+The trust boundary remains the enrolled machine owner, not isolation against a
+same-UID adversary. HTTP disconnects do not cancel or release collection work.
+An owned helper timeout preserves uncertainty and the original destination; it
+never cancels an original worker or settles a lease.
+
+The receipt retains `acceptance: NOT_RECORDED`, unknown controller/settlement
+state and the historical false producer-authentication flags. Current collection
+authorization does not manufacture historical producer or model authentication.
+Metabolism, the refused old A-core artifact, other existing rows and future runs
+are excluded from this gateway entry.
+
+## Publication and activation sequence
+
+This is source support, not an installed-capability claim. The release owner
+must build and install the full native collector generation and the current
+control bundle, then use the normal C3 stage/upgrade/config-seal path with the
+explicit opt-in. The verified same-owner opt-in is preserved by ordinary
+upgrades; `--no-original-collection` removes it. The prior 13-member gateway
+fileset and every older cohort retain their exact membership.
+
+After source and installed-closure proof, the root release owner performs the
+existing service start and same-app tool metadata publication/readback. A
+`fabric-backend-release` transaction updates only backend arguments and hashes;
+it cannot publish the new gateway module or collection configuration. C1's
+native pin and gateway compatibility paths remain their existing owners.

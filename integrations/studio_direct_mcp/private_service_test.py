@@ -195,6 +195,7 @@ def _stage_args(source, node, backend, account: str = "test-account", port: int 
         backend=str(backend),
         fabric_only=False,
         modern_fabric_protocol=None,
+        original_collection=None,
         enable_repository_workspaces=False,
         os_commission_config_sha256=None,
     )
@@ -248,7 +249,7 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     removed = ("fleet-status.mjs", "paper-design.mjs", "output-budget.mjs") if typed_git else (
         "fleet-status.mjs", "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
     )
-    removed = (*removed, "workspace-access.mjs", "commission-prepare.mjs", "commission-service.mjs", "modern-fabric-http.mjs")
+    removed = (*removed, "workspace-access.mjs", "commission-prepare.mjs", "commission-service.mjs", "modern-fabric-http.mjs", "original-delivery.mjs")
     for name in removed:
         (roots["base"] / name).unlink()
         manifest["files"].pop(name)
@@ -276,6 +277,7 @@ class TestIdentity(unittest.TestCase):
             {
                 "gateway.mjs",
                 "modern-fabric-http.mjs",
+                "original-delivery.mjs",
                 "output-budget.mjs",
                 "git-publish.mjs",
                 "workspace-access.mjs",
@@ -1793,7 +1795,7 @@ class TestCLI(unittest.TestCase):
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
         self.assertEqual(
             set(sub.choices),
-            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "native-pool-pin", "native-pool-pin-enrollment", "fleet-status-module-upgrade", "seal-runtime", "start", "status", "stop"},
+            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "native-pool-pin", "native-pool-pin-enrollment", "fleet-status-module-upgrade", "seal-runtime", "start", "status", "stop", "_original-collection-helper"},
         )
 
     def test_source_successor_cli_exposes_no_credential_or_lifecycle_selector(self):

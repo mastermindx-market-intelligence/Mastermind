@@ -179,6 +179,8 @@ GO_PARTICIPANT_ADDITIONS = {
 }
 GO_PARTICIPANT_OPERATOR = "90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f55c5f72c0c7"
 GO_PARTICIPANT_OPERATOR_PREIMAGE = "f81b4f053a22ba973b06214f6d06ed2d66e3fc471c781311f074718683cf4675"
+GO_BASE_ORIGINAL_COLLECTOR_SHA256 = "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183"
+GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256 = "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83"
 
 
 def validate_go_base_manifest(manifest, dependency_hashes):
@@ -191,7 +193,8 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     support changes, the exact protected diagnostic outcome correction, and
     the complete protected Ubuntu4/poll cohorts within the current diagnostic
     closure, the exact sparse-config executor successor, and the complete
-    protected participant cohort in the current106 namespace.
+    protected participant cohort and closed original-collection successor in
+    the current106 namespace.
     Every other member/key stays bound to actual395b.
     """
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
@@ -258,6 +261,13 @@ def validate_go_base_manifest(manifest, dependency_hashes):
             GO_BASE_PROVIDER_OUTCOME_SHA256, GO_PROTECTED_PROVIDER_OUTCOME_SHA256}:
         raise ValueError("native Go provider outcome is not the exact protected source")
     historical["ext/provider_outcome.py"] = GO_BASE_PROVIDER_OUTCOME_SHA256
+    collector = manifest["ext/original_delivery_collector.py"]
+    if (collector not in {GO_BASE_ORIGINAL_COLLECTOR_SHA256,
+                          GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256}
+            or (collector == GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256
+                and set(manifest) != expected)):
+        raise ValueError("native Go original collector is not the exact current source")
+    historical["ext/original_delivery_collector.py"] = GO_BASE_ORIGINAL_COLLECTOR_SHA256
     if sha((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) != GO_BASE_MANIFEST_SHA256:
         raise ValueError("native Go base closure is not the reviewed protected composition")
 

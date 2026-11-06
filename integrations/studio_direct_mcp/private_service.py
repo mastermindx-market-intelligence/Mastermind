@@ -132,6 +132,7 @@ RESERVED_ACCOUNT_LABELS = frozenset(
 # Files staged from source directory. gateway.mjs is the engine library.
 STAGE_FILES = (
     "gateway.mjs",
+    "original-delivery.mjs",
     "modern-fabric-http.mjs",
     "output-budget.mjs",
     "git-publish.mjs",
@@ -150,7 +151,8 @@ STAGE_FILES = (
 # immediately preceding v0.1.6 install has every current file except the new
 # read-only fleet-status consumer; earlier generations also predate Paper,
 # output paging, and typed Git.
-LEGACY_STAGE_FILES_V7 = tuple(name for name in STAGE_FILES if name != "modern-fabric-http.mjs")
+LEGACY_STAGE_FILES_V8 = tuple(name for name in STAGE_FILES if name != "original-delivery.mjs")
+LEGACY_STAGE_FILES_V7 = tuple(name for name in LEGACY_STAGE_FILES_V8 if name != "modern-fabric-http.mjs")
 LEGACY_STAGE_FILES_V6 = tuple(name for name in LEGACY_STAGE_FILES_V7 if name not in {"commission-prepare.mjs", "commission-service.mjs"})
 LEGACY_STAGE_FILES_V5 = tuple(name for name in LEGACY_STAGE_FILES_V6 if name != "workspace-access.mjs")
 LEGACY_STAGE_FILES_V4 = tuple(name for name in LEGACY_STAGE_FILES_V5 if name != "fleet-status.mjs")
@@ -433,6 +435,7 @@ C2_PAPER_V12_FILES_SHA256 = {
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V8),
         frozenset(LEGACY_STAGE_FILES_V7),
         frozenset(LEGACY_STAGE_FILES_V6),
         frozenset(LEGACY_STAGE_FILES_V5),
@@ -1510,6 +1513,161 @@ def _fleet_status_config(user_root: Path) -> dict | None:
     }
 
 
+ORIGINAL_COLLECTION_ACCOUNT = "fabric-c3-570f6f34"
+ORIGINAL_COLLECTION_SCHEMA = "mastermind.fabric_original_collection.v1"
+ORIGINAL_COLLECTION_RUNS = frozenset((
+    "fabric-app-native-drivers-j-20261105-01",
+    "fabric-app-application-process-carrier-20261105-01",
+))
+ORIGINAL_COLLECTION_FIELDS = frozenset((
+    "enabled", "schema", "pythonPath", "pythonSha256", "controlPath",
+    "controlSha256", "controlBundleDigest", "nativeStore", "nativeGeneration",
+))
+
+
+def _original_collection_profile(account, host, port, fabric_only, modern_fabric):
+    if (account != ORIGINAL_COLLECTION_ACCOUNT or host != "127.0.0.1" or port != 45280
+            or fabric_only is not True or modern_fabric is not True):
+        raise ValueError("original collection requires its existing private C3 service")
+
+
+def _original_collection_native(configuration=None, *, require_current=True):
+    """Use the incumbent sealed control and native-generation owners."""
+    context = _INSTALLED_CONTROL_CONTEXT
+    if context is None:
+        raise ValueError("original collection requires installed control closure")
+    native = _installed_control_module("_studio_original_native_generation",
+        "ops/native_fabric/quota_continuity/rollout/native_generation.py")
+    stable = Path.home() / (".claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/"
+        "handoff_kits/meta-ceo-b-2026-09-08/ext")
+    store = stable.parent / "native-code-releases"
+    selected = native.current(store) if configuration is None or require_current else None
+    digest = selected["generation"] if configuration is None else configuration.get("nativeGeneration")
+    if require_current and digest != selected["generation"]:
+        raise ValueError("original collection native selection changed")
+    root, metadata = native.verify(store, digest)
+    required = {"ext/original_delivery_collector.py", "ext/artifact_delivery.py",
+        "ext/artifact_reader.py", "ext/artifact_production.py", "ext/native_runtime_bindings.py"}
+    if metadata["stable_ext"] != str(stable) or not required.issubset(metadata["files"]):
+        raise ValueError("original collection native closure missing")
+    control = context["root"] / "private_service.py"
+    interpreter = Path(sys.executable).resolve(strict=True)
+    manifest = json.loads(_fabric_release_bytes(context["root"] / "manifest.json"))
+    expected = {"enabled": True, "schema": ORIGINAL_COLLECTION_SCHEMA,
+        "pythonPath": str(interpreter),
+        "pythonSha256": _stable_regular_file_hash(interpreter, label="original collection interpreter"),
+        "controlPath": str(control), "controlSha256": hashlib.sha256(context["files"]["private_service.py"]).hexdigest(),
+        "controlBundleDigest": manifest["bundleDigest"],
+        "nativeStore": str(store), "nativeGeneration": digest}
+    if configuration is not None and configuration != expected:
+        raise ValueError("original collection installed descriptor changed")
+    return expected, native, root, metadata
+
+
+def _original_collection_setting(args, roots, prior, fabric_only, modern_fabric):
+    requested = getattr(args, "original_collection", None)
+    if requested is not None and type(requested) is not bool:
+        raise SystemExit("invalid original collection selection")
+    previous = None
+    if prior is not None:
+        if _sha256_file(roots["config"]) != prior.get("configHash"):
+            raise SystemExit("original collection configuration changed")
+        config = json.loads(roots["config"].read_text(encoding="utf-8"))
+        previous = config.get("originalCollection")
+        if previous is not None:
+            if (type(previous) is not dict or set(previous) != ORIGINAL_COLLECTION_FIELDS
+                    or previous.get("enabled") is not True
+                    or previous.get("schema") != ORIGINAL_COLLECTION_SCHEMA
+                    or any(not _sha256_hex(previous.get(key)) for key in
+                           ("pythonSha256", "controlSha256", "controlBundleDigest", "nativeGeneration"))
+                    or any(type(previous.get(key)) is not str or not Path(previous[key]).is_absolute()
+                           or str(Path(previous[key])) != previous[key] or ".." in Path(previous[key]).parts
+                           for key in ("pythonPath", "controlPath", "nativeStore"))
+                    or config.get("backendMode") != "shared-account"
+                    or config.get("gitPublish") is not False or config.get("paperDesign") is not False
+                    or any(key in config for key in ("repositoryWorkspaces", "commissionPublication", "fleetStatus", "publicUrl"))):
+                raise SystemExit("invalid retained original collection selection")
+            _original_collection_profile(config.get("accountLabel"), config.get("host"),
+                config.get("port"), config.get("fabricOnly"), config.get("modernFabricProtocol"))
+    enabled = previous is not None if requested is None else requested
+    if not enabled:
+        return None
+    _original_collection_profile(args.account, "127.0.0.1", args.port, fabric_only, modern_fabric)
+    # Explicit opt-in is needed initially. Upgrades rebuild a fully verified
+    # descriptor under the same enrolled service; no client chooses a path.
+    descriptor, _, _, _ = _original_collection_native()
+    return descriptor
+
+
+def cmd_original_collection_helper(args):
+    """Fixed installed helper for the already-authorized gateway operation.
+
+    Its stdin contains correlation/selectors, never an identity assertion.
+    The gateway checks its actual private-channel principal before spawning.
+    Same-UID machine-owner access remains the existing trust model.
+    """
+    started = False
+    selected_run = None
+    operation = None
+    try:
+        raw = sys.stdin.buffer.read(16385)
+        if len(raw) > 16384:
+            raise ValueError("original collection input bound")
+        def unique(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError("duplicate original collection field")
+                value[key] = item
+            return value
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
+        required = {"configuration", "operation", "run_id"}
+        if (type(value) is not dict or not required.issubset(value)
+                or set(value) - required - {"receipt_sha256"}
+                or value["operation"] not in ("collect", "status", "result")
+                or type(value["run_id"]) is not str or value["run_id"] not in ORIGINAL_COLLECTION_RUNS
+                or (value["operation"] == "result" and not _sha256_hex(value.get("receipt_sha256")))
+                or (value["operation"] != "result" and "receipt_sha256" in value)
+                or type(value["configuration"]) is not dict
+                or set(value["configuration"]) != ORIGINAL_COLLECTION_FIELDS):
+            raise ValueError("original collection selector refused")
+        selected_run = value["run_id"]
+        operation = value["operation"]
+        _, native, root, metadata = _original_collection_native(value["configuration"],
+            require_current=value["operation"] == "collect")
+        import importlib.util
+        ext = root / "ext"
+        target = ext / "original_delivery_collector.py"
+        source = native.regular_bytes(target)
+        if native.digest(source) != metadata["files"]["ext/original_delivery_collector.py"]:
+            raise ValueError("original collector changed")
+        sys.path.insert(0, str(ext))
+        sys.dont_write_bytecode = True
+        spec = importlib.util.spec_from_file_location("original_delivery_collector", target)
+        collector = importlib.util.module_from_spec(spec)
+        if "original_delivery_collector" in sys.modules:
+            raise ValueError("original collector module conflict")
+        sys.modules["original_delivery_collector"] = collector
+        exec(compile(source, str(target), "exec"), collector.__dict__)
+        if collector.GATEWAY_ORIGINAL_RUNS != ORIGINAL_COLLECTION_RUNS:
+            raise ValueError("original collector scope differs")
+        started = True
+        result = collector._gateway_original_delivery(value["operation"], value["run_id"],
+            value.get("receipt_sha256"))
+        encoded = json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        if len(encoded) > 16 * 1024 * 1024:
+            raise ValueError("original collection output bound")
+        sys.stdout.buffer.write(encoded + b"\n")
+        return 0
+    except (OSError,ValueError,TypeError,KeyError,AttributeError,RecursionError):
+        effect_possible = started and operation == "collect"
+        print(json.dumps({"run_id": selected_run,
+            "state": "UNKNOWN" if effect_possible else "REFUSED",
+            "effect_state": "EFFECT_UNKNOWN" if effect_possible else "NOT_APPLIED",
+            "reason": "original_collection_unconfirmed", "retry_authorized": False}))
+        return 75
+
+
 def _build_config(
     account: str,
     host: str,
@@ -1523,6 +1681,7 @@ def _build_config(
     commission_digest: str | None = None,
     fabric_only: bool = False,
     modern_fabric: bool = False,
+    original_collection: dict | None = None,
 ) -> dict:
     if type(modern_fabric) is not bool or (modern_fabric and (not fabric_only or host != "127.0.0.1")):
         raise ValueError("modern Fabric requires the closed private Fabric-only profile")
@@ -1555,6 +1714,13 @@ def _build_config(
     if modern_fabric:
         config["modernFabricProtocol"] = True
         config["backendMode"] = "shared-account"
+    if original_collection is not None:
+        _original_collection_profile(account, host, port, fabric_only, modern_fabric)
+        if (type(original_collection) is not dict or set(original_collection) != ORIGINAL_COLLECTION_FIELDS
+                or original_collection.get("enabled") is not True
+                or original_collection.get("schema") != ORIGINAL_COLLECTION_SCHEMA):
+            raise ValueError("invalid original collection descriptor")
+        config["originalCollection"] = dict(original_collection)
     if repository_workspaces:
         config["repositoryWorkspaces"] = {
             "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]
@@ -2028,6 +2194,7 @@ def _write_install(
     commission_digest: str | None = None,
     fabric_only: bool = False,
     modern_fabric: bool = False,
+    original_collection: dict | None = None,
 ) -> int:
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
@@ -2055,6 +2222,7 @@ def _write_install(
                 commission_digest=commission_digest,
                 fabric_only=fabric_only,
                 modern_fabric=modern_fabric,
+                original_collection=original_collection,
             ),
             indent=2,
             sort_keys=True,
@@ -2251,6 +2419,8 @@ def cmd_stage(args) -> int:
         source, node_abs, backend_abs, account, label, host, port, roots
     )
     fabric_only = _fabric_profile_setting(args, roots, prior)
+    modern_fabric = _modern_fabric_setting(args, roots, prior, fabric_only)
+    original_collection = _original_collection_setting(args, roots, prior, fabric_only, modern_fabric)
     # Paper remains mandatory only for a profile that actually exposes Paper.
     if not fabric_only:
         _verify_paper_runtime(_user_root())
@@ -2267,7 +2437,8 @@ def cmd_stage(args) -> int:
         repository_workspaces=_repository_workspace_setting(args, roots, prior),
         commission_digest=_commission_setting(args, roots, prior),
         fabric_only=fabric_only,
-        modern_fabric=_modern_fabric_setting(args, roots, prior, fabric_only),
+        modern_fabric=modern_fabric,
+        original_collection=original_collection,
     )
 
 def _sealed_historical_tailnet_launch_argv(
@@ -3624,6 +3795,8 @@ def cmd_upgrade(args) -> int:
         commission_digest=commission_digest,
         fabric_only=fabric_only,
         modern_fabric=_modern_fabric_setting(args, roots, prior, fabric_only),
+        original_collection=_original_collection_setting(args, roots, prior, fabric_only,
+            _modern_fabric_setting(args, roots, prior, fabric_only)),
     )
 
 
@@ -4656,6 +4829,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="private_service")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    original = sub.add_parser("_original-collection-helper", help=argparse.SUPPRESS)
+    original.set_defaults(func=cmd_original_collection_helper)
+
     status = sub.add_parser("fleet-status-module-upgrade")
     status.add_argument("--account", choices=(
         "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt2-personal",
@@ -4721,6 +4897,8 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--backend", required=True)
         s.add_argument("--modern-fabric-protocol", action=argparse.BooleanOptionalAction, default=None,
                        help="opt into stateless MCP for the private Fabric-only shared backend; otherwise preserve verified selection")
+        s.add_argument("--original-collection", action=argparse.BooleanOptionalAction, default=None,
+                       help="explicit fixed J/carrier collection capability for the existing modern C3 service")
         s.add_argument("--fabric-only", action="store_true", help="new Fabric-only installation; no Git, Paper or repository tools")
         s.add_argument("--os-commission-config-sha256", help="opt into the exact root-sealed OS publication grant")
         s.add_argument("--enable-repository-workspaces", action="store_true",
