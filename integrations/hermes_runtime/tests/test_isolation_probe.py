@@ -80,7 +80,7 @@ def case_by_id(case_id: str, role: str = "mmsecretary") -> probe._Case:
 
 
 def current(case):
-    return {'sufficient': True, 'pid': 101, 'start_ticks': 22, 'socket_inode': 333,
+    return {'sufficient': True, 'pid': 101, 'start_ticks': 22, 'socket_fd': 7, 'socket_inode': 333,
             'host': case.host, 'port': case.port}
 
 
@@ -781,20 +781,251 @@ class ExternalAddressFixtureTests(unittest.TestCase):
                                  probe._case_record(case, flagged, selected=True))
 
 
+class LoadedCodeFingerprintTests(unittest.TestCase):
+    def test_nested_function_creation_and_reference_aliases_do_not_change_code(self):
+        def capture():
+            before = probe._loaded_code_fingerprint(capture.__code__)
+            def emit(value):
+                return value
+            def not_run(value):
+                return emit(value)
+            def listener(value):
+                return not_run(value)
+            after = probe._loaded_code_fingerprint(capture.__code__)
+            return before, after, (emit, not_run, listener)
+        before, after, retained = capture()
+        self.assertEqual(before, after)
+        aliases = (capture.__code__, capture.__code__.co_consts,
+                   tuple(function.__code__ for function in retained))
+        for _ in range(20):
+            retained[-1](123)
+        self.assertEqual(before, probe._loaded_code_fingerprint(capture.__code__))
+        self.assertTrue(aliases)
+
+    def test_each_structural_and_nested_change_remains_visible(self):
+        def original(value):
+            try:
+                def nested():
+                    return 'original'
+                return nested(), value
+            except ValueError:
+                return None
+        code = original.__code__
+        expected = probe._loaded_code_fingerprint(code)
+        self.assertEqual(expected, probe._loaded_code_fingerprint(code.replace()))
+        replacements = [
+            {'co_name': code.co_name + '_changed'},
+            {'co_qualname': code.co_qualname + '_changed'},
+            {'co_filename': code.co_filename + '.changed'},
+            {'co_firstlineno': code.co_firstlineno + 1},
+            {'co_flags': code.co_flags ^ 0x100000},
+            {'co_names': code.co_names + ('different',)},
+            {'co_code': code.co_code + bytes((9, 0))},
+            {'co_linetable': code.co_linetable + b'\x00'},
+            {'co_exceptiontable': code.co_exceptiontable + b'\x00'},
+        ]
+        nested = next(value for value in code.co_consts if type(value) is type(code))
+        changed = nested.replace(co_consts=nested.co_consts + ('different',))
+        replacements.append({'co_consts': tuple(changed if value is nested else value for value in code.co_consts)})
+        for delta in replacements:
+            with self.subTest(field=next(iter(delta))):
+                self.assertNotEqual(expected, probe._loaded_code_fingerprint(code.replace(**delta)))
+
+    def test_exact_constant_types_order_and_float_bits_are_preserved(self):
+        code = (lambda: None).__code__
+        values = [None, Ellipsis, False, True, 0, 1, 0.0, -0.0, 1.0, 1+0j,
+                  'x', b'x', (1, 2), (2, 1), frozenset({1, 2}), '\ud800']
+        digests = [probe._loaded_code_fingerprint(code.replace(co_consts=(value,))) for value in values]
+        self.assertEqual(len(set(digests)), len(values))
+        self.assertEqual(probe._loaded_code_fingerprint(code.replace(co_consts=(frozenset((1, 'x')),))),
+                         probe._loaded_code_fingerprint(code.replace(co_consts=(frozenset(('x', 1)),))))
+        for value in ([], {}, object()):
+            with self.subTest(type=type(value).__name__), self.assertRaises(RuntimeRefusal):
+                probe._loaded_code_fingerprint(code.replace(co_consts=(value,)))
+        nested = None
+        for _ in range(70):
+            nested = (nested,)
+        with self.assertRaises(RuntimeRefusal):
+            probe._loaded_code_fingerprint(code.replace(co_consts=(nested,)))
+        with self.assertRaises(RuntimeRefusal):
+            probe._loaded_code_fingerprint(code.replace(co_consts=('x' * (1024 * 1024 + 1),)))
+
+
+class ListenerProtocolTests(unittest.TestCase):
+    @contextlib.contextmanager
+    def channel(self):
+        request_read, request_write = os.pipe()
+        response_read, response_write = os.pipe()
+        request, response = os.fstat(request_write), os.fstat(response_read)
+        channel = probe._ListenerChannel(request_write, response_read, os.getpid(), 123,
+            (request.st_dev, request.st_ino), (response.st_dev, response.st_ino))
+        try:
+            yield channel, request_read, response_write
+        finally:
+            channel.close()
+            os.close(request_read)
+            os.close(response_write)
+
+    def test_replaced_descriptor_stays_open_and_cleanup_failure_remains_latched(self):
+        with self.channel() as (channel, _, _):
+            original_fd = channel.request_fd
+            replacement_read, replacement_write = os.pipe()
+            try:
+                os.dup2(replacement_write, original_fd)
+                self.assertFalse(channel.close())
+                self.assertFalse(channel.close())
+                os.write(original_fd, b'x')
+                self.assertEqual(os.read(replacement_read, 1), b'x')
+                with mock.patch.object(probe.os, 'waitpid', side_effect=ChildProcessError), \
+                     mock.patch.object(probe.os, 'kill') as kill:
+                    self.assertFalse(probe._terminate_children([
+                        {'pid': channel.child_pid, '_witness_channel': channel}]))
+                    kill.assert_not_called()
+            finally:
+                os.close(original_fd)
+                os.close(replacement_read)
+                os.close(replacement_write)
+
+    def test_wrong_or_missing_nonce_type_or_extra_field_closes_original_channel(self):
+        good = {'nonce': 'a' * 32, 'pid': 123, 'start_ticks': 20, 'socket_fd': 7,
+                'socket_inode': 99, 'host': '127.0.0.1', 'port': 45000, 'accepting': True}
+        mutations = [{'nonce': 'b' * 32}, {'pid': True}, {'socket_fd': '7'},
+                     {'accepting': 1}, {'extra': 'not permitted'}]
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), self.channel() as (channel, _, _):
+                with mock.patch.object(probe.uuid, 'uuid4', return_value=SimpleNamespace(hex='a' * 32)), \
+                     mock.patch.object(probe, '_read_pipe_frame', return_value={**good, **mutation}):
+                    self.assertIsNone(channel.observe())
+                self.assertEqual((channel.request_fd, channel.response_fd), (-1, -1))
+                self.assertTrue(channel.close())
+
+    def test_timeout_eof_and_malformed_or_oversized_frames_never_become_evidence(self):
+        for raw in (b'{}\n{}\n', b'{"x":1,"x":2}\n', b'[]\n', b'{"x":"\xff"}\n', b'x' * 2049):
+            with self.subTest(raw=raw[:30]), self.channel() as (channel, _, response_write):
+                os.write(response_write, raw)
+                self.assertIsNone(channel.observe())
+        with self.channel() as (channel, _, _), mock.patch.object(probe, 'LISTENER_TIMEOUT', 0.01):
+            self.assertIsNone(channel.observe())
+        read_fd, write_fd = os.pipe()
+        os.close(write_fd)
+        try:
+            with self.assertRaises(ValueError):
+                probe._read_pipe_frame(read_fd, timeout=0.01)
+        finally:
+            os.close(read_fd)
+
+    def test_descriptor_continuity_is_required_but_fresh_nonce_is_per_observation(self):
+        case = case_by_id('tcp.own_alias.denied_port')
+        before = {**current(case), 'nonce': 'first'}
+        self.assertTrue(probe._same_listener(before, {**before, 'nonce': 'second'}))
+        self.assertFalse(probe._same_listener(before, {**before, 'socket_fd': 8}))
+
+    def test_private_channel_never_enters_the_public_report(self):
+        report, profile, args, records, guards = report_fixture()
+        bind, connect = probe.role_tcp_ports(profile)
+        report = probe._build_report(profile, profile.role, 'mmsecretary', identity(profile.role),
+            guards, records, set(records), bind, connect, probe.DEFAULT_DENIED_PORT[profile.role], args,
+            witnesses={'cleanup_complete': True},
+            listeners={'fixture': {'pid': 123, 'socket_fd': 7, '_witness_channel': object()}})
+        self.assertEqual(report['listeners'], {'fixture': {'pid': 123, 'socket_fd': 7}})
+        self.assertNotIn('_witness_channel', json.dumps(report))
+
+
 @unittest.skipUnless(sys.platform.startswith('linux'), 'actual Linux proc/socket fixture only')
 class LinuxListenerTests(unittest.TestCase):
+    def setUp(self):
+        # Linux process labels alone do not prove that this executor exposes
+        # the current process namespace through procfs. Refuse the fixture
+        # before forking when its owner could not observe or reap by identity.
+        if not Path(f'/proc/{os.getpid()}/stat').is_file():
+            self.skipTest('current process procfs is unavailable in this execution environment')
+
     def test_owned_pid_start_inode_and_exact_address_are_required_and_reaped(self):
         pid, listener = probe._spawn_listener('127.0.0.1', 0)
         listener['bind_port'] = listener.get('listen_port', 0)
         try:
             now = probe._listener_current(listener, '127.0.0.1', listener['bind_port'])
             self.assertTrue(now['sufficient'])
-            for change in ({'socket_inode': listener['socket_inode'] + 1}, {'start_ticks': listener['start_ticks'] + 1}):
+            for change in ({'socket_inode': listener['socket_inode'] + 1},
+                           {'socket_fd': listener['socket_fd'] + 1},
+                           {'start_ticks': listener['start_ticks'] + 1}):
                 self.assertFalse(probe._listener_current({**listener, **change}, '127.0.0.1', listener['bind_port'])['sufficient'])
             self.assertFalse(probe._listener_current(listener, '127.0.0.2', listener['bind_port'])['sufficient'])
         finally:
             self.assertTrue(probe._terminate_children([listener]))
         self.assertFalse(probe._listener_current(listener, '127.0.0.1', listener['bind_port'])['sufficient'])
+
+    def test_current_kernel_row_and_live_private_channel_are_both_required(self):
+        _, listener = probe._spawn_listener('127.0.0.1', 0)
+        listener['bind_port'] = listener.get('listen_port', 0)
+        try:
+            with mock.patch.object(probe, '_kernel_listeners', return_value=[]):
+                self.assertFalse(probe._listener_current(listener, '127.0.0.1', listener['bind_port'])['sufficient'])
+            listener['_witness_channel'].close()
+            self.assertFalse(probe._listener_current(listener, '127.0.0.1', listener['bind_port'])['sufficient'])
+        finally:
+            self.assertTrue(probe._terminate_children([listener]))
+
+    def test_preexisting_listener_is_freshly_witnessed_after_actual_landlock(self):
+        # Policy attaches only in this disposable subprocess. No service,
+        # cgroup, role credentials or production host is involved.
+        code = r'''
+import json, socket
+from integrations.hermes_runtime import isolation_probe as p, tcp_sandbox as tcp
+from integrations.hermes_runtime.errors import RuntimeRefusal
+children=[]
+result={}
+try:
+    _, listener=p._spawn_listener('127.0.0.1', 0)
+    children.append(listener)
+    port=listener['listen_port']
+    listener['bind_port']=port
+    first=p._listener_current(listener,'127.0.0.1',port)
+    assert first['sufficient'], first
+    baseline=p._pre_landlock_baseline(listener,'127.0.0.1',port,0.5)
+    assert baseline['reached'], baseline
+    exec_before=p._exec_probe('127.0.0.1',port,0.5)
+    assert exec_before==('connected',None), exec_before
+    with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as reserved:
+        reserved.bind(('127.0.0.1',0))
+        allowed=reserved.getsockname()[1]
+    try:
+        tcp.apply_tcp_port_policy(frozenset({allowed}),frozenset({allowed}))
+    except RuntimeRefusal as exc:
+        if exc.code not in {'ROLE_TCP_LANDLOCK_PLATFORM_UNSUPPORTED','ROLE_TCP_LANDLOCK_ABI_UNAVAILABLE',
+                'ROLE_TCP_LANDLOCK_CREATE_FAILED','ROLE_TCP_NO_NEW_PRIVS_FAILED','ROLE_TCP_LANDLOCK_ATTACH_FAILED'}:
+            raise
+        result={'unavailable':exc.code}
+    else:
+        after=p._listener_current(listener,'127.0.0.1',port)
+        assert p._same_listener(first,after), after
+        case=p._Case('tcp.own_alias.denied_port','tcp','disposable kernel fixture',
+            p.OBSERVED_REFUSED,listener='denied',host='127.0.0.1',port=port)
+        outcome=p._tcp_outcome(case,{'denied':listener},{'denied':baseline},frozenset({allowed}),0.5)
+        assert p._status_for(case,outcome)==p.STATUS_PASS, outcome
+        executed=p._exec_outcome(case,exec_before,0.5,listener,first)
+        assert p._status_for(case,executed)==p.STATUS_PASS, executed
+        _, permitted=p._spawn_listener('127.0.0.1',allowed)
+        children.append(permitted)
+        assert p._listener_current(permitted,'127.0.0.1',allowed)['sufficient']
+        assert p._connect('127.0.0.1',allowed,0.5)==(None,'connected')
+        result={'status':'PASS','same_original':True,'tcp_denial':outcome.errno,
+                'exec_denial':executed.errno,'allowed_after_policy':True}
+finally:
+    assert p._terminate_children(children)
+    assert all(c['_witness_channel'].request_fd == c['_witness_channel'].response_fd == -1 for c in children)
+print(json.dumps(result))
+'''
+        completed = subprocess.run([sys.executable, '-B', '-c', code], cwd=REPO,
+            env={**os.environ, 'PYTHONPATH': str(REPO), 'PYTHONDONTWRITEBYTECODE': '1'},
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout)
+        if 'unavailable' in result:
+            self.skipTest(result['unavailable'])
+        self.assertEqual(result['status'], 'PASS')
+        self.assertTrue(result['same_original'])
+        self.assertTrue(result['allowed_after_policy'])
 
     def test_external_fixture_attempt_really_connects_to_the_exact_target(self):
         # No mock: the external mode uses the ordinary bounded connect path.

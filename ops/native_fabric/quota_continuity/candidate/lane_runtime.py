@@ -598,9 +598,21 @@ def _wait_owned_process_with_fuse(
         if not members:
             if proc.poll() is not None:
                 return "completed"
-            raise ProcessCensusError(
-                "process_group_census_empty_while_leader_live"
-            )
+            # A disappearing group and a not-yet-reaped leader are separate
+            # observations. Reap this same owned Popen once, within the original
+            # deadline; a leader that remains live still fails closed.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return "timeout"
+            try:
+                proc.wait(timeout=min(0.05, remaining))
+            except subprocess.TimeoutExpired:
+                if time.monotonic() >= deadline:
+                    return "timeout"
+                raise ProcessCensusError(
+                    "process_group_census_empty_while_leader_live"
+                ) from None
+            return "completed"
 
 
 def cleanup_receipt_is_proven(value: Mapping[str, Any]) -> bool:

@@ -294,9 +294,9 @@
       "source": "candidate/host_pull_probe.template"
     },
     "ext/lane_runtime.py": {
-      "bytes": 91552,
+      "bytes": 92154,
       "installed_preimage_sha256": "966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937",
-      "sha256": "83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d",
+      "sha256": "a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f",
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {

@@ -207,6 +207,8 @@ GO_ORIGINAL_ARTIFACT_DIGEST = "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3
 # Exact protected107 process-census successor; prior namespaces retain their bytes.
 GO_CENSUS_RUNTIME_PREIMAGE = "61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329"
 GO_CENSUS_RUNTIME_DIGEST = "83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d"
+# C36 at fe3265a9: exact owned-child exit observation successor, current107 only.
+GO_CENSUS_EXIT_RUNTIME_DIGEST = "a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f"
 
 # Exact current107 remote-cwd successor of the protected Ubuntu4 task member.
 # The complete Ubuntu4 cohort must still validate after this normalization.
@@ -227,10 +229,10 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     advertised-artifact recovery pair extends that closure to107 and is
     projected back to106 before historical validation; it grants no new
     application artifact access.
-    The exact current107 census and remote-cwd task successors are normalized
-    without changing any historical namespace or the caller manifest. The
-    task successor still requires the complete Ubuntu4 and poll cohorts.
-    Every other member/key stays bound to actual395b.
+    The two exact current107 census successors and the exact remote-cwd
+    task successor are normalized without changing any historical namespace
+    or the caller manifest. The task successor still requires the complete
+    Ubuntu4 and poll cohorts. Every other member/key stays bound to actual395b.
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
     """
@@ -246,7 +248,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         raise ValueError("native Go base dependency closure differs")
     normalized = dict(manifest)
     runtime = manifest["ext/lane_runtime.py"]
-    if runtime == GO_CENSUS_RUNTIME_DIGEST:
+    if runtime in (GO_CENSUS_RUNTIME_DIGEST, GO_CENSUS_EXIT_RUNTIME_DIGEST):
         if set(manifest) != expected:
             raise ValueError("native Go census cannot relabel historical namespace")
         normalized["ext/lane_runtime.py"] = GO_CENSUS_RUNTIME_PREIMAGE
