@@ -250,6 +250,16 @@ universal procedure owner. Read it before creating or relying on a temporary wat
 
 ### Session-owned review and ordinary release
 
+**Ship by default:** for ordinary reversible work, the entire path is one owner,
+one coherent diff, available affected tests, one Ready PR, one protected auto-merge
+request, then exact merge readback. Do not multiply approvals, reviewer chats,
+source workspaces, handoff documents, or status polling because of an internal
+process habit. FAST and STANDARD integrated queue checks are scoped to verified
+risk; unqualified and CRITICAL source still runs full required CI. User-path or
+installed proof is owed only where the feature changes those surfaces. A real
+security/permission denial, held PR, live writer or uncertain effect remains a
+specific fence, not a reason to stall unrelated work.
+
 Load [session-local review policy](docs/SESSION_LOCAL_REVIEW_POLICY.md) at the same
 protected pin. Ordinary reversible FAST/STANDARD changes use this session's self-check,
 affected tests and the normal protected controller/queue. No mandatory independent

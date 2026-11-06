@@ -120,6 +120,14 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
             "",
         ),
         (
+            "gateway-fleet-git-failure.test.mjs ",
+            "",
+        ),
+        (
+            "control_bundle*test.py",
+            "",
+        ),
+        (
             "python -m unittest discover -s . -p 'private_service*test.py'",
             "echo bypass",
         ),
@@ -539,7 +547,9 @@ _GATE_PASS_CASES = [
     ("pull_request", "full", ("success", "skipped", "success")),
     ("pull_request", "fast", ("success", "success", "skipped")),
     ("pull_request", "smoke", ("success", "success", "skipped")),
-    ("merge_group", "", ("skipped", "skipped", "success")),
+    ("merge_group", "full", ("success", "skipped", "success")),
+    ("merge_group", "fast", ("success", "success", "skipped")),
+    ("merge_group", "smoke", ("success", "success", "skipped")),
     ("push", "", ("skipped", "skipped", "success")),
     ("workflow_dispatch", "", ("skipped", "skipped", "success")),
 ]
@@ -612,7 +622,7 @@ def test_actual_shell_gate_rejects_unqualified_pr_modes(tmp_path, mode, states):
     assert calls == []
 
 
-@pytest.mark.parametrize("event", ["merge_group", "push", "workflow_dispatch"])
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
 @pytest.mark.parametrize("mode", ["fast", "smoke"])
 def test_actual_shell_gate_never_uses_pr_fast_results_for_release(tmp_path, event, mode):
     result, calls = _run_exact_workflow_gate(

@@ -457,9 +457,19 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     protected=([str(bootstrap.resolve()),str(bootstrap.parent)] if system_launch else [str(real),str(logical.parent),*set(observed.values())])
     ancestry=(bootstrap.resolve(),bootstrap) if system_launch else (real,logical,*map(Path,observed.values()))
     ancestors={str(v) for p in ancestry for v in p.parents}
+    # RWE starts through a runner-owned virtual environment. Model only its
+    # exact existing regular startup configuration files, preserving real
+    # content, link, size, getpath and drift checks in the production pin.
+    import stat
+    startup_configs=set()
+    for directory in (logical.parent,logical.parent.parent):
+        candidate=directory/'pyvenv.cfg'
+        try:info=candidate.lstat()
+        except FileNotFoundError:continue
+        if stat.S_ISREG(info.st_mode):startup_configs.add(str(candidate))
     private=[];fault_acl=False
     def distribution(name):
-        return str(name) in ancestors or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
+        return str(name) in ancestors or str(name) in startup_configs or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
     def root_view(info):
         return _preserving_stat_view(info,uid=0,mode=info.st_mode&~0o022)
     def owned_fstat(fd):
@@ -502,7 +512,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         # image/getpath/Bash/immutable FD and protocol validators stay real.
         monkeypatch.setattr(os,'fstat',owned_fstat);monkeypatch.setattr(os,'stat',owned_stat);monkeypatch.setattr(os,'lstat',owned_lstat);monkeypatch.setattr(os,'getxattr',modeled_xattr)
         monkeypatch.setenv('HOME',account.pw_dir)
-        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[scratch],root_directories=ancestors,root_files=[real])
+        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private)|startup_configs,prefixes=protected+[scratch],root_directories=ancestors,root_files=[real,*startup_configs])
         result=json.loads(_inert_bootstrap(req,probe,diagnostic_request=request))
         assert result['binary']['real_path']==str(real)
         assert result['pre_execution']['snapshot_sealed'] is True
@@ -573,7 +583,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='c6b250d42ff2841e5b1d98a8d5f5a81603274fcf9ca68a0e35a4bfccfb75d1e7'
+    assert hashlib.sha256(current_raw).hexdigest()=='06079d74361e849beac14436acdd709d40f226fe3bf2f3c905a9945b0325c069'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==107
     assert set(before)<=set(current)
@@ -603,20 +613,21 @@ def test_native_initializer_extends_only_exact_preimage_members():
                           'ext/fabric_operator_contract.py','ext/native_remote.py',
                           'ext/oc_free_exec.sh','ext/remote_sub_helpers.py',
                           'ext/slot.py','ext/sub.sh'}
+    application_changed={'ext/lease_broker.py', 'ext/go_lease_capability.py', 'ext/go_lease_gateway.py', 'ext/quota_circuit.py'}
     recovery_changed={'ext/artifact_delivery.py','ext/run_observation.py',
                       'ext/run_observation_delivery.py'}
-    # Ubuntu4 adds exactly one changed member to this finite source union.
-    # Its authentic predecessor remains fixed in the historical release.
+    # Preserve protected Linux process custody, the Ubuntu4 qualifier
+    # and the application A members in the exact historical diff.
     ubuntu4_changed={'ext/fabric_host_qualification.py'}
     assert before['ext/fabric_host_qualification.py']=='1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899'
     # The bounded procfs fallback changes only the current lane runtime.
     census_changed={'ext/lane_runtime.py'}
     assert before['ext/lane_runtime.py']=='61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329'
     assert current['ext/lane_runtime.py']=='83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d'
-    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|recovery_changed|ubuntu4_changed|census_changed
+    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed
     # Census fallback advances exactly one additional historical member.
-    assert sum(before[p]==current[p] for p in before)==62
-    for name in added|changed|diagnostic_changed|long_horizon_changed|recovery_changed|ubuntu4_changed|census_changed:
+    assert sum(before[p]==current[p] for p in before)==59
+    for name in added|changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation

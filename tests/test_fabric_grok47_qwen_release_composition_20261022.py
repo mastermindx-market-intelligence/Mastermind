@@ -58,10 +58,10 @@ PROTECTED_QWEN_SOURCE_DIGESTS = {
 }
 
 # Keep the exact historical Qwen map above. The restrictive context-reader
-# join and fair-share queue repair advance as explicit candidate bytes; the
-# other Qwen payloads remain exact.
+# join and the composed application-turn/fair-share broker each have one exact
+# forward digest; remaining Qwen payloads retain their original bytes.
 REVIEWED_QWEN_FORWARD_DIGESTS = {
-    "lease_broker.py": "598d9b905b71897275a0617d143f3280bc802fbd6c375bed9848d222564e1488",
+    "lease_broker.py": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
     "glm_host_account_source.py": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
 }
 
