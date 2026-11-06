@@ -63,7 +63,9 @@ def test_generated_manifest_covers_actual_new_entry_and_readiness_graph(tmp_path
 
 def test_exact_new_template_publisher_is_not_old_launcher_ingress(tmp_path):
     import json,pytest
-    path=DRAFT/'native_generation.py';current=path.read_bytes()
+    # This proof names the finite pre-application template transition. Its
+    # historical launcher is retained by the incumbent installer owner.
+    path=DRAFT/'preimages/native_generation_75330d.py';current=path.read_bytes()
     added=(b'    # One vetted flat plist. Not a suffix rule and not a directory walk.\n'
            b'    if relative == "ext/host_pull_launchd.plist.template":\n'
            b'        return\n')

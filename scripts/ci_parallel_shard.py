@@ -376,8 +376,9 @@ def validate_parallel_workflow(text: str) -> None:
     )
     fabric_commands = [
         "npm ci --ignore-scripts --no-audit --no-fund",
-        "node --test gateway-modern-fabric.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs",
+        "node --test gateway-modern-fabric.test.mjs gateway-fleet-git-failure.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs",
         "python -m unittest discover -s . -p 'private_service*test.py'",
+        "python -m unittest discover -s . -p 'control_bundle*test.py'",
     ]
     actual_commands = fabric_step.get("run")
     if (
