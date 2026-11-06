@@ -108,6 +108,7 @@ APPLICATION_QUOTA_TIMEOUT_S = 4.0
 APPLICATION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 APPLICATION_BODY_KEYS = frozenset({"model", "messages", "stream", "max_tokens",
     "temperature", "top_p", "stop", "tools", "tool_choice", "parallel_tool_calls"})
+APPLICATION_NATIVE_BODY_KEYS = frozenset({"model", "messages", "stream", "max_tokens", "preferred_tokens"})
 
 
 class ApplicationSelectionPurpose:
@@ -153,9 +154,10 @@ class ApplicationServiceBinding:
                 raise ValueError("invalid application service identity")
         if (not isinstance(self.credential, str) or not 32 <= len(self.credential) <= 4096
                 or any(not 33 <= ord(c) <= 126 for c in self.credential)
-                or self.credential.startswith(("v1.", "app1.", "app2."))):
+                or self.credential.startswith(("v1.", "app1.", "app2.", "app3.", "appd1."))):
             raise ValueError("invalid application service credential")
-        if self.pool not in ("go", "bailian"):
+        from go_lease_capability import NATIVE_APPLICATION_POOLS
+        if self.pool not in ({"go", "bailian"} | NATIVE_APPLICATION_POOLS):
             raise ValueError("invalid application service pool")
         if type(self.admin_pool_view) is not bool or self.admin_pool_view and (
                 self.pool != "go" or self.selection_purpose is None):
@@ -247,6 +249,206 @@ class ApplicationHTTPBinding:
         return ApplicationUpstreamResult(observation.upstream_status, body,
             observation.usage["input_tokens"], observation.usage["output_tokens"], served,
             observation.upstream_body_sha256, hashlib.sha256(body).hexdigest() if complete else None, complete)
+
+
+@dataclass(frozen=True, init=False)
+class ApplicationNativePreflight:
+    """Pure compiler output for one A-selected account, before dispatch intent.
+
+    This is a closed B boundary, not a CLI driver or process carrier. Neither
+    the caller nor A's later dispatch ID may change these committed bytes.
+    """
+    account: str
+    input_bytes: bytes = field(repr=False)
+    _commitment_json: str = field(repr=False)
+
+    def __init__(self, account, input_bytes, commitment):
+        from lease_broker import (_application_id, _application_digest, _application_json,
+            _APPLICATION_NATIVE_COMMITMENT_FIELDS)
+        _application_id(account)
+        if (type(input_bytes) is not bytes or not 1 <= len(input_bytes) <= APPLICATION_MAX_REQUEST
+                or type(commitment) is not dict or set(commitment) != _APPLICATION_NATIVE_COMMITMENT_FIELDS):
+            raise ValueError("invalid native preflight")
+        _application_id(commitment["physical_host"])
+        for key in _APPLICATION_NATIVE_COMMITMENT_FIELDS - {"physical_host"}:
+            _application_digest(commitment[key])
+        if commitment["input_sha256"] != hashlib.sha256(input_bytes).hexdigest():
+            raise ValueError("native preflight input mismatch")
+        object.__setattr__(self, "account", account)
+        object.__setattr__(self, "input_bytes", input_bytes)
+        object.__setattr__(self, "_commitment_json", _application_json(commitment))
+
+    @property
+    def commitment(self):
+        return json.loads(self._commitment_json)
+
+
+@dataclass(frozen=True, init=False)
+class ApplicationNativeDispatch:
+    """One original private handoff. No executable, URL or retry is selected here."""
+    preflight: ApplicationNativePreflight = field(repr=False)
+    input_bytes: bytes = field(repr=False)
+    capability: str = field(repr=False)
+    _invocation_json: str = field(repr=False)
+
+    def __init__(self, preflight, permit):
+        from lease_broker import _application_json, _APPLICATION_NATIVE_INVOCATION_FIELDS
+        if type(preflight) is not ApplicationNativePreflight or type(permit) is not dict:
+            raise ValueError("invalid native dispatch")
+        invocation = permit.get("native_invocation")
+        if (permit.get("dispatch_permitted") is not True or type(invocation) is not dict
+                or set(invocation) != _APPLICATION_NATIVE_INVOCATION_FIELDS | {"invocation_digest"}
+                or type(permit.get("native_input_bytes")) is not bytes
+                or permit["native_input_bytes"] != preflight.input_bytes
+                or invocation["account"] != preflight.account
+                or invocation["commitment"] != preflight.commitment
+                or type(permit.get("native_dispatch_capability")) is not str
+                or not permit["native_dispatch_capability"].startswith("appd1.")):
+            raise ValueError("native dispatch commitment mismatch")
+        original = {key: value for key, value in invocation.items() if key != "invocation_digest"}
+        if hashlib.sha256(_application_json(original).encode("utf-8")).hexdigest() != invocation["invocation_digest"]:
+            raise ValueError("native dispatch invocation mismatch")
+        object.__setattr__(self, "preflight", preflight)
+        object.__setattr__(self, "input_bytes", permit["native_input_bytes"])
+        object.__setattr__(self, "capability", permit["native_dispatch_capability"])
+        object.__setattr__(self, "_invocation_json", _application_json(invocation))
+
+    @property
+    def invocation(self):
+        return json.loads(self._invocation_json)
+
+
+@dataclass(frozen=True, init=False)
+class ApplicationNativeObservation:
+    """Immutable original-operation evidence returned by the qualified carrier.
+
+    Closed shape is checked here; A validates receipt values and positive
+    settlement against the actual stored invocation before any answer delivery.
+    """
+    invocation_digest: str
+    text: str = field(repr=False)
+    _evidence_json: str = field(repr=False)
+
+    def __init__(self, *, invocation_digest, text, response_digest, served_model,
+                 completed_at, process, provider_terminal, usage):
+        from lease_broker import (_application_digest, _application_model, _application_time,
+            _application_json, _APPLICATION_NATIVE_PROCESS_FIELDS, _APPLICATION_NATIVE_TERMINAL_FIELDS)
+        _application_digest(invocation_digest)
+        _application_digest(response_digest)
+        _application_time(completed_at)
+        if served_model is not None:
+            _application_model(served_model)
+        if (type(text) is not str or "\x00" in text or len(text.encode("utf-8")) > 1024 * 1024
+                or type(process) is not dict or set(process) != _APPLICATION_NATIVE_PROCESS_FIELDS
+                or type(provider_terminal) is not dict or set(provider_terminal) != _APPLICATION_NATIVE_TERMINAL_FIELDS
+                or type(usage) is not dict or set(usage) != {"input_tokens", "output_tokens", "scope", "complete"}):
+            raise ValueError("invalid native observation")
+        evidence = {"response_digest": response_digest, "served_model": served_model,
+            "completed_at": completed_at, "process": process, "provider_terminal": provider_terminal,
+            "usage": usage}
+        object.__setattr__(self, "invocation_digest", invocation_digest)
+        object.__setattr__(self, "text", text)
+        object.__setattr__(self, "_evidence_json", _application_json(evidence))
+
+    @property
+    def evidence(self):
+        return json.loads(self._evidence_json)
+
+
+@dataclass(frozen=True, init=False)
+class ApplicationNativeBinding:
+    """Explicit trusted startup join for one source-qualified fixed recipe.
+
+    The external pure compiler and original process carrier are supplied by the
+    source owner. There is no dynamic loader, registration file, CLI spawn or
+    default executor. These callbacks do not themselves grant application use.
+    """
+    accounts: frozenset
+    recipe_digest: str
+    _recipe_json: str = field(repr=False)
+    preflight: Any = field(repr=False)
+    execute: Any = field(repr=False)
+
+    def __init__(self, *, recipe, accounts, preflight, execute):
+        from lease_broker import _application_native_recipe, _application_id
+        if (type(recipe) is not dict or type(accounts) is not frozenset or not accounts
+                or not callable(preflight) or not callable(execute)):
+            raise ValueError("invalid native startup binding")
+        for account in accounts:
+            _application_id(account)
+        encoded, digest = _application_native_recipe(recipe, pool=recipe.get("pool"), model=recipe.get("model"))
+        object.__setattr__(self, "accounts", accounts)
+        object.__setattr__(self, "recipe_digest", digest)
+        object.__setattr__(self, "_recipe_json", encoded)
+        object.__setattr__(self, "preflight", preflight)
+        object.__setattr__(self, "execute", execute)
+
+    @property
+    def recipe(self):
+        return json.loads(self._recipe_json)
+
+    def validate_gateway(self, gateway):
+        from go_lease_gateway import GoLeaseGateway
+        from lease_broker import Broker
+        if type(gateway) is not GoLeaseGateway or type(gateway._application_owner()) is not Broker:
+            raise ValueError("actual native admission owner required")
+        recipe = self.recipe
+        actual, digest = gateway.application_recipe(recipe["pool"], recipe["model"])
+        if (actual != recipe or digest != self.recipe_digest
+                or gateway._application_native_accounts.get(recipe["pool"]) != self.accounts):
+            raise ValueError("native startup projection conflicts with admission")
+
+    def compile(self, account, payload):
+        from lease_broker import _application_native_payload, _application_native_commitment, _application_json
+        if account not in self.accounts:
+            raise ValueError("native admitted account unavailable")
+        recipe = self.recipe
+        frozen = json.loads(_application_json(payload))
+        input_bytes, logical_digest, _ = _application_native_payload(recipe, frozen)
+        compiled = self.preflight(recipe=recipe, account=account, payload=frozen)
+        if (type(compiled) is not ApplicationNativePreflight or compiled.account != account
+                or compiled.input_bytes != input_bytes
+                or compiled.commitment["logical_payload_digest"] != logical_digest):
+            raise ValueError("native compiler result conflicts with admission")
+        _application_native_commitment(compiled.commitment, self.recipe, self.recipe_digest)
+        return compiled
+
+    def settlement(self, dispatch, observation):
+        from lease_broker import _application_native_receipt
+        if type(dispatch) is not ApplicationNativeDispatch or type(observation) is not ApplicationNativeObservation:
+            raise ValueError("invalid native execution observation")
+        invocation, evidence = dispatch.invocation, observation.evidence
+        if observation.invocation_digest != invocation["invocation_digest"]:
+            raise ValueError("native observation correlation mismatch")
+        usage = evidence["usage"]
+        complete_usage = (usage["scope"] == "operation" and usage["complete"] is True
+            and all(type(usage[key]) is int and 0 <= usage[key] <= 10**12 for key in ("input_tokens", "output_tokens")))
+        counts = {key: usage[key] if complete_usage else None for key in ("input_tokens", "output_tokens")}
+        provider = evidence["provider_terminal"]
+        complete = (provider["state"] == "completed" and evidence["served_model"] == invocation["model"]
+            and bool(observation.text))
+        body = b""
+        if complete:
+            # A CLI operation's owned dispatch ID is an opaque completion ID;
+            # account, lease, input, command and capability never enter the wire.
+            delivery = {"id": invocation["dispatch_id"], "object": "chat.completion",
+                "model": evidence["served_model"], "choices": [{"index": 0, "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": observation.text}}],
+                "usage": {"prompt_tokens": counts["input_tokens"], "completion_tokens": counts["output_tokens"]}}
+            body = json.dumps(delivery, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False, allow_nan=False).encode("utf-8")
+        terminal = {"terminal_kind": "native_cli_operation_v1",
+            **{key: invocation[key] for key in ("principal_id", "caller_host", "workload", "admission_root",
+                "turn_id", "request_id", "dispatch_id", "lease_id", "pool", "account", "model",
+                "request_digest", "recipe_digest", "logical_payload_digest", "invocation_digest")},
+            **{key: invocation["commitment"][key] for key in ("physical_host", "source_generation", "support_generation")},
+            **evidence, "output_bytes": len(observation.text.encode("utf-8")),
+            "delivery_digest": hashlib.sha256(body).hexdigest() if complete else None}
+        _application_native_receipt(terminal)
+        observed = ApplicationUpstreamResult(200 if complete else 502, body, counts["input_tokens"],
+            counts["output_tokens"], evidence["served_model"], evidence["response_digest"],
+            terminal["delivery_digest"], complete)
+        return terminal, observed
 
 
 class ApplicationTransportUncertain(RuntimeError):
@@ -2294,7 +2496,8 @@ class WorkerReplyBuffer(io.BytesIO):
 def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 *, application_services: Tuple[ApplicationServiceBinding, ...] = (),
                 worker_capabilities_enabled: Optional[bool] = None,
-                application_http_binding: Optional[ApplicationHTTPBinding] = None) -> ThreadingHTTPServer:
+                application_http_binding: Optional[ApplicationHTTPBinding] = None,
+                application_native_bindings: Tuple[ApplicationNativeBinding, ...] = ()) -> ThreadingHTTPServer:
     # Capability validity is checked against live broker state per request.
     # This does not claim atomic cancellation of an already forwarded inference.
     worker_inflight = set()
@@ -2325,6 +2528,20 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             raise ValueError("application HTTP accounts conflict with admission")
     if any(service.pool == "bailian" for service in application_services) and application_http_binding is None:
         raise ValueError("application HTTP transport required")
+    from go_lease_capability import NATIVE_APPLICATION_POOLS
+    if (type(application_native_bindings) is not tuple
+            or any(type(binding) is not ApplicationNativeBinding for binding in application_native_bindings)):
+        raise ValueError("invalid native startup bindings")
+    native_bindings = {}
+    for binding in application_native_bindings:
+        binding.validate_gateway(lease_gateway)
+        recipe = binding.recipe
+        key = (recipe["pool"], recipe["model"])
+        if key in native_bindings:
+            raise ValueError("duplicate native startup binding")
+        native_bindings[key] = binding
+    # An enrolled stable service may recover/close an old operation even when
+    # its former executor has been removed. New execution then refuses below.
     source_sha256 = {}
     for name, path in (("go_shim.py", __file__),
                        ("go_lease_capability.py", os.path.join(_EXT_DIR, "go_lease_capability.py")),
@@ -2409,6 +2626,32 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             # observation. Never relay its account, lease, grant or token.
             self._application_reply(disposition, code="application_" + str(disposition))
 
+        def _application_recover(self, scope, arguments):
+            """Resolve an omitted native recipe from the original owner only.
+
+            A requires the exact stored recipe digest for recovery. Reading its
+            immutable turn through the same gateway supplies that commitment;
+            today's executor, recipe, grants and credentials are never queried.
+            The actual recovery still validates scope and the whole request.
+            """
+            if arguments["expected_recipe_digest"] is None:
+                from go_lease_gateway import LeaseGatewayError
+                connection = lease_gateway._connection()
+                try:
+                    connection.execute("BEGIN")
+                    try:
+                        turn = lease_gateway._application_turn_lookup(connection, arguments["principal_id"], scope["turn_id"])
+                    except LeaseGatewayError:
+                        turn = None  # Exact owner lookup reports an absent turn.
+                    if turn is not None:
+                        if (turn["caller_host"] != arguments["host"] or turn["workload"] != scope["workload"]
+                                or turn["model"] != scope["model"]):
+                            raise ValueError("original native recovery scope mismatch")
+                        arguments = {**arguments, "expected_recipe_digest": turn["recipe_digest"]}
+                finally:
+                    connection.close()
+            return lease_gateway.recover_application(scope, **arguments)
+
         def _application_close(self, service):
             try:
                 _, payload = self._read_object(16384)
@@ -2429,6 +2672,121 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 return
             state = result.get("disposition")
             self._application_reply(state, status=200 if state == "closed" else 409)
+
+        def _application_native_post(self, service, scope, recovery_args, payload, recipe_digest):
+            """Fixed-recipe path through A; no Router capacity, proxy or usage owner."""
+            native = native_bindings.get((service.pool, payload["model"]))
+            if native is None:
+                self._application_reply("refused", code="application_native_transport_unavailable", status=503)
+                return
+            try:
+                from lease_broker import _application_native_payload
+                native.validate_gateway(lease_gateway)
+                _application_native_payload(native.recipe, payload)
+                if recipe_digest is not None and recipe_digest != native.recipe_digest:
+                    raise ValueError("native recipe commitment mismatch")
+            except Exception:
+                self._application_reply("refused", code="application_native_contract_refused", status=400)
+                return
+            turn_id, request_id = self.application_turn_id, self.application_request_id
+            try:
+                binding = lease_gateway.begin_application(scope, principal_id=service.principal_id,
+                    host=service.host, expected_credential_ref=service.credential_ref,
+                    deadline_ns=time.monotonic_ns() + 5_000_000_000,
+                    expected_recipe_digest=native.recipe_digest)
+            except BaseException:
+                # A committed turn can outlive its ACK. Never call begin again
+                # or compile using an inferred account in this request.
+                try:
+                    original = self._application_recover(scope, recovery_args)
+                    if original.get("kind") == "request_present":
+                        self._application_recovered(original["request"])
+                        return
+                    if original.get("kind") == "turn_absent":
+                        self._application_reply("refused", code="application_admission_refused", status=503)
+                        return
+                except BaseException:
+                    pass
+                self._application_reply("effect_unknown", code="application_admission_unknown", status=503)
+                return
+            if not binding.get("ok"):
+                self._application_reply("refused", code="application_admission_refused", status=429)
+                return
+            if binding.get("disposition") not in {"admitted", "existing"}:
+                self._application_recovered(binding)
+                return
+            try:
+                compiled = native.compile(binding["account"], payload)
+            except BaseException:
+                # Admission remains held until the existing explicit close.
+                # A pure preflight refusal is not a process/provider attempt.
+                self._application_reply("refused", code="application_native_preflight_refused", status=503)
+                return
+            try:
+                permit = lease_gateway.prepare_application(binding["token"], principal_id=service.principal_id,
+                    host=service.host, turn_id=turn_id, request_id=request_id,
+                    path="/v1/chat/completions", payload=payload, expected_pool=service.pool,
+                    transport_commitment=compiled.commitment)
+            except BaseException:
+                # prepare may have committed an intent and capability whose
+                # ACK was lost. Original recovery never returns a second permit.
+                try:
+                    original = self._application_recover(scope, recovery_args)
+                    if original.get("kind") == "request_present":
+                        self._application_recovered(original["request"])
+                        return
+                except BaseException:
+                    pass
+                self._application_reply("effect_unknown", code="application_preparation_unknown", status=503)
+                return
+            if not permit.get("dispatch_permitted"):
+                self._application_recovered(permit)
+                return
+            observed = None
+            mark_unknown_allowed = True
+            try:
+                dispatch = ApplicationNativeDispatch(compiled, permit)
+                # Last authority check at the one external handoff; the same
+                # invocation, token and input bytes then go to the carrier.
+                lease_gateway.authorize_native_dispatch(dispatch.capability, principal_id=service.principal_id,
+                    caller_host=service.host, turn_id=turn_id, request_id=request_id,
+                    invocation=dispatch.invocation)
+                terminal, observed = native.settlement(dispatch, native.execute(dispatch))
+                try:
+                    mark_unknown_allowed = False
+                    result = lease_gateway.complete_application(permit["dispatch_id"], terminal_receipt=terminal)
+                    settled = result.get("disposition") == "terminal"
+                except BaseException:
+                    original = self._application_recover(scope, recovery_args)
+                    request = original.get("request") if original.get("kind") == "request_present" else None
+                    settled = (type(request) is dict and request.get("disposition") == "terminal"
+                        and request.get("terminal_receipt") == terminal)
+                    mark_unknown_allowed = (type(request) is dict
+                        and request.get("disposition") in {"pending", "effect_unknown"})
+                if not settled:
+                    raise ApplicationTransportUncertain("application_native_settlement_unknown")
+            except BaseException:
+                if mark_unknown_allowed:
+                    try:
+                        lease_gateway.mark_application_unknown(permit["dispatch_id"], reason="application_native_execution_unknown")
+                    except BaseException:
+                        pass  # Pending/unknown retains the original lease and intent.
+                self._application_reply("effect_unknown", code="application_native_execution_unknown",
+                    status=503, observed=observed)
+                return
+            # Delivery failure cannot undo accepted A settlement. There is no
+            # Router usage append, even on errors, replay or socket disconnect.
+            if not observed.answer_complete:
+                self._application_reply("terminal", code="application_native_provider_error", status=502, observed=observed)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(observed.body)))
+            for key, value in self._application_headers("terminal").items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(observed.body)
+            self.wfile.flush()
 
         def _application_post(self, service, path):
             if service is None:
@@ -2455,7 +2813,10 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 recipe_digest = recipe_values[0] if recipe_values else None
                 raw, payload = self._read_object(APPLICATION_MAX_REQUEST)
                 payload = _application_json(raw)
-                if (set(payload) - APPLICATION_BODY_KEYS or payload.get("stream", False) is not False
+                # Original recovery is independent of today's service pool.
+                # Dispatch-specific grammar is checked only after that recovery.
+                if (set(payload) - (APPLICATION_BODY_KEYS | APPLICATION_NATIVE_BODY_KEYS)
+                        or payload.get("stream", False) is not False
                         or not isinstance(payload.get("model"), str) or not payload["model"]
                         or not isinstance(payload.get("messages"), list) or not 1 <= len(payload["messages"]) <= 512):
                     raise ValueError("unsupported application payload")
@@ -2468,7 +2829,7 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 request_id=request_id, path=path, payload=payload, expected_recipe_digest=recipe_digest,
                 include_turn=True)
             try:
-                recovered = lease_gateway.recover_application(scope, **recovery_args)
+                recovered = self._application_recover(scope, recovery_args)
                 if type(recovered) is not dict or recovered.get("kind") not in {
                         "turn_absent", "request_present", "turn_present_new_step"}:
                     raise ValueError("unqualified original recovery")
@@ -2488,6 +2849,13 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 if scope["pool"] != recovered["turn"]["pool"]:
                     self._application_reply("refused", code="application_turn_scope_changed", status=409)
                     return
+            allowed = APPLICATION_NATIVE_BODY_KEYS if service.pool in NATIVE_APPLICATION_POOLS else APPLICATION_BODY_KEYS
+            if set(payload) - allowed:
+                self._application_reply("refused", code="application_request_invalid", status=400)
+                return
+            if service.pool in NATIVE_APPLICATION_POOLS:
+                self._application_native_post(service, scope, recovery_args, payload, recipe_digest)
+                return
             model = payload["model"]
             compiled, account_binding, commitment = None, None, None
             if service.pool == "bailian":
@@ -2912,7 +3280,8 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
 def main(*, application_broker=None,
          application_services: Tuple[ApplicationServiceBinding, ...] = (),
          application_http_binding: Optional[ApplicationHTTPBinding] = None,
-         application_selection_profile=None) -> int:
+         application_selection_profile=None,
+         application_native_bindings: Tuple[ApplicationNativeBinding, ...] = ()) -> int:
     # Only the verified original startup owner may supply these in-process
     # objects. No new config/credential/grant registry or env selector exists.
     if bool(application_services) != (application_broker is not None):
@@ -2920,6 +3289,18 @@ def main(*, application_broker=None,
     if application_http_binding is not None and (
             type(application_http_binding) is not ApplicationHTTPBinding or not application_services):
         raise ValueError("application HTTP startup binding incomplete")
+    if (type(application_native_bindings) is not tuple
+            or any(type(binding) is not ApplicationNativeBinding for binding in application_native_bindings)
+            or application_native_bindings and not application_services):
+        raise ValueError("application native startup binding incomplete")
+    native_accounts = {}
+    native_recipes = []
+    for binding in application_native_bindings:
+        recipe = binding.recipe
+        if recipe["pool"] in native_accounts and native_accounts[recipe["pool"]] != binding.accounts:
+            raise ValueError("application native account projections conflict")
+        native_accounts[recipe["pool"]] = binding.accounts
+        native_recipes.append(recipe)
     if "--check" in sys.argv:
         state_dir = os.environ.get("GO_STATE_DIR", DEFAULTS["GO_STATE_DIR"])
         try:
@@ -2944,11 +3325,14 @@ def main(*, application_broker=None,
             **({"application_http_accounts": application_http_binding.accounts,
                 "application_http_recipes": tuple(application_http_binding.recipe(model)
                     for model in sorted(application_http_binding.driver.identity.allowed_models))}
-               if application_http_binding is not None else {}))
+               if application_http_binding is not None else {}),
+            **({"application_native_accounts": native_accounts, "application_native_recipes": tuple(native_recipes)}
+               if application_native_bindings else {}))
     server = make_server(router, int(os.environ.get("GO_SHIM_PORT", DEFAULTS["GO_SHIM_PORT"])),
         lease_gateway=gateway, application_services=application_services,
         worker_capabilities_enabled=worker_enabled,
-        **({"application_http_binding": application_http_binding} if application_http_binding is not None else {}))
+        **({"application_http_binding": application_http_binding} if application_http_binding is not None else {}),
+        **({"application_native_bindings": application_native_bindings} if application_native_bindings else {}))
     print(f"go_shim listening port={server.server_port}", flush=True)
     server.serve_forever()
     return 0
