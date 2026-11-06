@@ -151,7 +151,10 @@ def compare(
         return _unavailable(at, "book_clock_unqualified")
 
     universe = _id_map(book.get("universe"), "instrument_id")
-    if not universe:
+    # An explicitly empty universe is valid for an entirely cash-funded book.
+    # Missing/malformed metadata remains unavailable; any invented position is
+    # rejected by _weights against this empty set rather than becoming a fund.
+    if universe is None:
         return _unavailable(at, "instrument_universe_missing_or_ambiguous")
     for key, inst in universe.items():
         if not _currency(inst.get("currency")):
