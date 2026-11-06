@@ -494,7 +494,7 @@ describe("Executive OS convergence surfaces", () => {
 
     await navigateCompanyOperation(user, "Fleet & Capacity");
     expect(
-      screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 }),
+      screen.getByRole("heading", { name: "Resources & systems", level: 1 }),
     ).toBeTruthy();
     expect(screen.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
     expect(screen.queryByText("Missingness and source state")).toBeNull();
@@ -530,14 +530,14 @@ describe("Executive OS convergence surfaces", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Meta-CEO" }));
     const attention = screen
       .getByRole("heading", {
-        name: "Chairman attention is not established.",
+        name: "Decisions not yet known.",
         level: 2,
       })
       .closest("section");
     expect(attention).toBeTruthy();
     expect(
       within(attention!).getByText(
-        "Missing attention data does not mean there are no decisions.",
+        "This view does not establish whether a decision needs you.",
         { exact: false },
       ),
     ).toBeTruthy();
@@ -556,7 +556,7 @@ describe("native and interaction contracts", () => {
     expect(within(operations).getByRole("button", { name: "Work queue" })).toBeTruthy();
     expect(within(operations).getByRole("button", { name: "Programs workspace" })).toBeTruthy();
     await userEvent.setup().click(within(operations).getByRole("button", { name: "Fleet & Capacity workspace" }));
-    expect(screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Resources & systems", level: 1 })).toBeTruthy();
     expect(screen.queryByRole("navigation", { name: "Company operations" })).toBeNull();
   });
   it("skip to workspace retains Today and the original URL while focusing main", async () => {

@@ -706,7 +706,7 @@ REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'f20b5b399ff9c6ee6c0cef0447156c59994b6db358c14b759b1d8e3e4bd253cc', 'sites': ((3513, 68, 71, 'int', '503'), (3518, 69, 72, 'int', '503'), (3522, 67, 70, 'int', '503'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '3f785f8b31f0b4e90bcdeb0c89798874f343d63aed957f704dd0112a89ee39c0', 'sites': ((3514, 68, 71, 'int', '503'), (3519, 69, 72, 'int', '503'), (3523, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'cd31cfc2d232e8d3b432ba059209a8a5f8479fd7dc5a811d1897ca664207645f', 'sites': ((13, 118, 121, 'int', '700'),)}

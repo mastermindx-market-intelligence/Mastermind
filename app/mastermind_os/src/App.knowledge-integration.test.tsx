@@ -259,6 +259,7 @@ async function selectActualReturnedWork(f:Awaited<ReturnType<typeof fixture>>) {
   // The title is also present while pending; wait for the retained document.
   await screen.findByText("Role-result digest");
   await user.click(screen.getByRole("button",{name:"Fleet & Capacity workspace"}));
+  await user.click(screen.getByText("Original capacity receipts and run records",{selector:"summary"}));
 }
 
 it("reads historical capacity only after explicit activation for the current independently indexed child Attempt",async()=>{
