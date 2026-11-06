@@ -1,0 +1,63 @@
+{
+  "compiler": "/root/.codex/skills/remote-skills/skill-6ac58acee97481919bf67ad444fd0766/scripts/brief.py",
+  "compiler_sha256": "6d9007885b0b353383d261c32801a3e1b3c355a8b4c344d5c6161d1dd61026f3",
+  "scope": "Authoring schema/completeness only; no authority, source-authentication, installed behavior or runtime admission proof.",
+  "results": [
+    {
+      "input": "opus/O1-executive-runtime.brief.json",
+      "output": "opus/O1-executive-runtime.md",
+      "compiler_returncode": 0,
+      "input_sha256": "165f238823248e9fcede00564fcb242f1d0f1e7e1c7855d38369f71281f8b871",
+      "output_sha256": "9351f2eeb4710dc1729c1c9049df95f76e2634d852789e1a08f53feea30ddbdd",
+      "execution_authority": false
+    },
+    {
+      "input": "opus/O2-fabric-capacity.brief.json",
+      "output": "opus/O2-fabric-capacity.md",
+      "compiler_returncode": 0,
+      "input_sha256": "4fa8cad2ec04126e29cbeb60fdd5771f91cc7e2049414541f7ce3cc0b153d5e1",
+      "output_sha256": "baef0b78e63c6631ee28a24b01fd224c415744b64a1809ceff29acd88cfd585d",
+      "execution_authority": false
+    },
+    {
+      "input": "opus/O3-product-release.brief.json",
+      "output": "opus/O3-product-release.md",
+      "compiler_returncode": 0,
+      "input_sha256": "39c73dd734d1dd9dcdcfed215a096910d869b747def7eaefcb1edb88fd2b0d1e",
+      "output_sha256": "00a9bf82b9d1d35886f495febb9888a2eb7eaab1be9c3a7a4fcf1252762b93c6",
+      "execution_authority": false
+    },
+    {
+      "input": "opus/O4-agent-context.brief.json",
+      "output": "opus/O4-agent-context.md",
+      "compiler_returncode": 0,
+      "input_sha256": "67adfee8caff28542df1a0c313ed2a3f87375f076bcf58bd139dd135c09377cf",
+      "output_sha256": "33639425c83e93b80a11fbe46b2a2ff545479ee8877ef874d5068291ac8c3806",
+      "execution_authority": false
+    },
+    {
+      "input": "opus/O5-principal-native.brief.json",
+      "output": "opus/O5-principal-native.md",
+      "compiler_returncode": 0,
+      "input_sha256": "976e64e5bd39af712dcf12dae9f5615488cc21b6ffacd0e5a81884b517792995",
+      "output_sha256": "3d8be89711d8c773c687d7d4f9a35fc59ff4f79ac78f6e0121348f91f0cb0424",
+      "execution_authority": false
+    },
+    {
+      "input": "opus/O6-acceptance-learning.brief.json",
+      "output": "opus/O6-acceptance-learning.md",
+      "compiler_returncode": 0,
+      "input_sha256": "a5084cae7d5dfc21b439974ff2588fd0f7b3e5e17858ebabe83d7943dc63384f",
+      "output_sha256": "c802f143791c7f55dd0b1f0542f86092b8e1a0fad7274d0ebf57bbb7f03ab00d",
+      "execution_authority": false
+    },
+    {
+      "input": "fabric/WP-23-handoff-selector.brief.json",
+      "output": "fabric/WP-23-handoff-selector.md",
+      "compiler_returncode": 0,
+      "input_sha256": "4b247f98b3ec1f2c53c7e0c32e4e556a64a10ff1363af75e2a1cd076c00f17f7",
+      "output_sha256": "b68e4521a87ee7b13b2ceb13a68ed05ca04996446cb6c671bf312a6d098f729b",
+      "execution_authority": false
+    }
+  ]
+}

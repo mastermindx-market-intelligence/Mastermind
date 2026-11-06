@@ -1,0 +1,303 @@
+"""The recovered L0 binding admits one original read, before any filesystem IO."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+RUN = "mm-l0-price-metadata-review-20261015-01a1333c-v1"
+OWNER = "01a1333c-a475-7052-95a8-72c623fb12e1"
+PACKET = "baf0b1e363b85a22796086029202e6b2e8330d21f4caa6b78a02d40c2916d197"
+SUPPORT = "8172955c737b6f55f83aaebcdea5c22566f06a14320bd3fd967054da0fd6c51c"
+
+
+@pytest.fixture(scope="module")
+def staged_ext():
+    # The real reader intentionally rejects a world-writable ancestor. Linux
+    # pytest's /tmp violates that contract; use a private test-owned directory.
+    with tempfile.TemporaryDirectory(prefix="l0-original-read-", dir=Path.home()) as directory:
+        stage = Path(directory)
+        subprocess.run(
+            [sys.executable, str(ROOT / "ops/native_fabric/quota_continuity/rollout/build_review_stage.py"),
+             "--output", str(stage)],
+            check=True, capture_output=True, text=True, timeout=30,
+        )
+        yield stage / "native-code-stage/ext"
+
+
+def test_generated_reader_requires_exact_original_scope_before_any_io(staged_ext):
+    request = {
+        "schema": "mastermind.original_delivery_read.v1", "run_id": RUN,
+        "root": OWNER, "parent": OWNER, "host": "ubuntu1",
+        "contract": {"schema": "mastermind.original_plain_result_contract.v1",
+                     "run_id": RUN, "root": OWNER, "parent": OWNER, "names": [],
+                     "packet_sha256": PACKET, "support_digest": SUPPORT},
+    }
+    program = f"""
+import copy
+import sys
+sys.path.insert(0, {str(staged_ext)!r})
+import original_delivery_collector as collector
+request = {request!r}
+code = collector.code_for_request(request)
+namespace = {{}}
+exec(compile(code[:code.rfind('\\ntry:\\n raw=')], 'generated-reader', 'exec'), namespace)
+visited = []
+class OriginalPathReached(Exception):
+    pass
+def directory_probe(path):
+    visited.append(str(path))
+    raise OriginalPathReached()
+namespace['DirectoryChain'] = directory_probe
+try:
+    namespace['remote_read'](request, home='/inert-owner')
+except OriginalPathReached:
+    pass
+else:
+    raise AssertionError('exact original request never reached its original packet path')
+assert visited == ['/inert-owner/lanes/tmp']
+changes = [
+    ('root', 'another-root'), ('parent', 'another-parent'), ('host', 'ubuntu0'),
+    ('run_id', request['run_id'] + '-replacement'),
+    ('contract.root', 'another-root'), ('contract.parent', 'another-parent'),
+    ('contract.run_id', request['run_id'] + '-replacement'),
+    ('contract.packet_sha256', '0' * 64), ('contract.support_digest', '0' * 64),
+    ('contract.names', ['replacement.patch']),
+    ('contract.schema', 'mastermind.fabric_artifact_production.v1'),
+]
+for field, value in changes:
+    candidate = copy.deepcopy(request)
+    if field.startswith('contract.'):
+        candidate['contract'][field.split('.')[1]] = value
+    else:
+        candidate[field] = value
+    visited.clear()
+    try:
+        namespace['remote_read'](candidate, home='/inert-owner')
+    except ValueError as error:
+        assert str(error) == 'read_contract_invalid', (field, str(error))
+    else:
+        raise AssertionError('accepted changed original scope: ' + field)
+    assert not visited, field
+"""
+    result = subprocess.run([sys.executable, "-B", "-c", program],
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_scope_provenance_preserves_original_dispatch_and_lease():
+    proof = json.loads((ROOT / "ops/native_fabric/quota_continuity/rollout/market_memory_l0_original_scope.json").read_text())
+    assert proof["original_session_id"] == OWNER
+    assert proof["run_id"] == RUN
+    assert proof["scope"]["packet_sha256"] == PACKET
+    assert proof["scope"]["support_digest"] == SUPPORT
+    assert proof["scope"]["lease_witness"]["sha256"] == "70ba6a698a49d7401611ef5ab5cf6f2f64f10355329d6593f38a76b3d3f5887b"
+    assert proof["witnesses"][1]["call_id"] == "call_d7cb5da6dc124cc293b2519cb7d9763b"
+    assert proof["effect"] == "LOCAL_SOURCE_QUALIFICATION_ONLY_NO_REMOTE_READ_NO_LEASE_MUTATION"
+
+
+@pytest.mark.parametrize("mode", ["minimax", "qwen"])
+def test_sealed_generation_uses_original_state_owner_and_keeps_custody_checks(staged_ext, mode):
+    # Every byte and path below belongs to this inert kit. No real run, host,
+    # credential, lease or selection pointer is read or changed.
+    with tempfile.TemporaryDirectory(prefix="l0-native-state-", dir=Path.home()) as directory:
+        base = Path(directory)
+        program = f"""
+import copy
+import json
+import os
+from pathlib import Path
+import sys
+sys.path.insert(0, {str(ROOT / 'ops/native_fabric/quota_continuity/rollout')!r})
+import native_generation
+base = Path({str(base)!r})
+owner = base/'kit/ext'
+state = owner/'state/remote_sub'
+state.mkdir(parents=True, mode=0o700)
+stage = Path({str(staged_ext.parent)!r})
+manifest = json.loads((stage.parent/'native-manifest.json').read_text())
+generation = native_generation.publish(stage, owner, manifest)
+sys.path.insert(0, str(generation/'ext'))
+import original_delivery_collector as collector
+mode = {mode!r}
+model = 'qwen3.8-max' if mode == 'qwen' else 'MiniMax-M3'
+rid = 'inert-original-l0'
+root = 'inert-parent'
+os.environ['CODEX_THREAD_ID'] = root
+packet = base/'packet.txt'
+packet.write_bytes(b'inert review text without an artifact contract')
+lease = state/(rid+'.lease.fixture')
+lease.write_bytes(b'inert lease witness')
+manifest = {{name: collector.sha((generation/'ext'/name).read_bytes())
+            for name in ('artifact_production.py', 'artifact_reader.py')}}
+if mode == 'qwen':
+    # The original Qwen run used an older producer. Exercise the real fixed
+    # historical validator from its exact source fixture, not a live host path.
+    historical = base/'original-producer.py'
+    raw = Path({str(ROOT / 'tests/fixtures/native_fabric/artifact_production_c0f17c3e.py.fixture')!r}).read_bytes()
+    assert collector.sha(raw) == collector.delivery._ORIGINAL_PRODUCER_SHA256
+    historical.write_bytes(raw)
+    historical.chmod(0o600)
+    collector.delivery._ORIGINAL_PRODUCER_PATH = historical
+    manifest['artifact_production.py'] = collector.delivery._ORIGINAL_PRODUCER_SHA256
+support = state/(rid+'.support.json')
+support.write_bytes(collector.canonical(manifest))
+support_digest = collector.sha(collector.canonical({{'schema':'remote-support-code.v1','files':manifest}}))
+log = state/(rid+'.log')
+events = ['LEASE_OK pool='+('bailian' if mode == 'qwen' else 'minimax'),
+          'SUPPORT_VERSION_READY digest='+support_digest+' policy='+'1'*64,
+          'LAUNCH stdout=lanes_'+rid+'.stdout rc_file=ext/lanes_'+rid+'.rc cwd=~',
+          'LAUNCH_ATTEMPT attempt=1']
+log.write_text(''.join('2026-10-19T00:00Z [remote_sub id='+rid+' host=inert-host] '+event+'\\n' for event in events))
+(owner/'hosts.json').write_text(json.dumps({{'inert-host':{{'allowed_modes':[mode],'ssh_alias':'inert-host'}}}}))
+scope = {{'root':root,'parent':root,'host':'inert-host','packet_path':str(packet),
+         'mode':mode,'requested_model':model,
+         'packet_sha256':collector.sha(packet.read_bytes()),'support_digest':support_digest,
+         'destination':str(base/'collection'),
+         'source_pins':{{'log':collector.sha(log.read_bytes()),'support':collector.sha(support.read_bytes())}},
+         'lease_witness':{{'path':str(lease),'sha256':collector.sha(lease.read_bytes())}}}}
+collector.PLAIN_SCOPES[rid] = scope
+binding = {{'schema':collector.BINDING_SCHEMA,'run_id':rid,'root':root,'parent':root,
+           'host':'inert-host','mode':mode,'requested_model':model,'cwd':'~',
+           'artifact_names':[], 'sources':{{name:{{'path':str(path),'sha256':collector.sha(path.read_bytes())}}
+                    for name,path in [('packet',packet),('log',log),('support',support)]}}}}
+binding_path = base/'binding.json'
+def qualify(value):
+    binding_path.write_bytes(collector.canonical(value))
+    return collector.load_binding(binding_path, run_id=rid, root=root, parent=root)
+qualified = qualify(binding)
+assert qualified[3]['run_id'] == rid
+if mode == 'qwen':
+    assert qualified[6] is not None, 'historical producer validator was not exercised'
+alias_binding = copy.deepcopy(binding)
+for name in ('log','support'):
+    alias_binding['sources'][name]['path'] = str(generation/'ext/state/remote_sub'/Path(binding['sources'][name]['path']).name)
+assert qualify(alias_binding)[3]['run_id'] == rid
+collection = base/'collection'
+collection.mkdir(mode=0o700)
+def read_inert_collection(value):
+    chunks = [('binding.json', collector.canonical(value)), ('stdout.000', b'inert review'),
+              ('process.json', b'{{}}'), ('returncode.txt', b'0\\n')]
+    files = []
+    for name, raw in chunks:
+        (collection/name).write_bytes(raw)
+        files.append({{'local_name':name, 'bytes':len(raw), 'sha256':collector.sha(raw)}})
+    receipt = {{'schema':collector.RECEIPT_SCHEMA,'state':'COMPLETE','delivery_verified':True,
+               'worker_terminal_proof':True,'root':root,'parent':root,'run_id':rid,
+               'original_operation_mutated':False,'host':'inert-host','mode':mode,
+               'artifacts':[],'artifact_manifest':None,'files':files,'stdout_chunks':['stdout.000'],
+               'binding_sha256':files[0]['sha256'],'stdout_bytes':len(chunks[1][1]),
+               'stdout_sha256':files[1]['sha256']}}
+    raw = collector.canonical(receipt)
+    path = collection/'receipt.json'
+    path.write_bytes(raw)
+    return collector.read_collection(path, expected_sha256=collector.sha(raw), run_id=rid, root=root, parent=root)
+assert read_inert_collection(binding) == b'inert review'
+assert read_inert_collection(alias_binding) == b'inert review'
+outside = copy.deepcopy(binding)
+outside['sources']['log']['path'] = str(base/log.name)
+try:
+    qualify(outside)
+except ValueError as error:
+    assert str(error) == 'original_source_path_invalid'
+else:
+    raise AssertionError('accepted a log outside the original state owner')
+try:
+    read_inert_collection(outside)
+except ValueError as error:
+    assert str(error) == 'plain_collection_source_pin_changed'
+else:
+    raise AssertionError('accepted a collection binding outside its original state owner')
+lease.write_bytes(b'changed inert witness')
+try:
+    qualify(binding)
+except ValueError as error:
+    assert str(error) == 'plain_original_lease_witness_changed'
+else:
+    raise AssertionError('accepted changed original lease witness')
+lease.unlink()
+lease.symlink_to(packet)
+try:
+    qualify(binding)
+except (ValueError, OSError):
+    pass
+else:
+    raise AssertionError('followed a lease symlink')
+"""
+        try:
+            result = subprocess.run([sys.executable, "-B", "-c", program],
+                                    capture_output=True, text=True, timeout=30)
+            assert result.returncode == 0, result.stdout + result.stderr
+        finally:
+            # Only this test's inert generation is unsealed for cleanup; never
+            # follow its aliases or touch the installed runtime generation.
+            for path, _directories, _files in os.walk(base, followlinks=False):
+                os.chmod(path, 0o700)
+
+
+def test_artifact_child_binding_keeps_original_parent_under_sealed_root(staged_ext):
+    """The same path repair covers an ordinary artifact run assigned by a child."""
+    with tempfile.TemporaryDirectory(prefix="artifact-native-state-", dir=Path.home()) as directory:
+        base = Path(directory)
+        program = f"""
+import copy, json, os, sys
+from pathlib import Path
+sys.path.insert(0, {str(ROOT / 'ops/native_fabric/quota_continuity/rollout')!r})
+import native_generation
+base = Path({str(base)!r})
+owner = base/'kit/ext'
+state = owner/'state/remote_sub'
+state.mkdir(parents=True, mode=0o700)
+stage = Path({str(staged_ext.parent)!r})
+generation = native_generation.publish(stage, owner, json.loads((stage.parent/'native-manifest.json').read_bytes()))
+sys.path.insert(0, str(generation/'ext'))
+import original_delivery_collector as c
+root, parent, rid = 'inert-root', 'inert-child', 'inert-artifact-run'
+os.environ['CODEX_THREAD_ID'] = root
+support = state/(rid+'.support.json')
+manifest = {{name:c.sha((generation/'ext'/name).read_bytes())
+            for name in ('artifact_production.py','artifact_reader.py')}}
+support.write_bytes(c.canonical(manifest))
+digest = c.sha(c.canonical({{'schema':'remote-support-code.v1','files':manifest}}))
+packet = state/(rid+'.packet.fixture')
+packet.write_text(c.production.encode_packet('inert artifact', root=root, parent=parent,
+    run_id=rid, names=['cache.py'], support_digest=digest))
+log = state/(rid+'.log')
+events = ['LEASE_OK pool=glm', 'SUPPORT_VERSION_READY digest='+digest+' policy='+'1'*64,
+          'LAUNCH stdout=lanes_'+rid+'.stdout rc_file=ext/lanes_'+rid+'.rc cwd=~',
+          'LAUNCH_ATTEMPT attempt=1']
+log.write_text(''.join('2026-10-19T00:00Z [remote_sub id='+rid+' host=inert-host] '+x+'\\n' for x in events))
+(owner/'hosts.json').write_text(json.dumps({{'inert-host':{{'allowed_modes':['glm'],'ssh_alias':'inert-host'}}}}))
+binding = {{'schema':c.BINDING_SCHEMA,'run_id':rid,'root':root,'parent':parent,
+    'host':'inert-host','mode':'glm','requested_model':'glm-5.3-flash','cwd':'~',
+    'artifact_names':['cache.py'],'sources':{{n:{{'path':str(p),'sha256':c.sha(p.read_bytes())}}
+        for n,p in [('packet',packet),('log',log),('support',support)]}}}}
+path = base/'binding.json'
+def qualify(value):
+    path.write_bytes(c.canonical(value))
+    return c.load_binding(path, run_id=rid, root=root, parent=parent)
+assert qualify(binding)[3]['parent'] == parent
+alias = copy.deepcopy(binding)
+for item in alias['sources'].values():
+    item['path'] = str(generation/'ext/state/remote_sub'/Path(item['path']).name)
+assert qualify(alias)[3]['parent'] == parent
+os.environ['CODEX_THREAD_ID'] = parent
+try:
+    qualify(binding)
+except ValueError as error:
+    assert str(error) == 'original_native_root_required'
+else:
+    raise AssertionError('child identity substituted for the actual invoking root')
+"""
+        try:
+            result = subprocess.run([sys.executable, "-B", "-c", program],
+                                    capture_output=True, text=True, timeout=30)
+            assert result.returncode == 0, result.stdout + result.stderr
+        finally:
+            for path, _directories, _files in os.walk(base, followlinks=False):
+                os.chmod(path, 0o700)

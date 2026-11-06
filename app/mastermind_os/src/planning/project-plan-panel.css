@@ -1,0 +1,280 @@
+/* ProjectPlanPanel: canonical project-plan task-tab content on the existing
+   shell tokens. No new root variables and no literal colors: dark keeps the
+   quiet graphite panel and its even hairline; the light treatment stays scoped
+   to the shell's own [data-theme="light"] owner. */
+
+.mm-project-plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+  padding: var(--sp-6);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--panel);
+  color: var(--text);
+}
+
+/* Light material depth: the white --panel material with the firmer existing
+   control border. The shell owns the theme switch and the focus outlines. */
+.shell[data-theme="light"] .mm-project-plan {
+  border-color: var(--control-border);
+}
+
+.mm-project-plan__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.mm-project-plan__heading h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.mm-project-plan__subtitle {
+  margin: var(--sp-1) 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.mm-project-plan__refresh {
+  min-height: 44px;
+  flex: none;
+}
+
+.mm-project-plan__status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.mm-project-plan__results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+.mm-project-plan__record {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.mm-project-plan__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.mm-project-plan__objective {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mm-project-plan code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.mm-project-plan__facts,
+.mm-project-plan__detail-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-5);
+  margin: 0;
+  min-width: 0;
+}
+
+.mm-project-plan__facts > div,
+.mm-project-plan__detail-list > div {
+  min-width: 0;
+}
+
+.mm-project-plan dt {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.mm-project-plan dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.mm-project-plan__section-title {
+  margin: 0 0 var(--sp-2);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.mm-project-plan__waves {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.mm-project-plan__wave {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+.mm-project-plan__wave-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2) var(--sp-3);
+  min-width: 0;
+}
+
+.mm-project-plan__wave-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.mm-project-plan__wave-status {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.mm-project-plan__wave-line {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.mm-project-plan__prs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+}
+
+.mm-project-plan__disclose {
+  align-self: flex-start;
+}
+
+.mm-project-plan__note {
+  margin: var(--sp-2) 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.mm-project-plan__reasons {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.mm-project-plan__reasons li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.mm-project-plan__reasons code {
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  padding: 2px 8px;
+}
+
+/* Details grammar: keyboard/touch disclosures with >=44px targets; long
+   identifiers wrap instead of truncating. */
+.mm-project-plan details > summary {
+  cursor: pointer;
+  color: var(--text);
+  min-height: 44px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  overflow-wrap: anywhere;
+}
+
+.mm-project-plan__source,
+.mm-project-plan__revision-details {
+  margin: 0;
+  min-width: 0;
+}
+
+.mm-project-plan__source[open] > summary,
+.mm-project-plan__revision-details[open] > summary {
+  margin-bottom: var(--sp-2);
+}
+
+.mm-project-plan__revisions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.mm-project-plan__revision-at {
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.mm-project-plan__revision-current {
+  color: var(--muted);
+  font-size: 0.76rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  padding: 2px 8px;
+}
+
+.mm-project-plan__footnote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .mm-project-plan {
+    padding: var(--sp-4);
+  }
+  .mm-project-plan__heading {
+    flex-direction: column;
+  }
+  .mm-project-plan__refresh {
+    width: 100%;
+  }
+  .mm-project-plan__facts,
+  .mm-project-plan__detail-list {
+    flex-direction: column;
+    gap: var(--sp-3);
+  }
+}

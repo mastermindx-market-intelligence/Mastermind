@@ -225,46 +225,22 @@ def _serialize_registry(experiments: list[dict]) -> bytes:
 
 
 def _fsync_directory(path: Path) -> None:
-    try:
-        fd = os.open(str(path), os.O_RDONLY)
-    except OSError:
-        return
+    """Require confirmed directory sync; unsupported or failed sync propagates."""
+    fd = os.open(str(path), os.O_RDONLY)
     try:
         os.fsync(fd)
-    except OSError:
-        pass
     finally:
         os.close(fd)
 
 
-def _restore_preimage(raw: bytes | None) -> None:
-    """Best-effort rollback while the mutation lock is still held."""
-    if raw is None:
-        try:
-            _REGISTRY_PATH.unlink(missing_ok=True)
-        finally:
-            _fsync_directory(_REGISTRY_PATH.parent)
-        return
-
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{_REGISTRY_PATH.name}.restore.",
-        suffix=".tmp",
-        dir=str(_REGISTRY_PATH.parent),
-    )
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(raw)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, _REGISTRY_PATH)
-        _fsync_directory(_REGISTRY_PATH.parent)
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
 def _save(experiments: list[dict]) -> bool:
-    """Durably replace the registry under the one mutation transaction."""
+    """Confirm durable replacement under the cooperating-writer lock.
+
+    False means the write could not be confirmed, not that it had no effect.
+    After replacement, preserve the visible state even if sync or readback
+    fails: a writer outside this advisory lock may already have replaced it.
+    Never restore or unlink the registry on that uncertain path.
+    """
     try:
         with _mutation_lock():
             payload = _serialize_registry(experiments)
@@ -283,7 +259,6 @@ def _save(experiments: list[dict]) -> bool:
                 dir=str(_REGISTRY_PATH.parent),
             )
             tmp = Path(tmp_name)
-            replaced = False
             try:
                 with os.fdopen(fd, "wb") as handle:
                     handle.write(payload)
@@ -294,23 +269,18 @@ def _save(experiments: list[dict]) -> bool:
                     return False
 
                 os.replace(tmp, _REGISTRY_PATH)
-                replaced = True
                 _fsync_directory(_REGISTRY_PATH.parent)
 
                 readback = _REGISTRY_PATH.read_bytes()
                 if readback != payload:
                     raise OSError("experiment registry readback byte mismatch")
-                parsed = _decode_registry_bytes(readback, strict=True)
-                if parsed != experiments:
-                    raise OSError("experiment registry readback semantic mismatch")
+                # Exact payload bytes plus strict decoding verify the stored
+                # representation. Existing default=str and tuple-to-list JSON
+                # conversion need not preserve in-memory Python value types.
+                _decode_registry_bytes(readback, strict=True)
                 _remember_preimage(readback)
                 return True
             except Exception:  # noqa: BLE001
-                if replaced:
-                    try:
-                        _restore_preimage(expected)
-                    except Exception:  # noqa: BLE001
-                        pass
                 return False
             finally:
                 tmp.unlink(missing_ok=True)
@@ -990,8 +960,8 @@ def matured(as_of: date | None = None) -> list[dict]:
           has been reached (as_of >= comeback_date).
 
     Items where (b) applies are promoted to status="matured" and saved before
-    being returned, so the agenda never re-surface a newly-matured item twice
-    without human acknowledgement.
+    being returned. If that save cannot be confirmed, return no promoted
+    results; failure does not establish that a replacement had no effect.
 
     Priority order: matured items first, sorted by comeback_date ASC (earliest
     deadline first); then by id as a tiebreaker.  Items with no comeback_date
@@ -1014,8 +984,8 @@ def matured(as_of: date | None = None) -> list[dict]:
         if as_of >= cd_date:
             all_exps[i]["status"] = "matured"
             changed = True
-    if changed:
-        _save(all_exps)
+    if changed and not _save(all_exps):
+        return []
     # collect all matured (not yet judged/cancelled)
     results = [_defaults(dict(e)) for e in all_exps if e.get("status") == "matured"]
     # sort: by comeback_date ASC (None sorts last), then by id

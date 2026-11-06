@@ -1,0 +1,56 @@
+LANE: C19-O1-WP03-CENSUS
+TIER: glm-5.3-flash (read-only census; no judgment calls beyond classification)
+TIME LAW: finish within ~30 minutes of wall clock. Do the CHECKOUT PROOF first, then ANSWER FIRST, then Q1..Q6 in order; if time runs short, emit the packet with the remaining questions listed under GAPS rather than running past the bound.
+PARENT: Commission 19 / Data Intelligence (Mastermind #1243, MAS-263, work package WP03 under orchestrator O1); seat 7ab343c8
+
+ANSWER FIRST: On Macro origin/main, what exact code path turns a request clock into the two FIF cutoffs (source/filing cutoff and recorded_at/knowledge cutoff), and does ANY committed test exercise an original financial occurrence PLUS a later correction across those cutoffs with a non-AAPL subject? Answer YES/NO with file:line citations before anything else.
+
+MISSION: Read-only census of the native financial time-and-correction path that WP03 must qualify: the dual-cutoff query (engine/fundamental_forensics/query.py), the attested-history pilot (engine/fundamental_forensics/attested_history_pilot.py), the attested snapshot owner (engine/fundamental_forensics/query_snapshots.py), their tests, and the composer's financial leg (app/integrated_answer.py). Produce a cited map, not a redesign.
+
+WHY: WP03's gate says a fixture-only pass cannot close MAS-268. Before any build lane is admitted, the seat needs to know where the clocks are parsed, what precision survives, where a post-cutoff correction could leak, and whether a real original+correction pair already exists in the repository.
+
+SCOPE (read-only, owned paths for READING):
+- engine/fundamental_forensics/query.py
+- engine/fundamental_forensics/attested_history_pilot.py
+- engine/fundamental_forensics/query_snapshots.py
+- app/integrated_answer.py
+- tests/test_integrated_answer_v0.py
+- tests/test_forensics_api.py
+- tests/test_fundamental_forensics_attested_history_api_store.py
+- tests/test_fundamental_forensics_attested_history_materializer.py
+- tests/test_fundamental_forensics_attested_history_operator.py
+- tests/fixtures/fundamental_forensics/** (list only; cite names and cutoff fields)
+You may grep anywhere under engine/fundamental_forensics/, app/, tests/ for callers.
+
+OUT OF SCOPE: any edit, commit, branch push, PR, label, comment, Slack post, or test-suite run; any file outside the Macro repository; GMI graph, identity service, K1 bridge, Mastermind repository; opinions about product copy. Do not run pytest. Do not install packages.
+
+CHECKOUT PROOF (mandatory, first commands):
+  cd ~/lanes/repos/macro && git fetch origin main && git rev-parse origin/main
+The working tree in this clone is DIRTY and must not be trusted. Read every file as `git show origin/main:<path>` (pipe through `sed -n 'A,Bp'` or `grep -n`). If you need a grep over a tree, create a throwaway worktree: `git worktree add --detach ~/lanes/wt/c19-o1-wp03-census origin/main` and read there; never modify ~/lanes/repos/macro's index or working tree. Cite the origin/main sha you fetched in EVERY evidence line.
+
+QUESTIONS (answer each with file:line on origin/main; "not found" needs the grep you ran):
+Q1. Where are the two cutoffs parsed and enforced in query.py? Name the parameters, their accepted formats (date-only? naive datetime? timezone?), the precision retained, and what happens on an unknown or missing timestamp (default? reject? silently now()?).
+Q2. In app/integrated_answer.py, trace the financial leg: where it calls into the FIF query/provider, which clock it passes (note the fallback literal near line 334 and the wall-clock near line 165), and how the per-leg `status` becomes "stale" (around lines 416-419). State whether the composer can ever pass a FUTURE clock or a date-only clock into the query without rejection.
+Q3. Inventory every committed fixture under tests/fixtures/fundamental_forensics/: subject, form type, period, filing/accepted dates present, and whether any pair of fixtures forms an original + correction (amendment/restatement) of the same fact. Say explicitly whether any non-AAPL subject exists.
+Q4. What does query_snapshots.py record per attested snapshot (generation id, content sha, cutoffs, source identity, consumer receipt)? Cite the writer function and the fields.
+Q5. Which existing tests would FAIL if a post-cutoff correction were returned as of the earlier cutoff? Name test functions. If none, say so with the grep bounds (patterns and directories searched).
+Q6. List every caller of the dual-cutoff query outside tests (module:line), so the seat can see the real consumer set.
+
+NOT DONE UNLESS: every Q1-Q6 is answered with origin/main citations or an explicit bounded "not found"; the ANSWER FIRST question is answered YES/NO; the fetched origin/main sha appears in the packet; no file was modified (`git -C ~/lanes/repos/macro status --porcelain | wc -l` is reported before and after and the count did not change).
+
+EVIDENCE REQUIRED: command lines with output tails (max 15 lines each), file:line citations with the sha, the fixture inventory as a table.
+
+HARD LAWS: never read, print or copy credentials (~/.glm, ~/.opencode-go, ~/.minimax, ~/.bailian, ~/.codex/auth*, ext/*/.token) or shim logs; never `git add -A`, never commit, never push, never force or rebase, never `git stash`; never `pkill -f`; no network calls except `git fetch origin main` and lazy blob fetches it triggers.
+
+RETURN (your final message IS the packet; nothing after the sentinel):
+STATUS: <PASS | PARTIAL | BLOCKED | FAIL>
+RESULT: <counts: questions answered N/6; fixtures inventoried N; callers found N; ANSWER FIRST verdict>
+EVIDENCE: <commands with output tails, file:line@sha citations, fixture table>
+GAPS: <criterion gaps vs disclosures, each labelled; "none" only if true>
+DEVIATIONS: <where you departed from this packet and why; "none" only if true>
+C19-O1-WP03-CENSUS: <STATUS word> <origin/main sha>
+
+Do not end a turn until you are emitting the return packet. If you catch yourself writing
+"now let me…" or "next I'll…", either keep going in the same turn or stop and return what
+you have. A partial packet with honest, specific GAPS is useful and I can act on it; another
+status note is not. Answer the ANSWER FIRST question before anything else.

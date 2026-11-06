@@ -14,6 +14,16 @@ const gitConfig = { enabled: true, workspaceCli: '/owned/bin/mmx-workspace', git
   sourceRepository: '/owned/source/mastermind',
   allowedRemoteUrls: ['https://github.com/mastermindx-market-intelligence/Mastermind.git'] };
 
+const closedGitConfig = { enabled: true, workspaceCli: '/owned/bin/mmx-workspace', gitBinary: '/usr/bin/git',
+  repositories: [
+    { repository: 'mastermind', sourceRepository: '/owned/source/mastermind',
+      allowedRemoteUrls: ['https://github.com/mastermindx-market-intelligence/Mastermind.git'] },
+    { repository: 'macro', sourceRepository: '/owned/source/macro',
+      allowedRemoteUrls: ['https://github.com/mastermindx-market-intelligence/macro.git'] },
+    { repository: 'terminal', sourceRepository: '/owned/source/terminal',
+      allowedRemoteUrls: ['https://github.com/mastermindx-market-intelligence/mastermind-terminal.git'] },
+  ] };
+
 function rows() {
   return Object.entries(repoNames).map(([alias, name]) => ({ alias,
     repository_full_name: `mastermindx-market-intelligence/${name}`,
@@ -38,11 +48,12 @@ function acquisition(alias) {
 function setup(options = {}) {
   assert.equal(typeof api.createRepositoryWorkspaceAccess, 'function', 'workspace consumer must be implemented');
   const calls = [], publications = [];
+  const gitCfg = options.gitConfig ?? gitConfig;
   const owner = options.owner ?? (async (argv) => {
     if (argv[0] === 'repositories') return discovery();
     return acquisition(argv[argv.indexOf('--repository') + 1]);
   });
-  const gateway = api.createRepositoryWorkspaceAccess(config, gitConfig, {
+  const gateway = api.createRepositoryWorkspaceAccess(config, gitCfg, {
     execFile: async (file, args, execution) => {
       calls.push({ file, args, execution });
       return { stdout: JSON.stringify(await owner(args)), stderr: '' };
@@ -124,6 +135,21 @@ test('explicit repository publication composes existing publisher with the owner
   assert.ok(calls.every((call) => call.args[0] === 'repositories'));
 });
 
+for (const alias of Object.keys(repoNames)) {
+  test(`closed three-repository profile resolves the exact ${alias} binding for explicit publication`, async () => {
+    const { gateway, publications } = setup({ gitConfig: closedGitConfig });
+    const result = await gateway.status({ repository: alias, operation_id: OP });
+    assert.match(result.schema, /\.v2$/);
+    assert.equal(result.repository, alias);
+    const selected = publications.at(-1);
+    assert.equal(selected.repository, alias);
+    assert.equal(selected.sourceRepository, `/owned/source/${alias}`);
+    assert.deepEqual(selected.allowedRemoteUrls,
+      [`https://github.com/mastermindx-market-intelligence/${repoNames[alias]}.git`]);
+  });
+}
+
+
 test('legacy publication keeps its original configuration and never reads an unrequested target', async () => {
   const { gateway, calls, publications } = setup();
   const result = await gateway.status({ operation_id: OP });
@@ -156,6 +182,35 @@ test('unavailable repository never falls back and produces no modifying call', a
   await assert.rejects(gateway.acquire({ repository: 'macro', operation_id: OP, base_sha: HEAD }), /REPOSITORY_NOT_READY/);
   assert.equal(calls.length, 1);
   assert.equal(publications.length, 1, 'only the unchanged legacy publisher is constructed');
+});
+
+test('closed three-repository profile keeps the exact Mastermind source check', async () => {
+  const { gateway } = setup({ gitConfig: closedGitConfig, owner: async () => {
+    const data = discovery();
+    data.receipt.repositories.find((row) => row.alias === 'mastermind').source_repository = '/elsewhere/mastermind';
+    return data;
+  } });
+  await assert.rejects(gateway.status({ repository: 'mastermind', operation_id: OP }),
+    /WORKSPACE_OWNER_RESPONSE_INVALID/);
+});
+
+test('closed three-repository profile keeps the exact Mastermind remote check', async () => {
+  const misbound = { ...closedGitConfig, repositories: closedGitConfig.repositories.map((profile) =>
+    profile.repository === 'mastermind'
+      ? { ...profile, allowedRemoteUrls: ['https://example.invalid/Mastermind.git'] } : profile) };
+  const { gateway } = setup({ gitConfig: misbound });
+  await assert.rejects(gateway.status({ repository: 'mastermind', operation_id: OP }),
+    /WORKSPACE_OWNER_RESPONSE_INVALID/);
+});
+
+test('legacy single-source profile still enforces its own Mastermind binding', async () => {
+  const { gateway } = setup({ owner: async () => {
+    const data = discovery();
+    data.receipt.repositories.find((row) => row.alias === 'mastermind').source_repository = '/elsewhere/mastermind';
+    return data;
+  } });
+  await assert.rejects(gateway.status({ repository: 'mastermind', operation_id: OP }),
+    /WORKSPACE_OWNER_RESPONSE_INVALID/);
 });
 
 for (const kind of ['wrong_origin', 'duplicate_alias', 'wrong_default', 'outside_source']) {
@@ -237,3 +292,62 @@ test('workspace acquisition honestly allows canonical Git promisor materializati
   assert.equal(acquire.annotations.openWorldHint, true,
     'the underlying Git owner can retrieve missing objects from its fixed canonical origin');
 });
+
+
+function statusReceipt() {
+  const row = rows()[0];
+  return { schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+    repository: 'mastermind', effect: 'NOT_APPLIED', receipt: {
+      source_repository: row.source_repository, workspace_path: path.join(row.workspace_root, 'web', OP),
+      branch: 'sol/web-' + OP, head_sha: HEAD, dirty: false, removed: false,
+    } };
+}
+test('internal inspection qualifies exact existing owner custody without acquiring', async () => {
+  const { gateway, calls } = setup({ owner: async (args) => args[0] === 'repositories' ? discovery() : statusReceipt() });
+  assert.equal((await gateway.inspect({ repository: 'mastermind', operation_id: OP })).status, 'PRESENT');
+  assert.deepEqual(calls.map((c) => c.args[0]), ['repositories', 'status']);
+  assert.equal(api.STUDIO_WORKSPACE_TOOLS.some((t) => /inspect|commission/.test(t.name)), false);
+});
+for (const mutation of [{ removed: true }, { workspace_path: '/foreign' }, { branch: 'master' }, { head_sha: 'HEAD' }]) {
+  test('internal inspection refuses unqualified existing custody: ' + JSON.stringify(mutation), async () => {
+    const response = statusReceipt();
+    Object.assign(response.receipt, mutation);
+    const { gateway, calls } = setup({ owner: async (args) => args[0] === 'repositories' ? discovery() : response });
+    await assert.rejects(gateway.inspect({ repository: 'mastermind', operation_id: OP }));
+    assert.ok(calls.every((c) => c.args[0] !== 'acquire'));
+  });
+}
+test('only exact known owner absence plus absent path permits fresh publication', async () => {
+  const { gateway } = setup({ owner: async (args) => {
+    if (args[0] === 'repositories') return discovery();
+    throw Object.assign(Error('known absence'), { code: 2, stderr: JSON.stringify({
+      schema_version: 'mastermind.workspace_cli/v2', action: 'status', effect: 'NOT_APPLIED',
+      repository: 'mastermind', error: 'workspace is not registered to the source repository',
+    }) });
+  } });
+  assert.equal((await gateway.inspect({ repository: 'mastermind', operation_id: OP })).status, 'ABSENT');
+});
+test('unknown status transport failure never becomes fresh allocation permission', async () => {
+  const { gateway } = setup({ owner: async (args) => {
+    if (args[0] === 'repositories') return discovery();
+    throw Object.assign(Error('lost'), { code: 75, stderr: '' });
+  } });
+  await assert.rejects(gateway.inspect({ repository: 'mastermind', operation_id: OP }));
+});
+
+
+for (const repository of [undefined, 'mastermind', 'macro', 'terminal']) {
+  test(`repository wrapper retains closed merge fences for ${repository ?? 'legacy'}`, async () => {
+    const { gateway, publications } = setup();
+    const args = { operation_id: OP, expected_head_sha: HEAD, message: 'test: reviewed merge',
+      merge: { expected_protected_base_sha: 'b'.repeat(40), expected_tree_sha: 'c'.repeat(40) },
+      ...(repository === undefined ? {} : { repository }) };
+    const result = await gateway.commit(args);
+    assert.deepEqual(result.args.merge, args.merge);
+    assert.equal(result.args.repository, undefined);
+    assert.equal(publications.at(-1).repository, repository);
+    const schema = api.STUDIO_REPOSITORY_GIT_TOOLS.find((tool) => tool.name === 'studio_git_commit_current_changes').inputSchema;
+    assert.equal(schema.properties.merge.additionalProperties, false);
+    assert.deepEqual(Object.keys(schema.properties.merge.properties), ['expected_protected_base_sha', 'expected_tree_sha']);
+  });
+}

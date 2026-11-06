@@ -8,6 +8,7 @@ import {
   type LaunchCompletion,
   type LaunchForm,
 } from "./LaunchOrchestrator";
+import { canNavigateForAutomaticSignIn } from "../../auth-navigation-guard";
 
 const makeProps = (overrides = {}) => ({
   projects: [
@@ -39,6 +40,42 @@ afterEach(() => {
 });
 
 describe("LaunchOrchestrator", () => {
+  it("prevents automatic Auth0 navigation during an unsent or in-flight launch", () => {
+    const view = render(<LaunchOrchestrator {...makeProps()} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Keep this private launch goal." } });
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "" } });
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    view.rerender(<LaunchOrchestrator {...makeProps({ submitting: true })} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    view.unmount();
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+  });
+  it("keeps real project/profile/CEO controls and one-shot guard in composer presentation", async () => {
+    const user = userEvent.setup();
+    const props = makeProps({ frontierModels: [{ ref: "ceo-a", label: "Requested CEO A" }] });
+    render(<LaunchOrchestrator {...props} presentation="composer" />);
+    await user.type(screen.getByLabelText("Goal"), "Review the project sources");
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-gamma");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
+    expect((screen.getByLabelText("Requested CEO") as HTMLSelectElement).value).toBe("ceo-a");
+    fireEvent.submit(goalForm());
+    fireEvent.submit(goalForm());
+    expect(props.onSubmit).toHaveBeenCalledTimes(1);
+    expect(props.onSubmit.mock.calls[0][0]).toEqual({ goal: "Review the project sources", projectRef: "proj-gamma", profileRef: "prof-2", frontierModelAlias: "ceo-a" });
+    expect(pendingLaunchButton().disabled).toBe(true);
+  });
+
+  it("keeps unavailable and stale choices blocked in composer presentation", () => {
+    const props = makeProps({ projects: [{ ref: "unavailable", label: "Unavailable project", unavailableReason: "Read only" }] });
+    render(<LaunchOrchestrator {...props} presentation="composer" />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Do not launch" } });
+    fireEvent.submit(goalForm());
+    expect(launchButton().disabled).toBe(true);
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
   describe("rendering", () => {
     it("renders project and profile selects with all choices", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
@@ -804,4 +841,384 @@ describe("LaunchOrchestrator host completion contract", () => {
       expect(onSubmit).toHaveBeenCalledTimes(2);
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// Stale-selection retention and explicit reselection
+// ---------------------------------------------------------------------------
+
+describe("LaunchOrchestrator stale selection retention", () => {
+  it("retains a stale project ref as a disabled previous-selection option with explanation until explicit reselection", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <LaunchOrchestrator {...makeProps({ onSubmit })} />,
+    );
+    fireEvent.change(screen.getByLabelText("Goal"), {
+      target: { value: "Stale project goal" },
+    });
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-gamma");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
+    expect(launchButton().disabled).toBe(false);
+
+    // Drop the chosen project, leaving exactly one eligible option behind.
+    rerender(
+      <LaunchOrchestrator
+        {...makeProps({
+          onSubmit,
+          projects: [
+            { ref: "proj-alpha", label: "Alpha Project" },
+            {
+              ref: "proj-beta",
+              label: "Beta Project",
+              unavailableReason: "Beta is read-only",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const projectSelect = screen.getByLabelText("Project") as HTMLSelectElement;
+    // Stale ref remains the displayed value rather than collapsing to a default.
+    expect(projectSelect.value).toBe("proj-gamma");
+    const staleOption = Array.from(projectSelect.options).find(
+      (o) => o.value === "proj-gamma",
+    );
+    expect(staleOption).toBeTruthy();
+    expect(staleOption?.disabled).toBe(true);
+    // Accessible explanation text and the aria-describedby link back to it.
+    expect(screen.getByText(/^Your previous project/i)).toBeTruthy();
+    const describedById = projectSelect.getAttribute("aria-describedby");
+    expect(describedById).toBeTruthy();
+    expect(
+      document.getElementById(describedById as string)?.textContent,
+    ).toMatch(/previous project/i);
+    // Goal draft survives the catalog churn untouched.
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "Stale project goal",
+    );
+    // Forced submit is refused while the selection is stale; no dispatch.
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // Explicit eligible reselection clears staleness and re-arms a single dispatch.
+    await user.selectOptions(projectSelect, "proj-alpha");
+    expect(launchButton().disabled).toBe(false);
+    await user.click(launchButton());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      goal: "Stale project goal",
+      projectRef: "proj-alpha",
+      profileRef: "prof-2",
+    });
+  });
+
+  it("retains a stale profile ref as a disabled previous-selection option with explanation until explicit reselection", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const { rerender } = render(
+      <LaunchOrchestrator {...makeProps({ onSubmit })} />,
+    );
+    fireEvent.change(screen.getByLabelText("Goal"), {
+      target: { value: "Stale profile goal" },
+    });
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-alpha");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
+    expect(launchButton().disabled).toBe(false);
+
+    rerender(
+      <LaunchOrchestrator
+        {...makeProps({
+          onSubmit,
+          profiles: [
+            { ref: "prof-1", label: "Profile One" },
+            {
+              ref: "prof-3",
+              label: "Profile Three",
+              unavailableReason: "Profile Three requires admin",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const profileSelect = screen.getByLabelText("Profile") as HTMLSelectElement;
+    expect(profileSelect.value).toBe("prof-2");
+    const staleOption = Array.from(profileSelect.options).find(
+      (o) => o.value === "prof-2",
+    );
+    expect(staleOption).toBeTruthy();
+    expect(staleOption?.disabled).toBe(true);
+    expect(screen.getByText(/^Your previous profile/i)).toBeTruthy();
+    const describedById = profileSelect.getAttribute("aria-describedby");
+    expect(describedById).toBeTruthy();
+    expect(
+      document.getElementById(describedById as string)?.textContent,
+    ).toMatch(/previous profile/i);
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "Stale profile goal",
+    );
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await user.selectOptions(profileSelect, "prof-1");
+    expect(launchButton().disabled).toBe(false);
+    await user.click(launchButton());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      goal: "Stale profile goal",
+      projectRef: "proj-alpha",
+      profileRef: "prof-1",
+    });
+  });
+
+  it("retains both stale project and profile with explanation, blocking submit until explicit dual reselect", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const twoEach = (override: Record<string, unknown> = {}) => ({
+      ...makeProps({
+        projects: [
+          { ref: "proj-alpha", label: "Alpha Project" },
+          { ref: "proj-gamma", label: "Gamma Project" },
+        ],
+        profiles: [
+          { ref: "prof-1", label: "Profile One" },
+          { ref: "prof-2", label: "Profile Two" },
+        ],
+      }),
+      onSubmit,
+      ...override,
+    });
+
+    const { rerender } = render(<LaunchOrchestrator {...twoEach()} />);
+    fireEvent.change(screen.getByLabelText("Goal"), {
+      target: { value: "Both stale" },
+    });
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-gamma");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
+    expect(launchButton().disabled).toBe(false);
+
+    rerender(
+      <LaunchOrchestrator
+        {...twoEach({
+          onSubmit,
+          projects: [{ ref: "proj-alpha", label: "Alpha Project" }],
+          profiles: [{ ref: "prof-1", label: "Profile One" }],
+        })}
+      />,
+    );
+
+    const projectSelect = screen.getByLabelText("Project") as HTMLSelectElement;
+    const profileSelect = screen.getByLabelText("Profile") as HTMLSelectElement;
+    expect(projectSelect.value).toBe("proj-gamma");
+    expect(profileSelect.value).toBe("prof-2");
+    expect(screen.getByText(/^Your previous project/i)).toBeTruthy();
+    expect(screen.getByText(/^Your previous profile/i)).toBeTruthy();
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe(
+      "Both stale",
+    );
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    // Resolving only the stale project keeps the form blocked on the profile.
+    await user.selectOptions(projectSelect, "proj-alpha");
+    expect(launchButton().disabled).toBe(true);
+    await user.selectOptions(profileSelect, "prof-1");
+    expect(launchButton().disabled).toBe(false);
+    await user.click(launchButton());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      goal: "Both stale",
+      projectRef: "proj-alpha",
+      profileRef: "prof-1",
+    });
+  });
+
+  it.each(["Project", "Profile"] as const)("describes an empty %s list without inventing a previous choice", (field) => {
+    const onSubmit = vi.fn();
+    render(<LaunchOrchestrator {...makeProps({ onSubmit,
+      ...(field === "Project" ? { projects: [] } : { profiles: [] }),
+    })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Retain an unstarted goal" } });
+    const select = screen.getByLabelText(field) as HTMLSelectElement;
+    expect(select.options).toHaveLength(1);
+    expect(select.options[0].value).toBe("");
+    expect(select.options[0].disabled).toBe(true);
+    expect(select.value).toBe("");
+    const description = document.getElementById(select.getAttribute("aria-describedby")!);
+    expect(description?.textContent).toBe(`No ${field.toLowerCase()}s are currently available.`);
+    expect(description?.textContent).not.toMatch(/previous/i);
+    expect(select.getAttribute("aria-invalid")).toBe("true");
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Retain an unstarted goal");
+  });
+
+  it("preserves a never-selected fresh form default when the choice set grows", () => {
+    const { rerender } = render(<LaunchOrchestrator {...makeProps()} />);
+    expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe(
+      "proj-alpha",
+    );
+    rerender(
+      <LaunchOrchestrator
+        {...makeProps({
+          projects: [
+            { ref: "proj-alpha", label: "Alpha Project" },
+            { ref: "proj-delta", label: "Delta Project" },
+            {
+              ref: "proj-beta",
+              label: "Beta Project",
+              unavailableReason: "Beta is read-only",
+            },
+            { ref: "proj-gamma", label: "Gamma Project" },
+          ],
+        })}
+      />,
+    );
+    expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe(
+      "proj-alpha",
+    );
+  });
+
+  it("keeps the pending latch when the chosen option is dropped mid-pending; no second dispatch", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    function Host() {
+      const [projects, setProjects] = useState([
+        { ref: "proj-alpha", label: "Alpha Project" },
+        { ref: "proj-gamma", label: "Gamma Project" },
+      ]);
+      const [profiles] = useState([
+        { ref: "prof-1", label: "Profile One" },
+        { ref: "prof-2", label: "Profile Two" },
+      ]);
+      return (
+        <LaunchOrchestrator
+          projects={projects}
+          profiles={profiles}
+          submitting={false}
+          onSubmit={(intent) => {
+            onSubmit(intent);
+            // Owner churns the catalog while the launch never completes.
+            if (intent.projectRef === "proj-gamma") {
+              setProjects([{ ref: "proj-alpha", label: "Alpha Project" }]);
+            }
+          }}
+          onCancel={vi.fn()}
+        />
+      );
+    }
+    render(<Host />);
+    fireEvent.change(screen.getByLabelText("Goal"), {
+      target: { value: "Churn goal" },
+    });
+    await user.selectOptions(screen.getByLabelText("Project"), "proj-gamma");
+    await user.selectOptions(screen.getByLabelText("Profile"), "prof-2");
+    expect(launchButton().disabled).toBe(false);
+    await user.click(launchButton());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    // Options churned mid-pending; the latch keeps the form visibly blocked.
+    expect(pendingLaunchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(pendingLaunchButton().disabled).toBe(true);
+    expect(
+      (screen.getByLabelText("Project") as HTMLSelectElement).value,
+    ).toBe("proj-gamma");
+  });
+});
+
+describe("requested CEO selection", () => {
+
+  it("omits the planner CEO for a native launch and retains the unsent draft", () => {
+    const onSubmit = vi.fn();
+    const onDraftChange = vi.fn();
+    const initialDraft = "Previously retained launch draft";
+    const goal = "Preserve this native research goal";
+    render(<LaunchOrchestrator {...makeProps({
+      onSubmit, onDraftChange, initialDraft, frontierModels,
+      profiles: [
+        { ref: "research_only", label: "Research only" },
+        { ref: "native_research_only", label: "Native research" },
+      ],
+    })} />);
+    const goalInput = screen.getByLabelText("Goal") as HTMLTextAreaElement;
+    expect(goalInput.value).toBe(initialDraft);
+    fireEvent.change(goalInput, { target: { value: goal } });
+    expect(onDraftChange).toHaveBeenLastCalledWith(goal);
+    fireEvent.change(screen.getByLabelText("Requested CEO"), { target: { value: "frontier.two" } });
+    fireEvent.change(screen.getByLabelText("Profile"), { target: { value: "native_research_only" } });
+    expect(screen.queryByLabelText("Requested CEO")).toBeNull();
+    expect(goalInput.value).toBe(goal);
+    expect(launchButton().disabled).toBe(false);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      goal, projectRef: "proj-alpha", profileRef: "native_research_only",
+    });
+    expect(onSubmit.mock.calls[0][0]).not.toHaveProperty("frontierModelAlias");
+    act(() => onSubmit.mock.calls[0][1]({ status: "refused" }));
+    expect(goalInput.value).toBe(goal);
+    expect(launchButton().disabled).toBe(false);
+    fireEvent.change(screen.getByLabelText("Profile"), { target: { value: "research_only" } });
+    expect((screen.getByLabelText("Requested CEO") as HTMLSelectElement).value).toBe("frontier.two");
+    expect(goalInput.value).toBe(goal);
+  });
+  const frontierModels = [{ ref: "frontier.one", label: "First CEO" }, { ref: "frontier.two", label: "Second CEO" }];
+  it("submits the explicit choice and preserves it after a refusal", () => {
+    const onSubmit = vi.fn();
+    render(<LaunchOrchestrator {...makeProps({ onSubmit, frontierModels })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build a project" } });
+    fireEvent.change(screen.getByLabelText("Requested CEO"), { target: { value: "frontier.two" } });
+    fireEvent.submit(goalForm());
+    expect(onSubmit.mock.calls[0][0].frontierModelAlias).toBe("frontier.two");
+    act(() => onSubmit.mock.calls[0][1]({ status: "refused" }));
+    expect((screen.getByLabelText("Requested CEO") as HTMLSelectElement).value).toBe("frontier.two");
+  });
+  it("blocks a selected CEO removed from the current catalog", () => {
+    const onSubmit = vi.fn();
+    const view = render(<LaunchOrchestrator {...makeProps({ onSubmit, frontierModels })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build a project" } });
+    fireEvent.change(screen.getByLabelText("Requested CEO"), { target: { value: "frontier.two" } });
+    view.rerender(<LaunchOrchestrator {...makeProps({ onSubmit, frontierModels: [frontierModels[0]] })} />);
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+  it("blocks all unavailable choices and leaves legacy launches unchanged", () => {
+    const view = render(<LaunchOrchestrator {...makeProps({ frontierModels: [
+      { ref: "frontier.one", label: "First CEO", unavailableReason: "Not qualified" },
+    ] })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build a project" } });
+    expect(launchButton().disabled).toBe(true);
+    view.unmount();
+    render(<LaunchOrchestrator {...makeProps()} />);
+    expect(screen.queryByLabelText("Requested CEO")).toBeNull();
+  });
+});
+
+describe("project goal character boundary", () => {
+  it.each(["en", "zh-CN"] as const)("retains full Unicode goals and explains the actual limit in %s", locale => {
+    const onSubmit = vi.fn();
+    render(<LaunchOrchestrator {...makeProps({onSubmit})} locale={locale} projectExecution />);
+    const input = screen.getByLabelText(locale === "zh-CN" ? "目标" : "Goal") as HTMLTextAreaElement;
+    const goal = "𠮷".repeat(4000);
+    fireEvent.change(input, {target:{value:goal}});
+    expect(input.getAttribute("aria-invalid")).toBe("false");
+    fireEvent.submit(input.closest("form")!);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0].goal).toBe(goal);
+    act(() => onSubmit.mock.calls[0][1]({status:"refused"}));
+    fireEvent.change(input, {target:{value:goal + "一"}});
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText(locale === "zh-CN"
+      ? "目标最多为 4,000 个字符。" : "Keep the goal within 4,000 characters.")).toBeTruthy();
+    expect(screen.queryByText(/byte UTF-8/)).toBeNull();
+    fireEvent.submit(input.closest("form")!);
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
 });

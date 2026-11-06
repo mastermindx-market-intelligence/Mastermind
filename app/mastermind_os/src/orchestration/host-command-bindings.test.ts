@@ -35,9 +35,9 @@ const port = {
 };
 
 const store = {
-  read: () => null,
-  write: () => {},
-  clear: () => {},
+  read: async () => null,
+  reserve: async () => ({ reserved: true as const }),
+  clearIfEqual: async () => true,
 };
 
 const session = {
@@ -101,8 +101,42 @@ describe("completeOrchestratorCommandBinding", () => {
         }),
       ),
     ).toBeNull();
+    // Missing the atomic durability operations on the store is rejected.
     expect(
-      completeOrchestratorCommandBinding(completeBinding({ store: { read: store.read } })),
+      completeOrchestratorCommandBinding(
+        completeBinding({ store: { read: store.read } }),
+      ),
+    ).toBeNull();
+    expect(
+      completeOrchestratorCommandBinding(
+        completeBinding({
+          store: { read: store.read, reserve: store.reserve },
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      completeOrchestratorCommandBinding(
+        completeBinding({
+          store: {
+            read: store.read,
+            reserve: store.reserve,
+            clearIfEqual: store.clearIfEqual,
+            write: () => {},
+          },
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      completeOrchestratorCommandBinding(
+        completeBinding({
+          store: {
+            read: store.read,
+            reserve: store.reserve,
+            clearIfEqual: store.clearIfEqual,
+            clear: () => {},
+          },
+        }),
+      ),
     ).toBeNull();
   });
 

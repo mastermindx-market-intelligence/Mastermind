@@ -24,9 +24,9 @@
     }
   },
   "consumer_patch": {
-    "sha256": "46b06ee2feeba65c668020b247a05495b12d1969fb200228652e445b0a91d7b8",
+    "sha256": "4c5092e149ea7171aff297674b7d6fc6a1c9f2407b9689cb5eff911205e9a68c",
     "target": "app/mastermind_os/src/orchestration/executive-launch-command-port.ts",
-    "patched_source_sha256": "43467062827376e3eeaae8bd7d9203f32a7abe890ba340686d7b80d73e9bda3d"
+    "patched_source_sha256": "cb1883df76ef9aaab7d513dd776efee4ffad4fbe28fefc5c6dd7673e674a5d5d"
   },
   "cases": [
     {
@@ -53,7 +53,7 @@
           "server_version": null,
           "receipt_schema": "mastermind.ceo_intent_receipt.v1",
           "work_ref": null,
-          "envelope_sha256": "18732d3e2078b5c6f4c9a7e55b69606f0ecd09ec263e45db59b0e223d65780ff"
+          "envelope_sha256": "0eac062d61d2f49ff8806ebcbe32503c5a5401914376ebc3a4a3a1b629dfc3ca"
         }
       ],
       "backend_jobs": 1,
@@ -90,7 +90,7 @@
           "pending_pointer_retained": true
         },
         {
-          "name": "unsupported-version:\"1.5.0\"",
+          "name": "unsupported-version:\"1.6.0\"",
           "status": "unknown",
           "pending_pointer_retained": true
         },
@@ -158,7 +158,7 @@
           "server_version": "1.2.0",
           "receipt_schema": "mastermind.ceo_intent_receipt.v1",
           "work_ref": null,
-          "envelope_sha256": "1b804323ab271d996ae5d08b496ce827afbcfee0445abc4b1c7b84e799fee1ee"
+          "envelope_sha256": "e5ca8c0b1a5bd600b49a9db27569f78a75929ca96865e544fe951bdf1642c429"
         }
       ],
       "backend_jobs": 1,
@@ -190,7 +190,7 @@
           "server_version": null,
           "receipt_schema": "mastermind.ceo_intent_receipt.v1",
           "work_ref": null,
-          "envelope_sha256": "1cb5a008133e70993bcfbc5cf61541c86691c265acbd4abcf7d2b736a56a2995"
+          "envelope_sha256": "78d1cd389b8b1f276551ac47ab5f4d9905190032615657d1ff7a838e492ad6d9"
         }
       ],
       "backend_jobs": 1,
@@ -227,7 +227,7 @@
           "pending_pointer_retained": true
         },
         {
-          "name": "unsupported-version:\"1.5.0\"",
+          "name": "unsupported-version:\"1.6.0\"",
           "status": "unknown",
           "pending_pointer_retained": true
         },
@@ -288,14 +288,14 @@
           "server_version": null,
           "receipt_schema": null,
           "work_ref": null,
-          "envelope_sha256": "20051b4b43bb0d34e97b72d8a978f0aeac6561292e2decdf846f26db3838f775"
+          "envelope_sha256": "118e10337f1ac4d8bb3c9053340ccc0141f3f8f28a7ca3aeba41fc5d17611b83"
         },
         {
           "tool": "ceo_intent_status",
-          "server_version": "1.4.0",
+          "server_version": "1.5.0",
           "receipt_schema": "mastermind.ceo_intent_receipt.v1",
           "work_ref": null,
-          "envelope_sha256": "4c223a46a2a1768ba5dc7e86b68dba76509a88fb10c618c0d46aa6cf95c76a46"
+          "envelope_sha256": "82af7820a7e0159b6663f6c166a9d5de8d1cb26b6afbc7464db080e57eeb0e29"
         }
       ],
       "backend_jobs": 1,
@@ -327,7 +327,7 @@
           "server_version": null,
           "receipt_schema": "mastermind.ceo_intent_receipt.v2",
           "work_ref": "WS:ORIGINAL-LAUNCH",
-          "envelope_sha256": "8b16feed1444e4e61aead2fcad8413311849ea88f946fcd3fe71aaf3ddd5726d"
+          "envelope_sha256": "86c952d8dbd8699f72f45fdcae2b9aea852c16242235dedb6e6733c8114419a9"
         }
       ],
       "backend_jobs": 1,
@@ -364,7 +364,7 @@
           "pending_pointer_retained": true
         },
         {
-          "name": "unsupported-version:\"1.5.0\"",
+          "name": "unsupported-version:\"1.6.0\"",
           "status": "unknown",
           "pending_pointer_retained": true
         },
@@ -432,7 +432,7 @@
           "server_version": "1.2.0",
           "receipt_schema": "mastermind.ceo_intent_receipt.v2",
           "work_ref": "WS:ORIGINAL-LAUNCH",
-          "envelope_sha256": "ef42cb4a398b7822eb94b68e8c0fd07aa6786523a715652fe31e55bf2324763f"
+          "envelope_sha256": "ae7305164c3901854e5f9820afda43fa821f96befaab5000cfe2cfcd7ce1cdc0"
         }
       ],
       "backend_jobs": 1,
@@ -464,7 +464,7 @@
           "server_version": null,
           "receipt_schema": "mastermind.ceo_intent_receipt.v2",
           "work_ref": "WS:ORIGINAL-LAUNCH",
-          "envelope_sha256": "daeb01b2bfd2112c1db0517c5b6476c6321f9f4ce316bbe62bf4056bee76636a"
+          "envelope_sha256": "2058711c26f41bf0e85f00db8793fb33e4d640b7b568f20bad9ee4cacfa0198c"
         }
       ],
       "backend_jobs": 1,
@@ -501,7 +501,7 @@
           "pending_pointer_retained": true
         },
         {
-          "name": "unsupported-version:\"1.5.0\"",
+          "name": "unsupported-version:\"1.6.0\"",
           "status": "unknown",
           "pending_pointer_retained": true
         },
@@ -562,14 +562,14 @@
           "server_version": null,
           "receipt_schema": null,
           "work_ref": null,
-          "envelope_sha256": "20051b4b43bb0d34e97b72d8a978f0aeac6561292e2decdf846f26db3838f775"
+          "envelope_sha256": "118e10337f1ac4d8bb3c9053340ccc0141f3f8f28a7ca3aeba41fc5d17611b83"
         },
         {
           "tool": "ceo_intent_status",
-          "server_version": "1.4.0",
+          "server_version": "1.5.0",
           "receipt_schema": "mastermind.ceo_intent_receipt.v2",
           "work_ref": "WS:ORIGINAL-LAUNCH",
-          "envelope_sha256": "dd431e469d186eb9a1882d4476187cd2144494606e20d031827ecd0156b975d3"
+          "envelope_sha256": "bf699529fcae1e438e1057dc893b30c25992efbe0f8c045e4cea2a5e647a2626"
         }
       ],
       "backend_jobs": 1,

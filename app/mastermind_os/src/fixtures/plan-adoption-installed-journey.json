@@ -1,0 +1,495 @@
+{
+  "body": {
+    "availability": "AVAILABLE",
+    "continuity": {
+      "adoption": {
+        "adoption": {
+          "adopted_source": {
+            "commit": "51656b3b45f9fe49b150cf014f6d7fcae4766196",
+            "content_sha256": "ea38b487738b1714c3b3ef0e4f4acbea4c0b426f3ed9c91033c125847cda0f8f",
+            "path": "research/project-plans/PLAN-PLAN-TEST-8888888888888888888888888888888888888888.candidate-ea38b487738b1714c3b3.md",
+            "repository": "mastermindx-market-intelligence/macro"
+          },
+          "display_revision": null,
+          "predecessor": "DEC:PLAN-FIRST",
+          "proposal_source": {
+            "commit": "f02a50e880bf13ce8bec538ae76063b05bd1abb4",
+            "content_sha256": "8d6f16a6867391f47084857d8c07bf5eee8e2b0f52b8244473e45861143b0798",
+            "path": "research/project-plans/PLAN-PLAN-TEST-8888888888888888888888888888888888888888.md",
+            "repository": "mastermindx-market-intelligence/macro"
+          },
+          "schema": "agentos.project_plan_adoption.v1",
+          "work_ref": "WS:PLAN-TEST"
+        },
+        "content": "---\nkey: PLAN-TEST\ntitle: Plan fixture\nobjective: Deliver actual content.\nstatus: active\nprogram: executive-os\nrepos:\n- macro\nowner: ceo\nclass: build\nblast_radius: user_facing\nambiguity: scoped\nwaves:\n- id: W1\n  title: Qualified planning wave\n  status: todo\nnext_action: Compare the exact planning waves.\nartifacts:\n- macro:research/project-plans/PLAN-PLAN-TEST-8888888888888888888888888888888888888888.md\n---\n",
+        "decided_at": "2027-01-15",
+        "decided_by": "workspace-subject:d38b5c99ecad75ce7fc03aff5082966530440327609ef417e5404f6dcce5feee",
+        "decision_ref": "DEC:PLAN-ADOPTION-9999999999999999999999999999999999999999",
+        "decision_source": {
+          "commit": "803102c63f56706c3f472b0979ff74b4899c42a3",
+          "content_sha256": "1f619df05536fb2a44bedf4ff962640508e7baf31ac4ece665ceaed001b9b8ea",
+          "path": "agentos/decisions/DEC-PLAN-ADOPTION-9999999999999999999999999999999999999999.md",
+          "repository": "mastermindx-market-intelligence/macro"
+        },
+        "state": "AVAILABLE"
+      },
+      "proposals": {
+        "coverage": "CAPTURED_ASSOCIATIONS_ONLY",
+        "items": [
+          {
+            "adoption_relation": "CURRENT_DECISION_REFERENCES_PROPOSAL",
+            "base_adoption": "DEC:PLAN-FIRST",
+            "base_source": {
+              "commit": "679699b78d468ec414fbe136ec767819255eee1b",
+              "content_sha256": "1872a61d0be891dc99def061d576a2a4cadcbc432b41746bf350245dc9c55a04",
+              "path": "planning/base.md",
+              "repository": "mastermindx-market-intelligence/macro"
+            },
+            "candidate_sha256": "ea38b487738b1714c3b3ef0e4f4acbea4c0b426f3ed9c91033c125847cda0f8f",
+            "comparison": {
+              "added_lines": 20,
+              "base_source": {
+                "commit": "679699b78d468ec414fbe136ec767819255eee1b",
+                "content_sha256": "1872a61d0be891dc99def061d576a2a4cadcbc432b41746bf350245dc9c55a04",
+                "path": "planning/base.md",
+                "repository": "mastermindx-market-intelligence/macro"
+              },
+              "base_text": "# Exact recorded base\r\n",
+              "candidate_sha256": "ea38b487738b1714c3b3ef0e4f4acbea4c0b426f3ed9c91033c125847cda0f8f",
+              "candidate_text": "---\nkey: PLAN-TEST\ntitle: Plan fixture\nobjective: Deliver actual content.\nstatus: active\nprogram: executive-os\nrepos:\n- macro\nowner: ceo\nclass: build\nblast_radius: user_facing\nambiguity: scoped\nwaves:\n- id: W1\n  title: Qualified planning wave\n  status: todo\nnext_action: Compare the exact planning waves.\nartifacts:\n- macro:research/project-plans/PLAN-PLAN-TEST-8888888888888888888888888888888888888888.md\n---\n",
+              "diff": "--- recorded-base\n+++ proposal-candidate\n@@ -1 +1,20 @@\n-# Exact recorded base\r\n+---\n+key: PLAN-TEST\n+title: Plan fixture\n+objective: Deliver actual content.\n+status: active\n+program: executive-os\n+repos:\n+- macro\n+owner: ceo\n+class: build\n+blast_radius: user_facing\n+ambiguity: scoped\n+waves:\n+- id: W1\n+  title: Qualified planning wave\n+  status: todo\n+next_action: Compare the exact planning waves.\n+artifacts:\n+- macro:research/project-plans/PLAN-PLAN-TEST-8888888888888888888888888888888888888888.md\n+---\n",
+              "identical": false,
+              "removed_lines": 1,
+              "state": "AVAILABLE"
+            },
+            "comparison_basis": "RECORDED_PREDECESSOR",
+            "evidence": [],
+            "proposal_id": "PLAN-PROPOSAL",
+            "proposal_source": {
+              "commit": "f02a50e880bf13ce8bec538ae76063b05bd1abb4",
+              "content_sha256": "8d6f16a6867391f47084857d8c07bf5eee8e2b0f52b8244473e45861143b0798",
+              "path": "research/project-plans/PLAN-PLAN-TEST-8888888888888888888888888888888888888888.md",
+              "repository": "mastermindx-market-intelligence/macro"
+            },
+            "rationale": "An actual fixture proposal.",
+            "schema": "agentos.project_plan_proposal.v1",
+            "state": "RECORDED_PROPOSAL",
+            "work_ref": "WS:PLAN-TEST"
+          }
+        ],
+        "state": "AVAILABLE"
+      },
+      "schema": "mastermind.project_plan_continuity.v1",
+      "work_ref": "WS:PLAN-TEST"
+    },
+    "plan": {
+      "adoption": {
+        "adopted_source": {
+          "commit": "51656b3b45f9fe49b150cf014f6d7fcae4766196",
+          "content_sha256": "ea38b487738b1714c3b3ef0e4f4acbea4c0b426f3ed9c91033c125847cda0f8f",
+          "path": "research/project-plans/PLAN-PLAN-TEST-8888888888888888888888888888888888888888.candidate-ea38b487738b1714c3b3.md",
+          "repository": "mastermindx-market-intelligence/macro"
+        },
+        "decision_ref": "DEC:PLAN-ADOPTION-9999999999999999999999999999999999999999",
+        "display_revision": null,
+        "matches_authored_record": true,
+        "state": "AVAILABLE"
+      },
+      "next_action": "Compare the exact planning waves.",
+      "objective": "Deliver actual content.",
+      "owner": "ceo",
+      "status": "active",
+      "title": "Plan fixture",
+      "version_history": {
+        "kind": "GIT_RECORD_REVISIONS",
+        "revisions": [
+          {
+            "commit": "803102c63f56706c3f472b0979ff74b4899c42a3",
+            "committed_at": "2026-11-05T11:45:15-07:00",
+            "content_sha256": "ea38b487738b1714c3b3ef0e4f4acbea4c0b426f3ed9c91033c125847cda0f8f"
+          },
+          {
+            "commit": "f02a50e880bf13ce8bec538ae76063b05bd1abb4",
+            "committed_at": "2026-11-05T11:44:58-07:00",
+            "content_sha256": "5e67c939b1d8b106e32cc269182d735ce7878e99162bb9183f81259897e67bf4"
+          },
+          {
+            "commit": "4f81ff97e661bf8b431380708cfc347ac4bf2330",
+            "committed_at": "2026-11-05T11:44:58-07:00",
+            "content_sha256": "b50deec459221d0bc0aa3531044fa3b178ea79af0f9e3c9ac0b64c009cd97bf6"
+          },
+          {
+            "commit": "679699b78d468ec414fbe136ec767819255eee1b",
+            "committed_at": "2026-11-05T11:44:57-07:00",
+            "content_sha256": "ac0be058cdff63d32df7b3c18abec7d1fce39e07894ebd0b752960f522df4f2f"
+          }
+        ],
+        "state": "AVAILABLE"
+      },
+      "waves": [
+        {
+          "depends_on": [],
+          "id": "W1",
+          "next_action": null,
+          "prs": [],
+          "status": "todo",
+          "title": "Qualified planning wave"
+        }
+      ]
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_plan.v2",
+    "selection": {
+      "work_ref": "WS:PLAN-TEST"
+    },
+    "source": {
+      "commit": "803102c63f56706c3f472b0979ff74b4899c42a3",
+      "content_sha256": "ea38b487738b1714c3b3ef0e4f4acbea4c0b426f3ed9c91033c125847cda0f8f",
+      "path": "agentos/workstreams/WS-PLAN-TEST.md",
+      "repository": "mastermindx-market-intelligence/macro"
+    }
+  },
+  "context": {
+    "can_inspect": true,
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "schema": "mastermind.workspace_source_operation_context.v1",
+    "selection": {
+      "action": "ADOPT_PLAN",
+      "work_ref": "WS:PLAN-TEST"
+    }
+  },
+  "initial_read": {
+    "availability": "AVAILABLE",
+    "continuity": {
+      "adoption": {
+        "adoption": {
+          "adopted_source": {
+            "commit": "679699b78d468ec414fbe136ec767819255eee1b",
+            "content_sha256": "1872a61d0be891dc99def061d576a2a4cadcbc432b41746bf350245dc9c55a04",
+            "path": "planning/base.md",
+            "repository": "mastermindx-market-intelligence/macro"
+          },
+          "display_revision": null,
+          "predecessor": null,
+          "proposal_source": null,
+          "schema": "agentos.project_plan_adoption.v1",
+          "work_ref": "WS:PLAN-TEST"
+        },
+        "content": "# Exact recorded base\r\n",
+        "decided_at": "2026-11-04",
+        "decided_by": "fixture-owner",
+        "decision_ref": "DEC:PLAN-FIRST",
+        "decision_source": {
+          "commit": "f02a50e880bf13ce8bec538ae76063b05bd1abb4",
+          "content_sha256": "352998285f13f8e0da27c17460b3bd5ee17895ca619d1100c4acf9e5cff25a40",
+          "path": "agentos/decisions/DEC-PLAN-FIRST.md",
+          "repository": "mastermindx-market-intelligence/macro"
+        },
+        "state": "AVAILABLE"
+      },
+      "proposals": {
+        "coverage": "CAPTURED_ASSOCIATIONS_ONLY",
+        "items": [
+          {
+            "adoption_relation": "UNASSOCIATED_WITH_CURRENT_DECISION",
+            "base_adoption": "DEC:PLAN-FIRST",
+            "base_source": {
+              "commit": "679699b78d468ec414fbe136ec767819255eee1b",
+              "content_sha256": "1872a61d0be891dc99def061d576a2a4cadcbc432b41746bf350245dc9c55a04",
+              "path": "planning/base.md",
+              "repository": "mastermindx-market-intelligence/macro"
+            },
+            "candidate_sha256": "ea38b487738b1714c3b3ef0e4f4acbea4c0b426f3ed9c91033c125847cda0f8f",
+            "comparison": {
+              "added_lines": 20,
+              "base_source": {
+                "commit": "679699b78d468ec414fbe136ec767819255eee1b",
+                "content_sha256": "1872a61d0be891dc99def061d576a2a4cadcbc432b41746bf350245dc9c55a04",
+                "path": "planning/base.md",
+                "repository": "mastermindx-market-intelligence/macro"
+              },
+              "base_text": "# Exact recorded base\r\n",
+              "candidate_sha256": "ea38b487738b1714c3b3ef0e4f4acbea4c0b426f3ed9c91033c125847cda0f8f",
+              "candidate_text": "---\nkey: PLAN-TEST\ntitle: Plan fixture\nobjective: Deliver actual content.\nstatus: active\nprogram: executive-os\nrepos:\n- macro\nowner: ceo\nclass: build\nblast_radius: user_facing\nambiguity: scoped\nwaves:\n- id: W1\n  title: Qualified planning wave\n  status: todo\nnext_action: Compare the exact planning waves.\nartifacts:\n- macro:research/project-plans/PLAN-PLAN-TEST-8888888888888888888888888888888888888888.md\n---\n",
+              "diff": "--- recorded-base\n+++ proposal-candidate\n@@ -1 +1,20 @@\n-# Exact recorded base\r\n+---\n+key: PLAN-TEST\n+title: Plan fixture\n+objective: Deliver actual content.\n+status: active\n+program: executive-os\n+repos:\n+- macro\n+owner: ceo\n+class: build\n+blast_radius: user_facing\n+ambiguity: scoped\n+waves:\n+- id: W1\n+  title: Qualified planning wave\n+  status: todo\n+next_action: Compare the exact planning waves.\n+artifacts:\n+- macro:research/project-plans/PLAN-PLAN-TEST-8888888888888888888888888888888888888888.md\n+---\n",
+              "identical": false,
+              "removed_lines": 1,
+              "state": "AVAILABLE"
+            },
+            "comparison_basis": "ADOPTED_CONTENT",
+            "evidence": [],
+            "proposal_id": "PLAN-PROPOSAL",
+            "proposal_source": {
+              "commit": "f02a50e880bf13ce8bec538ae76063b05bd1abb4",
+              "content_sha256": "8d6f16a6867391f47084857d8c07bf5eee8e2b0f52b8244473e45861143b0798",
+              "path": "research/project-plans/PLAN-PLAN-TEST-8888888888888888888888888888888888888888.md",
+              "repository": "mastermindx-market-intelligence/macro"
+            },
+            "rationale": "An actual fixture proposal.",
+            "schema": "agentos.project_plan_proposal.v1",
+            "state": "RECORDED_PROPOSAL",
+            "work_ref": "WS:PLAN-TEST"
+          }
+        ],
+        "state": "AVAILABLE"
+      },
+      "schema": "mastermind.project_plan_continuity.v1",
+      "work_ref": "WS:PLAN-TEST"
+    },
+    "plan": {
+      "adoption": {
+        "adopted_source": {
+          "commit": "679699b78d468ec414fbe136ec767819255eee1b",
+          "content_sha256": "1872a61d0be891dc99def061d576a2a4cadcbc432b41746bf350245dc9c55a04",
+          "path": "planning/base.md",
+          "repository": "mastermindx-market-intelligence/macro"
+        },
+        "decision_ref": "DEC:PLAN-FIRST",
+        "display_revision": null,
+        "matches_authored_record": false,
+        "state": "AVAILABLE"
+      },
+      "next_action": "Read the recorded content.",
+      "objective": "Deliver actual content.",
+      "owner": "ceo",
+      "status": "active",
+      "title": "Plan fixture",
+      "version_history": {
+        "kind": "GIT_RECORD_REVISIONS",
+        "revisions": [
+          {
+            "commit": "f02a50e880bf13ce8bec538ae76063b05bd1abb4",
+            "committed_at": "2026-11-05T11:44:58-07:00",
+            "content_sha256": "5e67c939b1d8b106e32cc269182d735ce7878e99162bb9183f81259897e67bf4"
+          },
+          {
+            "commit": "4f81ff97e661bf8b431380708cfc347ac4bf2330",
+            "committed_at": "2026-11-05T11:44:58-07:00",
+            "content_sha256": "b50deec459221d0bc0aa3531044fa3b178ea79af0f9e3c9ac0b64c009cd97bf6"
+          },
+          {
+            "commit": "679699b78d468ec414fbe136ec767819255eee1b",
+            "committed_at": "2026-11-05T11:44:57-07:00",
+            "content_sha256": "ac0be058cdff63d32df7b3c18abec7d1fce39e07894ebd0b752960f522df4f2f"
+          }
+        ],
+        "state": "AVAILABLE"
+      },
+      "waves": [
+        {
+          "depends_on": [],
+          "id": "W0",
+          "next_action": null,
+          "prs": [],
+          "status": "todo",
+          "title": "Read"
+        }
+      ]
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_plan.v2",
+    "selection": {
+      "work_ref": "WS:PLAN-TEST"
+    },
+    "source": {
+      "commit": "f02a50e880bf13ce8bec538ae76063b05bd1abb4",
+      "content_sha256": "5e67c939b1d8b106e32cc269182d735ce7878e99162bb9183f81259897e67bf4",
+      "path": "agentos/workstreams/WS-PLAN-TEST.md",
+      "repository": "mastermindx-market-intelligence/macro"
+    }
+  },
+  "pending_adoption": {
+    "advance": null,
+    "disposition": "unknown",
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "phase": "ADOPTION",
+    "reason": "IN_PROGRESS",
+    "receipt": {
+      "event_id": 6,
+      "kind": "PROPOSAL_OBSERVED",
+      "proposal": {
+        "head_branch": "mmos/plan-adopt-6f2a603a0b4d2559d81af7d49283acab0bc018b1f7810133953c082930a00ea4",
+        "head_commit": "803102c63f56706c3f472b0979ff74b4899c42a3",
+        "number": 402,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"
+      },
+      "receipt_sha256": "418f7ad1a3bc362613e6a5553bc841bda5c0ed30ae7f58735e8a2be2210bc7b1",
+      "recorded_at_ms": 1793904316000,
+      "sources": []
+    },
+    "recipe_fingerprint_sha256": "8e313c6d5714690d31c203346e77e90464568b8f025f9070d5c2eb03a26569e9",
+    "request_sha256": "30f31b50cd19074f10c1d5475e4f1fa658021777108f0ede9ec4f8670571fdb9",
+    "schema": "mastermind.workspace_source_operation_status.v1",
+    "selection": {
+      "action": "ADOPT_PLAN",
+      "request_id": "mmos-project-adopt-9999999999999999999999999999999999999999",
+      "work_ref": "WS:PLAN-TEST"
+    }
+  },
+  "pending_candidate": {
+    "advance": null,
+    "disposition": "unknown",
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "phase": "CANDIDATE",
+    "reason": "IN_PROGRESS",
+    "receipt": {
+      "event_id": 3,
+      "kind": "PROPOSAL_OBSERVED",
+      "proposal": {
+        "head_branch": "mmos/plan-adopt-12ab550bae2de5efa762f2ed1e1989562a84fc840382a7807b8a1e1878e44ae9",
+        "head_commit": "51656b3b45f9fe49b150cf014f6d7fcae4766196",
+        "number": 401,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"
+      },
+      "receipt_sha256": "b93a1c13969366e9a227c510dc8216128aff4d0002b565840836344c8e9f942b",
+      "recorded_at_ms": 1793904308000,
+      "sources": []
+    },
+    "recipe_fingerprint_sha256": "8e313c6d5714690d31c203346e77e90464568b8f025f9070d5c2eb03a26569e9",
+    "request_sha256": "30f31b50cd19074f10c1d5475e4f1fa658021777108f0ede9ec4f8670571fdb9",
+    "schema": "mastermind.workspace_source_operation_status.v1",
+    "selection": {
+      "action": "ADOPT_PLAN",
+      "request_id": "mmos-project-adopt-9999999999999999999999999999999999999999",
+      "work_ref": "WS:PLAN-TEST"
+    }
+  },
+  "preview": {
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "preview": {
+      "candidate_sha256": "ea38b487738b1714c3b3ef0e4f4acbea4c0b426f3ed9c91033c125847cda0f8f",
+      "changed_frontmatter_fields": [
+        "next_action",
+        "waves"
+      ],
+      "expected_adoption": "DEC:PLAN-FIRST",
+      "expected_commit": "f02a50e880bf13ce8bec538ae76063b05bd1abb4",
+      "record_body_changed": false,
+      "schema": "mastermind.project_plan_adoption_preview.v1",
+      "work_ref": "WS:PLAN-TEST"
+    },
+    "preview_witness": {
+      "original_input": {
+        "artifact_sha256": "02e3bd2a7737612ae47038c7e4f043ffd25381030b4f6a9a425dd39e66723b7f",
+        "input_ref": "terminal-input:08003fdfcd859295d4c35058ab3ccbe8fe1e5ed9acbd3be4ddb7fd1f2ff8a3bf",
+        "payload_sha256": "39f7a640adcd8541e0a5b1fbd866c54985bfc9f7f1c32a8753d55b12d3225ed1",
+        "schema": "mastermind.terminal_original_input_reference.v1"
+      },
+      "recipe_fingerprint_sha256": "8e313c6d5714690d31c203346e77e90464568b8f025f9070d5c2eb03a26569e9"
+    },
+    "recipe_fingerprint_sha256": "8e313c6d5714690d31c203346e77e90464568b8f025f9070d5c2eb03a26569e9",
+    "request_sha256": "30f31b50cd19074f10c1d5475e4f1fa658021777108f0ede9ec4f8670571fdb9",
+    "schema": "mastermind.workspace_source_operation_preview.v1",
+    "selection": {
+      "action": "ADOPT_PLAN",
+      "request_id": "mmos-project-adopt-9999999999999999999999999999999999999999",
+      "work_ref": "WS:PLAN-TEST"
+    }
+  },
+  "ready": {
+    "advance": {
+      "phase_receipt_digest": "64916ad096b9a662ee096b004373ff603c4a3b020d5d0828740219b428657162"
+    },
+    "disposition": "unknown",
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "phase": "CANDIDATE",
+    "reason": "READY_FOR_ADVANCE",
+    "receipt": {
+      "event_id": 4,
+      "kind": "SOURCE_OBSERVED",
+      "proposal": null,
+      "receipt_sha256": "64916ad096b9a662ee096b004373ff603c4a3b020d5d0828740219b428657162",
+      "recorded_at_ms": 1793904309000,
+      "sources": [
+        {
+          "commit": "51656b3b45f9fe49b150cf014f6d7fcae4766196",
+          "content_sha256": "ea38b487738b1714c3b3ef0e4f4acbea4c0b426f3ed9c91033c125847cda0f8f",
+          "path": "research/project-plans/PLAN-PLAN-TEST-8888888888888888888888888888888888888888.candidate-ea38b487738b1714c3b3.md",
+          "repository": "macro"
+        }
+      ]
+    },
+    "recipe_fingerprint_sha256": "8e313c6d5714690d31c203346e77e90464568b8f025f9070d5c2eb03a26569e9",
+    "request_sha256": "30f31b50cd19074f10c1d5475e4f1fa658021777108f0ede9ec4f8670571fdb9",
+    "schema": "mastermind.workspace_source_operation_status.v1",
+    "selection": {
+      "action": "ADOPT_PLAN",
+      "request_id": "mmos-project-adopt-9999999999999999999999999999999999999999",
+      "work_ref": "WS:PLAN-TEST"
+    }
+  },
+  "request": {
+    "base_source": {
+      "commit": "679699b78d468ec414fbe136ec767819255eee1b",
+      "content_sha256": "1872a61d0be891dc99def061d576a2a4cadcbc432b41746bf350245dc9c55a04",
+      "path": "planning/base.md",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    "candidate_sha256": "ea38b487738b1714c3b3ef0e4f4acbea4c0b426f3ed9c91033c125847cda0f8f",
+    "expected_adoption": "DEC:PLAN-FIRST",
+    "expected_commit": "f02a50e880bf13ce8bec538ae76063b05bd1abb4",
+    "proposal_source": {
+      "commit": "f02a50e880bf13ce8bec538ae76063b05bd1abb4",
+      "content_sha256": "8d6f16a6867391f47084857d8c07bf5eee8e2b0f52b8244473e45861143b0798",
+      "path": "research/project-plans/PLAN-PLAN-TEST-8888888888888888888888888888888888888888.md",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    "request_id": "mmos-project-adopt-9999999999999999999999999999999999999999",
+    "schema": "agentos.plan_adoption_request.v1",
+    "work_ref": "WS:PLAN-TEST"
+  },
+  "status": {
+    "advance": null,
+    "disposition": "accepted",
+    "owner_context": {
+      "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda"
+    },
+    "phase": "ADOPTION",
+    "reason": null,
+    "receipt": {
+      "event_id": 7,
+      "kind": "SOURCE_OBSERVED",
+      "proposal": null,
+      "receipt_sha256": "6a4466652202bb37f36afa7da8c88798f0c58f4384d5bd8533e59b69f717e87d",
+      "recorded_at_ms": 1793904317000,
+      "sources": [
+        {
+          "commit": "803102c63f56706c3f472b0979ff74b4899c42a3",
+          "content_sha256": "ea38b487738b1714c3b3ef0e4f4acbea4c0b426f3ed9c91033c125847cda0f8f",
+          "path": "agentos/workstreams/WS-PLAN-TEST.md",
+          "repository": "macro"
+        },
+        {
+          "commit": "803102c63f56706c3f472b0979ff74b4899c42a3",
+          "content_sha256": "1f619df05536fb2a44bedf4ff962640508e7baf31ac4ece665ceaed001b9b8ea",
+          "path": "agentos/decisions/DEC-PLAN-ADOPTION-9999999999999999999999999999999999999999.md",
+          "repository": "macro"
+        },
+        {
+          "commit": "803102c63f56706c3f472b0979ff74b4899c42a3",
+          "content_sha256": "10fd34f785995355566c25b438231d4f93f1d1fce7a3b261e60ba893e38a350e",
+          "path": "agentos/decisions/DEC-PLAN-FIRST.md",
+          "repository": "macro"
+        }
+      ]
+    },
+    "recipe_fingerprint_sha256": "8e313c6d5714690d31c203346e77e90464568b8f025f9070d5c2eb03a26569e9",
+    "request_sha256": "30f31b50cd19074f10c1d5475e4f1fa658021777108f0ede9ec4f8670571fdb9",
+    "schema": "mastermind.workspace_source_operation_status.v1",
+    "selection": {
+      "action": "ADOPT_PLAN",
+      "request_id": "mmos-project-adopt-9999999999999999999999999999999999999999",
+      "work_ref": "WS:PLAN-TEST"
+    }
+  }
+}

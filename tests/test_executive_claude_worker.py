@@ -89,6 +89,7 @@ def _fixture_claude_binary(
         '    auth-ready-orgid-secret) printf \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","orgId":"Bearer abcdefghijklmnopqrstuvwxyz"}\\n\'; exit 0 ;;\n'
         '  esac\n'
         'fi\n'
+        'if [ -p "$root/launch-release" ]; then IFS= read -r release < "$root/launch-release"; fi\n'
         'case "$mode" in\n'
         '  success) printf \'{"is_error":false,"model":"claude-opus-4-6","session_id":"fixture-session","usage":{"input_tokens":1,"output_tokens":2},"structured_output":{"outcome":"ok","run_id":"run-1","job_id":"job-1","worker_id":"worker-1","artifacts":[]}}\\n\' ;;\n'
         '  refusal) printf \'{"is_error":true,"subtype":"error","message":"refused"}\\n\' ;;\n'
@@ -727,18 +728,46 @@ def test_foreground_success_returns_common_structured_result(
     "mode",
     ("refusal", "malformed", "model-mismatch", "secret-output"),
 )
+@pytest.mark.parametrize("delay_initial_inspection", (False, True))
 def test_foreground_bad_provider_output_never_succeeds_or_persists_secret(
-    tmp_path: Path, mode: str
+    tmp_path: Path, mode: str, delay_initial_inspection: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     binary = _fixture_claude_binary(tmp_path)
     (tmp_path / "mode").write_text(mode, encoding="utf-8")
-    spec = _workspace_and_spec(tmp_path, run_id=f"run-{mode}")
+    spec = _workspace_and_spec(tmp_path, run_id=f"run-{mode}", timeout_seconds=5)
     adapter = _adapter(tmp_path, binary)
+    if delay_initial_inspection:
+        real_inspect = claude_worker.LocalProcessInspector.inspect
+        first_inspection = True
+
+        def delayed_inspect(self: object, pid: int) -> object:
+            nonlocal first_inspection
+            if first_inspection:
+                first_inspection = False
+                # Exercise a child scheduled before the parent's first identity
+                # read. The FIFO, not this delay, supplies the launch ordering.
+                time.sleep(0.2)
+            return real_inspect(self, pid)
+
+        monkeypatch.setattr(claude_worker.LocalProcessInspector, "inspect", delayed_inspect)
+
+    # These cases qualify output handling after an admitted start. Keep the real
+    # fixture PID alive through identity/attestation, without relaxing the
+    # adapter's separate fail-closed tests for an already-exited process.
+    gate = tmp_path / "launch-release"
+    os.mkfifo(gate, 0o600)
+    gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
 
     async def execute() -> CollectionReceipt:
-        return await adapter.collect_result(await adapter.start(spec))
+        ref = await adapter.start(spec)
+        assert os.write(gate_fd, b"release\n") == len(b"release\n")
+        return await adapter.collect_result(ref)
 
-    receipt = asyncio.run(execute())
+    try:
+        receipt = asyncio.run(execute())
+    finally:
+        os.close(gate_fd)
 
     assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
     for path in (
@@ -1069,12 +1098,89 @@ def test_malformed_json_never_retains_raw_payload_in_exception_chain(tmp_path: P
     assert "CREDENTIAL-SENTINEL" not in repr(auth_raised.value)
 
     (tmp_path / "mode").write_text("malformed-sentinel", encoding="utf-8")
-    async def malformed() -> CollectionReceipt:
-        return await adapter.collect_result(await adapter.start(_workspace_and_spec(tmp_path)))
+    # This case qualifies output handling after an admitted start. Keep the real
+    # fixture PID alive through identity/attestation, without relaxing the
+    # adapter's separate fail-closed tests for an already-exited process. The
+    # malformed fixture prints its payload and exits immediately, so without
+    # this barrier the fixture PID can be gone before the adapter inspects the
+    # real launch identity. The FIFO is released only once start has returned.
+    gate = tmp_path / "launch-release"
+    os.mkfifo(gate, 0o600)
+    gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
 
-    receipt = asyncio.run(malformed())
+    async def malformed() -> CollectionReceipt:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=5))
+        assert os.write(gate_fd, b"release\n") == len(b"release\n")
+        return await adapter.collect_result(ref)
+
+    try:
+        receipt = asyncio.run(malformed())
+    finally:
+        os.close(gate_fd)
+
     assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
     assert "CREDENTIAL-SENTINEL" not in str(receipt.result.error)
+
+
+def test_malformed_json_delayed_first_identity_inspection_still_redacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bounded deliberate delay before the first identity read must not change
+    the malformed-output contract.
+
+    The delay lets an ungated fixture exit before the parent performs its first
+    identity read. With the launch-release FIFO in place the real fixture PID is
+    still alive, the real inspector still qualifies it, and the malformed
+    payload is still redacted. The delay delegates to the original inspector and
+    is a discriminator only; the FIFO, not the delay, supplies the ordering.
+    """
+    binary = _fixture_claude_binary(tmp_path)
+    adapter = _adapter(tmp_path, binary)
+    (tmp_path / "mode").write_text("malformed-sentinel", encoding="utf-8")
+    real_inspect = claude_worker.LocalProcessInspector.inspect
+    first_inspection = True
+
+    def delayed_inspect(self: object, pid: int) -> object:
+        nonlocal first_inspection
+        if first_inspection:
+            first_inspection = False
+            # Exercise a child scheduled before the parent's first identity
+            # read. The FIFO, not this delay, supplies the launch ordering.
+            time.sleep(0.2)
+            # Reap this one owned fixture child only if it has already exited,
+            # so the real inspector observes the same absent-PID condition the
+            # hosted CI observed. A gated fixture is still alive at this point,
+            # so the probe reaps nothing and the real inspection is unchanged.
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+        return real_inspect(self, pid)
+
+    monkeypatch.setattr(claude_worker.LocalProcessInspector, "inspect", delayed_inspect)
+
+    gate = tmp_path / "launch-release"
+    os.mkfifo(gate, 0o600)
+    gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
+
+    async def malformed() -> CollectionReceipt:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=5))
+        assert os.write(gate_fd, b"release\n") == len(b"release\n")
+        return await adapter.collect_result(ref)
+
+    try:
+        receipt = asyncio.run(malformed())
+    finally:
+        os.close(gate_fd)
+
+    assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
+    assert "CREDENTIAL-SENTINEL" not in str(receipt.result.error)
+    for path in (
+        Path(receipt.process_ref.stdout_path),
+        Path(receipt.process_ref.stderr_path),
+        Path(receipt.process_ref.result_path),
+    ):
+        assert "CREDENTIAL-SENTINEL" not in path.read_text(encoding="utf-8")
 
 
 def test_foreground_environment_is_private_and_closed(
@@ -1220,35 +1326,50 @@ def test_secret_stderr_and_replaced_bound_evidence_never_succeed(
     tmp_path: Path,
 ) -> None:
     binary = _fixture_claude_binary(tmp_path)
-    (tmp_path / "mode").write_text("secret-stderr", encoding="utf-8")
-    adapter = _adapter(tmp_path, binary)
+    # All four negative controls require a live attested child. The fixture's
+    # fixed 0.2s sleep (and immediate secret-stderr exit) cannot ensure /proc
+    # visibility on loaded CI. Reuse the suite's FIFO release barrier; do not
+    # weaken the production identity inspector or relax any invalid-result gate.
+    gate = tmp_path / "launch-release"
+    os.mkfifo(gate, 0o600)
+    gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
+    try:
+        (tmp_path / "mode").write_text("secret-stderr", encoding="utf-8")
+        adapter = _adapter(tmp_path, binary)
 
-    async def secret_stderr() -> CollectionReceipt:
-        return await adapter.collect_result(await adapter.start(_workspace_and_spec(tmp_path)))
+        async def secret_stderr() -> CollectionReceipt:
+            ref = await adapter.start(_workspace_and_spec(tmp_path))
+            # Exit only after the real fixture process has been identity-attested.
+            assert os.write(gate_fd, b"release\n") == len(b"release\n")
+            return await adapter.collect_result(ref)
 
-    secret_receipt = asyncio.run(secret_stderr())
-    assert secret_receipt.result.status is WorkerRunStatus.INVALID_RESULT
-    assert "CREDENTIAL-SENTINEL" not in Path(secret_receipt.process_ref.stderr_path).read_text()
+        secret_receipt = asyncio.run(secret_stderr())
+        assert secret_receipt.result.status is WorkerRunStatus.INVALID_RESULT
+        assert "CREDENTIAL-SENTINEL" not in Path(secret_receipt.process_ref.stderr_path).read_text()
 
-    for label in ("stdout_path", "stderr_path", "result_path"):
-        (tmp_path / "mode").write_text("delayed-success", encoding="utf-8")
-        replacing_adapter = _adapter(tmp_path, binary)
-        spec = _workspace_and_spec(
-            tmp_path, run_id=f"run-replace-{label}", timeout_seconds=0.7
-        )
-        victim = tmp_path / f"victim-{label}"
-        victim.write_text("victim-data", encoding="utf-8")
+        for label in ("stdout_path", "stderr_path", "result_path"):
+            (tmp_path / "mode").write_text("delayed-success", encoding="utf-8")
+            replacing_adapter = _adapter(tmp_path, binary)
+            spec = _workspace_and_spec(
+                tmp_path, run_id=f"run-replace-{label}", timeout_seconds=0.7
+            )
+            victim = tmp_path / f"victim-{label}"
+            victim.write_text("victim-data", encoding="utf-8")
 
-        async def replace_then_collect() -> CollectionReceipt:
-            ref = await replacing_adapter.start(spec)
-            target = Path(getattr(ref, label))
-            target.unlink()
-            os.link(victim, target)
-            return await replacing_adapter.collect_result(ref)
+            async def replace_then_collect() -> CollectionReceipt:
+                ref = await replacing_adapter.start(spec)
+                target = Path(getattr(ref, label))
+                target.unlink()
+                os.link(victim, target)
+                # Release only *after* a verified start and path replacement.
+                assert os.write(gate_fd, b"release\n") == len(b"release\n")
+                return await replacing_adapter.collect_result(ref)
 
-        receipt = asyncio.run(replace_then_collect())
-        assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
-        assert victim.read_text(encoding="utf-8") == "victim-data"
+            receipt = asyncio.run(replace_then_collect())
+            assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
+            assert victim.read_text(encoding="utf-8") == "victim-data"
+    finally:
+        os.close(gate_fd)
 
 
 def test_post_parse_git_rejection_leaves_bound_result_empty(tmp_path: Path) -> None:
@@ -2024,6 +2145,7 @@ def test_process_group_census_refuses_empty_error_for_existing_group(
 def test_process_group_census_accepts_darwin_state_flags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
     real_popen = subprocess.Popen
 
     def flagged_state_popen(
@@ -2040,6 +2162,38 @@ def test_process_group_census_accepts_darwin_state_flags(
         claude_worker._ProcessGroupMember(42, "S"),
         claude_worker._ProcessGroupMember(43, "Z"),
     )
+
+
+@pytest.mark.parametrize("state_token", ["D", "t", "X", "I"])
+def test_process_group_census_accepts_linux_state_codes(
+    monkeypatch: pytest.MonkeyPatch, state_token: str,
+) -> None:
+    """Linux ps state codes are not Darwin's state-code alphabet."""
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    real_popen = subprocess.Popen
+
+    def linux_state_popen(_argv: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        return real_popen(("/usr/bin/printf", f"42 99 {state_token}\n"), **kwargs)
+
+    monkeypatch.setattr(claude_worker.subprocess, "Popen", linux_state_popen)
+    assert claude_worker._process_group_member_pids(99) == (
+        claude_worker._ProcessGroupMember(42, state_token),
+    )
+
+
+@pytest.mark.parametrize("state_token", ["?", "S!", "D+"])
+def test_process_group_census_refuses_invalid_linux_state_column(
+    monkeypatch: pytest.MonkeyPatch, state_token: str,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    real_popen = subprocess.Popen
+
+    def invalid_state_popen(_argv: object, **kwargs: object) -> subprocess.Popen[bytes]:
+        return real_popen(("/usr/bin/printf", f"42 99 {state_token}\n"), **kwargs)
+
+    monkeypatch.setattr(claude_worker.subprocess, "Popen", invalid_state_popen)
+    with pytest.raises(claude_worker.ClaudeProcessIdentityError):
+        claude_worker._process_group_member_pids(99)
 
 
 def test_exited_launch_pid_reuse_never_signals_foreign_group(

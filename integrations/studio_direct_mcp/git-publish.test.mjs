@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback, execFileSync } from 'node:child_process';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -239,7 +239,7 @@ test('typed commit stays closed-world and does not require remote observation', 
       message: 'test: local-only typed commit',
     });
     assert.equal(remoteObservationAttempted, false);
-    assert.equal(result.status, 'OK');
+    assert.equal(result.status, 'OK', JSON.stringify(result));
     assert.equal(result.effect_state, 'APPLIED');
     assert.equal(result.code, 'APPLIED');
     assert.equal('remote_head_sha' in result, false);
@@ -453,6 +453,65 @@ test('lost push response reconciles to APPLIED when exact remote head proves the
     assert.equal(result.effect_state, 'APPLIED');
     assert.equal(result.code, 'APPLIED_AFTER_AMBIGUOUS_PUSH_RETURN');
     assert.equal(result.remote_head_sha, f.head);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('explicit server-side one-ref rejection is diagnosed without treating its ref as unknown', async () => {
+  const f = await fixture();
+  try {
+    const hook = path.join(f.remote, 'hooks', 'pre-receive');
+    await writeFile(hook, '#!/bin/sh\nprintf "test-only remote rejection\\n" >&2\nexit 1\n');
+    await chmod(hook, 0o700);
+    let pushCount = 0;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && gitCommand(args) === 'push') pushCount += 1;
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.push({ operation_id: f.operationId, expected_head_sha: f.head });
+    assert.equal(pushCount, 1, 'a rejection must never initiate another write');
+    assert.equal(result.status, 'REFUSED', JSON.stringify(result));
+    assert.equal(result.effect_state, 'NOT_APPLIED');
+    assert.equal(result.code, 'REMOTE_REF_REJECTED_UNCHANGED');
+    assert.equal(result.push_attempted, true);
+    assert.equal(result.retry_allowed, false);
+    assert.equal(result.ready_to_push, false);
+    assert.equal(result.diagnostic_scope, 'SAME_CARRIER_READ_ONLY');
+    assert.equal(result.rejection_reason, 'UNDETERMINED');
+    assert.equal(result.local_head_sha, f.head);
+    assert.equal(result.remote_head_sha, null);
+    assert.equal((await git(f.workspace, 'ls-remote', '--heads', 'origin',
+      `refs/heads/${f.branch}`)).stdout.trim(), '');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('an unrelated porcelain ref cannot clear an ambiguous admitted push', async () => {
+  const f = await fixture();
+  try {
+    let pushCount = 0;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && gitCommand(args) === 'push') {
+          pushCount += 1;
+          const error = new Error('test-only wrong-ref remote rejection');
+          error.code = 1;
+          error.stdout = ['!', `${f.head}:refs/heads/unrelated`, '[remote rejected] (failed)'].join(String.fromCharCode(9)) + String.fromCharCode(10);
+          error.stderr = '';
+          throw error;
+        }
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.push({ operation_id: f.operationId, expected_head_sha: f.head });
+    assert.equal(pushCount, 1);
+    assert.equal(result.status, 'UNKNOWN');
+    assert.equal(result.effect_state, 'EFFECT_UNKNOWN');
+    assert.equal(result.code, 'PUSH_RESULT_UNCERTAIN');
   } finally {
     await f.cleanup();
   }
@@ -686,4 +745,1130 @@ test('selected publisher refuses a foreign or unversioned owner receipt before G
       assert.equal(gitCalls, 0);
     }
   } finally { await f.cleanup(); }
+});
+
+test('read-only cleanliness probes preserve config semantics and confine optional locks', async () => {
+  const f = await fixture();
+  try {
+    const calls = [];
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        calls.push({file, args, env: options?.env ?? {}});
+        return execFile(file, args, options);
+      },
+    });
+    const status = await publisher.status({ operation_id: f.operationId });
+    assert.equal(status.clean, true);
+    const cleanliness = new Set(['diff-files', 'diff-index', 'ls-files']);
+    const observed = calls.filter(({file, args}) => file === GIT && cleanliness.has(gitCommand(args)));
+    assert.deepEqual(observed.map(({args}) => gitCommand(args)).sort(), ['diff-files', 'diff-index', 'ls-files']);
+    for (const {env} of observed) {
+      assert.equal(env.GIT_OPTIONAL_LOCKS, '0');
+      assert.equal('GIT_CONFIG_GLOBAL' in env, false);
+      assert.equal('GIT_CONFIG_NOSYSTEM' in env, false);
+    }
+    for (const {file, args, env} of calls.filter(({file, args}) =>
+      file === GIT && !cleanliness.has(gitCommand(args)))) {
+      assert.equal('GIT_OPTIONAL_LOCKS' in env, false, `${gitCommand(args)} inherited observation fence`);
+      assert.equal('GIT_CONFIG_GLOBAL' in env, false);
+      assert.equal('GIT_CONFIG_NOSYSTEM' in env, false);
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('global exclude semantics cannot create false-clean push readiness', async () => {
+  const f = await fixture();
+  const previousHome = process.env.HOME;
+  try {
+    const home = path.join(f.root, 'home');
+    const ignoreDir = path.join(home, '.config', 'git');
+    await run('/bin/mkdir', ['-p', ignoreDir]);
+    await writeFile(path.join(home, '.gitconfig'), '[core]\n\texcludesFile = /dev/null\n');
+    await writeFile(path.join(ignoreDir, 'ignore'), 'pending.txt\n');
+    await writeFile(path.join(f.workspace, 'pending.txt'), 'must remain visible to publication admission\n');
+    process.env.HOME = home;
+
+    const publisher = createGitPublisher(f.config);
+    const status = await publisher.status({operation_id: f.operationId});
+    assert.equal(status.clean, false);
+    assert.equal(status.ready_to_push, false);
+
+    const out = await publisher.push({operation_id: f.operationId, expected_head_sha: f.head});
+    assert.equal(out.effect_state, 'NOT_APPLIED');
+    assert.equal(out.code, 'WORKSPACE_DIRTY');
+    const {stdout: remoteOut} = await git(
+      f.workspace, 'ls-remote', '--heads', 'origin', `refs/heads/${f.branch}`);
+    assert.equal(remoteOut.trim(), '');
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test('tracked and staged changes both refuse push under split cleanliness probes', async () => {
+  for (const staged of [false, true]) {
+    const f = await fixture();
+    try {
+      await writeFile(path.join(f.workspace, 'proof.txt'), staged ? 'staged\n' : 'unstaged\n');
+      if (staged) await git(f.workspace, 'add', 'proof.txt');
+      const publisher = createGitPublisher(f.config);
+      const out = await publisher.push({operation_id: f.operationId, expected_head_sha: f.head});
+      assert.equal(out.effect_state, 'NOT_APPLIED');
+      assert.equal(out.code, 'WORKSPACE_DIRTY');
+      const {stdout: remoteOut} = await git(
+        f.workspace, 'ls-remote', '--heads', 'origin', `refs/heads/${f.branch}`);
+      assert.equal(remoteOut.trim(), '');
+    } finally {
+      await f.cleanup();
+    }
+  }
+});
+
+
+function closedProfileFor(f) {
+  return {
+    enabled: true, workspaceCli: f.cli, gitBinary: GIT,
+    commandTimeoutMs: 10_000, pushTimeoutMs: 10_000,
+    repositories: [
+      { repository: 'mastermind', sourceRepository: path.join(f.root, 'mastermind-source'),
+        allowedRemoteUrls: [path.join(f.root, 'mastermind-remote.git')] },
+      { repository: 'macro', sourceRepository: path.join(f.root, 'macro-source'),
+        allowedRemoteUrls: [path.join(f.root, 'macro-remote.git')] },
+      { repository: 'terminal', sourceRepository: f.sourceRepo, allowedRemoteUrls: [f.remote] },
+    ],
+  };
+}
+
+test('closed three-repository publication profile is explicit, immutable and rejects aliases/remotes', async () => {
+  const f = await fixture();
+  try {
+    const profile = closedProfileFor(f);
+    const frozen = resolveGitPublishConfig(profile);
+    assert.equal(resolveGitPublishConfig(frozen), frozen);
+    assert.deepEqual(frozen.repositories.map((p) => p.repository), ['mastermind', 'macro', 'terminal']);
+    assert.equal(frozen.repositories[2].sourceRepository, f.sourceRepo);
+    assert.throws(() => resolveGitPublishConfig({ ...profile, repository: 'terminal' }), /not supported/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile, repositories: profile.repositories.slice(0, 2) }), /exact closed/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile,
+      repositories: [profile.repositories[0], profile.repositories[1], profile.repositories[1]] }), /unique/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile,
+      repositories: [profile.repositories[0], profile.repositories[1],
+        { ...profile.repositories[2], sourceRepository: profile.repositories[0].sourceRepository }] }), /distinct/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile,
+      repositories: [profile.repositories[0], profile.repositories[1],
+        { ...profile.repositories[2], allowedRemoteUrls: profile.repositories[0].allowedRemoteUrls }] }), /distinct/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile,
+      repositories: [profile.repositories[0], profile.repositories[1],
+        { ...profile.repositories[2], allowedRemoteUrls: [f.remote, 'another'] }] }), /distinct/);
+  } finally { await f.cleanup(); }
+});
+
+test('closed publisher routes only the uniquely registered Terminal operation and retains exact commit/push fencing', async () => {
+  const f = await fixture();
+  try {
+    const seen = [];
+    const exec = async (file, args, options) => {
+      if (file !== f.cli) return execFile(file, args, options);
+      const alias = args.at(-1);
+      assert.deepEqual(args, ['status', '--operation-id', f.operationId,
+        '--lane', 'web', '--repository', alias]);
+      seen.push(alias);
+      if (alias !== 'terminal') {
+        const error = new Error('workspace registration absent');
+        error.code = 2;
+        error.stdout = '';
+        error.stderr = JSON.stringify({
+          schema_version: 'mastermind.workspace_cli/v2',
+          action: 'status', effect: 'NOT_APPLIED', repository: alias,
+          error: 'workspace is not registered to the source repository',
+        });
+        throw error;
+      }
+      return { stdout: JSON.stringify({
+        schema_version: 'mastermind.workspace_cli/v2',
+        action: 'status', effect: 'NOT_APPLIED', repository: alias,
+        receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+          branch: f.branch, dirty: false, head_sha: f.head },
+      }), stderr: '' };
+    };
+    const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
+    const before = await publisher.status({ operation_id: f.operationId });
+    assert.equal(before.local_head_sha, f.head);
+    assert.equal(before.remote_head_sha, null);
+    await writeFile(path.join(f.workspace, 'proof.txt'), 'terminal repair\n');
+    const committed = await publisher.commit({
+      operation_id: f.operationId, expected_head_sha: f.head, message: 'fix: closed publisher routing',
+    });
+    assert.equal(committed.effect_state, 'APPLIED');
+    const pushed = await publisher.push({
+      operation_id: f.operationId, expected_head_sha: committed.commit_head_sha,
+    });
+    assert.equal(pushed.effect_state, 'APPLIED');
+    assert.equal(pushed.remote_head_sha, committed.commit_head_sha);
+    // The delegated publisher independently rereads its exact Terminal binding
+    // during commit/push, so its extra Terminal observations are intentional.
+    assert.equal(seen.filter((alias) => alias === 'mastermind').length, 3);
+    assert.equal(seen.filter((alias) => alias === 'macro').length, 3);
+    assert.ok(seen.filter((alias) => alias === 'terminal').length >= 3);
+    assert.ok(seen.every((alias) => ['mastermind', 'macro', 'terminal'].includes(alias)));
+    const {stdout} = await git(f.workspace, 'ls-remote', '--heads', 'origin', `refs/heads/${f.branch}`);
+    assert.equal(stdout.trim().split(/\s+/)[0], committed.commit_head_sha);
+  } finally { await f.cleanup(); }
+});
+
+test('closed publisher refuses duplicate operation ownership or bad registry receipts before Git', async () => {
+  const f = await fixture();
+  try {
+    for (const caseName of ['ambiguous', 'unversioned', 'foreign', 'unregistered']) {
+      let gitCalls = 0;
+      const exec = async (file, args) => {
+        if (file !== f.cli) { gitCalls++; throw new Error('Git must remain untouched'); }
+        const alias = args.at(-1);
+        const registered = alias === 'terminal' || (caseName === 'ambiguous' && alias === 'macro');
+        const result = registered ? {
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: alias,
+          receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+            branch: f.branch, dirty: false, head_sha: f.head },
+        } : {
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: alias,
+          error: 'workspace is not registered to the source repository',
+        };
+        if (caseName === 'unregistered') {
+          // A stdout success can never claim registration absence; this is
+          // malformed evidence, not the canonical exit-code-2 refusal.
+          delete result.receipt;
+          result.error = 'workspace is not registered to the source repository';
+        }
+        if (caseName === 'unversioned' && alias === 'macro') result.schema_version = 'mastermind.workspace_cli/v1';
+        if (caseName === 'foreign' && alias === 'macro') result.repository = 'terminal';
+        return { stdout: JSON.stringify(result), stderr: '' };
+      };
+      const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
+      await assert.rejects(publisher.commit({
+        operation_id: f.operationId, expected_head_sha: f.head, message: 'test: no effects',
+      }), /more than one repository|invalid repository receipt|unexpected result/);
+      assert.equal(gitCalls, 0, caseName);
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('closed publisher fails closed on stdout absence even when another repository is registered', async () => {
+  const f = await fixture();
+  try {
+    for (const caseName of ['malformed stdout absence', 'stdout absence beside a clean registration']) {
+      let gitCalls = 0;
+      const exec = async (file, args) => {
+        if (file !== f.cli) { gitCalls++; throw new Error('Git must remain untouched'); }
+        const alias = args.at(-1);
+        if (caseName === 'stdout absence beside a clean registration' && alias === 'macro') {
+          const error = new Error('workspace registration absent');
+          error.code = 2;
+          error.stdout = '';
+          error.stderr = JSON.stringify({
+            schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+            effect: 'NOT_APPLIED', repository: alias,
+            error: 'workspace is not registered to the source repository',
+          });
+          throw error;
+        }
+        if (caseName === 'stdout absence beside a clean registration' && alias === 'terminal') {
+          return { stdout: JSON.stringify({
+            schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+            effect: 'NOT_APPLIED', repository: alias,
+            receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+              branch: f.branch, dirty: false, head_sha: f.head },
+          }), stderr: '' };
+        }
+        return { stdout: JSON.stringify({
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: alias,
+          error: 'workspace is not registered to the source repository',
+        }), stderr: '' };
+      };
+      const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
+      await assert.rejects(publisher.commit({
+        operation_id: f.operationId, expected_head_sha: 'b'.repeat(40), message: 'test: no effects',
+      }), /unexpected result/, caseName);
+      assert.equal(gitCalls, 0, caseName);
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('closed publisher keeps canonical exit-code-2 absence as the only non-registration evidence', async () => {
+  const f = await fixture();
+  try {
+    const canonicalAbsence = (alias) => {
+      const error = new Error('workspace registration absent');
+      error.code = 2;
+      error.stdout = '';
+      error.stderr = JSON.stringify({
+        schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+        effect: 'NOT_APPLIED', repository: alias,
+        error: 'workspace is not registered to the source repository',
+      });
+      return error;
+    };
+    let gitCalls = 0;
+    const exec = async (file, args, options) => {
+      if (file !== f.cli) return execFile(file, args, options);
+      const alias = args.at(-1);
+      if (alias === 'terminal') {
+        return { stdout: JSON.stringify({
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: alias,
+          receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+            branch: f.branch, dirty: false, head_sha: f.head },
+        }), stderr: '' };
+      }
+      throw canonicalAbsence(alias);
+    };
+
+    const absent = createGitPublisher(closedProfileFor(f), {
+      execFile: (file, args) => {
+        if (file !== f.cli) { gitCalls++; throw new Error('Git must remain untouched'); }
+        throw canonicalAbsence(args.at(-1));
+      },
+    });
+    await assert.rejects(absent.commit({
+      operation_id: f.operationId, expected_head_sha: f.head, message: 'test: no effects',
+    }), /not registered in the closed repository profile/);
+    assert.equal(gitCalls, 0);
+
+    const routed = createGitPublisher(closedProfileFor(f), { execFile: exec });
+    const refused = await routed.commit({
+      operation_id: f.operationId, expected_head_sha: 'b'.repeat(40), message: 'test: no effects',
+    });
+    assert.equal(refused.status, 'REFUSED');
+    assert.equal(refused.effect_state, 'NOT_APPLIED');
+    assert.equal(refused.code, 'EXPECTED_HEAD_MISMATCH');
+  } finally { await f.cleanup(); }
+});
+
+
+test('sparse typed commit seeds its private index from the linked worktree index', async () => {
+  const f = await fixture();
+  try {
+    await run('/bin/mkdir', ['-p', path.join(f.workspace, 'visible'), path.join(f.workspace, 'hidden')]);
+    await writeFile(path.join(f.workspace, 'visible', 'shown.txt'), 'original\n');
+    await writeFile(path.join(f.workspace, 'hidden', 'preserve.txt'), 'hidden tracked\n');
+    await git(f.workspace, 'add', '-A');
+    await git(f.workspace, 'commit', '-m', 'test: complete source before sparse checkout');
+    const { stdout: baseOut } = await git(f.workspace, 'rev-parse', 'HEAD');
+    const base = baseOut.trim();
+    const receipt = {
+      schema_version: 'mastermind.workspace_cli/v1', action: 'status', effect: 'NOT_APPLIED',
+      receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace, branch: f.branch,
+        dirty: false, head_sha: base, state: 'RELEASABLE' },
+    };
+    const shell = '#!/bin/sh\n' + 'printf "%s\\n" ' + "'" + JSON.stringify(receipt) + "'" + '\n';
+    await writeFile(f.cli, shell);
+    await chmod(f.cli, 0o700);
+    await git(f.workspace, 'sparse-checkout', 'init', '--cone');
+    await git(f.workspace, 'sparse-checkout', 'set', 'visible');
+    await assert.rejects(readFile(path.join(f.workspace, 'hidden', 'preserve.txt')), /ENOENT/);
+    await writeFile(path.join(f.workspace, 'visible', 'shown.txt'), 'changed\n');
+    await writeFile(path.join(f.workspace, 'visible', 'new.txt'), 'new file\n');
+
+    const { stdout: indexOut } = await git(f.workspace, 'rev-parse', '--git-path', 'index');
+    const realIndexPath = path.resolve(f.workspace, indexOut.trim());
+    const realIndex = await readFile(realIndexPath);
+    let privateIndexVerified = false;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && args[0] === 'add' && options?.env?.GIT_INDEX_FILE) {
+          assert.deepEqual(await readFile(options.env.GIT_INDEX_FILE), realIndex,
+            'private staging index must retain sparse skip-worktree flags');
+          privateIndexVerified = true;
+        }
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.commit({
+      operation_id: f.operationId, expected_head_sha: base,
+      message: 'test: sparse typed commit',
+    });
+    assert.equal(privateIndexVerified, true);
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.status, 'OK');
+    assert.equal(result.index_synced, true);
+    const { stdout: hiddenOut } = await git(f.workspace, 'show', 'HEAD:hidden/preserve.txt');
+    assert.equal(hiddenOut, 'hidden tracked\n');
+    const { stdout: shownOut } = await git(f.workspace, 'show', 'HEAD:visible/shown.txt');
+    assert.equal(shownOut, 'changed\n');
+    const { stdout: newOut } = await git(f.workspace, 'show', 'HEAD:visible/new.txt');
+    assert.equal(newOut, 'new file\n');
+    const { stdout: statusOut } = await git(f.workspace, 'status', '--porcelain=v1', '--untracked-files=all');
+    assert.equal(statusOut, '');
+    assert.equal((await publisher.status({operation_id:f.operationId})).clean, true);
+  } finally { await f.cleanup(); }
+});
+
+test('typed commit captures a same-size unstaged edit after copying a racily clean index', async () => {
+  const f = await fixture();
+  try {
+    await git(f.workspace, 'config', 'core.checkStat', 'minimal');
+    await git(f.workspace, 'config', 'core.trustctime', 'false');
+    await git(f.workspace, 'config', 'core.fsmonitor', 'false');
+
+    const proofPath = path.join(f.workspace, 'proof.txt');
+    const timestamp = 1_700_000_000;
+    await utimes(proofPath, timestamp, timestamp);
+    await git(f.workspace, 'add', '--', 'proof.txt');
+    const { stdout: indexOut } = await git(f.workspace, 'rev-parse', '--git-path', 'index');
+    const realIndexPath = path.resolve(f.workspace, indexOut.trim());
+    await utimes(realIndexPath, timestamp, timestamp);
+
+    const originalIndex = await readFile(realIndexPath);
+    const originalIndexMtime = (await stat(realIndexPath, { bigint: true })).mtimeNs;
+    const assertRealIndexUnchanged = async () => {
+      assert.deepEqual(await readFile(realIndexPath), originalIndex,
+        'pre-commit preparation must not rewrite the real index');
+      assert.equal((await stat(realIndexPath, { bigint: true })).mtimeNs, originalIndexMtime,
+        'pre-commit preparation must not retimestamp the real index');
+    };
+
+    // Keep v2 entirely unstaged with the same size and compared timestamp.
+    await writeFile(proofPath, 'v2\n');
+    await utimes(proofPath, timestamp, timestamp);
+    assert.equal((await stat(proofPath)).size, 3);
+    const diffNames = async (indexPath) => {
+      const { stdout } = await run(GIT, ['diff-files', '--name-only', '--', 'proof.txt'], {
+        cwd: f.workspace,
+        env: { ...process.env, GIT_INDEX_FILE: indexPath, GIT_OPTIONAL_LOCKS: '0' },
+      });
+      return stdout;
+    };
+
+    // Identical index bytes lose Git's racy-clean guard if the copy is newer.
+    const newerCopy = path.join(f.root, 'newer-index-control');
+    await writeFile(newerCopy, originalIndex);
+    await utimes(newerCopy, timestamp + 60, timestamp + 60);
+    assert.deepEqual(await readFile(newerCopy), originalIndex);
+    assert.equal(await diffNames(realIndexPath), 'proof.txt\n');
+    assert.equal(await diffNames(newerCopy), '');
+    await assertRealIndexUnchanged();
+
+    let candidateChecks = 0;
+    let refChecks = 0;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && args[0] === 'commit-tree') {
+          await assertRealIndexUnchanged();
+          const { stdout } = await git(f.workspace, 'show', args[1] + ':proof.txt');
+          assert.equal(stdout, 'v2\n',
+            'the actual candidate tree must contain the unstaged edit');
+          candidateChecks++;
+        }
+        if (file === GIT && args[0] === 'update-ref') {
+          await assertRealIndexUnchanged();
+          const { stdout: oldHead } = await git(f.workspace, 'rev-parse', 'HEAD');
+          assert.equal(oldHead.trim(), f.head,
+            'the branch must remain unchanged before its fenced update');
+          const { stdout: candidateContent } = await git(
+            f.workspace, 'show', args[2] + ':proof.txt');
+          assert.equal(candidateContent, 'v2\n',
+            'the commit admitted to update-ref must contain the edit');
+          refChecks++;
+        }
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.commit({
+      operation_id: f.operationId,
+      expected_head_sha: f.head,
+      message: 'test: preserve racily clean index semantics',
+    });
+    assert.equal(result.code, 'APPLIED', JSON.stringify(result));
+    assert.equal(result.status, 'OK');
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.index_synced, true);
+    assert.equal(candidateChecks, 1);
+    assert.equal(refChecks, 1);
+    assert.notEqual(result.commit_head_sha, f.head);
+    const { stdout: committed } = await git(
+      f.workspace, 'show', result.commit_head_sha + ':proof.txt');
+    assert.equal(committed, 'v2\n');
+    const { stdout: staged } = await git(f.workspace, 'show', ':proof.txt');
+    assert.equal(staged, 'v2\n',
+      'post-commit synchronization must install the committed content');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('private-index preparation refuses concurrent real-index mutation before ref update', async () => {
+  const f = await fixture();
+  try {
+    await writeFile(path.join(f.workspace, 'proof.txt'), 'changed\n');
+    let injected = false;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        const out = await execFile(file, args, options);
+        if (!injected && file === GIT && args[0] === 'write-tree' && options?.env?.GIT_INDEX_FILE) {
+          await writeFile(path.join(f.workspace, 'competitor.txt'), 'concurrent\n');
+          await git(f.workspace, 'add', 'competitor.txt');
+          injected = true;
+        }
+        return out;
+      },
+    });
+    const result = await publisher.commit({
+      operation_id: f.operationId, expected_head_sha: f.head,
+      message: 'test: concurrent index refusal',
+    });
+    assert.equal(injected, true);
+    assert.equal(result.status, 'REFUSED');
+    assert.equal(result.effect_state, 'NOT_APPLIED');
+    assert.equal(result.code, 'REAL_INDEX_CHANGED_DURING_PREPARATION');
+    const { stdout: headOut } = await git(f.workspace, 'rev-parse', 'HEAD');
+    assert.equal(headOut.trim(), f.head);
+    const { stdout: remoteOut } = await git(
+      f.workspace, 'ls-remote', '--heads', 'origin', 'refs/heads/' + f.branch);
+    assert.equal(remoteOut.trim(), '');
+  } finally { await f.cleanup(); }
+});
+
+
+test('foreign index lock is preserved after the fenced ref update', async () => {
+  const f = await fixture();
+  try {
+    await writeFile(path.join(f.workspace, 'proof.txt'), 'v2\n');
+    const {stdout: indexOut} = await git(f.workspace, 'rev-parse', '--git-path', 'index');
+    const lockPath = path.resolve(f.workspace, indexOut.trim()) + '.lock';
+    let injected = false;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        const out = await execFile(file, args, options);
+        if (!injected && file === GIT && args[0] === 'commit-tree') {
+          // Disposable synthetic workspace only. Git index lock belongs to
+          // another writer and must never be deleted by the publisher.
+          await writeFile(lockPath, 'foreign index lock\n', {flag:'wx'});
+          injected = true;
+        }
+        return out;
+      },
+    });
+    const result = await publisher.commit({
+      operation_id:f.operationId, expected_head_sha:f.head,
+      message:'test: preserve foreign index lock',
+    });
+    assert.equal(injected, true);
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.index_synced, false);
+    assert.equal(result.status, 'PARTIAL');
+    assert.equal(result.code, 'APPLIED_INDEX_SYNC_FAILED');
+    assert.equal(await readFile(lockPath, 'utf8'), 'foreign index lock\n');
+    const {stdout: headOut} = await git(f.workspace, 'rev-parse', 'HEAD');
+    assert.equal(headOut.trim(), result.commit_head_sha);
+  } finally {await f.cleanup();}
+});
+
+
+async function preparedMergeFixture() {
+  const f = await fixture();
+  await git(f.workspace, 'checkout', '-b', 'fixture-protected', f.head);
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'protected runtime\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  await git(f.workspace, 'commit', '-m', 'test: protected successor');
+  f.protectedBase = (await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim();
+  await git(f.workspace, 'update-ref', 'refs/remotes/origin/master', f.protectedBase);
+  await git(f.workspace, 'checkout', f.branch);
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'requested CEO selection\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  await git(f.workspace, 'commit', '-m', 'test: original source');
+  f.head = (await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim();
+  await assert.rejects(git(f.workspace, 'merge-tree', '--write-tree', f.head, f.protectedBase),
+    (error) => error.code === 1 && error.stdout.includes('CONFLICT'));
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'protected runtime\nrequested CEO selection\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  f.tree = (await git(f.workspace, 'write-tree')).stdout.trim();
+  f.args = { operation_id: f.operationId, expected_head_sha: f.head,
+    message: 'test: preserve reviewed integration ancestry',
+    merge: { expected_protected_base_sha: f.protectedBase, expected_tree_sha: f.tree } };
+  return f;
+}
+
+test('merge schema accepts only optional exact parent and tree fences', () => {
+  const schema = STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL.inputSchema;
+  assert.equal(schema.required.includes('merge'), false);
+  assert.equal(schema.properties.merge.additionalProperties, false);
+  assert.deepEqual(schema.properties.merge.required, ['expected_protected_base_sha', 'expected_tree_sha']);
+  assert.deepEqual(Object.keys(schema.properties.merge.properties), schema.properties.merge.required);
+});
+
+test('typed merge preserves reviewed conflict resolution and actual protected ancestry without network', async () => {
+  const f = await preparedMergeFixture();
+  try {
+    const commands = [];
+    const publisher = createGitPublisher(f.config, { execFile: async (file, args, options) => {
+      if (file === GIT) {
+        const command = gitCommand(args);
+        commands.push(command);
+        assert.ok(!['fetch', 'push', 'ls-remote', 'clone'].includes(command), 'commit must remain local-only');
+      }
+      return execFile(file, args, options);
+    } });
+    const result = await publisher.commit(f.args);
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.status, 'OK');
+    const record = (await git(f.workspace, 'show', '-s', '--format=%T%n%P', result.commit_head_sha)).stdout.trim().split('\n');
+    assert.deepEqual(record, [f.tree, `${f.head} ${f.protectedBase}`]);
+    assert.equal((await git(f.workspace, 'status', '--porcelain')).stdout, '');
+    await git(f.workspace, 'merge-base', '--is-ancestor', f.protectedBase, result.commit_head_sha);
+    await git(f.workspace, 'merge-tree', '--write-tree', result.commit_head_sha, f.protectedBase);
+    assert.equal((await readFile(path.join(f.workspace, 'proof.txt'), 'utf8')), 'protected runtime\nrequested CEO selection\n');
+    assert.equal(commands.filter((command) => command === 'commit-tree').length, 1);
+    assert.equal((await git(f.workspace, 'ls-remote', '--heads', 'origin')).stdout, '');
+  } finally { await f.cleanup(); }
+});
+
+test('merge can record missing ancestry with an unchanged reviewed tree and binds its second parent in the action reference', async () => {
+  const f = await fixture();
+  try {
+    const tree = (await git(f.workspace, 'rev-parse', 'HEAD^{tree}')).stdout.trim();
+    const refs = [];
+    for (const message of ['protected one', 'protected two']) {
+      const base = (await git(f.workspace, 'commit-tree', tree, '-p', f.head, '-m', message)).stdout.trim();
+      await git(f.workspace, 'update-ref', 'refs/remotes/origin/master', base);
+      const result = await createGitPublisher(f.config).commit({ operation_id: f.operationId,
+        expected_head_sha: f.head, message: 'test: same reviewed tree',
+        merge: { expected_protected_base_sha: base, expected_tree_sha: tree } });
+      assert.equal(result.effect_state, 'APPLIED');
+      assert.equal((await git(f.workspace, 'show', '-s', '--format=%P', result.commit_head_sha)).stdout.trim(), `${f.head} ${base}`);
+      refs.push(result.action_ref);
+      await git(f.workspace, 'reset', '--hard', f.head);
+    }
+    assert.notEqual(refs[0], refs[1]);
+    const ordinary = await createGitPublisher(f.config).commit({ operation_id: f.operationId,
+      expected_head_sha: f.head, message: 'test: unchanged ordinary commit' });
+    assert.equal(ordinary.code, 'NO_COMMITTABLE_CHANGES');
+  } finally { await f.cleanup(); }
+});
+
+for (const merge of [null, [], {}, { expected_protected_base_sha: 'a'.repeat(40) },
+  { expected_protected_base_sha: 'A'.repeat(40), expected_tree_sha: 'b'.repeat(40) },
+  { expected_protected_base_sha: 'a'.repeat(40), expected_tree_sha: 'b'.repeat(40), ref: 'refs/heads/foreign' }]) {
+  test(`malformed merge object is rejected before owner or Git effects: ${JSON.stringify(merge)}`, async () => {
+    const f = await fixture();
+    try {
+      let calls = 0;
+      const publisher = createGitPublisher(f.config, { execFile: async () => { calls++; throw new Error('unexpected effect'); } });
+      await assert.rejects(publisher.commit({ operation_id: f.operationId,
+        expected_head_sha: f.head, message: 'test: invalid merge', merge }), /merge requires/);
+      assert.equal(calls, 0);
+      assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+    } finally { await f.cleanup(); }
+  });
+}
+
+for (const mismatch of ['protected', 'missing_protected', 'tree', 'head', 'duplicate', 'already_contained']) {
+  test(`merge ${mismatch} fence refuses without moving the owned ref or real index`, async () => {
+    const f = await preparedMergeFixture();
+    try {
+      const args = structuredClone(f.args);
+      const codes = { protected: 'PROTECTED_BASE_MISMATCH_OR_UNAVAILABLE', missing_protected: 'PROTECTED_BASE_MISMATCH_OR_UNAVAILABLE',
+        tree: 'EXPECTED_TREE_MISMATCH', head: 'EXPECTED_HEAD_MISMATCH', duplicate: 'DUPLICATE_MERGE_PARENT',
+        already_contained: 'PROTECTED_BASE_ALREADY_CONTAINED' };
+      if (mismatch === 'protected') args.merge.expected_protected_base_sha = 'b'.repeat(40);
+      if (mismatch === 'missing_protected') await git(f.workspace, 'update-ref', '-d', 'refs/remotes/origin/master');
+      if (mismatch === 'tree') args.merge.expected_tree_sha = 'c'.repeat(40);
+      if (mismatch === 'head') args.expected_head_sha = 'd'.repeat(40);
+      if (mismatch === 'duplicate' || mismatch === 'already_contained') {
+        const base = mismatch === 'duplicate' ? f.head : (await git(f.workspace, 'rev-parse', `${f.head}^`)).stdout.trim();
+        await git(f.workspace, 'update-ref', 'refs/remotes/origin/master', base);
+        args.merge.expected_protected_base_sha = base;
+      }
+      const indexPath = (await git(f.workspace, 'rev-parse', '--git-path', 'index')).stdout.trim();
+      const index = await readFile(path.resolve(f.workspace, indexPath));
+      const result = await createGitPublisher(f.config).commit(args);
+      assert.equal(result.effect_state, 'NOT_APPLIED');
+      assert.equal(result.code, codes[mismatch]);
+      assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+      assert.deepEqual(await readFile(path.resolve(f.workspace, indexPath)), index);
+    } finally { await f.cleanup(); }
+  });
+}
+
+test('changed protected snapshot during preparation is refused before branch mutation', async () => {
+  const f = await preparedMergeFixture();
+  try {
+    let changed = false;
+    const publisher = createGitPublisher(f.config, { execFile: async (file, args, options) => {
+      const result = await execFile(file, args, options);
+      if (file === GIT && gitCommand(args) === 'commit-tree' && !changed) {
+        changed = true;
+        await git(f.workspace, 'update-ref', 'refs/remotes/origin/master', f.head);
+      }
+      return result;
+    } });
+    const result = await publisher.commit(f.args);
+    assert.equal(result.code, 'PROTECTED_BASE_CHANGED_DURING_PREPARATION');
+    assert.equal(result.effect_state, 'NOT_APPLIED');
+    assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+  } finally { await f.cleanup(); }
+});
+
+test('merge readback rejects a commit with the wrong parent before updating the owned branch', async () => {
+  const f = await preparedMergeFixture();
+  try {
+    const publisher = createGitPublisher(f.config, { execFile: async (file, args, options) => {
+      const result = await execFile(file, args, options);
+      if (file === GIT && gitCommand(args) === 'show' && args.includes('--format=%T%n%P')) {
+        return { ...result, stdout: `${f.tree}\n${f.head}\n` };
+      }
+      return result;
+    } });
+    const result = await publisher.commit(f.args);
+    assert.equal(result.code, 'MERGE_COMMIT_IDENTITY_MISMATCH');
+    assert.equal(result.effect_state, 'NOT_APPLIED');
+    assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+  } finally { await f.cleanup(); }
+});
+
+
+test('publication recovery: pre-existing unjournaled action remains UNKNOWN and never becomes retry authority', async () => {
+  const f = await fixture();
+  try {
+    const sha = (await import('node:crypto')).createHash('sha256')
+      .update('mastermind.studio_git_push_current_branch.v1\0')
+      .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
+      .digest('hex');
+    const publisher = createGitPublisher(f.config);
+    const observed = await publisher.status({operation_id:f.operationId, action_ref:sha});
+    assert.equal(observed.publication_recovery.outcome, 'UNKNOWN');
+    assert.equal(observed.publication_recovery.reason, 'NO_MATCHING_OR_LEGACY_RECEIPT');
+    assert.equal(observed.publication_recovery.retry_allowed, false);
+    assert.equal(await refsAt(f.remote), '');
+  } finally { await f.cleanup(); }
+});
+
+test('publication recovery: successful exact ref is journaled, survives a new publisher instance, and never republishes', async () => {
+  const f = await fixture();
+  try {
+    const writer = createGitPublisher(f.config);
+    const out = await writer.push({operation_id:f.operationId, expected_head_sha:f.head});
+    assert.equal(out.effect_state, 'APPLIED');
+    assert.equal(out.receipt_recorded, true);
+    const restart = createGitPublisher(f.config);
+    const status = await restart.status({operation_id:f.operationId, action_ref:out.action_ref});
+    assert.equal(status.publication_recovery.outcome, 'APPLIED');
+    assert.equal(status.publication_recovery.stage, 'TERMINAL');
+    assert.equal(status.publication_recovery.reason, 'REMOTE_EXACT_AFTER_PUSH');
+    let pushes = 0;
+    const replay = createGitPublisher(f.config, {execFile:async (file,args,options)=>{
+      if (file===GIT && gitCommand(args)==='push') pushes++;
+      return execFile(file,args,options);
+    }});
+    const result = await replay.push({operation_id:f.operationId, expected_head_sha:f.head});
+    assert.equal(result.code, 'ALREADY_APPLIED');
+    assert.equal(pushes, 0);
+  } finally { await f.cleanup(); }
+});
+
+test('publication recovery: lost reply after remote update is proven APPLIED on the original destination', async () => {
+  const f = await fixture();
+  try {
+    let injected = false;
+    const writer = createGitPublisher(f.config, {execFile:async (file,args,options)=>{
+      if (file===GIT && gitCommand(args)==='push' && !injected) {
+        injected = true;
+        await execFile(file,args,options);
+        const err = new Error('simulated lost response after external effect');
+        err.code = 'SIMULATED_LOSS';
+        throw err;
+      }
+      return execFile(file,args,options);
+    }});
+    const out = await writer.push({operation_id:f.operationId, expected_head_sha:f.head});
+    assert.equal(injected,true);
+    assert.equal(out.code, 'APPLIED_AFTER_AMBIGUOUS_PUSH_RETURN');
+    assert.equal(out.receipt_recorded,true);
+    const restart = createGitPublisher(f.config);
+    assert.equal((await restart.status({operation_id:f.operationId,action_ref:out.action_ref}))
+      .publication_recovery.outcome,'APPLIED');
+    assert.equal(await refsAt(f.remote), 'refs/heads/' + f.branch + ' ' + f.head);
+  } finally { await f.cleanup(); }
+});
+
+test('publication recovery: ambiguous dispatch is retained and blocks unchanged retry after restart', async () => {
+  const f = await fixture();
+  try {
+    let originalPushes = 0;
+    const writer = createGitPublisher(f.config, {execFile:async (file,args,options)=>{
+      if (file===GIT && gitCommand(args)==='push') {
+        originalPushes++;
+        throw Object.assign(new Error('lost dispatch'), {code:'SIMULATED_LOSS'});
+      }
+      return execFile(file,args,options);
+    }});
+    const out = await writer.push({operation_id:f.operationId, expected_head_sha:f.head});
+    assert.equal(out.effect_state,'EFFECT_UNKNOWN');
+    assert.equal(originalPushes,1);
+    const recovery = await createGitPublisher(f.config).status({operation_id:f.operationId,action_ref:out.action_ref});
+    assert.equal(recovery.publication_recovery.outcome,'UNKNOWN');
+    assert.equal(recovery.publication_recovery.stage,'DISPATCHING');
+    let replayCount = 0;
+    const newProcess = createGitPublisher(f.config, {execFile:async (file,args,options)=>{
+      if (file===GIT && gitCommand(args)==='push') replayCount++;
+      return execFile(file,args,options);
+    }});
+    const second = await newProcess.push({operation_id:f.operationId, expected_head_sha:f.head});
+    assert.equal(second.status,'REFUSED');
+    assert.equal(second.retry_allowed,false);
+    assert.equal(second.code,'UNRECONCILED_OR_DENIED_PUBLICATION');
+    assert.equal(replayCount,0);
+    assert.equal(await refsAt(f.remote),'');
+  } finally { await f.cleanup(); }
+});
+
+test('publication recovery: prepared-before-dispatch evidence stays held while an original writer could continue', async () => {
+  const f = await fixture();
+  try {
+    const digest = (await import('node:crypto')).createHash('sha256')
+      .update('mastermind.studio_git_push_current_branch.v1\0')
+      .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
+      .digest('hex');
+    const {createPublicationRecovery} = await import('./git-publish.mjs');
+    const recovery = await createPublicationRecovery({
+      git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
+      operationId:f.operationId, branch:f.branch, ref:'refs/heads/'+f.branch,
+      remoteUrl:f.remote,
+    });
+    const before = await recovery.begin({actionRef:digest,intendedHead:f.head,expectedRemote:null});
+    assert.equal(before.record.stage,'PREPARED');
+    const read = await createGitPublisher(f.config).status({operation_id:f.operationId,action_ref:digest});
+    assert.equal(read.publication_recovery.outcome,'UNKNOWN');
+    assert.equal(read.publication_recovery.reason,'WRITER_MAY_STILL_DISPATCH');
+    const refusal = await createGitPublisher(f.config).push({operation_id:f.operationId,expected_head_sha:f.head});
+    assert.equal(refusal.status,'REFUSED');
+    assert.equal(await refsAt(f.remote),'');
+  } finally { await f.cleanup(); }
+});
+
+test('publication recovery: incomplete or torn terminal receipt never creates success or retry clearance', async () => {
+  const f = await fixture();
+  try {
+    const out = await createGitPublisher(f.config).push({operation_id:f.operationId,expected_head_sha:f.head});
+    assert.equal(out.effect_state,'APPLIED');
+    const digest = (await import('node:crypto')).createHash('sha256')
+      .update(f.operationId+'\0'+f.branch).digest('hex');
+    const file = path.join(f.workspace,'.git','mastermind-studio-publication-receipts',digest,out.action_ref+'.json');
+    await writeFile(file,'{"schema":"torn"}\n');
+    const read = await createGitPublisher(f.config).status({operation_id:f.operationId,action_ref:out.action_ref});
+    assert.equal(read.publication_recovery.outcome,'UNKNOWN');
+    assert.equal(read.publication_recovery.reason,'INVALID_OR_TORN_RECEIPT');
+    assert.equal(read.publication_recovery.retry_allowed,false);
+  } finally { await f.cleanup(); }
+});
+
+
+test('publication recovery: PREPARED does not attribute an identical remote push by another writer', async () => {
+  const f = await fixture();
+  try {
+    const {createPublicationRecovery} = await import('./git-publish.mjs');
+    const actionRef = (await import('node:crypto')).createHash('sha256')
+      .update('mastermind.studio_git_push_current_branch.v1\0')
+      .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
+      .digest('hex');
+    const journal = await createPublicationRecovery({
+      git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
+      operationId:f.operationId, branch:f.branch, ref:'refs/heads/'+f.branch,
+      remoteUrl:f.remote,
+    });
+    const held = await journal.begin({actionRef,intendedHead:f.head,expectedRemote:null});
+    assert.equal(held.record.stage,'PREPARED');
+    // Separate fixture-side publisher creates precisely the intended remote tip.
+    // This is NOT the operation with the held PREPARED receipt.
+    await git(f.workspace,'push','origin',f.head+':refs/heads/'+f.branch);
+    const status = await createGitPublisher(f.config).status({operation_id:f.operationId,action_ref:actionRef});
+    assert.equal(status.remote_head_sha,f.head);
+    assert.equal(status.publication_recovery.outcome,'UNKNOWN');
+    assert.equal(status.publication_recovery.reason,'WRITER_MAY_STILL_DISPATCH');
+    assert.equal(status.publication_recovery.retry_allowed,false);
+  } finally {await f.cleanup();}
+});
+
+test('publication recovery: DISPATCHING action can be reconciled after a later valid descendant tip', async () => {
+  const f = await fixture();
+  try {
+    const {createPublicationRecovery} = await import('./git-publish.mjs');
+    const actionRef = (await import('node:crypto')).createHash('sha256')
+      .update('mastermind.studio_git_push_current_branch.v1\0')
+      .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
+      .digest('hex');
+    const journal = await createPublicationRecovery({
+      git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
+      operationId:f.operationId, branch:f.branch, ref:'refs/heads/'+f.branch,
+      remoteUrl:f.remote,
+    });
+    const prepared = await journal.begin({actionRef,intendedHead:f.head,expectedRemote:null});
+    await journal.markDispatching(prepared.record);
+    await git(f.workspace,'push','origin',f.head+':refs/heads/'+f.branch);
+    await writeFile(path.join(f.workspace,'proof.txt'),'subsequent valid change\n');
+    await git(f.workspace,'add','proof.txt');
+    await git(f.workspace,'commit','-m','test: newer publisher');
+    const newer=(await git(f.workspace,'rev-parse','HEAD')).stdout.trim();
+    await git(f.workspace,'push','origin',newer+':refs/heads/'+f.branch);
+    const status=await createGitPublisher(f.config).status({operation_id:f.operationId,action_ref:actionRef});
+    assert.equal(status.remote_head_sha,newer);
+    assert.equal(status.publication_recovery.outcome,'APPLIED');
+    assert.equal(status.publication_recovery.reason,'INTENDED_HEAD_IS_REMOTE_ANCESTOR');
+    assert.equal(status.publication_recovery.retry_allowed,false);
+  } finally {await f.cleanup();}
+});
+
+test('publication recovery: unrelated remote branch advance is CONFLICT, not proven absence or retry clearance', async () => {
+  const f = await fixture();
+  try {
+    const {createPublicationRecovery} = await import('./git-publish.mjs');
+    const actionRef = (await import('node:crypto')).createHash('sha256')
+      .update('mastermind.studio_git_push_current_branch.v1\0')
+      .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
+      .digest('hex');
+    const journal = await createPublicationRecovery({
+      git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
+      operationId:f.operationId, branch:f.branch, ref:'refs/heads/'+f.branch,
+      remoteUrl:f.remote,
+    });
+    await journal.markDispatching((await journal.begin({
+      actionRef,intendedHead:f.head,expectedRemote:null,
+    })).record);
+    // An unparented commit models a different legitimate writer's branch tip.
+    const tree=(await git(f.workspace,'rev-parse','HEAD^{tree}')).stdout.trim();
+    const unparented=(await git(f.workspace,'commit-tree',tree,'-m','test: separate writer')).stdout.trim();
+    await git(f.workspace,'push','origin',unparented+':refs/heads/'+f.branch);
+    const status=await createGitPublisher(f.config).status({operation_id:f.operationId,action_ref:actionRef});
+    assert.equal(status.publication_recovery.outcome,'CONFLICT');
+    assert.equal(status.publication_recovery.reason,'REMOTE_DIVERGED_TARGET_NOT_ANCESTOR');
+    assert.equal(status.publication_recovery.retry_allowed,false);
+    let pushes=0;
+    const attempted=createGitPublisher(f.config,{execFile:async(file,args,options)=>{
+      if(file===GIT&&gitCommand(args)==='push')pushes++;
+      return execFile(file,args,options);
+    }});
+    const held=await attempted.push({operation_id:f.operationId,expected_head_sha:f.head});
+    assert.equal(held.code,'UNRECONCILED_OR_DENIED_PUBLICATION');
+    assert.equal(pushes,0);
+  } finally {await f.cleanup();}
+});
+
+test('publication recovery: wrong operation and wrong origin never match a retained action', async () => {
+  const f = await fixture();
+  try {
+    const {createPublicationRecovery} = await import('./git-publish.mjs');
+    const actionRef = (await import('node:crypto')).createHash('sha256')
+      .update('mastermind.studio_git_push_current_branch.v1\0')
+      .update(f.operationId).update('\0').update(f.branch).update('\0').update(f.head)
+      .digest('hex');
+    const args={
+      git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
+      operationId:f.operationId, branch:f.branch, ref:'refs/heads/'+f.branch,
+      remoteUrl:f.remote,
+    };
+    const journal=await createPublicationRecovery(args);
+    const prepared=await journal.begin({actionRef,intendedHead:f.head,expectedRemote:null});
+    assert.equal(prepared.record.stage,'PREPARED');
+    const wrongOperation=await createPublicationRecovery({...args,operationId:'other-operation'});
+    assert.equal((await wrongOperation.status(actionRef,null)).outcome,'UNKNOWN');
+    assert.equal((await wrongOperation.status(actionRef,null)).reason,'NO_MATCHING_OR_LEGACY_RECEIPT');
+    const wrongOrigin=await createPublicationRecovery({...args,remoteUrl:path.join(f.root,'forbidden.git')});
+    const state=await wrongOrigin.status(actionRef,null);
+    assert.equal(state.outcome,'UNKNOWN');
+    assert.equal(state.reason,'INVALID_OR_TORN_RECEIPT');
+    assert.equal(state.retry_allowed,false);
+    const wrongBranch=await createPublicationRecovery({...args,branch:'sol/web-foreign'});
+    assert.equal((await wrongBranch.status(actionRef,null)).reason,'NO_MATCHING_OR_LEGACY_RECEIPT');
+  } finally {await f.cleanup();}
+});
+
+
+function originalPushRef(f, head) {
+  return (awaitedCrypto()).createHash('sha256')
+    .update('mastermind.studio_git_push_current_branch.v1\0')
+    .update(f.operationId).update('\0').update(f.branch).update('\0').update(head)
+    .digest('hex');
+}
+
+function awaitedCrypto() {
+  return cryptoForForward;
+}
+
+const cryptoForForward = await import('node:crypto');
+
+async function legacyForwardFixture() {
+  const f = await fixture();
+  await git(f.workspace, 'push', 'origin', f.head + ':refs/heads/' + f.branch);
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'original uncertain candidate\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  await git(f.workspace, 'commit', '-m', 'test: old unpublished candidate');
+  const originalHead = (await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim();
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'prepared forward candidate\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  await git(f.workspace, 'commit', '-m', 'test: new guarded candidate');
+  const candidate = (await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim();
+  const recovery = {
+    prior_action_ref: originalPushRef(f, originalHead),
+    prior_intended_head_sha: originalHead,
+    expected_remote_head_sha: f.head,
+  };
+  return {...f, originalHead, candidate, recovery};
+}
+
+test('forward recovery: legacy unknown publication admits one new nonforced descendant action', async () => {
+  const f = await legacyForwardFixture();
+  try {
+    const publisher = createGitPublisher(f.config);
+    const result = await publisher.push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,
+      recovery:f.recovery,
+    });
+    assert.equal(result.status, 'OK');
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.receipt_recorded, true);
+    assert.notEqual(result.action_ref, f.recovery.prior_action_ref);
+    assert.equal(await refsAt(f.remote), 'refs/heads/' + f.branch + ' ' + f.candidate);
+    const old = await publisher.status({operation_id:f.operationId,
+      action_ref:f.recovery.prior_action_ref});
+    assert.equal(old.publication_recovery.outcome, 'UNKNOWN');
+    assert.equal(old.publication_recovery.reason, 'NO_MATCHING_OR_LEGACY_RECEIPT');
+    const fresh = await publisher.status({operation_id:f.operationId,
+      action_ref:result.action_ref});
+    assert.equal(fresh.publication_recovery.outcome, 'APPLIED');
+    assert.equal(fresh.publication_recovery.stage, 'TERMINAL');
+    assert.equal(fresh.publication_recovery.retry_allowed, false);
+    let pushes = 0;
+    const restarted = createGitPublisher(f.config, {execFile:async(file,args,options)=>{
+      if (file===GIT && gitCommand(args)==='push') pushes++;
+      return execFile(file,args,options);
+    }});
+    const repeat = await restarted.push({operation_id:f.operationId,
+      expected_head_sha:f.candidate,recovery:f.recovery});
+    assert.equal(repeat.code,'ALREADY_APPLIED');
+    assert.equal(pushes,0);
+  } finally {await f.cleanup();}
+});
+
+test('forward recovery: malformed/wrong prior identity and widened input refuse before push', async () => {
+  const f = await legacyForwardFixture();
+  try {
+    const publisher = createGitPublisher(f.config);
+    await assert.rejects(()=>publisher.push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,
+      recovery:{...f.recovery, force:true},
+    }),/recovery arguments are invalid/);
+    await assert.rejects(()=>publisher.push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,
+      recovery:{...f.recovery, prior_action_ref:'bad'},
+    }),/recovery identities are invalid/);
+    const bad = await publisher.push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,
+      recovery:{...f.recovery, prior_action_ref:'a'.repeat(64)},
+    });
+    assert.equal(bad.code,'RECOVERY_PRIOR_IDENTITY_MISMATCH');
+    assert.equal(bad.push_attempted,false);
+    assert.equal(await refsAt(f.remote), 'refs/heads/' + f.branch + ' ' + f.head);
+  } finally {await f.cleanup();}
+});
+
+test('forward recovery: stale expected remote and missing ancestry are nonmutating', async () => {
+  const f = await legacyForwardFixture();
+  try {
+    const publisher = createGitPublisher(f.config);
+    const stale = await publisher.push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,
+      recovery:{...f.recovery, expected_remote_head_sha:f.originalHead},
+    });
+    assert.equal(stale.code,'RECOVERY_REMOTE_HEAD_MISMATCH');
+    assert.equal(stale.push_attempted,false);
+    const tree=(await git(f.workspace,'rev-parse','HEAD^{tree}')).stdout.trim();
+    const alien=(await git(f.workspace,'commit-tree',tree,'-m','test: unparented prior')).stdout.trim();
+    const unrelated = await publisher.push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,
+      recovery:{...f.recovery, prior_intended_head_sha:alien,
+        prior_action_ref:originalPushRef(f,alien)},
+    });
+    assert.equal(unrelated.code,'RECOVERY_ANCESTRY_UNVERIFIED');
+    assert.equal(unrelated.push_attempted,false);
+    assert.equal(await refsAt(f.remote),'refs/heads/'+f.branch+' '+f.head);
+  } finally {await f.cleanup();}
+});
+
+test('forward recovery: outstanding journalled prior is not bypassed by legacy exception', async () => {
+  const f = await legacyForwardFixture();
+  try {
+    const {createPublicationRecovery} = await import('./git-publish.mjs');
+    const journal = await createPublicationRecovery({
+      git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
+      operationId:f.operationId, branch:f.branch,
+      ref:'refs/heads/'+f.branch, remoteUrl:f.remote,
+    });
+    const held = await journal.begin({
+      actionRef:f.recovery.prior_action_ref,
+      intendedHead:f.originalHead, expectedRemote:f.head,
+    });
+    assert.equal(held.record.stage,'PREPARED');
+    const result = await createGitPublisher(f.config).push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,recovery:f.recovery,
+    });
+    assert.equal(result.status,'REFUSED');
+    assert.equal(result.code,'PRIOR_ACTION_HAS_DURABLE_RECEIPT');
+    assert.equal(result.push_attempted,false);
+    assert.equal(await refsAt(f.remote),'refs/heads/'+f.branch+' '+f.head);
+  } finally {await f.cleanup();}
+});
+
+test('forward recovery: lost reply after actual update is reconciled by exact new action', async () => {
+  const f = await legacyForwardFixture();
+  try {
+    let attempts=0;
+    const publisher = createGitPublisher(f.config,{execFile:async(file,args,options)=>{
+      if(file===GIT&&gitCommand(args)==='push') {
+        attempts++;
+        const settled=await execFile(file,args,options);
+        assert.ok(settled);
+        throw Object.assign(new Error('simulated response loss'),{code:'SIMULATED_LOSS'});
+      }
+      return execFile(file,args,options);
+    }});
+    const result = await publisher.push({
+      operation_id:f.operationId,expected_head_sha:f.candidate,recovery:f.recovery,
+    });
+    assert.equal(attempts,1);
+    assert.equal(result.code,'APPLIED_AFTER_AMBIGUOUS_PUSH_RETURN');
+    assert.equal(result.effect_state,'APPLIED');
+    assert.equal(await refsAt(f.remote),'refs/heads/'+f.branch+' '+f.candidate);
+    const read=await createGitPublisher(f.config).status({
+      operation_id:f.operationId,action_ref:result.action_ref,
+    });
+    assert.equal(read.publication_recovery.outcome,'APPLIED');
+  } finally {await f.cleanup();}
+});
+
+test('forward recovery: competing remote update after preflight cannot overwrite history', async () => {
+  const f = await legacyForwardFixture();
+  try {
+    let writes=0, remoteCompetitor=null;
+    const publisher = createGitPublisher(f.config,{execFile:async(file,args,options)=>{
+      if(file===GIT&&gitCommand(args)==='push'&&writes===0) {
+        writes++;
+        const tree=(await git(f.workspace,'rev-parse','HEAD^{tree}')).stdout.trim();
+        remoteCompetitor=(await git(f.workspace,'commit-tree',tree,'-p',f.head,
+          '-m','test: competing sibling')).stdout.trim();
+        await git(f.workspace,'push','origin',
+          remoteCompetitor+':refs/heads/'+f.branch);
+      }
+      return execFile(file,args,options);
+    }});
+    const result = await publisher.push({
+      operation_id:f.operationId,expected_head_sha:f.candidate,recovery:f.recovery,
+    });
+    assert.equal(writes,1);
+    assert.ok(['EFFECT_UNKNOWN','NOT_APPLIED'].includes(result.effect_state));
+    assert.equal(await refsAt(f.remote),'refs/heads/'+f.branch+' '+remoteCompetitor);
+  } finally {await f.cleanup();}
 });

@@ -1092,8 +1092,13 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
     generic_v2_history = WakeLedgerRepository(runtime).list_records(
         generic_v2_obligation.obligation_id
     )
-    assert generic_v2_history[0].record.physical_source is None
+    # Generic armed delivery must retain the same physical source as canary
+    # delivery; dropping it leaves the recipient's reply reference stale.
+    assert generic_v2_history[0].record.physical_source == generic_v2_physical
     assert len(operator.calls) == 3
+    assert asyncio.run(production_bridge(runtime, generic_v2_request)) == DialogueWakeResult(
+        "RECORDED", "WAKE_RECORDED")
+    assert len(operator.calls) == 3  # Same physical request, no second native turn.
 
     moved = dataclasses.replace(
         request,
@@ -7689,7 +7694,7 @@ def test_host_bound_v2_cycle_uses_exact_profile_and_replays_one_attempt(
             root_id = submitted["result"]["job_id"]
             root = service.runtime.jobs.get_job(root_id)
             assert root is not None
-            assert root.constraints["routing_policy_version"] == "2026-08-24.stage4"
+            assert root.constraints["routing_policy_version"] == "2026-10-14.attended-qualification"
             assert root.constraints["execution_profile_id"] == (
                 "sealed.worker.write.no-extensions.v1"
             )
@@ -9452,7 +9457,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                     **raw,
                     "terminal_return_armed": True,
                     "terminal_return_socket_path": (
-                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                        "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
                     ),
                 }
             ),
@@ -9462,7 +9467,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         terminal_loaded = service_cli.load_control_config(terminal_return_path)
         assert terminal_loaded["terminal_return_armed"] is True
         assert terminal_loaded["terminal_return_socket_path"] == Path(
-            "/var/run/mastermind-agent-relay/agent-relay.sock"
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
         ).resolve(strict=False)
         terminal_unarmed_path = tmp_path / "control-terminal-return-unarmed.json"
         terminal_unarmed_path.write_text(
@@ -9471,7 +9476,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                     **raw,
                     "terminal_return_armed": False,
                     "terminal_return_socket_path": (
-                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                        "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
                     ),
                 }
             ),
@@ -9481,6 +9486,74 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         terminal_unarmed_loaded = service_cli.load_control_config(
             terminal_unarmed_path
         )
+
+        # The only alternate terminal socket admitted by the installed
+        # Control loader is historical A2 recovery while ALL return arms are
+        # disabled; arbitrary sockets and armed legacy routes remain refused.
+        legacy_path = tmp_path / "control-old-a2-recovery.json"
+        legacy_raw = {
+            **raw,
+            "terminal_return_armed": False,
+            "terminal_return_socket_path":
+                "/var/run/mastermind-agent-relay/agent-relay.sock",
+            "ceo_submit_armed": False,
+            "coo_autonomy_armed": False,
+            "coo_operator_harness_armed": False,
+            "coo_foreground_only": False,
+        }
+        legacy_path.write_text(json.dumps(legacy_raw))
+        legacy_path.chmod(0o400)
+        old_loaded = service_cli.load_control_config(legacy_path)
+        assert old_loaded["terminal_return_socket_path"] == Path(
+            "/var/run/mastermind-agent-relay/agent-relay.sock"
+        ).resolve(strict=False)
+        # Ordinary clients (including Company Consultation, Session Bridge,
+        # Product Acceptance and Principal Dialogue) must follow exactly the
+        # same reviewed recovery route as the Control return projector.
+        assert service_cli._agent_relay_readside_socket_for_control(
+            SimpleNamespace(
+                terminal_return_armed=False,
+                terminal_return_socket_path=old_loaded["terminal_return_socket_path"],
+            )
+        ) == Path("/var/run/mastermind-agent-relay/agent-relay.sock").resolve(strict=False)
+        assert service_cli._agent_relay_readside_socket_for_control(
+            SimpleNamespace(
+                terminal_return_armed=True,
+                terminal_return_socket_path=old_loaded["terminal_return_socket_path"],
+            )
+        ) == Path("/var/db/mastermind-agent-relay/socket/agent-relay.sock")
+        # Exercise the actual Control composition, not only the selector helper:
+        # this legacy disarmed configuration must still instantiate the native
+        # service and carry the normalized old A2 path into its ServiceConfig.
+        captured_legacy: dict[str, object] = {}
+        with monkeypatch.context() as patch_legacy:
+            patch_legacy.setattr(
+                service_cli, "activate_launchd_socket", lambda _name: listener
+            )
+            patch_legacy.setattr(
+                service_cli, "ExecutiveControlService",
+                lambda service_config, **kwargs: (
+                    captured_legacy.update(config=service_config, kwargs=kwargs),
+                    object(),
+                )[1],
+            )
+            service_cli._service_from_config(
+                old_loaded,
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+            )
+        assert service_cli._agent_relay_readside_socket_for_control(
+            captured_legacy["config"]
+        ) == Path("/var/run/mastermind-agent-relay/agent-relay.sock").resolve(strict=False)
+        for unsafe in (
+            {**legacy_raw, "terminal_return_armed": True},
+            {**legacy_raw, "ceo_submit_armed": True},
+            {**legacy_raw, "terminal_return_socket_path": "/tmp/foreign.sock"},
+        ):
+            legacy_path.chmod(0o600)
+            legacy_path.write_text(json.dumps(unsafe))
+            legacy_path.chmod(0o400)
+            with pytest.raises(ServiceError, match="legacy A2 recovery path"):
+                service_cli.load_control_config(legacy_path)
 
         stale_policy_path = tmp_path / "control-stale-policy.json"
         stale_policy_path.write_text(
@@ -9617,7 +9690,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         assert isinstance(unarmed_composed_config, ServiceConfig)
         assert unarmed_composed_config.terminal_return_armed is False
         assert unarmed_composed_config.terminal_return_socket_path == Path(
-            "/var/run/mastermind-agent-relay/agent-relay.sock"
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
         ).resolve(strict=False)
         assert isinstance(unarmed_composed_kwargs, dict)
         assert "terminal_return_projector_factory" not in unarmed_composed_kwargs
@@ -9799,7 +9872,7 @@ def test_canary_envelope_binds_live_control_probe_and_inner_receipt(tmp_path: Pa
         )
 
 
-def test_awaiting_canary_quarantine_allows_only_readiness_and_activation(
+def test_awaiting_canary_quarantine_preserves_readiness_and_activation(
     tmp_path: Path, short_socket_root: Path
 ):
     async def exercise():
@@ -9864,6 +9937,225 @@ def test_awaiting_canary_quarantine_allows_only_readiness_and_activation(
             assert repeated["ok"] is False
             assert loader_calls == [True]
         finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_awaiting_canary_allows_provider_independent_backup_and_verify(
+    tmp_path: Path, short_socket_root: Path
+):
+    """DR backup/verify are local-only (real `control_plane.executive_backup`
+    helper, no fake) and must not depend on worker-provider canary
+    readiness: they run while AWAITING_CANARY, leave `service_state`
+    unchanged, and touch no canary/provider/worker surface."""
+
+    async def exercise():
+        service, holder = _service(tmp_path, socket_root=short_socket_root)
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            before = await _request(service, "status")
+            assert before["result"]["service_state"] == "AWAITING_CANARY"
+
+            created = await _request(service, "backup")
+            assert created["ok"] is True, created
+            receipt = created["result"]
+            database_path = Path(receipt["database_path"])
+            assert database_path.is_file()
+            assert database_path.parent == service.config.backup_root.resolve()
+            assert stat.S_IMODE(database_path.stat().st_mode) == 0o600
+            manifest_path = Path(receipt["manifest_path"])
+            assert manifest_path.is_file()
+
+            verified = await _request(
+                service, "verify-backup", {"name": database_path.name}
+            )
+            assert verified["ok"] is True, verified
+            assert (
+                verified["result"]["database_sha256"] == receipt["database_sha256"]
+            )
+
+            after = await _request(service, "status")
+            assert after["result"]["service_state"] == "AWAITING_CANARY"
+            # No canary verdict was ever loaded and the fake supervisor never
+            # observed a restart/requeue call from this path — backup/verify
+            # never reaches the supervisor, canary loader, or any worker.
+            assert holder["supervisor"].requeue_values == []
+            assert holder["supervisor"].started_jobs == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_awaiting_canary_refuses_lifecycle_and_worker_mutations(
+    tmp_path: Path, short_socket_root: Path
+):
+    """Worker and lifecycle mutations stay refused while AWAITING_CANARY,
+    and `service_state` never moves as a side effect of the attempt."""
+
+    async def exercise():
+        service, holder = _service(tmp_path, socket_root=short_socket_root)
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            for command, args in (
+                ("register-worker", {}),
+                ("create-proof-job", {}),
+                ("dispatch", {"job_id": "JOB-nonexistent"}),
+                ("run-coo-cycle", {"root_job_id": "JOB-nonexistent"}),
+                ("reconcile", {}),
+                ("requeue", {"job_id": "JOB-nonexistent"}),
+                ("cancel", {"job_id": "JOB-nonexistent"}),
+            ):
+                denied = await _request(service, command, args)
+                assert denied["ok"] is False, (command, denied)
+                assert "AWAITING_CANARY" in denied["error"]["message"], (
+                    command,
+                    denied,
+                )
+                assert service.service_state == "AWAITING_CANARY"
+            assert holder["supervisor"].requeue_values == []
+            assert holder["supervisor"].started_jobs == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_quarantined_state_refuses_backup_and_verify_backup(
+    tmp_path: Path, short_socket_root: Path
+):
+    """The backup/verify decoupling preserves the QUARANTINED refusal;
+    only READY and AWAITING_CANARY admit the local backup routes."""
+
+    async def exercise():
+        backend = _FakeBackup()
+        service, _holder = _service(
+            tmp_path, socket_root=short_socket_root, backup=backend
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            service._service_state = "QUARANTINED"
+            denied_backup = await _request(service, "backup")
+            assert denied_backup["ok"] is False
+            assert "QUARANTINED" in denied_backup["error"]["message"]
+            assert "require service state READY or AWAITING_CANARY" in denied_backup["error"]["message"]
+            denied_verify = await _request(
+                service, "verify-backup", {"name": "fixture.sqlite3"}
+            )
+            assert denied_verify["ok"] is False
+            assert "QUARANTINED" in denied_verify["error"]["message"]
+            assert "require service state READY or AWAITING_CANARY" in denied_verify["error"]["message"]
+            assert backend.created == []
+            assert backend.verified == []
+            assert service.service_state == "QUARANTINED"
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_awaiting_canary_backup_stays_confined_to_the_configured_root(
+    tmp_path: Path, short_socket_root: Path
+):
+    """The AWAITING_CANARY admission reuses the existing closed root and name
+    handling rather than a second backup surface: the configured root is
+    created owner-only, a name that is not a simple ``.sqlite3`` file name is
+    refused, and a backup with no canonical manifest is refused before the
+    backend is reached."""
+
+    async def exercise():
+        backend = _FakeBackup()
+        service, _holder = _service(
+            tmp_path, socket_root=short_socket_root, backup=backend
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            created = await _request(service, "backup")
+            assert created["ok"] is True, created
+            assert Path(created["result"]["database_path"]).parent == service.config.backup_root
+            assert stat.S_IMODE(service.config.backup_root.stat().st_mode) == 0o700
+            assert stat.S_IMODE(backend.created[0].stat().st_mode) == 0o600
+
+            escaped = await _request(
+                service, "verify-backup", {"name": "../executive.sqlite3"}
+            )
+            assert escaped["ok"] is False
+            assert "simple .sqlite3 file name" in escaped["error"]["message"]
+            assert backend.verified == []
+
+            unrestorable = await _request(
+                service, "verify-backup", {"name": "absent.sqlite3"}
+            )
+            assert unrestorable["ok"] is False
+            assert "no canonical manifest" in unrestorable["error"]["message"]
+            assert backend.verified == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+class _BlockingBackup(_FakeBackup):
+    """Blocks inside the physical backup call so the owned-physical-worker
+    registration and the cancellation behaviour stay observable."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def create_online_backup(self, store, destination_dir: Path):
+        self.entered.set()
+        assert self.release.wait(timeout=30)
+        return super().create_online_backup(store, destination_dir)
+
+
+def test_awaiting_canary_backup_keeps_the_owned_physical_effect(
+    tmp_path: Path, short_socket_root: Path
+):
+    """The AWAITING_CANARY backup still runs through the service's owned
+    physical worker (`_run_physical` → `_run_owned_coroutine`): the effect is
+    registered as service-owned while it runs, a cancelled request does not
+    abandon it, and it completes rather than being dropped. A bare
+    `asyncio.to_thread` body would register no owned physical worker and its
+    effect would be abandoned on cancellation."""
+
+    async def exercise():
+        backend = _BlockingBackup()
+        service, _holder = _service(
+            tmp_path, socket_root=short_socket_root, backup=backend
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            request = {
+                "version": CONTROL_PROTOCOL_VERSION,
+                "command": "backup",
+                "args": {},
+            }
+            task = asyncio.create_task(service._dispatch_request(request))
+            for _ in range(500):
+                if backend.entered.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert backend.entered.is_set(), "the backup never reached the backend"
+            # The effect is owned by the service, not by a bare thread.
+            assert len(service._physical_workers) == 1
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            # Cancellation of the request does not abandon the physical effect.
+            assert service._physical_workers
+            backend.release.set()
+            await asyncio.wait(tuple(service._physical_workers), timeout=30)
+            assert (service.config.backup_root / "fixture.sqlite3").is_file()
+        finally:
+            backend.release.set()
             await service.close()
 
     asyncio.run(exercise())
@@ -10776,7 +11068,9 @@ def test_cycle_supervisor_selection_uses_root_binding_not_global_arm(tmp_path, s
             plan=dataclasses.replace(root,job_id="JOB-plan",parent_job_id=root.job_id,
                                      depth=1,orchestration_role="plan")
             service.config=dataclasses.replace(service.config,coo_autonomy_armed=True,coo_operator_harness_armed=True)
-            monkeypatch.setattr(service.runtime.jobs,"get_job",lambda job_id:plan)
+            actual_get_job=service.runtime.jobs.get_job
+            monkeypatch.setattr(service.runtime.jobs,"get_job",
+                                lambda job_id:plan if job_id==plan.job_id else actual_get_job(job_id))
             monkeypatch.setattr(service,"_require_bound_coo_job",lambda job:root)
             monkeypatch.setattr(service,"_require_coo_workspace",lambda job:{})
             monkeypatch.setattr(service,"_coo_binding_for_root",lambda job:dict(operator_harness_armed=frozen))

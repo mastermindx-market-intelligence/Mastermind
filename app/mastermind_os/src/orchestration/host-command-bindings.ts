@@ -1,4 +1,5 @@
 import { normalizeSelection, type MissionSelection } from "../mission";
+import type { DirectSelection, DirectTerminalSelection } from "../direct-native-result";
 import type {
   CommandIntent,
   FiniteCommandPort,
@@ -6,7 +7,7 @@ import type {
   OwnerContext,
   PendingPointerStore,
 } from "./operation-controller";
-import type { LaunchChoice, LaunchForm } from "./ui/LaunchOrchestrator";
+import type { LaunchChoice, LaunchForm, LaunchWorkstreamChoice } from "./ui/LaunchOrchestrator";
 import type {
   SessionMessage,
   SessionWorkspaceProps,
@@ -34,16 +35,26 @@ export interface OrchestratorSessionPresentation {
 }
 
 export interface OrchestratorCommandView {
+  readonly workstreams?: readonly LaunchWorkstreamChoice[];
+  readonly defaultWorkstream?: string;
   readonly projects: readonly LaunchChoice[];
   readonly profiles: readonly LaunchChoice[];
+  readonly frontierModels?: readonly LaunchChoice[];
   readonly session: OrchestratorSessionPresentation | null;
 }
 
 /**
  * Owner-injected command capability. Completeness is a closed shape check:
  * there are no catalog, provider, or programs-derived defaults.
+ *
+ * The pending-pointer store is checked for the atomic durability boundary:
+ * `read`, `reserve`, and `clearIfEqual`. Bindings that expose `write` or
+ * `clear` aliases are rejected — controllers cannot compose them to fake
+ * durability, and the controller's contract requires the atomic operations
+ * instead.
  */
 export interface OrchestratorCommandBinding {
+  readonly projectExecution?: import("../planning/project-execution-command-port").ProjectExecutionCapability;
   readonly port: FiniteCommandPort;
   readonly store: PendingPointerStore;
   getView(): OrchestratorCommandView;
@@ -51,6 +62,14 @@ export interface OrchestratorCommandBinding {
   makeLaunchIntent(form: LaunchForm): CommandIntent | null;
   makeMessageIntent(sessionKey: string, text: string): CommandIntent | null;
   makeStopIntent(sessionKey: string): CommandIntent | null;
+  /** Distinct direct terminal view; no role-envelope or product acceptance fallback. */
+  readonly directNative?: {
+    read(selection: DirectSelection, signal: AbortSignal): Promise<unknown>;
+    inspectCorrection?(selection:DirectSelection,signal:AbortSignal):Promise<unknown>;
+    makeCorrectionIntent?(selection:DirectTerminalSelection,fence:number):CommandIntent|null;
+    makeConsumeIntent(selection: DirectTerminalSelection, digest: string): CommandIntent | null;
+    isDirectSelection(selection: MissionSelection): boolean;
+  };
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -80,8 +99,18 @@ export function completeOrchestratorCommandBinding(
     !isFn(port.readOperation)
   )
     return null;
-  if (!isFn(store.read) || !isFn(store.write) || !isFn(store.clear))
+  // Durability boundary: only the three atomic operations are accepted.
+  if (
+    !isFn(store.read) ||
+    !isFn(store.reserve) ||
+    !isFn(store.clearIfEqual)
+  )
     return null;
+  // Reject any binding that exposes a write or clear alias — those would let
+  // a controller compose non-atomic reads/writes instead of going through
+  // the durable reserve / clearIfEqual operations.
+  if (isFn((store as Record<string, unknown>).write)) return null;
+  if (isFn((store as Record<string, unknown>).clear)) return null;
   if (
     !isFn(value.getView) ||
     !isFn(value.subscribe) ||
@@ -196,12 +225,48 @@ export function readCommandView(
       if (!choice) return EMPTY_VIEW;
       profiles.push(choice);
     }
+    let frontierModels: LaunchChoice[] | undefined;
+    if (raw.frontierModels !== undefined) {
+      if (!Array.isArray(raw.frontierModels) || raw.frontierModels.length > 16) return EMPTY_VIEW;
+      frontierModels = [];
+      for (const item of raw.frontierModels) {
+        const choice = asChoice(item);
+        if (!choice) return EMPTY_VIEW;
+        frontierModels.push(choice);
+      }
+    }
+    let workstreams: LaunchWorkstreamChoice[] | undefined;
+    if (raw.workstreams !== undefined) {
+      if (!Array.isArray(raw.workstreams) || raw.workstreams.length < 1 || raw.workstreams.length > 16 ||
+          typeof raw.defaultWorkstream !== "string") return EMPTY_VIEW;
+      workstreams = [];
+      for (const entry of raw.workstreams) {
+        const choice = asChoice(entry);
+        if (!choice || !isPlainObject(entry) || !/^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/.test(choice.ref) ||
+            !Array.isArray(entry.projects) || !Array.isArray(entry.profiles) ||
+            entry.projects.length !== 1 || entry.profiles.length < 1 || entry.profiles.length > 2 ||
+            (entry.frontierModels !== undefined && (!Array.isArray(entry.frontierModels) ||
+              entry.frontierModels.length < 1 || entry.frontierModels.length > 16))) return EMPTY_VIEW;
+        const projects = entry.projects.map(asChoice);
+        const profiles = entry.profiles.map(asChoice);
+        const models = entry.frontierModels?.map(asChoice);
+        if (projects.some(item => item === null) || profiles.some(item => item === null) ||
+            models?.some(item => item === null)) return EMPTY_VIEW;
+        workstreams.push({ ...choice, projects: projects as LaunchChoice[],
+          profiles: profiles as LaunchChoice[],
+          ...(models !== undefined ? { frontierModels: models as LaunchChoice[] } : {}) });
+      }
+      if (new Set(workstreams.map(entry => entry.ref)).size !== workstreams.length ||
+          !workstreams.some(entry => entry.ref === raw.defaultWorkstream) ||
+          workstreams.reduce((count, entry) => count + entry.profiles.length, 0) > 16) return EMPTY_VIEW;
+    } else if (raw.defaultWorkstream !== undefined) return EMPTY_VIEW;
     const session =
       raw.session === null || raw.session === undefined
         ? null
         : asSession(raw.session);
     if (raw.session != null && session === null) return EMPTY_VIEW;
-    return { projects, profiles, session };
+    return { projects, profiles, session, ...(frontierModels !== undefined ? { frontierModels } : {}),
+      ...(workstreams !== undefined ? { workstreams, defaultWorkstream: raw.defaultWorkstream as string } : {}) };
   } catch {
     return EMPTY_VIEW;
   }
