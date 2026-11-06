@@ -101,9 +101,7 @@ process/log/metrics dump. Use exact roots, `git grep`, `find -maxdepth`, selecte
 
 On timeout: preserve exact PID/command/carrier/effect; start no replacement or
 equivalent broad command; read status/output once; deliberately retain or terminate
-only that process; verify; checkpoint before broad work. A timeout is never permission
-to replay the command. `EFFECT_UNKNOWN` stays on its original carrier until canonical
-readback proves accepted, conflicted, absent or still unknown.
+only that process; verify; checkpoint before broad work. A timeout is never permission to replay the command. Legacy Git uses `RECONCILE_STATE.md` Step 4C.
 
 ## Connector taint
 
