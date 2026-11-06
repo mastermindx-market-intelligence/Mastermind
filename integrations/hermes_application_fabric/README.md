@@ -20,6 +20,11 @@ production role binding, AUTO routing or account/budget acceptance is claimed by
 the loopback fixture. `from_factory` fails closed until the owner qualifies the
 role; the direct raw-client constructor cannot borrow a Brain/Ask identity.
 
+The installed v0.23 runtime passed **53 tests with zero skips**, including a real
+native primary/tool conversation against the loopback original-owner fixture,
+post-tool disconnect, and the native watchdog. See [qualification evidence](QUALIFICATION.md)
+for exact source identities, bounds and the unproved live-account acceptance.
+
 ## Exact dependencies and native composition
 
 Installed M2 Hermes v0.23.0: `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`.
@@ -64,6 +69,7 @@ client constructed from a remembered ID.
 | Bounds | 512 KiB request, 1 MiB result, 128 KiB arguments, 512 messages, 64 tools, 32,768 maximum requested output tokens. The owner applies its own independent limits. |
 | Attribution | Actual served model must equal the inspected/bound model. Actual usage must be present. No estimated usage or fabricated provider/account receipt. |
 | Streaming | Disabled through the real provider profile. The current native APPLICATION protocol rejects streams; no buffered answer is presented as streaming. |
+| SDK deadline | A positive native SDK timeout must cover the bound owner's timeout. A tighter deadline refuses before dispatch; host configuration can narrow the owner timeout at initial binding. |
 | Async/vision | Explicit refusing views. Native async wrapping cannot construct another HTTP client. Primary qualification does not authorize auxiliary inference. |
 | Opaque reasoning | Unsupported provider-private replay/multimodal carriers refuse when presented; model eligibility must require history semantics this adapter preserves. |
 
@@ -157,7 +163,9 @@ qualify any required provider-native streaming/cancellation/replay semantics.
 
 ## Custody and continuation
 
-All new source and tests are under this directory. Macro #10740's APPLICATION
+All new product source and tests are under this directory. A separate new
+`hermes-application-inference.yml` workflow runs its bounded offline checks;
+incumbent workflow files are unchanged. Macro #10740's APPLICATION
 paths, Hermes #2134 selected-child/auth/installer paths, #2147 worker delegation
 and #2109/#2148 policy/config paths retain incumbent custody. A paid bounded
 worker request was retained but refused before launch; no worker START or code

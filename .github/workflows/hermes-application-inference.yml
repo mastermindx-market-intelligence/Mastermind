@@ -1,0 +1,53 @@
+name: Hermes APPLICATION inference contract
+
+on:
+  pull_request:
+    paths:
+      - 'integrations/hermes_application_fabric/**'
+      - '.github/workflows/hermes-application-inference.yml'
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [master]
+    paths:
+      - 'integrations/hermes_application_fabric/**'
+      - '.github/workflows/hermes-application-inference.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  original-owner-contract:
+    name: Hermes APPLICATION offline contract (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Reuse the repository's existing read-only Macro checkout capability.
+      # No provider credentials, installed Hermes profile, or runtime grants.
+      - name: Checkout exact APPLICATION client evidence
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 2ef828e569b683b9dfaa94f81116da3ac55f6186
+          path: .ci-hermes-application-owner
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /engine/fabric_inference_client.py
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install qualified JSON validator
+        run: python -m pip install --disable-pip-version-check 'jsonschema==4.26.0'
+      - name: Run bounded no-external-network contract suite
+        run: >-
+          python -B integrations/hermes_application_fabric/qualification/qualify_offline.py
+          --owner-root .ci-hermes-application-owner
