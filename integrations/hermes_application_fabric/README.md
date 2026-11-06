@@ -140,8 +140,9 @@ PYTHONPATH=.:/path/to/exact/macro/source python3 -m unittest discover \
   -s integrations/hermes_application_fabric/tests -p 'test_*.py' -v
 ```
 
-`qualification/qualify_installed.py` runs through the installed Hermes launcher's
-`--run-module runpy` path, in an isolated `HERMES_HOME`, with an immutable candidate
+`qualification/qualify_installed.py` runs through the installed
+`hermes_cli._launchers.runtime_command` with a `runpy.run_path` code entry, in an
+isolated `HERMES_HOME`, with an immutable candidate
 manifest and exact owner file checksum. It runs actual provider resolution,
 primary construction, middleware, transport, classifier and native conversation
 tests. Standard OpenAI/AsyncOpenAI construction fails the fixture; external

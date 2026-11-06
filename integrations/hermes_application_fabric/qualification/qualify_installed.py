@@ -1,6 +1,7 @@
 """Run immutable candidate tests in an isolated installed Hermes runtime.
 
-Invoke through its real launcher: hermes --run-module runpy <this file> ... .
+Invoke with the installed hermes_cli._launchers.runtime_command(code=...), using
+runpy.run_path(this_file, run_name="__main__") as the entry code.
 The caller supplies a GitHub-read-back manifest and exact owner source fixture;
 this runner never clones, changes the installation, or contacts a provider.
 """
@@ -40,7 +41,7 @@ def main():
         if not path.is_relative_to(root) or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
             raise RuntimeError("Candidate source checksum mismatch")
     owner_bytes = (owner / "engine/fabric_inference_client.py").read_bytes()
-    if hashlib.sha256(owner_bytes).hexdigest() != "bd6be854a22a89cc1f998455e8b614fffa4372b6dd616492c0a79e30388aa2b9":
+    if hashlib.sha256(owner_bytes).hexdigest() != "3250f2ea9b56b4762619a960c23dd5cc57ae05c273fe8e2b63c89a0f868d0ce0":
         raise RuntimeError("APPLICATION owner source checksum mismatch")
     package = root / "integrations/hermes_application_fabric"
     sys.path[:0] = [str(root), str(owner), str(package / "tests"), str(package / "qualification")]
