@@ -116,6 +116,10 @@ def before_census_runtime(manifest):
 
 def before_original_artifact_recovery(manifest):
     prior = before_census_runtime(manifest)
+    # The frozen 106-member predecessor predates the current observer.
+    assert prior["ext/current_source_observation.py"] in {
+        builder.GO_OBSERVER_PREIMAGE_SHA256, builder.GO_OBSERVER_SUCCESSOR_SHA256}
+    prior["ext/current_source_observation.py"] = builder.GO_OBSERVER_PREIMAGE_SHA256
     assert len(prior) == 107
     assert prior.pop("ext/original_advertised_artifact.py") == "46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0"
     assert prior["ext/artifact_delivery.py"] == "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d"
@@ -168,6 +172,8 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     for name, digest in builder.GO_POST_FAILURE_DIAGNOSTICS_ADDITIONS.items():
         assert default["ext/" + name] == digest
         del historical["ext/" + name]
+    assert default["ext/current_source_observation.py"] == builder.GO_OBSERVER_SUCCESSOR_SHA256
+    assert historical["ext/current_source_observation.py"] == builder.GO_OBSERVER_PREIMAGE_SHA256
     assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == builder.GO_BASE_MANIFEST_SHA256
     assert {k: v for k, v in application.items() if k in default} == default
     assert set(application) - set(default) == {g.GO_ENTRY, g.GO_HANDLER}
@@ -183,6 +189,23 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
         raw = (builds.application / "native-code-stage" / path).read_bytes()
         assert g.digest(raw) == expected == inventory["files"][path]["sha256"]
         assert len(raw) == inventory["files"][path]["bytes"]
+
+
+def test_go_base_observer_only_exact_successor_and_frozen_preimage(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    assert current["ext/current_source_observation.py"] == builder.GO_OBSERVER_SUCCESSOR_SHA256
+    for value in (builder.GO_OBSERVER_SUCCESSOR_SHA256, builder.GO_OBSERVER_PREIMAGE_SHA256):
+        manifest = dict(current)
+        manifest["ext/current_source_observation.py"] = value
+        original = dict(manifest)
+        builder.validate_go_base_manifest(manifest, captured)
+        assert manifest == original, "projection must not mutate the caller"
+    for value in ("f" * 64, "", "e" * 64):
+        malformed = dict(current)
+        malformed["ext/current_source_observation.py"] = value
+        with pytest.raises(ValueError, match="observer"):
+            builder.validate_go_base_manifest(malformed, captured)
 
 
 def test_exact_historical_picker_remains_a_valid_base_but_no_arbitrary_fourth_member(builds):
