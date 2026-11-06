@@ -222,15 +222,15 @@
       "source": "source/go_codex_exec.sh"
     },
     "ext/go_lease_capability.py": {
-      "bytes": 17821,
+      "bytes": 24577,
       "installed_preimage_sha256": "9f350698ba94d64fedc3f64ebffce993840d7ee3376b46254756d58bdb78c66a",
-      "sha256": "5227bf4d7b2b4b5664392c5178f31b113603e42490e9693fc0da5c79401c7938",
+      "sha256": "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940",
       "source": "candidate/go_lease_capability.py"
     },
     "ext/go_lease_gateway.py": {
-      "bytes": 27855,
+      "bytes": 45333,
       "installed_preimage_sha256": "7b1e1d48933218135771c770a1d25c994aa0332bc6bc8461c5b9d625ef8a7658",
-      "sha256": "19f4276840361a1efafd329f72e919a2b9d4d898c9eb67ee5fddaaf3b8a27c03",
+      "sha256": "df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1",
       "source": "candidate/go_lease_gateway.py"
     },
     "ext/go_remote_capsule.py": {
@@ -300,9 +300,9 @@
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 142839,
+      "bytes": 193976,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
+      "sha256": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
       "source": "candidate/lease_broker.py"
     },
     "ext/linux_process_identity.py": {

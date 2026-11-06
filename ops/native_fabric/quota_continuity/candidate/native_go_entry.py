@@ -6,7 +6,7 @@ server. Import and inspect are read-only. Only main enters the original B.main.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import importlib.util
 import json
@@ -250,6 +250,9 @@ SERVICE_SET_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v5"
 SERVICE_FAMILY_SCHEMA = "mastermind.native_go_application_service.v6"
 SERVICE_FAMILY_ENROLLMENT_SCHEMA = "native-go-service-enrollment.v6"
 SERVICE_FAMILY_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v6"
+SERVICE_ROUTED_SCHEMA = "mastermind.native_go_application_service.v7"
+SERVICE_ROUTED_ENROLLMENT_SCHEMA = "native-go-service-enrollment.v7"
+SERVICE_ROUTED_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v7"
 SERVICE_CREDENTIAL_REF = "MACRO_FABRIC_APPLICATION_TOKEN"
 SERVICE_TEXT_CREDENTIAL_REF = "MASTERMIND_FABRIC_APPLICATION_TOKEN"
 SERVICE_FAMILY_ROLES = (
@@ -460,10 +463,20 @@ def _service_family_scope_binding(startup, scope, credential, role):
         selection_purpose=startup.handler.ApplicationSelectionPurpose(scope["selection_purpose"]) if selected else None)
 
 
-def _validate_service_family(startup, document):
+def _service_routed_scope_binding(startup, scope, credential, role):
+    """The same five stable identities with an explicit restrictive pool scope."""
+    if type(scope) is not dict or "route_scope" not in scope:
+        raise ValueError("native routed service scope refused")
+    route_scope = startup.handler.ApplicationRouteScope(scope["route_scope"])
+    original = {key: value for key, value in scope.items() if key != "route_scope"}
+    binding = _service_family_scope_binding(startup, original, credential, role)
+    return replace(binding, route_scope=route_scope)
+
+
+def _validate_service_family(startup, document, *, routed=False):
     fields = {"schema", "operation_id", "plan_digest", "source_generation", "ingress_digest",
               "scopes", "owners", "credentials"}
-    if (set(document) != fields or document["schema"] != SERVICE_FAMILY_SCHEMA
+    if (set(document) != fields or document["schema"] != (SERVICE_ROUTED_SCHEMA if routed else SERVICE_FAMILY_SCHEMA)
             or document["owners"] != application_service_owners(startup)
             or type(document["scopes"]) is not list or len(document["scopes"]) != 5
             or type(document["credentials"]) is not list or len(document["credentials"]) != 5):
@@ -473,7 +486,8 @@ def _validate_service_family(startup, document):
             raise ValueError("native application service commitment refused")
     if type(document["operation_id"]) is not str or IDENTITY.fullmatch(document["operation_id"]) is None:
         raise ValueError("native application service operation refused")
-    bindings = tuple(_service_family_scope_binding(startup, scope, credential, role[0])
+    scope_binding = _service_routed_scope_binding if routed else _service_family_scope_binding
+    bindings = tuple(scope_binding(startup, scope, credential, role[0])
         for role, scope, credential in zip(SERVICE_FAMILY_ROLES, document["scopes"], document["credentials"]))
     first = document["scopes"][0]
     if (any(scope["native_host"] != first["native_host"]
@@ -485,6 +499,8 @@ def _validate_service_family(startup, document):
 
 
 def validate_application_service_document(startup, document):
+    if type(document) is dict and document.get("schema") == SERVICE_ROUTED_SCHEMA:
+        return _validate_service_family(startup, document, routed=True)
     if type(document) is dict and document.get("schema") == SERVICE_FAMILY_SCHEMA:
         return _validate_service_family(startup, document)
     if type(document) is dict and document.get("schema") == SERVICE_SET_SCHEMA:
@@ -551,8 +567,9 @@ def validate_completed_application_records(startup, raw, binding_identity, inten
     """Validate the same completed enrollment chain from retained private bytes."""
     document, intent, receipt = map(_service_json, (raw, intent_raw, receipt_raw))
     result = validate_application_service_document(startup, document)
-    family = document["schema"] == SERVICE_FAMILY_SCHEMA
-    service_set = document["schema"] in (SERVICE_SET_SCHEMA, SERVICE_FAMILY_SCHEMA)
+    routed = document["schema"] == SERVICE_ROUTED_SCHEMA
+    family = document["schema"] in (SERVICE_FAMILY_SCHEMA, SERVICE_ROUTED_SCHEMA)
+    service_set = document["schema"] in (SERVICE_SET_SCHEMA, SERVICE_FAMILY_SCHEMA, SERVICE_ROUTED_SCHEMA)
     http = document["schema"] == SERVICE_HTTP_SCHEMA
     admin = document["schema"] == SERVICE_ADMIN_SCHEMA
     selected = document["schema"] in (SERVICE_SELECTED_SCHEMA, SERVICE_ADMIN_SCHEMA)
@@ -562,10 +579,10 @@ def validate_completed_application_records(startup, raw, binding_identity, inten
                       scope_field, "binding_sha256", "binding_identity", "accounts_sha256", "accounts_identity"}
     if http:
         receipt_fields |= {"application_recipe_digest", "source_projection_sha256", "provider_profile_identity"}
-    if (set(intent) != intent_fields or intent["schema"] != (SERVICE_FAMILY_ENROLLMENT_SCHEMA if family else SERVICE_SET_ENROLLMENT_SCHEMA if service_set else SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
+    if (set(intent) != intent_fields or intent["schema"] != (SERVICE_ROUTED_ENROLLMENT_SCHEMA if routed else SERVICE_FAMILY_ENROLLMENT_SCHEMA if family else SERVICE_SET_ENROLLMENT_SCHEMA if service_set else SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
             SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
             SERVICE_SELECTED_ENROLLMENT_SCHEMA if selected else SERVICE_ENROLLMENT_SCHEMA)
-            or set(receipt) != receipt_fields or receipt["schema"] != (SERVICE_FAMILY_RECEIPT_SCHEMA if family else SERVICE_SET_RECEIPT_SCHEMA if service_set else SERVICE_HTTP_RECEIPT_SCHEMA if http else
+            or set(receipt) != receipt_fields or receipt["schema"] != (SERVICE_ROUTED_RECEIPT_SCHEMA if routed else SERVICE_FAMILY_RECEIPT_SCHEMA if family else SERVICE_SET_RECEIPT_SCHEMA if service_set else SERVICE_HTTP_RECEIPT_SCHEMA if http else
                 SERVICE_ADMIN_RECEIPT_SCHEMA if admin else
                 SERVICE_SELECTED_RECEIPT_SCHEMA if selected else SERVICE_RECEIPT_SCHEMA)
             or any(intent[key] != document[key] or receipt[key] != document[key]
