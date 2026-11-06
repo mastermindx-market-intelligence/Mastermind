@@ -1182,6 +1182,10 @@ def test_drifted_context_pins_refuse_fresh_work(tmp_path, monkeypatch):
         def load():
             return _SyntheticCooPolicy()
 
+        @staticmethod
+        def for_digest(_digest):
+            return _SyntheticCooPolicy()
+
     monkeypatch.setattr(
         executive_runtime,
         "CooCyclePolicy",

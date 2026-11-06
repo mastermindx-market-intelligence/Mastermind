@@ -369,7 +369,7 @@ def test_mcp_missing_scope_or_ambiguous_authorization_never_calls_reader(setting
 
 
 @pytest.mark.parametrize("profile", ["v3", "sessions"])
-@pytest.mark.parametrize("auth", ["original-read", "submit-only", "foreign", "expired"])
+@pytest.mark.parametrize("auth", ["original-read", "combined", "submit-only", "foreign", "expired"])
 def test_installed_profiles_keep_native_reply_read_bound_to_original_parent(settings, rsa_key, profile, auth):
     from integrations.executive_mcp import web_ceo_v3
     app, owner, calls = app_with_reader(settings, profile)
@@ -385,18 +385,20 @@ def test_installed_profiles_keep_native_reply_read_bound_to_original_parent(sett
                 assert tools[-1]["annotations"]["destructiveHint"] is False
                 if auth == "submit-only":
                     token = auth_fixture._token(rsa_key, scope=auth_fixture.SUBMIT_SCOPE)
+                elif auth == "combined":
+                    token = auth_fixture._submit_token(rsa_key)
                 else:
                     changes = {"sub": "foreign-subject"} if auth == "foreign" else (
                         {"exp": auth_fixture.NOW - 1} if auth == "expired" else {})
                     token = auth_fixture._read_token(rsa_key, **changes)
                 response = await host_fixture.rpc(client, token, "tools/call",
                     {"name": NAME, "arguments": {"read_ref": READ_REF}})
-                if auth == "original-read":
+                if auth in {"original-read", "combined"}:
                     payload = json.loads(response.json()["result"]["content"][0]["text"])
                     assert payload["ok"] and payload["data"]["parent_consumed"] is False
                 else:
                     assert response.status_code in {401, 403}
-        if auth == "original-read":
+        if auth in {"original-read", "combined"}:
             assert len(calls) == 2
             assert [call["operation"] for call in owner.service.calls] == ["read_thread"]
         else:

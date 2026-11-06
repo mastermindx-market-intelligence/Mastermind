@@ -228,6 +228,9 @@ def bound_sealed_worker_planner(tmp_path):
     )
     codex_home = tmp_path / "codex-home"
     codex_home.mkdir(mode=0o700)
+    # macOS temporary directories may inherit a group other than the process
+    # group. This fixture models a provider home owned by the sealed worker.
+    os.chown(codex_home, -1, os.getegid())
     adapter = _PlannerSealedWorkerAdapter(
         FakeInspector(),
         root_job_id=root.job_id,

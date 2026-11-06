@@ -342,8 +342,27 @@ def test_release_and_capability_evidence_are_projected_without_claiming_gate_com
     assert result["capability"]["capability_profile_digest"] == D5
     assert result["capability"]["source_grant_digest"] == D6
     assert result["capability"]["economic_envelope_digest"] == D7
+    assert result["capability"]["principal_actions"] == ["bounded_intent"]
     assert "merge_allowed" not in result["release"]
     assert "deploy_allowed" not in result["release"]
+
+
+def test_explicit_orchestration_action_is_projected_without_implying_execution():
+    result = project_coo_principal_mandate(
+        principal=principal(),
+        authority=dataclasses.replace(
+            authority(),
+            principal_actions=("bounded_intent", "governed_orchestration"),
+        ),
+        mission_workspace=mission_doc(),
+    )
+    assert result["capability"]["principal_actions"] == [
+        "bounded_intent",
+        "governed_orchestration",
+    ]
+    assert result["new_effect_gate"] == NewEffectGate.OPEN.value
+    assert "submit" not in result
+    assert "orchestration_root" not in result
 
 
 def test_current_mission_does_not_fabricate_or_accept_stronger_session_assurance():
@@ -411,6 +430,9 @@ def test_projection_is_deterministic_and_has_no_mutation_result_surface():
         (authority, {"work_ref": "not-a-workstream"}),
         (authority, {"authority_generation_digest": "bad"}),
         (authority, {"capability_profile_digest": "bad"}),
+        (authority, {"principal_actions": ("governed_orchestration", "bounded_intent")}),
+        (authority, {"principal_actions": ("bounded_intent", "bounded_intent")}),
+        (authority, {"principal_actions": ("unreviewed_action",)}),
     ],
 )
 def test_owner_fact_construction_refuses_malformed_identity(factory, replacement):

@@ -7,9 +7,13 @@ description: Use when a consequential Mastermind research question needs current
 
 ## Mandatory current-source gate
 
-Run `bootstrap-mastermind` for the task. Read protected Mastermind `master`, record its exact revision, load `docs/sol_skills/INDEX.md` and required companions from that same exact commit, and verify compatibility. Reuse the verified pin and relevant procedures already loaded in the current turn while valid; new-turn recovery must re-establish current source. Material changes use the existing reconciliation procedure. If the read or compatibility fails, modifying workflow is unavailable; bounded read-only analysis may continue with explicit uncertainty.
-
-Read `../../references/authority-boundaries.md` before interpreting any app, record, or action as authority. This skill grants no authority. Current Chairman intent, protected source law and platform permissions govern. GitHub owns source and evidence; existing operational owners retain state, custody and execution.
+Reuse the verified pin for the mission; verify compatibility. Read protected Mastermind `master` and run `bootstrap-mastermind` only
+at unfamiliar entry/recovery without a usable pin, or a material governing-procedure change. Load
+`docs/sol_skills/INDEX.md` and the needed companions from that same exact commit; never mix revisions.
+Read `../../references/authority-boundaries.md` once before interpreting any app, record, or action as authority. This skill grants no authority; GitHub owns source/evidence and existing owners retain runtime, custody and effects.
+A worker return, tool call, new turn or phase completion alone does not restart bootstrap. Without a
+verified compatible pin, modifying workflow is unavailable. Failed refresh does not erase a usable pin
+for independent unaffected work. Scope gates to the actual action.
 
 ## Do not use
 

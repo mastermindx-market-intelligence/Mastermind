@@ -1,0 +1,31 @@
+{
+  "schema": "soxx.parent_turn.cycle_failure.frozen_v17",
+  "date": "2026-10-11",
+  "fixed_parent_entry": "First completed 3h negative histogram improving with 3h Stoch K rising and >=D after >=2x historical RMS oversold 3h arm. Next 15m RTH open. One original parent arm, at most one parent-entry candidate.",
+  "already_inspected_asset_cohort": [
+    "SOXX",
+    "SMH",
+    "QQQ",
+    "AMD"
+  ],
+  "source": "same 15m historical Terminal RTH snapshots as v14/15/16; no 24h BOATS, PIT/bid-ask not independently verified",
+  "exit_modes": [
+    "time52",
+    "finite_guard",
+    "fast_weak_control",
+    "structural_cycle",
+    "momentum_reset",
+    "slow"
+  ],
+  "lower_observation_minutes": [
+    15,
+    30
+  ],
+  "risk_and_economics": "1.5% hard emergency stop, 25% profit-taking at +2%, 5bp/side, 52 observed RTH-hour time cap, next-bar-open signal, stop-first OHLC",
+  "first_order_question": "On exactly the same parent-turn entry episodes, measure average delta vs time52, losers saved (not necessarily made profitable), previous winners harmed, residual winners, stop times, and per original extreme-episode opportunity results. Overlap and right-censorship separate.",
+  "analysis_gates": "No threshold search or reoptimization on current year. Compare both 15m and 30m lower detectors; include no signal and time controls. Do not infer a trade was marketable at exact OHLC price.",
+  "risk_conservative": "No sizing recommendations, no stop widening, no pyramiding, no quote-staleness beyond venue evidence.",
+  "predeclared_before_evaluation": true,
+  "research_only": true,
+  "raw_rows_github_prohibited": true
+}

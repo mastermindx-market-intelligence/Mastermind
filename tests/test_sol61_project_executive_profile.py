@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import dataclasses
+
+import pytest
+
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
-from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
+from control_plane.executive_operator_supervisor import (
+    ExecutiveOperatorSupervisor,
+    ExecutiveOperatorSupervisorError,
+)
 from control_plane.executive_runtime import AttemptLease
-from control_plane.model_router import ModelRouter
+from control_plane.model_router import ModelRouter, RoutingPolicyError
 from test_executive_operator_supervisor import _PromptSource, _seed_dispatchable_operator_planner
 
 
@@ -17,8 +24,9 @@ def test_sol61_operator_candidate_is_additive_and_exact() -> None:
     registry = ExecutionCapabilityRegistry.load()
     router = ModelRouter.load()
 
-    assert router.policy_version == "2026-08-24.stage4"
-    assert registry.policy_version == "2026-10-05.sol61-project-executive-candidate"
+    assert router.policy_version == "2026-10-14.attended-qualification"
+    assert registry.policy_version == "2026-10-14.attended-qualification"
+    assert registry.production_armed is False
     assert all(
         CANDIDATE_ALIAS not in tier.model_aliases
         for route in router.routes.values()
@@ -57,6 +65,9 @@ def test_sol61_operator_candidate_is_additive_and_exact() -> None:
     assert profile.native_helper is not None
     assert profile.native_helper.default_model == "gpt-6.1-sol"
     assert profile.native_helper.default_reasoning_effort == "xhigh"
+    assert profile.native_helper.mechanism == "codex-multi-agent-v2-inherit-parent"
+    assert profile.native_helper.inherit_parent_capabilities is True
+    assert profile.native_helper.hide_spawn_agent_metadata is True
     assert profile.native_helper.max_concurrent_helpers == 1
     assert profile.native_helper.max_depth == 1
     assert profile.native_helper.max_runtime_seconds == 60
@@ -64,13 +75,18 @@ def test_sol61_operator_candidate_is_additive_and_exact() -> None:
     assert legacy_profile.native_helper is not None
     assert legacy_profile.native_helper.default_model == "gpt-5.6-sol"
 
-    candidate_overrides = profile.app_server_config_overrides()
-    legacy_overrides = legacy_profile.app_server_config_overrides()
-    assert 'model="gpt-6.1-sol"' in candidate_overrides
-    assert 'model_reasoning_effort="xhigh"' in candidate_overrides
-    assert 'model="gpt-5.6-sol"' in legacy_overrides
-    assert 'model_reasoning_effort="xhigh"' in legacy_overrides
-    assert candidate_overrides.count('model="gpt-6.1-sol"') == 1
+    for resolved, model in (
+        (profile, "gpt-6.1-sol"),
+        (legacy_profile, "gpt-5.6-sol"),
+    ):
+        overrides = resolved.app_server_config_overrides()
+        assert [value for value in overrides if value.startswith("model=")] == [
+            f'model="{model}"'
+        ]
+        assert [
+            value for value in overrides
+            if value.startswith("model_reasoning_effort=")
+        ] == ['model_reasoning_effort="xhigh"']
 
 
 def test_sol61_candidate_does_not_replace_current_coo_default() -> None:
@@ -78,10 +94,22 @@ def test_sol61_candidate_does_not_replace_current_coo_default() -> None:
 
     assert router.model_aliases[LEGACY_ALIAS].model == "gpt-5.6-sol"
     assert router.model_aliases[CANDIDATE_ALIAS].model == "gpt-6.1-sol"
+    assert router.resolve_model_alias(CANDIDATE_ALIAS).worker_eligible is True
 
-def test_sol61_candidate_reaches_supervisor_as_exact_claimed_model(tmp_path) -> None:
+    # This accepted frontier alias is separate from the explicitly selectable
+    # candidate worker alias and must remain unavailable for a worker claim.
+    existing = router.model_aliases["project.executive.sol61"]
+    assert existing.model == "gpt-6.1-sol"
+    assert existing.effort == "xhigh"
+    assert existing.execution_profile_id == "operator.appserver.readonly.v1"
+    assert existing.worker_eligible is False
+    with pytest.raises(RoutingPolicyError, match="is not worker eligible"):
+        router.resolve_model_alias("project.executive.sol61")
+
+
+def _claimed_profile(tmp_path, model_alias):
     runtime, root, planner = _seed_dispatchable_operator_planner(
-        tmp_path, operator_alias=CANDIDATE_ALIAS
+        tmp_path.resolve(), operator_model_alias=model_alias
     )
     dispatch = runtime.attempts.dispatch_cycle_job(
         planner.job_id,
@@ -95,13 +123,87 @@ def test_sol61_candidate_reaches_supervisor_as_exact_claimed_model(tmp_path) -> 
         claimed_adapter_factory=lambda *args, **kwargs: None,
         prompt_source=_PromptSource(),
     )
+    return runtime, planner, lease, supervisor
 
-    requested = supervisor._requested_profile(planner, lease)
 
-    assert requested.requested_model == "gpt-6.1-sol"
+def _assert_requested_read_only(requested, model):
+    assert requested.requested_model == model
     assert requested.harness_kind == "codex-app-server"
     assert requested.sandbox_policy == "read-only"
     assert requested.approval_policy == "never"
     assert requested.network_policy == "disabled"
     assert requested.write_capable is False
 
+
+def test_sol61_candidate_reaches_supervisor_as_exact_claimed_model(tmp_path) -> None:
+    _, planner, lease, supervisor = _claimed_profile(tmp_path, CANDIDATE_ALIAS)
+
+    _assert_requested_read_only(
+        supervisor._requested_profile(planner, lease), "gpt-6.1-sol"
+    )
+
+
+def test_legacy_helper_reaches_supervisor_as_exact_claimed_model(tmp_path) -> None:
+    _, planner, lease, supervisor = _claimed_profile(tmp_path, LEGACY_ALIAS)
+
+    _assert_requested_read_only(
+        supervisor._requested_profile(planner, lease), "gpt-5.6-sol"
+    )
+
+
+def _assert_matching_job_and_quota_cannot_override_helper(
+    tmp_path, monkeypatch, model_alias, *, model, effort
+):
+    runtime, planner, lease, supervisor = _claimed_profile(tmp_path, model_alias)
+    sealed_model = ModelRouter.load().model_aliases[model_alias].model
+    _assert_requested_read_only(
+        supervisor._requested_profile(planner, lease), sealed_model
+    )
+    quota = runtime.workers.get_quota_class(
+        lease.attempt.worker_id, lease.attempt.quota_class
+    )
+    assert quota is not None
+
+    # Keep every policy/profile/harness/authority binding valid. Mutating both
+    # sides together deliberately passes the older Job-versus-quota check.
+    changed_quota = dataclasses.replace(quota, model=model, effort=effort)
+    changed_job = dataclasses.replace(
+        planner, constraints={**planner.constraints, "model": model, "effort": effort}
+    )
+
+    def read_claimed_quota(worker_id, quota_class):
+        assert (worker_id, quota_class) == (
+            lease.attempt.worker_id, lease.attempt.quota_class
+        )
+        return changed_quota
+
+    monkeypatch.setattr(runtime.workers, "get_quota_class", read_claimed_quota)
+    with pytest.raises(
+        ExecutiveOperatorSupervisorError,
+        match="not one reviewed rich read-only lane",
+    ):
+        supervisor._requested_profile(changed_job, lease)
+
+
+def test_legacy_helper_refuses_coordinated_model_drift(tmp_path, monkeypatch) -> None:
+    _assert_matching_job_and_quota_cannot_override_helper(
+        tmp_path, monkeypatch, LEGACY_ALIAS, model="gpt-6.1-sol", effort="xhigh"
+    )
+
+
+def test_legacy_helper_refuses_coordinated_effort_drift(tmp_path, monkeypatch) -> None:
+    _assert_matching_job_and_quota_cannot_override_helper(
+        tmp_path, monkeypatch, LEGACY_ALIAS, model="gpt-5.6-sol", effort="high"
+    )
+
+
+def test_sol61_helper_refuses_coordinated_model_drift(tmp_path, monkeypatch) -> None:
+    _assert_matching_job_and_quota_cannot_override_helper(
+        tmp_path, monkeypatch, CANDIDATE_ALIAS, model="gpt-5.6-sol", effort="xhigh"
+    )
+
+
+def test_sol61_helper_refuses_coordinated_effort_drift(tmp_path, monkeypatch) -> None:
+    _assert_matching_job_and_quota_cannot_override_helper(
+        tmp_path, monkeypatch, CANDIDATE_ALIAS, model="gpt-6.1-sol", effort="high"
+    )
