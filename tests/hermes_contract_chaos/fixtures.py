@@ -159,10 +159,12 @@ async def selected_case(tmp_path, *, supervisor_factory=None):
                 yield service, supervisor, work, command, selected_child_composition(), received, finish
             finally:
                 finish.set()
-                tasks = tuple(service._dispatch_tasks.values())
-                if tasks:
-                    await asyncio.wait_for(asyncio.gather(*tasks), 5)
-                clear_selected_child_composition()
+                try:
+                    tasks = tuple(service._dispatch_tasks.values())
+                    if tasks:
+                        await asyncio.wait_for(asyncio.gather(*tasks), 5)
+                finally:
+                    clear_selected_child_composition()
 
 
 @pytest.fixture

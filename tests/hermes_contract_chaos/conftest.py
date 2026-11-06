@@ -1,19 +1,40 @@
-"""Keep this lane independent of the portfolio-wide test environment."""
+"""Offline collection/execution and a complete per-invocation pytest manifest."""
 from __future__ import annotations
 
-import socket
-import subprocess
-import urllib.request
+import json
+import os
 from pathlib import Path
 
 import pytest
 
+from .offline_guard import OfflineGuard
+
+
+_guard = None
+_collected = []
+_deselected = []
+_reports = []
+
 
 def pytest_addoption(parser):
-    parser.addoption(
-        "--chaos-seed", action="append", default=[],
-        help="Replay an integer seed (decimal or 0x hex); repeat for several seeds.",
-    )
+    parser.addoption("--chaos-seed", action="append", default=[],
+                     help="Replay an integer seed; repeat for several seeds.")
+
+
+def pytest_configure(config):
+    global _guard
+    _collected.clear()
+    _deselected.clear()
+    _reports.clear()
+    _guard = OfflineGuard()
+    _guard.install()  # Before test-module imports; no disposable Git exception yet.
+
+
+def pytest_unconfigure(config):
+    global _guard
+    if _guard is not None:
+        _guard.close()
+        _guard = None
 
 
 def pytest_generate_tests(metafunc):
@@ -23,45 +44,34 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("chaos_seed", seeds, ids=[f"seed-{seed}" for seed in seeds])
 
 
+def pytest_collection_finish(session):
+    _collected.extend(item.nodeid for item in session.items)
+
+
+def pytest_deselected(items):
+    _deselected.extend(item.nodeid for item in items)
+
+
+def pytest_runtest_logreport(report):
+    _reports.append({"node_id": report.nodeid, "when": report.when, "outcome": report.outcome})
+
+
+def pytest_sessionfinish(session, exitstatus):
+    target = os.environ.get("H24_EXECUTION_MANIFEST")
+    if target:
+        Path(target).write_text(json.dumps({
+            "schema": "mastermind.h24_pytest_execution.v1",
+            "invocation_id": os.environ["H24_INVOCATION_ID"],
+            "collected": _collected, "deselected": _deselected, "reports": _reports,
+            "pytest_exit_code": int(exitstatus),
+        }, sort_keys=True) + "\n")
+
+
 @pytest.fixture(autouse=True)
-def offline_only(monkeypatch, tmp_path):
-    """Fail on external network/host execution; allow disposable Git fixtures."""
-    original_connect = socket.socket.connect
-    original_popen = subprocess.Popen
-
-    def connect(sock, address):
-        if sock.family in {socket.AF_INET, socket.AF_INET6}:
-            pytest.fail("H24-10 attempted a network connection")
-        return original_connect(sock, address)
-
-    def forbidden(*args, **kwargs):
-        pytest.fail("H24-10 attempted external network or process execution")
-
-    def fixture_git(args, *positional, **kwargs):
-        # The incumbent plan fixture creates a disposable Git repository.
-        # It may not use a provider binary, shell, remote or the working tree.
-        if not isinstance(args, (list, tuple)) or Path(args[0]).name != "git" or kwargs.get("shell"):
-            return forbidden()
-        if "-C" in args:
-            target = Path(args[args.index("-C") + 1]).resolve()
-            verb = args[args.index("-C") + 2]
-        elif len(args) > 2 and args[1] in {"init", "clone"}:
-            target, verb = Path(args[-1]).resolve(), args[1]
-            if verb == "clone" and not Path(args[-2]).resolve().is_relative_to(tmp_path.resolve()):
-                return forbidden()
-        else:
-            target, verb = Path(kwargs.get("cwd", ".")).resolve(), args[1]
-        allowed = {"init", "config", "add", "commit", "rev-parse", "status", "show", "ls-files",
-                   "diff", "log", "ls-tree", "cat-file", "rev-list", "check-ref-format",
-                   "clone", "pack-objects", "unpack-objects", "index-pack", "for-each-ref",
-                   "update-ref", "checkout", "switch", "symbolic-ref", "merge-base", "remote"}
-        if not target.is_relative_to(tmp_path.resolve()) or verb not in allowed:
-            return forbidden()
-        return original_popen(args, *positional, **kwargs)
-
-    monkeypatch.setattr(socket.socket, "connect", connect)
-    monkeypatch.setattr(socket.socket, "connect_ex", forbidden)
-    monkeypatch.setattr(socket, "getaddrinfo", forbidden)
-    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
-    monkeypatch.setattr(socket, "create_connection", forbidden)
-    monkeypatch.setattr(subprocess, "Popen", fixture_git)
+def offline_only(tmp_path):
+    assert _guard is not None
+    _guard.root = tmp_path
+    try:
+        yield
+    finally:
+        _guard.root = None

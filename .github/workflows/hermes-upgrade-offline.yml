@@ -1,8 +1,14 @@
 name: H24 Hermes offline conformance (advisory)
 
-# Deliberately opt-in. No pull_request/push trigger or existing required check
-# changes; another packet's paths cannot launch this lane accidentally.
+# Opt in with workflow_dispatch, or [h24-offline] on this isolated branch.
+# The branch/path fence keeps unrelated packet changes out of this lane.
 on:
+  push:
+    branches: ['sol/h24-10-chaos-ci-20261106']
+    paths:
+      - 'tests/hermes_contract_chaos/**'
+      - '.github/workflows/hermes-upgrade-offline.yml'
+      - 'docs/hermes/H24_CHAOS_QUALIFICATION.md'
   workflow_dispatch:
     inputs:
       seeds:
@@ -15,11 +21,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: h24-hermes-offline-${{ github.ref }}
+  # A skipped, unmarked push cannot cancel an opted-in run.
+  group: h24-hermes-offline-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[h24-offline]') }}
   cancel-in-progress: true
 
 jobs:
   offline:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[h24-offline]') }}
     name: H24 ${{ matrix.lane }} / Python ${{ matrix.python }} (advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -39,7 +47,7 @@ jobs:
         run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.3' 'pytest==9.2.0' 'jsonschema==4.26.0'
       - name: Run deterministic offline contracts and measure runtime
         env:
-          H24_SEEDS: ${{ inputs.seeds }}
+          H24_SEEDS: ${{ inputs.seeds || '0,1,0x2410' }}
           H24_LANE: ${{ matrix.lane }}
         run: >-
           python tests/hermes_contract_chaos/run_lane.py
@@ -47,6 +55,27 @@ jobs:
           --seeds "$H24_SEEDS"
           --report "$RUNNER_TEMP/h24-${H24_LANE}.json"
           --budget-seconds 60
+          --timeout-seconds 120
+      - name: Show measured qualification and completeness
+        if: always()
+        env:
+          H24_LANE: ${{ matrix.lane }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          receipt = Path(os.environ['RUNNER_TEMP']) / ('h24-' + os.environ['H24_LANE'] + '.json')
+          if receipt.is_file():
+              r = json.loads(receipt.read_text())
+              text = f"## H24 {r['lane']}: {r['qualification']}\n\n"
+              text += f"Seeds: {r['seeds']}; elapsed: {r['elapsed_seconds']} s; exit: {r['exit_code']}\n\n"
+              text += f"Tests: {r['pytest_summary']}; execution: {r['execution']}\n\n"
+              text += f"Receipt errors: {r['receipt_errors']}\n\nOffline source conformance only.\n"
+          else:
+              text = '## H24 not qualified\n\nNo execution receipt was produced.\n'
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write(text)
+          PY
       - name: Retain timing, seeds and actual test conclusion
         if: always()
         uses: actions/upload-artifact@v4
@@ -55,5 +84,6 @@ jobs:
           path: |
             ${{ runner.temp }}/h24-${{ matrix.lane }}.json
             ${{ runner.temp }}/h24-${{ matrix.lane }}.junit.xml
+            ${{ runner.temp }}/h24-${{ matrix.lane }}.execution.json
           if-no-files-found: warn
           retention-days: 7

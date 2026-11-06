@@ -6,6 +6,7 @@ from dataclasses import asdict, replace
 import hashlib
 import json
 import os
+import sqlite3
 
 import pytest
 
@@ -246,6 +247,59 @@ def test_owner_lost_during_original_capture_withholds_answer(native_case):
             await s.owner.read_hermes(s.principal, sent["read_ref"])
         assert (counts(s.runtime), event_digest(s.runtime)) == before
         assert s.state.writes == 1
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("phase", ["before_insert", "after_insert"])
+@pytest.mark.parametrize("fault", ["authority_lost", "connection_lost"])
+def test_capture_owner_or_connection_loss_rolls_back_claim_facts(tmp_path, monkeypatch, phase, fault):
+    async def exercise():
+        async with selected_case(tmp_path) as (service, supervisor, work, command, composition, received, finish):
+            runtime = service.runtime
+            before = counts(runtime), event_digest(runtime)
+            original = runtime.attempts._claim_job_in_transaction
+            inserted = []
+
+            def lose_boundary():
+                if fault == "authority_lost":
+                    service._selected_child_fixture[1]["missions"][0]["enabled"] = False
+                else:
+                    raise sqlite3.OperationalError("injected H24 connection loss")
+
+            def capture(*args, **kwargs):
+                if phase == "before_insert":
+                    lose_boundary()
+                result = original(*args, **kwargs)
+                inserted.append(result.attempt.attempt_id)
+                if phase == "after_insert":
+                    lose_boundary()
+                return result
+
+            monkeypatch.setattr(runtime.attempts, "_claim_job_in_transaction", capture)
+            result = await composition.submit_async(command)
+            assert result["state"] == "REFUSED" and result["live_submit"] is False
+            assert result["command_id"] == command and result["attempt_id"] is None
+            assert (counts(runtime), event_digest(runtime)) == before
+            assert runtime.jobs.get_job(work.job_id).attempt_count == 0
+            assert all(runtime.attempts.get_attempt(attempt) is None for attempt in inserted)
+            if phase == "after_insert":
+                assert len(inserted) == 1  # A real inserted claim was rolled back.
+            assert not service._dispatch_tasks and received == []
+    asyncio.run(exercise())
+
+
+def test_failed_dispatch_teardown_always_clears_global_composition(tmp_path):
+    from integrations.hermes_delegate.executive import selected_child_composition
+
+    async def fail():
+        raise RuntimeError("injected H24 cleanup failure")
+
+    async def exercise():
+        with pytest.raises(RuntimeError, match="injected H24 cleanup failure"):
+            async with selected_case(tmp_path) as values:
+                service = values[0]
+                service._dispatch_tasks["h24-failed-teardown"] = asyncio.create_task(fail())
+        assert selected_child_composition() is None
     asyncio.run(exercise())
 
 

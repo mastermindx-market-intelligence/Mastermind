@@ -10,40 +10,60 @@
     "--confcutdir=/workspace/scratch/756e91231da1/h24-10/tests/hermes_contract_chaos",
     "--tb=short",
     "--durations=10",
-    "--junitxml=/workspace/scratch/756e91231da1/h24-evidence/failures.junit.xml",
+    "--junitxml=/workspace/scratch/756e91231da1/h24-evidence/.h24-invocation-gxbelcw0/junit.xml",
     "/workspace/scratch/756e91231da1/h24-10/tests/hermes_contract_chaos/test_h24_failures.py",
+    "/workspace/scratch/756e91231da1/h24-10/tests/hermes_contract_chaos/test_h24_lane_receipts.py",
     "--chaos-seed=0",
     "--chaos-seed=1",
     "--chaos-seed=9232"
   ],
-  "elapsed_seconds": 7.375,
+  "elapsed_seconds": 7.839,
+  "execution": {
+    "collected": 65,
+    "completed": 65,
+    "deselected": 0,
+    "node_ids_sha256": "7c30557aa4799e7f20adca10eff5402655c73565a86d766dd5749982cf0287b9"
+  },
+  "execution_manifest": "/workspace/scratch/756e91231da1/h24-evidence/r2-failures.execution.json",
+  "execution_manifest_sha256": "9f550fcc264f98ead29dd9bdab3c05c95cbed9e4f32d8599b9e651e4e669dac7",
   "exit_code": 0,
+  "finished_at": "2026-11-06T19:47:04.959220+00:00",
   "invocation_error": null,
-  "junit": "/workspace/scratch/756e91231da1/h24-evidence/failures.junit.xml",
+  "invocation_id": "caf1e3b3885a439dbc4d2bc56d78edac",
+  "junit": "/workspace/scratch/756e91231da1/h24-evidence/r2-failures.junit.xml",
+  "junit_sha256": "36494ab2c0cd7a25b4b1679632f2699ae7ac01adc55069d86245400acf1f461e",
   "lane": "failures",
   "native_service_qualified": false,
   "platform": "Linux",
+  "pytest_exit_code": 0,
   "pytest_summary": {
     "errors": 0,
     "failures": 0,
     "skipped": 0,
-    "tests": 33
+    "tests": 65
   },
   "python": "3.12.14",
-  "schema": "mastermind.h24_chaos_timing.v1",
+  "qualification": "PASS",
+  "receipt_errors": [],
+  "schema": "mastermind.h24_chaos_timing.v2",
   "scope": "OFFLINE_SOURCE_CONFORMANCE_ONLY",
   "seeds": [
     0,
     1,
     9232
   ],
+  "source_unchanged": true,
+  "started_at": "2026-11-06T19:46:57.116663+00:00",
   "tests_sha256": {
     "tests/hermes_contract_chaos/__init__.py": "8314f65721c3867f6a8a51f4bddf58e751263318392d4a35a8aad1b365208893",
-    "tests/hermes_contract_chaos/conftest.py": "2c9a5ad5f5bc71babb4ccc46176362fd29a7a2c10b67aae4d9b13bc5a86716d7",
-    "tests/hermes_contract_chaos/fixtures.py": "44819f8d7693eb154f34fc6091506d246fcd65f9ebcaad33d6263075af877a98",
-    "tests/hermes_contract_chaos/run_lane.py": "070c4cf280a871ec696d74eb1a98c443ee0541c9bafd6d06992be8b356c1f690",
+    "tests/hermes_contract_chaos/conftest.py": "20bae93260b715500c860e4750e34b25288fa1de873a54e7d6eeae56a7e88e27",
+    "tests/hermes_contract_chaos/fixtures.py": "25c3470d400d7d9c8575230dd7725d347dab985d5aac841a7da81e69ea9363ec",
+    "tests/hermes_contract_chaos/offline_guard.py": "082239585afef0cf7d0e60f1e3cfb7cc9344f7e72fccf200b9aa5dcc90143858",
+    "tests/hermes_contract_chaos/run_lane.py": "319e8a26d4bba120680f7aa908d8751efdd5a36298a7363a2cea46526f3011b1",
     "tests/hermes_contract_chaos/test_h24_concurrency.py": "0e8bfafe555eebe648845b108da7f0c4b6a42892be7a6818b2b6e7f023a857eb",
-    "tests/hermes_contract_chaos/test_h24_failures.py": "9647e6684b8319c0cba827e5d8173eebba31c5783a58e535a9fee641dcd4ab5c"
+    "tests/hermes_contract_chaos/test_h24_failures.py": "1736c1f1b259bc4a088f0216ad1a7753c7ff737196515bfbe1440b21a27f8871",
+    "tests/hermes_contract_chaos/test_h24_lane_receipts.py": "926f54a3ca6647d81d197cf9ec7fb1433706c24e54552dd55ff640304a794d70"
   },
+  "timeout_seconds": 120.0,
   "within_budget": true
 }

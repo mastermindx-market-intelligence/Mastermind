@@ -7,9 +7,9 @@ principal, source-identity and transaction invariants. It uses the incumbent
 Runtime and integration owners against disposable fixtures. It does not add a
 Runtime, retry controller, callback ledger, worker queue or publication owner.
 
-- Implementation parent: [`b54cb10e4abdd3766c62d4088f6a576ecfe80437`](https://github.com/mastermindx-market-intelligence/Mastermind/commit/b54cb10e4abdd3766c62d4088f6a576ecfe80437).
+- Immutable implementation base: [`b54cb10e4abdd3766c62d4088f6a576ecfe80437`](https://github.com/mastermindx-market-intelligence/Mastermind/commit/b54cb10e4abdd3766c62d4088f6a576ecfe80437).
 - Isolated branch: `sol/h24-10-chaos-ci-20261106`.
-- Governing protected-source pin: `88a8b103a5a69e4b4e870a184655dde9fd5875c3`
+- Governing protected-source pin: `609bc3a3e4117fed9b656a0552cecb8b8c7e3bf1`
   (`docs/sol_skills/INDEX.md` and laws read at that same commit;
   skillpack 1.0.1, compatible with bootstrap major 1).
 - Placement: the Chairman explicitly authorized concurrent H24-10 source work;
@@ -50,10 +50,16 @@ safe model identifiers, never headers, prompts, credential values or raw error
 text. `ManualClock` drives both wall timestamps and monotonic elapsed time;
 rollback must still produce a 25 ms modeled attempt duration.
 
-The offline guard rejects Internet connections, DNS/URL requests and external
-processes. The only subprocess exception is local Git work inside the current
-test's disposable directory, needed by the incumbent source-plan fixture.
-This Python fixture guard is not an OS sandbox or a Landlock qualification.
+The offline guard is installed before test-module collection. It rejects Internet
+connections, DNS/URL requests and external processes. During test execution only,
+it permits the existing Git executable in that test's disposable directory.
+Both forms of local clone (with and without `-C`) must name an existing local
+source and a destination inside that directory. Global/file configuration,
+external executables, remote updates, external diff and text conversion are
+refused. Inherited Git settings are removed; hooks, fsmonitor, signing,
+credential helpers and nonlocal protocols are disabled. Read observations keep
+`GIT_OPTIONAL_LOCKS=0`, preserving the incumbent immutable-index handoff contract.
+This Python regression guard is not an OS sandbox or a Landlock qualification.
 
 ## Coverage and exact assertions
 
@@ -66,6 +72,7 @@ This Python fixture guard is not an OS sandbox or a Landlock qualification.
 | STOP before/after claim | `test_worker_stop_never_creates_a_replacement_attempt`, `test_typed_stop_after_claim_has_one_original_effect` | OFFLINE availability before claim prevents an Attempt; after claim preserves original identity. Actual OHF STOP succeeds or retains durable `EFFECT_UNKNOWN`; fresh orchestrator cannot repeat the operation; uncertain STOP retains writer custody |
 | Original source replaced / ABA | `test_original_source_identity_survives_no_byte_equivalent_replacement` | Original descriptor retained, final bytes/SHA restored but inode changed; source validator and public native-send consumer refuse; zero native writes or ledger changes |
 | Owner lost during capture | `test_owner_lost_during_original_capture_withholds_answer` | Read guard disappears after native bytes are captured; public owner withholds answer and leaves ledger immutable. This models owner-authority loss, not physical process death |
+| Authority/connection loss inside claim | `test_capture_owner_or_connection_loss_rolls_back_claim_facts` | Fault before/after actual claim insertion; canonical absence yields REFUSED; all Job/Attempt/Event facts roll back and no provider task is scheduled |
 | Quota reaches zero after candidate projection | `test_quota_exhaustion_after_candidate_projection_refuses_claim` | Candidate first exists; public quota-class RATE_LIMITED state makes capacity unavailable before claim; no Attempt |
 | Event delivery before commit | `test_event_delivery_before_commit_cannot_see_or_dispatch_it` | Separate SQLite connection cannot see uncommitted WAKE_REQUESTED; dispatch refuses; rollback leaves counts unchanged and zero transport calls |
 | Duplicate/reordered wake | `test_reordered_duplicate_wakes_reconcile_the_original_nudge` | Duplicate group refused before provider read; reordered/replayed group preserves original nudge; one nudge and one reconciliation read |
@@ -76,6 +83,8 @@ This Python fixture guard is not an OS sandbox or a Landlock qualification.
 | Readonly model fallback / modifying prohibition | `test_model_fault_fallback_is_readonly_and_secrets_stay_private`, `test_retry_classifier_never_turns_ambiguous_quota_into_replay` | Readonly disconnect/503 may fall back once; modifying, 401 and 429 do not; 429 backoff capped at 900 seconds; unknown/live/stale/modifying retry evidence needs reconciliation |
 | Bounded projection | `test_selected_child_bound_refuses_oversized_projection_before_claim` | Oversized child set refused before claim with no ledger or task delta |
 | CI invocation loss | `test_runner_cannot_reuse_old_success_after_invocation_loss` | Earlier passing JSON/JUnit cannot survive as the new run's result; launch failure produces nonzero exit, empty test summary and redacted exception type |
+| Partial execution / conflicting evidence | `test_h24_lane_receipts.py` | Inherited collection/filter/plugin options removed; zero, deselected, skipped, incomplete or mismatched execution cannot qualify; source drift and conflicting report writers fail closed |
+| Teardown failure | `test_failed_dispatch_teardown_always_clears_global_composition` | A dispatch-task exception still clears the process-global selected-child binding |
 
 The credential checks use an inert sentinel. Model results, metering, captured
 logs and relevant uncertainty receipts must not contain it. These assertions
@@ -95,12 +104,26 @@ For one seed, use `--seeds 0x2410`. For both files in one pytest process, use
 `--lane all`. Seeds control release order, not random runtime IDs or Git commit
 timestamps. The default regression set is decimal `0`, `1`, `9232` (`0x2410`).
 
-The runner invokes only the two explicitly selected test files, disables
-unrelated pytest plugin autoloading and stops conftest discovery at this owned
-folder. It preserves the actual pytest exit status. A missing/invalid JUnit
-receipt cannot produce success, and an earlier report is removed before a new
-invocation. JSON records the exact Python/pytest command, test-file SHA256s,
-seeds, counts, elapsed time, budget and `native_service_qualified=false`.
+The concurrency lane selects its one contract file. The failure lane selects
+the failure-contract file and `test_h24_lane_receipts.py`. The runner removes
+inherited `PYTEST_ADDOPTS`/`PYTEST_PLUGINS`, disables unrelated plugin autoloading
+and user-site imports, and stops conftest discovery at this owned folder.
+
+Each invocation holds an exclusive nonblocking OS file lock on its report path.
+A competing invocation returns exit 75 without changing the active writer's
+evidence. Temporary output paths and a unique invocation ID bind JUnit and the
+execution manifest to that invocation. The JSON receipt is replaced atomically
+after its companion evidence. Lock files retain their inode after release to
+avoid a second writer acquiring a replacement lock inode.
+
+Qualification requires nonempty, undeselected collection across every selected
+file, exactly one passed setup/call/teardown per collected case, matching JUnit
+counts and matching invocation/pytest-exit identities. Missing, malformed,
+skipped, partial, duplicated or mismatched evidence cannot yield PASS, even if
+pytest exits zero. A nonzero pytest exit is retained separately. Harness Python
+files are hashed before and after execution; source drift invalidates the run.
+Receipts contain exact commands, seeds, counts, elapsed time, budget,
+`qualification` and `native_service_qualified=false`.
 
 Final measurements and exact local commands are in the committed
 [concurrency receipt](../../tests/hermes_contract_chaos/evidence/concurrency.json)
@@ -108,18 +131,24 @@ and [failure receipt](../../tests/hermes_contract_chaos/evidence/failures.json).
 The commands use the already available interpreter
 `/workspace/scratch/16d3df696438/qa-venv/bin/python`; no local package was installed.
 Local environment: Linux, Python 3.12.14, pytest 9.2.0, PyYAML 6.0.3,
-jsonschema 4.26.0. Python 3.13 and GitHub-hosted execution are not locally proven.
+jsonschema 4.26.0. These local receipts establish no Python 3.13/hosted result;
+any exact-head hosted result is recorded separately on the source PR.
 
-The final two lane processes were launched concurrently on 2026-11-06:
+The final lane processes were launched concurrently on 2026-11-06:
 
 | Lane | Passed | Failures / errors / skips | Pytest duration | Measured process duration | Exit | 60 s budget |
 | --- | ---: | --- | ---: | ---: | ---: | --- |
-| concurrency | 30 | 0 / 0 / 0 | 11.34 s | 11.751 s | 0 | within |
-| failures | 33 | 0 / 0 / 0 | 6.96 s | 7.375 s | 0 | within |
+| concurrency | 30 | 0 / 0 / 0 | 8.47 s | 8.893 s | 0 | within |
+| failures | 65 | 0 / 0 / 0 | 7.41 s | 7.839 s | 0 | within |
 
-Total: 63 passing cases. Python syntax, workflow YAML/matrix/trigger validation
-and the base-relative ownership/diff checks also passed. No hosted CI or
-Python 3.13 execution is included in these local receipts.
+Total: 95 passing cases. Both receipts report PASS, complete execution,
+unchanged harness sources and no receipt errors. Python syntax, workflow
+YAML/matrix/opt-in isolation validation and the owned-path diff checks passed.
+
+The concurrency invocation deliberately inherited `PYTEST_ADDOPTS=--collect-only`
+and `PYTEST_PLUGINS=nonexistent_h24_plugin`. All selected cases still executed;
+the runner's child-environment isolation was exercised through the real pytest
+process, in addition to the focused negative tests.
 
 There are no unresolved failing conformance seeds in the recorded runs. A
 failure names its seed in the pytest node ID; replay that seed and the named
@@ -130,9 +159,12 @@ transport and makes no socket/startup qualification claim.
 
 ## Advisory CI and runtime budget
 
-The new workflow has only `workflow_dispatch`; it has no push or pull-request
-trigger, modifies no required check and cannot run because another packet
-changed unrelated paths. It creates four independent jobs: concurrency and
+The workflow remains opt-in. In addition to `workflow_dispatch`, it accepts a
+push only on `sol/h24-10-chaos-ci-20261106`, only for the owned test/workflow/doc
+paths, and only executes tests when the head commit contains `[h24-offline]`.
+There is no pull-request trigger and no required-check modification. This lets
+the isolated source branch qualify before merge without launching this lane for
+another packet's paths. It creates four independent jobs: concurrency and
 failures on Python 3.12 and 3.13, with `fail-fast: false`.
 
 The hosted setup prepares only exact test dependencies (pytest 9.2.0,
@@ -144,14 +176,17 @@ opt-in and non-required, not `continue-on-error`.
 
 The measured test budget is 60 seconds per lane. `within_budget` is a reported
 performance target, not a correctness bypass or a flaky timing assertion.
-The job has a five-minute hard timeout including dependency setup and artifact
-upload. Timing and JUnit artifacts are retained for seven days. Runs on the
-same ref may replace an obsolete source-only run; matrix lanes do not cancel
-each other on failure.
+The pytest subprocess has a 120-second deadline; timeout yields exit 124 and
+NOT_QUALIFIED. Each job has a five-minute hard timeout including dependency
+setup and artifact upload. JSON, JUnit and execution-manifest artifacts are
+retained for seven days. Opted-in runs on the same ref may replace an obsolete
+source-only run. Unmarked pushes use a separate concurrency group and cannot
+cancel an opted-in run; matrix lanes do not cancel each other on failure.
 
 GitHub [requires the workflow on the default branch for manual triggering](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch).
-This packet delivers
-the workflow source; it does not merge, dispatch or claim a hosted run.
+The explicitly marked branch-push route removes that pre-merge limitation.
+Both routes run the same source-only tests with default seeds `0,1,0x2410`;
+push events do not depend on missing manual-input fields.
 
 ## Integration ownership and limits
 
@@ -191,10 +226,12 @@ No merge, approval, service install, activation or production-serving effect
 is part of this delivery. There is no live runner, unknown external mutation
 or watcher created by the harness.
 
-The parent integration owner should inspect the exact isolated commit and its
-base-relative owned diff, then integrate that commit through the existing
-source workflow. Its parent must remain the immutable implementation base
-above. Do not redo the passing local seed matrix without a material source,
-authority, behavior or evidence change. Hosted 3.12/3.13 execution after
-integration and real native/host acceptance belong to their respective
-existing owners; neither blocks independent source work in other packets.
+The assigned source session owns the branch and its focused draft PR through
+this packet's source-only completion. The branch remains descended from the
+immutable implementation base above; no integration or production file is
+changed. The prior `afbcacaee7ac4eafeefd5a00c33766e0ff290a63` checkpoint retains
+its original 63-case evidence. This continuation adds the demonstrated runner,
+isolation and claim-boundary gaps, which materially require fresh qualification.
+Do not repeat accepted checks without a material source, authority, behavior or
+evidence change. Source merge and real native/host acceptance remain outside
+this assignment; neither is claimed by the source-only CI lane.
