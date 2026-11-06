@@ -109,7 +109,8 @@ def loaded_entry(published, *, clean_yaml=False):
 def before_census_runtime(manifest):
     prior = dict(manifest)
     assert len(prior) == 107
-    assert prior["ext/lane_runtime.py"] == builder.GO_CENSUS_RUNTIME_DIGEST
+    assert prior["ext/lane_runtime.py"] in (builder.GO_CENSUS_RUNTIME_DIGEST,
+                                            builder.GO_CENSUS_EXIT_RUNTIME_DIGEST)
     prior["ext/lane_runtime.py"] = builder.GO_CENSUS_RUNTIME_PREIMAGE
     return prior
 
@@ -509,15 +510,19 @@ def test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace(bu
 
 def test_exact_census_successor_preserves_original_107_without_mutation(builds):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
-    before = dict(current)
+    assert current["ext/lane_runtime.py"] == builder.GO_CENSUS_EXIT_RUNTIME_DIGEST
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-    builder.validate_go_base_manifest(current, captured)
-    builder.validate_go_base_manifest(before_census_runtime(current), captured)
-    assert current == before
+    previous = dict(current, **{"ext/lane_runtime.py": builder.GO_CENSUS_RUNTIME_DIGEST})
+    for candidate in (current, previous, before_census_runtime(current)):
+        before = dict(candidate)
+        builder.validate_go_base_manifest(candidate, captured)
+        assert candidate == before
 
 
 @pytest.mark.parametrize("namespace", ["106", "104", "102"])
-def test_census_successor_cannot_be_backdated_to_a_historical_namespace(builds, namespace):
+@pytest.mark.parametrize("runtime_digest", [builder.GO_CENSUS_RUNTIME_DIGEST,
+                                             builder.GO_CENSUS_EXIT_RUNTIME_DIGEST])
+def test_census_successor_cannot_be_backdated_to_a_historical_namespace(builds, namespace, runtime_digest):
     current = json.loads((builds.default / "native-manifest.json").read_bytes())
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     prior = before_original_artifact_recovery(current) if namespace == "106" else before_participant_cohort(current)
@@ -527,9 +532,11 @@ def test_census_successor_cannot_be_backdated_to_a_historical_namespace(builds, 
         for name in builder.GO_POST_FAILURE_ADDITIONS:
             del prior["ext/" + name]
     assert len(prior) == int(namespace)
-    prior["ext/lane_runtime.py"] = builder.GO_CENSUS_RUNTIME_DIGEST
+    prior["ext/lane_runtime.py"] = runtime_digest
+    before = dict(prior)
     with pytest.raises(ValueError, match="census cannot relabel"):
         builder.validate_go_base_manifest(prior, captured)
+    assert prior == before
 
 
 @pytest.mark.parametrize("digest", ["f" * 64, ""])
