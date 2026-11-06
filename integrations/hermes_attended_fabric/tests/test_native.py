@@ -86,8 +86,14 @@ class TestNativeFabric(unittest.TestCase):
         self.assertEqual(same, run_id_for(self.grant, "one-thing"))
         other = SessionGrant(self.grant.profile_id, self.grant.session_id,
                              self.grant.root_id, self.grant.parent_id, "generation-B")
-        self.assertNotEqual(same, run_id_for(other, "one-thing"))
+        self.assertEqual(same, run_id_for(other, "one-thing"))
         self.assertTrue(same.startswith("hermes-native-"))
+
+    def test_reconnect_does_not_create_new_original_run(self):
+        changed = SessionGrant("main", "native-session-A", "hermes-owned-root-A",
+                               "hermes-owned-root-A", "generation-after-restart")
+        self.assertEqual(run_id_for(self.grant, "one-thing"),
+                         run_id_for(changed, "one-thing"))
 
     def test_preview_cannot_dispatch(self):
         result = self.call("preview", **{k: v for k, v in self.fields().items()
