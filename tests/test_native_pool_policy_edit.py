@@ -80,7 +80,7 @@ def test_explicit_remove_and_routing_replacement_do_not_leave_hidden_old_values(
     assert "DRAIN_OR_RETAIN_ACTIVE_BINDINGS" in preview["requirements"]
 
 
-@pytest.mark.parametrize("request", [
+@pytest.mark.parametrize("change_set", [
     {}, {"schema": "wrong"}, {"schema": edit.EDITS_SCHEMA, "enable_now": True},
     {"schema": edit.EDITS_SCHEMA, "pool_removals": ["glm", "glm"]},
     {"schema": edit.EDITS_SCHEMA, "pool_removals": [{}]},
@@ -89,9 +89,9 @@ def test_explicit_remove_and_routing_replacement_do_not_leave_hidden_old_values(
     {"schema": edit.EDITS_SCHEMA, "pool_upserts": {"glm": False}},
     {"schema": edit.EDITS_SCHEMA, "routing": []},
 ])
-def test_closed_edit_schema_rejects_ambiguous_or_unknown_operations(request):
+def test_closed_edit_schema_rejects_ambiguous_or_unknown_operations(change_set):
     with pytest.raises(policy.PolicyChangeError):
-        edit.parse_edits(raw(request))
+        edit.parse_edits(raw(change_set))
 
 
 @pytest.mark.parametrize("value", [b'{"schema":"one","schema":"two"}', b'{"x":NaN}',
