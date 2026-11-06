@@ -6,11 +6,25 @@ test fixtures supply owner data; no handler/auth implementation is copied here.
 """
 from __future__ import annotations
 
+import sys
+import unittest
+
+# The existing lightweight Hermes CI profile uses stdlib unittest discovery.
+# These integration functions require pytest and its explicit dependency profile;
+# unittest cannot execute them. Do not conceal missing imports in a pytest run.
+if "pytest" not in sys.modules:
+    raise unittest.SkipTest(
+        "H24-04 is a pytest-only integration suite; run python -m pytest "
+        "integrations/hermes_qualification/tests/test_h24_api_conformance.py"
+    )
+
 import asyncio
 import copy
 import dataclasses
 import hashlib
 import json
+import subprocess
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 import httpx
@@ -427,6 +441,36 @@ def test_unknown_approval_and_model_selected_target_are_not_public_authority(
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("surface", ["coo_http", "coo_mcp", "ruling"])
+@pytest.mark.parametrize("second_member", [0, 1], ids=["same-token", "different-principal"])
+def test_ambiguous_authorization_never_selects_a_principal(identities, tmp_path, surface, second_member):
+    async def request(app, token, path, body):
+        other = identities[second_member].token(fixture_policy(identities, facet="coo_legacy"))
+        headers = [("authorization", "Bearer " + token), ("authorization", "Bearer " + other),
+                   *rpc_headers().items()]
+        async with signed_asgi_client(app, token) as client:
+            response = await client.post(path, json=body, headers=headers)
+            assert response.status_code == 401, response.text
+
+    async def run():
+        if surface == "ruling":
+            async with ruling_surface(tmp_path, identities) as (app, token, recorder, _):
+                await request(app, token, "/mcp/principal-ruling",
+                    rpc("tools/call", name="ruling", arguments=dict(ruling_fixture.RULING)))
+                assert recorder.frames == []
+        else:
+            async with coo_surface(tmp_path, identities) as (core, settings, token, state, _):
+                state["mission"] = None  # auth refusal must precede owner data
+                if surface == "coo_http":
+                    await request(core, token, "/v1/tools/executive_mandate",
+                                  {"arguments": {"work_ref": "WS:ONE"}})
+                else:
+                    app = build_coo_mcp_app(settings, audit_sink=FixtureAudit())
+                    async with _mounted_lifespan(app):
+                        await request(app, token, "/mcp/coo", rpc())
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("raw,expected", [
     (b"{", 400),
     pytest.param(b'{"arguments":{"work_ref":"WS:ONE"},"arguments":{"work_ref":"WS:ONE"}}', 400,
@@ -599,6 +643,172 @@ def test_lost_original_submit_reconciles_after_fresh_admission_closes_without_re
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("shared_operation", [True, False], ids=["same-operation", "distinct-operations"])
+def test_two_bound_principals_cannot_borrow_original_effects(
+    identities, tmp_path, short_socket_root, shared_operation,
+):
+    async def run():
+        host = ingress_fixture.service(tmp_path, short_socket_root)
+        await host.start()
+        try:
+            async with coo_surface(tmp_path, identities, member=0,
+                    socket_path=host.ceo_ingress_socket_path) as a, coo_surface(
+                    tmp_path, identities, member=1,
+                    socket_path=host.ceo_ingress_socket_path) as b:
+                surfaces = [a, b]
+                wire_frames = []
+
+                def observed_send(label, actual_send):
+                    async def send(path, frame):
+                        wire_frames.append((label, copy.deepcopy(frame)))
+                        return await actual_send(path, frame)
+                    return send
+
+                for label, (core, _, _, _, _) in enumerate(surfaces):
+                    core._client.send_frame = observed_send(label, core._client.send_frame)
+                async with signed_asgi_client(a[0], a[2]) as ca, signed_asgi_client(b[0], b[2]) as cb:
+                    access = [SecretaryAccessClient(work_ref="WS:ONE", root_job_id="JOB-001",
+                              workspace=client, coo=client, clock=lambda: FIXTURE_NOW)
+                              for client in (ca, cb)]
+                    requests = [request_body(), request_body(
+                        operation_key="h24-original-operation" if shared_operation else "h24-secretary-operation")]
+                    expected = [original_ref(body) for body in requests]
+                    outcomes = await asyncio.gather(
+                        *(client.submit_intent(body) for client, body in zip(access, requests)))
+                    assert [outcome["request_ref"] for outcome in outcomes] == expected
+                    assert all(outcome["replay_authorized"] is False for outcome in outcomes)
+                    accepted = [i for i, outcome in enumerate(outcomes)
+                                if outcome["state"] == "ADMISSION_ACCEPTED"]
+                    assert len(accepted) == (1 if shared_operation else 2), outcomes
+                    if shared_operation:
+                        assert expected[0] == expected[1]
+                        loser = 1 - accepted[0]
+                        assert outcomes[loser]["state"] == "REFUSED", outcomes
+                        assert outcomes[loser]["reason_code"] == "operation_conflict"
+                        assert outcomes[loser].get("job_id") is None
+                    else:
+                        assert expected[0] != expected[1]
+                        assert outcomes[0]["job_id"] != outcomes[1]["job_id"]
+                    assert len(host.runtime.jobs.list_jobs()) == len(accepted)
+                    submits = [(label, frame) for label, frame in wire_frames
+                               if frame["schema"] == ingress.PRINCIPAL_SUBMIT_SCHEMA]
+                    assert [sum(label == i for label, _ in submits) for i in range(2)] == [1, 1]
+                    assert len({frame["principal_context"]["principal_binding_digest"]
+                                for _, frame in submits}) == 2
+                    host._ceo_ingress_app_binding = dataclasses.replace(
+                        host._ceo_ingress_app_binding, principal_admission_armed=False)
+                    for winner in accepted:
+                        own = await access[winner].reconcile_intent(expected[winner])
+                        assert own["state"] == "ADMISSION_ACCEPTED", own
+                        assert own["job_id"] == outcomes[winner]["job_id"]
+                        assert own["dispatched"] is False
+                        foreign = await access[1 - winner].reconcile_intent(expected[winner])
+                        assert foreign["state"] == "REFUSED", foreign
+                        assert foreign["reason_code"] == "operation_conflict"
+                        assert foreign.get("job_id") is None
+                    assert sum(frame["schema"] == ingress.PRINCIPAL_SUBMIT_SCHEMA
+                               for _, frame in wire_frames) == 2
+                    assert len(host.runtime.jobs.list_jobs()) == len(accepted)
+        finally:
+            await host.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("boundary", ["after_grounding", "after_submit"])
+@pytest.mark.parametrize("change", ["disabled", "rotated_receipt"])
+def test_permission_change_at_send_boundary_preserves_original_effect(
+    identities, tmp_path, short_socket_root, boundary, change,
+):
+    async def run():
+        host = ingress_fixture.service(tmp_path, short_socket_root)
+        await host.start()
+        try:
+            async with coo_surface(tmp_path, identities,
+                    socket_path=host.ceo_ingress_socket_path) as (core, _, token, state, _):
+                saved_binding = copy.deepcopy(state["binding"])
+                original_send = core._client.send_frame
+                frames, revocations = [], []
+
+                async def send(path, frame):
+                    frames.append(copy.deepcopy(frame))
+                    response = await original_send(path, frame)
+                    selected = (frame["schema"].endswith("grounding.v1")
+                                if boundary == "after_grounding"
+                                else frame["schema"] == ingress.PRINCIPAL_SUBMIT_SCHEMA)
+                    if selected:
+                        if change == "disabled":
+                            state["binding"]["enabled"] = False
+                        else:
+                            state["binding"]["binding"]["permission_digest"] = permission_receipt("rotated")
+                        revocations.append(frame["schema"])
+                    return response
+
+                core._client.send_frame = send
+                transport = ObservedAsgiTransport(core)
+                async with signed_asgi_client(core, token, transport=transport) as client:
+                    access = SecretaryAccessClient(work_ref="WS:ONE", root_job_id="JOB-001",
+                        workspace=client, coo=client, clock=lambda: FIXTURE_NOW)
+                    outcome = await access.submit_intent(request_body())
+                    expected = original_ref()
+                    submitted = boundary == "after_submit"
+                    assert len(revocations) == 1
+                    assert outcome["state"] == ("EFFECT_UNKNOWN" if submitted else "REFUSED"), outcome
+                    assert outcome["request_ref"] == expected
+                    assert outcome["replay_authorized"] is False
+                    assert outcome.get("job_id") is None
+                    assert sum(frame["schema"] == ingress.PRINCIPAL_SUBMIT_SCHEMA for frame in frames) == int(submitted)
+                    jobs = host.runtime.jobs.list_jobs()
+                    assert len(jobs) == int(submitted)
+                    if submitted:
+                        refused = await access.reconcile_intent(expected)
+                        assert refused["state"] == "REFUSED", refused
+                        assert refused["reason_code"] == (
+                            "authority_refused" if change == "disabled" else "operation_conflict")
+                        assert refused.get("job_id") is None
+                        # Fixture restoration uses the exact original receipt;
+                        # a rotated receipt must never borrow the old context.
+                        state["binding"] = saved_binding
+                        host._ceo_ingress_app_binding = dataclasses.replace(
+                            host._ceo_ingress_app_binding, principal_admission_armed=False)
+                        recovered = await access.reconcile_intent(expected)
+                        assert recovered["state"] == "ADMISSION_ACCEPTED", recovered
+                        assert recovered["request_ref"] == expected
+                        assert recovered["job_id"] == jobs[0].job_id
+                        assert recovered["dispatched"] is False
+                    assert sum(frame["schema"] == ingress.PRINCIPAL_SUBMIT_SCHEMA for frame in frames) == int(submitted)
+                    assert sum(request.path == "/v1/tools/submit_principal_intent"
+                               for request in transport.requests) == 1
+                    assert len(host.runtime.jobs.list_jobs()) == int(submitted)
+        finally:
+            await host.close()
+    asyncio.run(run())
+
+
+def test_secretary_retains_uncertainty_for_an_opaque_server_refusal(identities, tmp_path):
+    async def run():
+        async with coo_surface(tmp_path, identities) as (core, _, token, _, _):
+            frames = []
+
+            async def send(path, frame):
+                frames.append(copy.deepcopy(frame))
+                if frame["schema"].endswith("grounding.v1"):
+                    return CeoIngressResponse("sent_ok", ok=True, result=ingress_fixture.GROUNDING)
+                return CeoIngressResponse("not_sent")
+
+            core._client.send_frame = send
+            async with signed_asgi_client(core, token) as client:
+                access = SecretaryAccessClient(work_ref="WS:ONE", root_job_id="JOB-001",
+                    workspace=client, coo=client, clock=lambda: FIXTURE_NOW)
+                outcome = await access.submit_intent(request_body())
+                # COO knows its transport did not send, but the consumer sees
+                # HTTP 503 and conservatively retains the original uncertainty.
+                assert outcome["state"] == "EFFECT_UNKNOWN"
+                assert outcome["request_ref"] == original_ref()
+                assert outcome["replay_authorized"] is False
+                assert sum(frame["schema"] == ingress.PRINCIPAL_SUBMIT_SCHEMA for frame in frames) == 1
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("outcome", ["not_sent", "lost", "raised", "bad_receipt"])
 def test_pre_and_post_send_outcomes_retain_original_identity(identities, tmp_path, outcome):
     async def run():
@@ -730,7 +940,8 @@ def test_ruling_strict_json_boundary_refuses_before_forwarding(identities, tmp_p
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("change", ["none", "mutated", "answered", "authority_revoked", "binding_drift"])
+@pytest.mark.parametrize("change", ["none", "mutated", "answered", "authority_revoked", "binding_drift",
+                                  "invalid_option", "policy_denied", "policy_revoked_at_commit"])
 def test_existing_ruling_source_fence_rechecks_current_unanswered_decision(
     short_socket_root, monkeypatch, change,
 ):
@@ -789,3 +1000,13 @@ def test_distinct_resource_verifier_and_missing_c34_composition_are_explicit(ide
             with pytest.raises(ValueError, match="share the Executive resource"):
                 dataclasses.replace(settings, policy=policy)
     asyncio.run(run())
+
+
+def test_stdlib_discovery_explicitly_separates_the_pytest_profile():
+    result = subprocess.run([sys.executable, "-S", "-m", "unittest", "discover", "-v",
+        "-s", str(Path(__file__).parent), "-p", Path(__file__).name],
+        capture_output=True, text=True, timeout=20, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Ran 1 test" in result.stderr
+    assert "OK (skipped=1)" in result.stderr
+    assert "pytest-only integration suite" in result.stderr
