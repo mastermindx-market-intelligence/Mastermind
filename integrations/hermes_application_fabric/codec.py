@@ -18,7 +18,7 @@ MAX_ARGUMENT_BYTES = 128 * 1024
 ID = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}\Z")
 _KEYS = frozenset({"model", "messages", "tools", "tool_choice", "max_tokens",
                    "max_completion_tokens", "temperature", "stop", "stream",
-                   "stream_options"})
+                   "stream_options", "extra_headers"})
 
 
 def fail(code="hermes_fabric_request_invalid"):
@@ -109,6 +109,19 @@ def to_owner_request(kwargs: dict, selected_model: str) -> dict:
     kw = json.loads(json_bytes(kwargs, MAX_REQUEST_BYTES))
     if kw.get("model") != _id(selected_model):
         fail("hermes_fabric_model_selection_mismatch")
+    if "extra_headers" in kw:
+        # Native Relay adds SDK-shaped traceparent AFTER llm_execution. The
+        # native trace already records this call; APPLICATION correlation uses
+        # its original request_id. Do not forward arbitrary HTTP/auth headers
+        # through an owner API that does not accept header overrides.
+        headers = kw["extra_headers"]
+        if type(headers) is not dict or len(headers) > 1:
+            fail("hermes_fabric_header_unsupported")
+        for name, value in headers.items():
+            if (name.lower() != "traceparent" or type(value) is not str
+                    or re.fullmatch(r"00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}", value) is None
+                    or value[3:35] == "0" * 32 or value[36:52] == "0" * 16):
+                fail("hermes_fabric_header_unsupported")
     if "stream" in kw and type(kw["stream"]) is not bool:
         fail()
     if "stream_options" in kw:

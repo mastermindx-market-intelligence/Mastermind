@@ -83,6 +83,16 @@ class ConversationCodecTests(unittest.TestCase):
     def test_output_budget_alias(self):
         self.assertEqual(to_owner_request(request(max_completion_tokens=21), "model-1")["max_tokens"], 21)
 
+    def test_native_relay_trace_header_is_not_an_owner_auth_override(self):
+        trace = "00-" + "a" * 32 + "-" + "b" * 16 + "-01"
+        converted = to_owner_request(request(extra_headers={"traceparent": trace}), "model-1")
+        self.assertNotIn("extra_headers", converted)
+        for headers in [{"Authorization": "Bearer must-not-pass"}, {"traceparent": "invalid"},
+                        {"X-MM-Application-Turn-ID": "another-turn"},
+                        {"traceparent": trace, "x-pool": "override"}]:
+            with self.subTest(headers=list(headers)), self.assertRaises(HermesFabricError):
+                to_owner_request(request(extra_headers=headers), "model-1")
+
     def test_unknown_roles_and_carriers(self):
         for msg in [dict(role="developer", content="x"), dict(role="user", content="x", name="a"),
                     dict(role="assistant", content="x", reasoning_content="private"),
