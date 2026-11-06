@@ -1112,7 +1112,14 @@ from pathlib import Path
 sys.path.insert(0,sys.argv[1])
 import native_install as i
 import native_generation as g
-p,payload=i.read_successor(Path(sys.argv[2]))
+try:
+ p,payload=i.read_successor(Path(sys.argv[2]))
+except FileNotFoundError:
+ # Only a READ of an already-completed historical pin may use the fixed,
+ # full-byte-pinned retained receipt path when its original bootstrap
+ # artifact has been pruned. Never admit new native apply/reconcile here.
+ if sys.argv[5]!='status':raise
+ p,payload=i.read_retained_successor_after_bootstrap_prune(Path(sys.argv[2]))
 assert p['digest']==sys.argv[3]
 store=Path(p['store']);current=g.current(store);old=p['expected_selection']
 new={'schema':g.POINTER_SCHEMA,'generation':p['target_generation'],'previous':old['generation'],'sequence':old['sequence']+1}
@@ -1122,8 +1129,8 @@ if current==old:
 elif current==new:
  i._upgrade_entries(p,complete=True);phase='SELECTED'
 elif (sys.argv[4] in (
-        'admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt3',
-        'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4')
+        'admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal',
+        'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4')
       and p['digest']=='77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7'
       and new['generation']=='28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce'
       and new['sequence']==24
@@ -1132,10 +1139,10 @@ elif (sys.argv[4] in (
       and type(current.get('sequence')) is int
       and current['sequence']>new['sequence']
       and current.get('previous') not in (None,current.get('generation'))):
- # Each original seven-seat native pin shares this exact completed immutable
- # sequence-24 successor. Later native releases do not invalidate historical
- # ingress, but only these seven enrolled accounts may accept the verified
- # forward selection. No other pin/generation/account gains admission.
+ # All eight reviewed public-seat native pins share this completed immutable
+ # sequence-24 successor (including the non-Paper-v20 personal profile).
+ # Later native releases do not invalidate historical ingress, but only
+ # these eight exact accounts admit verified forward selection.
  g.verify(store,new['generation'])
  g.verify(store,current['generation'])
  g.verify(store,current['previous'])
@@ -1149,7 +1156,8 @@ print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_g
     def proof():
         try:
             r = subprocess.run([sys.executable, *python_flags, "-c", code, str(rollout),
-                str(args.successor_bundle), args.successor_plan_sha256, args.account],
+                str(args.successor_bundle), args.successor_plan_sha256, args.account,
+                args.operation],
                 capture_output=True, timeout=30)
         except (OSError, subprocess.SubprocessError):
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED") from None
