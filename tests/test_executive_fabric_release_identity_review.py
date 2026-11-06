@@ -25,7 +25,14 @@ def test_only_exact_reviewed_file_and_spelling_qualifies(path):
         ['_mastermind_operator_canary', '0o700'] if path ==
         'control_plane/codex_operator_adapter.py' else
         ['430', '512', '401', '403', '409', '503', '503', '503', '503'] if path ==
-        'app/mastermind_os/src-tauri/src/auth.rs' else [])
+        'app/mastermind_os/src-tauri/src/auth.rs' else
+        # Exact protected installer60fb9e55 retains these17 findings unchanged;
+        # only the newly reviewed initial directory-mode token is masked.
+        ['_mastermind_exec', '_mastermind_exec', '_mastermind_worker',
+         '_mastermind_worker', '_mastermind_ops', '_mastermind_ops',
+         '_mastermind_ops', '_mastermind_ops', '452', '457',
+         '_mastermind_worker', '_mastermind_worker', '452', '432', '457',
+         '432', '432'] if path == 'ops/executive_os/install.sh' else [])
     assert scan(text, path) == expected
     assert reviewed_literal_spans('unreviewed/'+path, text) == ()
 
