@@ -582,7 +582,7 @@ export function ProjectPlanProposalWorkflow(
           </>
         )}
       {o && (
-        <p>
+        <p className="form-actions">
           <button
             className={unknown ? "primary" : undefined}
             disabled={busy || !current}
