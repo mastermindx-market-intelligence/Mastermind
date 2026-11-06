@@ -67,3 +67,20 @@ def test_web_project_instruction_text_fits_8000_characters() -> None:
     payload, closing, _ = fenced.partition("```")
     assert closing and payload.startswith("MASTERMIND SOL BOOTSTRAP")
     assert len(payload) <= 8000
+
+def test_mastermind_merge_queue_auto_arm_omits_unsupported_branch_deletion() -> None:
+    """A real queue rejected --delete-branch before creating an arm request."""
+    workflow = _read("docs/DELIVERY_WORKFLOW.md")
+    _, marker, release = workflow.partition(
+        "this head-leased request against the exact qualified candidate:"
+    )
+    assert marker
+    _, fenced, command = release.partition("```bash\n")
+    assert fenced
+    command, ending, _ = command.partition("```")
+    assert ending
+    assert "gh pr merge <PR>" in command
+    assert "--auto --squash" in command
+    assert "--match-head-commit <CURRENT_40_HEX_HEAD>" in command
+    assert "--delete-branch" not in command
+    assert "GitHub CLI refuses `--delete-branch`" in release
