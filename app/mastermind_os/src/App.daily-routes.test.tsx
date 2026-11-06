@@ -119,10 +119,10 @@ describe("owner-backed daily routes in App", () => {
         screen.getByRole("region", { name: "Meta-CEO answer" }).textContent,
       ).toContain("Private daily project"),
     );
-    await user.type(
+    await user.click(
       screen.getByRole("textbox", { name: "Direction to Meta-CEO" }),
-      "Office direction only",
     );
+    await user.paste("Office direction only");
     await user.click(screen.getByRole("button", { name: "Inbox" }));
     expect(
       (await screen.findAllByText("Private reserved decision")).length,
@@ -139,10 +139,8 @@ describe("owner-backed daily routes in App", () => {
       screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent notes" })
         .value,
     ).toBe("");
-    await user.type(
-      screen.getByRole("textbox", { name: "Unsent notes" }),
-      "Keep this conversation thought",
-    );
+    await user.click(screen.getByRole("textbox", { name: "Unsent notes" }));
+    await user.paste("Keep this conversation thought");
     await user.click(screen.getByRole("button", { name: "Review evidence" }));
     expect(
       screen.getByRole("region", { name: "Conversation evidence" }),
