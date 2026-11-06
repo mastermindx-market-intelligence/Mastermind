@@ -1,3 +1,4 @@
+import {ProjectDetailsNavigator} from './projects/ProjectDetailsNavigator';
 import {RetainedResultContent} from './activity/RetainedResultContent';
 import {PlanAdoptionWorkflow} from "./planning/PlanAdoptionWorkflow";
 import { appCopy } from "./app-copy";
@@ -5265,25 +5266,28 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 {"reason" in mission ? <code>{mission.reason}</code> : null}
               </details>
             </> : undefined}
-            detailsPanel={<>
-              {panel}{retainedResultHost ? <PlanAdoptionWorkflow workRef={projectWorkRef} inspection={inspection}
-                host={retainedResultHost} isHostCurrent={planAdoptionHostCurrent} locale={locale}/> : null}
-              {recordedDirection}{projectAdmissionPanel}
-              {projectDetailsControls.instructions}{projectDetailsControls.access}
-              <details className="reason-details"><summary>{locale === "zh-CN" ? "项目历史与来源证据" : "Project history and source evidence"}</summary>
-              {projectConversations.panel}
-              {projectConversationHistory.panel}
-                {projectSessionEvidence}{recordedProjectJournal}
-              </details>
-              {projectConversationActive ? <>
-                <AutonomyPanel selection={selection} read={projectReaders.autonomy}
-                  canRead={Boolean(projectReaders.generation) && projectReaders.canRead()}
-                  sourceGeneration={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"} locale={locale}/>
-                <details className="reason-details"><summary>{locale === "zh-CN" ? "更多工作详情" : "More work details"}</summary>
-                  <ProjectTabs locale={locale} active="Conversation" onChange={changeProjectTab}/>
-                </details>
-              </> : null}
-            </>}/>}/>
+            detailsPanel={<ProjectDetailsNavigator
+              scopeKey={JSON.stringify([authRevision, projectWorkRef])}
+              locale={locale} title={currentProjectCards[0].title || projectWorkRef} goal={objective}
+              sections={[
+                {id:"direction", content:recordedDirection},
+                {id:"plan", content:<>{panel}{retainedResultHost ? <PlanAdoptionWorkflow workRef={projectWorkRef} inspection={inspection}
+                  host={retainedResultHost} isHostCurrent={planAdoptionHostCurrent} locale={locale}/> : null}</>},
+                {id:"work", content:<>{projectAdmissionPanel}
+                  {projectConversationActive ? <>
+                    <AutonomyPanel selection={selection} read={projectReaders.autonomy}
+                      canRead={Boolean(projectReaders.generation) && projectReaders.canRead()}
+                      sourceGeneration={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"} locale={locale}/>
+                    <details className="reason-details"><summary>{locale === "zh-CN" ? "更多工作详情" : "More work details"}</summary>
+                      <ProjectTabs locale={locale} active="Conversation" onChange={changeProjectTab}/>
+                    </details>
+                  </> : null}</>},
+                {id:"instructions", content:projectDetailsControls.instructions},
+                {id:"permissions", content:projectDetailsControls.access},
+                {id:"history", content:<details className="reason-details"><summary>{locale === "zh-CN" ? "项目历史与来源证据" : "Project history and source evidence"}</summary>
+                  {projectConversations.panel}{projectConversationHistory.panel}{projectSessionEvidence}{recordedProjectJournal}
+                </details>},
+              ]}/>}/>}/>
         ) : !catalogueProject && (projectTab || directSelected) && selection ? (
         <>
           <section className="hero">

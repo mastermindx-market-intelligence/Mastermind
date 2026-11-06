@@ -62,6 +62,9 @@ async function prepare({ foreignConversation = false } = {}) {
   fireEvent.click(screen.getByRole("button", { name: "Projects" }));
   fireEvent.click(await screen.findByRole("button", { name: "Open project Qualified instruction project" }));
   fireEvent.click(await screen.findByRole("button", { name: "Project details" }));
+  // The details navigator hides each owner until its overview button chooses
+  // it; choosing Standing instructions is presentation-only and reads nothing.
+  fireEvent.click(screen.getByRole("button", { name: "Standing instructions" }));
   fireEvent.click(screen.getByRole("button", { name: "Read instructions" }));
   fireEvent.click(await screen.findByRole("button", { name: /Review instruction:/ }));
   const change = screen.getByRole("button", { name: "Change in conversation" });

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { openLegacyProjectTabs, openObservedConversation } from "./test-operational-navigation";
+import { openObservedConversation } from "./test-operational-navigation";
 import {
   act,
   cleanup,
@@ -119,10 +119,10 @@ describe("owner-backed daily routes in App", () => {
         screen.getByRole("region", { name: "Meta-CEO answer" }).textContent,
       ).toContain("Private daily project"),
     );
-    await user.type(
+    await user.click(
       screen.getByRole("textbox", { name: "Direction to Meta-CEO" }),
-      "Office direction only",
     );
+    await user.paste("Office direction only");
     await user.click(screen.getByRole("button", { name: "Inbox" }));
     expect(
       (await screen.findAllByText("Private reserved decision")).length,
@@ -139,10 +139,8 @@ describe("owner-backed daily routes in App", () => {
       screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Unsent notes" })
         .value,
     ).toBe("");
-    await user.type(
-      screen.getByRole("textbox", { name: "Unsent notes" }),
-      "Keep this conversation thought",
-    );
+    await user.click(screen.getByRole("textbox", { name: "Unsent notes" }));
+    await user.paste("Keep this conversation thought");
     await user.click(screen.getByRole("button", { name: "Review evidence" }));
     expect(
       screen.getByRole("region", { name: "Conversation evidence" }),
@@ -237,7 +235,9 @@ describe("owner-backed daily routes in App", () => {
     await user.click(openProject);
     expect(await screen.findByRole("button", {name:"Project details"})).toBeTruthy();
     expect(screen.getByRole("button", {name:"Files"})).toBeTruthy();
-    await openLegacyProjectTabs(user);
+    await user.click(screen.getByRole("button", { name: "Project details" }));
+    await user.click(screen.getByRole("button", { name: "Work controls" }));
+    await user.click(screen.getByText("More work details", { selector: "summary" }));
     await user.click(screen.getByRole("tab", {name:"Overview"}));
     const tabs = screen.getByRole("tablist", { name: "Project workspace" });
     for (const tab of ["Overview", "Plan", "Work", "Evidence", "More"])

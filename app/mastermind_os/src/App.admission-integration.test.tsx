@@ -63,6 +63,7 @@ async function setup({lost=false,pending=false,noPermission=false}={}) {
     fireEvent.click(screen.getByRole("button",{name:"Projects"}));
     fireEvent.click(await screen.findByRole("button",{name:"Open project Admission test programme"}));
     fireEvent.click(screen.getByRole("button",{name:"Project details"}));
+    fireEvent.click(screen.getByRole("button",{name:"Work controls",exact:true}));
   }
   const view=mount();await open();
   return {invoke,store,binding,launch,view,mount,open,notify,finish,observe:()=>{statusObserved=true;}};
@@ -84,6 +85,7 @@ it("mounts actual fixed controls without automatic reads/effects, then submits o
   expect(screen.queryByRole("button",{name:"Resume new work"})).toBeNull();
   fireEvent.click(screen.getByRole("button",{name:"Project details"}));
   fireEvent.click(screen.getByRole("button",{name:"Project details"}));
+  fireEvent.click(screen.getByRole("button",{name:"Work controls",exact:true}));
   expect(screen.queryByRole("button",{name:"Pause new work"})).toBeNull();
   expect(screen.queryByText("New work is not paused here. Other limits and permissions still apply.")).toBeNull();
 });
@@ -170,6 +172,7 @@ async function canonicalCycle({lostPause=false,lostResume=false,denyResume=false
     fireEvent.click(screen.getByRole("button",{name:"Projects"}));
     fireEvent.click(await screen.findByRole("button",{name:`Open project ${title}`}));
     fireEvent.click(screen.getByRole("button",{name:"Project details"}));
+    fireEvent.click(screen.getByRole("button",{name:"Work controls",exact:true}));
     await screen.findByRole("region",{name:"New work"});
   };
   await open();

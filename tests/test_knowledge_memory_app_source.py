@@ -43,24 +43,32 @@ def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(own
     git(o['env'].clone,'commit','-m','Complete canonical fixture decision association')
     git(o['env'].clone,'push','origin','main')
     o['request']['source_commit']=rev_parse(o['env'].clone,'HEAD')
-    # The donor fixture supplies this argument to the existing collector
-    # constructor. Its module's native-runtime skip mark is not inherited by
-    # this test; choose the current interpreter explicitly instead of relying
-    # on a Darwin-only /Library installation being present in Linux CI.
-    python = Path(sys.executable).absolute()
-    if runtime_kind == 'missing_interpreter':
-        python = tmp_path/'absent-native-runtime'/'bin'/'python3.12'
-        assert not python.exists()
+    # The donor fixture's native-runtime skip mark is not inherited here.
+    # Force the hosted branch and qualify this test's interpreter with the
+    # existing isolated-import check before issuing the compiler/collector.
+    # A selected interpreter failure must not switch to another runtime.
+    from ops.executive_os import capacity_source_contract
+    from tests.test_project_discovery_installed_plan import _qualified_source_python
+    missing = tmp_path/'absent-native-runtime'/'bin'/'python3.12'
+    assert not missing.exists()
+    monkeypatch.setattr(capacity_source_contract, 'PYTHON_BINARY', missing)
+    python = missing if runtime_kind == 'missing_interpreter' else _qualified_source_python()
+    if runtime_kind == 'portable':
+        assert python == Path(sys.executable).absolute()
     monkeypatch.setattr(installed_fixture, 'PYTHON_BINARY', python)
     collector,git_owner=configured(o,identity,tmp_path,monkeypatch)
     assert collector._python == python
-    original_runner, children = collector._runner, []
+    original_runner, children, failures = collector._runner, [], []
     def observe_child(argv, **options):
         if any(str(value).endswith(('/scripts/agentos_project_knowledge_entry.py',
                                    '/scripts/agentos_project_knowledge_recipe_entry.py')) for value in argv):
             assert argv[:3] == [str(python), '-I', '-B']
             children.append(tuple(argv))
-        return original_runner(argv, **options)
+        try:
+            return original_runner(argv, **options)
+        except FileNotFoundError:
+            failures.append((str(argv[0]), 'FileNotFoundError'))
+            raise
     monkeypatch.setattr(collector, '_runner', observe_child)
     async def run():
         auth=_authenticator(rsa_key);token=_workspace_token(rsa_key)
@@ -111,12 +119,15 @@ def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(own
                 programs=await get('/workspace/programs/current')
                 assert any(row['work_ref']=='WS:ALPHA' for row in programs['control_room']['work'])
                 if runtime_kind == 'missing_interpreter':
+                    events_before=o['runtime'].events.list_events()
                     refused=await client.get('/workspace/project-knowledge/current',params={'work_ref':'WS:ALPHA'})
                     assert refused.status_code==503,refused.text
                     assert refused.json()['reason_codes']==['SOURCE_UNAVAILABLE']
                     assert refused.json()['project'] is None and refused.json()['source'] is None
                     assert len(children)==1 and o['pr'].create_calls==0
+                    assert failures and all(item==(str(python),'FileNotFoundError') for item in failures)
                     assert o['runtime'].jobs.list_jobs()==[]
+                    assert o['runtime'].events.list_events()==events_before
                     return
                 initial=await catalogue()
                 file_request=copy.deepcopy(o['request'])
@@ -177,3 +188,16 @@ def test_actual_memory_edit_published_and_reopened_by_same_installed_readers(own
                 if destination:Path(destination).write_text(json.dumps(output,ensure_ascii=False,sort_keys=True))
         finally:await host.close()
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('configured_present',[True,False])
+def test_memory_source_selected_interpreter_failure_never_falls_back(tmp_path,monkeypatch,configured_present):
+    import subprocess
+    from ops.executive_os import capacity_source_contract
+    from tests.test_project_discovery_installed_plan import _qualified_source_python
+    failed=tmp_path/'selected-python'
+    failed.write_text('#!/bin/sh\nexit 7\n');failed.chmod(0o700)
+    monkeypatch.setattr(capacity_source_contract,'PYTHON_BINARY',failed if configured_present else tmp_path/'absent-cf1')
+    if not configured_present:monkeypatch.setattr(sys,'executable',str(failed))
+    with pytest.raises(subprocess.CalledProcessError) as error:_qualified_source_python()
+    assert error.value.returncode==7 and error.value.cmd[0]==str(failed)

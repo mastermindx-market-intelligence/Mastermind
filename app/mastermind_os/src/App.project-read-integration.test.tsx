@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import {act,cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
+import {act,cleanup,fireEvent,render,screen,waitFor,within} from "@testing-library/react";
 import {afterEach,beforeEach,expect,it,vi} from "vitest";
 import {App} from "./App";
 import {bindMissionHost,createNativeClient} from "./host";
@@ -44,9 +44,14 @@ it("opens rootless canonical Plan/Journal through actual host decoders under Pro
   expect(await screen.findByText("Deliver the real owner content.")).toBeTruthy();
   expect(f.journalRead).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button",{name:"Project details"}));
-  expect(screen.getAllByText("Deliver the real owner content.")).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button",{name:"Plan",exact:true}));
+  const visiblePlan=within(screen.getByRole("region",{name:"Inspect Plan",exact:true}));
+  expect(visiblePlan.getByText("Deliver the real owner content.")).toBeTruthy();
   expect(f.planRead).toHaveBeenCalledExactlyOnceWith({work_ref:"WS:ONE",signal:expect.any(AbortSignal)});
   expect(f.journalRead).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button",{name:/Back to project details/}));
+  fireEvent.click(screen.getByRole("button",{name:"History and sources",exact:true}));
+  fireEvent.click(screen.getByText("Project history and source evidence",{selector:"summary"}));
   fireEvent.click(screen.getByRole("button",{name:"Read project journal"}));
   await waitFor(()=>expect(f.journalRead).toHaveBeenCalledTimes(1));
   expect(f.journalRead).toHaveBeenCalledWith({work_ref:"WS:ONE",signal:expect.any(AbortSignal)});

@@ -58,6 +58,7 @@ async function prepare() {
   const list = within(document.querySelector(".conversations-list") as HTMLElement);
   fireEvent.click(list.getByRole("button", {name:"Open project Qualified conversation project"}));
   fireEvent.click(await screen.findByRole("button",{name:"Project details"}));
+  fireEvent.click(screen.getByRole("button",{name:"History and sources",exact:true}));
   const disclosure=await screen.findByText("Project history and source evidence",{selector:"summary"});
   fireEvent.click(disclosure);
   const panel=within(await screen.findByRole("region",{name:"Saved replies in this project"}));
