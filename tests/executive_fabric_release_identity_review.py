@@ -310,17 +310,21 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Macro-epoch composition f48d7421 / source-risk review bd9bba4b:
 # same three complete runtime tokens and unchanged original top-level ASTs;
 # only the reviewed digest and shifted lines change. No new identity exemption.
+# PR #1329 accepted-V2 carry: the same complete account-pattern token and
+# attended worker UID/GID bounds move with the qualified maintenance source.
+# Both owning constructs remain byte-identical; no new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": 'f53e9401d28f1053d67a59d375f7380b86271f87278080f7dd972f3d8ff6f7f9',
-    "sites": ((104, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1825, 46, 49, 'int', '400'), (1825, 66, 69, 'int', '500')),
+    "sha256": 'febdc61cc241058c8b5e896290e62e0acc342ddf08010fbd36a6e24399748f56',
+    "sites": ((111, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1861, 46, 49, 'int', '400'), (1861, 66, 69, 'int', '500')),
 }
 
 
-# PR #1813: unchanged independently reviewed migration-evidence helper 8c7f1584.
+# PR #1813 reviewed migration-evidence helper, carried through PR #1329's
+# qualified provenance accessors. The config-namespace function stays exact.
 # This exact token is the Root config-directory permission mode, not a UID.
 # Source, path, AST location and complete token must all match; scanner unchanged.
 REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
-    "sha256": '1f316e19da3b2d4f362b64928c7ede1aee0b28301a71990455c138589d9cc402',
+    "sha256": '141f4cbb77d3c3eed130025289b1f2cd06805f67cd4a10d7c2462f2d4d49e122',
     "sites": ((347, 46, 51, 'int', '0o755'),),
 }
 
