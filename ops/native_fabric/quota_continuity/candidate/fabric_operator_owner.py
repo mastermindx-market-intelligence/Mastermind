@@ -234,6 +234,9 @@ class OperatorOwner:
                 "expires_at": grant["expires_at"], "allowed_classes": grant["allowed_classes"]}
 
     def reserve(self, token, request, *, participant=None):
+        import fabric_memory_view as memory
+        if type(request) is dict and type(request.get('packet')) is str and request['packet'].encode().startswith(memory.PACKET_PREFIX):
+            refuse(memory.VIEW_REQUIRED)
         with self.transaction() as con:
             grant, launch, lease, root = self._authorized(con, token)
             used = con.execute("SELECT COUNT(*) FROM operator_child_authorizations WHERE operator_run=?", (grant["operator_run"],)).fetchone()[0]
@@ -262,7 +265,7 @@ class OperatorOwner:
                         (rid, grant["operator_run"], grant["root"], digest(canonical(stored).encode()), self.clock(), canonical(stored)))
         return grant
 
-    def child_binding(self, token, rid):
+    def _child_authorization(self, token, rid):
         safe_id(rid)
         with self.transaction() as con:
             grant, _, _, _ = self._authorized(con, token)
@@ -270,7 +273,38 @@ class OperatorOwner:
                               (rid, grant["operator_run"], grant["root"])).fetchone()
             if row is None:
                 refuse("child_binding_refused")
+        return grant, dict(row)
+
+    def child_binding(self, token, rid):
+        grant, row = self._child_authorization(token, rid)
+        from fabric_memory_view import require_generic_row
+        require_generic_row(row)
         return grant
+
+    def dispatch_memory_participant(self, token, lookup):
+        # This private entry cannot accept a packet/source/condition/role or
+        # caller-defined issuer.  Missing real issuer refuses before a child
+        # authorization/budget/file/controller effect.
+        import fabric_memory_view as memory
+        rid = memory.validate_lookup(lookup)
+        with self.transaction() as con:
+            grant, _, _, _ = self._authorized(con, token)
+            if con.execute("SELECT 1 FROM operator_child_authorizations WHERE run_id=?", (rid,)).fetchone():
+                refuse("RUN_EXISTS")
+            memory.selected_case(self, grant, {"run_id": rid})
+        refuse(memory.ISSUER_UNAVAILABLE)
+
+    def memory_participant_result(self, token, lookup):
+        import fabric_memory_view as memory
+        rid = memory.validate_lookup(lookup)
+        grant, row = self._child_authorization(token, rid)
+        stored = memory._stored_row(row)
+        if not memory.is_prospective(stored):
+            refuse(memory.VIEW_REQUIRED)
+        # No generic terminal read can substitute for current issuer, source,
+        # recipient, input and original result/attempt qualification.
+        memory.selected_case(self, grant, {"run_id": rid})
+        refuse(memory.ISSUER_UNAVAILABLE)
 
     def dispatch(self, token, request, *, popen=subprocess.Popen, participant=None):
         grant = (self.reserve(token, request) if participant is None
@@ -319,7 +353,9 @@ class OperatorOwner:
         return metadata(self, token, rid, binding_sha256, object_id)
 
     def observe(self, token, action, rid):
-        grant = self.child_binding(token, rid)
+        grant, row = self._child_authorization(token, rid)
+        from fabric_memory_view import require_generic_row
+        require_generic_row(row)
         import fabric_task
         state = fabric_task.inspect_run(rid)
         if state.get("result_available"):
@@ -340,7 +376,11 @@ class OperatorOwner:
     def returns(self, token):
         with self.transaction() as con:
             grant, _, _, _ = self._authorized(con, token)
-            rows = con.execute("SELECT run_id,acknowledged_sha256 FROM operator_child_authorizations WHERE operator_run=? AND root=? ORDER BY authorized_at", (grant['operator_run'], grant['root'])).fetchall()
+            rows = con.execute("SELECT run_id,acknowledged_sha256,request_json,request_digest FROM operator_child_authorizations WHERE operator_run=? AND root=? ORDER BY authorized_at", (grant['operator_run'], grant['root'])).fetchall()
+        from fabric_memory_view import require_generic_row
+        # Check the whole recipient set before any original status/result read.
+        for row in rows:
+            require_generic_row(dict(row))
         import fabric_task
         states = []
         for row in rows:
