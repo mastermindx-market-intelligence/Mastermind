@@ -41,7 +41,11 @@ import { normalizeResultSelection, RESULT_HTTP_BODY_BYTES } from "./result";
 import { DIRECT_RESULT_BYTES, decodeDirectNativeResult, normalizeDirectSelection, parseDirectNativeJson } from "./direct-native-result";
 import { validActivitySelection } from "./planning/retained-activity";
 import { attendedSelection } from "./fabric/attended-status";
-import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
+import {
+  normalizeExecutiveSessionSelection,
+  sessionSelectionWire,
+  type ExecutiveSessionTransport,
+} from "./orchestration/executive-session-command-port";
 import type { AuthState, RawClient } from "./host";
 import {
   CONTROL_ROOM_REQUEST_BYTES, CONTROL_ROOM_RESPONSE_BYTES,
@@ -1221,11 +1225,11 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       available: () => configured && executiveResource !== null && valid("executive"),
       subscribe(listener) { executiveListeners.add(listener); return () => { executiveListeners.delete(listener); }; },
       context: (selection, signal) => {
-        const normalized = normalizeSelection(selection);
+        const normalized = normalizeExecutiveSessionSelection(selection);
         if (!normalized) return Promise.reject(new Error("SELECTION_INVALID"));
         return executivePost(
           "session/context",
-          { selection: { work_ref: normalized.workRef, root_job_id: normalized.rootJobId } },
+          { selection: sessionSelectionWire(normalized) },
           signal,
         );
       },

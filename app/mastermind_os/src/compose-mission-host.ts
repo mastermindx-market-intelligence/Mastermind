@@ -1,6 +1,6 @@
 import { bindMissionHost, type RawClient, type SessionHostAttachment } from "./host";
 import { readLaunchBindingConfig } from "./launch-config";
-import type { MissionSelection } from "./mission";
+import type { ExecutiveSessionSelection } from "./orchestration/executive-session-command-port";
 import type { LaunchConfiguration } from "./orchestration/executive-launch-command-port";
 import { createIndexedDbPendingPointerStore } from "./orchestration/indexeddb-pending-pointer-store";
 import { createIndexedDbSessionPendingPointerStore } from "./orchestration/indexeddb-session-pending-pointer-store";
@@ -76,7 +76,10 @@ export function composeMissionHost(
   const sessionAttachment: SessionHostAttachment | undefined = session
     ? {
         binding: session.binding,
-        refresh: (selection) => session.refresh(selection as MissionSelection | null),
+        // The session selection carries the closed target kind; the generic
+        // attachment keeps its opaque signature.
+        refresh: (selection) =>
+          session.refresh(selection as ExecutiveSessionSelection | null),
         setStopCondition: (provider) => session.setStopCondition(provider),
       }
     : undefined;

@@ -1,6 +1,12 @@
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
-import { decodeSessionContext, type ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
+import {
+  decodeSessionContext,
+  normalizeExecutiveSessionSelection,
+  sessionSelectionWire,
+  type ExecutiveSessionSelection,
+  type ExecutiveSessionTransport,
+} from "./orchestration/executive-session-command-port";
 import { normalizeDirectSelection, type DirectNativeTransport } from "./direct-native-result";
 import { closedReadFailureReason, type DiagnosticReadReason, type DiagnosticPhase, type ExecutiveDiagnosticSnapshot } from "./diagnostic-state";
 
@@ -21,7 +27,7 @@ const CURSOR = /^[A-Za-z0-9_=-]{1,2048}$/;
 /** Deprivilege the existing authenticated native context to READ-only; never
  * rewrite identity, selection or native source. Only a fully qualified backend
  * context can be projected, and its capability is reduced, not invented. */
-function nativeReadContextOnly(raw: unknown, selected: { workRef: string; rootJobId: string }): unknown {
+function nativeReadContextOnly(raw: unknown, selected: ExecutiveSessionSelection): unknown {
   if (!decodeSessionContext(raw, selected)) return raw;
   const envelope = raw as Record<string, unknown>;
   const data = envelope.data as Record<string, unknown>;
@@ -180,11 +186,13 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     authGeneration: () => epoch, available: () => available,
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     context: async (selection, signal) => {
-      if (!WORK.test(selection.workRef) || !ROOT.test(selection.rootJobId))
-        throw new Error("SESSION_SELECTION_INVALID");
+      const normalized = normalizeExecutiveSessionSelection(selection);
+      if (!normalized) throw new Error("SESSION_SELECTION_INVALID");
+      // The native context command carries the closed selection variant; it
+      // remains a READ and never gains a SEND route.
       return nativeReadContextOnly(await call("executive_session_context", signal, {
-        selection: { work_ref: selection.workRef, root_job_id: selection.rootJobId },
-      }), selection);
+        selection: sessionSelectionWire(normalized),
+      }), normalized);
     },
     reply: (args, signal) => OPERATION.test(args.operation_key)
       ? call("executive_session_reply", signal, { operationKey: args.operation_key })

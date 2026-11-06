@@ -8,7 +8,10 @@ import { normalizeResultSelection, type ResultSelection } from "../result";
 import type { DraftInsertion, DraftSource } from "./drafts";
 import { ResultSourceReader } from "./ResultSourceReader";
 import type { OperationPointer } from "../orchestration/operation-controller";
-import type { QualifiedSessionAnswer } from "../orchestration/executive-session-command-port";
+import {
+  qualifiedAnswerVariant,
+  type QualifiedSessionAnswerValue,
+} from "../orchestration/executive-session-command-port";
 import "./conversation.css";
 
 type ConversationLocale = "en" | "zh-CN";
@@ -76,7 +79,7 @@ function ui(locale: ConversationLocale, text: string) { return locale === "zh-CN
  * A browser-local render is NOT a canonical parent-consumed acknowledgement. */
 export interface QualifiedConversationReply {
   readonly pointer: OperationPointer;
-  readonly answer: QualifiedSessionAnswer;
+  readonly answer: QualifiedSessionAnswerValue;
 }
 
 function QualifiedReplyCard({ value, onCommitted }: {
@@ -92,13 +95,23 @@ function QualifiedReplyCard({ value, onCommitted }: {
       onCommitted?.(value);
     }
   }, [value, onCommitted]);
+  const native = qualifiedAnswerVariant(value.answer) === "hermes_secretary";
+  const nextStep = native ? null : value.answer.nextStep;
+  const successful = native
+    ? (value.answer as { readonly successful: boolean }).successful
+    : null;
   return <section ref={mounted} className="conversation-result"
       aria-label="Qualified original answer" data-operation-key={value.pointer.operationKey}>
     <div>
       <p className="conversation-eyebrow">Qualified original reply · READ only</p>
       <h2>Original answer recovered</h2>
       <p className="conversation-answer">{value.answer.text}</p>
-      <p className="conversation-history">Next step: {value.answer.nextStep}</p>
+      {nextStep ? <p className="conversation-history">Next step: {nextStep}</p> : null}
+      {successful !== null ? (
+        <p className="conversation-history">
+          {successful ? "Reply available." : "Unsuccessful native result available."}
+        </p>
+      ) : null}
       <p className="conversation-history">Original read reference: <code>{value.answer.readRef}</code></p>
       <p className="conversation-history">Original-parent acceptance is not established by this local display.</p>
     </div>
