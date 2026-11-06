@@ -192,6 +192,50 @@ export async function createPublicationRecovery({git, workspacePath, operationId
     return {record};
   }
 
+  // Distinct legacy-only forward progress. This does not claim a missing old
+  // action succeeded or failed, and never reuses its action ID. It is valid
+  // only when caller has separately qualified source custody and quiescence.
+  async function beginForward({actionRef, intendedHead, expectedRemote,
+      priorActionRef, priorIntendedHead}) {
+    if (!ACTION.test(actionRef || '') || !ACTION.test(priorActionRef || '') ||
+        actionRef === priorActionRef || !SHA.test(intendedHead || '') ||
+        !SHA.test(expectedRemote || '') || !SHA.test(priorIntendedHead || '')) {
+      throw new TypeError('invalid guarded publication recovery identity');
+    }
+    const refs = await allActionRefs();
+    if (refs.includes(actionRef)) {
+      return {blocked:true, reason:'ALREADY_RECORDED_PUBLICATION',
+        prior:await disposition(actionRef, expectedRemote)};
+    }
+    // This path is for a pre-journal old action only. A known prior journal
+    // with DISPATCHING/PREPARED still demands its exact result/owner fence;
+    // an already-terminal prior can use the ordinary current-state path.
+    if (refs.includes(priorActionRef)) {
+      return {blocked:true, reason:'PRIOR_ACTION_HAS_DURABLE_RECEIPT',
+        prior:await disposition(priorActionRef, expectedRemote)};
+    }
+    for (const oldRef of refs) {
+      const item = await disposition(oldRef, expectedRemote);
+      if (item.outcome !== 'APPLIED') {
+        return {blocked:true, reason:'OTHER_UNRECONCILED_PUBLICATION',
+          prior:item};
+      }
+    }
+    const record = {
+      schema:SCHEMA, operation_id:operationId, branch, target_ref:ref,
+      remote_fingerprint:remoteFingerprint, action_ref:actionRef,
+      intended_head_sha:intendedHead, expected_remote_head_sha:expectedRemote,
+      prior_action_ref:priorActionRef,
+      prior_intended_head_sha:priorIntendedHead,
+      recovery_mode:'LEGACY_FORWARD_ONLY',
+      stage:'PREPARED', generation_id:String(process.pid) + ':' + randomUUID(),
+      created_at:new Date().toISOString(),
+    };
+    await mkdir(dir, {recursive:true, mode:0o700});
+    await writeExclusive(filename(actionRef), makeWire(record));
+    return {record};
+  }
+
   async function markDispatching(record) {
     const found = await read(record.action_ref);
     if (!found.record || found.record.stage !== 'PREPARED' ||
@@ -215,5 +259,5 @@ export async function createPublicationRecovery({git, workspacePath, operationId
     return next;
   }
 
-  return Object.freeze({status, begin, markDispatching, terminal});
+  return Object.freeze({status, begin, beginForward, markDispatching, terminal});
 }

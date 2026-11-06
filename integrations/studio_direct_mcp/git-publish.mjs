@@ -145,6 +145,17 @@ export const STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL = Object.freeze({
         type: 'string',
         pattern: '^[0-9a-f]{40}$',
       },
+      recovery: {
+        type: 'object',
+        description: 'Legacy lost-response recovery only: new forward-only source ref update on the SAME registered workspace/branch after external source-writer and original-process qualification. This cannot replay or settle the old action.',
+        properties: {
+          prior_action_ref: {type: 'string', pattern: '^[0-9a-f]{64}$'},
+          prior_intended_head_sha: {type: 'string', pattern: '^[0-9a-f]{40}$'},
+          expected_remote_head_sha: {type: 'string', pattern: '^[0-9a-f]{40}$'},
+        },
+        required: ['prior_action_ref', 'prior_intended_head_sha', 'expected_remote_head_sha'],
+        additionalProperties: false,
+      },
     },
     required: ['operation_id', 'expected_head_sha'],
     additionalProperties: false,
@@ -351,6 +362,14 @@ function actionRef(operationId, branch, head) {
   return createHash('sha256')
     .update('mastermind.studio_git_push_current_branch.v1\0')
     .update(operationId).update('\0').update(branch).update('\0').update(head)
+    .digest('hex');
+}
+
+function forwardRecoveryActionRef(operationId, branch, head, priorActionRef, expectedRemoteHead) {
+  return createHash('sha256')
+    .update('mastermind.studio_git_forward_recovery.v1\0')
+    .update(operationId).update('\0').update(branch).update('\0')
+    .update(head).update('\0').update(priorActionRef).update('\0').update(expectedRemoteHead)
     .digest('hex');
 }
 
@@ -1103,13 +1122,27 @@ export function createGitPublisher(config, dependencies = {}) {
 
   async function push(args) {
     if (!args || typeof args !== 'object' || Array.isArray(args) ||
-        Object.keys(args).some((key) => !['operation_id', 'expected_head_sha'].includes(key))) {
+        Object.keys(args).some((key) => !['operation_id', 'expected_head_sha', 'recovery'].includes(key))) {
       throw new TypeError('studio_git_push_current_branch arguments are invalid');
     }
     const operationId = validateOperationId(args.operation_id);
     const expectedHead = validateExpectedHead(args.expected_head_sha);
+    const forward = args.recovery !== undefined;
+    if (forward && (!args.recovery || typeof args.recovery !== 'object' ||
+        Array.isArray(args.recovery) || Object.keys(args.recovery).some((key) =>
+          !['prior_action_ref', 'prior_intended_head_sha', 'expected_remote_head_sha'].includes(key)))) {
+      throw new TypeError('studio_git_push_current_branch recovery arguments are invalid');
+    }
+    if (forward && (!SHA256_RE.test(args.recovery.prior_action_ref || '') ||
+        !SHA_RE.test(args.recovery.prior_intended_head_sha || '') ||
+        !SHA_RE.test(args.recovery.expected_remote_head_sha || ''))) {
+      throw new TypeError('studio_git_push_current_branch recovery identities are invalid');
+    }
     const before = await workspace(operationId);
-    const ref = actionRef(operationId, before.branch, expectedHead);
+    const ref = forward
+      ? forwardRecoveryActionRef(operationId, before.branch, expectedHead,
+          args.recovery.prior_action_ref, args.recovery.expected_remote_head_sha)
+      : actionRef(operationId, before.branch, expectedHead);
     if (before.localHead !== expectedHead) {
       return {
         schema:'mastermind.studio_git_push_result.v1', status:'REFUSED',
@@ -1132,6 +1165,39 @@ export function createGitPublisher(config, dependencies = {}) {
       };
     }
 
+    if (forward) {
+      // No attempt to infer a legacy action's outcome from a missing journal.
+      // The explicit prior identity must be the original tool's deterministic
+      // action ID for the same operation/ref and immutable intended commit.
+      const prior = args.recovery;
+      const fail = (code) => ({
+        schema:'mastermind.studio_git_push_result.v1', status:'REFUSED',
+        effect_state:'NOT_APPLIED', code, action_ref:ref, push_attempted:false,
+        retry_allowed:false, prior_action_ref:prior.prior_action_ref,
+        ...publicStatus(before), ready_to_push:false,
+      });
+      if (prior.prior_action_ref !== actionRef(operationId, before.branch, prior.prior_intended_head_sha)) {
+        return fail('RECOVERY_PRIOR_IDENTITY_MISMATCH');
+      }
+      if (before.remoteHead === null ||
+          before.remoteHead !== prior.expected_remote_head_sha) {
+        return fail('RECOVERY_REMOTE_HEAD_MISMATCH');
+      }
+      // Both ancestors must be locally present. No implicit fetch, history
+      // rewrite, branch creation, or non-fast-forward fallback is authorized.
+      if (!await gitQuiet(before.workspacePath,
+          ['merge-base', '--is-ancestor', prior.prior_intended_head_sha, expectedHead]) ||
+          !await gitQuiet(before.workspacePath,
+            ['merge-base', '--is-ancestor', before.remoteHead, expectedHead])) {
+        return fail('RECOVERY_ANCESTRY_UNVERIFIED');
+      }
+      // Reobserve the same owner/remote immediately before journaling. A race
+      // after this snapshot remains bounded by Git's non-forced ref update.
+      const fresh = await workspace(operationId, {remoteBinding:before.remoteBinding});
+      if (fresh.remoteHead !== before.remoteHead || fresh.localHead !== expectedHead ||
+          !fresh.clean) return fail('RECOVERY_STALE_PREFLIGHT');
+    }
+
     const submodulePolicy = await boundedSubmodulePolicy(before.workspacePath);
     await verifyDestinationBinding(before.remoteBinding);
     let journal;
@@ -1143,9 +1209,15 @@ export function createGitPublisher(config, dependencies = {}) {
       });
       // All prior actions for this exact workspace are checked before any push.
       // A changed remote is not evidence of nonapplication of an old effect.
-      const opening = await journal.begin({
-        actionRef:ref, intendedHead:expectedHead, expectedRemote:before.remoteHead,
-      });
+      const opening = forward
+        ? await journal.beginForward({
+            actionRef:ref, intendedHead:expectedHead, expectedRemote:before.remoteHead,
+            priorActionRef:args.recovery.prior_action_ref,
+            priorIntendedHead:args.recovery.prior_intended_head_sha,
+          })
+        : await journal.begin({
+            actionRef:ref, intendedHead:expectedHead, expectedRemote:before.remoteHead,
+          });
       if (opening.blocked) {
         return {
           schema:'mastermind.studio_git_push_result.v1', status:'REFUSED',

@@ -1685,3 +1685,190 @@ test('publication recovery: wrong operation and wrong origin never match a retai
     assert.equal((await wrongBranch.status(actionRef,null)).reason,'NO_MATCHING_OR_LEGACY_RECEIPT');
   } finally {await f.cleanup();}
 });
+
+
+function originalPushRef(f, head) {
+  return (awaitedCrypto()).createHash('sha256')
+    .update('mastermind.studio_git_push_current_branch.v1\0')
+    .update(f.operationId).update('\0').update(f.branch).update('\0').update(head)
+    .digest('hex');
+}
+
+function awaitedCrypto() {
+  return cryptoForForward;
+}
+
+const cryptoForForward = await import('node:crypto');
+
+async function legacyForwardFixture() {
+  const f = await fixture();
+  await git(f.workspace, 'push', 'origin', f.head + ':refs/heads/' + f.branch);
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'original uncertain candidate\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  await git(f.workspace, 'commit', '-m', 'test: old unpublished candidate');
+  const originalHead = (await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim();
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'prepared forward candidate\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  await git(f.workspace, 'commit', '-m', 'test: new guarded candidate');
+  const candidate = (await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim();
+  const recovery = {
+    prior_action_ref: originalPushRef(f, originalHead),
+    prior_intended_head_sha: originalHead,
+    expected_remote_head_sha: f.head,
+  };
+  return {...f, originalHead, candidate, recovery};
+}
+
+test('forward recovery: legacy unknown publication admits one new nonforced descendant action', async () => {
+  const f = await legacyForwardFixture();
+  try {
+    const publisher = createGitPublisher(f.config);
+    const result = await publisher.push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,
+      recovery:f.recovery,
+    });
+    assert.equal(result.status, 'OK');
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.receipt_recorded, true);
+    assert.notEqual(result.action_ref, f.recovery.prior_action_ref);
+    assert.equal(await refsAt(f.remote), 'refs/heads/' + f.branch + ' ' + f.candidate);
+    const old = await publisher.status({operation_id:f.operationId,
+      action_ref:f.recovery.prior_action_ref});
+    assert.equal(old.publication_recovery.outcome, 'UNKNOWN');
+    assert.equal(old.publication_recovery.reason, 'NO_MATCHING_OR_LEGACY_RECEIPT');
+    const fresh = await publisher.status({operation_id:f.operationId,
+      action_ref:result.action_ref});
+    assert.equal(fresh.publication_recovery.outcome, 'APPLIED');
+    assert.equal(fresh.publication_recovery.stage, 'TERMINAL');
+    assert.equal(fresh.publication_recovery.retry_allowed, false);
+    let pushes = 0;
+    const restarted = createGitPublisher(f.config, {execFile:async(file,args,options)=>{
+      if (file===GIT && gitCommand(args)==='push') pushes++;
+      return execFile(file,args,options);
+    }});
+    const repeat = await restarted.push({operation_id:f.operationId,
+      expected_head_sha:f.candidate,recovery:f.recovery});
+    assert.equal(repeat.code,'ALREADY_APPLIED');
+    assert.equal(pushes,0);
+  } finally {await f.cleanup();}
+});
+
+test('forward recovery: malformed/wrong prior identity and widened input refuse before push', async () => {
+  const f = await legacyForwardFixture();
+  try {
+    const publisher = createGitPublisher(f.config);
+    await assert.rejects(()=>publisher.push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,
+      recovery:{...f.recovery, force:true},
+    }),/recovery arguments are invalid/);
+    await assert.rejects(()=>publisher.push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,
+      recovery:{...f.recovery, prior_action_ref:'bad'},
+    }),/recovery identities are invalid/);
+    const bad = await publisher.push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,
+      recovery:{...f.recovery, prior_action_ref:'a'.repeat(64)},
+    });
+    assert.equal(bad.code,'RECOVERY_PRIOR_IDENTITY_MISMATCH');
+    assert.equal(bad.push_attempted,false);
+    assert.equal(await refsAt(f.remote), 'refs/heads/' + f.branch + ' ' + f.head);
+  } finally {await f.cleanup();}
+});
+
+test('forward recovery: stale expected remote and missing ancestry are nonmutating', async () => {
+  const f = await legacyForwardFixture();
+  try {
+    const publisher = createGitPublisher(f.config);
+    const stale = await publisher.push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,
+      recovery:{...f.recovery, expected_remote_head_sha:f.originalHead},
+    });
+    assert.equal(stale.code,'RECOVERY_REMOTE_HEAD_MISMATCH');
+    assert.equal(stale.push_attempted,false);
+    const tree=(await git(f.workspace,'rev-parse','HEAD^{tree}')).stdout.trim();
+    const alien=(await git(f.workspace,'commit-tree',tree,'-m','test: unparented prior')).stdout.trim();
+    const unrelated = await publisher.push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,
+      recovery:{...f.recovery, prior_intended_head_sha:alien,
+        prior_action_ref:originalPushRef(f,alien)},
+    });
+    assert.equal(unrelated.code,'RECOVERY_ANCESTRY_UNVERIFIED');
+    assert.equal(unrelated.push_attempted,false);
+    assert.equal(await refsAt(f.remote),'refs/heads/'+f.branch+' '+f.head);
+  } finally {await f.cleanup();}
+});
+
+test('forward recovery: outstanding journalled prior is not bypassed by legacy exception', async () => {
+  const f = await legacyForwardFixture();
+  try {
+    const {createPublicationRecovery} = await import('./git-publish-recovery.mjs');
+    const journal = await createPublicationRecovery({
+      git:(cwd,args)=>git(cwd,...args), workspacePath:f.workspace,
+      operationId:f.operationId, branch:f.branch,
+      ref:'refs/heads/'+f.branch, remoteUrl:f.remote,
+    });
+    const held = await journal.begin({
+      actionRef:f.recovery.prior_action_ref,
+      intendedHead:f.originalHead, expectedRemote:f.head,
+    });
+    assert.equal(held.record.stage,'PREPARED');
+    const result = await createGitPublisher(f.config).push({
+      operation_id:f.operationId, expected_head_sha:f.candidate,recovery:f.recovery,
+    });
+    assert.equal(result.status,'REFUSED');
+    assert.equal(result.code,'PRIOR_ACTION_HAS_DURABLE_RECEIPT');
+    assert.equal(result.push_attempted,false);
+    assert.equal(await refsAt(f.remote),'refs/heads/'+f.branch+' '+f.head);
+  } finally {await f.cleanup();}
+});
+
+test('forward recovery: lost reply after actual update is reconciled by exact new action', async () => {
+  const f = await legacyForwardFixture();
+  try {
+    let attempts=0;
+    const publisher = createGitPublisher(f.config,{execFile:async(file,args,options)=>{
+      if(file===GIT&&gitCommand(args)==='push') {
+        attempts++;
+        const settled=await execFile(file,args,options);
+        assert.ok(settled);
+        throw Object.assign(new Error('simulated response loss'),{code:'SIMULATED_LOSS'});
+      }
+      return execFile(file,args,options);
+    }});
+    const result = await publisher.push({
+      operation_id:f.operationId,expected_head_sha:f.candidate,recovery:f.recovery,
+    });
+    assert.equal(attempts,1);
+    assert.equal(result.code,'APPLIED_AFTER_AMBIGUOUS_PUSH_RETURN');
+    assert.equal(result.effect_state,'APPLIED');
+    assert.equal(await refsAt(f.remote),'refs/heads/'+f.branch+' '+f.candidate);
+    const read=await createGitPublisher(f.config).status({
+      operation_id:f.operationId,action_ref:result.action_ref,
+    });
+    assert.equal(read.publication_recovery.outcome,'APPLIED');
+  } finally {await f.cleanup();}
+});
+
+test('forward recovery: competing remote update after preflight cannot overwrite history', async () => {
+  const f = await legacyForwardFixture();
+  try {
+    let writes=0, remoteCompetitor=null;
+    const publisher = createGitPublisher(f.config,{execFile:async(file,args,options)=>{
+      if(file===GIT&&gitCommand(args)==='push'&&writes===0) {
+        writes++;
+        const tree=(await git(f.workspace,'rev-parse','HEAD^{tree}')).stdout.trim();
+        remoteCompetitor=(await git(f.workspace,'commit-tree',tree,'-p',f.head,
+          '-m','test: competing sibling')).stdout.trim();
+        await git(f.workspace,'push','origin',
+          remoteCompetitor+':refs/heads/'+f.branch);
+      }
+      return execFile(file,args,options);
+    }});
+    const result = await publisher.push({
+      operation_id:f.operationId,expected_head_sha:f.candidate,recovery:f.recovery,
+    });
+    assert.equal(writes,1);
+    assert.ok(['EFFECT_UNKNOWN','NOT_APPLIED'].includes(result.effect_state));
+    assert.equal(await refsAt(f.remote),'refs/heads/'+f.branch+' '+remoteCompetitor);
+  } finally {await f.cleanup();}
+});
