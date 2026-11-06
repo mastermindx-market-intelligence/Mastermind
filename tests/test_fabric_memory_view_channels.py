@@ -185,3 +185,16 @@ def test_unknown_authorization_family_never_authorizes_generic_raw_result(case, 
     with mock.patch.object(fabric_task, 'inspect_run', side_effect=AssertionError('no private status')):
         with pytest.raises(owner_module.DelegationRefused, match=view.VIEW_REQUIRED):
             case['owner'].observe(case['cap']['token'], 'result', case['request']['run_id'])
+
+
+def test_exact_frozen_linux_packet_cannot_enter_ordinary_packet_dispatch(case):
+    import base64
+    from pathlib import Path
+    fixture=json.loads((Path(__file__).parent/'fixtures/native_memory_packet_a6.json').read_bytes())
+    packet=base64.b64decode(fixture['packet_base64'])
+    assert packet.startswith(view.PACKET_PREFIX)
+    request=dict(case['request'],packet=packet.decode())
+    before=case['owner'].describe(case['cap']['token'])
+    with mock.patch.object(owner_module.subprocess,'Popen',side_effect=AssertionError('no generic dispatch')):
+        with pytest.raises(owner_module.DelegationRefused):case['owner'].dispatch(case['cap']['token'],request)
+    assert case['owner'].describe(case['cap']['token'])==before

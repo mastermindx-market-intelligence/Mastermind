@@ -4133,6 +4133,16 @@ class ExecutiveSupervisor:
             assignment_seal_receipt_path=str(seal_path),
         )
 
+    async def run_protected_memory_case(self, lease: AttemptLease) -> dict:
+        """Fixed protected mode for one actual already-admitted Runtime claim.
+
+        Source and recipient admission are independently enforced by its fixed
+        native issuer; ordinary run_once/UID501 paid execution is unchanged.
+        This internal owner method accepts no packet, source selector or grant.
+        """
+        from control_plane.protected_memory_execution import run_protected_memory_case
+        return await run_protected_memory_case(self, lease)
+
     async def run_once(self, job_id: str) -> SupervisorReceipt:
         """Claim, execute, validate, and terminalize exactly one queued job."""
 

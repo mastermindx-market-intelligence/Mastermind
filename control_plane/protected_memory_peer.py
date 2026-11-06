@@ -121,7 +121,7 @@ def _control_projection(claim, observed_owner):
         _refuse()
     locator = admission.require_memory_runtime_claim(claim)
     state = admission._ISSUED[claim]
-    current, _, _ = admission._current(state.runtime, state.lease)
+    current, _, _ = admission._current(state.runtime, state.lease, process=state.process)
     return canonical({'schema': SCHEMA, 'owner': _owner_shape(observed_owner),
         'runtime_admission': json.loads(current),
         'original_operation_id': locator['operation_id'],

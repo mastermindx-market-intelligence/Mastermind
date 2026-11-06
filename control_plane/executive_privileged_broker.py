@@ -2304,7 +2304,12 @@ def serve_connection(
             raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
         raw = _read_request_frame(connection)
         from control_plane.executive_release_consumer import BROKER_SCHEMA, _qualify_connection
-        if raw.get("schema") == BROKER_SCHEMA:
+        if raw.get("schema") == "mastermind.protected_memory_issuer_exchange.v1":
+            # Same actual accepted socket; fixed Memory source exchange cannot
+            # select an action-catalog command, caller path or generic executor.
+            from control_plane.executive_memory_issuer import handle_memory_exchange
+            _send_wire(connection, handle_memory_exchange(raw, connection))
+        elif raw.get("schema") == BROKER_SCHEMA:
             try:
                 _qualify_connection(connection, "control")
                 if raw.get("operation") == "commit_prepared_release_transition":

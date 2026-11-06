@@ -119,3 +119,12 @@ def test_job_writer_rejects_future_input_hash_before_creating_any_record(claimed
 def test_ordinary_job_constraint_normalization_does_not_gain_memory_mode(claimed):
     from control_plane.executive_runtime import _normalise_constraints
     assert _normalise_constraints({'eligible_quota_classes': [QUOTA]}) == {'eligible_quota_classes': [QUOTA]}
+
+
+def test_current_policy_reversal_withholds_already_issued_runtime_claim(claimed, monkeypatch):
+    from types import SimpleNamespace
+    from control_plane.executive_authority import ExecutiveAuthorityPolicy
+    runtime,_,lease=claimed
+    cap=admission.capture_memory_runtime_claim(runtime,lease)
+    monkeypatch.setattr(ExecutiveAuthorityPolicy,'load',lambda:SimpleNamespace(authorize=lambda *a,**k:SimpleNamespace(policy_sha256='f'*64)))
+    with pytest.raises(admission.MemoryAdmissionRefused):admission.require_memory_runtime_claim(cap)

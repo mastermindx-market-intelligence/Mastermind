@@ -11,7 +11,9 @@ from __future__ import annotations
 SCHEMA = 'mastermind.fabric_bound_child_authorization.v3'
 ISSUER_UNAVAILABLE = 'protected_memory_owner_required'
 VIEW_REQUIRED = 'participant_view_required'
-PACKET_PREFIX = b'NATIVE_MEMORY_PARTICIPANT_INPUT_V1\n'
+# Exact canonical body prefix from the frozen Linux packet contract, not an
+# added packet header or any authentication fact.
+PACKET_PREFIX = b'{"schema":"research_factory.market_memory_e0_participant_packet.v1",'
 
 
 def _refuse(reason):
