@@ -426,9 +426,9 @@
       "source": "candidate/original_advertised_artifact.py"
     },
     "ext/original_delivery_collector.py": {
-      "bytes": 94249,
+      "bytes": 103052,
       "installed_preimage_sha256": "c5cc0c5762073a0029c88ef6daa6fb7d073db1c8aa6518b93594a114cb6fe1f8",
-      "sha256": "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183",
+      "sha256": "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83",
       "source": "candidate/original_delivery_collector.py"
     },
     "ext/original_result_delivery.py": {
