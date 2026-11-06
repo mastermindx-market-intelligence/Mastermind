@@ -170,8 +170,13 @@ async function openOffice(user: ReturnType<typeof userEvent.setup>) {
 }
 
 /** One frozen direction preview on the Office, ready for the handoff. */
-async function freezeDirection(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText("Direction to Meta-CEO"), DIRECTION);
+async function freezeDirection(user: ReturnType<typeof userEvent.setup>, paste = false) {
+  // These owner-lifecycle cases may use one real focused paste gesture. They
+  // do not assert keyboard-per-character behavior or bypass the input owner.
+  if (paste) {
+    await user.click(screen.getByLabelText("Direction to Meta-CEO"));
+    await user.paste(DIRECTION);
+  } else await user.type(screen.getByLabelText("Direction to Meta-CEO"), DIRECTION);
   await user.click(screen.getByRole("button", { name: "Review direction preview" }));
   const preview = await screen.findByRole("region", { name: "Direction preview" });
   expect(preview.textContent).toContain(DIRECTION);
@@ -234,7 +239,7 @@ describe("Office direction handoff into the existing launch owner", () => {
     const user = userEvent.setup();
     render(<App />);
     await openOffice(user);
-    await freezeDirection(user);
+    await freezeDirection(user, true);
     await user.click(screen.getByRole("button", { name: "Start new work" }));
     await user.click(await screen.findByRole("button", { name: "Launch" }));
     await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(1));
@@ -245,7 +250,8 @@ describe("Office direction handoff into the existing launch owner", () => {
     await user.click(await screen.findByRole("button", { name: "Work queue" }));
     expect((await screen.findByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
     // The settled Office handoff cannot fence a later independent launch.
-    await user.type(screen.getByLabelText("Goal"), "A new launch after the first receipt.");
+    await user.click(screen.getByLabelText("Goal"));
+    await user.paste("A new launch after the first receipt.");
     await user.click(screen.getByRole("button", { name: "Launch" }));
     await waitFor(() => expect(made.submit).toHaveBeenCalledTimes(2));
     expect(made.prepare.mock.calls[1][0].payload).toHaveProperty(
@@ -380,11 +386,12 @@ describe("Office direction handoff into the existing launch owner", () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "Work queue" }));
-    await user.type(await screen.findByLabelText("Goal"), "An earlier unsent goal.");
+    await user.click(await screen.findByLabelText("Goal"));
+    await user.paste("An earlier unsent goal.");
     await user.click(screen.getByRole("button", { name: "Launch" }));
     await waitFor(() => expect(made.prepare).toHaveBeenCalledTimes(1));
     await openOffice(user);
-    await freezeDirection(user);
+    await freezeDirection(user, true);
     await user.click(screen.getByRole("button", { name: "Start new work" }));
     expect(previewRefusal()).toHaveProperty(
       "textContent",
