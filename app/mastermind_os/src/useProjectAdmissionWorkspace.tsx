@@ -48,8 +48,20 @@ export function useProjectAdmissionWorkspace(props: ProjectAdmissionWorkspacePro
   const source = canRead && readState?.scope === scope ? readState.source : null;
   const snapshot = useRef<ProjectAdmissionSnapshot>({selection:null, data:null, dataGeneration:null, generation:null, canRead:false});
   snapshot.current = {selection, data:source?.data ?? null, dataGeneration:source?.generation ?? null, generation, canRead};
+  // A detached gesture can run before a host/auth notification rerenders App.
+  // Recheck the real owner callbacks at every port boundary, not only render.
+  const currentSnapshot = () => {
+    const value=snapshot.current,p=live.current;
+    try {
+      const currentGeneration=p.sourceGeneration?.();
+      const valid=typeof currentGeneration==="number" && Number.isSafeInteger(currentGeneration) && currentGeneration>=0;
+      return {...value,canRead:value.canRead && valid && p.canRead()===true &&
+        value.generation===JSON.stringify([p.authGeneration,currentGeneration,owner.current.epoch]) &&
+        p.readCurrent===owner.current.read && p.transport===owner.current.transport && p.store===owner.current.store};
+    } catch {return {...value,canRead:false};}
+  };
   const port = useRef<ReturnType<typeof createProjectAdmissionCommandPort> | null>(null);
-  if (!port.current) port.current = createProjectAdmissionCommandPort(() => snapshot.current, {
+  if (!port.current) port.current = createProjectAdmissionCommandPort(currentSnapshot, {
     pause: request => {
       if (!live.current.transport) return Promise.reject(new Error("PROJECT_CONTROL_UNAVAILABLE"));
       return live.current.transport.pause(request);
@@ -111,13 +123,18 @@ export function useProjectAdmissionWorkspace(props: ProjectAdmissionWorkspacePro
   }, [source, readState?.hydrate, controller, canRead, selection, scope]);
 
   async function readCurrent() {
-    if (!canRead || !selection || !generation || !live.current.readCurrent) return;
+    if (!canRead || !currentSnapshot().canRead || !selection || !generation || !live.current.readCurrent) return;
     const started = scope, request = ++ticket.current;
     abort.current?.abort(); const pending = new AbortController(); abort.current = pending;
     setReadState({scope:started,source:null,reading:true,hydrate:false});
     try {
       const data = await live.current.readCurrent({selection:{...selection},signal:pending.signal});
       if (pending.signal.aborted || liveScope.current !== started || ticket.current !== request) return;
+      const current=currentSnapshot();
+      if (!current.canRead || current.generation!==generation) {
+        setReadState(value=>value?.scope===started ? {...value,source:null,reading:false,hydrate:false} : value);
+        return;
+      }
       setReadState({scope:started,source:{data,generation,readVersion:++version.current},reading:false,hydrate:true});
     } catch {
       if (!pending.signal.aborted && liveScope.current === started && ticket.current === request)

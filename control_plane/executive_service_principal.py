@@ -847,7 +847,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L1023",
+                "line": "L1028",
                 "what": (
                     "_provenance() stamps the typed service evidence (principal_id, "
                     "task_kind, requested_authorities, effective_authorities, "
@@ -857,7 +857,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L1454",
+                "line": "L1497",
                 "what": (
                     "the service branch of submit_intent passes EXPLICIT "
                     "owner_seat='coo' / escalation_target='coo' and no orchestration "
@@ -874,7 +874,7 @@ def admission_status() -> dict[str, Any]:
             "conflict_predicates": (
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L1384",
+                    "line": "L1426",
                     "what": (
                         "submit_intent looks the derived command id up in the durable "
                         "event log first, so a reused intent id reconciles instead of "
@@ -883,7 +883,7 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L1101",
+                    "line": "L1106",
                     "what": (
                         "_receipt_from_event raises CeoIntentConflict when the reused "
                         "intent id was already accepted under a DIFFERENT whole-envelope "
@@ -893,7 +893,7 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L907",
+                    "line": "L910",
                     "what": "command_id_for() derives the durable command id from the intent id",
                 },
             ),

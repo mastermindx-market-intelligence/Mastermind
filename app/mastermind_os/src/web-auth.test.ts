@@ -1,3 +1,6 @@
+import freshRecoveryOwner from "./conversations/new-conversation/fixtures/fresh-conversation-recovery-owner.json";
+import projectConversationLegacy from "./fixtures/project-conversation-catalogue-owner.json";
+import projectConversationFresh from "./fixtures/project-fresh-conversation-owner.json";
 // @vitest-environment jsdom
 // @vitest-environment-options {"url":"https://mcp.mastermind-x.com/os/"}
 import { planObservationFixture } from "./planning/plan-observation.fixture";
@@ -137,6 +140,34 @@ afterEach(() => {
   localStorage.clear(); sessionStorage.clear();
   history.replaceState(null, "", "/os/");
   Object.defineProperty(window, "opener", { value: null, configurable: true });
+});
+describe("fixed project planning two-resource requests",()=>{
+  const resource="https://fixture-resource.mastermind-x.com/executive";
+  const args={operation_key:"original-planning",work_ref:"WS:EXAMPLE"};
+  it("sends two private resource bearers only to the fixed same-origin route",async()=>{
+    const e=setup({executiveResource:resource});await e.login();e.fetcher.mockReset();
+    e.fetcher.mockImplementation(async()=>response({schema:"mastermind.project_initial_planning.private_result.v1",operation:"status",ok:true,data:{},error:null}));
+    await e.client.executive!.projectPlanning!.request("status",args,new AbortController().signal);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    const [url,options]=e.fetcher.mock.calls[0]!;
+    expect(url).toBe(`${ORIGIN}/os/executive/project-planning/status`);
+    expect(options).toMatchObject({method:"POST",redirect:"error",credentials:"omit",cache:"no-store",
+      headers:{Authorization:"Bearer private-token","X-Mastermind-Workspace-Authorization":"Bearer private-token"},body:JSON.stringify({arguments:args})});
+    e.fetcher.mockClear();await e.client.executive!.context(new AbortController().signal);
+    expect(e.fetcher.mock.calls[0]![1]!.headers).not.toHaveProperty("X-Mastermind-Workspace-Authorization");
+  });
+  it("rejects arbitrary routes and additional authority fields before fetch",async()=>{
+    const e=setup({executiveResource:resource});await e.login();e.fetcher.mockReset();
+    expect(()=>e.client.executive!.projectPlanning!.request("../submit" as never,args,new AbortController().signal)).toThrow("PROJECT_PLANNING_INPUT_INVALID");
+    expect(()=>e.client.executive!.projectPlanning!.request("status",{...args,job_id:"JOB-invented"},new AbortController().signal)).toThrow("PROJECT_PLANNING_INPUT_INVALID");
+    expect(e.fetcher).not.toHaveBeenCalled();
+  });
+  it("drops a pending planning response when either resource is signed out",async()=>{
+    const e=setup({executiveResource:resource});await e.login();const held=deferred<Response>();e.fetcher.mockReset();e.fetcher.mockReturnValue(held.promise);
+    const pending=e.client.executive!.projectPlanning!.request("status",args,new AbortController().signal);
+    const rejection=expect(pending).rejects.toThrow();await e.client.signOut();held.resolve(response({ok:true}));await rejection;
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
 });
 describe("browser public PKCE", () => {
   it("keeps missing public client IDs explicit without opening or requesting", async () => {
@@ -1920,6 +1951,123 @@ describe('fixed current project access Web read',()=>{
  it('withholds late access facts after sign-out with no retry',async()=>{
   const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client),late=deferred<Response>();e.fetcher.mockReturnValueOnce(late.promise);
   const pending=host.readProjectAccess!(request()),rejected=expect(pending).rejects.toThrow();await host.auth!.signOut();late.resolve(response(projectAccessFixture));await rejected;
+  expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+});
+
+describe("project history fixed READ",()=>{
+  const historyResource="https://mcp.mastermind-x.com/os/executive";
+  async function readOnlyHistory(){
+    const e=setup({executiveResource:historyResource});
+    e.fetcher.mockImplementation(async()=>response({token_type:"Bearer",access_token:"private-token",expires_in:3600,
+      scope:new URL(e.popup.location).searchParams.get("audience")===historyResource
+        ?"mastermind.executive.read":new URL(e.popup.location).searchParams.get("scope")}));
+    await e.login();e.fetcher.mockClear();return e;
+  }
+  it("sends four literal conversation READs with exact arguments and READ-only authority",async()=>{
+    const e=await readOnlyHistory(),signal=new AbortController().signal;
+    e.fetcher.mockImplementation(async()=>response({inertTransportResult:true}));
+    const transport=e.client.executiveSession!.projectConversations!;
+    const cases=[
+      ["catalogue","conversations",{work_ref:projectConversationLegacy.catalogue.work_ref}],
+      ["read","conversation-read",projectConversationLegacy.selection],
+      ["fresh_references","fresh-conversations",{work_ref:projectConversationFresh.catalogue.work_ref}],
+      ["fresh_read","fresh-conversation-read",projectConversationFresh.initial_read.reference],
+    ] as const;
+    for(const [operation,path,args] of cases){
+      await transport.request(operation,args,signal);
+      const [url,request]=e.fetcher.mock.calls.at(-1)!;
+      expect(url).toBe(ORIGIN+"/os/executive/session/"+path);
+      expect(JSON.parse(request!.body as string)).toEqual({arguments:args});
+      expect(new Headers(request!.headers).has("x-mastermind-workspace-authorization")).toBe(false);
+    }
+    expect(e.fetcher).toHaveBeenCalledTimes(4);
+  });
+  it("sends only the direct work selection with READ-only Executive authority and never widens SEND",async()=>{
+    const e=await readOnlyHistory(),signal=new AbortController().signal;
+    e.fetcher.mockImplementation(async()=>response({ok:true}));
+    await e.client.executiveSession!.historyContext!({workRef:"WS:Original.Project"},signal);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    const [url,request]=e.fetcher.mock.calls[0];
+    expect(url).toBe(ORIGIN+"/os/executive/session/history-context");
+    expect(JSON.parse(request!.body as string)).toEqual({selection:{work_ref:"WS:Original.Project"}});
+    const headers=new Headers(request!.headers);
+    expect(headers.has("x-mastermind-workspace-authorization")).toBe(false);
+    await expect(e.client.executiveSession!.send({operation_key:"inert-original",target_ref:"fabric_attempt:"+"a".repeat(64),instruction:"inert message",stop_condition:"finish"},signal)).rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("rejects root/additional/accessor selectors before OAuth or fetch",async()=>{
+    const e=setup({executiveResource:historyResource}),signal=new AbortController().signal;
+    const getter=vi.fn(()=>"WS:Original.Project");
+    for(const selection of [{workRef:"WS:Original.Project",rootJobId:"JOB-1"},
+      Object.defineProperty({},"workRef",{get:getter}),{workRef:"WS:Original.Project\n"}]){
+      await expect(e.client.executiveSession!.historyContext!(selection as {workRef:string},signal)).rejects.toThrow("SESSION_HISTORY_SELECTION_INVALID");
+    }
+    expect(getter).not.toHaveBeenCalled();expect(e.fetcher).not.toHaveBeenCalled();
+  });
+  it("refuses the original READ reply after actual auth generation withdrawal",async()=>{
+    const e=await readOnlyHistory(),held=deferred<Response>();e.fetcher.mockImplementation(()=>held.promise);
+    const pending=e.client.executiveSession!.historyContext!({workRef:"WS:Original.Project"},new AbortController().signal);
+    const refused=expect(pending).rejects.toThrow();await flush();
+    await e.client.signOut();held.resolve(response({ok:true}));await refused;
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("fresh conversation fixed transport",()=>{
+ const resource="https://mcp.mastermind-x.com/os/executive";
+ const preview={work_ref:"WS:Original.Project",operation_key:"mmos-conversation-create-"+"a".repeat(40),message:"Original user message."};
+ it("uses dual resource headers only on preview/create and exact original Executive recovery bodies",async()=>{
+  const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+  e.fetcher.mockImplementation(async()=>response({ok:false,error:{code:"inert"}}));
+  const signal=new AbortController().signal;
+  for(const operation of ["preview","create","status","read"] as const){
+   const request=operation==="preview"?preview:operation==="create"?{...preview,preview_digest:"b".repeat(64)}:
+    {work_ref:preview.work_ref,operation_key:preview.operation_key};
+   await e.client.executive!.freshConversation!.request(operation,request,signal);
+   const [url,options]=e.fetcher.mock.calls.at(-1)!;
+   expect(url).toBe(ORIGIN+"/os/executive/conversation/"+operation);
+   expect(JSON.parse(options!.body as string)).toEqual({arguments:request});
+   expect(new Headers(options!.headers).has("x-mastermind-workspace-authorization")).toBe(operation==="preview"||operation==="create");
+  }
+  expect(e.fetcher).toHaveBeenCalledTimes(4);
+ });
+ it("carries all six attended leaves on exact paths with source-owned dual-resource separation",async()=>{
+  const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+  e.fetcher.mockImplementation(async()=>response({inertTransportResult:true}));
+  const signal=new AbortController().signal,{preview_digest,...preflight}=freshRecoveryOwner.turn_request;
+  const selected={work_ref:preflight.work_ref,reference:preflight.reference,turn_key:preflight.turn_key};
+  for(const [operation,path,request,dual] of [
+    ["consume","consume",freshRecoveryOwner.consume_request,true],
+    ["consume_status","consume/status",freshRecoveryOwner.consume_request,false],
+    ["turn_preview","turn/preview",preflight,true],
+    ["turn","turn",freshRecoveryOwner.turn_request,true],
+    ["turn_status","turn/status",selected,false],
+    ["turn_read","turn/read",selected,false],
+  ] as const){
+   await e.client.executive!.freshConversation!.request(operation,request,signal);
+   const [url,options]=e.fetcher.mock.calls.at(-1)!;
+   expect(url).toBe(ORIGIN+"/os/executive/conversation/"+path);
+   expect(JSON.parse(options!.body as string)).toEqual({arguments:request});
+   expect(new Headers(options!.headers).has("x-mastermind-workspace-authorization")).toBe(dual);
+  }
+  expect(e.fetcher).toHaveBeenCalledTimes(6);
+ });
+ it("does not relabel a READ-only Executive token as original submit-policy recovery",async()=>{
+  const e=setup({executiveResource:resource});
+  e.fetcher.mockImplementation(async()=>response({token_type:"Bearer",access_token:"private-token",expires_in:3600,
+   scope:new URL(e.popup.location).searchParams.get("audience")===resource?"mastermind.executive.read":new URL(e.popup.location).searchParams.get("scope")}));
+  await e.login();e.fetcher.mockClear();
+  await expect(e.client.executive!.freshConversation!.request("status",{work_ref:preview.work_ref,operation_key:preview.operation_key},new AbortController().signal)).rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+  expect(e.fetcher).not.toHaveBeenCalled();
+ });
+ it("closes unknown/request fields before transport and withholds a late reply after actual sign-out",async()=>{
+  const e=setup({executiveResource:resource}),signal=new AbortController().signal;
+  expect(()=>e.client.executive!.freshConversation!.request("preview",{...preview,root_job_id:"JOB-foreign"},signal)).toThrow("FRESH_CONVERSATION_REQUEST_INVALID");
+  expect(e.fetcher).not.toHaveBeenCalled();await e.login();e.fetcher.mockClear();
+  const held=deferred<Response>();e.fetcher.mockImplementation(()=>held.promise);
+  const pending=e.client.executive!.freshConversation!.request("preview",preview,signal),refused=expect(pending).rejects.toThrow();
+  await flush();await e.client.signOut();held.resolve(response({ok:true}));await refused;
   expect(e.fetcher).toHaveBeenCalledTimes(1);
  });
 });

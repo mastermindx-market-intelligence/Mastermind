@@ -468,6 +468,7 @@ describe("epoch races, including A-B-A", () => {
     );
     await show();
     fireEvent.click(screen.getByRole("button", { name: "Open retained result — JOB-002" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to retained results" }));
     fireEvent.click(screen.getByRole("button", { name: "Open retained result — JOB-003" }));
     await screen.findByText("EXACT_RESULT_CARD:work:JOB-003");
     expect(resultSignals[0].aborted).toBe(true);

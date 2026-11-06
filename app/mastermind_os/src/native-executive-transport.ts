@@ -1,14 +1,21 @@
+import {freshConversationArguments} from "./orchestration/fresh-conversation-transport";
+import {projectConversationArguments} from './conversations/project-conversation-transport';
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
   decodeSessionContext,
   normalizeExecutiveSessionSelection,
   sessionSelectionWire,
+  sessionTargetKind,
   type ExecutiveSessionSelection,
   type ExecutiveSessionTransport,
 } from "./orchestration/executive-session-command-port";
+import {sessionSendArguments} from "./orchestration/session-send-arguments";
+import type { ProjectConversationHistoryTransport } from "./conversations/project-conversation-history-owner";
+import { projectHistorySelection } from "./conversations/project-history-selection";
 import { normalizeDirectSelection, type DirectNativeTransport } from "./direct-native-result";
 import { closedReadFailureReason, type DiagnosticReadReason, type DiagnosticPhase, type ExecutiveDiagnosticSnapshot } from "./diagnostic-state";
+import { planningArguments } from "./planning/project-planning-transport";
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type Listen = (event: string, listener: (event: { payload: unknown }) => void) => Promise<() => void>;
@@ -24,11 +31,12 @@ const WORK = /^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ROOT = /^JOB-[A-Za-z0-9][A-Za-z0-9._:-]{0,250}$/;
 const OPERATION = /^session-continue-[0-9a-f]{64}$/;
 const CURSOR = /^[A-Za-z0-9_=-]{1,2048}$/;
-/** Deprivilege the existing authenticated native context to READ-only; never
+/** Keep the Secretary native context READ-only; never
  * rewrite identity, selection or native source. Only a fully qualified backend
  * context can be projected, and its capability is reduced, not invented. */
 function nativeReadContextOnly(raw: unknown, selected: ExecutiveSessionSelection): unknown {
-  if (!decodeSessionContext(raw, selected)) return raw;
+  if (sessionTargetKind(selected) !== "hermes_secretary" ||
+      !decodeSessionContext(raw, selected)) return raw;
   const envelope = raw as Record<string, unknown>;
   const data = envelope.data as Record<string, unknown>;
   const capability = data.capabilities as Record<string, unknown>;
@@ -93,9 +101,10 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
   })();
 
   function call(command: "executive_context" | "executive_submit" | "executive_status" |
-    "executive_session_context" | "executive_session_reply" | "executive_session_references" |
+    "executive_session_context" | "executive_session_send" | "executive_session_reply" | "executive_session_references" |
     "executive_project_session_references" |
-    "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction",
+    "executive_project_history_context" | "executive_fresh_conversation" | "executive_project_conversations_read" |
+    "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction" | "executive_project_planning",
     signal: AbortSignal, args?: Record<string, unknown>): Promise<unknown> {
     const started = epoch, boundary = generationAbort.signal;
     if (!available || signal.aborted) return Promise.reject(new Error("EXECUTIVE_UNAVAILABLE"));
@@ -135,6 +144,10 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     context: (signal) => call("executive_context", signal),
     submit: (arguments_, signal) => call("executive_submit", signal, { arguments: arguments_ }),
     status: (arguments_, signal) => call("executive_status", signal, { intentId: arguments_.intent_id }),
+    projectPlanning: {request:(operation,arguments_,signal)=>call("executive_project_planning",signal,
+      {operation,arguments:planningArguments(operation,arguments_)})},
+    freshConversation: {request:(operation,arguments_,signal)=>call("executive_fresh_conversation",signal,
+      {operation,arguments:freshConversationArguments(operation,arguments_)})},
     directNative: {
       read: (selection, signal) => {
         const normalized = normalizeDirectSelection(selection);
@@ -178,18 +191,27 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
       },
     },
   };
-  // Session history reuses the *same* native bearer owner/epoch. It exposes
-  // only the preexisting authenticated READ endpoints and cannot submit even
-  // if the backend reports an addressable target. The independent native
-  // executive_submit F2 review remains held; this does not modify that route.
-  const sessionTransport: ExecutiveSessionTransport = {
+  // History and qualified Fabric continuations reuse the same native bearer
+  // owner and epoch. Secretary SEND remains unavailable on this native route.
+  // The independent executive_submit F2 review remains unchanged.
+  const sessionTransport: ProjectConversationHistoryTransport = {
+    projectConversations: {request: (operation,arguments_,signal) => {
+      const closed=projectConversationArguments(operation,arguments_);
+      return closed ? call('executive_project_conversations_read',signal,{operation,arguments:closed})
+        : Promise.reject(new Error('PROJECT_CONVERSATION_SELECTION_INVALID'));
+    }},
     authGeneration: () => epoch, available: () => available,
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    historyContext: (selection, signal) => {
+      const closed = projectHistorySelection(selection);
+      return closed ? call("executive_project_history_context", signal, {workRef: closed.workRef})
+        : Promise.reject(new Error("SESSION_HISTORY_SELECTION_INVALID"));
+    },
     context: async (selection, signal) => {
       const normalized = normalizeExecutiveSessionSelection(selection);
       if (!normalized) throw new Error("SESSION_SELECTION_INVALID");
-      // The native context command carries the closed selection variant; it
-      // remains a READ and never gains a SEND route.
+      // Preserve the accepted Fabric context and its fixed SEND command.
+      // The separately selected Secretary path remains READ-only here.
       return nativeReadContextOnly(await call("executive_session_context", signal, {
         selection: sessionSelectionWire(normalized),
       }), normalized);
@@ -216,7 +238,11 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
         ...(args.cursor ? { cursor: args.cursor } : {}),
       });
     },
-    send: () => Promise.reject(new Error("NATIVE_SESSION_READ_ONLY")),
+    send: (arguments_,signal) => {
+      const closed=sessionSendArguments(arguments_);
+      return closed?call("executive_session_send",signal,{arguments:closed})
+        :Promise.reject(new Error("SESSION_SEND_INVALID"));
+    },
   };
   return { transport, sessionTransport, ready,
     invalidate() {

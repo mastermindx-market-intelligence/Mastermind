@@ -1,4 +1,6 @@
 import { bindMissionHost, type RawClient, type SessionHostAttachment } from "./host";
+import { createProjectConversationHistoryReaderFactory } from "./conversations/project-conversation-history-owner";
+import {createProjectConversationCatalogueReaderFactory} from './conversations/project-conversation-catalogue-factory';
 import { readLaunchBindingConfig } from "./launch-config";
 import type { ExecutiveSessionSelection } from "./orchestration/executive-session-command-port";
 import type { LaunchConfiguration } from "./orchestration/executive-launch-command-port";
@@ -73,9 +75,15 @@ export function composeMissionHost(
         createIndexedDbSessionPendingPointerStore(indexedDB),
       )
     : null;
+  const projectHistoryReader = client.executiveSession
+    ? createProjectConversationHistoryReaderFactory(client.executiveSession) : undefined;
+  const projectCatalogueReader = client.executiveSession
+    ? createProjectConversationCatalogueReaderFactory(client.executiveSession) : undefined;
   const sessionAttachment: SessionHostAttachment | undefined = session
     ? {
         binding: session.binding,
+        ...(projectHistoryReader ? {createProjectHistoryReader: projectHistoryReader} : {}),
+        ...(projectCatalogueReader ? {createProjectCatalogueReader: projectCatalogueReader} : {}),
         // The session selection carries the closed target kind; the generic
         // attachment keeps its opaque signature.
         refresh: (selection) =>

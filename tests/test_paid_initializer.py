@@ -573,16 +573,16 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='0e6c009ef049b93a14b03d2091d63d3c86d991d012028ec7f4ac90c1b40cc291'
+    assert hashlib.sha256(current_raw).hexdigest()=='c6b250d42ff2841e5b1d98a8d5f5a81603274fcf9ca68a0e35a4bfccfb75d1e7'
     current=json.loads(current_raw)
-    assert len(before)==95 and len(current)==106
+    assert len(before)==95 and len(current)==107
     assert set(before)<=set(current)
     added={'ext/host_pull_daemon.sh','ext/host_pull_launchd.plist.template',
         'ext/paid_host_readiness.py','ext/paid_initializer.py',
         'ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py',
         'ext/paid_provider_entry.py','ext/post_failure_observation.py',
         'ext/post_failure_observation_delivery.py', 'ext/participant_binding.py',
-        'ext/fabric_participant_owner.py'}
+        'ext/fabric_participant_owner.py','ext/original_advertised_artifact.py'}
     # The accepted source union includes the protected review-routing picker,
     # provider/readiness composition and fixed-template launcher transition.
     # Preserve their finite changes without replacing the historical epoch.
@@ -609,10 +609,14 @@ def test_native_initializer_extends_only_exact_preimage_members():
     # Its authentic predecessor remains fixed in the historical release.
     ubuntu4_changed={'ext/fabric_host_qualification.py'}
     assert before['ext/fabric_host_qualification.py']=='1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899'
-    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|recovery_changed|ubuntu4_changed
-    # Linux process custody and Ubuntu4 qualification advance distinct historical members.
-    assert sum(before[p]==current[p] for p in before)==63
-    for name in added|changed|diagnostic_changed|long_horizon_changed|recovery_changed|ubuntu4_changed:
+    # The bounded procfs fallback changes only the current lane runtime.
+    census_changed={'ext/lane_runtime.py'}
+    assert before['ext/lane_runtime.py']=='61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329'
+    assert current['ext/lane_runtime.py']=='83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d'
+    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|recovery_changed|ubuntu4_changed|census_changed
+    # Census fallback advances exactly one additional historical member.
+    assert sum(before[p]==current[p] for p in before)==62
+    for name in added|changed|diagnostic_changed|long_horizon_changed|recovery_changed|ubuntu4_changed|census_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation

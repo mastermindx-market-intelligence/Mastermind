@@ -29,7 +29,7 @@ def _missing(work_ref):
 
 def capture_plan_continuity(*, owner, git, work_ref, macro_sha,
                             workstream_source, workstream_bytes, executable_macro_sha=None,
-                            _data_closure=None):
+                            _data_closure=None, code_git=None):
     """Use the parent's bounded Git runner and existing cumulative deadline."""
     if _data_closure is not None:
         _data_closure.update(state='CAPTURED',captures=[])
@@ -44,13 +44,14 @@ def capture_plan_continuity(*, owner, git, work_ref, macro_sha,
             _data_closure['state']='FIXED_READER_UNAVAILABLE' if fixed else 'FAILED'
         return _missing(work_ref)
     code_sha = macro_sha if executable_macro_sha is None else executable_macro_sha
+    read_code = git if code_git is None else code_git
     if not callable(getattr(owner, "select_project_plan_adoption", None)):
         return missing(fixed=True)  # Older configured reader, identical at both refs.
     try:
-        membership = git("ls-tree", "-z", code_sha, "--", _HELPER)
+        membership = read_code("ls-tree", "-z", code_sha, "--", _HELPER)
         if re.fullmatch(r"100644 blob [0-9a-f]{40}\t" + re.escape(_HELPER) + "\x00", membership) is None:
             return missing(fixed=True)
-        helper_text = git("show", code_sha + ":" + _HELPER, limit=1048576)
+        helper_text = read_code("show", code_sha + ":" + _HELPER, limit=1048576)
         helper = types.ModuleType("_captured_agentos_plan_content_contract")
         helper.__file__ = "scripts/agentos_project_plan_contract.py"
         exec(compile(helper_text, helper.__file__, "exec"), helper.__dict__)
