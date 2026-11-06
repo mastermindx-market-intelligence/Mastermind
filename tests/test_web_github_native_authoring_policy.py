@@ -57,3 +57,12 @@ def test_all_principal_entrypoints_advertise_the_same_route() -> None:
         source = _read(path)
         for marker in markers:
             assert marker in source, (path, marker)
+
+
+def test_web_project_instruction_text_fits_8000_characters() -> None:
+    source = _read("docs/sol_skills/BOOTSTRAP_KERNEL.md")
+    _, marker, fenced = source.partition("```text\n")
+    assert marker
+    payload, closing, _ = fenced.partition("```")
+    assert closing and payload.startswith("MASTERMIND SOL BOOTSTRAP")
+    assert len(payload) <= 8000
