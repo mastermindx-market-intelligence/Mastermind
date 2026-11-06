@@ -41,6 +41,15 @@ class KernelCensusFallbackTests(unittest.TestCase):
         self.assertEqual(set(compact), {"81 S", "82 Z"})
         self.assertEqual(set(grouped), {"81 75 S", "82 75 Z"})
 
+    def test_kernel_thread_zero_process_group_is_a_valid_record(self) -> None:
+        record(self.root, 2, pgid=0, sid=0, state="I", comm="kworker")
+        with patch.object(lr.sys, "platform", "linux"):
+            self.assertEqual(
+                lr._linux_procfs_ps_lines(
+                    ["/bin/ps", "-axo", "pid=,pgid=,stat="], proc_root=self.root
+                ), ("2 0 I",)
+            )
+
     def test_disappearing_process_does_not_claim_any_member(self) -> None:
         (self.root / "70").mkdir()
         record(self.root, 80)

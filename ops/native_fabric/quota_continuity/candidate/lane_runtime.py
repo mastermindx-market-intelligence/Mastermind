@@ -382,7 +382,10 @@ def _linux_procfs_ps_lines(
                     group = int(fields[2])
                 except (UnicodeError, ValueError) as exc:
                     raise ProcessCensusError("process_census_malformed") from exc
-                if group <= 0 or not state.isalpha():
+                # Kernel threads legitimately have process group zero.
+                # Retain them in the census; owned-session checks still
+                # require a positive, exact session and verify identity.
+                if group < 0 or not state.isalpha():
                     raise ProcessCensusError("process_census_malformed")
                 lines.append(
                     f"{entry.name} {group} {state}" if with_group
