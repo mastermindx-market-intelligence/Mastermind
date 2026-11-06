@@ -55,9 +55,11 @@ export function decodeExecutiveContext(value: unknown, nowMs: number): VerifiedC
  * while signed out too, so later sign-in can qualify it without remounting App.
  * Auth events and expiry invalidate first; async replies can never restore an
  * older principal. Persistence and operation identity remain their existing owners.
+ * The legacy Launch catalog is optional; project work and fresh conversations
+ * use this same qualified context and pending-operation store without that catalog.
  */
 export function createOsExecutiveHost(
-  config: LaunchConfiguration,
+  config: LaunchConfiguration | null,
   transport: OsExecutiveTransport,
   store: PendingPointerStore,
   now: () => number = Date.now,

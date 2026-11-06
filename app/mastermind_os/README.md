@@ -29,9 +29,14 @@ The current project-team implementation adds a source-qualified Start work path,
 goal and handoff capture, nested COO teams, retained project run history, and
 explicit follow-ups from completed results. It reuses the Executive Runtime,
 original input store, worker placements, workspace allocator and app operation
-controller. See [Project team execution](docs/project-team-execution.md) for the
-architecture, code artifact continuity, transport boundaries and remaining
-installed journey qualification.
+controller. The standard app composition mounts that existing Executive command
+owner when the client supplies an Executive transport, even without a legacy
+Launch manifest. Current-project Start work, new conversations and completed-run
+follow-ups keep the same authenticated context and operation store. An absent
+manifest supplies no legacy Launch choices or submit authority. See
+[Project team execution](docs/project-team-execution.md) for the architecture,
+code artifact continuity, transport boundaries and remaining installed journey
+qualification.
 
 This candidate also composes the published native Session Send source from
 [9679d5e](https://github.com/mastermindx-market-intelligence/Mastermind/commit/9679d5e864be2d742abbd35eaf976ed090b7a82e).

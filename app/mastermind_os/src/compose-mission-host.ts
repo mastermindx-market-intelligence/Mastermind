@@ -50,10 +50,11 @@ function executiveObservation(transport: OsExecutiveTransport | undefined): {
 }
 
 /**
- * One app instance composes the existing read/auth owner with the fixed
- * launch adapter and — independently — the selected-session continuation
- * host. Session continuation may exist without a Launch catalog; absent
- * Executive configuration/auth keeps it unavailable and it sends no requests.
+ * One app instance composes the existing read/auth owner with the shared
+ * Executive command owner and the independent selected-session continuation
+ * host. A Launch catalog enables only legacy Launch choices; project work and
+ * fresh conversations use the same command context and store without it.
+ * Absent Executive configuration/auth keeps these owners unavailable.
  * The session store is a separate durable namespace: Launch records are never
  * read, migrated or cleared by it.
  */
@@ -64,7 +65,7 @@ export function composeMissionHost(
   hostKind: DiagnosticHostKind = "unknown",
 ) {
   // Mount while signed out: the existing auth owner later qualifies this binding.
-  const executive = config && client.executive
+  const executive = client.executive
     ? createOsExecutiveHost(config, client.executive, createIndexedDbPendingPointerStore(indexedDB))
     : null;
   // Separate session capability/controller and lifecycle; no shared slot with

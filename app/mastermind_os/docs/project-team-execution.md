@@ -63,6 +63,43 @@ descendant obtains the original root input through its validated Runtime lineage
 Mixed execution supervisors explicitly reference the same original input owner;
 they do not copy an artifact into another store.
 
+## App entry without a legacy Launch manifest
+
+The production entry calls `composeMissionHost` with the actual client. An
+Executive transport mounts the existing qualified command context, controller
+and IndexedDB pending-operation store even when `VITE_MM_LAUNCH_CONFIG` is
+absent. Current-project work and fresh conversations attach to that same owner.
+The separate selected-session owner and its durable namespace are unchanged.
+
+A missing legacy manifest produces an empty legacy catalog. It cannot create,
+prepare or submit a legacy Launch intent, synthesize a workstream, or grant a
+project profile. Original pending-operation status recovery remains available
+under the original principal when the manifest is removed. Authentication loss,
+principal changes, source validity and current project admission still use
+their existing checks.
+
+Qualification includes the actual native client, production host composition
+with `config=null`, App and a retained IndexedDB database. The pre-repair case
+failed to open the project Goal form through this entry; the unchanged case
+passes after mounting the shared owner independently of the legacy catalog.
+Transport calls in these tests are inert and do not prove installed enrollment
+or provider execution.
+
+The closed web asset recipe supports three explicit public-input modes. Ambient
+`VITE_` variables remain excluded from the build process.
+
+| Inputs | Receipt | Capability boundary |
+| --- | --- | --- |
+| Neither Executive resource nor legacy manifest | Existing v1, `web` | Read-only default; no Executive command configuration is inferred. |
+| Exact qualified Executive resource only | `mastermind.os_web_build.executive.v3`, `web+executive` | The receipt includes `executive_resource`; legacy manifest fields are absent and refused if added. |
+| Exact qualified Executive resource and legacy manifest | Existing v2, `web+launch` | The original manifest bytes, digest and legacy Launch qualification remain required. |
+
+A manifest without the qualified resource is refused. The existing asset
+qualifier/importer validates v3 source, input and asset digests. The separate
+legacy Launch publication qualifier remains v2-only, so a resource-only receipt
+cannot stand in for legacy Launch enrollment. These are build-input contracts,
+not a credential, registration, installed service or provider-start proof.
+
 ## Durable and attended modes
 
 Eligibility is derived from the installed service and registered worker

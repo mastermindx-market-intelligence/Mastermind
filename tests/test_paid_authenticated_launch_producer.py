@@ -47,14 +47,15 @@ OBJECTIVE=('Assess launch-readiness from supplied exact release evidence. Two in
     'analyses cover auth/admission/launch and return/recovery/effect preservation. Review only the '
     'auth/admission/launch analysis; the original parent reconciles both and labels the second unreviewed.')
 # Exact joined paid producer plus finite-workstream source; any input drift refuses.
-# 2026-11-06 source audit: only accepted-receipt decoding was extracted for reuse.
-# makeLaunchIntent, prepare, operation keys and launch configuration are unchanged.
+# 2026-11-06 source audit: the shared command owner accepts an absent legacy
+# catalog, while legacy prepare/submit explicitly refuse that absent catalog.
+# With the manifest below, payload construction and operation keys are unchanged.
 # The actual producer still runs below; no payload or installed-source substitute.
 SOURCE_PINS={
     'app/mastermind_os/src/orchestration/operation-key.ts':
         'de1b4f7bf74030b6c71b956440801760452f17049d13fa423a9fac6aeec2562f',
     'app/mastermind_os/src/orchestration/executive-launch-command-port.ts':
-        'f72ef9f04725675b187600e4a9b5d4865e4445cde8ff853fe71fc4aa90b6a2c8',
+        'd122bbf0d42de8aa247f077dc3c5c43ae5bfe38e22b85dc4a01dfa3bba178f34',
     'app/mastermind_os/src/launch-config.ts':
         '5a24a817790848228af05fa437bd8bdbbaa5ce12cc0feaeca6e20abb9e9e512e',
 }
