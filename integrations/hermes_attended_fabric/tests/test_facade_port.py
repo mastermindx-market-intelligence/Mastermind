@@ -73,6 +73,10 @@ class FakeFacade:
             raw["response_sha256"] = "a" * 64
         if self.break_contract == "missing_parent" and name == "fabric_status":
             raw["status"].pop("parent_run_id", None)
+        if self.break_contract == "missing_live_lineage" and name == "fabric_status":
+            raw["status"].pop("parent_run_id", None)
+            raw["status"].pop("root_id", None)
+            raw["root_verified"] = False
         if self.break_contract == "wrong_run":
             raw["run_id"] = "foreign"
         if self.break_contract == "backend_refusal":
@@ -169,6 +173,17 @@ class TestFabricFacadePort(unittest.TestCase):
         got = self.ask("result")
         self.assertEqual(got["state"], "UNAVAILABLE")
         self.assertEqual(len(self.facade.calls), 1)
+
+    def test_active_run_without_canonical_lineage_blocks_duplicate_submit(self):
+        self.facade.state = "ACTIVE_OR_WAITING"
+        self.facade.break_contract = "missing_live_lineage"
+        observed = self.ask("status")
+        self.assertEqual(observed["state"], "UNVERIFIED")
+        self.assertEqual(observed["reason"], "FABRIC_STATUS_LINEAGE_NOT_PROVEN")
+        attempted = self.ask("submit", **self.task())
+        self.assertEqual(attempted["state"], "UNVERIFIED")
+        self.assertEqual([name for name, _ in self.facade.calls],
+                         ["fabric_status", "fabric_status"])
 
     def test_wrong_digest_does_not_reveal_result_bytes(self):
         self.facade.state = "TERMINAL"
