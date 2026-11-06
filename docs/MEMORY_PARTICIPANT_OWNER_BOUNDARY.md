@@ -4,8 +4,9 @@
 
 The frozen 499 source was **not accepted for execution**: MEMORY-OWNER-PAID-1
 found that Runtime/profile custody did not establish incumbent paid admission.
-The successor source below adds that actual economic join. It is prospective,
-uninstalled, and remains subject to the same finite consequence review.
+The b73 economic successor closed that finding in a scoped independent review
+(77 unique retained checks). The new V3 ordering/configuration/service-reader
+delta remains prospective and subject to the same reviewer continuation.
 No profile, key, grant, service, provider invocation or study is enabled.
 
 The existing operator bearer may authorize ONLY a closed pre-input economic
@@ -29,18 +30,33 @@ uses the existing strict original outcome ledger before lease release; unknown
 accounting preserves the original count/lease and cannot refund/replay. Missing
 usage stays null, not a fabricated zero or acceptance.
 
-Two cross-repository facts remain explicitly missing. Frozen Linux wire v2 has
-no pre-budget read-only current-permission qualification; original-case recovery
-is not repurposed as preflight. Local transport/profile metadata is not Linux
-permission. The source owner must supply its prospective qualified seam before
-this path can be promoted for execution. Also original Control custody does
-not establish that the intended original recipient was that service. The new
-completed-reference loader checks actual terminal Runtime/Events and original
-hashes only, never reads private bodies, never clones an active lease, and
-reports `original_recipient: UNRECORDED`, `disclosure_authorized: false`.
-It is NOT a completed-read authority. A genuine original-recipient fact plus
-fresh authenticated receiver/current permission and independent Linux current
-grant are still mandatory; no policy stanza backfills an unrecorded recipient.
+The prospective V3 path now performs `qualify_current_case` before ANY original
+OperatorOwner child-row/count reservation or broker lease. Missing, refused,
+malformed or unknown qualification leaves all three untouched. The original
+bounded economic delegation is retained only in the incumbent private Attempt
+artifact namespace; Events retain its digest/size only. It is not Linux source
+authority. The real incumbent owner validates that original bearer only after
+fresh Linux permission. Prepare then checks Linux current permission again;
+revocation withholds input and provider execution without refund/replay.
+
+Completed SERVICE reading is a distinct nominal read-only path, not a cloned
+active lease. A V3 original result must retain the genuine original native service
+recipient from Linux authorization, exact original pre-input/case/input/result
+receipts, and the current protected Control/Runtime namespace. The existing
+root-owned Control configuration may separately authorize an exact completed
+view through `memory_original_result_access`; its scope includes the original
+native root/operator/child, Runtime Job/root/parent/Attempt and all three original
+digests. This stanza is installed AFTER completion, so future result facts never
+enter the original pre-input. Actual current global READ and fresh Linux V3
+permission are additional conjuncts on every read. No policy can backfill a V1/V2
+unrecorded recipient or authorize a human from a service label. No new policy
+store, listener, credential, lifecycle or registry is introduced.
+
+V3 qualified current-selection/current-access metadata may advance. Original
+locator selection, source/install/epoch, service and recipient-grant reference
+remain immutable. V1/V2 source comparison and wire meanings remain unchanged.
+Actual Linux source/current installed grant and two-host confinement still need
+joined qualification; explicit fixture authority is not actual enrollment.
 
 Exact packet bytes are retained mode0600 only in the existing private Control
 Attempt directory, with input/result digest receipts in the existing Events.
@@ -177,8 +193,10 @@ UID501 paid profile/shim are unchanged. Its new Control mode calls:
    remains there. Existing privileged serve_connection dispatches only the exact
    Memory schema to `executive_memory_issuer`; root independently requalifies
    the accepted Control socket and projection before the fixed SSH exchange.
-4. `memory_native_issuer` commits MEMORY_PREPARE_ATTEMPT in existing Attempt Events
-   before exchange. No reply/UNKNOWN permits only v2 read_original_case for the
+4. The current V3 read-only qualification precedes the actual incumbent economic
+   reservation. The private original economic bearer never enters wire/source,
+   provider input, generic logs or Events. `memory_native_issuer` commits MEMORY_PREPARE_ATTEMPT in existing Attempt Events
+   before exchange. No reply/UNKNOWN permits only the recorded original-version read_original_case for the
    same operation and pre-input; ABSENT/PENDING never prepares again. Its local
    nominal case cap appears only after current framed response validation.
 5. `protected_memory_execution` freshly checks current_input, compiles the exact
@@ -202,7 +220,11 @@ UID501 paid profile/shim are unchanged. Its new Control mode calls:
 The private root SSH identity is a separately enrolled fixed slot under
 `/var/db/mastermind-executive/memory-issuer/`; it is not the principal deployment
 key. Existing root-owned control.json may declare the exact closed
-`memory_native_issuer` and `protected_memory_execution` stanzas. Source code never
+`memory_native_issuer`, `protected_memory_execution` and the optional exact-view
+`memory_original_result_access` stanzas, all validated by the actual closed
+`load_control_config` loader. Missing/malformed configuration refuses. V3
+requires the NEW explicit `memory.e0.protected_m2_service_ssh.v2` transport profile;
+old standalone transport V1 cannot be relabelled as V3. Source code never
 creates them or enrolls credentials. SSH has no user config/agent/proxy/forwarding/
 TTY/command/path override, and strict pinned known-host checking. Actual Linux
 sshd/service confinement plus native source-use grant remain independently
@@ -231,3 +253,23 @@ completed-case cross-process recovery need their actual current admission owner;
 the source does not expose a generic result endpoint or manufacture that grant.
 Candidate native manifest/seal derivation remains with the sole release composer;
 this branch does not update installed source or select a release.
+
+## Prospective client confinement and remaining runtime premises
+
+The source fixes SSH to `/usr/bin/ssh -F /dev/null`, a literal remote command,
+separately enrolled root-only key and pinned known-host file. It disables agents,
+forwarding, local commands, TTY, proxy selection, ambient SendEnv and connection
+multiplexing (`SendEnv=-*`, `ControlMaster=no`, `ControlPath=none`,
+`ControlPersist=no`). The exact minimal process environment does not inherit
+hostile caller variables. Neither wire nor projection accepts command, path,
+key, environment or option selectors. Ordinary local kernel peers are refused
+before key/enrollment lookup or exchange. No actual SSH is exercised by tests.
+
+This establishes prospective M2 client confinement only. Actual protected
+installation/current Control custody, dedicated Linux key and per-key options,
+trusted current sshd ancestry/journal/image facts and source-purpose grant remain
+independent acceptance premises. Default sshd configuration and `sshd -T -C` are
+not historic loaded-environment attestation. Linux current service permission
+must bind the exact original recipient, not an end user inferred from Control.
+All five flags, scientific admission, adjudicator access and retry remain false;
+no live study/provider/private source or original held operation is touched.

@@ -11,6 +11,8 @@ import json
 import os
 import re
 import pool_ledger
+import weakref
+from dataclasses import dataclass
 
 from fabric_operator_owner import OperatorOwner, canonical, digest, refuse, validate_child_admission
 from lease_broker import Broker
@@ -18,6 +20,37 @@ from lease_broker import Broker
 SCHEMA = 'mastermind.protected_memory_economic.v1'
 WRAPPER = 'mastermind.fabric_bound_child_authorization.v3'
 _SHA = re.compile(r'[0-9a-f]{64}\Z')
+_INVOCATIONS=weakref.WeakKeyDictionary()
+
+class RootEconomicInvocation:
+    __slots__=('__weakref__',)
+    def __new__(cls):refuse('protected_memory_root_helper_required')
+
+@dataclass(frozen=True)
+class _Invocation:
+    connection:object
+    peer:object
+    scope:str
+    pid:int
+
+def root_helper_invocation(connection,request):
+    """Kernel-root parent of this fixed helper, NOT Linux/source authority."""
+    import socket
+    from control_plane.executive_peer_identity import capture_peer_identity,_current_capture
+    if os.geteuid()!=501 or type(connection) is not socket.socket:refuse('protected_memory_root_helper_required')
+    actual=capture_peer_identity(connection)
+    if actual.euid!=0 or actual.pid!=os.getppid():refuse('protected_memory_root_helper_required')
+    _current_capture(actual)
+    value=object.__new__(RootEconomicInvocation)
+    _INVOCATIONS[value]=_Invocation(connection,actual,canonical(request),os.getpid())
+    return value
+
+def require_root_invocation(value,request):
+    from control_plane.executive_peer_identity import _current_capture
+    if type(value) is not RootEconomicInvocation or value not in _INVOCATIONS:refuse('protected_memory_root_helper_required')
+    state=_INVOCATIONS[value]
+    if state.pid!=os.getpid() or state.scope!=canonical(request):refuse('protected_memory_root_helper_required')
+    _current_capture(state.peer)
 
 
 def require_economic_policy(owner,request):
@@ -154,13 +187,21 @@ class ProtectedMemoryEconomicOwner:
             (raw, digest(raw.encode()), row['run_id'], row['request_digest']))
         if con.execute('SELECT changes()').fetchone()[0] != 1: refuse('protected_memory_economic_changed')
 
-    def acquire(self, selector, route, *, controller_pid):
+    def acquire(self, selector, route, *, controller_pid,delegation,authority):
         if type(controller_pid) is not int or controller_pid<=0:refuse('protected_memory_economic_owner')
         if (type(route) is not dict or set(route) != {'account', 'model', 'host'}
                 or route['host'] != self.broker.this_host or route['model'] not in ('glm-5.3','glm-5.3-flash')):
             # Keep the incumbent granted pool/model/host laws; no cheap-model
             # relabel, alternate host or fresh route can rescue a refusal.
             refuse('protected_memory_economic_route')
+        if (type(delegation) is not dict or set(delegation)!={'token','task_class','task_complexity','model'}
+                or delegation['model']!=route['model']):refuse('protected_memory_economic_binding')
+        request=dict(schema='mastermind.fabric_protected_memory_pre_input.v1',**selector,
+            model=route['model'],task_class=delegation['task_class'],task_complexity=delegation['task_complexity'])
+        require_root_invocation(authority,request)
+        # The helper is invoked ONLY after fresh v3 qualification. No earlier
+        # unqualified preauthorization row/count is reused or silently adopted.
+        self.owner.reserve_protected_memory(delegation['token'],request,authority=authority)
         with self.owner.transaction() as con:
             row, _, state = self._read(con, selector)
             if route['model']!=state['request']['model']:refuse('protected_memory_economic_route')

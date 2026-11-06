@@ -35,7 +35,7 @@ def test_terminal_original_reference_is_readonly_without_active_lease_or_private
     ref=original.completed_original_reference(runtime,lease.attempt.attempt_id)
     observed=original.current_reference(ref)
     assert observed['job_id']==job.job_id and observed['root_job_id']==job.root_job_id
-    assert observed['original_recipient']=='UNRECORDED' and observed['disclosure_authorized'] is False
+    assert observed['original_recipient']['recipient_kind']=='native_broker_service' and observed['disclosure_authorized'] is False
     assert observed['retry_authorized'] is False and 'answer' not in json.dumps(observed)
     assert runtime.events.list_events()==before and runtime.attempts.get_attempt(lease.attempt.attempt_id).status.value=='COMPLETED'
     assert not hasattr(ref,'prepare') and not hasattr(ref,'start') and not hasattr(ref,'result')

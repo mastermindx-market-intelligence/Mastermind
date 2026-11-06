@@ -10,7 +10,7 @@ import json
 import os
 import time
 import weakref
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from common import memory_native_wire as wire
 from control_plane import protected_memory_peer as peer
@@ -37,6 +37,7 @@ class _State:
     locator: bytes
     input_sha256: str
     pid: int
+    recipient: bytes|None=None
 
 
 def _send(payload):
@@ -59,14 +60,14 @@ def qualify_transport(intent):
     before=peer.require_control_memory_intent(intent)
     response=_send({'schema':SCHEMA,'operation':'qualify_transport','projection':before})
     if peer.require_control_memory_intent(intent)!=before:raise NativeCaseRefused()
-    if response!={'schema':SCHEMA,'state':'TRANSPORT_CONFIGURED','protocol':'memory.e0.native_issuer.v2'}:
+    if response!={'schema':SCHEMA,'state':'TRANSPORT_CONFIGURED','protocol':'memory.e0.native_issuer.v3'}:
         raise NativeCaseRefused()
 
 
-def _request(intent, action, **extra):
+def _request(intent, action, *, version='v2', **extra):
     projection = peer.require_control_memory_intent(intent)
     digest = hashlib.sha256(peer.canonical(projection)).hexdigest()
-    return projection, wire.validate_request({'schema':'research_factory.market_memory_e0_native_issuer_request.v2',
+    return projection, wire.validate_request({'schema':'research_factory.market_memory_e0_native_issuer_request.'+version,
         'action':action,'operation_id':projection['original_operation_id'],
         'intent':dict(projection['native_source_locator'],participant_binding_sha256=digest), **extra})
 
@@ -92,13 +93,15 @@ def _event_context(intent):
     return projection, claim
 
 
-def _prepare_attempt(intent):
+def _prepare_attempt(intent,version='v2'):
     projection, claim = _event_context(intent)
     attempt = claim.lease.attempt
     command = 'memory-case:'+attempt.attempt_id+':prepare'
     safe = {'schema':'mastermind.memory_prepare_attempt.v1',
         'operation_id':projection['original_operation_id'],
         'pre_input_sha256':hashlib.sha256(peer.canonical(projection)).hexdigest()}
+    if version=='v3':safe.update(schema='mastermind.memory_prepare_attempt.v2',wire_version='v3')
+    elif version!='v2':raise NativeCaseRefused()
     with claim.runtime.store.transaction() as con:
         prior = con.execute('SELECT event_id,payload_json FROM events WHERE command_id=? LIMIT 2',(command,)).fetchall()
         if prior: raise NativeCaseUnknown()
@@ -120,9 +123,9 @@ def _issue(intent, response):
     return cap
 
 
-def prepare_case(intent):
-    _prepare_attempt(intent)
-    _, request = _request(intent,'prepare_case')
+def prepare_case(intent,*,version='v2'):
+    _prepare_attempt(intent,version)
+    _, request = _request(intent,'prepare_case',version=version)
     return _issue(intent,_exchange(intent,request))
 
 
@@ -135,8 +138,11 @@ def read_original_case(intent):
     if len(rows)!=1: raise NativeCaseRefused()
     expected={'schema':'mastermind.memory_prepare_attempt.v1','operation_id':projection['original_operation_id'],
         'pre_input_sha256':hashlib.sha256(peer.canonical(projection)).hexdigest()}
-    if json.loads(rows[0]['payload_json'])!=expected: raise NativeCaseRefused()
-    _,request=_request(intent,'read_original_case')
+    actual=json.loads(rows[0]['payload_json']);version='v2'
+    if actual.get('schema')=='mastermind.memory_prepare_attempt.v2':
+        expected.update(schema='mastermind.memory_prepare_attempt.v2',wire_version='v3');version='v3'
+    if actual!=expected: raise NativeCaseRefused()
+    _,request=_request(intent,'read_original_case',version=version)
     response=_exchange(intent,request)
     if response['operation_state']!='COMPLETE': return response['operation_state'],None
     return 'COMPLETE',_issue(intent,response)
@@ -155,14 +161,16 @@ def _same_source(state, response):
     before=json.loads(state.issuer);after=response['issuer']
     # Access continuation can advance only when actual Linux current owner
     # qualifies it. Original source/installation/registration remain immutable.
-    keys=set(before)-{'current_access_ref','recipient_grant_ref'}
+    mutable=({'current_selection_sha256','current_access_ref'} if before['protocol']=='memory.e0.native_issuer.v3'
+             else {'current_access_ref','recipient_grant_ref'})
+    keys=set(before)-mutable
     if any(before[k]!=after[k] for k in keys) or wire.canonical(response['locator'])!=state.locator:
         raise NativeCaseRefused()
 
 
 def current_input(capability,intent):
     state=_current(capability,intent)
-    _,request=_request(intent,'current_input',locator=json.loads(state.locator))
+    _,request=_request(intent,'current_input',version=json.loads(state.issuer)['protocol'][-2:],locator=json.loads(state.locator))
     response=_exchange(intent,request);_same_source(state,response)
     raw=wire.packet(response['input'],response['locator'])
     if hashlib.sha256(raw).hexdigest()!=state.input_sha256: raise NativeCaseRefused()
@@ -182,6 +190,10 @@ def authorize_result_disclosure(capability,intent,original_attempt,original_inpu
     wire.exact(retained_result_digest,'sha256 bytes')
     reference={'attempt_id':original_attempt,'input_sha256':original_input_digest,
         'result_sha256':retained_result_digest['sha256'],'result_bytes':retained_result_digest['bytes']}
-    _,request=_request(intent,'authorize_result_disclosure',locator=json.loads(state.locator),result_ref=reference)
+    _,request=_request(intent,'authorize_result_disclosure',version=json.loads(state.issuer)['protocol'][-2:],locator=json.loads(state.locator),result_ref=reference)
     response=_exchange(intent,request);_same_source(state,response);_current(capability,intent)
+    if request['schema'].endswith('.v3'):
+        fact=wire.canonical(response['authorization']['original_recipient'])
+        if state.recipient is not None and state.recipient!=fact:raise NativeCaseRefused()
+        if state.recipient is None:_ISSUED[capability]=replace(state,recipient=fact)
     return response['authorization']

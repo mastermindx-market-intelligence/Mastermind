@@ -34,7 +34,9 @@ def joined(claimed,installed,monkeypatch):
     projection=peer._CONTROL_ISSUED[intent].original
     fingerprint=response({'schema':'research_factory.market_memory_e0_native_issuer_request.v2','action':'prepare_case',
         'operation_id':'x','intent':{}})['issuer']['broker_service_fingerprint']
-    monkeypatch.setattr(root,'_enrollment',lambda observed:(b'installed-auth-fixture',fingerprint,b'known',('root-owned-key-metadata',)))
+    transport=wire.canonical({'memory_native_issuer':{'schema':'mastermind.fixed_memory_issuer_transport.v1',
+        'protocol':'memory.e0.native_issuer.v2','service_key_fingerprint':fingerprint,'known_hosts_sha256':'a'*64}})
+    monkeypatch.setattr(root,'_enrollment',lambda observed:(transport,fingerprint,b'known',('root-owned-key-metadata',)))
     def exchange(raw):
         request=wire.decode_request(raw);count['actions'].append(request['action'])
         # Real Events are inspected BEFORE the fixed transport seam.

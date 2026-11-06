@@ -36,12 +36,15 @@ def issuer(version):
         'authority':'current_recipient_scoped_source_view_only'}
 
 def response(req,state='COMPLETE'):
-    action=req['action'];version=int(req['schema'][-1]);loc=locator();raw=rawpacket()
+    action=req['action'];version=int(req['schema'][-1])
     value={'schema':f'research_factory.market_memory_e0_native_issuer_response.v{version}',
         'status':{'prepare_case':'CASE_PREPARED','current_input':'INPUT_CURRENT',
-          'authorize_result_disclosure':'RESULT_DISCLOSURE_CURRENT','read_original_case':'ORIGINAL_CASE_STATE'}[action],
+          'authorize_result_disclosure':'RESULT_DISCLOSURE_CURRENT','read_original_case':'ORIGINAL_CASE_STATE',
+          'qualify_current_case':'CURRENT_CASE_QUALIFIED'}[action],
         'action':action,'operation_id':req['operation_id'],'intent':copy.deepcopy(req['intent']),
         'issuer':issuer(version),'verification':dict(w.FLAGS),'scientific_admission':False,'retry_authorized':False}
+    if action=='qualify_current_case':return value
+    loc=locator();raw=rawpacket()
     if action=='read_original_case': value['operation_state']=state
     if action!='read_original_case' or state=='COMPLETE': value['locator']=loc
     if action in ('prepare_case','current_input') or action=='read_original_case' and state=='COMPLETE':
@@ -50,6 +53,11 @@ def response(req,state='COMPLETE'):
         value['result_ref']=copy.deepcopy(req['result_ref'])
         value['authorization']=dict(purpose='disclose_exact_original_untrusted_child_result',
             **{k:req['result_ref'][k] for k in ('input_sha256','result_sha256','result_bytes')})
+        if version==3:value['authorization']['original_recipient']={
+            'schema':'research_factory.market_memory_e0_original_recipient.v3','recipient_kind':'native_broker_service',
+            'principal_ref':copy.deepcopy(issuer(3)['registration_ref']),
+            'ssh_key_fingerprint':issuer(3)['broker_service_fingerprint'],
+            'original_operation_id':req['operation_id'],'pre_input_intent_sha256':hashlib.sha256(w.canonical(req['intent'])).hexdigest()}
     return value
 
 def frame(value):

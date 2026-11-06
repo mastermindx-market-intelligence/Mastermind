@@ -14,6 +14,10 @@ from common.memory_native_wire import SUFFIX
 
 def test_actual_bounded_ssh_pipe_mechanics_fixed_argv_no_identity_fallback(monkeypatch):
     captured=[];actual=subprocess.Popen;reply=b'\0\0\0\x02{}'
+    for key,value in {'SSH_AUTH_SOCK':'/hostile/agent','HOME':'/hostile/home',
+            'PATH':'/hostile/bin','LD_PRELOAD':'/hostile/library','DYLD_INSERT_LIBRARIES':'/hostile/library',
+            'SSH_ASKPASS':'/hostile/askpass','DISPLAY':'hostile:0','LANG':'hostile',
+            'BASH_ENV':'/hostile/environment'}.items():monkeypatch.setenv(key,value)
     def inert(argv,**kwargs):
         captured.append((argv,kwargs['env']))
         # Actual subprocess/pipe/select/EOF mechanics; wholly inert Python echo.
@@ -26,8 +30,19 @@ def test_actual_bounded_ssh_pipe_mechanics_fixed_argv_no_identity_fallback(monke
     assert argv[-2]=='root@146.190.142.17'
     assert '-F' in argv and '/dev/null' in argv and 'IdentityAgent=none' in argv
     assert 'StrictHostKeyChecking=yes' in argv and 'ClearAllForwardings=yes' in argv
+    assert all(option in argv for option in ('SendEnv=-*','ControlMaster=no','ControlPath=none','ControlPersist=no'))
     assert str(root.KEY) in argv and 'macro_dashboard_deploy_v2' not in ' '.join(argv)
     assert environment=={'PATH':'/usr/bin:/bin','HOME':'/var/empty','LANG':'C'}
+
+
+@pytest.mark.parametrize('field',['argv','env','command','key','path','ssh_options','transport_profile'])
+def test_wire_selector_cannot_control_fixed_transport(field):
+    from common import memory_native_wire as wire
+    request={'schema':'research_factory.market_memory_e0_native_issuer_request.v3',
+        'action':'qualify_current_case','operation_id':'original-op',
+        'intent':{'study_id':'study','root_id':'root','operator_run_id':'operator',
+            'child_run_id':'child','participant_binding_sha256':'a'*64},field:'hostile'}
+    with pytest.raises(ValueError):wire.validate_request(request)
 
 
 @pytest.mark.parametrize('damage',['tools','unfinished','oversize','multiple'])

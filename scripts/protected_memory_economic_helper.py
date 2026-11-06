@@ -30,7 +30,7 @@ def main():
         raw.extend(part)
     if len(raw)<5 or int.from_bytes(raw[:4],'big')!=len(raw)-4: return 75
     value=wire.parse(bytes(raw[4:]),16384)
-    wire.exact(value,'schema action selector route arguments controller_pid')
+    wire.exact(value,'schema action selector route arguments controller_pid delegation')
     if type(value['controller_pid']) is not int or value['controller_pid']<=0:return 75
     if value['schema']!=SCHEMA or value['action'] not in ACTIONS: return 75
     # Check existing namespace BEFORE Broker's historical mkdir/init behavior.
@@ -43,7 +43,7 @@ def main():
     import lease_broker
     import pool_ledger
     from fabric_operator_owner import OperatorOwner
-    from protected_memory_economic import ProtectedMemoryEconomicOwner
+    from protected_memory_economic import ProtectedMemoryEconomicOwner,root_helper_invocation
     kit=OWNER.parent
     # All incumbent quota/fairness/external gates remain ON. No provider probe,
     # relaxed check_pid, alternate account/host or new cache/allowance exists.
@@ -57,7 +57,13 @@ def main():
     _current_capture(parent)
     action=value['action']; selector=value['selector']; args=value['arguments']
     if action!='acquire': owner.require_route(selector,value['route'],ready=action!='settle')
-    if action=='acquire': receipt=owner.acquire(selector,value['route'],controller_pid=value['controller_pid'])
+    if action=='acquire':
+        wire.exact(value['delegation'],'token task_class task_complexity model')
+        request=dict(schema='mastermind.fabric_protected_memory_pre_input.v1',**selector,model=value['route']['model'],
+            task_class=value['delegation']['task_class'],task_complexity=value['delegation']['task_complexity'])
+        authority=root_helper_invocation(channel,request)
+        receipt=owner.acquire(selector,value['route'],controller_pid=value['controller_pid'],
+            delegation=value['delegation'],authority=authority)
     elif action in ('current','heartbeat'): receipt=getattr(owner,action)(selector)
     else: receipt=getattr(owner,action)(selector,args)
     _current_capture(parent)

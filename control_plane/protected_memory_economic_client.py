@@ -51,6 +51,8 @@ def _exchange(intent, action, arguments):
 
 def acquire(intent, qualified_profile, claim, observed):
     value=profile.require_protected_memory_profile(qualified_profile,claim,observed)
+    from control_plane.protected_memory_delegation import read_original_economic_delegation
+    delegation=read_original_economic_delegation(claim,qualified_profile,observed)
     projection,actual=issuer._event_context(intent)
     payload={'schema':'mastermind.memory_economic_admission_attempt.v1',
         'operation_id':projection['original_operation_id'],
@@ -65,7 +67,7 @@ def acquire(intent, qualified_profile, claim, observed):
             event_type='MEMORY_ECONOMIC_ADMISSION_ATTEMPT',job_id=attempt.job_id,attempt_id=attempt.attempt_id,
             worker_id=attempt.worker_id,quota_class=attempt.quota_class,actor='supervisor',command_id=command,payload=payload)
     peer.require_control_memory_intent(intent)
-    receipt=_exchange(intent,'acquire',{})
+    receipt=_exchange(intent,'acquire',{'delegation':delegation})
     if receipt['phase']!='ADMITTED' or receipt['profile_sha256']!=hashlib.sha256(profile.canonical(value)).hexdigest():
         raise peer.ProtectedMemoryRefused()
     cap=object.__new__(EconomicAdmission)

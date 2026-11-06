@@ -33,7 +33,12 @@ def configured(tmp_path,monkeypatch):
     lease=runtime.attempts.claim_job(job.job_id,worker_id=value['worker_id'],quota_class=value['quota_class'],lease_owner='fixture')
     assert lease is not None
     claim=admission.capture_memory_runtime_claim(runtime,lease)
-    raw=profile.canonical({'protected_memory_execution':value})
+    from tests.test_memory_native_wire import issuer
+    source=issuer(3)
+    raw=profile.canonical({'runtime_root':str(runtime.store.root),'protected_memory_execution':value,
+        'memory_native_issuer':{'schema':'mastermind.fixed_memory_issuer_transport.v2',
+            'protocol':'memory.e0.native_issuer.v3','service_key_fingerprint':source['broker_service_fingerprint'],
+            'known_hosts_sha256':'a'*64,'transport_profile':'memory.e0.protected_m2_service_ssh.v2'}})
     state={'raw':raw,'credential':(1,2,3),'owner':{'service_label':'com.mastermind.executive.control',
         'configuration_sha256':hashlib.sha256(raw).hexdigest()}}
     monkeypatch.setattr(profile.os,'geteuid',lambda:450)

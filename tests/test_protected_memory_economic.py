@@ -28,7 +28,8 @@ assert Path(importlib.import_module('lease_broker').__file__).resolve()==NATIVE/
 
 
 @pytest.fixture
-def economy(tmp_path,monkeypatch):
+def economy(tmp_path,monkeypatch,request):
+    fixture_lifecycle=request
     here=tmp_path/'ext';(here/'broker').mkdir(parents=True)
     policy=tmp_path/'orch/fabric/pools.yaml';policy.parent.mkdir(parents=True)
     policy.write_text(json.dumps({'pools':{'glm':{'models':{'executor':'glm-5.3-flash'}}}}))
@@ -64,18 +65,49 @@ def economy(tmp_path,monkeypatch):
     selector={k:request[k] for k in ('root','parent','run_id','pre_input_sha256','profile_sha256')}
     route=dict(account='configured-fixture-account',model='glm-5.3-flash',host=broker.this_host)
     engine=ProtectedMemoryEconomicOwner(owner,broker)
+    # Explicit kernel-root/helper identity premise. Public dictionaries or a
+    # budget bearer alone cannot issue this nominal source invocation.
+    from control_plane import executive_peer_identity as peers
+    import protected_memory_economic as economic
+    root_socket,other=socket.socketpair(socket.AF_UNIX,socket.SOCK_STREAM)
+    fixture_lifecycle.addfinalizer(lambda:(root_socket.close(),other.close()))
+    previous=peers._observe_socket
+    def observe(connection):
+        if connection.fileno()==root_socket.fileno():
+            return peers._KernelObservation(b'R'*32,0,os.getppid(),987,peers._descriptor_identity(root_socket))
+        return previous(connection)
+    monkeypatch.setattr(peers,'_observe_socket',observe)
+    def authority(scope):
+        current=os.geteuid;monkeypatch.setattr(os,'geteuid',lambda:501)
+        try:return economic.root_helper_invocation(root_socket,scope)
+        finally:monkeypatch.setattr(os,'geteuid',current)
+    engine._fixture_root_authority=authority
     return owner,broker,engine,token,request,selector,route,clock,ledger
 
 
 def authorize(economy):
     owner,broker,engine,token,request,selector,route,_,_=economy
-    owner.reserve_protected_memory(token,request)
-    return engine.acquire(selector,route,controller_pid=os.getpid())
+    delegation={k:request[k] for k in ('task_class','task_complexity','model')};delegation['token']=token
+    return engine.acquire(selector,route,controller_pid=os.getpid(),delegation=delegation,
+        authority=engine._fixture_root_authority(request))
 
 
 def bind(engine,selector):
     engine.bind_input(selector,dict(input_sha256='e'*64,input_bytes=9856,body_sha256='f'*64))
     return engine.consume(selector,dict(attempt_id='runtime-attempt',process_ref_sha256='1'*64))
+
+
+@pytest.mark.parametrize('shape',['absent','dict','clone'])
+def test_original_bearer_without_actual_root_invocation_cannot_reserve_count_or_child(economy,shape):
+    owner,_,_,token,request,_,_,_,_=economy
+    from protected_memory_economic import RootEconomicInvocation
+    value=None if shape=='absent' else ({'root':True} if shape=='dict' else object.__new__(RootEconomicInvocation))
+    before=owner.describe(token)['child_budget_remaining']
+    with pytest.raises(DelegationRefused):owner.reserve_protected_memory(token,request,authority=value)
+    assert owner.describe(token)['child_budget_remaining']==before
+    with owner.transaction() as con:
+        assert con.execute('SELECT count(*) FROM operator_child_authorizations').fetchone()[0]==0
+        assert con.execute('SELECT count(*) FROM leases').fetchone()[0]==1
 
 
 def test_actual_original_count_new_paid_lease_unique_consume_and_durable_accounting(economy):
@@ -89,8 +121,10 @@ def test_actual_original_count_new_paid_lease_unique_consume_and_durable_account
         assert len(leases)==2
         row=con.execute('SELECT request_json FROM operator_child_authorizations').fetchone()[0]
         assert 'packet' not in row and 'result' not in row
-    with pytest.raises(DelegationRefused):engine.acquire(selector,route,controller_pid=os.getpid())
-    with pytest.raises(DelegationRefused):owner.reserve_protected_memory(token,request)
+    delegation=dict(token=token,**{k:request[k] for k in ('task_class','task_complexity','model')})
+    with pytest.raises(DelegationRefused):engine.acquire(selector,route,controller_pid=os.getpid(),delegation=delegation,
+        authority=engine._fixture_root_authority(request))
+    with pytest.raises(DelegationRefused):owner.reserve_protected_memory(token,request,authority=engine._fixture_root_authority(request))
     assert bind(engine,selector)['phase']=='CONSUMED'
     with pytest.raises(DelegationRefused):engine.consume(selector,dict(attempt_id='runtime-attempt',process_ref_sha256='1'*64))
     assert engine.heartbeat(selector)['phase']=='CONSUMED'
@@ -108,19 +142,21 @@ def test_actual_original_count_new_paid_lease_unique_consume_and_durable_account
 @pytest.mark.parametrize('damage',['missing','foreign-root','foreign-parent','preinput','profile'])
 def test_no_matching_current_original_row_cannot_acquire_any_child_lease(economy,damage):
     owner,broker,engine,token,request,selector,route,_,_=economy
-    if damage!='missing':owner.reserve_protected_memory(token,request)
     selected=dict(selector)
     if damage=='foreign-root':selected['root']='other-root'
     elif damage=='foreign-parent':selected['parent']='other-parent'
     elif damage=='preinput':selected['pre_input_sha256']='3'*64
     elif damage=='profile':selected['profile_sha256']='4'*64
-    with pytest.raises(DelegationRefused):engine.acquire(selected,route,controller_pid=os.getpid())
+    delegation=dict(token='0'*64 if damage=='missing' else token,
+        **{k:request[k] for k in ('task_class','task_complexity','model')})
+    with pytest.raises(DelegationRefused):engine.acquire(selected,route,controller_pid=os.getpid(),delegation=delegation,
+        authority=engine._fixture_root_authority(request))
     with owner.transaction() as con:assert con.execute('SELECT count(*) FROM leases').fetchone()[0]==1
 
 
 @pytest.mark.parametrize('damage',['class','complexity','future-input','token','exhausted','expired','economics'])
 def test_grant_class_budget_and_deadline_refuse_before_source_or_new_row(economy,damage):
-    owner,_,_,token,request,_,_,clock,_=economy
+    owner,_,engine,token,request,_,_,clock,_=economy
     selected=copy.deepcopy(request)
     if damage=='class':selected['task_class']='scientific_study'
     elif damage=='complexity':selected['task_complexity']='C2'
@@ -130,7 +166,7 @@ def test_grant_class_budget_and_deadline_refuse_before_source_or_new_row(economy
     elif damage=='economics':selected['model']='glm-5.3'
     else:
         with owner.transaction() as con:con.execute('UPDATE operator_root_grants SET child_limit=0')
-    with pytest.raises(DelegationRefused):owner.reserve_protected_memory(token,selected)
+    with pytest.raises(DelegationRefused):owner.reserve_protected_memory(token,selected,authority=engine._fixture_root_authority(selected))
     with owner.transaction() as con:assert con.execute('SELECT count(*) FROM operator_child_authorizations').fetchone()[0]==0
 
 
@@ -153,8 +189,8 @@ def test_current_grant_and_exact_one_input_fence_provider_consumption(economy,da
 
 
 def test_existing_generic_result_status_and_artifact_paths_deny_economic_v3(economy):
-    owner,_,_,token,request,_,_,_,_=economy
-    owner.reserve_protected_memory(token,request)
+    owner,_,engine,token,request,_,_,_,_=economy
+    owner.reserve_protected_memory(token,request,authority=engine._fixture_root_authority(request))
     for read in (lambda:owner.child_binding(token,request['run_id']),
                  lambda:owner.observe(token,'status',request['run_id']),lambda:owner.returns(token)):
         with pytest.raises(DelegationRefused,match='participant_view_required'):read()

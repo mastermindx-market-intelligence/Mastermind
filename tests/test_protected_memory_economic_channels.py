@@ -15,6 +15,7 @@ from control_plane import protected_memory_economic_owner as root
 from control_plane import protected_memory_economic_client as client
 from control_plane import protected_memory_peer as peer
 from control_plane import executive_installed_peer
+from control_plane import executive_memory_issuer as issuer
 
 
 def test_real_ordinary_unix_parent_cannot_reach_economic_owner_or_its_source_reader(monkeypatch):
@@ -53,6 +54,22 @@ def test_real_foreign_peer_refuses_before_runner_ready_identity_config_or_creden
         a.close();b.close()
         try:os.close(fd)
         except OSError:pass
+
+
+@pytest.mark.parametrize('operation',['describe','qualify_transport','exchange','completed_result','economic'])
+def test_genuine_ordinary_local_peer_cannot_reach_fixed_source_key_or_exchange(monkeypatch,operation):
+    assert os.geteuid()==501
+    a,b=socket.socketpair(socket.AF_UNIX,socket.SOCK_STREAM);calls=[]
+    # Only the receiver process UID is substituted. The accepted socket's
+    # kernel UID remains the genuine local ordinary user, never Control450.
+    monkeypatch.setattr(issuer.os,'geteuid',lambda:0)
+    monkeypatch.setattr(issuer,'_enrollment',lambda *_a:calls.append('key'))
+    monkeypatch.setattr(issuer,'_exchange',lambda *_a:calls.append('ssh'))
+    try:
+        assert issuer.handle_memory_exchange({'schema':issuer.SCHEMA,'operation':operation},a)=={
+            'schema':issuer.SCHEMA,'state':'REFUSED'}
+        assert calls==[]
+    finally:a.close();b.close()
 
 
 @pytest.mark.parametrize('shape',['dict','clone','subclass'])

@@ -97,6 +97,26 @@ class _State:
     pid: int
 
 
+def validate_profile_document(value):
+    """Closed public configuration DATA only; no installation or grant IO."""
+    keys={'schema','profile_id','policy_sha256','worker_id','quota_class','provider',
+          'model','account_ref','api_origin','credential_slot'}
+    if (type(value) is not dict or set(value)!=keys or value['schema']!=SCHEMA
+            or value['profile_id']!=PROFILE or value['provider']!='glm'
+            or value['model'] not in ('glm-5.3','glm-5.3-flash')
+            or value['policy_sha256']!=hashlib.sha256(canonical(POLICY)).hexdigest()
+            or value['credential_slot']!='memory-model-01'):_refuse()
+    for key in ('worker_id','quota_class','account_ref'):
+        if type(value[key]) is not str or not _ID.fullmatch(value[key]):_refuse()
+    if type(value['api_origin']) is not str or len(value['api_origin'])>512:_refuse()
+    uri=urlsplit(value['api_origin'])
+    if (uri.scheme!='https' or uri.hostname not in {'api.z.ai','open.bigmodel.cn'}
+            or uri.username is not None or uri.password is not None or uri.port not in (None,443)
+            or uri.query or uri.fragment or uri.path not in ('/api/paas/v4','/api/coding/paas/v4')
+            or value['api_origin']!=uri.geturl()):_refuse()
+    return _json(canonical(value))
+
+
 def _qualify(claim, observed_owner):
     if os.geteuid() != 450: _refuse()
     locator = admission.require_memory_runtime_claim(claim)
@@ -107,22 +127,16 @@ def _qualify(claim, observed_owner):
             or observed_owner.get('service_label') != 'com.mastermind.executive.control'
             or observed_owner.get('configuration_sha256') != digest): _refuse()
     document = _json(raw)
+    if (type(document) is not dict or type(document.get('runtime_root')) is not str
+            or document['runtime_root']!=str(state.runtime.store.root)):_refuse()
+    read_access=document.get('memory_original_result_access')
+    if (type(read_access) is dict and type(read_access.get('scope')) is dict
+            and read_access['scope'].get('attempt_id')==state.lease.attempt.attempt_id):
+        # A completed-result grant for this SAME future result must never
+        # become a self-dependent ingredient of its original pre-input hash.
+        _refuse()
     value = document.get('protected_memory_execution') if type(document) is dict else None
-    keys = {'schema', 'profile_id', 'policy_sha256', 'worker_id', 'quota_class',
-            'provider', 'model', 'account_ref', 'api_origin', 'credential_slot'}
-    if (type(value) is not dict or set(value) != keys or value['schema'] != SCHEMA
-            or value['profile_id'] != PROFILE or value['provider'] != 'glm'
-            or value['model'] not in ('glm-5.3', 'glm-5.3-flash')
-            or value['policy_sha256'] != hashlib.sha256(canonical(POLICY)).hexdigest()
-            or value['credential_slot'] != 'memory-model-01'): _refuse()
-    for key in ('worker_id', 'quota_class', 'account_ref'):
-        if type(value[key]) is not str or not _ID.fullmatch(value[key]): _refuse()
-    if type(value['api_origin']) is not str or len(value['api_origin']) > 512: _refuse()
-    uri = urlsplit(value['api_origin'])
-    if (uri.scheme != 'https' or uri.hostname not in {'api.z.ai', 'open.bigmodel.cn'}
-            or uri.username is not None or uri.password is not None or uri.port not in (None, 443)
-            or uri.query or uri.fragment or uri.path not in ('/api/paas/v4', '/api/coding/paas/v4')
-            or value['api_origin'] != uri.geturl()): _refuse()
+    value=validate_profile_document(value)
     job = state.runtime.jobs.get_job(state.lease.attempt.job_id)
     quota = state.runtime.workers.get_quota_class(value['worker_id'], value['quota_class'])
     worker = state.runtime.workers.get_worker(value['worker_id'])

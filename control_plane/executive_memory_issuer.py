@@ -30,6 +30,20 @@ class IssuerExchangeUnknown(ValueError):
 
 def fail(): raise peer.ProtectedMemoryRefused()
 
+def validate_transport_document(value):
+    """Pure closed config shape; never enrollment or current source permission."""
+    if type(value) is not dict:fail()
+    if value.get('schema')=='mastermind.fixed_memory_issuer_transport.v1':
+        wire.exact(value,'schema protocol service_key_fingerprint known_hosts_sha256')
+        if value['protocol']!='memory.e0.native_issuer.v2':fail()
+    elif value.get('schema')=='mastermind.fixed_memory_issuer_transport.v2':
+        wire.exact(value,'schema protocol service_key_fingerprint known_hosts_sha256 transport_profile')
+        if (value['protocol']!='memory.e0.native_issuer.v3'
+                or value['transport_profile']!='memory.e0.protected_m2_service_ssh.v2'):fail()
+    else:fail()
+    wire.fingerprint(value['service_key_fingerprint']);wire.digest(value['known_hosts_sha256'])
+    return json.loads(wire.canonical(value))
+
 def _read(path, maximum, *, private=False):
     from control_plane.codex_provider_realm import _native_open
     with _native_open(path) as (fd, info):
@@ -59,10 +73,7 @@ def _enrollment(observed):
             value[key] = item
         return value
     document = json.loads(raw, object_pairs_hook=pairs, parse_constant=lambda _: fail())
-    value = document.get('memory_native_issuer')
-    wire.exact(value, 'schema protocol service_key_fingerprint known_hosts_sha256')
-    if value['schema'] != 'mastermind.fixed_memory_issuer_transport.v1' or value['protocol'] != 'memory.e0.native_issuer.v2': fail()
-    wire.digest(value['known_hosts_sha256'])
+    value = validate_transport_document(document.get('memory_native_issuer'))
     public = _read(PUBLIC, 4096).decode('ascii').split()
     if len(public) not in (2,3) or public[0] != 'ssh-ed25519': fail()
     try: keyblob = base64.b64decode(public[1], validate=True)
@@ -86,6 +97,7 @@ def _exchange(frame):
     argv = ['/usr/bin/ssh','-F','/dev/null','-T','-o','BatchMode=yes',
         '-o','IdentitiesOnly=yes','-o','IdentityAgent=none','-o','StrictHostKeyChecking=yes',
         '-o','UpdateHostKeys=no','-o','ClearAllForwardings=yes','-o','ForwardAgent=no',
+        '-o','SendEnv=-*','-o','ControlMaster=no','-o','ControlPath=none','-o','ControlPersist=no',
         '-o','ForwardX11=no','-o','PermitLocalCommand=no','-o','RequestTTY=no',
         '-o','ConnectTimeout=10','-o','ConnectionAttempts=1','-o','ProxyCommand=none',
         '-o','UserKnownHostsFile='+str(KNOWN_HOSTS),'-i',str(KEY),
@@ -134,6 +146,25 @@ def _exchange(frame):
         if proc.stdin is not None and not proc.stdin.closed: proc.stdin.close()
         if proc.stdout is not None: proc.stdout.close()
 
+def _protocol(enrollment):
+    from control_plane.protected_memory_profile import _json
+    return validate_transport_document(_json(enrollment[0])['memory_native_issuer'])['protocol']
+
+def qualify_before_economic(admitted):
+    """Real read-only v3 exchange; no capability/cache/row/count is issued."""
+    prepare,_=peer.require_protected_memory_intent(admitted)
+    state=peer._ISSUED[admitted]
+    observed=peer.observe_control_owner(state.connection)
+    before=_enrollment(observed)
+    if _protocol(before)!='memory.e0.native_issuer.v3':fail()
+    request=wire.validate_request(dict(prepare,schema='research_factory.market_memory_e0_native_issuer_request.v3',
+        action='qualify_current_case'))
+    response=wire.decode_response(_exchange(wire.encode_request(request)),request=request)
+    if (response.get('status')!='CURRENT_CASE_QUALIFIED'
+            or response['issuer']['broker_service_fingerprint']!=before[1]):fail()
+    peer.require_protected_memory_intent(admitted)
+    if peer.observe_control_owner(state.connection)!=observed or _enrollment(observed)!=before:fail()
+
 def handle_memory_exchange(raw, connection):
     """Fixed branch, called with the real accepted socket by privileged owner."""
     try:
@@ -150,7 +181,12 @@ def handle_memory_exchange(raw, connection):
             from control_plane.protected_memory_economic_owner import qualify_helper_source
             qualify_helper_source()
             if peer.observe_control_owner(connection)!=observed or _enrollment(observed)!=before: fail()
-            return {'schema':SCHEMA,'state':'TRANSPORT_CONFIGURED','protocol':'memory.e0.native_issuer.v2'}
+            return {'schema':SCHEMA,'state':'TRANSPORT_CONFIGURED','protocol':_protocol(before)}
+        if raw.get('operation')=='completed_result':
+            wire.exact(raw,'schema operation material')
+            from control_plane.protected_memory_result_access import authorize_completed_read
+            return {'schema':SCHEMA,'state':'COMPLETED_READ_CURRENT',
+                'receipt':authorize_completed_read(connection,raw['material'])}
         if raw.get('operation') == 'economic':
             wire.exact(raw, 'schema operation projection request')
             admitted = peer.accept_protected_memory_intent(raw['projection'], connection)
@@ -162,7 +198,7 @@ def handle_memory_exchange(raw, connection):
         admitted = peer.accept_protected_memory_intent(raw['projection'], connection)
         prepare, _ = peer.require_protected_memory_intent(admitted)
         request = wire.validate_request(raw['request'])
-        if (request['schema'] != 'research_factory.market_memory_e0_native_issuer_request.v2'
+        if (request['schema'] not in ('research_factory.market_memory_e0_native_issuer_request.v2','research_factory.market_memory_e0_native_issuer_request.v3')
                 or request['operation_id'] != prepare['operation_id'] or request['intent'] != prepare['intent']): fail()
         if request['action'] == 'prepare_case':
             # Source reservation is downstream of REAL incumbent paid capacity,
@@ -171,6 +207,7 @@ def handle_memory_exchange(raw, connection):
             receipt = economic.execute(admitted, {'action':'current', 'arguments':{}})
             if receipt['phase'] != 'RESERVED': fail()
         before = _enrollment(observed)
+        if _protocol(before)!='memory.e0.native_issuer.'+request['schema'][-2:]:fail()
         result = _exchange(wire.encode_request(request))
         response = wire.decode_response(result, request=request)
         if peer.observe_control_owner(connection) != observed or _enrollment(observed) != before: fail()

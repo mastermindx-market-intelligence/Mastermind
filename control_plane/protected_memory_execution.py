@@ -138,6 +138,29 @@ def _retain_input(state):
         'input_sha256':hashlib.sha256(state.packet).hexdigest(),'input_bytes':len(state.packet)})
 
 
+def _retain_case_binding(state):
+    held=issuer._current(state.case,state.intent)
+    source=json.loads(held.issuer)
+    if source['protocol']!='memory.e0.native_issuer.v3':return
+    projection=peer.require_control_memory_intent(state.intent)
+    _,request=issuer._request(state.intent,'current_input',version='v3',locator=json.loads(held.locator))
+    binding={'schema':'mastermind.memory_original_case_binding.v1',
+        'attempt_id':state.lease.attempt.attempt_id,'pre_input_sha256':hashlib.sha256(peer.canonical(projection)).hexdigest(),
+        'operation_id':projection['original_operation_id'],'wire_version':'v3',
+        'intent':request['intent'],'issuer':source,'locator':json.loads(held.locator)}
+    command='memory-case:'+state.lease.attempt.attempt_id+':case_bound'
+    with state.runtime.store.read() as con:
+        rows=con.execute('SELECT payload_json FROM events WHERE command_id=?',(command,)).fetchall()
+    if rows:
+        if len(rows)!=1:raise MemoryExecutionRefused()
+        previous=json.loads(rows[0]['payload_json'])
+        if ({k:v for k,v in previous.items() if k!='issuer'}!={k:v for k,v in binding.items() if k!='issuer'}
+                or any(previous['issuer'][k]!=source[k] for k in set(source)-{'current_selection_sha256','current_access_ref'})):
+            raise MemoryExecutionRefused()
+        return
+    _receipt_event(state,'CASE_BOUND',binding)
+
+
 def _current(value):
     if type(value) is not PreparedMemoryExecution or value not in _OWNED:raise MemoryExecutionRefused()
     state=_OWNED[value]
@@ -161,12 +184,13 @@ def prepare_memory_execution(runtime,lease):
     intent=peer.capture_control_memory_intent(claim,observed)
     issuer.qualify_transport(intent)
     paid=economic.acquire(intent,qualified,claim,observed)
-    case=issuer.prepare_case(intent)
+    case=issuer.prepare_case(intent,version='v3')
     packet=issuer.current_input(case,intent)
     state=_State(runtime,lease,claim,intent,qualified,observed,case,packet,run_dir,
         peer.canonical(peer.require_control_memory_intent(intent)),economic=paid)
     value=object.__new__(PreparedMemoryExecution);_OWNED[value]=state
     _current(value)
+    _retain_case_binding(state)
     _retain_input(state)
     return value
 
@@ -184,7 +208,7 @@ def recover_memory_preparation(runtime,lease):
     value=object.__new__(PreparedMemoryExecution)
     _OWNED[value]=_State(runtime,lease,claim,intent,qualified,observed,case,packet,run_dir,
         peer.canonical(peer.require_control_memory_intent(intent)),economic=paid)
-    _current(value);_retain_input(_OWNED[value]);_current(value);return 'COMPLETE',value
+    _current(value);_retain_case_binding(_OWNED[value]);_retain_input(_OWNED[value]);_current(value);return 'COMPLETE',value
 
 
 def start_memory_execution(value):
@@ -280,7 +304,7 @@ def collect_original_memory_result(value):
             'result_sha256':hashlib.sha256(raw).hexdigest(),'result_bytes':len(raw)})
         state.accounted=True
     # Current Linux source permission authorizes only the exact original digest.
-    issuer.authorize_result_disclosure(state.case,state.intent,state.ref.run_id,
+    authorization=issuer.authorize_result_disclosure(state.case,state.intent,state.ref.run_id,
         hashlib.sha256(state.packet).hexdigest(),{'sha256':hashlib.sha256(raw).hexdigest(),'bytes':len(raw)})
     if _private_read(Path(state.ref.result_path),65536)!=raw:raise MemoryExecutionRefused()
     _current(value);state.raw=raw
@@ -288,6 +312,8 @@ def collect_original_memory_result(value):
         'input_sha256':hashlib.sha256(state.packet).hexdigest(),
         'result_sha256':hashlib.sha256(raw).hexdigest(),'result_bytes':len(raw),
         'verification':dict(wire.FLAGS),'scientific_admission':False,'adjudicator_access':False}
+    if 'original_recipient' in authorization:
+        receipt.update(schema='mastermind.protected_memory_original_result.v2',source_authorization=authorization)
     _receipt_event(state,'ORIGINAL_RESULT_RETAINED',receipt)
     return receipt
 

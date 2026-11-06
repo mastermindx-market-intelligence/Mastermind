@@ -35,6 +35,7 @@ class _State:
     attempt_id:str
     reference:bytes
     pre_input:bytes
+    case:bytes|None=None
 
 
 def _fail():raise OriginalReferenceRefused()
@@ -99,13 +100,37 @@ def _read(runtime,attempt_id):
                 or launch['profile_sha256']!=event['profile_sha256']):_fail()
         wire.digest(launch['body_sha256'])
         result_event,result=_one(con,'MEMORY_ORIGINAL_RESULT_RETAINED',attempt)
-        wire.exact(result,'schema attempt_id input_sha256 result_sha256 result_bytes verification scientific_admission adjudicator_access')
-        if (result['schema']!='mastermind.protected_memory_original_result.v1' or result['attempt_id']!=attempt_id
+        version=result.get('schema')
+        if version not in ('mastermind.protected_memory_original_result.v1','mastermind.protected_memory_original_result.v2'):_fail()
+        wire.exact(result,'schema attempt_id input_sha256 result_sha256 result_bytes verification scientific_admission adjudicator_access'+
+            (' source_authorization' if version.endswith('.v2') else ''))
+        if (result['attempt_id']!=attempt_id
                 or result['input_sha256']!=held['input_sha256'] or type(result['verification']) is not dict
                 or set(result['verification'])!=set(wire.FLAGS)
                 or any(value is not False for value in result['verification'].values())
                 or result['scientific_admission'] is not False or result['adjudicator_access'] is not False):_fail()
         wire.digest(result['result_sha256']);wire.integer(result['result_bytes'],65536)
+        case=None;recipient='UNRECORDED'
+        if version.endswith('.v2'):
+            case_event,case=_one(con,'MEMORY_CASE_BOUND',attempt)
+            wire.exact(case,'schema attempt_id pre_input_sha256 operation_id wire_version intent issuer locator')
+            expected_intent=dict(projection['native_source_locator'],participant_binding_sha256=event['pre_input_sha256'])
+            if (case['schema']!='mastermind.memory_original_case_binding.v1' or case['attempt_id']!=attempt_id
+                    or case['pre_input_sha256']!=event['pre_input_sha256'] or case['operation_id']!=event['operation_id']
+                    or case['wire_version']!='v3' or case['intent']!=expected_intent
+                    or not economic['event_id']<case_event['event_id']<input_event['event_id']):_fail()
+            wire._issuer(case['issuer'],'v3');wire.locator(case['locator'])
+            if (case['locator']['input_sha256']!=held['input_sha256'] or case['locator']['input_bytes']!=held['input_bytes']
+                    or case['locator']['installation_id']!=case['issuer']['installation_id']
+                    or case['locator']['installation_epoch']!=case['issuer']['installation_epoch']):_fail()
+            request=wire.validate_request({'schema':'research_factory.market_memory_e0_native_issuer_request.v3',
+                'action':'authorize_result_disclosure','operation_id':case['operation_id'],'intent':case['intent'],
+                'locator':case['locator'],'result_ref':{k:result[k] for k in ('attempt_id','input_sha256','result_sha256','result_bytes')}})
+            authorization=result['source_authorization']
+            wire.exact(authorization,'purpose input_sha256 result_sha256 result_bytes original_recipient')
+            if (authorization['purpose']!='disclose_exact_original_untrusted_child_result'
+                    or any(authorization[k]!=result[k] for k in ('input_sha256','result_sha256','result_bytes'))):_fail()
+            recipient=wire.original_recipient(authorization['original_recipient'],request=request,issuer=case['issuer'])
         view_event,view=_one(con,'MEMORY_RESULT_VIEW_OBSERVED',attempt)
         wire.exact(view,'schema attempt_id input_sha256 result_sha256 view_sha256 verification scientific_admission adjudicator_access')
         wire.digest(view['view_sha256'])
@@ -129,16 +154,17 @@ def _read(runtime,attempt_id):
         'pre_input_sha256':event['pre_input_sha256'],'input_sha256':held['input_sha256'],'input_bytes':held['input_bytes'],
         'result_sha256':result['result_sha256'],'result_bytes':result['result_bytes'],
         'receipt_event_ids':[row['event_id'] for row in (economic,input_event,launch_event,result_event,view_event,terminal)],
-        'original_recipient':'UNRECORDED','disclosure_authorized':False,'retry_authorized':False}
-    return wire.canonical(ref),original
+        'original_recipient':recipient,'disclosure_authorized':False,'retry_authorized':False}
+    if case is not None:ref.update(schema='mastermind.memory_completed_original_reference.v2',wire_version='v3')
+    return wire.canonical(ref),original,None if case is None else wire.canonical(case)
 
 
 def completed_original_reference(runtime,attempt_id):
     """Owner-internal receipt integrity only; never a current read permission."""
     try:
-        ref,original=_read(runtime,attempt_id)
+        ref,original,case=_read(runtime,attempt_id)
         value=object.__new__(OriginalMemoryReference)
-        _REFERENCES[value]=_State(runtime,attempt_id,ref,original)
+        _REFERENCES[value]=_State(runtime,attempt_id,ref,original,case)
         return value
     except Exception:raise OriginalReferenceRefused() from None
 
@@ -146,7 +172,7 @@ def completed_original_reference(runtime,attempt_id):
 def current_reference(value):
     try:
         if type(value) is not OriginalMemoryReference or value not in _REFERENCES:_fail()
-        state=_REFERENCES[value];ref,original=_read(state.runtime,state.attempt_id)
-        if ref!=state.reference or original!=state.pre_input:_fail()
+        state=_REFERENCES[value];ref,original,case=_read(state.runtime,state.attempt_id)
+        if ref!=state.reference or original!=state.pre_input or case!=state.case:_fail()
         return json.loads(ref)
     except Exception:raise OriginalReferenceRefused() from None

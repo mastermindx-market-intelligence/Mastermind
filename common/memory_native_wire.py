@@ -83,11 +83,14 @@ def validate_request(value):
     _tree(value)
     if type(value) is not dict: fail()
     schema = value.get('schema')
-    if type(schema) is not str or schema not in ('research_factory.market_memory_e0_native_issuer_request.v1', 'research_factory.market_memory_e0_native_issuer_request.v2'): fail()
+    if type(schema) is not str or schema not in ('research_factory.market_memory_e0_native_issuer_request.v1', 'research_factory.market_memory_e0_native_issuer_request.v2', 'research_factory.market_memory_e0_native_issuer_request.v3'): fail()
     version = schema[-2:]
     action = value.get('action')
-    if type(action) is not str or action not in {'prepare_case', 'current_input', 'authorize_result_disclosure'} | ({'read_original_case'} if version == 'v2' else set()): fail()
-    extra = '' if action in ('prepare_case', 'read_original_case') else ' locator'
+    actions={'prepare_case','current_input','authorize_result_disclosure'}
+    if version in ('v2','v3'):actions.add('read_original_case')
+    if version=='v3':actions.add('qualify_current_case')
+    if type(action) is not str or action not in actions: fail()
+    extra = '' if action in ('prepare_case', 'read_original_case','qualify_current_case') else ' locator'
     if action == 'authorize_result_disclosure': extra += ' result_ref'
     exact(value, 'schema action operation_id intent'+extra)
     token(value['operation_id']); _intent(value['intent'])
@@ -102,6 +105,24 @@ def _reference(value):
     exact(value, 'schema object_id sha256 bytes')
     token(value['schema']); token(value['object_id']); digest(value['sha256']); integer(value['bytes'], 4194304)
 
+def fingerprint(value):
+    if type(value) is not str or not value.startswith('SHA256:'):fail()
+    try:
+        raw=base64.b64decode(value[7:]+'=',validate=True)
+        if len(raw)!=32 or base64.b64encode(raw).decode().rstrip('=')!=value[7:]:fail()
+    except (ValueError,TypeError):raise WireRefused() from None
+
+def original_recipient(value,*,request=None,issuer=None):
+    exact(value,'schema recipient_kind principal_ref ssh_key_fingerprint original_operation_id pre_input_intent_sha256')
+    if (value['schema']!='research_factory.market_memory_e0_original_recipient.v3'
+            or value['recipient_kind']!='native_broker_service'):fail()
+    _reference(value['principal_ref']);fingerprint(value['ssh_key_fingerprint'])
+    token(value['original_operation_id']);digest(value['pre_input_intent_sha256'])
+    if request is not None and (value['original_operation_id']!=request['operation_id']
+            or value['pre_input_intent_sha256']!=hashlib.sha256(canonical(request['intent'])).hexdigest()):fail()
+    if issuer is not None and value['ssh_key_fingerprint']!=issuer['broker_service_fingerprint']:fail()
+    return parse(canonical(value),16384)
+
 def _issuer(value, version):
     exact(value, 'issuer_id protocol source_commit source_closure_sha256 installation_id installation_epoch registration_ref publication_ref current_selection_sha256 current_access_ref recipient_grant_ref broker_service_fingerprint authority')
     if (value['issuer_id'] != 'MACRO_LINUX_NATIVE_E0_ISSUER' or value['protocol'] != 'memory.e0.native_issuer.'+version
@@ -110,12 +131,7 @@ def _issuer(value, version):
     for key in ('source_closure_sha256', 'current_selection_sha256'): digest(value[key])
     for key in ('installation_id', 'installation_epoch'): token(value[key])
     for key in ('registration_ref', 'publication_ref', 'current_access_ref', 'recipient_grant_ref'): _reference(value[key])
-    fp = value['broker_service_fingerprint']
-    if type(fp) is not str or not fp.startswith('SHA256:'): fail()
-    try:
-        raw = base64.b64decode(fp[7:]+'=', validate=True)
-        if len(raw) != 32 or base64.b64encode(raw).decode().rstrip('=') != fp[7:]: fail()
-    except (ValueError, TypeError): fail()
+    fingerprint(value['broker_service_fingerprint'])
 
 def packet(value, loc):
     exact(value, 'encoding bytes sha256 body')
@@ -148,13 +164,15 @@ def validate_response(value, *, request):
         return parse(canonical(value), 262144)
     action = req['action']
     expected = {'prepare_case': 'CASE_PREPARED', 'current_input': 'INPUT_CURRENT',
-        'authorize_result_disclosure': 'RESULT_DISCLOSURE_CURRENT', 'read_original_case': 'ORIGINAL_CASE_STATE'}[action]
+        'authorize_result_disclosure': 'RESULT_DISCLOSURE_CURRENT', 'read_original_case': 'ORIGINAL_CASE_STATE',
+        'qualify_current_case':'CURRENT_CASE_QUALIFIED'}[action]
     if status != expected or value.get('action') != action or value.get('operation_id') != req['operation_id'] or value.get('intent') != req['intent']: fail()
     common = 'schema status action operation_id intent issuer verification scientific_admission retry_authorized'
     if action == 'read_original_case':
         state = value.get('operation_state')
         if type(state) is not str or state not in {'ABSENT', 'PENDING', 'COMPLETE'}: fail()
         exact(value, common+' operation_state'+(' locator input' if state == 'COMPLETE' else ''))
+    elif action=='qualify_current_case':exact(value,common)
     elif action in ('prepare_case', 'current_input'): exact(value, common+' locator input')
     else: exact(value, common+' locator result_ref authorization')
     _issuer(value['issuer'], version)
@@ -165,8 +183,10 @@ def validate_response(value, *, request):
         if 'input' in value: packet(value['input'], loc)
     if action == 'authorize_result_disclosure':
         if value['result_ref'] != req['result_ref']: fail()
-        auth = value['authorization']; exact(auth, 'purpose input_sha256 result_sha256 result_bytes')
-        if auth != dict(purpose='disclose_exact_original_untrusted_child_result', **{k:req['result_ref'][k] for k in ('input_sha256','result_sha256','result_bytes')}): fail()
+        auth = value['authorization']; exact(auth, 'purpose input_sha256 result_sha256 result_bytes'+(' original_recipient' if version=='v3' else ''))
+        expected_auth=dict(purpose='disclose_exact_original_untrusted_child_result', **{k:req['result_ref'][k] for k in ('input_sha256','result_sha256','result_bytes')})
+        if version=='v3':expected_auth['original_recipient']=original_recipient(auth['original_recipient'],request=req,issuer=value['issuer'])
+        if auth != expected_auth: fail()
     return parse(canonical(value), 262144)
 
 def encode_request(value):

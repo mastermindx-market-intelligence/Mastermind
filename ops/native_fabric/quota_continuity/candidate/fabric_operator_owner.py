@@ -275,7 +275,7 @@ class OperatorOwner:
                 refuse("child_binding_refused")
         return grant, dict(row)
 
-    def reserve_protected_memory(self, token, request):
+    def reserve_protected_memory(self, token, request, *, authority=None):
         """Delegate economic permission only, in the existing child row.
 
         No packet, source capability, result or provider call is accepted here.
@@ -284,6 +284,8 @@ class OperatorOwner:
         Lost response consumes the original count; it never refunds/replays.
         """
         from fabric_operator_contract import validate_protected_launch
+        from protected_memory_economic import require_root_invocation
+        require_root_invocation(authority,request)
         with self.transaction() as con:
             grant, launch, lease, root = self._authorized(con, token)
             used = con.execute('SELECT COUNT(*) FROM operator_child_authorizations WHERE operator_run=?',
@@ -309,6 +311,7 @@ class OperatorOwner:
             raw = canonical(stored)
             con.execute('INSERT INTO operator_child_authorizations VALUES (?,?,?,?,?,?,NULL,NULL)',
                 (rid, grant['operator_run'], grant['root'], digest(raw.encode()), self.clock(), raw))
+            require_root_invocation(authority,request)
         return {'root': grant['root'], 'parent': grant['operator_run'], 'run_id': rid,
                 'pre_input_sha256': request['pre_input_sha256'], 'retry_authorized': False}
 
@@ -553,9 +556,6 @@ def main():
         result = owner.wait(value["token"], args["run_id"], args["seconds"])
     elif action == "request":
         result = owner.dispatch(value["token"], args)
-    elif action == 'protected_memory_authorize':
-        # Economic delegation only; no case packet, source read or execution.
-        result = owner.reserve_protected_memory(value['token'], args)
     elif action == "participant_observation" and type(args) is dict and set(args) == {"run_id", "binding_sha256"}:
         result = owner.participant_observation(value["token"], args["run_id"], args["binding_sha256"])
     elif action == "participant_metadata" and type(args) is dict and set(args) == {"run_id", "binding_sha256", "object_id"}:

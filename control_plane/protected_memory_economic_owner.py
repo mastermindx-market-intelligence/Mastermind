@@ -103,6 +103,7 @@ def _material(projection, observed):
 
 def execute(admitted, request):
     """Called only with a nominal current root-issued Control intent."""
+    from control_plane import executive_memory_issuer as issuer
     peer.require_protected_memory_intent(admitted)
     state = peer._ISSUED[admitted]
     projection = json.loads(state.original)
@@ -111,7 +112,14 @@ def execute(admitted, request):
     wire.exact(request, 'action arguments')
     if type(request['action']) is not str or request['action'] not in ACTIONS: fail()
     action = request['action']; arguments = request['arguments']
-    if action in ('acquire', 'current', 'heartbeat') and arguments != {}: fail()
+    if action in ('current', 'heartbeat') and arguments != {}: fail()
+    delegation=None
+    if action=='acquire':
+        wire.exact(arguments,'delegation')
+        delegation=arguments['delegation'];wire.exact(delegation,'token task_class task_complexity model')
+        # Do not call the helper/reserve a row/count/lease before genuine
+        # current Linux service/recipient/source-purpose qualification.
+        issuer.qualify_before_economic(admitted)
     if action == 'bind_input': wire.exact(arguments, 'input_sha256 input_bytes body_sha256')
     if action == 'consume':
         wire.exact(arguments, 'attempt_id process_ref_sha256')
@@ -120,7 +128,8 @@ def execute(admitted, request):
     actual_peer=peer.capture_peer_identity(state.connection)
     if actual_peer.euid!=450:fail()
     result = _call_helper({'schema':SCHEMA, 'action':action, 'selector':selector,
-        'route':route, 'arguments':arguments,'controller_pid':actual_peer.pid})
+        'route':route, 'arguments':{} if action=='acquire' else arguments,
+        'controller_pid':actual_peer.pid,'delegation':delegation})
     peer.require_protected_memory_intent(admitted)
     if peer.observe_control_owner(state.connection) != observed or _material(projection, observed)[0] != before: fail()
     wire.exact(result, 'schema root parent run_id pre_input_sha256 profile_sha256 lease_id phase retry_authorized')

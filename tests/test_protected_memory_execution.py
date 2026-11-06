@@ -44,7 +44,8 @@ def joined(configured,installed,monkeypatch,economy,request):
     from control_plane import native_memory_admission as admission
     state=admission._ISSUED[configured[2]];lease=state.lease
     def qualified(capture,*,role):
-        return bind_fixture(capture,dataclasses.replace(owner_observation(capture),config_digest=config['owner']['configuration_sha256']))
+        return bind_fixture(capture,dataclasses.replace(owner_observation(capture),
+            service_label=installed[1]['label'],config_digest=config['owner']['configuration_sha256']))
     monkeypatch.setattr(peer,'qualify_installed_peer',qualified)
     actions=[];calls=[];done=threading.Event();errors=[];result={'bad':False,'late':False}
     native=packet()
@@ -53,15 +54,30 @@ def joined(configured,installed,monkeypatch,economy,request):
         assert hashlib.sha256(native).hexdigest()=='f4213c04dc827819ac476859803d462b27ddf4badb3d5855c52dbf701acd641f'
     sha=hashlib.sha256(native).hexdigest()
     fingerprint=response({'schema':'request.v2','action':'prepare_case','operation_id':'x','intent':{}})['issuer']['broker_service_fingerprint']
-    monkeypatch.setattr(root,'_enrollment',lambda _:(b'fixture',fingerprint,b'known',(1,2,3)))
+    monkeypatch.setattr(root,'_enrollment',lambda _:(config['raw'],fingerprint,b'known',(1,2,3)))
     def exchange(raw):
-        req=wire.decode_request(raw);actions.append(req['action']);value=response(req)
+        req=wire.decode_request(raw);actions.append(req['action'])
+        if req['action']=='qualify_current_case' and result.get('qualification')=='unknown':raise root.IssuerExchangeUnknown()
+        if (req['action']=='qualify_current_case' and result.get('qualification')=='refused'
+                or req['action']=='prepare_case' and result.get('revoked_after_qualification')):
+            return frame({'schema':'research_factory.market_memory_e0_native_issuer_response.v3','status':'REFUSED',
+                'reason':'native_recipient_grant_unavailable','verification':dict(wire.FLAGS),
+                'scientific_admission':False,'retry_authorized':False})
+        value=response(req)
+        if result.get('access_advanced'):
+            value['issuer']['current_selection_sha256']='b'*64
+            value['issuer']['current_access_ref']=dict(value['issuer']['current_access_ref'],object_id='continued-access',sha256='b'*64)
+        if result.get('grant_changed'):
+            value['issuer']['recipient_grant_ref']=dict(value['issuer']['recipient_grant_ref'],sha256='c'*64)
+        if req['action']=='authorize_result_disclosure' and result.get('disclosure_refused'):
+            return frame({'schema':'research_factory.market_memory_e0_native_issuer_response.v3','status':'REFUSED',
+                'reason':'native_recipient_grant_unavailable','verification':dict(wire.FLAGS),
+                'scientific_admission':False,'retry_authorized':False})
         loc=value.get('locator')
         if loc is not None:loc.update(input_sha256=sha,input_bytes=len(native))
         if 'input' in value:value['input'].update(body=base64.b64encode(native).decode(),sha256=sha,bytes=len(native))
         if req['action']=='authorize_result_disclosure':
-            value['result_ref']=req['result_ref'];value['authorization']=dict(purpose='disclose_exact_original_untrusted_child_result',
-                **{k:req['result_ref'][k] for k in ('input_sha256','result_sha256','result_bytes')})
+            value['result_ref']=req['result_ref']
         return frame(value)
     monkeypatch.setattr(root,'_exchange',exchange)
     from control_plane import protected_memory_economic_owner as economic_root
@@ -75,9 +91,10 @@ def joined(configured,installed,monkeypatch,economy,request):
         try:
             action=value['action'];selector=value['selector'];arguments=value['arguments']
             if action=='acquire':
-                economic_owner.reserve_protected_memory(token,dict(authorization,**selector))
-                return economic_engine.acquire(selector,value['route'],controller_pid=value['controller_pid'])
-            economic_engine.require_route(selector,value['route'])
+                scope=dict(authorization,**selector)
+                return economic_engine.acquire(selector,value['route'],controller_pid=value['controller_pid'],
+                    delegation=value['delegation'],authority=economic_engine._fixture_root_authority(scope))
+            economic_engine.require_route(selector,value['route'],ready=action!='settle')
             if action in ('current','heartbeat'):return getattr(economic_engine,action)(selector)
             return getattr(economic_engine,action)(selector,arguments)
         finally:monkeypatch.setattr(peer.os,'geteuid',lambda:0)
@@ -136,6 +153,14 @@ def joined(configured,installed,monkeypatch,economy,request):
         return raw
     monkeypatch.setattr(paid,'_private_read',retained)
     result['economic_owner']=economic_owner;result['economic_engine']=economic_engine
+    from control_plane.executive_supervisor import ExecutiveSupervisor
+    class Unused:
+        inspector=Inspector()
+        def __getattr__(self,name):raise AssertionError('ordinary adapter not used')
+    supervisor=ExecutiveSupervisor(runtime,Unused())
+    supervisor.retain_protected_memory_economic_delegation(lease,token,
+        task_class=authorization['task_class'],task_complexity=authorization['task_complexity'])
+    result['supervisor']=supervisor;result['config']=config;result['installed']=installed
     return runtime,job,lease,actions,calls,done,errors,result,run
 
 
@@ -155,6 +180,11 @@ def test_existing_runtime_fixed_owner_one_exact_input_and_current_recipient_view
     assert len(calls)==1
     assert not list(runtime.store.root.glob('**/*.operator-packet'))
     assert 'RESULT_SCHEMA_JSON' not in run.joinpath('memory-original-result').read_text()
+    delegation=json.loads((run/'memory-original-economic-delegation').read_bytes())
+    bearer=delegation['token']
+    assert stat.S_IMODE((run/'memory-original-economic-delegation').stat().st_mode)==0o600
+    assert bearer not in json.dumps([e.payload for e in runtime.events.list_events()])
+    assert bearer not in json.dumps(calls) and bearer not in (run/'memory-original-input').read_text()
 
 
 def test_current_grant_loss_withholds_retained_result_and_never_replays(joined):
@@ -189,7 +219,7 @@ def test_actual_economic_grant_revocation_refuses_before_linux_prepare_or_proces
     owner=state['economic_owner']
     with owner.transaction() as con:con.execute("UPDATE leases SET state='released'")
     with pytest.raises(ValueError):execution.prepare_memory_execution(runtime,lease)
-    assert actions==[] and calls==[]
+    assert actions==['qualify_current_case'] and calls==[]
     assert not any(e.event_type=='MEMORY_PREPARE_ATTEMPT' for e in runtime.events.list_events())
     with owner.transaction() as con:assert con.execute('SELECT count(*) FROM operator_child_authorizations').fetchone()[0]==0
 
@@ -200,14 +230,14 @@ def test_paid_permission_loss_after_source_preparation_refuses_before_provider_i
     owner=state['economic_owner']
     with owner.transaction() as con:con.execute("UPDATE leases SET state='released' WHERE task_class='remote-glm'")
     with pytest.raises(ValueError):execution.start_memory_execution(prepared)
-    assert actions==['prepare_case','current_input'] and calls==[]
+    assert actions==['qualify_current_case','prepare_case','current_input'] and calls==[]
 
 
 def test_same_preinput_reservation_cannot_be_spent_by_a_second_original_prepare(joined):
     runtime,_,lease,actions,calls,_,_,_,_=joined
     execution.prepare_memory_execution(runtime,lease)
     with pytest.raises(ValueError):execution.prepare_memory_execution(runtime,lease)
-    assert actions==['prepare_case','current_input'] and calls==[]
+    assert actions==['qualify_current_case','prepare_case','current_input'] and calls==[]
 
 
 def test_actual_existing_supervisor_internal_entry_terminalizes_safe_runtime_receipt(joined):
@@ -242,3 +272,56 @@ def test_native_builder_whole_packet_through_actual_economic_runtime_and_private
     assert len(held)==9856 and hashlib.sha256(held).hexdigest()=='f4213c04dc827819ac476859803d462b27ddf4badb3d5855c52dbf701acd641f'
     assert view['citations']==[selected_descriptors(held)[0]] and len(calls)==1
     assert view['verification']==wire.FLAGS and view['scientific_admission'] is False
+
+
+@pytest.mark.parametrize('status',['refused','unknown','malformed'])
+def test_v3_nonqualification_never_reserves_original_child_count_or_paid_lease(joined,monkeypatch,status):
+    runtime,_,lease,actions,calls,_,_,state,_=joined
+    state['qualification']=status
+    if status=='malformed':
+        actual=root._exchange
+        def malformed(raw):
+            req=wire.decode_request(raw)
+            if req['action']=='qualify_current_case':
+                actions.append(req['action']);value=response(req);value['locator']={};return frame(value)
+            return actual(raw)
+        monkeypatch.setattr(root,'_exchange',malformed)
+    with pytest.raises(ValueError):execution.prepare_memory_execution(runtime,lease)
+    assert actions==['qualify_current_case'] and calls==[]
+    owner=state['economic_owner']
+    with owner.transaction() as con:
+        assert con.execute('SELECT count(*) FROM operator_child_authorizations').fetchone()[0]==0
+        assert con.execute('SELECT count(*) FROM leases').fetchone()[0]==1
+    assert not any(e.event_type=='MEMORY_PREPARE_ATTEMPT' for e in runtime.events.list_events())
+
+
+def test_fresh_prepare_grant_revocation_after_qualification_withholds_input_and_provider(joined):
+    runtime,_,lease,actions,calls,_,_,state,run=joined
+    state['revoked_after_qualification']=True
+    with pytest.raises(ValueError):execution.prepare_memory_execution(runtime,lease)
+    assert actions==['qualify_current_case','prepare_case'] and calls==[]
+    assert not (run/'memory-original-input').exists()
+    with state['economic_owner'].transaction() as con:
+        assert con.execute('SELECT count(*) FROM operator_child_authorizations').fetchone()[0]==1
+        assert con.execute('SELECT count(*) FROM leases').fetchone()[0]==2
+
+
+def test_v3_qualified_current_access_advances_without_rebinding_original_input_or_grant(joined):
+    runtime,_,lease,_,calls,done,errors,state,run=joined
+    prepared=execution.prepare_memory_execution(runtime,lease)
+    old=next(e.payload for e in runtime.events.list_events() if e.event_type=='MEMORY_CASE_BOUND')
+    state['access_advanced']=True
+    execution.start_memory_execution(prepared)
+    assert done.wait(3) and not errors
+    view=execution.disclose_memory_result(prepared)
+    assert view['answer']=='Fixture untrusted answer' and len(calls)==1
+    assert next(e.payload for e in runtime.events.list_events() if e.event_type=='MEMORY_CASE_BOUND')==old
+    assert hashlib.sha256((run/'memory-original-input').read_bytes()).hexdigest()==view['input_sha256']
+
+
+def test_v3_changed_original_native_grant_never_uses_current_access_exemption(joined):
+    runtime,_,lease,_,calls,_,_,state,_=joined
+    prepared=execution.prepare_memory_execution(runtime,lease)
+    state['grant_changed']=True
+    with pytest.raises(ValueError):execution.start_memory_execution(prepared)
+    assert calls==[]

@@ -4143,6 +4143,16 @@ class ExecutiveSupervisor:
         from control_plane.protected_memory_execution import run_protected_memory_case
         return await run_protected_memory_case(self, lease)
 
+    def retain_protected_memory_economic_delegation(self,lease,token,*,task_class,task_complexity):
+        """Internal original-parent budget handoff; no source or paid grant."""
+        from control_plane.protected_memory_delegation import retain_original_economic_delegation
+        return retain_original_economic_delegation(self,lease,token,task_class=task_class,task_complexity=task_complexity)
+
+    def read_completed_protected_memory_result(self,attempt_id):
+        """Explicit current SERVICE read only; no active lease or retry path."""
+        from control_plane.protected_memory_completed_read import capture_completed_memory_read,read_completed_memory_result
+        return read_completed_memory_result(capture_completed_memory_read(self,attempt_id))
+
     async def run_once(self, job_id: str) -> SupervisorReceipt:
         """Claim, execute, validate, and terminalize exactly one queued job."""
 
