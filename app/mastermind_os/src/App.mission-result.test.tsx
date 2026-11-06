@@ -319,9 +319,13 @@ async function openProjectOverview(user: ReturnType<typeof userEvent.setup>) {
   // The current product opens a project catalogue from the project list, so the
   // exact Mission root is selected from the Programs workspace and the project
   // Overview section then exposes the same qualified result references.
+  // Legacy Overview/Work tabs are reached through the Work controls button and
+  // its "More work details" summary, so each entry opens both before the tab.
   await user.click(screen.getByRole("button", { name: "Programs workspace" }));
   await user.click(await screen.findByRole("button", { name: /Mission JOB-001/ }));
   await user.click(await screen.findByRole("button", { name: "Project details" }));
+  await user.click(await screen.findByRole("button", { name: "Work controls" }));
+  await user.click(await screen.findByText("More work details", { selector: "summary" }));
   await user.click(await screen.findByRole("tab", { name: "Overview" }));
 }
 
