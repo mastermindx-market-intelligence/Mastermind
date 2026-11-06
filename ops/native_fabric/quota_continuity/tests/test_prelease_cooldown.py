@@ -466,6 +466,69 @@ class PreleaseCooldownRace(unittest.TestCase):
                 self.assertIn("invalid excluded_pools", api.pick._format_pick_host(
                     "mechanical", host="auto", excluded_pools=["unregistered"]))
 
+    def test_no_alternate_after_busy_refuses_without_extra_controller(self):
+        # Original MiniMax becomes full after selection; the only other
+        # compatible route is forbidden by its ordinary capability policy.
+        # Exhausted AUTO options are a visible refusal, not a silent retry.
+        self._prepare_busy_minimax()
+        original_filter = api.pick.hard_filter
+        def unavailable_alternate(pool, *args, **kwargs):
+            if pool == "glm":
+                return False, "alternate unavailable"
+            return original_filter(pool, *args, **kwargs)
+        with patch.object(api.pick, "hard_filter", side_effect=unavailable_alternate):
+            rc = fabric_continuation.foreground(
+                api, "origin", "mechanical", cwd="~",
+                packet=None, stdin_bytes=b"all alternatives unavailable",
+                root_id="root", parent_run_id="parent",
+                task_complexity="C0_MECHANICAL")
+        state = fabric_continuation.resolve(api, "origin")
+        self.assertEqual(rc, 75)
+        self.assertEqual(len(self.native_calls), 1)
+        self.assertEqual(len(state["prior_attempts"]), 1)
+        self.assertEqual(state["prior_attempts"][0]["reason"], "prelease_broker_busy")
+        self.assertEqual(state["controller_reason"], "request_refused_before_launch")
+        self.assertEqual(state["effective_status"]["state"], "REQUEST_REFUSED_BEFORE_LAUNCH")
+        self.assertFalse(self.path(state["effective_run_id"], ".request-launch.json").exists())
+
+    def test_granted_primary_lease_is_not_replayed_on_later_failure(self):
+        # When the primary broker grants a real lease, a subsequent
+        # transport failure is *not* no-start proof and must not reroute.
+        with patch.object(self, "cool_from_settled_other_commission", return_value=None):
+            rc = fabric_continuation.foreground(
+                api, "origin", "mechanical", cwd="~",
+                packet=None, stdin_bytes=b"retained primary",
+                root_id="root", parent_run_id="parent",
+                task_complexity="C0_MECHANICAL")
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(len(self.native_calls), 1)
+        self.assertEqual([row["pool"] for row in self.route_calls], ["minimax"])
+        self.assertIn("LEASE_OK pool=minimax", self.path("origin", ".log").read_text())
+        self.assertFalse(self.path("origin", ".successor.json").exists())
+        self.assertEqual(fabric_continuation.resolve(
+            api, "origin")["prior_attempts"], [])
+
+    def test_broker_busy_handoff_preserves_ordinary_fair_share_mode(self):
+        # The opt-in path may return a typed no-lease decision directly;
+        # it must not register a phantom root in the existing waiter table.
+        # Ordinary calls still receive the unmodified priority-wait result.
+        with patch.object(self.br, "_front_of_queue", return_value=False):
+            fast = self.br.acquire("auto-root", "minimax",
+                model="MiniMax-M2.7", host="fixture", task_class="mechanical",
+                capacity_handoff=True, wait=0)
+            ordinary = self.br.acquire("normal-root", "minimax",
+                model="MiniMax-M2.7", host="fixture", task_class="mechanical",
+                capacity_handoff=False, wait=0)
+        self.assertFalse(fast.ok)
+        self.assertFalse(ordinary.ok)
+        self.assertEqual((fast.reason, ordinary.reason),
+                         ("priority_wait", "priority_wait"))
+        with self.br._conn() as conn:
+            phantom = conn.execute(
+                "SELECT COUNT(*) FROM waiters WHERE orchestrator_id='auto-root'"
+            ).fetchone()[0]
+        self.assertEqual(phantom, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
