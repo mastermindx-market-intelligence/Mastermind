@@ -1253,7 +1253,7 @@ def request(
         if not guard.get("allowed"):
             raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
         if new_macro_worktree is not None:
-            if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}:
+            if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4"}:
                 raise FabricTaskError("FABRIC_SPARSE_HOST_REFUSED")
             if route["MODE"] not in {"glm", "glm-codex", "minimax", "qwen"}:
                 raise FabricTaskError("FABRIC_SPARSE_MODE_NOT_YET_QUALIFIED")
@@ -1546,7 +1546,7 @@ def plan_accepted_macro_worktree_release(
     pattern = re.compile(
         r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "
         r"\[remote_sub id=" + re.escape(rid) +
-        r" host=(?P<host>ubuntu[0-3])\] "
+        r" host=(?P<host>ubuntu[0-4])\] "
         r"FABRIC_NEW_MACRO_WORKTREE run=" + re.escape(rid) +
         r" commit=(?P<sha>[0-9a-f]{40}) "
         r"root=(?P<root>[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}) "
@@ -1682,7 +1682,7 @@ def main(argv: list[str] | None = None) -> int:
     packet_group.add_argument("--stdin", action="store_true")
     p_request.add_argument("--pool")
     p_request.add_argument("--strict-manual-pin", action="store_true", help="fail closed if provider or model changes after preview")
-    p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), help="Explicit pending-host first worker (Grok on Mac, MiniMax on M1 or Ubuntu4); no provider enrollment")
+    p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), help="Explicit pending-host first worker (Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4); no provider enrollment")
     p_request.add_argument("--prefer")
     p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
     p_request.add_argument("--root")

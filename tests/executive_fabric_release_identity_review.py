@@ -500,7 +500,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '4a1f1e2ac43591e9eb0684134ffad1c3519492e4f7debd205b8ccb3209128eab', 'sites': ((876, 71, 74, 'int', '400'), (887, 71, 74, 'int', '403'), (895, 71, 74, 'int', '400'), (901, 79, 82, 'int', '400'), (910, 71, 74, 'int', '400'), (920, 71, 74, 'int', '403'), (925, 76, 79, 'int', '503'), (931, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'ed6e016eb9f65121baff9e9e41d5a7aa98c9edf20765d5b34224f4518e5bd5dd', 'sites': ((923, 71, 74, 'int', '400'), (934, 71, 74, 'int', '403'), (942, 71, 74, 'int', '400'), (948, 79, 82, 'int', '400'), (957, 71, 74, 'int', '400'), (967, 71, 74, 'int', '403'), (972, 76, 79, 'int', '503'), (978, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -562,7 +562,9 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 
 # NEXT accepted source: callback input bound / existing HTTP permission denial,
 # never an OS identity. Exact whole-source hash and token sites only.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '98a0be4402c331678b0870cd7b673d56c8e3704b83ff9e8b21c95610a5b54c4d', 'sites': ((703, 93, 96, 'int', '403'), (705, 56, 59, 'int', '403'), (712, 46, 49, 'int', '403'), (713, 56, 59, 'int', '403'))}
+# BYOK/Instructions composition preserves the complete permission handler AST;
+# only its enclosing source and four HTTP denial token positions change.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'de69741a1be8c3e980815a284c277da04843f16f34ce303141d482ff7ec64a66', 'sites': ((711, 93, 96, 'int', '403'), (713, 56, 59, 'int', '403'), (720, 46, 49, 'int', '403'), (721, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -589,3 +591,6 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
         (79, 56, 59, 'int', '800'),
     ),
 }
+
+# BYOK metadata READ re-pin: same eight action literals and unchanged action AST.
+# Attended parent source check under the current Chairman waiver; no formal approval claim.

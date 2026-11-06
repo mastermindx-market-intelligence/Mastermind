@@ -22,6 +22,9 @@ _PLACEHOLDERS = frozenset({
 _CHILD_SECRET_ENV = set(DEFAULT_CHILD_SECRET_ENV)
 _SLACK_BOT_USER_ID_ENV = "HERMES_SLACK_BOT_USER_ID"
 _SLACK_BOT_TOKEN_ENV = "HERMES_SLACK_BOT_TOKEN"
+_SUPERVISOR_NOTIFICATION_ENV = frozenset({
+    "NOTIFY_SOCKET", "INVOCATION_ID", "SYSTEMD_EXEC_PID", "MM_HERMES_IMPLEMENTATION_SHA",
+})
 
 
 def register_child_secret_env(names: set[str] | frozenset[str] | list[str]) -> None:
@@ -35,6 +38,8 @@ def register_child_secret_env(names: set[str] | frozenset[str] | list[str]) -> N
             raise RuntimeRefusal("INVALID_SECRET_ENV_NAME")
         if name == GATEWAY_TOKEN_ENV:
             raise RuntimeRefusal("GATEWAY_TOKEN_STAYS_ON_THE_FRONT_DOOR")
+        if name in _SUPERVISOR_NOTIFICATION_ENV:
+            raise RuntimeRefusal("SUPERVISOR_NOTIFICATION_ENV_REFUSED")
         _CHILD_SECRET_ENV.add(name)
 
 
@@ -45,6 +50,12 @@ def clear_child_secret_env() -> None:
 
 def child_secret_env_names() -> frozenset[str]:
     return frozenset(_CHILD_SECRET_ENV)
+
+
+def assert_no_supervisor_notification_env(env: dict[str, str]) -> None:
+    """Refuse a late model/proxy merge that introduces main-process authority."""
+    if _SUPERVISOR_NOTIFICATION_ENV.intersection(env):
+        raise RuntimeRefusal("SUPERVISOR_NOTIFICATION_ENV_REFUSED")
 
 
 class Secrets:
@@ -149,7 +160,8 @@ def child_env(secrets: Secrets, *, home: Path, extra: dict[str, str] | None = No
         DASHBOARD_PASSWORD_ENV: secrets.dashboard_password,
     }
     for name in sorted(_CHILD_SECRET_ENV):
-        if name in env or name in {GATEWAY_TOKEN_ENV, _SLACK_BOT_TOKEN_ENV}:
+        if (name in env or name in {GATEWAY_TOKEN_ENV, _SLACK_BOT_TOKEN_ENV}
+                or name in _SUPERVISOR_NOTIFICATION_ENV):
             continue
         if name in secrets.values:
             env[name] = secrets.values[name]
@@ -164,4 +176,5 @@ def child_env(secrets: Secrets, *, home: Path, extra: dict[str, str] | None = No
         if "\n" in value or "\x00" in value:
             raise RuntimeRefusal("EXTRA_CHILD_ENV_REFUSED")
         env[key] = value
+    assert_no_supervisor_notification_env(env)
     return env
