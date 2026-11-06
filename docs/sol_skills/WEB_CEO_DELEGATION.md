@@ -131,7 +131,7 @@ children are not substitutes merely because spawn is available/familiar.
 
 A native child requires a genuinely needed reasoning/coordinator role; never
 explicitly select Sol for routine implementation, tests, research or repair labor.
-Direct-retention reasons permit principal work, not native labor children. The assigned principal may do its own authorized implementation, tests and repair when delegation is unavailable or direct execution has lower total overhead. No ceremonial failed dispatch is required first. Preserve source custody and any live/uncertain worker; this does not authorize retry of a denied effect, additional spend, a new provider or a native labor substitute. A Fabric
+Direct-retention reasons permit principal work, not native labor children. This includes the principal's authorized implementation/tests/repair without a ceremonial failed dispatch; preserve live/uncertain workers and denied effects. A Fabric
 admission/host/permission blocker means permitted direct work or that exact blocker,
 not silent native substitution. Optional native integration gaps do not bar an
 admitted adapter; QUEUED is neither worker START nor duplicate-dispatch permission.
