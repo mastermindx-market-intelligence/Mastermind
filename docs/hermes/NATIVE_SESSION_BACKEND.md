@@ -197,10 +197,10 @@ installed/product work is:
    originating request/turn through the existing owners. Never choose the latest
    request for a root or equate native UID/session identity with the Office or
    COO OAuth principal.
-4. Complete the Meta-CEO participant's Runtime continuation and Office selection.
-   Native enrollment/control, the role gateway and the shared remote transport
-   now support explicit mmmeta identity; that source support does not authorize
-   a COO Attempt or make the Meta role selectable in Office.
+4. Complete the Meta-CEO participant's existing Office/native selection.
+   Native enrollment/control, role gateway, shared remote transport and Runtime
+   continuation now support explicit mmmeta identity; source support does not
+   authorize a COO Attempt or establish an installed Meta conversation.
 
 The installed role/proxy/provider/canary/cutover restrictions remain separate
 from source completion. Independent review is not a blanket prerequisite for
@@ -303,3 +303,35 @@ original bytes. It never selects replacement inputs or republishes an artifact.
 
 These are source integration changes. Installed credentials, role services,
 provider admission and Office Meta selection remain separately qualified work.
+
+### Meta Runtime continuation and original-result recovery
+
+The same pure continuation owner now joins one of two immutable schema families.
+Meta uses the hermes_meta target prefix, its own binding/target/operation/request/
+commit/public-result schemas and the session-meta submission prefix. Secretary
+keeps all existing wire values and defaults. The common request/commit Event
+types, command prefixes, aggregate and Runtime writers remain unchanged.
+
+A family is resolved from exact validated kind or stored schema, never inferred
+from an unknown value. The binding, target material, operation digest, submission
+and commit must agree on that family. Public results join the stored original
+family, native result, target, operation and original read/request references.
+Answer budget, original admission checks and parent_consumed:false remain intact.
+
+The installed Session Bridge explicitly discovers either enrolled role. A missing
+Meta selection returns no Meta target; it never selects Secretary. SEND still has
+exactly four fields. Original command recovery precedes fresh target observation
+and submission, and the synchronous original commit precedes possible native
+bytes. Recovery reads the original stored binding and preserves journal facts
+when that route cannot answer. Both native families refuse the legacy live-writer
+path before Attempt/worker lookup.
+
+The existing bounded Runtime history can return legacy, Secretary and Meta
+original references together under the same principal, scope and pagination
+rules. The public session_reply_read owner validates both closed result families.
+The session_targets tool advertises the explicit Meta kind; installing this source
+therefore owes the normal exact tool-publication identity qualification. This
+change does not republish a live tool or activate a role.
+
+Office/native Meta selection and authenticated installed-provider proof remain
+separate from this backend source integration.

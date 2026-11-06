@@ -27587,7 +27587,7 @@ class BoundedRuntimeReadObservation:
             _digest, _request_key, _validate_payload,
         )
         from control_plane.native_continuation import (
-            HERMES_REQUEST_SCHEMA, validate_hermes_continuation_request_event,
+            HERMES_REQUEST_SCHEMAS, validate_hermes_continuation_request_event,
             _hermes_root_event,
         )
 
@@ -27603,7 +27603,7 @@ class BoundedRuntimeReadObservation:
             raise RuntimeReadUnavailable("original request unavailable")
         value = event.payload
         schema = value.get("schema") if type(value) is dict else None
-        if schema == HERMES_REQUEST_SCHEMA:
+        if schema in HERMES_REQUEST_SCHEMAS:
             # The native Secretary request has no Dialogue, Attempt or worker
             # carrier. Its principal filter is required and is applied before
             # any root read; the bounded UNIQUE root join is unchanged.
@@ -27636,7 +27636,7 @@ class BoundedRuntimeReadObservation:
         if root_row is None:
             raise RuntimeReadUnavailable("original root disappeared")
         root = _event_from_row(root_row)
-        if schema == HERMES_REQUEST_SCHEMA:
+        if schema in HERMES_REQUEST_SCHEMAS:
             _hermes_root_event(root, value["binding"])
         if (root.event_id != value["root_event_id"]
                 or _digest(root.to_dict()) != value["root_event_sha256"]):
@@ -27686,7 +27686,7 @@ class BoundedRuntimeReadObservation:
         self._select()
         try:
             from control_plane.native_continuation import (
-                HERMES_REQUEST_SCHEMA, hermes_continuation_commit_evidence,
+                HERMES_REQUEST_SCHEMAS, hermes_continuation_commit_evidence,
             )
 
             loader = _BoundedRoleResultLoader(self._connection)
@@ -27726,7 +27726,7 @@ class BoundedRuntimeReadObservation:
                     row = loader.execute("SELECT * FROM events WHERE command_id=?",
                                          (prefix + event.aggregate_id,)).fetchone()
                     indexed.append(None if row is None else _event_from_row(row))
-                if type(value) is dict and value.get("schema") == HERMES_REQUEST_SCHEMA:
+                if type(value) is dict and value.get("schema") in HERMES_REQUEST_SCHEMAS:
                     # The native Secretary aggregate carries its own commit
                     # fact; the pure helper proves the aggregate Event and the
                     # independent global command index agree.
@@ -27777,14 +27777,14 @@ class BoundedRuntimeReadObservation:
                 _validate_current_target_worker_quota,
                 job_id_from_operation_key,
             )
-            from control_plane.native_continuation import HERMES_REQUEST_SCHEMA
+            from control_plane.native_continuation import HERMES_REQUEST_SCHEMAS
 
             loader = _BoundedRoleResultLoader(self._connection)
             self._vm_progress.activate()
             try:
                 event, value = self._load_session_original_request_bounded(
                     loader, read_ref, original_principals)
-                if type(value) is dict and value.get("schema") == HERMES_REQUEST_SCHEMA:
+                if type(value) is dict and value.get("schema") in HERMES_REQUEST_SCHEMAS:
                     # A native Secretary request has no Attempt, worker or
                     # harness writer. Refuse before every live-writer query
                     # instead of synthesizing a legacy writer tuple.
@@ -27897,7 +27897,7 @@ class BoundedRuntimeReadObservation:
                 _digest, _request_key, _validate_payload,
             )
             from control_plane.native_continuation import (
-                HERMES_REQUEST_SCHEMA, validate_hermes_continuation_request,
+                HERMES_REQUEST_SCHEMAS, validate_hermes_continuation_request,
                 validate_hermes_continuation_request_event, _hermes_root_event,
             )
 
@@ -27957,7 +27957,7 @@ class BoundedRuntimeReadObservation:
                     event = _event_from_row(row)
                     value = event.payload
                     schema = value.get("schema") if type(value) is dict else None
-                    if schema == HERMES_REQUEST_SCHEMA:
+                    if schema in HERMES_REQUEST_SCHEMAS:
                         # The native Secretary request carries no Dialogue
                         # context, Attempt or worker. Its own closed payload
                         # law supplies the scope the filters below apply.
@@ -27993,7 +27993,7 @@ class BoundedRuntimeReadObservation:
                             not in original_principals):
                         continue
                     # Foreign work/principal scope never triggers a root read.
-                    if schema == HERMES_REQUEST_SCHEMA:
+                    if schema in HERMES_REQUEST_SCHEMAS:
                         try:
                             validate_hermes_continuation_request_event(
                                 event, original_principals=original_principals)
@@ -28012,7 +28012,7 @@ class BoundedRuntimeReadObservation:
                     if root_row is None:
                         raise RuntimeReadUnavailable("original root disappeared")
                     root = _event_from_row(root_row)
-                    if schema == HERMES_REQUEST_SCHEMA:
+                    if schema in HERMES_REQUEST_SCHEMAS:
                         _hermes_root_event(root, value["binding"])
                     if (root.event_id != value["root_event_id"]
                             or _digest(root.to_dict()) != value["root_event_sha256"]):

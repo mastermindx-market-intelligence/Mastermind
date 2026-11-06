@@ -280,7 +280,7 @@ class RuntimeSessionReturn:
 
     def _hermes_evidence(self, principal, read_ref):
         from control_plane.native_continuation import (
-            HERMES_REQUEST_SCHEMA, hermes_continuation_commit_evidence,
+            HERMES_REQUEST_SCHEMAS, hermes_continuation_commit_evidence,
         )
         identity = _principal(principal)
         if self.hermes is not None:
@@ -290,7 +290,7 @@ class RuntimeSessionReturn:
                 observation.read_session_reply_evidence_bounded(
                     read_ref=read_ref, original_principals=self._original_principals(principal)))
         _ = observation.receipt
-        if (value.get("schema") != HERMES_REQUEST_SCHEMA
+        if (value.get("schema") not in HERMES_REQUEST_SCHEMAS
                 or not _read_matches_original(value["principal"], identity, principal,
                                               trusted_pair=self._trusted_read_pair)
                 or _principal(principal) != identity):
@@ -312,12 +312,13 @@ class RuntimeSessionReturn:
             raise BridgeError("reply_unavailable", "authorized canonical reply is unavailable")
         return value["schema"]
 
-    async def hermes_targets(self, principal):
-        from control_plane.native_continuation import build_hermes_continuation_target
+    async def hermes_targets(self, principal, *, kind="hermes_secretary"):
+        from control_plane.native_continuation import build_hermes_continuation_target, hermes_family
+        family = hermes_family(kind)
         identity = _principal(principal)
         if self.hermes is None:
             return []
-        binding = self.hermes.selected_binding()
+        binding = self.hermes.selected_binding(kind=family.kind)
         if binding is None:
             return []
         root = self.runtime.store.unique_root_created_event(binding["root_job_id"])
@@ -338,11 +339,12 @@ class RuntimeSessionReturn:
             raise BridgeError("operation_carrier_conflict", "original Secretary request differs")
 
     async def _bind_hermes_request(self, principal, args):
-        from control_plane.native_continuation import build_hermes_continuation_request
+        from control_plane.native_continuation import build_hermes_continuation_request, hermes_family_for_target
+        family = hermes_family_for_target(args["target_ref"])
         identity = _principal(principal, submit=True)
         if self.hermes is None:
             raise BridgeError("backend_unavailable", "installed Secretary owner is unavailable")
-        binding = self.hermes.selected_binding()
+        binding = self.hermes.selected_binding(kind=family.kind)
         if binding is None:
             raise BridgeError("binding_unavailable", "Secretary selection is unavailable")
         self.hermes.require_submit(binding)
@@ -456,8 +458,11 @@ class RuntimeSessionReturn:
         from .hermes_native import public_result
         args = validate_tool_arguments("session_send", arguments)
         identity = _principal(principal, submit=True)
-        if re.fullmatch(r"hermes_secretary:[0-9a-f]{64}", args["target_ref"]) is None:
-            raise BridgeError("invalid_input", "Secretary target is malformed")
+        from control_plane.native_continuation import hermes_family_for_target
+        try:
+            hermes_family_for_target(args["target_ref"])
+        except ValueError:
+            raise BridgeError("invalid_input", "native conversation target is malformed") from None
         read_ref = "session-reply-" + _request_key(args["operation_key"])
         try:
             # An original commit wins before any live native observation or
