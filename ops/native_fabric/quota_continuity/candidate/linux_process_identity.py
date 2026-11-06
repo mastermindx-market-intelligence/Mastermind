@@ -39,6 +39,11 @@ Contract, not implementation detail:
   observation only -- never proof of provider progress, never permission to
   launch anything, and never a claim that the image matches any expected
   binary; that comparison belongs to whoever holds the expected attestation.
+* ``inspect_linux_process(pid, require_live=True)`` qualifies the same
+  identity while refusing an already-dead process through that same
+  dead-state predicate, and it never opens the executed image at all.  It is
+  the one path a caller that may not read another role's
+  ``/proc/<pid>/exe`` can use to learn whether that process is alive.
 
 Standard library only.  The private ``_open_*``/``_read_*``/``_parse_*``
 helpers are the injection seams exercised by the inert tests; they are not
@@ -422,10 +427,10 @@ def _fstat_image(image_fd: int) -> dict[str, Any]:
 
 
 def _reject_zombie(stat: dict[str, Any], pid: int) -> None:
-    """A zombie has no live image; refuse before touching ``exe`` at all."""
-    if stat["state"] == "Z":
+    """A zombie or dead process has no live image or live identity."""
+    if stat["state"] in {"Z", "X", "x"}:
         raise LinuxProcessIdentityError(
-            f"process {pid} is a zombie; there is no executed image to observe"
+            f"process {pid} is a zombie or dead; there is no live process to observe"
         )
 
 
@@ -588,8 +593,8 @@ def _qualify_bracketed_identity(
     }
 
 
-def inspect_linux_process(pid: int) -> dict[str, Any]:
-    """Qualify the boot-scoped identity of one live Linux process.
+def inspect_linux_process(pid: int, *, require_live: bool = False) -> dict[str, Any]:
+    """Qualify the boot-scoped identity of one Linux process.
 
     Returns a dict with ``start_identity`` (exact stat field 22 tick count as
     a decimal string, no timestamp rounding), ``pgid``, ``session_id``,
@@ -601,6 +606,15 @@ def inspect_linux_process(pid: int) -> dict[str, Any]:
     both the identity and the principal observations must be stable.  Any
     absence, permission, malformed or race condition raises
     :class:`LinuxProcessIdentityError` with a closed diagnostic.
+
+    ``require_live`` asks for the live, non-image identity: the incumbent
+    zombie/dead-state predicate is applied to the observed state, so a
+    process that has already died is refused instead of reported.  It reuses
+    the very predicate :func:`inspect_linux_process_image` applies, inside
+    this same owner, and it never opens the executed image: a caller that may
+    not read another role's ``/proc/<pid>/exe`` can still qualify whether
+    that process is alive.  The default preserves historical identity observations; the live check
+    is an explicit keyword-only extension.
     """
     _require_valid_pid(pid)
     try:
@@ -625,6 +639,10 @@ def inspect_linux_process(pid: int) -> dict[str, Any]:
             stat_before = _read_proc_file(
                 pid_dir_fd, "stat", _STAT_MAX_BYTES, f"/proc/{pid}/stat"
             )
+            if require_live:
+                # The same dead-state predicate the image path applies, on
+                # the same pinned descriptor.  No image is opened here.
+                _reject_zombie(_parse_stat(stat_before, pid), pid)
             status_before = _read_proc_file(
                 pid_dir_fd, "status", _STATUS_MAX_BYTES, f"/proc/{pid}/status"
             )
@@ -634,6 +652,8 @@ def inspect_linux_process(pid: int) -> dict[str, Any]:
             stat_after = _read_proc_file(
                 pid_dir_fd, "stat", _STAT_MAX_BYTES, f"/proc/{pid}/stat"
             )
+            if require_live:
+                _reject_zombie(_parse_stat(stat_after, pid), pid)
         finally:
             _close_fd(pid_dir_fd)
     finally:

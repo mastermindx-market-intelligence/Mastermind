@@ -653,13 +653,111 @@ supervisor, lifecycle owner or retry service.
 
 Linux enrollment includes exactly `paid_yaml_runtime.py`,
 `paid_pyyaml_6_0_3.zip` and `paid_pyyaml_provenance.json` from the current native
-Fabric source owner. It does not install packages or enable a role.
+Fabric source owner, plus the shared runtime-custody factory
+`paid_initializer.py` and the incumbent `linux_process_identity.py`. Neither
+helper is copied into the release. It does not install packages or enable a role.
 
-This closes the source-loading recipe. Interpreter/stdlib/native-library
-qualification, effective-unit and current-process binding, credentials and
-kernel isolation still belong to their existing host owners. The BYOK observer
-continues to report its installed source as unbound until those facts are
-qualified. A rendered unit or implementation label does not establish them.
+## Frozen Hermes runtime installation input
+
+The release manifest may carry one optional fifth member, `hermes_runtime`,
+with the closed schema `mastermind.hermes_runtime_installation/v1`. The outer
+schema stays `mastermind.executive_release_manifest/v1` and the persisted
+document is either the historic four keys or those four plus `hermes_runtime`.
+An omitted member is the legacy release. A persisted `null` is invalid and is
+never accepted as "absent".
+
+The member records only the operator-approved recipe:
+
+- `bootstrap_python` and `launch_python`, each exactly
+  `{path, real_path, sha256}`; for Hermes the two documents must be equal.
+- `startup`, exactly `{profile, prefix, exec_prefix, base_prefix,
+  base_exec_prefix}`; the only admitted profile is
+  `cpython-3.12-linux-root-prefix-nosite.v1`, and the base prefixes must equal
+  their prefixes because a root-prefix interpreter is not a virtual
+  environment.
+- `roles`, exactly two ordered rows, `mmmeta` then `mmsecretary`, each
+  exactly `{role, uid, gid, state_dir, restart_sec, start_limit_burst,
+  start_limit_interval_sec}`. The UIDs are positive and distinct, the GIDs are
+  positive and distinct, and a UID need not equal its GID. Paths are
+  normalized absolute paths with no traversal, control character, systemd
+  unit name or unit directory. The service bounds are `restart_sec` 0..60,
+  `start_limit_burst` 1..10 and `start_limit_interval_sec` 1..3600; an
+  integral restart bound normalizes to one value.
+
+No credential, provider, model, environment variable, arbitrary command, unit
+path, implementation label or release root is accepted. The canonical member
+is bounded to 16 KiB.
+
+This member is DATA the operator supplies. It is not this repository's
+self-attestation of the host, the interpreter, the accounts or a running unit.
+The authority for the accepted Ubuntu1 vendor proof and for the created role
+receipts stays with those existing owners.
+
+`ops/executive_os/release_manifest.py` exposes
+`validate_hermes_runtime_installation(value)`, which returns the detached
+canonical document. `_document`, `create` and `verify` take the member
+explicitly, and `verify(..., expected_hermes_runtime=...)` distinguishes three
+modes: omitted is ordinary inspection, an explicit `None` requires absence and
+an explicit document requires exact validated equality. The persisted member is
+never discarded to hide a mismatch.
+
+The installer takes the same input with `--hermes-runtime-json`, decodes it
+with a bounded closed decoder before the first mutation and always passes the
+explicit expectation — including its absence — to the manifest tool, which is
+still invoked from the accepted source copy. An already installed release
+whose frozen member differs conflicts before any mutation; the immutable
+manifest is never retrofitted. When a Hermes member is supplied, execute the
+enroller from that same accepted checkout; a different source repository is
+refused before rendering so the unit hashes and sealed release use one source.
+
+The shared unit recipe now has one pure formatter. `render_host_unit` keeps
+every profile-facing validation and produces the same bytes as before, and
+`render_role_units_from_installation` supplies the closed recipe directly,
+without constructing a synthetic runtime profile. The role account, the unit
+name, the role-only loopback address and the final release path are derived
+from the role and the enclosing manifest; the ExecStart always names
+`/opt/mastermind-executive/releases/<commitSHA>`, never a staging or archive
+path. Linux enrollment renders those expected units and reports their digest;
+it does not write them and does not start a role.
+
+The fixed PID1 observer joins that approved source to the live host. For
+each role it holds the immutable release, the manifest-approved member and the
+root-owned unit fragment through the existing descriptor/ancestor/ACL owner.
+It queries only the two fixed units with an explicit property list and requires
+a loaded, non-transient unit at the exact fragment, no drop-in and no pending
+daemon reload. The effective ExecStart must be the qualified Python
+`-I -S -B` recipe, without an ignored-error prefix, running the fixed release
+entry and role profile. These checks do not claim independent observation of
+every effective sandbox property or kernel enforcement.
+
+The shared `held_runtime_custody` context now remains open for the complete
+role entry. Its no-site sentinels are installed before ordinary imports;
+programmatic late dispatch refuses without backfilling that early policy.
+Before importing the CLI or reading a role credential, the entry compares its
+actual executable, four Python prefixes, role principal, kernel self-image and
+process birth to the held approved inputs. The image's digest and complete
+identity must match the retained interpreter descriptor. Source/runtime checks
+bracket every subsequent main-process custody sample.
+
+The existing main-only STATUS publisher emits the closed v2 custody witness
+through PID1. The gateway requires v2 for a positive role pair and independently
+checks MainPID, live process birth and real/effective UID/GID with the incumbent
+non-image process reader. It joins the witness to the held root manifest's
+original-byte digest and approved launch-image digest. It does not open another
+role's executable or acquire tracing privileges. Standalone v1 codecs remain
+available for legacy diagnostics, but v1 cannot satisfy the positive host read.
+
+Both snapshots must agree, preserve the publisher's original timestamps and
+pass the existing dual-clock freshness checks. The same four-second deadline is
+checked between acquisition stages and before returning; bounded synchronous
+filesystem reads are not a hard preemption mechanism. Missing facts, refused
+reads and changed custody yield no positive observation.
+
+The public role projection and its proof, including `service_observed: false`
+and credential enrollment `UNVERIFIED`, remain unchanged. A completed metadata
+join establishes neither provider authentication nor a served model/turn.
+Protected installation, actual kernel isolation, credential enrollment and the
+real browser/serving path still require their corresponding host evidence.
 
 ### Credential-free qualification entry
 
@@ -706,51 +804,3 @@ the UI remains honestly unavailable even when the transport is connected.
 Office refresh updates this observation without changing the direction draft,
 frozen preview or existing launch owner. Configuration observed is not proof of
 credential enrollment, service health, served model, useful turn or usage.
-
-
-## Current installed-source binding for read-only role observations
-
-The MH1 gateway uses the existing root-custodied release entry for a bounded
-`hermes-observation` subprocess. Ordinary imports of the observer remain unbound.
-The entry requires CPython3.12 `-I -S -B`, held manifest-matched first-party
-imports, and the root installation owner's current
-`/etc/mastermind-executive/hermes-role-observation.json`. A configured SHA or
-publisher StatusText does not supply that record or prove installation.
-
-The existing root release/unit installer may prepare candidate bytes, without
-installing or querying a unit, through this exact released entry:
-
-```text
-/usr/bin/python3.12 -I -S -B /opt/mastermind-executive/releases/<S>/ops/executive_os/release_manifest.py hermes-observation-prepare <gateway-config-sha256> <installation-epoch-sha256> <observer-uid> <observer-gid>
-```
-
-Its bounded stdin is the two existing unit operands, each with `role`, numeric
-`uid`/`gid`, exact `argv`, and the normalized effective system-manager `exec_start`
-value. These are explicit root-installer inputs, not caller proof. The command
-derives interpreter/module/unit hashes from actual held root-owned files and
-returns candidate JSON only. It does not generate an epoch, change a file,
-install a unit, query PID1, inspect a process, read a role profile/secret, or
-certify a live service. A new or replaced epoch is a consequential installation
-fact owned by that same root installer, not a monotonic counter invented here.
-
-Normal reviewed root installation must bind the actual release, selected gateway
-configuration, current observer identity, distinct existing role identities,
-root-managed units and runtime import closure before installing those bytes as
-its root-owned current record. This source change does not perform that step.
-Missing/foreign/changed record, runtime, unit, rights or import roots refuse.
-The source preparation output and synthetic tests are not installed evidence.
-
-At acquisition, the actual held loader supplies the source identity and checks
-the current record/epoch and runtime around both fixed unit reads. Effective
-unit FragmentPath, absence of drop-ins, no pending daemon reload, role User/Group
-and exact ExecStart must match. Only then does the existing owner inspect fixed
-public kernel metadata for the two PID1-selected main processes: executable,
-argv, numeric UID/GID, system cgroup and start epoch. It never reads environ,
-role-private state, profile, credential or model output. The existing boot,
-InvocationID, two-snapshot identity, dual-clock age and single request deadline
-still apply. Replacement, drift or expiry withholds the observation.
-
-This enables only the existing authenticated read-only metadata projection.
-Credential enrollment, served model, provider authentication, service health and
-useful model turns remain unproved by that projection. No H1/H8, network canary,
-service activation or installation is implied.
