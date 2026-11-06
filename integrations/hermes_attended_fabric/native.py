@@ -25,6 +25,8 @@ COMPLEXITIES = frozenset({
 KEY = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 OPERATIONS = frozenset({"preview", "submit", "status", "result"})
+MANUAL_POOLS = frozenset({"grok", "glm", "minimax", "bailian", "cursor", "ocfree", "go"})
+MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
 # The model never receives a root/parent/caller authority field.
 TOOL_SCHEMA = {
     "name": TOOL,
@@ -44,6 +46,8 @@ TOOL_SCHEMA = {
             "task_complexity": {"type": "string", "enum": sorted(COMPLEXITIES)},
             "work_packet": {"type": "string", "maxLength": 16000},
             "escalation_reason": {"type": "string", "maxLength": 500},
+            "pool": {"type": "string", "enum": sorted(MANUAL_POOLS)},
+            "model": {"type": "string", "pattern": MODEL_ID.pattern},
         },
     },
 }
@@ -62,6 +66,8 @@ class SessionGrant:
     parent_id: str
     # Distinct bound native session generation; changes invalidate this grant.
     generation: str
+    manual_pools: tuple[str, ...] = ()
+    manual_models: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         for value in (self.root_id, self.parent_id):
@@ -70,6 +76,16 @@ class SessionGrant:
         for value in (self.profile_id, self.session_id, self.generation):
             if type(value) is not str or not 0 < len(value) <= 256:
                 raise FabricNativeRefusal("GRANT_LINEAGE_INVALID")
+        if (type(self.manual_pools) is not tuple
+                or any(type(p) is not str or p not in MANUAL_POOLS
+                       for p in self.manual_pools)
+                or type(self.manual_models) is not tuple
+                or any(type(pair) is not tuple or len(pair) != 2
+                       or pair[0] not in self.manual_pools
+                       or type(pair[1]) is not str
+                       or MODEL_ID.fullmatch(pair[1]) is None
+                       for pair in self.manual_models)):
+            raise FabricNativeRefusal("GRANT_MANUAL_ROUTES_INVALID")
 
 
 @runtime_checkable
@@ -85,7 +101,9 @@ class FabricOwnerPort(Protocol):
                 task_class: str, complexity: str, reason: str) -> Mapping[str, Any]: ...
     def status(self, grant: SessionGrant, run_id: str) -> Mapping[str, Any]: ...
     def submit(self, grant: SessionGrant, run_id: str, task_class: str,
-               complexity: str, packet: str, reason: str) -> Mapping[str, Any]: ...
+               complexity: str, packet: str, reason: str, *,
+               pool: str | None = None,
+               model: str | None = None) -> Mapping[str, Any]: ...
     def result(self, grant: SessionGrant, run_id: str) -> Mapping[str, Any]: ...
 
 
@@ -203,6 +221,18 @@ def native_handler(
                 return _project(grant, run_id, "UNAVAILABLE",
                                 "FABRIC_PREVIEW_UNAVAILABLE")
 
+        pool, model = arguments.get("pool"), arguments.get("model")
+        if pool is not None or model is not None:
+            if (action != "submit" or type(pool) is not str
+                    or pool not in grant.manual_pools
+                    or (model is not None
+                        and (type(model) is not str
+                             or MODEL_ID.fullmatch(model) is None
+                             or (model.lower() != "auto"
+                                 and (pool, model) not in grant.manual_models)))):
+                return _project(grant, run_id, "REFUSED",
+                                "MANUAL_ROUTE_NOT_AUTHORIZED")
+
         packet = arguments.get("work_packet")
         if (type(packet) is not str or not packet.strip()
                 or "\x00" in packet or len(packet) > 16000
@@ -222,7 +252,8 @@ def native_handler(
         except Exception:
             return _project(grant, run_id, "REFUSED", "NATIVE_SESSION_REVOKED")
         try:
-            raw = port.submit(grant, run_id, task_class, complexity, packet, reason)
+            raw = port.submit(grant, run_id, task_class, complexity, packet,
+                              reason, pool=pool, model=model)
         except Exception:
             # The incumbent port may have sent the request. Never auto-retry.
             return _project(grant, run_id, "EFFECT_UNKNOWN",
