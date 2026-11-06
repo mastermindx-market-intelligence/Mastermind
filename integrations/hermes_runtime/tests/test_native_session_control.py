@@ -5,6 +5,8 @@ The wire test uses a real AF_UNIX stream; native authority effects are doubles.
 """
 import asyncio
 from contextlib import contextmanager
+from dataclasses import make_dataclass
+import sqlite3
 import json
 from pathlib import Path
 import socket
@@ -64,6 +66,12 @@ def native(monkeypatch, tmp_path):
             assert identity["profile_scope"] == "profile" and len(scopes) == 2
             assert transport is state.transport
             self.transport = transport
+            self.authority = authority
+            self.actor = SimpleNamespace(profile_id=target["profile_id"], subject=target["principal_id"])
+
+        def submission(self, ref, params):
+            assert ref.session_id == target["session_id"] and ref.profile_id == target["profile_id"]
+            return params
 
         async def dispatch(self, request):
             calls.append(request)
@@ -74,9 +82,7 @@ def native(monkeypatch, tmp_path):
                 if state.changed:
                     value["revision"] += 1
                 return {"result": value}
-            if state.lose:
-                raise TimeoutError("admission response lost")
-            return {"result": receipt}
+            raise AssertionError("only resume uses the generic dispatcher")
 
         async def close(self):
             state.closed = True
@@ -91,8 +97,19 @@ def native(monkeypatch, tmp_path):
 
     grant = dict(subject=target["principal_id"], scope="profile", instance_id=target["instance_id"],
                  profile_id=str(home), capabilities=["session:read", "session:submit"])
-    runner = SimpleNamespace(session_authority=object(),
+    Receipt = make_dataclass("Receipt", list(receipt))
+    async def submit(actor, request, *, _authorize_write, queue_while_restarting):
+        assert actor.subject == target["principal_id"] and callable(_authorize_write)
+        assert queue_while_restarting is False
+        calls.append({"method": "authority.submit", "params": request})
+        if state.lose:
+            raise TimeoutError("admission response lost")
+        return Receipt(**receipt)
+    authority = SimpleNamespace(submit=submit)
+    runner = SimpleNamespace(session_authority=authority,
                              session_ticket_store=SimpleNamespace(redeem=lambda *a, **k: grant))
+    module(monkeypatch, "gateway.session_contract",
+           SessionRef=make_dataclass("SessionRef", ["profile_id", "session_id"]))
     module(monkeypatch, "gateway.session_controls", AuthorityConnection=Connection)
     module(monkeypatch, "gateway.run_api", _embedded_chat_enabled=lambda: True)
     module(monkeypatch, "gateway.session_authorities", owner_scope=scope)
@@ -108,7 +125,7 @@ def native(monkeypatch, tmp_path):
 def test_one_native_admission_preserves_receipt_and_cleans_viewer(native):
     result = asyncio.run(control._submit(native.runner, native.home, native.params, "uid:994"))
     assert result == dict(schema=control.SCHEMA, status="ADMITTED", admission=native.receipt)
-    assert [call["method"] for call in native.calls] == ["session.resume", "prompt.submit"]
+    assert [call["method"] for call in native.calls] == ["session.resume", "authority.submit"]
     assert native.calls[-1]["params"] == dict(session_id="owned-session", submission_id="operation-1",
                                              text="Explain this mission.", finite=True)
     assert native.state.closed and native.state.reset and not native.scopes
@@ -127,7 +144,7 @@ def test_lost_admission_response_is_unknown_and_never_replayed(native):
     native.state.lose = True
     result = asyncio.run(control._submit(native.runner, native.home, native.params, "uid:994"))
     assert result["status"] == "EFFECT_UNKNOWN"
-    assert sum(call["method"] == "prompt.submit" for call in native.calls) == 1
+    assert sum(call["method"] == "authority.submit" for call in native.calls) == 1
     assert native.state.closed and native.state.reset
 
 
@@ -175,3 +192,64 @@ def test_private_wire_uses_one_existing_socket_request(monkeypatch, tmp_path):
     assert not worker.is_alive() and result["status"] == "EFFECT_UNKNOWN"
     assert len(requests) == 1 and requests[0]["verb"] == control.VERB
     assert requests[0]["params"]["operation"] == "read_original"
+
+
+@pytest.mark.parametrize("field", ["authority_epoch", "revision", "execution_generation"])
+def test_boolean_cannot_match_native_integer_identity(native, field):
+    native.target[field] = 1
+    native.params["target"][field] = True
+    result = asyncio.run(control._submit(native.runner, native.home, native.params, "uid:994"))
+    assert result["status"] == "REFUSED"
+    assert native.calls == []
+
+
+@pytest.mark.parametrize("payload", [
+    {"operation": "observe", "session_id": "s", "ticket": "external-ticket"},
+    {"operation": "submit", "target": {}, "submission_id": "s", "text": "q"},
+    {"operation": "read_original", "session_id": "s", "submission_id": "op",
+     "input_sha256": "G" * 64, "admission_id": None},
+])
+def test_role_dispatch_rejects_unqualified_input_before_wire(monkeypatch, tmp_path, payload):
+    client = control.NativeSecretaryClient(tmp_path)
+    monkeypatch.setattr(client, "_call", lambda *args: pytest.fail("invalid request reached native socket"))
+    with pytest.raises(RuntimeRefusal):
+        client.dispatch(payload)
+
+
+def test_admission_fence_uses_same_transaction_and_native_busy_owner(monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE sessions (id TEXT, user_id TEXT, runtime_revision INTEGER, runtime_generation INTEGER)")
+    conn.execute("INSERT INTO sessions VALUES ('s','uid:994',3,2)")
+    conn.execute("CREATE TABLE pending (session_id TEXT)")
+    target = dict(profile_id="/native/home", session_id="s", principal_id="uid:994",
+                  instance_id="owner", authority_epoch=7, revision=3, execution_generation=2)
+    authority = SimpleNamespace(profile_id=target["profile_id"], instance_id="owner", epoch=7, db=object())
+    actor = SimpleNamespace(subject="uid:994")
+    checks = []
+    def snapshot(db, actual_conn, sid):
+        assert db is authority.db and actual_conn is conn and sid == "s"
+        checks.append("lineage")
+        return {"target": "s", "receipt": dict(profile_id=target["profile_id"],
+                    session_id="s", principal_id="uid:994", policy={"source": "cli"})}
+    def idle(db, actual_conn, sids):
+        assert db is authority.db and actual_conn is conn and sids == ["s"]
+        checks.append("idle")
+        if conn.execute("SELECT 1 FROM pending WHERE session_id='s'").fetchone():
+            raise RuntimeError("native owner reports busy")
+    module(monkeypatch, "hermes_state_mutation_prepared", local_snapshot=snapshot)
+    module(monkeypatch, "hermes_state_mutation_guards", require_idle=idle)
+    guard = control._admission_guard(authority, actor, target)
+    with conn:
+        guard(conn)
+        conn.execute("INSERT INTO pending VALUES ('s')")
+    with pytest.raises(control._AdmissionRefused):
+        with conn:
+            guard(conn)
+    assert checks == ["lineage", "idle", "lineage", "idle"]
+    conn.execute("DELETE FROM pending")
+    conn.execute("UPDATE sessions SET runtime_generation=3")
+    with pytest.raises(control._AdmissionRefused):
+        guard(conn)
+    assert checks == ["lineage", "idle", "lineage", "idle"]
+    conn.close()

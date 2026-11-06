@@ -9,7 +9,7 @@ import socket
 import threading
 import urllib.parse
 
-from .constants import DASHBOARD_PATH, HEALTH_PATH, LOOPBACK_HOST
+from .constants import DASHBOARD_PATH, HEALTH_PATH, LOOPBACK_HOST, SECRETARY_PATH
 from .egress import ROLE_PROXY_HOST
 
 ALLOWED_LOOPBACK_HOSTS = frozenset((LOOPBACK_HOST, *ROLE_PROXY_HOST.values()))
@@ -41,11 +41,19 @@ class _LoopbackServer(ThreadingHTTPServer):
 
 
 class Gateway:
-    def __init__(self, host: str, port: int, token: str, snapshot: Callable[[], tuple[int, dict]]):
+    def __init__(self, host: str, port: int, token: str, snapshot: Callable[[], tuple[int, dict]], *,
+                 conversation_token: str | None = None, conversation_handler: Callable | None = None):
         if host not in ALLOWED_LOOPBACK_HOSTS:
             raise RuntimeRefusal("NON_LOOPBACK_BIND_REFUSED")
         if not token:
             raise RuntimeRefusal("SECRETS_TOKEN_MISSING")
+        if ((conversation_token is None) != (conversation_handler is None)
+                or (conversation_token is not None and
+                    (type(conversation_token) is not str or not 16 <= len(conversation_token) <= 256
+                     or conversation_token == token or not callable(conversation_handler)))):
+            raise RuntimeRefusal("SECRETARY_GATEWAY_CAPABILITY_INVALID")
+        self._conversation_token = conversation_token
+        self._conversation_handler = conversation_handler
         self._token = token
         self._snapshot = snapshot
         handler = _handler_factory(self)
@@ -119,12 +127,68 @@ def _handler_factory(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
             self._send(404, b'{"status":"not_found"}', "application/json")
 
         def do_POST(self) -> None:  # noqa: N802
-            self._send(405, b'{"status":"method_refused"}', "application/json")
+            self.close_connection = True
+            parsed = urllib.parse.urlsplit(self.path)
+            if parsed.path != SECRETARY_PATH or gateway._conversation_handler is None:
+                self._send(405, b'{"status":"method_refused"}', "application/json")
+                return
+            if parsed.query or parsed.fragment or parsed.scheme or parsed.netloc:
+                self._send(400, b'{"status":"query_refused"}', "application/json")
+                return
+            headers = self.headers.get_all("Authorization", [])
+            expected = gateway._conversation_token
+            if (len(headers) != 1 or not headers[0].startswith("Bearer ")
+                    or not token_matches(headers[0][7:], expected)):
+                self._send(401, b'{"status":"unauthorized"}', "application/json")
+                return
+            lengths = self.headers.get_all("Content-Length", [])
+            if (self.headers.get("Transfer-Encoding") is not None or len(lengths) != 1
+                    or not 1 <= len(lengths[0]) <= 6
+                    or not lengths[0].isascii() or not lengths[0].isdigit()
+                    or not 0 < int(lengths[0]) <= 64 * 1024
+                    or self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "application/json"):
+                self._send(400, b'{"status":"request_refused"}', "application/json")
+                return
+            def unique(items):
+                value = {}
+                for key, item in items:
+                    if key in value:
+                        raise ValueError("duplicate key")
+                    value[key] = item
+                return value
+            try:
+                self.connection.settimeout(5)
+                raw = self.rfile.read(int(lengths[0]))
+                if len(raw) != int(lengths[0]):
+                    raise ValueError("incomplete request")
+                request = json.loads(raw.decode("utf-8"), object_pairs_hook=unique,
+                                     parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+                if type(request) is not dict:
+                    raise ValueError("invalid request")
+            except (OSError, ValueError, UnicodeError, RecursionError):
+                self._send(400, b'{"status":"request_refused"}', "application/json")
+                return
+            try:
+                response = gateway._conversation_handler(request)
+                body = json.dumps(response, sort_keys=True, separators=(",", ":"),
+                                  ensure_ascii=False, allow_nan=False).encode("utf-8")
+                if (type(response) is not dict or len(body) > 256 * 1024
+                        or any(json.dumps(secret, ensure_ascii=False)[1:-1].encode("utf-8") in body
+                               for secret in (token, expected))):
+                    raise ValueError("unqualified response")
+            except Exception:
+                # A callback may already have submitted native work. HTTP
+                # failure never proves nonexecution and never triggers retry.
+                self._send(503, b'{"status":"effect_unknown"}', "application/json")
+                return
+            self._send(200, body, "application/json")
 
         def _send(self, code: int, body: bytes, content_type: str) -> None:
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            if self.close_connection:
+                self.send_header("Connection", "close")
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()

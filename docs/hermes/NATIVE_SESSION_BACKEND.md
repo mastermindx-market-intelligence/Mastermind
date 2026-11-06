@@ -115,19 +115,55 @@ Cleanup detaches the request's viewer through `AuthorityConnection.close()`
 without a session end reason, then seals the sink under the same write lock.
 It does not cancel admitted work.
 
+After exact resume, the adapter uses the native connection's submission parser
+and the existing SessionAuthority finite-admission API. A request-local
+authorization guard runs inside the native admission transaction, beneath the
+owner's existing mutation lock. It rechecks principal, source instance, epoch,
+revision, generation and local lineage on that same database connection. Native
+idle checks exclude queued/running/unknown work, transcript leases and
+compression. The native deduplication owner remains unchanged. Interactive
+voice-stop shortcuts do not apply to this finite Secretary question path.
+
 An admission receipt remains distinct from started or completed execution.
 A lost reply, timeout, oversized result, or absent original admission after a
 possible write is `EFFECT_UNKNOWN`; it never authorizes resubmission.
 Historical terminal recovery retains the original principal and request
 identity without requiring the old authority epoch to be the current epoch.
 
+## Existing role gateway consumer
+
+For a selected native Secretary profile, the existing role front door can expose
+one closed POST path, `/api/secretary/v1`. It forwards the three operations above
+to the actual same-UID native private owner. The optional credential
+`HERMES_SECRETARY_CONVERSATION_TOKEN` comes from the existing role secret file.
+It must be distinct from health, dashboard, provider, and every other secret
+value, and is never forwarded to the native model child. The legacy gateway and
+the health credential retain their read-only behavior.
+
+The outer request schema is `mastermind.hermes_secretary_role_request/v1`,
+with exactly `schema`, `implementation_sha`, and `request`. The selected
+immutable first-party source must match before dispatch. The response schema is
+`mastermind.hermes_secretary_role_response/v1`, with that source identity
+and the native result. HTTP callers supply no native interactive ticket.
+
+Framing, duplicate keys, request size, response size, source continuity, selected
+role home, and child readiness are checked. The handler sends once. Failure after
+a possible native submission remains uncertainty; neither the HTTP path nor the
+native client retries it. The supervisor keeps its originally qualified role
+home across child restarts and refuses an unexpected home change.
+
+The native entry preloads the qualified `urllib3.util.connection` dependency
+after role isolation and before upstream bootstrap. This preserves upstream's
+native socket patch without allowing its lazy compatibility finder to precede
+the installed source/YAML owners.
+
 ## Remaining product integration
 
 The following consumers still need composition before this is the complete
 Office Secretary journey:
 
-1. A distinct existing-secret-owner conversation credential and the closed
-   Secretary request family on the existing role gateway/mTLS transport.
+1. A distinct closed Secretary request family and credential binding on the
+   existing mTLS transport, connecting Control to the role gateway consumer.
 2. The native request/return variant in the existing SessionBridge and Runtime
    aggregate, including a durable commit-started event before possible native
    admission and original-request recovery after refresh.

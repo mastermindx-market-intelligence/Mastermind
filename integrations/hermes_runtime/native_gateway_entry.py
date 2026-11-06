@@ -146,6 +146,12 @@ def run(launch, argv: list[str]) -> int:
     if any(os.environ.get(key) != value for key, value in native_git_environment(vendor).items()):
         raise RuntimeRefusal("NATIVE_GIT_SELECTION_MISMATCH")
     prepare_vendor(vendor)
+    # Pinned hermes_bootstrap patches this loaded module directly; otherwise
+    # it inserts its own import finder ahead of the held source/YAML owners.
+    # Load only from the already verified dependency closure, after role
+    # isolation, preserving the native socket patch and exact finder order.
+    importlib.import_module("urllib3.util.connection")
+    launch.check()
     # Preserve the real recognized launcher and command before the native
     # module applies its profile selector at import time.
     sys.argv[:] = [str(launch.launcher), *argv]

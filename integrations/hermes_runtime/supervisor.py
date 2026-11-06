@@ -175,6 +175,7 @@ class ServiceRuntime:
         self._role_status_publisher = role_status_publisher
         self._next_role_status_publication = 0.0
         self._native_launch = native_launch
+        self._native_home: Path | None = None
 
     def start(self) -> None:
         # Check native BYOK/alias policy before *any* Hermes subprocess,
@@ -186,11 +187,19 @@ class ServiceRuntime:
         self.profile.hermes_home.mkdir(parents=True, exist_ok=True)
         os.chmod(self.profile.hermes_home, 0o700)
         self.memory = HighWaterLog(self.profile.state_dir / "memory" / "high-water.log")
+        gateway_options = {}
+        if self.profile.gateway_backend == "native-session-authority" and self.profile.role == "mmsecretary":
+            from .secrets import secretary_conversation_token
+            conversation_token = secretary_conversation_token(self.secrets)
+            if conversation_token is not None:
+                gateway_options = {"conversation_token": conversation_token,
+                                   "conversation_handler": self._native_conversation}
         self.gateway = Gateway(
             self.profile.gateway_host,
             self.profile.gateway_port,
             self.secrets.token,
             self.health_snapshot,
+            **gateway_options,
         )
         self._thread = threading.Thread(target=self._loop_guarded, name="hermes-runtime-supervisor", daemon=True)
         self._thread.start()
@@ -246,6 +255,53 @@ class ServiceRuntime:
             }
         return (200 if status == "ok" else 503), payload
 
+    def _native_conversation(self, request: dict) -> dict:
+        """Existing role gateway -> actual selected native private owner."""
+        from .native_session_control import NativeSecretaryClient, SCHEMA
+        response_schema = "mastermind.hermes_secretary_role_response/v1"
+        implementation = self._native_launch.owner.root.name
+        def reply(status, **fields):
+            return {"schema": response_schema, "implementation_sha": implementation,
+                    "result": {"schema": SCHEMA, "status": status, **fields}}
+        if (type(request) is not dict or set(request) != {"schema", "implementation_sha", "request"}
+                or request["schema"] != "mastermind.hermes_secretary_role_request/v1"
+                or request["implementation_sha"] != implementation or type(request["request"]) is not dict):
+            return reply("REFUSED", reason="SOURCE_OR_REQUEST_MISMATCH")
+        with self._lock:
+            child, home, launch = self._child, self._native_home, self._native_launch
+
+        def same_owner():
+            with self._lock:
+                if (self._stop.is_set() or self.failed or child is None
+                        or self._child is not child or child.poll() is not None
+                        or not self._backend_ready or home is None
+                        or self._native_home != home or self._native_launch is not launch):
+                    return False
+            launch.check()
+            launch.observe_child(child.pid)
+            return (self.profile.hermes_home / "profiles" / self.profile.role).resolve(strict=True) == home
+
+        try:
+            if not same_owner():
+                return reply("UNAVAILABLE")
+        except Exception:
+            return reply("UNAVAILABLE")
+        # dispatch validates its closed request before the actual native call.
+        # After this boundary, unexpected failure is conservative uncertainty.
+        uncertain = "EFFECT_UNKNOWN" if request["request"].get("operation") == "submit" else "UNAVAILABLE"
+        try:
+            result = NativeSecretaryClient(home, expected_pid=child.pid).dispatch(request["request"])
+        except RuntimeRefusal:
+            return reply("REFUSED", reason="REQUEST_REFUSED")
+        except Exception:
+            return reply(uncertain)
+        try:
+            if not same_owner():
+                return reply(uncertain)
+        except Exception:
+            return reply(uncertain)
+        return {"schema": response_schema, "implementation_sha": implementation, "result": result}
+
     def _env(self) -> dict[str, str]:
         # CLI/tool census receives no model provider credential.
         return child_env(self.secrets, home=self.profile.hermes_home, extra=self.extra_child_env)
@@ -283,6 +339,17 @@ class ServiceRuntime:
                 raise
             except Exception:
                 raise RuntimeRefusal("NATIVE_STARTUP_CUSTODY_UNQUALIFIED") from None
+        from .secrets import secretary_conversation_token
+        conversation_token = secretary_conversation_token(self.secrets)
+        if conversation_token is not None and (self.profile.gateway_backend != "native-session-authority"
+                                                or self.profile.role != "mmsecretary"):
+            raise RuntimeRefusal("SECRETARY_CONVERSATION_ROLE_UNQUALIFIED")
+        if self.profile.gateway_backend == "native-session-authority":
+            current_home = (self.profile.hermes_home / "profiles" / self.profile.role).resolve(strict=True)
+            if self._native_home is None:
+                self._native_home = current_home
+            elif self._native_home != current_home:
+                raise RuntimeRefusal("NATIVE_PROFILE_HOME_CHANGED")
         self._expected_disabled_mcp()
         native = self.profile.hermes_home / "profiles" / self.profile.role / "config.yaml"
         from integrations.hermes_harness.native_byok import render_disarmed_native_byok
@@ -445,7 +512,7 @@ class ServiceRuntime:
                         from .native_gateway_entry import native_ready
                         backend_ready = native_ready(
                             vendor=Path(self._native_launch.recipe["vendor_root"]),
-                            home=(self.profile.hermes_home / "profiles" / self.profile.role).resolve(),
+                            home=self._native_home,
                             host=self.profile.gateway_host, port=port, pid=proc.pid)
                     except Exception:
                         backend_ready = False

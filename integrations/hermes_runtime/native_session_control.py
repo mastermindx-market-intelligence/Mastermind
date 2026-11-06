@@ -44,6 +44,17 @@ def _id(value):
     return value
 
 
+def validate_target(value) -> dict:
+    if type(value) is not dict or set(value) != _TARGET:
+        raise RuntimeRefusal("NATIVE_SECRETARY_TARGET_INVALID")
+    for key in ("profile_id", "session_id", "principal_id", "instance_id"):
+        _id(value[key])
+    for key in ("authority_epoch", "revision", "execution_generation"):
+        if type(value[key]) is not int or value[key] < (1 if key == "authority_epoch" else 0):
+            raise RuntimeRefusal("NATIVE_SECRETARY_TARGET_INVALID")
+    return dict(value)
+
+
 def _result(status: str, **fields):
     return {"schema": SCHEMA, "status": status, **fields}
 
@@ -179,16 +190,60 @@ class _ReceiptStream:
         self.closed = True
 
 
+class _AdmissionRefused(RuntimeRefusal):
+    """The existing native transaction refused before any new admission."""
+
+
+def _admission_guard(authority, actor, target):
+    frozen = validate_target(target)
+
+    def authorize(conn):
+        # Called inside the incumbent native admission transaction. No new
+        # connection, lock, queue, network operation, or external side effect.
+        from hermes_state_mutation_guards import require_idle
+        from hermes_state_mutation_prepared import local_snapshot
+        try:
+            if (authority.profile_id != frozen["profile_id"]
+                    or authority.instance_id != frozen["instance_id"]
+                    or authority.epoch != frozen["authority_epoch"]
+                    or actor.subject != frozen["principal_id"]):
+                raise ValueError("authority changed")
+            row = conn.execute(
+                "SELECT user_id,runtime_revision,runtime_generation FROM sessions WHERE id=?",
+                (frozen["session_id"],)).fetchone()
+            if (row is None or row["user_id"] != frozen["principal_id"]
+                    or row["runtime_revision"] != frozen["revision"]
+                    or row["runtime_generation"] != frozen["execution_generation"]):
+                raise ValueError("session changed")
+            snapshot = local_snapshot(authority.db, conn, frozen["session_id"])
+            receipt = snapshot["receipt"]
+            if (snapshot["target"] != frozen["session_id"]
+                    or receipt.get("profile_id") != frozen["profile_id"]
+                    or receipt.get("session_id") != frozen["session_id"]
+                    or receipt.get("principal_id") != frozen["principal_id"]
+                    or (receipt.get("policy") or {}).get("source") == "acp"):
+                raise ValueError("native lineage changed")
+            # Includes native admissions, workers, transcript leases and
+            # compression. The incumbent owner supplies all busy semantics.
+            require_idle(authority.db, conn, [frozen["session_id"]])
+        except Exception:
+            raise _AdmissionRefused("NATIVE_SECRETARY_ADMISSION_FENCE") from None
+
+    return authorize
+
+
 async def _submit(runner, home, params, principal):
     from gateway.session_controls import AuthorityConnection
     from gateway.run_api import _embedded_chat_enabled
     from gateway.session_authorities import owner_scope
     from gateway.run_idle_exit import attached_client
     from tui_gateway.transport import StdioTransport, bind_transport, reset_transport
-    target = params["target"]
-    if (type(target) is not dict or set(target) != _TARGET
-            or target != await asyncio.to_thread(_target, runner, home, target.get("session_id"), principal)
-            or not _embedded_chat_enabled()):
+    try:
+        target = validate_target(params["target"])
+        observed = await asyncio.to_thread(_target, runner, home, target["session_id"], principal)
+    except (RuntimeRefusal, OSError, ValueError, KeyError):
+        return _result("REFUSED", reason="TARGET_UNAVAILABLE")
+    if target != observed or not _embedded_chat_enabled():
         return _result("REFUSED", reason="TARGET_UNAVAILABLE")
     try:
         grant = runner.session_ticket_store.redeem(params["ticket"], profile_id=str(home), purpose="interactive")
@@ -217,15 +272,21 @@ async def _submit(runner, home, params, principal):
                         or value.get("revision") != target["revision"]
                         or value.get("execution_generation") != target["execution_generation"]):
                     return _result("NOT_SUBMITTED", reason="TARGET_CHANGED_AFTER_RESUME")
-                answer = await connection.dispatch({"jsonrpc": "2.0", "id": 2, "method": "prompt.submit",
-                    "params": {"session_id": target["session_id"], "submission_id": params["submission_id"],
-                               "text": params["text"], "finite": True}})
-                if "error" in answer:
-                    return _result("EFFECT_UNKNOWN")
-                value = answer.get("result")
-                if value == {"voice_stopped": True}:
-                    return _result("NATIVE_VOICE_STOPPED")
-                return _result("ADMITTED", admission=_admission(value, home, target["session_id"]))
+                from dataclasses import asdict
+                from gateway.session_contract import SessionRef
+                ref = SessionRef(connection.actor.profile_id, target["session_id"])
+                submission = connection.submission(ref, {
+                    "session_id": target["session_id"], "submission_id": params["submission_id"],
+                    "text": params["text"], "finite": True})
+                # Use the native finite-admission API with its transactional
+                # guard. Interactive voice-stop shortcuts do not apply here.
+                receipt = await connection.authority.submit(
+                    connection.actor, submission,
+                    _authorize_write=_admission_guard(connection.authority, connection.actor, target),
+                    queue_while_restarting=False)
+                return _result("ADMITTED", admission=_admission(asdict(receipt), home, target["session_id"]))
+        except _AdmissionRefused:
+            return _result("NOT_SUBMITTED", reason="TARGET_CHANGED_BEFORE_ADMISSION")
         except Exception:
             return _result("EFFECT_UNKNOWN")
         finally:
@@ -287,11 +348,48 @@ def install_private_control(runner, home: Path, role: str) -> None:
 class NativeSecretaryClient:
     """Actual selected same-UID native client; each operation sends once."""
 
-    def __init__(self, home: Path):
+    def __init__(self, home: Path, *, expected_pid: int | None = None):
         self.home = home.resolve(strict=True)
+        if expected_pid is not None and (type(expected_pid) is not int or expected_pid <= 0):
+            raise RuntimeRefusal("NATIVE_SECRETARY_OWNER_INVALID")
+        self.expected_pid = expected_pid
+
+    def _identify(self):
+        from hermes_cli.gateway_runtime_discovery import query_identify
+        from hermes_cli.gateway_runtime import _endpoint
+        payload = query_identify(self.home, timeout=2)
+        if self.expected_pid is not None and (
+                type(payload) is not dict or type(payload.get("pid")) is not int
+                or payload["pid"] != self.expected_pid or payload.get("hermes_home") != str(self.home)):
+            raise RuntimeRefusal("NATIVE_SECRETARY_OWNER_CHANGED")
+        return _endpoint(payload, self.home)
+
+    def dispatch(self, request: dict):
+        """Closed role-gateway consumer; no native ticket is accepted on HTTP."""
+        if type(request) is not dict:
+            raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
+        operation = request.get("operation")
+        if operation == "observe" and set(request) == {"operation", "session_id"}:
+            return self.observe(request["session_id"])
+        if operation == "submit" and set(request) == {"operation", "target", "submission_id", "text"}:
+            return self.submit(request["target"], request["submission_id"], request["text"])
+        if operation == "read_original" and set(request) == {
+            "operation", "session_id", "submission_id", "input_sha256", "admission_id"
+        }:
+            digest = request["input_sha256"]
+            if type(digest) is not str or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
+            if request["admission_id"] is not None:
+                _id(request["admission_id"])
+            return self.read_original(**{key: value for key, value in request.items() if key != "operation"})
+        raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
 
     def _call(self, params):
         from hermes_cli.gateway_runtime_discovery import connect_private
+        if self.expected_pid is not None:
+            observed = self._identify()
+            if observed.state != "ready" or observed.endpoint is None:
+                raise RuntimeRefusal("NATIVE_SECRETARY_OWNER_CHANGED")
         request = _canonical({"protocol": 1, "id": 1, "verb": VERB, "params": params}) + b"\n"
         if len(request) > 64 * 1024:
             raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_TOO_LARGE")
@@ -319,11 +417,11 @@ class NativeSecretaryClient:
         return self._call({"operation": "observe", "profile_id": str(self.home), "session_id": _id(session_id)})
 
     def submit(self, target: dict, submission_id: str, text: str):
-        from hermes_cli.gateway_runtime_discovery import query_identify
-        from hermes_cli.gateway_runtime import _endpoint
-        from hermes_cli.gateway_client import _session_ticket
         input_digest(text)
-        observed = _endpoint(query_identify(self.home, timeout=2), self.home)
+        target = validate_target(target)
+        _id(submission_id)
+        from hermes_cli.gateway_client import _session_ticket
+        observed = self._identify()
         endpoint = observed.endpoint
         if (observed.state != "ready" or endpoint is None or type(target) is not dict
                 or set(target) != _TARGET or endpoint.profile_id != target["profile_id"]

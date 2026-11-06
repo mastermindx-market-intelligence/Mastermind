@@ -12,6 +12,7 @@ from .constants import (
     DASHBOARD_USERNAME_ENV,
     DEFAULT_CHILD_SECRET_ENV,
     GATEWAY_TOKEN_ENV,
+    SECRETARY_CONVERSATION_TOKEN_ENV,
 )
 from .errors import RuntimeRefusal
 
@@ -36,7 +37,7 @@ def register_child_secret_env(names: set[str] | frozenset[str] | list[str]) -> N
     for name in names:
         if not isinstance(name, str) or not _KEY.fullmatch(name):
             raise RuntimeRefusal("INVALID_SECRET_ENV_NAME")
-        if name == GATEWAY_TOKEN_ENV:
+        if name in {GATEWAY_TOKEN_ENV, SECRETARY_CONVERSATION_TOKEN_ENV}:
             raise RuntimeRefusal("GATEWAY_TOKEN_STAYS_ON_THE_FRONT_DOOR")
         if name in _SUPERVISOR_NOTIFICATION_ENV:
             raise RuntimeRefusal("SUPERVISOR_NOTIFICATION_ENV_REFUSED")
@@ -69,6 +70,20 @@ class Secrets:
 
     def __repr__(self) -> str:
         return "Secrets(redacted)"
+
+
+def secretary_conversation_token(secrets: Secrets) -> str | None:
+    """One optional, independently revocable capability in the existing owner."""
+    value = secrets.values.get(SECRETARY_CONVERSATION_TOKEN_ENV)
+    if value is None:
+        return None
+    _validate_token(value)
+    if len(value) > 256 or value in {secrets.token, secrets.dashboard_password} or any(
+        other == value for key, other in secrets.values.items()
+        if key != SECRETARY_CONVERSATION_TOKEN_ENV
+    ):
+        raise RuntimeRefusal("SECRETARY_CONVERSATION_CREDENTIAL_ALIAS_REFUSED")
+    return value
 
 
 def load_secrets(path: Path) -> Secrets:
@@ -160,7 +175,7 @@ def child_env(secrets: Secrets, *, home: Path, extra: dict[str, str] | None = No
         DASHBOARD_PASSWORD_ENV: secrets.dashboard_password,
     }
     for name in sorted(_CHILD_SECRET_ENV):
-        if (name in env or name in {GATEWAY_TOKEN_ENV, _SLACK_BOT_TOKEN_ENV}
+        if (name in env or name in {GATEWAY_TOKEN_ENV, _SLACK_BOT_TOKEN_ENV, SECRETARY_CONVERSATION_TOKEN_ENV}
                 or name in _SUPERVISOR_NOTIFICATION_ENV):
             continue
         if name in secrets.values:

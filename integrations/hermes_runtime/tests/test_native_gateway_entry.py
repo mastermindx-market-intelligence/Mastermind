@@ -122,3 +122,45 @@ def test_native_installer_pin_check_uses_selected_command_environment(tmp_path, 
     installer.assert_checkout_sha(tmp_path, native_environment=chosen)
     assert seen[0][1]["env"] == chosen
     assert seen[0][0] == ["git", "-C", str(tmp_path), "rev-parse", "HEAD"]
+
+
+def test_qualified_dependency_preload_precedes_native_bootstrap(monkeypatch, tmp_path):
+    from integrations.hermes_runtime import profile as profiles, supervisor, system_service, role_isolation, tcp_sandbox
+    selected = replace(profile(tmp_path), gateway_backend=entry.BACKEND, gateway_host="127.0.0.2",
+                       gateway_port=18765, backend_port=18766)
+    selected.hermes_home.mkdir(parents=True)
+    role_home = selected.hermes_home.resolve() / "profiles/mmsecretary"
+    vendor = tmp_path / "qualified-vendor"
+    order = []
+    launch = SimpleNamespace(row={"role": "mmsecretary", "state_dir": str(selected.state_dir)},
+                             recipe={"vendor_root": str(vendor)}, launcher=Path("/inert/hermes"),
+                             qualify=lambda *args: order.append("qualify"),
+                             check=lambda: order.append("source-check"))
+    monkeypatch.setattr(profiles, "load_profile", lambda path: selected)
+    monkeypatch.setattr(system_service, "assert_root_service_cgroup", lambda role: order.append("cgroup"))
+    monkeypatch.setattr(system_service, "assert_role_network_profile", lambda p: order.append("network"))
+    monkeypatch.setattr(role_isolation, "assert_role_credential_isolation", lambda p: order.append("credentials"))
+    monkeypatch.setattr(tcp_sandbox, "enforce_role_tcp_ports", lambda p: order.append("ports"))
+    monkeypatch.setattr(supervisor, "expected_disabled_mcp", lambda p: {})
+    monkeypatch.setattr(entry, "prepare_vendor", lambda p: order.append("vendor"))
+    monkeypatch.setenv("HERMES_HOME", str(selected.hermes_home.resolve()))
+    for key, value in entry.native_git_environment(vendor).items():
+        monkeypatch.setenv(key, value)
+    original_import = entry.importlib.import_module
+    def import_module(name, *args, **kwargs):
+        if name == "urllib3.util.connection":
+            order.append("qualified-dependency")
+            return object()
+        return original_import(name, *args, **kwargs)
+    monkeypatch.setattr(entry.importlib, "import_module", import_module)
+    def native_module(name, vendor):
+        order.append(name)
+        if name == "hermes_cli.main":
+            return SimpleNamespace(explicit_cli_profile=lambda: "mmsecretary",
+                                   main=lambda: order.append("native-main"))
+        return SimpleNamespace(get_process_hermes_home=lambda: role_home)
+    monkeypatch.setattr(entry, "_vendor_module", native_module)
+    monkeypatch.setattr(entry.sys, "argv", ["original"])
+    assert entry.run(launch, ["-p", "mmsecretary", "tools", "list", "--platform", "cli"]) == 0
+    assert order.index("ports") < order.index("qualified-dependency") < order.index("hermes_cli.main")
+    assert order.index("qualified-dependency") < order.index("source-check") < order.index("native-main")
