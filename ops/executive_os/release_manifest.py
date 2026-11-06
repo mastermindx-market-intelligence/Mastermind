@@ -1024,12 +1024,14 @@ def _hermes_runtime(argv: list[str]) -> int:
                         custody_observer = _main_custody_observer(owner, finder, runtime, installation)
                         if argv[0] == "isolation-probe":
                             from integrations.hermes_runtime.isolation_probe import main as entry_main
+                            finder.check()
                             result = entry_main(argv[1:])
                         else:
                             from integrations.hermes_runtime.cli import main as entry_main
                             kwargs = {"custody_observer": custody_observer}
                             if native_launch is not None:
                                 kwargs["native_launch"] = native_launch
+                            finder.check()
                             result = entry_main(argv, **kwargs)
                         custody_observer()
                     finder.check()
