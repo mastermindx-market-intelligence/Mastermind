@@ -255,8 +255,11 @@ physical file and inode without downloading or executing it. Provenance and stag
 identity are included in the reviewed plan and revalidated before mutation. Metadata
 is strict JSON with duplicate-key rejection and a 1MiB ceiling. One fixed absolute
 ten-second deadline covers the whole connection/TLS/header/body sequence and all five
-fixed metadata documents; every document gets only the remaining time. The transport
-closes on rejection with no retry, local-Git fallback or background reader. Explicit
+fixed metadata documents; every document gets only the remaining time. Each finite qualified-interpreter/source child is parent-enforced with
+subprocess.run(remaining), which kills/waits it on timeout. Absolute monotonic
+checks refuse late results before intent/config/manifest writes; no future response
+is consumed and no reader/retry/background child remains. Process creation itself is
+not claimed separately interruptible; child-bound teardown is for successful spawn. Explicit
 `ProxyHandler({})` construction disables ambient/system proxy and proxy-credential
 discovery while retaining standard TLS certificate and hostname verification. Only
 `/git/ref/heads/master`, `/git/commits/<40 lowercase hex>` and
