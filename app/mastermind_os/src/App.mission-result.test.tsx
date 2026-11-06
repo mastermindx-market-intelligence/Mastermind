@@ -345,7 +345,16 @@ function sourceRow(name: string) {
 
 async function expectOfficeHalvesEmpty(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
-  expect(screen.getByText("The current operating answer is not yet available.")).toBeTruthy();
+  // The genuine catalogue supplies the selected project title here. It is
+  // navigation data, not Mission authority: both private halves stay withheld
+  // with their unavailable work/conversation context, and no bounded typed
+  // result may appear in either Office half.
+  expect(screen.getByRole("heading", { name: "One" })).toBeTruthy();
+  expect(screen.getByText(
+    "Project information is available. Work and conversation context have not been supplied here.",
+  )).toBeTruthy();
+  expect(sourceRow("Mission").textContent).not.toContain("CURRENT");
+  expect(sourceRow("Return").textContent).not.toContain("CURRENT");
   expect(screen.getByText("No exactly associated return has been qualified for this view.")).toBeTruthy();
   expect(screen.queryByText("bounded typed fixture result")).toBeNull();
 }
