@@ -145,6 +145,34 @@ class PreviewInstallTests(unittest.TestCase):
         self.assertFalse(self.target.exists())
         self.assertFalse((self.toolkit.with_name("original-toolkit") / self.target.name).exists())
 
+    def test_state_directory_replacement_cannot_detach_install_receipts(self):
+        original = self.mod._write_new
+        def replace_state(fd, name, raw):
+            original(fd, name, raw)
+            if name.endswith(".json"):
+                self.state.rename(self.state.with_name("original-state"))
+                self.state.mkdir(mode=0o700)
+        with mock.patch.object(self.mod, "_write_new", side_effect=replace_state):
+            with self.assertRaisesRegex(self.mod.InstallHeld, "directory_identity"):
+                self.install()
+        self.assertFalse(self.target.exists())
+
+    def test_late_postimage_import_scope_drift_cannot_return_verified(self):
+        original = self.mod._import_only
+        calls = 0
+        def late_import(*args):
+            nonlocal calls
+            module = original(*args)
+            calls += 1
+            if calls == 2:
+                (self.active / "new-hold").touch()
+            return module
+        with mock.patch.object(self.mod, "_import_only", side_effect=late_import):
+            with self.assertRaisesRegex(self.mod.InstallHeld, "install_effect_unknown_no_replay"):
+                self.install()
+        self.assertEqual(self.target.read_bytes(), self.payload)
+        self.assertEqual(list(self.state.glob("*.verified")), [])
+
     def test_failed_postimage_retains_backup_and_write_ahead_receipt(self):
         self.target.write_bytes(b"original")
         original = self.mod._import_only
@@ -191,7 +219,8 @@ class PreviewInstallTests(unittest.TestCase):
         driver = SimpleNamespace(SSH=["ssh", "-o", "BatchMode=yes"])
         registry, config = self.configs()
         with mock.patch("subprocess.run", side_effect=AssertionError("planning only")):
-            plan = self.mod.transport_plan(driver, "ubuntu0", registry, config, kind="inspect")
+            plan = self.mod.transport_plan(driver, "ubuntu0", registry, config, kind="inspect",
+                                           expected_installer_sha=self.mod.digest((ROOT / "preview_install.py").read_bytes()))
         self.assertEqual(plan["argv"][-2], "mmx-ubuntu0")
         self.assertEqual(plan["target"]["binding"], self.binding)
         self.assertFalse(plan["dispatch_authorized"])
@@ -212,6 +241,37 @@ class PreviewInstallTests(unittest.TestCase):
     def test_unknown_role_cannot_inspect_arbitrary_file(self):
         with self.assertRaisesRegex(self.mod.InstallHeld, "platform_or_role"):
             self.mod.inspect_target("/etc/passwd", self.binding, **self.kw)
+
+    def test_bootstrap_source_substitution_cannot_self_bless(self):
+        original = (ROOT / "preview_install.py").read_bytes()
+        substituted = self.home / "preview_install.py"
+        substituted.write_bytes(b"raise RuntimeError('must never execute')\n")
+        registry, config = self.configs()
+        driver = SimpleNamespace(SSH=["ssh"])
+        with mock.patch.object(self.mod, "__file__", str(substituted)):
+            with self.assertRaisesRegex(self.mod.InstallHeld, "installer_source_pin"):
+                self.mod.transport_plan(driver, "ubuntu0", registry, config, kind="inspect",
+                                        expected_installer_sha=self.mod.digest(original))
+
+    def test_missing_independent_installer_pin_never_prepares_bootstrap(self):
+        registry, config = self.configs()
+        with self.assertRaisesRegex(self.mod.InstallHeld, "installer_source_pin"):
+            self.mod.transport_plan(SimpleNamespace(SSH=["ssh"]), "ubuntu0", registry, config, kind="inspect")
+
+    def test_drift_during_terminal_write_cannot_return_verified(self):
+        original = self.mod._write_new
+        def late_marker(fd, name, raw):
+            original(fd, name, raw)
+            if name.endswith(".verified"):
+                (self.active / "terminal-time-hold").touch()
+        with mock.patch.object(self.mod, "_write_new", side_effect=late_marker):
+            with self.assertRaisesRegex(self.mod.InstallHeld, "install_effect_unknown_no_replay"):
+                self.install()
+        self.assertEqual(len(list(self.state.glob("*.verified"))), 1)
+        self.assertEqual(len(list(self.state.glob("*.unknown"))), 1)
+        (self.active / "terminal-time-hold").unlink()
+        with self.assertRaisesRegex(self.mod.InstallHeld, "prior_install_unknown_no_replay"):
+            self.install(self.mod.digest(self.payload))
 
     def test_unknown_dynamic_or_accountless_mapping_never_falls_back(self):
         registry, config = self.configs()

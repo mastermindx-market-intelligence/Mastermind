@@ -164,7 +164,8 @@ def enrolled_binding(host, registry_bytes, ssh_config_bytes):
 
 
 def transport_plan(driver, host, registry_bytes, ssh_config_bytes, *, kind,
-                   payload=None, expected_before=None, operation_id=None):
+                   payload=None, expected_before=None, operation_id=None,
+                   expected_installer_sha=None):
     """Prepare ONE existing-transport argv; never dispatch it or discover a host.
 
     Missing remote preimage stays unknown: install planning requires its actual
@@ -173,7 +174,6 @@ def transport_plan(driver, host, registry_bytes, ssh_config_bytes, *, kind,
     binding = enrolled_binding(host, registry_bytes, ssh_config_bytes)
     if kind not in {"inspect", "install", "preview"}:
         raise InstallHeld("operation_kind")
-    source = Path(__file__).read_bytes()
     request = {"binding": binding["binding"], "role": "linux-preview"}
     if kind == "install":
         if expected_before is None or payload is None or operation_id is None:
@@ -187,8 +187,20 @@ def transport_plan(driver, host, registry_bytes, ssh_config_bytes, *, kind,
                 + original[2])
         command = shlex.join(["python3", "-c", code, original[3]])
     else:
+        # The pin comes from the already-qualified release packet, never from
+        # hashing a newly read file and trusting that same fresh value.
+        if (type(expected_installer_sha) is not str or len(expected_installer_sha) != 64
+                or any(c not in "0123456789abcdef" for c in expected_installer_sha)):
+            raise InstallHeld("installer_source_pin")
+        parent_fd = _directory(Path(__file__).parent, os.getuid())
+        try:
+            source = _read(parent_fd, Path(__file__).name, os.getuid())
+        finally:
+            os.close(parent_fd)
+        if source is None or digest(source) != expected_installer_sha:
+            raise InstallHeld("installer_source_pin")
         code = ("import base64,hashlib,json\nraw=base64.b64decode(" + repr(base64.b64encode(source).decode()) + ")\n"
-                "if hashlib.sha256(raw).hexdigest()!=" + repr(digest(source)) + ": raise SystemExit(78)\n"
+                "if hashlib.sha256(raw).hexdigest()!=" + repr(expected_installer_sha) + ": raise SystemExit(78)\n"
                 "n={'__name__':'mastermind_install_transport','__file__':'preview_install.py'}\nexec(compile(raw,'preview_install.py','exec'),n)\n"
                 "r=json.loads(" + repr(json.dumps(request)) + ")\n")
         if kind == "inspect":
@@ -212,7 +224,8 @@ def _prior_install_hold(fd, uid):
                 continue
             before = json.loads(_read(fd, entry.name, uid))
             terminal = _read(fd, entry.name + ".verified", uid)
-            if (terminal is None or json.loads(terminal) != dict(before, state="VERIFIED")):
+            unknown = _read(fd, entry.name + ".unknown", uid)
+            if (unknown is not None or terminal is None or json.loads(terminal) != dict(before, state="VERIFIED")):
                 raise InstallHeld("prior_install_unknown_no_replay")
 
 
@@ -285,12 +298,13 @@ def install(role, binding, payload, expected_before, expected_after, operation_i
                 if _identity(os.fstat(lock_fd)) != _identity(os.stat("fleet-remote-sweep.lock", dir_fd=state_fd, follow_symlinks=False)):
                     raise InstallHeld("lock_identity")
         def namespace():
-            check = _directory(toolkit, uid)
-            try:
-                if _identity(os.fstat(check))[:4] != _identity(os.fstat(directory))[:4]:
-                    raise InstallHeld("directory_identity")
-            finally:
-                os.close(check)
+            for path, held in ((toolkit, directory), (state, state_fd)):
+                check = _directory(path, uid)
+                try:
+                    if _identity(os.fstat(check))[:4] != _identity(os.fstat(held))[:4]:
+                        raise InstallHeld("directory_identity")
+                finally:
+                    os.close(check)
             current()
         namespace()
         _prior_install_hold(state_fd, uid)
@@ -323,13 +337,21 @@ def install(role, binding, payload, expected_before, expected_after, operation_i
         if installed != payload:
             raise InstallHeld("postimage_changed")
         _import_only(installed, role, str(toolkit / name))
+        namespace()
         receipt["state"] = "VERIFIED"
         # Never overwrite the write-ahead receipt: a separate terminal artifact
         # preserves PREPARED across a crash or postimage failure.
         _write_new(state_fd, receipt_name + ".verified", json.dumps(receipt, sort_keys=True).encode())
+        namespace()
         return receipt
     except BaseException as exc:
         if effect_started:
+            # A late fence can fail after terminal bytes were written. Preserve
+            # that evidence, but an UNKNOWN companion dominates it on reopen.
+            try:
+                _write_new(state_fd, receipt_name + ".unknown", b'{"state":"UNKNOWN"}')
+            except OSError:
+                pass  # The caller's same-operation UNKNOWN still forbids replay.
             raise InstallHeld("install_effect_unknown_no_replay") from exc
         raise
     finally:

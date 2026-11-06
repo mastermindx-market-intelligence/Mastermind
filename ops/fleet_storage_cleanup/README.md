@@ -123,6 +123,10 @@ source-bound `preview`; each remote command first requires the exact expected
 account and enrolled machine hostname. There is no reachability probe, rsync,
 alternate alias/host, retry, sweep or fallback. A separately authorized operator
 must re-read/reconcile the public binding at action time before using that argv.
+Inspect/install planning also requires `expected_installer_sha` from the already
+qualified immutable source packet. A fresh file read cannot supply its own trust
+pin: its no-follow/stable bytes must match that independent pin before a command
+is prepared, and the same pin is verified before remote compile/exec.
 
 Remote installed preimages remain UNKNOWN until an authorized fixed `inspect`
 actually reports their SHA or ABSENT. Unknown is never converted to ABSENT.
@@ -138,6 +142,11 @@ writes a PREPARED receipt in the existing storage-cleanup state directory.
 It rechecks the exact target preimage, then atomically replaces that fixed file;
 an ABSENT target uses atomic no-replace. A matching postimage import produces a
 separate VERIFIED receipt. Neither import invokes preview, sweep or network.
+The named receipt-state directory is rejoined with its held descriptor alongside
+the toolkit/lock namespace, including after the postimage import and terminal
+receipt write. Observed drift withholds successful acceptance.
+An UNKNOWN companion dominates any already-written terminal receipt; failure to
+retain it does not clear the caller's same-operation unknown-effect hold.
 An unresolved PREPARED record holds later installs, including new IDs. After an
 uncertain effect there is no automatic rollback or replay: the same owner must
 reconcile the target and retained backup/receipt. Installing does not itself
