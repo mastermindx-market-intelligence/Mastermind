@@ -10,16 +10,25 @@ Procedure pin: protected master `88a8b103a5a69e4b4e870a184655dde9fd5875c3`,
 `mastermind.sol_skillpack.v1`, version 1.0.1, bootstrap major 1.
 Continuation compatibility pin: protected master
 `28a894186eb56654ab4e833eb11a183d2eed46ae`; same schema/version/bootstrap.
+Consumer continuation pin: protected master
+`b0a280be474ae67e7681f68dc0dfe3af2aea1626`; same schema/version/bootstrap.
 The changed governing files were checked; unchanged companions retain their verified
 contents. The immutable implementation base remains the packet's original base.
 
-This source delivery adds exactly three files:
+The original packet added three files. The Chairman's continuation to move beyond
+the standalone implementation adds an authenticated read consumer and its fixture
+suite. The cumulative source delivery adds exactly five files:
 
 - `integrations/secretary_team_access/team_projection.py`
+- `integrations/secretary_team_access/team_reader.py`
 - `tests/test_h24_team_projection.py`
+- `tests/test_h24_team_reader.py`
 - `docs/hermes/H24_TEAM_OPERATOR_VIEW.md`
 
-The bounded worker scope is a pure read model, fixtures, and adoption guidance.
+The bounded scope is the pure read model, its existing-transport consumer, fixtures,
+and adoption guidance. Existing `client.py`, `mission.py`, `projection.py`, Workspace
+owners and all App/UI files remain untouched. In particular, current PRs #2134 and
+#2152 have live changes in `App.tsx`; this continuation preserves those writers.
 Runtime activation, enrollment, credentials, service installation, deployment,
 production serving, UI navigation, source-authority changes, merging and approval
 are outside this delivery. PR #2120 and C29–C34 integration writers remain separate.
@@ -45,8 +54,13 @@ workstream strings, root IDs, fingerprints and shared view bytes confer no acces
 
 There is no IO, clock acquisition, identity store, mission store, cache, command
 API, timer, polling service, subscription, provider selection, retry or dispatch in
-the new module. `now` is an explicit host input. All mutable input and output
+the pure projection module. `now` is an explicit host input. All mutable input and output
 containers are detached; concurrent calls share no mutable state.
+
+`SecretaryTeamReader` now supplies the missing acquisition connection. It takes one
+existing host-bound `SecretaryAccessClient`, reads a fixed existing Workspace route,
+and returns the operator projection or the existing typed failure outcome. It owns
+no HTTP client, credentials, lifetime, store, permission or background task.
 
 ## Existing owners and exact trust boundary
 
@@ -73,6 +87,77 @@ authentication.
 
 The original Secretary `read_mission()` returns a smaller summary. That summary
 is deliberately **not** accepted as a Mission v3 input to this module.
+
+## Implemented authenticated consumer
+
+Import the additive reader directly; no change to the existing package facade is
+needed. The host constructs a distinct authenticated Secretary client and reader
+for each principal, using its existing enrollment and client lifetime:
+
+```python
+from integrations.secretary_team_access.team_reader import SecretaryTeamReader
+from integrations.secretary_team_access.team_projection import SCHEMA, render_operator_text
+
+# existing_secretary_client is already host-bound to one principal and mission.
+team = SecretaryTeamReader(existing_secretary_client)
+view = await team.read_team(limit=8)
+if view.get("schema") == SCHEMA:
+    operator_text = render_operator_text(view)
+else:
+    # Replace prior private material with the typed REFUSED/UNAVAILABLE outcome.
+    operator_text = f"{view['state']}: {view['reason_code']}"
+```
+
+| Method | Existing route and exact source | Returned meaning |
+| --- | --- | --- |
+| `await team.read_team(...)` | `GET /workspace/mission/v3/current`, fixed work/root | Freshly authorized team cards; references stay `REFERENCE_ONLY`. |
+| `await team.read_result(reference, ...)` | `GET /workspace/mission-result/current`, exact five-field selector derived from the displayed six-field reference and fixed work/root | Projection of the compound response's own Mission and one qualified result. Does not sample Mission separately. |
+| `await team.read_acceptance(original_request_message_key, ...)` | `GET /workspace/mission/v4/current`, fixed work/root and original host-held request key | Projection of the companion's own Mission and owner acceptance. A terminal parent without original consumption remains unaccepted. |
+
+All three accept `previous_fingerprint=None`, `limit=8`, and
+`suppress_unchanged_details=False`. The reader deliberately defaults to a full
+display on each authorized read. An unchanged fingerprint suppresses a reasoning
+wake, not fresh authorization or visible cards. Compact consumers can opt into
+suppression; changing the display limit does not change the semantic fingerprint.
+
+For a selected result, pass the exact `card["result"]["reference"]`, not a new
+dictionary derived from a title or result text. The reader validates its closed
+shape, IDs, digest, role and `UNVALIDATED` marker before IO; it derives the work
+selector from the fixed host binding. After IO it requires the response's complete
+selection to equal the original request, and the exact reference to occur in that
+response's Mission. The projector then checks source, digest, role and observation
+association. A caller changing its reference dictionary during the await cannot
+change the already detached selection/reference.
+
+Each result/acceptance response **replaces** the previous displayed view. Do not
+merge independently sampled views to accumulate qualified details. In particular,
+a typed unavailable compound intentionally contains neither document; the reader
+returns `UNAVAILABLE` with its closed source reason codes and performs no fallback
+read. HTTP 5xx detail is unavailable through the incumbent transport and remains
+`source_unavailable`; no richer error receipt is invented.
+
+The reader reuses `SecretaryAccessClient._request` with an explicit 2,000,000-byte
+response limit and `modifying=False`. That incumbent path retains bounded strict
+JSON, one attempt, no redirects and cancellation propagation. Only HTTP 200 is a
+successful read. Nested result bounds and output bounds remain enforced by the
+projector. Malformed or mismatched owner material becomes the existing
+`mastermind.secretary_team_access_outcome.v1` with `UNAVAILABLE`; 401/403 refusal
+remains `REFUSED`. Neither includes cards, cached material or raw owner errors.
+Invalid caller arguments raise `ValueError` before IO.
+
+The detached mission selection and bound HTTP object are checked before dispatch
+and after the await. Rebinding either withholds the response as `REFUSED` /
+`host_binding_changed`. This is an in-flight identity check, not an authorization
+generation or new grant store. The existing server still checks the real principal
+and permission stamp before and after acquisition. The host must replace the
+client and reader on principal/selection changes; silently replacing credentials
+inside the same HTTP object is outside this client's observable contract. Never
+reuse a prior private view after sign-out, refusal, revocation or host invalidation.
+
+The facade's private transport coupling is intentional and bounded: the incumbent
+client has no public raw-Mission method. Its compatibility suite exercises the real
+transport and owners, while the protected incumbent files remain unchanged. A
+future change to that private transport seam requires rerunning these tests.
 
 ## Pure API
 
@@ -285,11 +370,19 @@ PARENT_RETURN_UNVERIFIED or PARENT_CONSUMPTION_UNPROVEN.
 | Per-child return delivery/consumption | W3C receipt is mission-scoped and has no child result tuple. | Existing Dialogue/Wake/result owner must provide exact subject evidence if finer display is required. Acceptance already proves consumption for its exact subject. |
 | Product rejection | Product acceptance defines ACCEPTED/UNAVAILABLE; review defines approve/reject. | Keep review rejection distinct. Any broader product disposition belongs to the existing acceptance owner, not this read model. |
 | Original acceptance request key | Not present in Mission v3. | Existing host selects the original request and provides the complete v4 companion plus separately bound request_message_key. Never derive it from model text. |
-| Raw authenticated Mission at Secretary consumer seam | `SecretaryAccessClient.read_mission` currently returns an incumbent summary. | The owner of `integrations/secretary_team_access/client.py` can adopt `project_team` at the already-authorized raw response boundary. Preserve fixed endpoints, independent clients and before/after grant checks. This packet edits none of those files. |
-| UI adoption | Existing `app/mastermind_os/src/mission.ts` decodes v3 and v4; this packet adds no frontend code. | C33/UI owner keeps `decodeMissionv3`/`decodeMissionv4` unchanged, uses `suppress_unchanged_details=False` for freshly authorized full displays, renders cards and coverage additively in the existing Mission surface, and treats display labels as text. Any later command must use the existing host-bound action owner with fresh authorization. |
+| Raw authenticated Mission at Secretary consumer seam | Implemented by `team_reader.py::SecretaryTeamReader`, reusing the existing authenticated transport. The incumbent `read_mission()` remains compatible. | The current host can instantiate the reader around its existing distinct per-principal Secretary clients. Source fixtures prove this path; live host enrollment/installation remains outside this delivery. |
+| UI adoption | Existing `app/mastermind_os/src/mission.ts` decodes v3 and v4; this packet adds no frontend code. `App.tsx` is actively owned by PRs #2134/#2152 at the consumer pin. | Integrate a pure team renderer at `App.tsx`'s existing inline `Mission` component, shared by Project Overview and Mission Workspace. Preserve the `missionV3` document, existing result picker and `compoundContextHeld` qualification. `product-acceptance/ProductAcceptancePanel.tsx` can expose its already-qualified v4 document through a render slot after its live checks. These changes require coordination with the active source writer; H24 does not edit their paths. |
 
 `docs/GROK_SECRETARY_TEAM_INTEGRATION.md` and issue #2082 remain the consumer
 coordination references. H24 creates no new identity or coordination registry.
+
+The UI integration must retain host identity, invalidation generation,
+`authRevision`, selection generation and request-ticket checks. A late response
+must not restore cards after sign-out or same-visible-state principal replacement.
+Pass selected result detail only while the incumbent compound context is held;
+pass null acceptance after its live qualification fails. Reuse the mounted App
+test approach with signed source fixtures for both existing Mission locations.
+The source-only Python proof does not assert that those UI mounts have been changed.
 
 ## Verification and parent handback
 
@@ -336,6 +429,47 @@ owner-fixture dependencies were compared between the immutable base and protecte
 `28a894186eb56654ab4e833eb11a183d2eed46ae`; none of those paths changed. This bounded
 compatibility check does not claim full current-master or installed qualification.
 
+The consumer continuation also compares the entire `secretary_team_access` and
+`mastermind_workspace_app` directories, Mission/Workspace owners, the three read
+contracts and direct HTTP/acceptance fixtures against protected
+`b0a280be474ae67e7681f68dc0dfe3af2aea1626`: no changes in those paths. Its new suite
+traverses the actual signed HTTP → Unix → Runtime read and acceptance chains,
+including both service and App release-time revocation checks. It verifies fixed
+routes, no fallback or mutation, exact request/response association, detached
+inputs, host rebinding, unchanged expanded display and cancellation.
+
+The final consumer suite passes **193 tests in 55.23s**, exit code 0: **50 reader
+cases, 77 pure projection cases and 66 incumbent contract/transport cases**. Exact
+command, run in an isolated archive of published parent
+`d28e6e5da09fad0134563b6c301ee38623733c36` with only the two new reader files added:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.11 -m pytest -p no:cacheprovider -o addopts= -q \
+  tests/test_h24_team_reader.py \
+  tests/test_h24_team_projection.py \
+  tests/test_secretary_team_mission.py \
+  tests/test_secretary_team_access.py \
+  tests/test_secretary_team_access_http.py \
+  tests/test_workspace_mission_result_service.py \
+  tests/test_workspace_mission_result_http.py \
+  tests/test_product_acceptance_workspace_read.py \
+  tests/test_product_acceptance_full_read_chain.py --tb=short
+```
+
+The real two-principal custody tests read sequentially because the incumbent
+`ObservationNamespace` fixture explicitly rejects overlapping ownership. A
+separate 16-call asynchronous reader test proves equal, detached projections;
+the original pure suite also checks concurrent projection. Neither asserts live
+multi-client service capacity. The fixture auth clock and source clock are separate;
+the test supplies the actual source fixture time for currentness and independently
+advances that clock to prove stale accepted evidence is not current or actionable.
+The initial reader run exposed these two fixture assumptions; both were corrected
+without weakening the source or authorization checks.
+
+Published reader/module and test bytes are matched to the tested SHA-256 values
+in the PR checkpoint. AST parsing, whitespace and cumulative owned-path checks are
+also recorded there. No package installation or serving configuration is needed.
+
 ### Continuation publication and inherited CI
 
 The original managed checkout was already cleanly released. Its installed launcher
@@ -346,8 +480,9 @@ fixture, with no Git branch, installation, service or credential enrollment.
 
 PR #2120 merged after the initial checkpoint, and draft PR #2136 subsequently
 compared against master. That broader comparison contains the foundation's old
-ancestry; the authoritative H24 packet remains the three-path diff from the frozen
-base. This continuation neither rewrites the branch nor edits integration files.
+ancestry; the authoritative cumulative H24 delivery is the five-path diff from the
+frozen base. This continuation does not rewrite the branch or edit incumbent
+integration files.
 
 At the original H24 head, hosted Hermes harness run
 [42208283181](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42208283181)
@@ -359,13 +494,13 @@ failed inherited SessionBridge/Secretary-forwarder and Executive fixture checks;
 Mastermind OS run
 [42208283106](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42208283106)
 failed the inherited ProjectConversations Open-button test. These failures are
-outside the three H24-owned files. No repair, rerun, queue or release of those
+outside the H24-owned files. No repair, rerun, queue or release of those
 lanes is performed by this packet, and no new-head hosted CI success is inferred
 from the local source/fixture result.
 
-Source handback includes immutable base, branch/head, exact three-file diff,
-SHA-256 of `git diff --binary <base> <head> -- <three-owned-paths>`, test results,
+Source handback includes immutable base, branch/head, exact five-file diff,
+SHA-256 of `git diff --binary <base> <head> -- <five-owned-paths>`, test results,
 this schema and the generated samples. The bounded H24-06 source outcome can be
-complete while the wider Hermes/UI/always-on deployment remains unproven. Adoption
-and production proof belong to the existing integration owners; this packet makes
+complete while the wider Hermes/UI/always-on deployment remains unproven. UI adoption
+and installed production proof remain separate; this packet makes
 no production-serving or acceptance claim for that wider program.
