@@ -3799,7 +3799,7 @@ class ProductionTransactionHost(ProductionArmHost):
                 raise TransactionEffectUnknown()
             # The OPTIONAL selection member is STRUCTURED: it has its own
             # closed validator and is never read as a digest string.
-            if value.get("component_binding") is not None:
+            if "component_binding" in value:
                 _require_component_binding_member(value["component_binding"])
             required |= _COMPONENT_MANIFEST_FIELDS
         elif value.get("operation") == CONTROL_COMPONENT_UPDATE:
@@ -8685,6 +8685,13 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             prior_remote_transports=prior_transports,
         )
         try:
+            # Use the actual consumer's byte ceiling before the transaction
+            # can be claimed. Pretty-printing and the added read member can
+            # expand an otherwise valid prior binding beyond that ceiling.
+            if not 0 < len(composed) <= composition.MAX_CONFIG_BYTES:
+                raise composition.FabricCompositionError(
+                    "Composed Fabric binding exceeds the consumer byte limit"
+                )
             # The composed document is proved loadable by the incumbent v3
             # parser: the Control's own loader will read exactly these bytes.
             composition._composition(composed)
@@ -10145,18 +10152,34 @@ def _reconcile_control_component_update(
         try:
             input_raw = archives["prior-component-hermes-read-input.json"]
             prior_raw = archives["prior-component-binding-selection.json"]
+            candidate_raw = archives["component-binding-candidate.json"]
+            # Recovery joins every original archive to its sealed bytes,
+            # including serialization that composition does not preserve.
+            if sha256_bytes(input_raw) != member["input_sha256"]:
+                raise TransactionEffectUnknown()
+            if (
+                not 0 < len(candidate_raw) <= composition.MAX_CONFIG_BYTES
+                or sha256_bytes(candidate_raw) != member["candidate_sha256"]
+            ):
+                raise TransactionEffectUnknown()
             input_document = composition._document(input_raw)
             if type(input_document) is not dict:
                 raise composition.FabricCompositionError(
                     "Hermes host observation differs from its closed schema"
                 )
-            if prior_raw:
+            if member["prior_selector_present"]:
+                if not prior_raw or sha256_bytes(prior_raw) != member["prior_binding_sha256"]:
+                    raise TransactionEffectUnknown()
                 prior_document = composition._document(prior_raw)
+                if type(prior_document) is not dict:
+                    raise TransactionEffectUnknown()
                 prior_bindings = tuple(prior_document.get("bindings") or ())
                 prior_transports = tuple(
                     prior_document.get("remote_transports") or ()
                 )
             else:
+                if prior_raw != b"" or member["prior_binding_sha256"] != "":
+                    raise TransactionEffectUnknown()
                 prior_bindings = ()
                 prior_transports = ()
             binding_payload = compiler.compose_binding_candidate(
@@ -10166,7 +10189,10 @@ def _reconcile_control_component_update(
             )
         except (composition.FabricCompositionError, KeyError, OSError, ValueError) as exc:
             raise TransactionEffectUnknown() from exc
-        if sha256_bytes(binding_payload) != member["candidate_sha256"]:
+        if (
+            sha256_bytes(binding_payload) != member["candidate_sha256"]
+            or candidate_raw != binding_payload
+        ):
             raise TransactionEffectUnknown()
         if compiler.binding_destination(str(member["candidate_sha256"])) != member[
             "destination"
@@ -10245,6 +10271,12 @@ def _reconcile_control_component_update(
         )
     except compiler.ComponentError as exc:
         raise TransactionEffectUnknown() from exc
+    if type(member) is dict and (
+        candidate.selection is None or candidate.selection.document() != member
+    ):
+        # Counts and execution presence must describe the exact recovered
+        # rows; a well-shaped marker alone is not proof of their contents.
+        raise TransactionEffectUnknown()
     if (
         candidate.control_config_after_sha256 != manifest["target_control_sha256"]
         or candidate.control_plist_after_sha256

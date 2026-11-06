@@ -652,7 +652,7 @@ valid_component_input_path() {
     *//*) return 1 ;;
   esac
   case "$candidate" in
-    *[!A-Za-z0-9/._-]*) return 1 ;;
+    *[!A-Za-z0-9/._\ -]*) return 1 ;;
   esac
   local IFS='/'
   for part in $candidate; do

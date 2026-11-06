@@ -3135,6 +3135,99 @@ def test_the_reconcile_reconstructs_the_archived_selection(
     assert host.closed is True
 
 
+@pytest.mark.parametrize("drift", [
+    "input_whitespace", "prior_discarded_read", "candidate_bytes",
+    "prior_present_empty", "prior_absent_nonempty", "prior_absent_digest",
+    "bindings_count", "transports_count", "execution_present",
+])
+def test_reconcile_refuses_archive_or_selection_drift_without_effects(
+        host, publisher, tmp_path, root_owned_files, drift):
+    absent = drift.startswith("prior_absent")
+    if not absent:
+        prior_path, prior_digest = _prior_binding(tmp_path, schema=BINDING_V3)
+        _select_binding(host, prior_path, prior_digest)
+    # A distinct observation host keeps this recovery fixture independent
+    # of the prior execution transport's TLS selection.
+    member = _hermes_read_member(tmp_path, host_ref="host-" + "2" * 64)
+    path, digest = _hermes_input(tmp_path, member)
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    host.closed = False
+    host.production_manifest = True
+    manifest = copy.deepcopy(host.manifest)
+    member = manifest["component_binding"]
+    def archive(name):
+        return os.fspath(ac.AUTONOMY_TRANSACTION / name)
+    input_key = archive("prior-component-hermes-read-input.json")
+    prior_key = archive("prior-component-binding-selection.json")
+    candidate_key = archive("component-binding-candidate.json")
+    if drift == "input_whitespace":
+        host.files.data[input_key] += b" "
+    elif drift == "prior_discarded_read":
+        prior = json.loads(host.files.data[prior_key])
+        prior["hermes_role_metadata_read"]["expected_implementation_sha"] = "d" * 40
+        host.files.data[prior_key] = json.dumps(prior, sort_keys=True).encode()
+    elif drift == "candidate_bytes":
+        host.files.data[candidate_key] += b" "
+    elif drift == "prior_present_empty":
+        host.files.data[prior_key] = b""
+    elif drift == "prior_absent_nonempty":
+        host.files.data[prior_key] = b"{}"
+    elif drift == "prior_absent_digest":
+        member["prior_binding_sha256"] = _sha(b"")
+    elif drift == "bindings_count":
+        member["bindings_count"] += 1
+    elif drift == "transports_count":
+        member["remote_transports_count"] += 1
+    elif drift == "execution_present":
+        member["execution_present"] = False
+    host.files.data[archive(ac._TRANSACTION_MANIFEST_NAME)] = ac._encoded_json(manifest)
+    files_before = dict(host.files.data)
+    commands_before = list(host.commands)
+    phases_before = list(host.phases)
+    bindings_before = list(host.binding_publications)
+    receipts_before = list(publisher)
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host.transaction_present is True
+    assert host.closed is False
+    assert host.files.data == files_before
+    assert host.commands == commands_before
+    assert host.phases == phases_before
+    assert host.binding_publications == bindings_before
+    assert publisher == receipts_before
+
+
+def test_composed_binding_obeys_the_actual_consumer_byte_limit(
+        host, publisher, tmp_path, root_owned_files):
+    from control_plane import executive_fabric_composition as composition
+
+    prior_path, _ = _prior_binding(tmp_path, schema=BINDING_V1)
+    prior = json.loads(Path(prior_path).read_bytes())
+    raw = json.dumps(prior, sort_keys=True).encode()
+    prior["bindings"][0]["model"] += "x" * (
+        composition.MAX_CONFIG_BYTES - len(raw) - 128)
+    raw = json.dumps(prior, sort_keys=True).encode()
+    assert 0 < len(raw) <= composition.MAX_CONFIG_BYTES
+    composition._composition(raw)  # A valid prior document, within its limit.
+    Path(prior_path).write_bytes(raw)
+    _select_binding(host, prior_path, _sha(raw))
+    member = _hermes_read_member(tmp_path)
+    path, digest = _hermes_input(tmp_path, member)
+    composed = ccu.compose_binding_candidate(
+        input_document=member, prior_bindings=prior["bindings"],
+        prior_remote_transports=())
+    assert len(composed) > composition.MAX_CONFIG_BYTES
+    before = dict(host.files.data)
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _selection_plan(host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert caught.value.code == "control_component_hermes_read_binding_conflict"
+    assert host.transaction_present is False
+    assert host.files.data == before
+    assert host.commands == []
+    assert host.binding_publications == []
+    assert publisher == []
+
+
 def test_a_published_binding_with_an_unswitched_config_remains_incomplete(
         host, publisher, tmp_path, root_owned_files):
     path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
@@ -3201,15 +3294,19 @@ def test_the_extended_marker_carries_the_closed_selection_member(
         ac._COMPONENT_ARCHIVES + ac._COMPONENT_BINDING_ARCHIVES)
 
 
+@pytest.mark.parametrize("malformation", ["presence", "null"])
 def test_a_malformed_selection_member_is_refused(host, publisher, tmp_path,
-                                                  root_owned_files):
+                                                  root_owned_files, malformation):
     path, digest = _hermes_input(tmp_path, _hermes_read_member(tmp_path))
     _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
     host.production_manifest = True
     manifest = dict(host.manifest)
     manifest["component_binding"] = dict(manifest["component_binding"])
-    # The presence flags are EXPLICIT booleans, never a raw comparison.
-    manifest["component_binding"]["destination_present"] = "yes"
+    # Absence is legacy; an explicitly null member is malformed.
+    if malformation == "null":
+        manifest["component_binding"] = None
+    else:
+        manifest["component_binding"]["destination_present"] = "yes"
     host.files.data[
         os.fspath(ac.AUTONOMY_TRANSACTION / ac._TRANSACTION_MANIFEST_NAME)
     ] = ac._encoded_json(manifest)
@@ -3271,10 +3368,14 @@ def _control_component_argv(*argv: str) -> subprocess.CompletedProcess:
         stderr=subprocess.DEVNULL, check=False, timeout=30)
 
 
-def test_the_closed_argv_walk_forwards_the_paired_selection():
+@pytest.mark.parametrize("input_path", [
+    "/var/db/staged/read.json",
+    "/Library/Application Support/MastermindExecutive/staged/read.json",
+])
+def test_the_closed_argv_walk_forwards_the_paired_selection(input_path):
     completed = _control_component_argv(
         "plan-control-component", "--expected-sha", "a" * 40,
-        "--hermes-role-metadata-read-input", "/var/db/staged/read.json",
+        "--hermes-role-metadata-read-input", input_path,
         "--hermes-role-metadata-read-sha256", "b" * 64)
     assert completed.returncode == 0
     assert completed.stdout.decode("utf-8").splitlines() == [
@@ -3282,7 +3383,7 @@ def test_the_closed_argv_walk_forwards_the_paired_selection():
         "--expected-sha",
         "a" * 40,
         "--hermes-role-metadata-read-input",
-        "/var/db/staged/read.json",
+        input_path,
         "--hermes-role-metadata-read-sha256",
         "b" * 64,
     ]
@@ -3304,8 +3405,10 @@ def test_the_closed_argv_walk_refuses_an_unsafe_input_path():
         "/var/db/../etc/read.json",
         "/var//db/read.json",
         "/var/db/read.json; rm -rf /",
-        "/var/db/read file.json",
+        "/var/db/read.json\t",
         "/var/db/read.json\n",
+        "/var/db/$(read).json",
+        "/var/db/`read`.json",
     ):
         completed = _control_component_argv(
             "plan-control-component", "--expected-sha", "a" * 40,
