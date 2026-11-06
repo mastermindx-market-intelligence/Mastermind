@@ -349,46 +349,81 @@ def _callable_identity(value) -> str | None:
 
 
 def _consumer_extension(runner, home: Path) -> dict:
-    """Read the serving process's actual scoped native extension entry.
-
-    This is the *serving-process extension proof*. It reads the live tool
-    registry of THIS process, in the scope the actual per-profile plugin
-    manager owns. It never accepts a caller-selected target or route, never
-    writes the registry and never clears the extension hold: an absent entry
-    is reported as absent.
-    """
+    """Prove this slot's exact C28 registration in the live native scope."""
+    from hermes_cli.plugins import get_plugin_manager
+    from tools.registry import registry
+    from integrations.hermes_harness.native_executive_consumer import (
+        CONSUMER_SLOT_ATTRIBUTE, CONSUMER_PLUGIN_NAME, ConsumerSlot,
+        NativeConsumerCurrentness, schema_digest)
+    from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
     descriptor = runner.session_runtime_descriptor
     if descriptor.get("state") != "ready" or runner._draining:
         raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_NOT_READY")
-    try:
-        from hermes_cli.plugins import get_plugin_manager
-        from tools.registry import registry
-        manager = get_plugin_manager()
-        scope = getattr(manager, "scope_key", None)
-        if type(scope) is not str or not scope:
-            raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_SCOPE_UNAVAILABLE")
-        entry = registry.snapshot_registration(CONSUMER_EXTENSION_TOOL, scope=scope)
-    except RuntimeRefusal:
-        raise
-    except Exception:
-        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE") from None
-    from integrations.hermes_harness.native_executive_consumer import schema_digest
-    result = {
-        "tool": CONSUMER_EXTENSION_TOOL,
-        "scope": scope,
-        "profile_id": str(home),
-        "present": entry is not None,
-        "instance_id": descriptor.get("instance_id"),
-        "authority_epoch": descriptor.get("authority_epoch"),
+    manager = get_plugin_manager()
+    slot = getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None)
+    if not isinstance(slot, ConsumerSlot):
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    with slot._lock:
+        registration = slot.registration
+        binding = slot.startup.binding
+        loaded = getattr(manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME)
+        if (slot.manager is not manager or slot.scope != manager.scope_key
+                or slot.owner != current_runtime_owner() or str(slot.scope) != str(home)
+                or slot.load_outcome != "REGISTERED" or slot.registration_error is not None
+                or registration is None or binding is None
+                or loaded is not slot.loader_record or loaded is None
+                or getattr(loaded, "enabled", None) is not True
+                or getattr(loaded, "error", None) is not None
+                or getattr(slot.registration_context, "_manager", None) is not manager):
+            raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    guard = binding.currentness_guard
+    publication = slot.publication
+    if (not isinstance(guard, NativeConsumerCurrentness) or guard() is not True
+            or guard.session_id != binding.session_id
+            or guard.instance_id != descriptor.get("instance_id")
+            or guard.authority_epoch != descriptor.get("authority_epoch")
+            or registration.scope != slot.scope
+            or registration.profile_id != binding.profile_id
+            or registration.profile_id != slot.profile_id
+            or registration.session_id != binding.session_id
+            or registration.command != publication.command
+            or registration.job_id != publication.job_id):
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+
+    def matches(entry):
+        return (entry is not None and entry.handler is registration.handler
+                and entry.check_fn is registration.check_fn
+                and entry.toolset == registration.toolset
+                and entry.schema == NATIVE_TOOL_SCHEMA)
+    if not matches(registry.snapshot_registration(CONSUMER_EXTENSION_TOOL, scope=slot.scope)):
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    if guard() is not True or registration.check_fn() is not True:
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    with slot._lock:
+        if (slot.registration is not registration or slot.startup.binding is not binding
+                or slot.load_outcome != "REGISTERED"
+                or getattr(manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME) is not loaded
+                or getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None) is not slot):
+            raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    if not matches(registry.snapshot_registration(CONSUMER_EXTENSION_TOOL, scope=slot.scope)):
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    return {
+        "tool": CONSUMER_EXTENSION_TOOL, "scope": slot.scope, "profile_id": str(home),
+        "present": True, "toolset": registration.toolset,
+        "schema_sha256": schema_digest(NATIVE_TOOL_SCHEMA),
+        "implementation_sha": slot.owner,
+        "instance_id": guard.instance_id, "authority_epoch": guard.authority_epoch,
+        "enrollment_request_id": publication.session.request_id,
+        "principal_id": publication.session.principal_id, "session_id": binding.session_id,
+        "command_id": publication.command, "job_id": publication.job_id,
+        "target_digest": publication.target_digest,
+        "principal_binding_digest": publication.principal_binding_digest,
+        "authority_generation_digest": publication.authority_generation_digest,
+        "capability_profile_digest": publication.capability_profile_digest,
+        "plugin_sha256": publication.plugin.digest,
+        "mcp_tools_schema_sha256": publication.tools_schema_digest,
     }
-    if entry is not None:
-        result.update({
-            "toolset": entry.toolset,
-            "schema_sha256": schema_digest(entry.schema),
-            "handler": _callable_identity(entry.handler),
-            "check_fn": _callable_identity(entry.check_fn),
-        })
-    return result
+
 
 
 def _implementation(value):
@@ -642,25 +677,34 @@ async def _create_enrollment(runner, home, params, principal):
     return enrollment_result(implementation_sha, request_id, "EFFECT_UNKNOWN")
 
 
-async def _enrollment_operation(runner, home, params, principal):
+async def _enrollment_operation(runner, home, params, principal, *, consumer_transition=None):
     if params["operation"] == "inspect_enrollment":
         return _inspect_enrollment(runner, home, params["implementation_sha"], params["request_id"], principal)
     from gateway.session_runtime_workers import track_mutation
     # The native task set covers create, resume and cleanup. A private response
     # deadline cannot cancel it or make another observer infer absence.
     task = track_mutation(runner.session_authority, _create_enrollment(runner, home, params, principal))
-    return await asyncio.shield(task)
+    result = await asyncio.shield(task)
+    if result.get("status") == "ENROLLED" and consumer_transition is not None:
+        try:
+            consumer_transition(runner)
+        except Exception:
+            pass  # Consumer qualification cannot rewrite native enrollment truth.
+    return result
 
 
 def install_private_control(runner, home: Path, role: str, *,
                             implementation_sha: str | None = None,
-                            session_enrollment: dict | None = None) -> None:
+                            session_enrollment: dict | None = None,
+                            consumer_transition=None) -> None:
     if role != "mmsecretary":
         return
     server = runner.session_control_server
     if VERB in server.private_handlers:
         raise RuntimeRefusal("NATIVE_SECRETARY_CONTROL_ALREADY_INSTALLED")
     loop = asyncio.get_running_loop()
+    import contextvars
+    owner_context = contextvars.copy_context()
     frozen = None
     if session_enrollment is not None:
         _implementation(implementation_sha)
@@ -686,7 +730,8 @@ def install_private_control(runner, home: Path, role: str, *,
                 or (modifying and (type(params["ticket"]) is not str
                                    or not 1 <= len(params["ticket"]) <= 256))):
             return refused
-        coroutine = _enrollment_operation(runner, home, dict(params), peer_subject)
+        options = {"consumer_transition": consumer_transition} if consumer_transition is not None else {}
+        coroutine = _enrollment_operation(runner, home, dict(params), peer_subject, **options)
         try:
             future = asyncio.run_coroutine_threadsafe(coroutine, loop)
         except Exception:
@@ -718,7 +763,21 @@ def install_private_control(runner, home: Path, role: str, *,
                 # one this private socket belongs to.
                 if set(params) != {"operation", "profile_id"} or params["profile_id"] != str(home):
                     raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_REQUEST_INVALID")
-                return _result("OBSERVED", extension=_consumer_extension(runner, home))
+                async def observe_extension():
+                    return _result("OBSERVED", extension=_consumer_extension(runner, home))
+                coroutine = observe_extension()
+                try:
+                    future = owner_context.copy().run(
+                        asyncio.run_coroutine_threadsafe, coroutine, loop)
+                except Exception:
+                    coroutine.close()
+                    return _result("UNAVAILABLE")
+                try:
+                    return future.result(timeout=5)
+                except Exception:
+                    from integrations.hermes_harness.native_executive_consumer import _consume_future_result
+                    future.add_done_callback(_consume_future_result)
+                    return _result("UNAVAILABLE")
             if operation != "submit" or set(params) != {"operation", "target", "submission_id", "text", "ticket"}:
                 raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
             _id(params["submission_id"])
@@ -726,7 +785,7 @@ def install_private_control(runner, home: Path, role: str, *,
             if type(params["ticket"]) is not str or not 1 <= len(params["ticket"]) <= 256:
                 raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
         except Exception:
-            return _result("UNAVAILABLE" if operation in {"observe", "read_original"} else "REFUSED")
+            return _result("UNAVAILABLE" if operation in {"observe", "read_original", "consumer_extension"} else "REFUSED")
         # This is the native control server's existing executor. The native
         # loop owns the bounded coroutine; never create a new event loop.
         coroutine = _submit(runner, home, params, peer_subject)

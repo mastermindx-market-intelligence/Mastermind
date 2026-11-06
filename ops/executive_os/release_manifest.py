@@ -312,6 +312,8 @@ def _hermes_native_gateway(value: Any) -> dict[str, Any]:
                     validate_consumer_publication,
                 )
                 consumer = validate_consumer_publication(consumer)
+                if consumer["session"]["request_id"] != enrollment["request_id"]:
+                    raise ValueError("consumer enrollment identity differs")
             except Exception:
                 raise ReleaseManifestError("Hermes executive consumer is invalid") from None
     elif version != "mastermind.hermes_native_gateway_installation/v1":
@@ -366,6 +368,9 @@ def _hermes_roles(value: Any) -> list[dict[str, Any]]:
                   if "native_gateway" in row else None)
         if native is not None and "session_enrollment" in native and role != "mmsecretary":
             raise ReleaseManifestError("Hermes session enrollment requires Secretary")
+        if (native is not None and "executive_consumer" in native
+                and native["executive_consumer"]["session"]["role"] != role):
+            raise ReleaseManifestError("Hermes executive consumer role differs")
         if native is not None and "executive_consumer" in native and role != "mmsecretary":
             # The smallest existing supported consumer is the Secretary.
             # Another role needs its own real native-session owner; it never
@@ -965,11 +970,11 @@ class _NativeGatewayLaunch:
             raise RuntimeRefusal("NATIVE_GATEWAY_RECEIPT_MISMATCH")
         consumer = self.recipe.get("executive_consumer")
         if consumer is not None:
-            # The installed plugin package must be the sealed one the
-            # publication names. A raw hash in an installation document is
-            # not source authenticity: the receipt records what the normal
-            # install writer actually installed.
-            if receipt.get("native_consumer_plugin_sha256") != consumer["plugin"]["digest"]:
+            # Qualify physical custody through the original held release.
+            # The role-home receipt's digest is only an equality witness.
+            from integrations.hermes_harness.native_executive_consumer import held_plugin_package_digest
+            if (receipt.get("native_consumer_plugin_sha256") != consumer["plugin"]["digest"]
+                    or held_plugin_package_digest(self.owner) != consumer["plugin"]["digest"]):
                 raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_UNPROVEN")
         self.check()
 

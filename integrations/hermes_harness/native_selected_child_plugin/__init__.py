@@ -50,21 +50,20 @@ def _assert_mcp_allowed(ctx: Any, slot: ConsumerSlot) -> None:
 
 
 def register(ctx: Any):
-    """Register the one selected-child tool through the upstream owner.
-
-    The loader calls this with the plugin context only. Every input comes
-    from the owner-private slot the held native startup installed, and every
-    refusal leaves no tool registered.
-    """
+    """Retain original registration owners before C28 can have an effect."""
     owner = current_runtime_owner()
     if not owner:
-        # The held native startup did not bind this process's owner identity.
         raise NativeToolRegistrationError("NATIVE_CONSUMER_OWNER_UNAVAILABLE")
     slot = read_consumer_slot(ctx, owner=owner, source=CONSUMER_PLUGIN_SOURCE,
-                               plugin_id=CONSUMER_PLUGIN_NAME)
+                              plugin_id=CONSUMER_PLUGIN_NAME)
     _assert_mcp_allowed(ctx, slot)
-    registration = register_native_delegate_tools(ctx, slot.startup)
-    # The one registration this slot may own. A second, different one is
-    # refused; the original context and lease stay with the upstream owner.
-    slot.publish_registration(registration)
-    return registration
+    slot.begin_registration(ctx)
+    try:
+        registration = register_native_delegate_tools(ctx, slot.startup)
+        slot.publish_registration(registration)
+        return registration
+    except Exception as error:
+        # The native loader may catch the exception. This original private slot
+        # keeps its exact context/binding/handle and uncertainty for reconciliation.
+        slot.retain_registration_error(error)
+        raise

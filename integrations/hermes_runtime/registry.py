@@ -68,6 +68,7 @@ def inspect_extension_proof(
     expected_tool: str,
     expected_schema_sha256: str | None = None,
     expected_scope: str | None = None,
+    expected_binding: Mapping[str, object] | None = None,
 ) -> dict:
     """Evaluate the serving-process extension proof.
 
@@ -98,6 +99,11 @@ def inspect_extension_proof(
     if expected_schema_sha256 is not None:
         if observed.get("schema_sha256") != expected_schema_sha256:
             issues.add("EXTENSION_SCHEMA_MISMATCH")
+    if expected_binding is not None:
+        if not isinstance(expected_binding, Mapping) or not expected_binding:
+            issues.add("EXTENSION_BINDING_UNQUALIFIED")
+        elif any(observed.get(key) != value for key, value in expected_binding.items()):
+            issues.add("EXTENSION_BINDING_MISMATCH")
     return {
         "schema": REGISTRY_SCHEMA,
         "status": "PASS_EXTENSION_PROOF" if not issues else "BLOCKED",
@@ -113,6 +119,7 @@ def assert_extension_proof_exact(
     expected_tool: str,
     expected_schema_sha256: str | None = None,
     expected_scope: str | None = None,
+    expected_binding: Mapping[str, object] | None = None,
 ) -> dict:
     """Require a proved serving-process extension entry.
 
@@ -122,7 +129,8 @@ def assert_extension_proof_exact(
     """
     result = inspect_extension_proof(
         observed, expected_tool=expected_tool,
-        expected_schema_sha256=expected_schema_sha256, expected_scope=expected_scope)
+        expected_schema_sha256=expected_schema_sha256, expected_scope=expected_scope,
+        expected_binding=expected_binding)
     if result["status"] != "PASS_EXTENSION_PROOF":
         raise RuntimeRefusal("NATIVE_EXTENSION_NOT_INSTALLED")
     return result

@@ -127,62 +127,104 @@ class NativeSupervisorTests(unittest.TestCase):
         self.assertEqual(status, 503)
         self.assertFalse(payload["native_extension_proved"])
 
-    def test_the_extension_proof_needs_the_original_actual_child(self) -> None:
-        """The proof is read only after the launch owner proved the child."""
-        class _Launch:
-            recipe = {"vendor_root": "/nonexistent"}
-
-            def __init__(self) -> None:
-                self.observed = 0
-
+    def _consumer_runtime(self):
+        import types
+        from integrations.hermes_harness.tests.test_native_executive_consumer import (
+            OWNER, publication_document, publication_from_document, schema_digest)
+        from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
+        from integrations.hermes_runtime import native_session_control
+        document = publication_document()
+        publication = publication_from_document(document)
+        class Launch:
+            recipe = {"vendor_root": "/nonexistent", "executive_consumer": document}
+            owner = types.SimpleNamespace(root=Path("/qualified") / OWNER)
+            def __init__(self):
+                self.observed = []
             def observe_child(self, pid):
-                self.observed += 1
-
+                self.observed.append(pid)
             def check(self):
                 return None
-
-        runtime = self._runtime()
-        launch = _Launch()
+        launch = Launch()
+        runtime = self._runtime(replace(self.profile, gateway_backend="native-session-authority"))
         runtime._native_launch = launch
         runtime._native_home = self.home
+        runtime._child = types.SimpleNamespace(pid=4242, poll=lambda: None)
+        runtime.child_pid = 4242
+        runtime._backend_ready = True
+        target = {
+            "profile_id": str(self.home), "principal_id": publication.session.principal_id,
+            "session_id": "session-1", "instance_id": "instance-1", "authority_epoch": 1,
+            "revision": 0, "execution_generation": 0,
+        }
+        extension = {
+            "tool": "mmx_delegate", "present": True, "toolset": "mmx_delegate",
+            "scope": str(self.home), "profile_id": str(self.home),
+            "schema_sha256": schema_digest(NATIVE_TOOL_SCHEMA),
+            "implementation_sha": OWNER, "instance_id": target["instance_id"],
+            "authority_epoch": target["authority_epoch"],
+            "enrollment_request_id": publication.session.request_id,
+            "principal_id": publication.session.principal_id, "session_id": target["session_id"],
+            "command_id": publication.command, "job_id": publication.job_id,
+            "target_digest": publication.target_digest,
+            "principal_binding_digest": publication.principal_binding_digest,
+            "authority_generation_digest": publication.authority_generation_digest,
+            "capability_profile_digest": publication.capability_profile_digest,
+            "plugin_sha256": publication.plugin.digest,
+            "mcp_tools_schema_sha256": publication.tools_schema_digest,
+        }
+        enrollment = native_session_control.enrollment_result(
+            OWNER, publication.session.request_id, "ENROLLED", target)
+        class Client:
+            def __init__(self, home, expected_pid=None):
+                assert home == runtime._native_home and expected_pid == runtime._child.pid
+            def consumer_extension(self):
+                return {"schema": native_session_control.SCHEMA,
+                        "status": "OBSERVED", "extension": dict(extension)}
+            def inspect_enrollment(self, implementation, request_id):
+                assert implementation == OWNER and request_id == publication.session.request_id
+                return enrollment
+        return runtime, launch, extension, Client
+
+    def test_the_extension_proof_needs_the_original_actual_child(self) -> None:
+        from integrations.hermes_runtime import native_session_control
+        runtime, launch, _extension, _client = self._consumer_runtime()
+        runtime._child = None
         runtime._consume_consumer_extension(4242)
-        self.assertEqual(launch.observed, 1)
-        # No serving process answered, so there is no proof and no hold change.
+        self.assertEqual(launch.observed, [])
+        runtime._child = type("Child", (), {"pid": 4242, "poll": lambda _self: None})()
+        with mock.patch.object(native_session_control, "NativeSecretaryClient",
+                               side_effect=RuntimeRefusal("NO_SERVING_PROCESS")):
+            runtime._consume_consumer_extension(4242)
+        self.assertEqual(launch.observed, [4242])
         self.assertIsNone(runtime._extension_observed)
         self.assertFalse(runtime._extension_proved)
 
     def test_a_proved_scoped_entry_is_recorded(self) -> None:
-        from integrations.hermes_harness.native_executive_consumer import schema_digest
-        from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
         from integrations.hermes_runtime import native_session_control
-
-        class _Launch:
-            recipe = {"vendor_root": "/nonexistent"}
-
-            def observe_child(self, pid):
-                return None
-
-            def check(self):
-                return None
-
-        class _Client:
-            def __init__(self, home, expected_pid=None):
-                self.expected_pid = expected_pid
-
-            def consumer_extension(self):
-                return {"schema": native_session_control.SCHEMA, "status": "OBSERVED",
-                        "extension": {"tool": "mmx_delegate", "present": True,
-                                      "scope": "/profile",
-                                      "schema_sha256": schema_digest(NATIVE_TOOL_SCHEMA)}}
-
-        runtime = self._runtime()
-        runtime._native_launch = _Launch()
-        runtime._native_home = self.home
-        with mock.patch.object(native_session_control, "NativeSecretaryClient", _Client):
-            runtime._consume_consumer_extension(4242)
-        self.assertTrue(runtime._extension_proved)
-        status, payload = runtime.health_snapshot()
+        runtime, launch, _extension, client = self._consumer_runtime()
+        with mock.patch.object(native_session_control, "NativeSecretaryClient", client):
+            status, payload = runtime.health_snapshot()
+        self.assertEqual(status, 200)
         self.assertTrue(payload["native_extension_proved"])
+        self.assertEqual(launch.observed, [4242, 4242])
+
+    def test_health_clears_the_proof_after_same_schema_binding_or_scope_replacement(self):
+        from integrations.hermes_runtime import native_session_control
+        for key, value in (("scope", "/foreign"), ("session_id", "foreign-session"),
+                           ("target_digest", "f" * 64), ("implementation_sha", "b" * 40)):
+            with self.subTest(key=key):
+                runtime, _launch, extension, client = self._consumer_runtime()
+                with mock.patch.object(native_session_control, "NativeSecretaryClient", client):
+                    self.assertTrue(runtime.health_snapshot()[1]["native_extension_proved"])
+                    extension[key] = value
+                    self.assertFalse(runtime.health_snapshot()[1]["native_extension_proved"])
+                self.assertFalse(runtime._extension_proved)
+
+    def test_no_backend_readiness_means_no_serving_proof(self):
+        runtime, _launch, _extension, _client = self._consumer_runtime()
+        runtime._extension_proved = True
+        runtime._backend_ready = False
+        self.assertFalse(runtime.health_snapshot()[1]["native_extension_proved"])
 
 
 if __name__ == "__main__":

@@ -216,12 +216,17 @@ class PublicationTests(unittest.TestCase):
             validate_consumer_publication(publication_document(plugin={
                 "name": CONSUMER_PLUGIN_NAME, "source": "bundled", "digest": PLUGIN_DIGEST}))
 
-    def test_the_frozen_material_digest_is_stable_and_excludes_nothing(self) -> None:
-        publication = _publication()
-        material = publication.frozen_material()
-        self.assertEqual(consumer.frozen_material_digest(material),
-                         consumer.frozen_material_digest(dict(material)))
-        self.assertEqual(len(consumer.frozen_material_digest(material)), 64)
+    def test_remote_http_lookalikes_and_non_mcp_routes_refuse(self) -> None:
+        for url in ("http://127.0.0.1evil.example/mcp", "http://127.0.0.1@evil.example/mcp",
+                    "https://coo.example/other", "https://coo.example/mcp?token=public",
+                    "https://coo.example/mcp#fragment"):
+            document = publication_document()
+            document["mcp"]["url"] = url
+            with self.assertRaises(RuntimeRefusal):
+                validate_consumer_publication(document)
+        document = publication_document()
+        document["mcp"]["url"] = "http://127.0.0.1:4010/mcp"
+        self.assertEqual(validate_consumer_publication(document), document)
 
     def test_the_tools_schema_digest_covers_every_tool(self) -> None:
         first = types.SimpleNamespace(name="mmx_delegate", description="a",
@@ -274,11 +279,15 @@ class SlotTests(unittest.TestCase):
             startup=NativeDelegateStartup(binding=binding),
         )
 
-    def test_an_unbound_startup_cannot_own_a_slot(self) -> None:
+    def test_an_unbound_slot_has_no_registration_or_load_attempt(self) -> None:
+        slot = ConsumerSlot(owner=OWNER, profile_id="mmsecretary", source=CONSUMER_PLUGIN_SOURCE,
+                            plugin_id=CONSUMER_PLUGIN_NAME, publication=_publication(),
+                            startup=NativeDelegateStartup())
+        self.assertIsNone(slot.startup.binding)
+        self.assertIsNone(slot.registration)
+        self.assertFalse(slot.load_attempted)
         with self.assertRaises(RuntimeRefusal):
-            ConsumerSlot(owner=OWNER, profile_id="mmsecretary", source=CONSUMER_PLUGIN_SOURCE,
-                         plugin_id=CONSUMER_PLUGIN_NAME, publication=_publication(),
-                         startup=NativeDelegateStartup())
+            slot.bind_startup(NativeDelegateStartup())
 
     def test_the_slot_is_installed_once_and_never_retargeted(self) -> None:
         class _Manager:
@@ -294,6 +303,7 @@ class SlotTests(unittest.TestCase):
 
     def test_a_second_different_registration_is_refused(self) -> None:
         slot = self._slot()
+        consumer.install_consumer_slot(types.SimpleNamespace(scope_key="/profile"), slot)
         registration = NativeDelegateRegistration(
             name="mmx_delegate", toolset="mmx_delegate", scope="/profile",
             profile_id="mmsecretary", session_id="session-1", command=COMMAND,
@@ -576,7 +586,7 @@ class InstallationTests(unittest.TestCase):
         with self.assertRaises(ReleaseManifestError):
             validate_hermes_runtime_installation(_installation(consumer=broken))
 
-    def test_the_sealed_plugin_package_is_installed_and_proven(self) -> None:
+    def test_plugin_code_stays_outside_the_role_owned_home(self) -> None:
         from integrations.hermes_harness.native_executive_consumer import (
             plugin_package_digest,
         )
@@ -592,9 +602,10 @@ class InstallationTests(unittest.TestCase):
             installed = _install_consumer_plugin(role_dir, document)
             self.assertEqual(installed, digest)
             target = role_dir / "plugins" / CONSUMER_PLUGIN_NAME
-            self.assertEqual(plugin_package_digest(target), digest)
-            self.assertTrue((target / "plugin.yaml").is_file())
-            self.assertTrue((target / "__init__.py").is_file())
+            self.assertFalse(target.exists())
+            target.mkdir(parents=True)
+            with self.assertRaises(RuntimeRefusal):
+                _install_consumer_plugin(role_dir, document)
 
     def test_an_unsealed_plugin_source_is_refused(self) -> None:
         from integrations.hermes_runtime.install import _install_consumer_plugin
@@ -697,6 +708,7 @@ class NativePluginLoaderTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self._native_managers = {}
         self.home = self.root / "profiles" / "mmsecretary"
         self.home.mkdir(parents=True, exist_ok=True)
         environment = os.environ.get("HERMES_HOME")
@@ -719,7 +731,9 @@ class NativePluginLoaderTests(unittest.TestCase):
         scope = self.root / "profiles" / name
         scope.mkdir(parents=True, exist_ok=True)
         os.environ["HERMES_HOME"] = str(scope)
-        return self.upstream.PluginManager(scope_key=str(scope)), str(scope)
+        manager = self.upstream.PluginManager(scope_key=str(scope))
+        self._native_managers[name] = manager
+        return manager, str(scope)
 
     def _grant_mcp(self):
         """Grant the plugin its one server, as the installed config would.
@@ -749,10 +763,17 @@ class NativePluginLoaderTests(unittest.TestCase):
         target.mkdir(parents=True, exist_ok=True)
         for member in ("plugin.yaml", "__init__.py"):
             shutil.copyfile(source / member, target / member)
+        manager = self._native_managers.get(name)
+        slot = getattr(manager, consumer.CONSUMER_SLOT_ATTRIBUTE, None)
+        if isinstance(slot, ConsumerSlot):
+            slot.package_path = str(target)
+            slot.package_check = lambda: consumer.plugin_package_digest(target) == slot.publication.plugin.digest
         return target
 
     def _slot(self, profile_id: str = "mmsecretary", owner: str = OWNER) -> ConsumerSlot:
-        publication = _publication()
+        source = Path(__file__).resolve().parents[1] / CONSUMER_PLUGIN_NAME
+        publication = _publication(plugin={"name": CONSUMER_PLUGIN_NAME,
+            "source": CONSUMER_PLUGIN_SOURCE, "digest": consumer.plugin_package_digest(source)})
         binding = NativeDelegateBinding(
             transport=_Transport(), currentness_guard=lambda: True,
             profile_id=profile_id, session_id="session-1",
@@ -892,3 +913,468 @@ class NativePluginLoaderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# C46 controlled integration regressions. These fixtures do not claim an
+# installed enrollment, root-owned source custody, or a provider turn.
+def test_native_tools_digest_matches_the_capability_owner():
+    from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
+    first = types.SimpleNamespace(
+        name="mmx_delegate", description="old prose", inputSchema={"type": "object"},
+        outputSchema={"type": "object"}, annotations={"readOnlyHint": False})
+    expected = observed_mcp_tool_schema_digest({"tools": {"mmx_delegate": {
+        "name": first.name, "inputSchema": first.inputSchema,
+        "outputSchema": first.outputSchema, "annotations": first.annotations}}})
+    assert tools_schema_digest([first]) == expected
+    first.description = "new prose"
+    assert tools_schema_digest([first]) == expected
+    first.annotations = {"readOnlyHint": True}
+    assert tools_schema_digest([first]) != expected
+
+
+def test_native_transport_accepts_closed_digest_free_local_uncertainty():
+    loop = _McpLoop()
+    try:
+        for action, state, reason in (
+            ("selected_child_submit", "EFFECT_UNKNOWN", "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN"),
+            ("selected_child_status", "UNAVAILABLE", "EXECUTIVE_SELECTED_CHILD_UNAVAILABLE")):
+            local = {"schema": SELECTED_CHILD_SCHEMA, "state": state, "reason": reason,
+                     "command_id": COMMAND, "job_id": None, "attempt_id": None,
+                     "attempt_status": None, "job_status": None, "live_submit": None}
+            session = _Session(results=[_Result(structured=local)])
+            transport = NativeExecutiveTransport(
+                publication=_publication(), server=_Owner(session), session=session,
+                loop=loop.loop, currentness=lambda: True)
+            result = transport._call(action, COMMAND)
+            assert result == local
+            assert "target_digest" not in result
+            assert len(session.calls) == 1
+    finally:
+        loop.close()
+
+
+def test_native_transport_rejects_contradictory_control_effect_evidence():
+    import pytest
+    loop = _McpLoop()
+    try:
+        for state, attempt, live in (
+                ("ACTIVE", None, False), ("NOT_CLAIMED", None, True),
+                ("EFFECT_UNKNOWN", None, False), ("ACTIVE", "attempt-1", None)):
+            body = _envelope(state=state, live_submit=live)
+            body["attempt_id"] = attempt
+            if attempt is None:
+                body["attempt_status"] = body["job_status"] = None
+            session = _Session(results=[_Result(structured=body)])
+            transport = NativeExecutiveTransport(
+                publication=_publication(), server=_Owner(session), session=session,
+                loop=loop.loop, currentness=lambda: True)
+            with pytest.raises(consumer._ConsumerUncertain):
+                transport.submit_selected_child(COMMAND)
+            assert len(session.calls) == 1
+    finally:
+        loop.close()
+
+
+def test_native_rpc_rechecks_the_session_after_waiting_for_its_lock():
+    import concurrent.futures
+    import pytest
+    loop = _McpLoop()
+    try:
+        session = _Session()
+        owner = _Owner(session)
+        held = threading.Event()
+        release = asyncio.Event()
+        async def hold():
+            async with owner._rpc_lock:
+                held.set()
+                await release.wait()
+        holder = asyncio.run_coroutine_threadsafe(hold(), loop.loop)
+        assert held.wait(2)
+        before_queue = threading.Event()
+        def current():
+            before_queue.set()
+            return True
+        transport = NativeExecutiveTransport(
+            publication=_publication(), server=owner, session=session,
+            loop=loop.loop, currentness=current, timeout=3)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            result = pool.submit(transport.submit_selected_child, COMMAND)
+            assert before_queue.wait(2)
+            owner.session = _Session()
+            loop.loop.call_soon_threadsafe(release.set)
+            holder.result(timeout=2)
+            with pytest.raises(consumer._ConsumerUncertain):
+                result.result(timeout=3)
+        assert session.calls == []
+        assert owner.session.calls == []
+    finally:
+        loop.close()
+
+
+def test_native_rpc_late_revocation_returns_original_uncertainty():
+    loop = _McpLoop()
+    try:
+        for action, state in (("selected_child_submit", "EFFECT_UNKNOWN"),
+                              ("selected_child_status", "UNAVAILABLE")):
+            live = {"current": True}
+            class LateSession(_Session):
+                async def call_tool(self, name, arguments=None, **kwargs):
+                    result = await super().call_tool(name, arguments, **kwargs)
+                    live["current"] = False
+                    return result
+            session = LateSession()
+            transport = NativeExecutiveTransport(
+                publication=_publication(), server=_Owner(session), session=session,
+                loop=loop.loop, currentness=lambda: live["current"])
+            binding = NativeDelegateBinding(
+                transport=transport, currentness_guard=lambda: True,
+                profile_id="mmsecretary", session_id="session-1", command=COMMAND, job_id=JOB_ID)
+            result = json.loads(native_delegate_handler(binding)(
+                {"action": action, "command": COMMAND}, session_id="session-1"))
+            assert result["state"] == state
+            assert result["command_id"] == COMMAND and result["job_id"] == JOB_ID
+            assert result["live_submit"] is None
+            assert len(session.calls) == 1
+    finally:
+        loop.close()
+
+
+def test_captured_mcp_guard_rejects_registry_config_and_handshake_replacement(monkeypatch):
+    loop = _McpLoop()
+    try:
+        document = publication_document()
+        tool = types.SimpleNamespace(name="mmx_delegate", inputSchema={"type": "object"},
+                                     outputSchema=None, annotations=None)
+        document["tools_schema_digest"] = tools_schema_digest([tool])
+        publication = publication_from_document(document)
+        session = _Session()
+        owner = _Owner(session)
+        owner._tools = [tool]
+        owner._config = {"url": publication.mcp.url, "auth": "oauth",
+                         "oauth": {"client_id": publication.mcp.client_id, "scope": publication.mcp.scope}}
+        owner.initialize_result = types.SimpleNamespace(serverInfo=types.SimpleNamespace(
+            name=publication.mcp.server_name, version=publication.mcp.server_version))
+        core = types.ModuleType("tools.mcp_tool")
+        core._lock = threading.RLock()
+        core._servers = {"profile::coo": owner}
+        package = types.ModuleType("tools")
+        package.mcp_tool = core
+        loops = types.ModuleType("tools.mcp_tool_loop")
+        loops._running_loop = lambda: loop.loop
+        scopes = types.ModuleType("tools.mcp_tool_scope")
+        scopes._resolve_server_key = lambda _name: "profile::coo"
+        for name, module in {"tools": package, "tools.mcp_tool": core,
+                             "tools.mcp_tool_loop": loops, "tools.mcp_tool_scope": scopes}.items():
+            monkeypatch.setitem(sys.modules, name, module)
+        captured = consumer.capture_native_mcp_owner(publication, include_guard=True)
+        assert captured[:3] == (owner, session, loop.loop)
+        guard = captured[3]
+        assert guard() is True
+        core._servers["profile::coo"] = _Owner(session)
+        assert guard() is False
+        core._servers["profile::coo"] = owner
+        owner._config["url"] = "https://foreign.example/mcp"
+        assert guard() is False
+        owner._config["url"] = publication.mcp.url
+        owner.initialize_result.serverInfo.version = "foreign"
+        assert guard() is False
+        owner.initialize_result.serverInfo.version = publication.mcp.server_version
+        tool.annotations = {"readOnlyHint": True}
+        assert guard() is False
+    finally:
+        loop.close()
+
+
+def test_registration_uncertainty_retains_original_context_and_does_not_reload(monkeypatch):
+    from integrations.hermes_harness import native_selected_child_plugin as plugin
+    from integrations.hermes_harness.native_tool_registration import NativeToolRegistrationError
+    publication = _publication()
+    manifest = types.SimpleNamespace(name=CONSUMER_PLUGIN_NAME, source=CONSUMER_PLUGIN_SOURCE,
+                                     path="/held/package")
+    manager = types.SimpleNamespace(scope_key="/profile", _plugins={})
+    context = types.SimpleNamespace(
+        _manager=manager, manifest=manifest, profile_name="mmsecretary",
+        plugin_id=CONSUMER_PLUGIN_NAME, _mcp_allowlist=lambda _name: [CONSUMER_MCP_SERVER])
+    binding = NativeDelegateBinding(
+        transport=_Transport(), currentness_guard=lambda: True, profile_id="mmsecretary",
+        session_id="session-1", command=COMMAND, job_id=JOB_ID)
+    counts = {"qualify": 0, "load": 0, "register": 0}
+    def qualify(**_kwargs):
+        counts["qualify"] += 1
+        return binding
+    def uncertain(ctx, startup):
+        counts["register"] += 1
+        raise NativeToolRegistrationError("NATIVE_TOOL_REGISTRATION_EFFECT_UNKNOWN",
+                                          context=ctx, binding=startup.binding,
+                                          scope=manager.scope_key)
+    def load(manifest):
+        counts["load"] += 1
+        try:
+            plugin.register(context)
+        except Exception as error:
+            manager._plugins[CONSUMER_PLUGIN_NAME] = types.SimpleNamespace(
+                enabled=False, error=str(error), manifest=manifest)
+    manager._load_plugin = load
+    monkeypatch.setattr(consumer, "qualify_executive_consumer", qualify)
+    monkeypatch.setattr(plugin, "current_runtime_owner", lambda: OWNER)
+    monkeypatch.setattr(plugin, "register_native_delegate_tools", uncertain)
+    arguments = dict(manager=manager, publication=publication, owner=OWNER, profile_id="mmsecretary",
+                     session_id="session-1", instance_id="instance-1", authority_epoch=1,
+                     route="route-1", server=None, session=None, loop=None,
+                     session_guard=lambda: True, manifest=manifest, package_check=lambda: True)
+    slot = consumer.install_native_consumer(**arguments)
+    assert slot is getattr(manager, consumer.CONSUMER_SLOT_ATTRIBUTE)
+    assert slot.load_outcome == "EFFECT_UNKNOWN"
+    assert slot.registration_context is context and slot.registration_binding is binding
+    assert slot.registration_error.original_context is context
+    assert slot.registration_error.original_binding is binding
+    assert slot.registration_error.original_scope == "/profile"
+    assert consumer.install_native_consumer(**arguments) is slot
+    assert counts == {"qualify": 1, "load": 1, "register": 1}
+    import pytest
+    with pytest.raises(RuntimeRefusal):
+        consumer.install_native_consumer(**dict(arguments, publication=_publication(target_digest="f" * 64)))
+    assert counts["load"] == 1
+
+
+def test_v3_consumer_joins_enrollment_request_and_actual_role():
+    import pytest
+    from ops.executive_os.release_manifest import ReleaseManifestError, validate_hermes_runtime_installation
+    for key, value in (("request_id", "foreign-request"), ("role", "mmmeta")):
+        document = publication_document()
+        document["session"][key] = value
+        with pytest.raises(ReleaseManifestError):
+            validate_hermes_runtime_installation(_installation(consumer=document))
+
+
+def test_provider_import_boundary_excludes_foreign_code_and_preserves_native_rows(tmp_path, monkeypatch):
+    import pytest
+    from integrations.hermes_runtime import native_gateway_entry as gateway
+    vendor = tmp_path / "vendor"
+    package = vendor / "providers"
+    bundled = vendor / "plugins/model-providers"
+    builtin = bundled / "builtin"
+    package.mkdir(parents=True)
+    builtin.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    foreign = tmp_path / "role/plugins/foreign"
+    foreign.mkdir(parents=True)
+    providers = types.ModuleType("providers")
+    providers.__file__ = str(package / "__init__.py")
+    providers.__path__ = [str(package)]
+    providers._BUNDLED_PLUGINS_DIR = bundled
+    providers._discovered = providers._discovering = False
+    for name in ("_REGISTRY", "_ALIASES", "_SOURCES", "_HOME_LAYERS"):
+        setattr(providers, name, {})
+    original_registry = providers._REGISTRY
+    calls = []
+    providers._import_plugin_dir = lambda path, source, **kw: calls.append((path, source, kw))
+    providers._discover_entry_point_providers = lambda: calls.append("entry-point-import")
+    monkeypatch.setitem(sys.modules, "providers", providers)
+    launch = types.SimpleNamespace(recipe={"executive_consumer": publication_document()},
+                                   check=lambda: None)
+    gateway._bind_consumer_provider_imports(launch, vendor)
+    assert providers._import_plugin_dir(foreign, "user", home_key=str(tmp_path / "role")) is None
+    assert providers._discover_entry_point_providers() is None
+    assert calls == []
+    with pytest.raises(RuntimeRefusal):
+        providers._import_plugin_dir(foreign, "bundled")
+    alias = bundled / "alias"
+    alias.symlink_to(foreign, target_is_directory=True)
+    with pytest.raises(RuntimeRefusal):
+        providers._import_plugin_dir(alias, "bundled")
+    providers._import_plugin_dir(builtin, "bundled")
+    assert calls == [(builtin, "bundled", {"home_key": ""})]
+    assert providers._REGISTRY is original_registry
+    assert providers._discovered is False
+    with pytest.raises(RuntimeRefusal):
+        gateway._bind_consumer_provider_imports(launch, vendor)
+
+def test_serving_proof_cannot_borrow_a_foreign_same_schema_registration(tmp_path, monkeypatch):
+    import pytest
+    from integrations.hermes_runtime import native_session_control as control
+    publication = _publication()
+    home = tmp_path / "role"
+    manager = types.SimpleNamespace(scope_key=str(home), _plugins={})
+    server = _Owner(_Session())
+    guard = consumer.NativeConsumerCurrentness(
+        publication=publication, session_id="session-1", instance_id="instance-1",
+        authority_epoch=1, server=server, session=server.session, guard=lambda: True)
+    binding = NativeDelegateBinding(
+        transport=_Transport(), currentness_guard=guard, profile_id="mmsecretary",
+        session_id="session-1", command=COMMAND, job_id=JOB_ID)
+    slot = consumer.install_consumer_slot(manager, ConsumerSlot(
+        owner=OWNER, profile_id="mmsecretary", source=CONSUMER_PLUGIN_SOURCE,
+        plugin_id=CONSUMER_PLUGIN_NAME, publication=publication,
+        startup=NativeDelegateStartup(binding=binding)))
+    handler = native_delegate_handler(binding)
+    check = lambda: True
+    entry = types.SimpleNamespace(handler=handler, check_fn=check,
+                                  toolset="mmx_delegate", schema=NATIVE_TOOL_SCHEMA)
+    registration = NativeDelegateRegistration(
+        name="mmx_delegate", toolset="mmx_delegate", scope=str(home),
+        profile_id="mmsecretary", session_id="session-1", command=COMMAND, job_id=JOB_ID,
+        handler=handler, check_fn=check, handle=object(), entry=entry)
+    slot.publish_registration(registration)
+    slot.registration_context = types.SimpleNamespace(_manager=manager)
+    slot.load_outcome = "REGISTERED"
+    loaded = types.SimpleNamespace(enabled=True, error=None)
+    slot.loader_record = loaded
+    manager._plugins[CONSUMER_PLUGIN_NAME] = loaded
+    live = {"entry": entry}
+    plugin_module = types.ModuleType("hermes_cli.plugins")
+    plugin_module.get_plugin_manager = lambda: manager
+    registry_module = types.ModuleType("tools.registry")
+    registry_module.registry = types.SimpleNamespace(
+        snapshot_registration=lambda _name, scope: live["entry"] if scope == str(home) else None)
+    monkeypatch.setitem(sys.modules, "hermes_cli.plugins", plugin_module)
+    monkeypatch.setitem(sys.modules, "tools.registry", registry_module)
+    monkeypatch.setattr(control, "current_runtime_owner", lambda: OWNER)
+    runner = types.SimpleNamespace(_draining=False, session_runtime_descriptor={
+        "state": "ready", "instance_id": "instance-1", "authority_epoch": 1})
+    proof = control._consumer_extension(runner, home)
+    assert proof["session_id"] == "session-1" and proof["target_digest"] == TARGET_DIGEST
+    assert proof["implementation_sha"] == OWNER and proof["scope"] == str(home)
+    live["entry"] = types.SimpleNamespace(
+        handler=lambda *_args, **_kwargs: "", check_fn=check,
+        toolset="mmx_delegate", schema=NATIVE_TOOL_SCHEMA)
+    with pytest.raises(RuntimeRefusal):
+        control._consumer_extension(runner, home)
+    live["entry"] = entry
+    manager._plugins[CONSUMER_PLUGIN_NAME] = types.SimpleNamespace(enabled=True, error=None)
+    with pytest.raises(RuntimeRefusal):
+        control._consumer_extension(runner, home)
+
+
+def test_enrollment_qualification_keeps_original_worker_after_observer_cancellation(tmp_path, monkeypatch):
+    import contextvars
+    import pytest
+    from integrations.hermes_runtime import native_gateway_entry as gateway
+    from integrations.hermes_runtime import native_session_control as control
+    from integrations.hermes_harness import native_selected_child_plugin as plugin
+    held = Path(consumer.__file__).parent / CONSUMER_PLUGIN_NAME
+    class HeldOwner:
+        root = tmp_path / OWNER
+        def directory(self, relative):
+            return self.root / relative
+        def source(self, relative):
+            return (held / Path(relative).name).read_bytes()
+        def check(self):
+            return None
+    owner = HeldOwner()
+    document = publication_document()
+    document["plugin"]["digest"] = consumer.held_plugin_package_digest(owner)
+    publication = publication_from_document(document)
+    role_home = tmp_path / "role"
+    launch = types.SimpleNamespace(owner=owner, recipe={"executive_consumer": document},
+                                   check=lambda: None)
+    active_profile = contextvars.ContextVar("c46_fixture_profile", default="foreign")
+    active_profile.set("mmsecretary")
+    manager = types.SimpleNamespace(scope_key=str(role_home), _plugins={})
+    foreign_manager = types.SimpleNamespace(scope_key="/foreign")
+    counts = {"qualify": 0, "load": 0, "register": 0}
+    contexts = []
+    class Manifest:
+        def __init__(self, **values):
+            self.__dict__.update(values)
+    def original_load(manifest):
+        counts["load"] += 1
+        context = types.SimpleNamespace(
+            _manager=manager, manifest=manifest, profile_name="mmsecretary",
+            plugin_id=CONSUMER_PLUGIN_NAME, _mcp_allowlist=lambda _name: [CONSUMER_MCP_SERVER])
+        contexts.append(context)
+        plugin.register(context)
+        manager._plugins[CONSUMER_PLUGIN_NAME] = types.SimpleNamespace(
+            enabled=True, error=None, manifest=manifest)
+    manager._load_plugin = original_load
+    modules = {
+        "hermes_cli.plugins": {"get_plugin_manager": lambda: manager
+                              if active_profile.get() == "mmsecretary" else foreign_manager},
+        "hermes_cli.profiles": {"get_active_profile_name": lambda: active_profile.get()},
+        "hermes_cli.plugins_manifest": {"PluginManifest": Manifest},
+    }
+    for name, values in modules.items():
+        module = types.ModuleType(name)
+        module.__dict__.update(values)
+        monkeypatch.setitem(sys.modules, name, module)
+    native_ready = types.SimpleNamespace(publish_gateway_runtime_ready=lambda _runner: "native-ready")
+    monkeypatch.setattr(gateway, "_vendor_module", lambda name, _root: native_ready
+                        if name == "gateway.run_runtime" else pytest.fail("unexpected native import"))
+    monkeypatch.setattr(control, "current_runtime_owner", lambda: OWNER)
+    monkeypatch.setattr(plugin, "current_runtime_owner", lambda: OWNER)
+    target = {"profile_id": str(role_home), "principal_id": publication.session.principal_id,
+              "session_id": "session-1", "instance_id": "instance-1", "authority_epoch": 1,
+              "revision": 0, "execution_generation": 0}
+    observed = {"status": "ABSENT", "target": None, "route": None}
+    monkeypatch.setattr(control, "read_enrolled_session", lambda *_args: dict(observed))
+    entered, release = threading.Event(), threading.Event()
+    loop = _McpLoop()
+    server = _Owner(_Session())
+    monkeypatch.setattr(consumer, "capture_native_mcp_owner",
+                        lambda *_args, **_kwargs: (server, server.session, loop.loop, lambda: True))
+    def qualify(**kwargs):
+        counts["qualify"] += 1
+        guard = consumer.NativeConsumerCurrentness(
+            publication=publication, session_id=target["session_id"],
+            instance_id=target["instance_id"], authority_epoch=target["authority_epoch"],
+            server=server, session=server.session, guard=kwargs["currentness"])
+        assert guard() is True
+        entered.set()
+        assert release.wait(5)
+        assert guard() is True
+        return NativeDelegateBinding(
+            transport=_Transport(), currentness_guard=guard, profile_id="mmsecretary",
+            session_id="session-1", command=COMMAND, job_id=JOB_ID)
+    monkeypatch.setattr(consumer, "qualify_executive_consumer", qualify)
+    def register(context, startup):
+        counts["register"] += 1
+        binding = startup.binding
+        return NativeDelegateRegistration(
+            name="mmx_delegate", toolset="mmx_delegate", scope=str(role_home),
+            profile_id=binding.profile_id, session_id=binding.session_id,
+            command=binding.command, job_id=binding.job_id,
+            handler=native_delegate_handler(binding), check_fn=binding.currentness_guard,
+            handle=object(), entry=object())
+    monkeypatch.setattr(plugin, "register_native_delegate_tools", register)
+    runner = types.SimpleNamespace(_draining=False, session_runtime_descriptor={
+        "state": "ready", "instance_id": "instance-1", "authority_epoch": 1})
+    async def scenario():
+        transition = gateway._install_consumer_seam(launch, tmp_path / "vendor", role_home)
+        slot = getattr(manager, consumer.CONSUMER_SLOT_ATTRIBUTE)
+        assert native_ready.publish_gateway_runtime_ready(runner) == "native-ready"
+        assert slot.startup.binding is None and slot.qualification_task is None
+        candidate = Manifest(name=CONSUMER_PLUGIN_NAME, key=CONSUMER_PLUGIN_NAME,
+                             source=CONSUMER_PLUGIN_SOURCE, path=slot.package_path)
+        assert manager._load_plugin(candidate) is None
+        candidate.path = str(role_home / "plugins" / CONSUMER_PLUGIN_NAME)
+        with pytest.raises(RuntimeRefusal):
+            manager._load_plugin(candidate)
+        assert counts == {"qualify": 0, "load": 0, "register": 0}
+        observed.update(status="ENROLLED", target=target, route="route-1")
+        transition(runner)
+        original_observer = slot.qualification_task
+        assert await asyncio.to_thread(entered.wait, 3)
+        original_worker = slot.qualification_worker
+        assert original_worker is not None and not original_worker.done()
+        original_observer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await original_observer
+        # The outer observer's cancellation cannot admit a replacement while
+        # the original native registration worker still owns the outcome.
+        transition(runner)
+        assert slot.qualification_worker is original_worker
+        assert slot.qualification_task is original_observer
+        assert counts == {"qualify": 1, "load": 0, "register": 0}
+        active_profile.set("foreign")
+        release.set()
+        assert await asyncio.wait_for(asyncio.shield(original_worker), timeout=4) is slot
+        await asyncio.sleep(0)
+        assert slot.load_outcome == slot.qualification_outcome == "REGISTERED"
+        assert slot.registration_context is contexts[0] and slot.registration is not None
+        assert counts == {"qualify": 1, "load": 1, "register": 1}
+        transition(runner)
+        assert counts == {"qualify": 1, "load": 1, "register": 1}
+    try:
+        asyncio.run(scenario())
+    finally:
+        release.set()
+        loop.close()

@@ -245,6 +245,15 @@ class ServiceRuntime:
 
     def health_snapshot(self) -> tuple[int, dict]:
         with self._lock:
+            original = self._child
+            ready = self._backend_ready
+        # Refresh at the existing requested health/status boundary, outside
+        # the supervisor lock. No new watcher or automatic registration.
+        if (original is not None and ready and original.poll() is None
+                and self.profile.gateway_backend == "native-session-authority"
+                and self._consumer_publication() is not None):
+            self._consume_consumer_extension(original.pid)
+        with self._lock:
             child = self._child
             running = child is not None and child.poll() is None
             backend_ready = running and self._backend_ready
@@ -279,7 +288,7 @@ class ServiceRuntime:
                 # actual scoped entry in the running child. It is separate
                 # from the static no-credential built-in census and it never
                 # clears the extension hold by itself.
-                "native_extension_proved": self._extension_proved,
+                "native_extension_proved": self._extension_proved and backend_ready,
                 "loopback": True,
                 "gateway_host": self.profile.gateway_host,
                 "allowlist": sorted(self.profile.tool_allowlist),
@@ -334,50 +343,77 @@ class ServiceRuntime:
             return reply(uncertain)
         return {"schema": response_schema, "implementation_sha": implementation, "result": result}
 
-    def _observe_consumer_extension(self, child_pid: int) -> dict | None:
-        """Read the serving process's actual scoped native extension entry.
-
-        The read happens only after the launch owner proved that this is the
-        original actual child. It is a finite read-only observation over the
-        existing same-UID private socket: it starts no owner, creates no
-        session and clears no hold.
-        """
-        home = self._native_home
-        launch = self._native_launch
+    def _observe_consumer_extension(self, child_pid: int):
+        """Join one serving proof to its original child and enrolled session."""
+        home, launch = self._native_home, self._native_launch
         if home is None or launch is None:
             return None
         try:
+            from .native_session_control import NativeSecretaryClient, validate_enrollment_result
+            from integrations.hermes_harness.native_executive_consumer import publication_from_document
+            publication = publication_from_document(self._consumer_publication())
+            implementation = launch.owner.root.name
             launch.observe_child(child_pid)
-            from .native_session_control import NativeSecretaryClient
-            result = NativeSecretaryClient(home, expected_pid=child_pid).consumer_extension()
+            client = NativeSecretaryClient(home, expected_pid=child_pid)
+            result = client.consumer_extension()
+            enrollment = validate_enrollment_result(
+                client.inspect_enrollment(implementation, publication.session.request_id),
+                implementation_sha=implementation, request_id=publication.session.request_id,
+                profile_id=str(home), principal_id=publication.session.principal_id)
+            launch.observe_child(child_pid)
+            if (not isinstance(result, dict) or result.get("status") != "OBSERVED"
+                    or enrollment["status"] != "ENROLLED"
+                    or type(result.get("extension")) is not dict):
+                return None
+            return result["extension"], enrollment["target"]
         except Exception:
             return None
-        if not isinstance(result, dict) or result.get("status") != "OBSERVED":
-            return None
-        extension = result.get("extension")
-        return extension if isinstance(extension, dict) else None
+
 
     def _consume_consumer_extension(self, child_pid: int) -> None:
-        """Record the serving-process extension proof for this child."""
+        """Refresh the conclusion for the same held child at a read boundary."""
         from .registry import assert_extension_proof_exact
         from .native_session_control import CONSUMER_EXTENSION_TOOL
-        from integrations.hermes_harness.native_executive_consumer import schema_digest
+        from integrations.hermes_harness.native_executive_consumer import (
+            publication_from_document, schema_digest)
         from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
-
-        extension = self._observe_consumer_extension(child_pid)
         with self._lock:
-            self._extension_observed = extension
-            self._extension_proved = False
-        if extension is None:
-            return
+            original_child = self._child
+            if original_child is None or original_child.pid != child_pid:
+                return
+        observation = self._observe_consumer_extension(child_pid)
+        extension = None
+        proved = False
         try:
-            verdict = assert_extension_proof_exact(
-                extension, expected_tool=CONSUMER_EXTENSION_TOOL,
-                expected_schema_sha256=schema_digest(NATIVE_TOOL_SCHEMA))
-        except RuntimeRefusal:
-            return
+            if observation is not None:
+                extension, target = observation
+                publication = publication_from_document(self._consumer_publication())
+                expected = {
+                    "implementation_sha": self._native_launch.owner.root.name,
+                    "profile_id": str(self._native_home),
+                    "instance_id": target["instance_id"], "authority_epoch": target["authority_epoch"],
+                    "enrollment_request_id": publication.session.request_id,
+                    "principal_id": publication.session.principal_id, "session_id": target["session_id"],
+                    "command_id": publication.command, "job_id": publication.job_id,
+                    "target_digest": publication.target_digest,
+                    "principal_binding_digest": publication.principal_binding_digest,
+                    "authority_generation_digest": publication.authority_generation_digest,
+                    "capability_profile_digest": publication.capability_profile_digest,
+                    "plugin_sha256": publication.plugin.digest,
+                    "mcp_tools_schema_sha256": publication.tools_schema_digest,
+                }
+                verdict = assert_extension_proof_exact(
+                    extension, expected_tool=CONSUMER_EXTENSION_TOOL,
+                    expected_schema_sha256=schema_digest(NATIVE_TOOL_SCHEMA),
+                    expected_scope=str(self._native_home), expected_binding=expected)
+                proved = verdict["installed"] is True
+        except (RuntimeRefusal, ValueError, TypeError, KeyError, AttributeError):
+            proved = False
         with self._lock:
-            self._extension_proved = verdict["installed"] is True
+            if self._child is original_child:
+                self._extension_observed = extension
+                self._extension_proved = proved and original_child.poll() is None
+
 
     def _env(self) -> dict[str, str]:
         # CLI/tool census receives no model provider credential.
@@ -599,9 +635,10 @@ class ServiceRuntime:
                 self._child = proc
                 self.child_pid = proc.pid
                 self._backend_ready = False
+                self._extension_observed = None
+                self._extension_proved = False
             next_memory_sample = 0.0
             poll_sec = min(0.25, self.profile.memory_sample_interval_sec)
-            extension_checked = False
             while not self._stop.is_set() and proc.poll() is None:
                 if self.profile.gateway_backend == "native-session-authority":
                     try:
@@ -618,11 +655,6 @@ class ServiceRuntime:
                 with self._lock:
                     if self._child is proc:
                         self._backend_ready = backend_ready
-                if backend_ready and not extension_checked:
-                    # The serving-process extension proof is read once, after
-                    # the launch owner proved this is the original child.
-                    extension_checked = True
-                    self._consume_consumer_extension(proc.pid)
                 now = time.monotonic()
                 if now >= next_memory_sample:
                     rss = read_rss_kib(proc.pid)
@@ -637,12 +669,16 @@ class ServiceRuntime:
                     self._child = None
                     self.child_pid = None
                     self._backend_ready = False
+                    self._extension_observed = None
+                    self._extension_proved = False
                 return
             _reap(proc)
             with self._lock:
                 self._child = None
                 self.child_pid = None
                 self._backend_ready = False
+                self._extension_observed = None
+                self._extension_proved = False
                 self.restart_count += 1
             if self.child_starts >= self.profile.start_limit_burst:
                 self.failed = True

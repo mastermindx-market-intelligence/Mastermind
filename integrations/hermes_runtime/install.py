@@ -323,43 +323,29 @@ def _write_release(
                        native_adapter_sha256=hashlib_sha256(
                            (repo_root() / "integrations/hermes_runtime/native_gateway_entry.py").read_bytes()))
         if plugin_digest is not None:
-            # What the normal install writer actually installed. The launch
-            # owner proves it against the sealed publication before the
-            # native loader may import the package.
+            # Source package equality only. The held release capability,
+            # never role-home ownership, authenticates it before import.
             receipt.update(native_consumer_plugin_sha256=plugin_digest)
     _atomic_write(release / "install-receipt.json", _json(receipt), 0o600)
 
 
 def _install_consumer_plugin(role_dir: Path, consumer: dict) -> str:
-    """Install the sealed consumer plugin package into the role's plugin root.
+    """Record the source package; never copy executable code into role custody.
 
-    The bytes come from the held release source, are owner-only, and are
-    proven against the publication's sealed digest before they are written.
-    A digest in an installation document is a claim; this is the check that
-    the installed bytes are the release source it names.
+    The held release owner qualifies these same bytes again before any native
+    discovery/import. A source digest in this receipt alone grants no load.
     """
     from integrations.hermes_harness.native_executive_consumer import (
-        CONSUMER_PLUGIN_NAME,
-        plugin_package_digest,
-    )
-
-    source = repo_root() / "integrations" / "hermes_harness" / CONSUMER_PLUGIN_NAME
-    try:
-        observed = plugin_package_digest(source)
-    except RuntimeRefusal:
-        raise
+        CONSUMER_PLUGIN_NAME, plugin_package_digest)
+    target = role_dir / "plugins" / CONSUMER_PLUGIN_NAME
+    if os.path.lexists(target):
+        raise RuntimeRefusal("NATIVE_CONSUMER_ROLE_PACKAGE_FORBIDDEN")
+    source = repo_root() / "integrations/hermes_harness" / CONSUMER_PLUGIN_NAME
+    observed = plugin_package_digest(source)
     if observed != consumer["plugin"]["digest"]:
         raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_SOURCE_MISMATCH")
-    target = role_dir / "plugins" / CONSUMER_PLUGIN_NAME
-    target.mkdir(parents=True, mode=0o700)
-    os.chmod(target, 0o700)
-    for name in ("plugin.yaml", "__init__.py"):
-        data = (source / name).read_bytes()
-        _atomic_write(target / name, data, 0o600)
-    installed = plugin_package_digest(target)
-    if installed != observed:
-        raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_PACKAGE_MISMATCH")
-    return installed
+    return observed
+
 
 
 def _soul_bytes(role: str) -> bytes:

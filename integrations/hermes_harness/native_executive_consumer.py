@@ -63,7 +63,6 @@ __all__ = [
     "ExecutiveConsumerPublication",
     "NativeConsumerCurrentness",
     "NativeExecutiveTransport",
-    "frozen_material_digest",
     "install_consumer_slot",
     "publication_from_document",
     "read_consumer_slot",
@@ -158,16 +157,6 @@ def _canonical(value: Any) -> bytes:
                       ensure_ascii=False, allow_nan=False).encode("utf-8")
 
 
-def frozen_material_digest(material: Mapping[str, Any]) -> str:
-    """Deterministic equality digest over the frozen target material.
-
-    This is an *equality* check over material equality, never an authority and
-    never an operation identity. The callable that C29's target carries is not
-    part of the material and cannot be digested.
-    """
-    if not isinstance(material, Mapping):
-        raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
-    return hashlib.sha256(_canonical(dict(material))).hexdigest()
 
 
 def schema_digest(schema: Any) -> str:
@@ -183,33 +172,32 @@ def schema_digest(schema: Any) -> str:
 
 
 def tools_schema_digest(tools: Any) -> str:
-    """Digest of one MCP server's complete discovered tool schema.
-
-    The digest covers every discovered tool's name, description and input
-    schema, sorted by name. It is compared against the frozen publication, so
-    a server that grew, shrank or changed a tool can never be mistaken for the
-    reviewed Executive ingress.
-    """
-    if tools is None or not isinstance(tools, (list, tuple)):
+    """Use the capability owner's canonical observed MCP contract digest."""
+    from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
+    if not isinstance(tools, (list, tuple)):
         raise RuntimeRefusal("NATIVE_CONSUMER_TOOLS_SCHEMA_INVALID")
-    rows = []
+    rows = {}
     for tool in tools:
-        name = getattr(tool, "name", None)
-        if type(name) is not str or not name:
+        if isinstance(tool, Mapping):
+            row = dict(tool)
+        elif callable(getattr(tool, "model_dump", None)):
+            row = tool.model_dump(by_alias=True, exclude_none=True)
+        else:
+            row = {name: getattr(tool, name, None)
+                   for name in ("name", "inputSchema", "outputSchema", "annotations")}
+        name = row.get("name")
+        if type(name) is not str or not name or name in rows:
             raise RuntimeRefusal("NATIVE_CONSUMER_TOOLS_SCHEMA_INVALID")
-        schema = getattr(tool, "inputSchema", None)
-        if schema is None:
-            schema = getattr(tool, "input_schema", None)
-        description = getattr(tool, "description", None)
-        rows.append({
-            "name": name,
-            "description": description if type(description) is str else "",
-            "input_schema": schema if isinstance(schema, Mapping) else {},
-        })
-    if len(rows) != len({row["name"] for row in rows}):
+        for key in ("outputSchema", "annotations"):
+            value = row.get(key)
+            if callable(getattr(value, "model_dump", None)):
+                row[key] = value.model_dump(by_alias=True, exclude_none=True)
+        rows[name] = row
+    result = observed_mcp_tool_schema_digest({"tools": rows})
+    if result is None:
         raise RuntimeRefusal("NATIVE_CONSUMER_TOOLS_SCHEMA_INVALID")
-    rows.sort(key=lambda row: row["name"])
-    return hashlib.sha256(_canonical(rows)).hexdigest()
+    return result
+
 
 
 @dataclass(frozen=True)
@@ -276,9 +264,17 @@ class ConsumerMcp:
         _text(self.server, "server")
         if type(self.url) is not str or not 1 < len(self.url) <= _MAX_URL:
             raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
-        if not self.url.startswith("https://") and not self.url.startswith("http://127.0.0.1"):
-            # A native Executive ingress is loopback- or TLS-terminated. A
-            # plaintext remote route is refused here rather than published.
+        from urllib.parse import urlsplit
+        try:
+            route = urlsplit(self.url)
+            port = route.port
+        except ValueError:
+            raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID") from None
+        if (not route.hostname or route.username is not None or route.password is not None
+                or route.query or route.fragment or route.path not in {"/mcp", "/mcp/coo"}
+                or (port is not None and not 1 <= port <= 65535)
+                or not (route.scheme == "https"
+                        or (route.scheme == "http" and route.hostname == "127.0.0.1"))):
             raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
         _text(self.client_id, "client_id", _CLIENT_REF_RE)
         if type(self.scope) is not str or _OAUTH_SCOPE_RE.fullmatch(self.scope) is None:
@@ -379,23 +375,6 @@ class ExecutiveConsumerPublication:
             # cannot describe different children.
             raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
 
-    def frozen_material(self) -> dict[str, Any]:
-        """The material the target digest is computed over.
-
-        This is the *equality* material of the frozen child: the work
-        reference, the command, the Job and the mission joins. The C30
-        producer must publish exactly this material for the digests to match.
-        """
-        return {
-            "work_ref": self.work_ref,
-            "command": self.command,
-            "job_id": self.job_id,
-            "root_job_id": self.root_job_id,
-            "mission_authority_ref": self.mission_authority_ref,
-            "authority_generation_digest": self.authority_generation_digest,
-            "capability_profile_digest": self.capability_profile_digest,
-            "principal_binding_digest": self.principal_binding_digest,
-        }
 
 
 def validate_consumer_publication(value: Any) -> dict[str, Any]:
@@ -522,85 +501,120 @@ def _typed_publication(document: Mapping[str, Any]) -> ExecutiveConsumerPublicat
 
 
 class ConsumerSlot:
-    """The fixed typed owner-private slot on one per-profile PluginManager.
-
-    The held native startup owns the slot. The plugin loader reads it through
-    the typed accessors below. The slot carries the *one* immutable startup
-    and, after a proved registration, the *one* registration receipt. A second
-    different registration is refused: the original context and lease stay.
-    """
+    """The original manager's sole qualification/registration outcome owner."""
 
     __slots__ = ("owner", "profile_id", "source", "plugin_id", "publication", "startup",
-                 "_registration", "_lock")
+                 "_registration", "_lock", "manager", "scope", "package_path",
+                 "package_check", "qualification_task", "qualification_worker", "qualification_key",
+                 "qualification_outcome", "load_attempted", "loader_entered",
+                 "loader_result", "loader_record", "load_outcome", "registration_context",
+                 "registration_binding", "registration_error", "registration_attempted")
 
     def __init__(self, *, owner: str, profile_id: str, source: str, plugin_id: str,
-                 publication: "ExecutiveConsumerPublication",
-                 startup: NativeDelegateStartup) -> None:
-        if (type(owner) is not str or not owner
-                or type(profile_id) is not str or not profile_id
-                or type(source) is not str or not source
-                or type(plugin_id) is not str or not plugin_id):
+                 publication: ExecutiveConsumerPublication,
+                 startup: NativeDelegateStartup | None = None) -> None:
+        if any(type(value) is not str or not value
+               for value in (owner, profile_id, source, plugin_id)):
             raise RuntimeRefusal("NATIVE_CONSUMER_SLOT_INVALID")
         if not isinstance(publication, ExecutiveConsumerPublication):
             raise RuntimeRefusal("NATIVE_CONSUMER_SLOT_INVALID")
-        if not isinstance(startup, NativeDelegateStartup):
+        if startup is not None and not isinstance(startup, NativeDelegateStartup):
             raise RuntimeRefusal("NATIVE_CONSUMER_SLOT_INVALID")
-        if startup.binding is None:
-            raise RuntimeRefusal("NATIVE_CONSUMER_SLOT_UNBOUND")
-        self.owner = owner
-        self.profile_id = profile_id
-        self.source = source
-        self.plugin_id = plugin_id
+        self.owner, self.profile_id, self.source, self.plugin_id = owner, profile_id, source, plugin_id
         self.publication = publication
-        self.startup = startup
-        self._registration: NativeDelegateRegistration | None = None
-        self._lock = threading.Lock()
+        self.startup = startup if startup is not None else NativeDelegateStartup()
+        self._registration = None
+        self._lock = threading.RLock()
+        self.manager = self.scope = self.package_path = self.package_check = None
+        self.qualification_task = self.qualification_worker = self.qualification_key = None
+        self.qualification_outcome = "UNBOUND"
+        self.load_attempted = self.loader_entered = self.registration_attempted = False
+        self.loader_result = self.loader_record = self.registration_context = self.registration_binding = None
+        self.registration_error = None
+        self.load_outcome = "NOT_ATTEMPTED"
+
+    def identities_match(self, *, owner: str, source: str, plugin_id: str,
+                         profile_id: str | None = None,
+                         publication: ExecutiveConsumerPublication | None = None) -> bool:
+        return (self.owner == owner and self.source == source and self.plugin_id == plugin_id
+                and (profile_id is None or self.profile_id == profile_id)
+                and (publication is None or self.publication == publication))
+
+    def bind_startup(self, startup: NativeDelegateStartup) -> None:
+        if not isinstance(startup, NativeDelegateStartup) or startup.binding is None:
+            raise RuntimeRefusal("NATIVE_CONSUMER_SLOT_UNBOUND")
+        with self._lock:
+            if self.load_attempted or self.registration_attempted:
+                raise RuntimeRefusal("NATIVE_CONSUMER_ORIGINAL_LOAD_RETAINED")
+            if self.startup.binding is not None and self.startup.binding is not startup.binding:
+                raise RuntimeRefusal("NATIVE_CONSUMER_SLOT_CONFLICT")
+            self.startup = startup
+
+    def begin_registration(self, ctx: Any) -> None:
+        with self._lock:
+            if (self.registration_attempted or self.startup.binding is None
+                    or getattr(ctx, "_manager", None) is not self.manager):
+                raise NativeToolRegistrationError("NATIVE_CONSUMER_ORIGINAL_REGISTRATION_RETAINED")
+            if not callable(self.package_check) or self.package_check() is not True:
+                raise NativeToolRegistrationError("NATIVE_CONSUMER_PLUGIN_UNQUALIFIED")
+            # Retain the original owners BEFORE C28 may mutate the native registry.
+            self.registration_context = ctx
+            self.registration_binding = self.startup.binding
+            self.registration_attempted = True
+            self.load_outcome = "REGISTRATION_PENDING"
+
+    def retain_registration_error(self, error: Exception) -> None:
+        with self._lock:
+            self.registration_error = error
+            self.load_outcome = (
+                "EFFECT_UNKNOWN" if getattr(error, "code", "") in {
+                    "NATIVE_TOOL_REGISTRATION_EFFECT_UNKNOWN", "NATIVE_TOOL_ROLLBACK_EFFECT_UNKNOWN"}
+                or not isinstance(error, NativeToolRegistrationError) else "REFUSED")
 
     def publish_registration(self, registration: NativeDelegateRegistration) -> None:
-        """Record the one registration this slot may ever own."""
         if not isinstance(registration, NativeDelegateRegistration):
             raise RuntimeRefusal("NATIVE_CONSUMER_REGISTRATION_INVALID")
         with self._lock:
-            current = self._registration
-            if current is None:
-                self._registration = registration
-                return
-            if (current.name != registration.name or current.scope != registration.scope
-                    or current.handler is not registration.handler
-                    or current.check_fn is not registration.check_fn):
-                # A second, different registration never replaces the first.
+            binding = self.startup.binding
+            if (binding is None or registration.profile_id != binding.profile_id
+                    or registration.session_id != binding.session_id
+                    or registration.command != binding.command or registration.job_id != binding.job_id
+                    or registration.scope != self.scope):
                 raise RuntimeRefusal("NATIVE_CONSUMER_REGISTRATION_CONFLICT")
+            current = self._registration
+            if current is not None and current is not registration:
+                raise RuntimeRefusal("NATIVE_CONSUMER_REGISTRATION_CONFLICT")
+            self._registration = registration
 
     @property
     def registration(self) -> NativeDelegateRegistration | None:
         with self._lock:
             return self._registration
 
-    def identities_match(self, *, owner: str, source: str, plugin_id: str) -> bool:
-        return (self.owner == owner and self.source == source
-                and self.plugin_id == plugin_id)
 
 
 def install_consumer_slot(manager: Any, slot: ConsumerSlot) -> ConsumerSlot:
-    """Install the slot on the ACTUAL per-profile PluginManager.
-
-    The manager is the object the upstream owner created for this profile. A
-    manager that already carries a *different* slot is refused: a reconnect,
-    a settings change or another profile must never retarget a live
-    registration.
-    """
-    if manager is None or not hasattr(manager, "scope_key"):
+    """Return the actual original slot; never retarget an existing binding."""
+    scope = getattr(manager, "scope_key", None)
+    if type(scope) is not str or not scope or not isinstance(slot, ConsumerSlot):
         raise RuntimeRefusal("NATIVE_CONSUMER_MANAGER_INVALID")
-    if not isinstance(slot, ConsumerSlot):
-        raise RuntimeRefusal("NATIVE_CONSUMER_SLOT_INVALID")
     existing = getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None)
     if existing is not None:
-        if not isinstance(existing, ConsumerSlot) or not existing.identities_match(
-                owner=slot.owner, source=slot.source, plugin_id=slot.plugin_id):
+        if (not isinstance(existing, ConsumerSlot)
+                or not existing.identities_match(
+                    owner=slot.owner, source=slot.source, plugin_id=slot.plugin_id,
+                    profile_id=slot.profile_id, publication=slot.publication)
+                or existing.manager is not manager or existing.scope != scope
+                or (slot.startup.binding is not None
+                    and existing.startup.binding is not slot.startup.binding)):
             raise RuntimeRefusal("NATIVE_CONSUMER_SLOT_CONFLICT")
         return existing
+    if slot.manager is not None and (slot.manager is not manager or slot.scope != scope):
+        raise RuntimeRefusal("NATIVE_CONSUMER_SLOT_CONFLICT")
+    slot.manager, slot.scope = manager, scope
     setattr(manager, CONSUMER_SLOT_ATTRIBUTE, slot)
     return slot
+
 
 
 def read_consumer_slot(ctx: Any, *, owner: str, source: str,
@@ -620,7 +634,8 @@ def read_consumer_slot(ctx: Any, *, owner: str, source: str,
     slot = getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None)
     if not isinstance(slot, ConsumerSlot):
         raise NativeToolRegistrationError("NATIVE_CONSUMER_SLOT_UNBOUND")
-    if not slot.identities_match(owner=owner, source=source, plugin_id=plugin_id):
+    if (not slot.identities_match(owner=owner, source=source, plugin_id=plugin_id)
+            or slot.manager is not manager or slot.scope != manager.scope_key):
         raise NativeToolRegistrationError("NATIVE_CONSUMER_SLOT_FOREIGN")
     manifest = getattr(ctx, "manifest", None)
     if manifest is None:
@@ -633,6 +648,9 @@ def read_consumer_slot(ctx: Any, *, owner: str, source: str,
     reported = getattr(ctx, "profile_name", None)
     if type(reported) is not str or reported != slot.profile_id:
         raise NativeToolRegistrationError("NATIVE_PROFILE_MISMATCH")
+    if (slot.package_path is None
+            or str(getattr(manifest, "path", "")) != slot.package_path):
+        raise NativeToolRegistrationError("NATIVE_CONSUMER_PLUGIN_PACKAGE_MISMATCH")
     return slot
 
 
@@ -661,7 +679,7 @@ class NativeConsumerCurrentness:
 
     def __call__(self) -> bool:
         try:
-            if self._guard is not None and self._guard() is not True:
+            if self._guard is None or self._guard() is not True:
                 return False
             server = self._server
             if server is None or getattr(server, "session", None) is not self._session:
@@ -717,211 +735,159 @@ def _refusal_envelope(reason: str, publication: ExecutiveConsumerPublication) ->
 
 
 class _NativeMcpCaller:
-    """One ``tools/call`` on one captured native MCP owner.
+    """One RPC on the captured native loop, with checks at its actual send edge."""
 
-    The caller owns no connection. It uses the *captured* ``MCPServerTask`` and
-    its live ``ClientSession``, on the MCP owner's own loop, under the
-    incumbent RPC lock and inflight bookkeeping. It never opens a session,
-    discovers a server, reconnects, replays, cancels or handles a token.
+    __slots__ = ("_server", "_session", "_loop", "_timeout", "_currentness")
 
-    A lost response, a timeout or a transport error is *uncertain*: the caller
-    raises and never retries, cancels or re-keys the request.
-    """
-
-    __slots__ = ("_server", "_session", "_loop", "_timeout")
-
-    def __init__(self, *, server: Any, session: Any, loop: Any, timeout: float = 30.0) -> None:
-        self._server = server
-        self._session = session
-        self._loop = loop
-        self._timeout = float(timeout)
+    def __init__(self, *, server: Any, session: Any, loop: Any, timeout: float = 30.0,
+                 currentness: Callable[[], bool] | None = None) -> None:
+        self._server, self._session, self._loop = server, session, loop
+        self._timeout, self._currentness = float(timeout), currentness
 
     @property
-    def server(self) -> Any:
-        return self._server
+    def server(self): return self._server
 
     @property
-    def session(self) -> Any:
-        return self._session
+    def session(self): return self._session
 
     @property
-    def loop(self) -> Any:
-        return self._loop
+    def loop(self): return self._loop
+
+    def _check(self):
+        if (self._server is None or self._session is None or self._loop is None
+                or getattr(self._server, "session", None) is not self._session
+                or (self._currentness is not None and self._currentness() is not True)):
+            raise _ConsumerUncertain("original native MCP binding is unavailable")
 
     def call(self, tool_name: str, arguments: Mapping[str, Any]) -> Any:
-        """Send exactly one request and return the raw MCP result."""
-        server = self._server
-        session = self._session
-        loop = self._loop
-        if server is None or session is None or loop is None:
-            raise _ConsumerUncertain("native mcp owner is unavailable")
-        if getattr(server, "session", None) is not session:
-            # The captured session was replaced (a reconnect). Never call the
-            # replacement: the binding owns the session it was qualified on.
-            raise _ConsumerUncertain("native mcp session changed")
+        self._check()
+        try:
+            if asyncio.get_running_loop() is self._loop:
+                raise _ConsumerUncertain("synchronous RPC cannot block its owner loop")
+        except RuntimeError:
+            pass
+        server, session, loop = self._server, self._session, self._loop
         payload = dict(arguments)
 
-        async def _call() -> Any:
+        async def exchange():
             lock = getattr(server, "_rpc_lock", None)
             inflight = getattr(server, "_inflight_tasks", None)
             task = asyncio.current_task()
             if lock is None:
-                raise RuntimeError("native mcp owner has no rpc lock")
+                raise _ConsumerUncertain("native RPC lock is unavailable")
             async with lock:
+                # The connection/authority may change while waiting for this lock.
+                self._check()
                 if inflight is not None and task is not None:
                     inflight.add(task)
                 try:
-                    return await session.call_tool(tool_name, arguments=payload)
+                    result = await session.call_tool(tool_name, arguments=payload)
+                    self._check()
+                    return result
                 finally:
                     if inflight is not None and task is not None:
                         inflight.discard(task)
 
+        coroutine = exchange()
         try:
-            future = asyncio.run_coroutine_threadsafe(_call(), loop)
+            future = asyncio.run_coroutine_threadsafe(coroutine, loop)
         except Exception as exc:
-            raise _ConsumerUncertain("native rpc scheduling failed") from exc
+            coroutine.close()
+            raise _ConsumerUncertain("native RPC scheduling failed") from exc
         try:
             return future.result(timeout=self._timeout)
         except concurrent.futures.TimeoutError as exc:
-            # The send may already have happened. Do not cancel, retry or
-            # re-key it: the original command stays uncertain.
             future.add_done_callback(_consume_future_result)
-            raise _ConsumerUncertain("native rpc timed out") from exc
+            raise _ConsumerUncertain("native RPC timed out; original request retained") from exc
         except Exception as exc:
-            raise _ConsumerUncertain("native rpc failed") from exc
+            raise _ConsumerUncertain("native RPC failed") from exc
+
 
 
 class NativeExecutiveTransport:
-    """One RPC per action on the captured native MCP owner.
-
-    The transport owns no connection. It uses the *captured* ``MCPServerTask``
-    and its live ``ClientSession``, on the MCP owner's own loop, under the
-    incumbent RPC lock and inflight bookkeeping. It never opens a session,
-    discovers a server, reconnects, replays, cancels or handles a token.
-
-    A pre-send refusal returns the canonical ``REFUSED`` envelope. Anything
-    after a possible send raises, and the C28 adapter turns that into the
-    original command's ``EFFECT_UNKNOWN`` (submit) or ``UNAVAILABLE`` (status).
-    """
+    """One original RPC; late uncertainty preserves C28 command identity."""
 
     def __init__(self, *, publication: ExecutiveConsumerPublication, server: Any,
                  session: Any, loop: Any, timeout: float = 30.0,
                  currentness: Callable[[], bool] | None = None,
                  trust_gate: Callable[[], str | None] | None = None) -> None:
         self._publication = publication
-        self._caller = _NativeMcpCaller(server=server, session=session, loop=loop,
-                                        timeout=timeout)
-        self._currentness = currentness
-        self._trust_gate = trust_gate
+        self._caller = _NativeMcpCaller(
+            server=server, session=session, loop=loop, timeout=timeout, currentness=currentness)
+        self._currentness, self._trust_gate = currentness, trust_gate
 
     @property
-    def publication(self) -> ExecutiveConsumerPublication:
-        return self._publication
+    def publication(self): return self._publication
 
-    # -- the two closed entries the C28 adapter uses -------------------
+    def submit_selected_child(self, command_id): return self._call("selected_child_submit", command_id)
 
-    def submit_selected_child(self, command_id: str) -> Mapping[str, Any]:
-        return self._call("selected_child_submit", command_id)
+    def selected_child_status(self, command_id): return self._call("selected_child_status", command_id)
 
-    def selected_child_status(self, command_id: str) -> Mapping[str, Any]:
-        return self._call("selected_child_status", command_id)
-
-    # -- the one RPC ---------------------------------------------------
-
-    def _call(self, action: str, command_id: str) -> Mapping[str, Any]:
+    def _call(self, action, command_id):
         publication = self._publication
         try:
             if command_id != publication.command:
                 raise _ConsumerRefused("NATIVE_COMMAND_MISMATCH")
             if self._currentness is not None and self._currentness() is not True:
                 raise _ConsumerRefused("NATIVE_BINDING_STALE")
-            if self._trust_gate is not None:
-                refusal = self._trust_gate()
-                if refusal is not None:
-                    # A proved pre-send refusal: the incumbent trust gate
-                    # refused before any transport work, so nothing was sent.
-                    raise _ConsumerRefused("NATIVE_MCP_TRUST_REFUSED")
+            if self._trust_gate is not None and self._trust_gate() is not None:
+                raise _ConsumerRefused("NATIVE_MCP_TRUST_REFUSED")
         except _ConsumerRefused as exc:
-            # A proved no-effect: the transport was never called. The C28
-            # adapter accepts the canonical REFUSED envelope unchanged.
             return _refusal_envelope(exc.reason, publication)
-        payload = {"action": action, "command": publication.command}
         try:
-            raw = self._caller.call(TOOL_NAME, payload)
+            raw = self._caller.call(TOOL_NAME, {"action": action, "command": publication.command})
+            envelope = self._unwrap(raw, action=action)
+            if envelope is None or (self._currentness is not None and self._currentness() is not True):
+                raise _ConsumerUncertain("native result or original binding is unavailable")
+            return envelope
         except _ConsumerUncertain:
             raise
-        except Exception:
-            raise _ConsumerUncertain("native rpc failed")
-        envelope = self._unwrap(raw)
-        if envelope is None:
-            raise _ConsumerUncertain("native rpc returned an unusable envelope")
-        return envelope
+        except Exception as exc:
+            raise _ConsumerUncertain("native RPC outcome unavailable") from exc
 
-    def _unwrap(self, raw: Any) -> Mapping[str, Any] | None:
-        """Unwrap the real structured content of one MCP tool result.
-
-        ``isError=False`` or a success-looking string is not proof. The
-        envelope must carry the canonical schema, the original command and Job,
-        and the frozen target digest.
-        """
-        if raw is None:
+    def _unwrap(self, raw: Any, *, action: str) -> Mapping[str, Any] | None:
+        from integrations.hermes_delegate.executive import (
+            validate_selected_child_ingress_envelope, validate_selected_child_local_envelope)
+        body = _native_result_body(raw)
+        if type(body) is not dict:
             return None
-        is_error = getattr(raw, "isError", None)
-        if is_error is None and isinstance(raw, Mapping):
-            is_error = raw.get("isError")
-        if is_error is True:
-            # The protocol-level error flag is never proof of an effect.
-            return None
-        content = getattr(raw, "structuredContent", None)
-        if content is None:
-            content = getattr(raw, "structured_content", None)
-        body: Any = content
-        if body is None:
-            text = getattr(raw, "content", None)
-            if text is None:
-                text = raw
-            if isinstance(text, (list, tuple)):
-                pieces = []
-                for item in text:
-                    value = getattr(item, "text", None)
-                    if value is None and isinstance(item, Mapping):
-                        value = item.get("text")
-                    if isinstance(value, str):
-                        pieces.append(value)
-                text = "".join(pieces)
-            if isinstance(text, str):
-                try:
-                    body = json.loads(text)
-                except (TypeError, ValueError):
-                    return None
-            else:
-                body = text
-        if isinstance(body, str):
-            try:
-                body = json.loads(body)
-            except (TypeError, ValueError):
-                return None
-        if not isinstance(body, Mapping):
-            return None
-        # The App wraps the tool result in its own envelope. Accept either the
-        # bare selected-child envelope or the wrapped one, but only when the
-        # wrapped payload proves the same original command.
-        if body.get("schema") != SELECTED_CHILD_SCHEMA and isinstance(body.get("data"), Mapping):
+        if body.get("schema") != SELECTED_CHILD_SCHEMA and type(body.get("data")) is dict:
             body = body["data"]
-        if body.get("schema") != SELECTED_CHILD_SCHEMA:
-            return None
         publication = self._publication
-        if body.get("command_id") != publication.command:
+        try:
+            if "target_digest" in body:
+                return validate_selected_child_ingress_envelope(
+                    body, command_id=publication.command, job_id=publication.job_id,
+                    target_digest=publication.target_digest)
+            return validate_selected_child_local_envelope(
+                body, command_id=publication.command, action=action)
+        except (ValueError, TypeError, KeyError):
             return None
-        if body.get("job_id") != publication.job_id:
+
+
+def _native_result_body(raw):
+    if raw is None:
+        return None
+    def member(name, fallback=None):
+        return raw.get(name, fallback) if isinstance(raw, Mapping) else getattr(raw, name, fallback)
+    if member("isError") is True:
+        return None
+    body = member("structuredContent", member("structured_content"))
+    if body is None:
+        body = member("content", raw)
+        if isinstance(body, (list, tuple)):
+            pieces = [item.get("text") if isinstance(item, Mapping) else getattr(item, "text", None)
+                      for item in body]
+            if len(pieces) != 1 or type(pieces[0]) is not str:
+                return None
+            body = pieces[0]
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except (ValueError, TypeError):
             return None
-        digest = body.get("target_digest")
-        if digest != publication.target_digest:
-            # The C29/C30 join adds ``target_digest`` to the authenticated
-            # response. A response without it, or with another value, is not
-            # the frozen target and can never be projected to the model.
-            return None
-        return dict(body)
+    return body if type(body) is dict else None
+
 
 
 def _consume_future_result(future: Any) -> None:
@@ -960,109 +926,111 @@ def plugin_package_digest(root: Any) -> str:
     return hashlib.sha256(_canonical(files)).hexdigest()
 
 
-def capture_native_mcp_owner(publication: ExecutiveConsumerPublication):
-    """Capture the genuine SAME-profile MCP owner of the Executive server.
 
-    The capture proves four things before anything is registered: the
-    connection is the live one of this profile, the handshake advertised the
-    reviewed server identity, the complete discovered tool schema is the
-    reviewed C29 schema, and the connection was opened with the approved
-    route, OAuth client and scope.
+def held_plugin_package_digest(owner: Any) -> str:
+    """Read the fixed package through the existing held release capability."""
+    relative = "integrations/hermes_harness/" + CONSUMER_PLUGIN_NAME
+    owner.directory(relative)
+    files = {name: hashlib.sha256(owner.source(relative + "/" + name)).hexdigest()
+             for name in ("plugin.yaml", "__init__.py")}
+    owner.check()
+    return hashlib.sha256(_canonical(files)).hexdigest()
 
-    A cached, configured or merely-connected boolean is never accepted.
-    """
+
+def capture_native_mcp_owner(publication: ExecutiveConsumerPublication, *, include_guard=False):
+    """Capture one exact scoped owner and a non-retargeting currentness check."""
     from tools import mcp_tool as core
     from tools.mcp_tool_loop import _running_loop
     from tools.mcp_tool_scope import _resolve_server_key
-
-    server_name = publication.mcp.server
     try:
-        key = _resolve_server_key(server_name)
+        key = _resolve_server_key(publication.mcp.server)
         with core._lock:
             server = core._servers.get(key)
+        session = getattr(server, "session", None)
+        loop = _running_loop()
     except Exception:
         raise RuntimeRefusal("NATIVE_CONSUMER_MCP_SERVER_UNAVAILABLE") from None
-    if server is None:
-        raise RuntimeRefusal("NATIVE_CONSUMER_MCP_SERVER_UNAVAILABLE")
-    session = getattr(server, "session", None)
-    if session is None:
-        raise RuntimeRefusal("NATIVE_CONSUMER_MCP_SESSION_UNAVAILABLE")
-    loop = _running_loop()
-    if loop is None:
-        raise RuntimeRefusal("NATIVE_CONSUMER_MCP_LOOP_UNAVAILABLE")
-    initialize = getattr(server, "initialize_result", None)
-    info = getattr(initialize, "serverInfo", None)
-    if (getattr(info, "name", None) != publication.mcp.server_name
-            or getattr(info, "version", None) != publication.mcp.server_version):
-        raise RuntimeRefusal("NATIVE_CONSUMER_MCP_IDENTITY_MISMATCH")
-    try:
-        observed = tools_schema_digest(getattr(server, "_tools", ()))
-    except RuntimeRefusal:
-        raise
-    if observed != publication.tools_schema_digest:
-        raise RuntimeRefusal("NATIVE_CONSUMER_TOOLS_SCHEMA_MISMATCH")
-    if not publication.mcp.matches_config(getattr(server, "_config", None)):
-        raise RuntimeRefusal("NATIVE_CONSUMER_MCP_CONFIG_MISMATCH")
-    return server, session, loop
+
+    def current():
+        try:
+            with core._lock:
+                same_owner = core._servers.get(key) is server
+            info = getattr(getattr(server, "initialize_result", None), "serverInfo", None)
+            return (server is not None and session is not None and loop is not None
+                    and same_owner and _running_loop() is loop
+                    and getattr(server, "session", None) is session
+                    and getattr(info, "name", None) == publication.mcp.server_name
+                    and getattr(info, "version", None) == publication.mcp.server_version
+                    and tools_schema_digest(getattr(server, "_tools", ())) == publication.tools_schema_digest
+                    and publication.mcp.matches_config(getattr(server, "_config", None)))
+        except Exception:
+            return False
+    if not current():
+        raise RuntimeRefusal("NATIVE_CONSUMER_MCP_CONTRACT_UNAVAILABLE")
+    return (server, session, loop, current) if include_guard else (server, session, loop)
 
 
-def _consumer_manifest(manager: Any) -> Any:
-    """The exact manifest the upstream manager gated and loaded."""
-    plugins = getattr(manager, "_plugins", None)
-    if not isinstance(plugins, dict):
-        raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_NOT_DISCOVERED")
-    loaded = plugins.get(CONSUMER_PLUGIN_NAME)
-    manifest = getattr(loaded, "manifest", None)
-    if manifest is None:
-        raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_NOT_DISCOVERED")
-    if getattr(manifest, "source", None) != CONSUMER_PLUGIN_SOURCE:
-        raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_SOURCE_MISMATCH")
-    return manifest
+
 
 
 def install_native_consumer(
-    *,
-    manager: Any,
-    publication: ExecutiveConsumerPublication,
-    owner: str,
-    profile_id: str,
-    session_id: str,
-    instance_id: str,
-    authority_epoch: int,
-    route: str | None,
-    server: Any,
-    session: Any,
-    loop: Any,
-    timeout: float = 30.0,
+    *, manager: Any, publication: ExecutiveConsumerPublication, owner: str,
+    profile_id: str, session_id: str, instance_id: str, authority_epoch: int,
+    route: str | None, server: Any, session: Any, loop: Any, timeout: float = 30.0,
     trust_gate: Callable[[], str | None] | None = None,
     session_guard: Callable[[], bool] | None = None,
+    manifest: Any = None, package_check: Callable[[], bool] | None = None,
 ) -> ConsumerSlot:
-    """Qualify the connection, install the slot and load the one plugin.
-
-    The order is fixed: the connection is qualified first, the immutable
-    startup is installed on the actual per-profile manager, and only then is
-    the plugin loaded through the upstream loader, with the upstream manifest
-    and configuration gates, the load deadline, the registration ledger and
-    the unload lease.
-    """
-    manifest = _consumer_manifest(manager)
-    installed = getattr(manifest, "path", None)
-    if not installed:
-        raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_PACKAGE_INVALID")
-    if plugin_package_digest(installed) != publication.plugin.digest:
+    """Retain the original slot before qualification and native registration."""
+    slot = install_consumer_slot(manager, ConsumerSlot(
+        owner=owner, profile_id=profile_id, source=CONSUMER_PLUGIN_SOURCE,
+        plugin_id=CONSUMER_PLUGIN_NAME, publication=publication))
+    if slot.load_attempted:
+        # Success and uncertainty both retain this exact original registration.
+        return slot
+    if (manifest is None or not callable(package_check) or package_check() is not True
+            or getattr(manifest, "source", None) != CONSUMER_PLUGIN_SOURCE
+            or getattr(manifest, "name", None) != CONSUMER_PLUGIN_NAME
+            or not callable(session_guard) or session_guard() is not True):
+        raise RuntimeRefusal("NATIVE_CONSUMER_STARTUP_UNQUALIFIED")
+    package_path = str(getattr(manifest, "path", ""))
+    if not package_path or (slot.package_path is not None and slot.package_path != package_path):
         raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_PACKAGE_MISMATCH")
-    caller = _NativeMcpCaller(server=server, session=session, loop=loop, timeout=timeout)
+    slot.package_path, slot.package_check = package_path, package_check
+    caller = _NativeMcpCaller(server=server, session=session, loop=loop,
+                             timeout=timeout, currentness=session_guard)
     binding = qualify_executive_consumer(
-        publication=publication, caller=caller, profile_id=profile_id,
-        session_id=session_id, instance_id=instance_id, authority_epoch=authority_epoch,
-        session_key=route, task_id=None, timeout=timeout, trust_gate=trust_gate,
-        currentness=session_guard)
-    slot = ConsumerSlot(owner=owner, profile_id=profile_id, source=CONSUMER_PLUGIN_SOURCE,
-                        plugin_id=CONSUMER_PLUGIN_NAME, publication=publication,
-                        startup=NativeDelegateStartup(binding=binding))
-    install_consumer_slot(manager, slot)
-    manager._load_plugin(manifest)
+        publication=publication, caller=caller, profile_id=profile_id, session_id=session_id,
+        instance_id=instance_id, authority_epoch=authority_epoch, session_key=route,
+        task_id=None, timeout=timeout, trust_gate=trust_gate, currentness=session_guard)
+    slot.bind_startup(NativeDelegateStartup(binding=binding))
+    if package_check() is not True or session_guard() is not True:
+        raise RuntimeRefusal("NATIVE_CONSUMER_STARTUP_CHANGED")
+    with slot._lock:
+        if slot.load_attempted:
+            return slot
+        slot.load_attempted = True
+        slot.load_outcome = "LOAD_PENDING"
+    try:
+        slot.loader_result = manager._load_plugin(manifest)
+    except Exception as error:
+        slot.retain_registration_error(error)
+        raise
+    loaded = getattr(manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME)
+    if (slot.registration is None or slot.registration_error is not None
+            or loaded is None or getattr(loaded, "enabled", None) is not True
+            or getattr(loaded, "error", None) is not None
+            or getattr(loaded, "manifest", None) is not manifest):
+        if slot.load_outcome not in {"EFFECT_UNKNOWN", "REFUSED"}:
+            slot.load_outcome = "EFFECT_UNKNOWN" if slot.registration_attempted else "REFUSED"
+        return slot
+    if package_check() is not True or session_guard() is not True:
+        slot.load_outcome = "CURRENTNESS_UNAVAILABLE"
+        return slot
+    slot.loader_record = loaded
+    slot.load_outcome = "REGISTERED"
     return slot
+
 
 
 def _mandate_schema() -> str:
@@ -1072,56 +1040,15 @@ def _mandate_schema() -> str:
 
 
 def _unwrap_mandate(raw: Any) -> Mapping[str, Any] | None:
-    """Unwrap the authenticated mandate document from one tool result.
-
-    The App wraps the projection in its own result envelope. Both shapes are
-    accepted, but only when the payload carries the incumbent mandate schema.
-    """
-    if raw is None:
-        return None
-    is_error = getattr(raw, "isError", None)
-    if is_error is None and isinstance(raw, Mapping):
-        is_error = raw.get("isError")
-    if is_error is True:
-        return None
-    content = getattr(raw, "structuredContent", None)
-    if content is None:
-        content = getattr(raw, "structured_content", None)
-    body: Any = content
-    if body is None:
-        text = getattr(raw, "content", None)
-        if text is None:
-            text = raw
-        if isinstance(text, (list, tuple)):
-            pieces = []
-            for item in text:
-                value = getattr(item, "text", None)
-                if value is None and isinstance(item, Mapping):
-                    value = item.get("text")
-                if isinstance(value, str):
-                    pieces.append(value)
-            text = "".join(pieces)
-        if isinstance(text, str):
-            try:
-                body = json.loads(text)
-            except (TypeError, ValueError):
-                return None
-        else:
-            body = text
-    if isinstance(body, str):
-        try:
-            body = json.loads(body)
-        except (TypeError, ValueError):
-            return None
-    if not isinstance(body, Mapping):
+    body = _native_result_body(raw)
+    if type(body) is not dict:
         return None
     schema = _mandate_schema()
     if body.get("schema") == schema:
         return body
     data = body.get("data")
-    if isinstance(data, Mapping) and data.get("schema") == schema:
-        return data
-    return None
+    return data if type(data) is dict and data.get("schema") == schema else None
+
 
 
 def read_mandate(caller: _NativeMcpCaller, publication: ExecutiveConsumerPublication,
@@ -1231,6 +1158,8 @@ def qualify_executive_consumer(
     if envelope.get("target_digest") != publication.target_digest:
         raise RuntimeRefusal("NATIVE_CONSUMER_TARGET_DIGEST_MISMATCH")
 
+    if guard() is not True:
+        raise RuntimeRefusal("NATIVE_CONSUMER_STARTUP_CHANGED")
     binding = NativeDelegateBinding(
         transport=NativeExecutiveTransport(
             publication=publication, server=caller.server, session=caller.session,

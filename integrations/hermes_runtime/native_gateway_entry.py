@@ -56,7 +56,8 @@ def _vendor_module(name: str, root: Path):
 
 def bind_native_api(module, *, vendor: Path, role_home: Path, role: str,
                     host: str, port: int, implementation_sha: str | None = None,
-                    session_enrollment: dict | None = None) -> None:
+                    session_enrollment: dict | None = None,
+                    consumer_transition=None) -> None:
     _selection(role, host, port)
     if getattr(module, "_mmx_role_api_bound", False):
         raise RuntimeRefusal("NATIVE_API_ALREADY_BOUND")
@@ -76,9 +77,11 @@ def bind_native_api(module, *, vendor: Path, role_home: Path, role: str,
                 or getattr(runner.config, "multiplex_profiles", False)):
             raise RuntimeRefusal("NATIVE_PROFILE_AUTHORITY_MISMATCH")
         from .native_session_control import install_private_control
-        install_private_control(runner, role_home, role,
-                                implementation_sha=implementation_sha,
-                                session_enrollment=session_enrollment)
+        options = {"implementation_sha": implementation_sha,
+                   "session_enrollment": session_enrollment}
+        if consumer_transition is not None:
+            options["consumer_transition"] = consumer_transition
+        install_private_control(runner, role_home, role, **options)
         return await original(runner, host=host, port=port)
 
     module.start_gateway_api = start_role_gateway_api
@@ -117,6 +120,59 @@ def prepare_vendor(vendor: Path) -> None:
         raise RuntimeRefusal("NATIVE_IMPORT_ROOT_NOT_QUALIFIED")
 
 
+
+def _bind_consumer_provider_imports(launch, vendor: Path) -> None:
+    """Constrain native provider imports before CLI/config import can discover.
+
+    Keep native bundled/legacy providers and their original registry. Exclude
+    role-home and pip provider code through the existing two native hooks.
+    """
+    if launch.recipe.get("executive_consumer") is None:
+        return
+    launch.check()
+    providers = importlib.import_module("providers")
+    package = vendor / "providers"
+    bundled = vendor / "plugins/model-providers"
+    if (Path(getattr(providers, "__file__", "")).resolve() != package / "__init__.py"
+            or tuple(str(Path(path).resolve()) for path in getattr(providers, "__path__", ()))
+               != (str(package),)
+            or getattr(providers, "_BUNDLED_PLUGINS_DIR", None) != bundled
+            or getattr(providers, "_discovered", None) is not False
+            or getattr(providers, "_discovering", None) is not False
+            or any(getattr(providers, name, None) != {}
+                   for name in ("_REGISTRY", "_ALIASES", "_SOURCES", "_HOME_LAYERS"))
+            or hasattr(providers, "_mmx_provider_import_owner")):
+        raise RuntimeRefusal("NATIVE_PROVIDER_IMPORT_BOUNDARY_UNAVAILABLE")
+    original_directory_import = providers._import_plugin_dir
+    if (not callable(original_directory_import)
+            or not callable(getattr(providers, "_discover_entry_point_providers", None))):
+        raise RuntimeRefusal("NATIVE_PROVIDER_IMPORT_BOUNDARY_UNAVAILABLE")
+    launch.check()
+
+    def import_directory(plugin_dir, source, *, home_key=""):
+        if source != "bundled" or home_key != "":
+            return None
+        launch.check()
+        candidate = Path(plugin_dir)
+        if (not candidate.is_absolute() or candidate.parent != bundled
+                or candidate.is_symlink() or not candidate.is_dir()
+                or candidate.resolve(strict=True) != candidate
+                or bundled.resolve(strict=True) != bundled):
+            raise RuntimeRefusal("NATIVE_PROVIDER_SOURCE_UNQUALIFIED")
+        result = original_directory_import(candidate, source, home_key=home_key)
+        launch.check()
+        return result
+
+    def exclude_entry_points():
+        launch.check()
+        return None
+
+    # Native discovery remains lazy. No flags, registries or aliases are reset.
+    providers._import_plugin_dir = import_directory
+    providers._discover_entry_point_providers = exclude_entry_points
+    providers._mmx_provider_import_owner = launch
+
+
 def _consumer_trust_gate(publication):
     """The incumbent MCP trust gate, consulted before a model-facing call."""
     from integrations.hermes_delegate.policy import TOOL_NAME
@@ -134,82 +190,227 @@ def _consumer_trust_gate(publication):
     return gate
 
 
-def _qualify_consumer(runner, document, role_home: Path, launch) -> None:
-    """Qualify the ready process, the target and the authenticated connection.
-
-    Nothing here is fabricated. The enrollment is read through the incumbent
-    bounded reader, the MCP owner is the live same-profile connection, and the
-    mandate and the one harmless status read are the real calls. Any refusal
-    leaves the consumer unbound and the extension hold untouched.
-    """
+async def _qualify_consumer(runner, document, role_home: Path, launch, *,
+                            manager, slot, manifest, package_check) -> None:
+    """One finite qualification while the existing gateway loop remains free."""
+    import asyncio
+    import contextvars
     from integrations.hermes_harness.native_executive_consumer import (
-        capture_native_mcp_owner,
-        install_native_consumer,
-        publication_from_document,
-    )
+        CONSUMER_SLOT_ATTRIBUTE, capture_native_mcp_owner, install_native_consumer,
+        publication_from_document, _consume_future_result)
     from .native_session_control import current_runtime_owner, read_enrolled_session
-
-    publication = publication_from_document(document)
-    owner = current_runtime_owner()
-    if not owner:
-        return
-    # The ACTUAL per-profile plugin manager of this role, and the profile the
-    # upstream owner resolves for it.
     from hermes_cli.plugins import get_plugin_manager
-    from hermes_cli.profiles import get_active_profile_name
-    manager = get_plugin_manager()
-    profile_id = get_active_profile_name()
-    # The real discovery sweep. It proves the unbound load: without a
-    # qualified startup the plugin registers nothing.
-    manager.discover_and_load()
-    # The original enrolled native session. It is never created here.
-    principal = publication.session.principal_id
-    enrollment = read_enrolled_session(runner, role_home, launch.owner.root.name,
-                                       publication.session.request_id, principal)
+    publication = publication_from_document(document)
+    owner = launch.owner.root.name
+    owner_loop = asyncio.get_running_loop()
+    owner_context = contextvars.copy_context()
+    enrollment = read_enrolled_session(
+        runner, role_home, owner, publication.session.request_id, publication.session.principal_id)
     if enrollment["status"] != "ENROLLED":
+        slot.qualification_outcome = "UNBOUND"
         return
     target = enrollment["target"]
-    if target["profile_id"] != str(role_home) or target["principal_id"] != principal:
-        return
-    server, session, loop = capture_native_mcp_owner(publication)
-    install_native_consumer(
-        manager=manager, publication=publication, owner=owner, profile_id=profile_id,
-        session_id=target["session_id"], instance_id=target["instance_id"],
-        authority_epoch=target["authority_epoch"], route=enrollment["route"],
-        server=server, session=session, loop=loop,
-        trust_gate=_consumer_trust_gate(publication))
+    identity_keys = ("profile_id", "principal_id", "session_id", "instance_id", "authority_epoch")
+    original_identity = tuple(target.get(key) for key in identity_keys)
+    original_route = enrollment["route"]
+    if (target["profile_id"] != str(role_home)
+            or target["principal_id"] != publication.session.principal_id):
+        raise RuntimeRefusal("NATIVE_CONSUMER_SESSION_MISMATCH")
+    server, session, loop, mcp_current = capture_native_mcp_owner(publication, include_guard=True)
 
+    def inspect_original():
+        launch.check()
+        if (current_runtime_owner() != owner or get_plugin_manager() is not manager
+                or getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None) is not slot
+                or manager.scope_key != slot.scope or str(slot.scope) != str(role_home)
+                or publication_from_document(launch.recipe["executive_consumer"]) != publication
+                or getattr(runner, "_draining", True)):
+            return False
+        descriptor = runner.session_runtime_descriptor
+        if (descriptor.get("state") != "ready"
+                or descriptor.get("instance_id") != target["instance_id"]
+                or descriptor.get("authority_epoch") != target["authority_epoch"]):
+            return False
+        observed = read_enrolled_session(
+            runner, role_home, owner, publication.session.request_id, publication.session.principal_id)
+        return (observed["status"] == "ENROLLED"
+                and tuple(observed["target"].get(key) for key in identity_keys) == original_identity
+                and observed["route"] == original_route and package_check() is True)
 
-def _install_consumer_seam(launch, vendor: Path, role_home: Path) -> None:
-    """Bind the optional native consumer to the existing genuine-ready seam.
+    async def inspect_on_owner():
+        return inspect_original()
 
-    The publication is optional. Without a qualified publication nothing is
-    installed, no plugin is loaded, and the default stays disarmed. The seam
-    runs after the upstream owner published the genuine ready state; it never
-    fabricates readiness and it never qualifies the enrolled session before
-    the gateway is ready.
-    """
-    publication = launch.recipe.get("executive_consumer")
-    if publication is None:
-        return
-    from integrations.hermes_harness.native_executive_consumer import (
-        validate_consumer_publication,
-    )
-    document = validate_consumer_publication(publication)
-    runtime = _vendor_module("gateway.run_runtime", vendor)
-    original = runtime.publish_gateway_runtime_ready
-
-    def publish_gateway_runtime_ready(runner):
-        result = original(runner)
+    def session_guard():
         try:
-            _qualify_consumer(runner, document, role_home, launch)
+            if not owner_loop.is_running() or not mcp_current():
+                return False
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+            if current_loop is owner_loop:
+                valid = inspect_original()
+            else:
+                coroutine = inspect_on_owner()
+                try:
+                    future = owner_context.copy().run(
+                        asyncio.run_coroutine_threadsafe, coroutine, owner_loop)
+                except Exception:
+                    coroutine.close()
+                    return False
+                try:
+                    valid = future.result(timeout=5.0)
+                except Exception:
+                    # Read only, no cancellation/reconnect/replacement.
+                    future.add_done_callback(_consume_future_result)
+                    return False
+            return valid is True and mcp_current()
         except Exception:
-            # An unqualified consumer never takes the gateway down, never
-            # clears the extension hold and never registers a tool.
-            pass
-        return result
+            return False
 
+    # The C28 sync contract is retained. Its finite worker uses the incumbent
+    # executor; it cannot block the gateway loop needed by original enrollment.
+    worker = asyncio.create_task(asyncio.to_thread(
+        install_native_consumer, manager=manager, publication=publication, owner=owner,
+        profile_id=slot.profile_id, session_id=target["session_id"],
+        instance_id=target["instance_id"], authority_epoch=target["authority_epoch"],
+        route=original_route, server=server, session=session, loop=loop,
+        trust_gate=_consumer_trust_gate(publication), session_guard=session_guard,
+        manifest=manifest, package_check=package_check))
+    slot.qualification_worker = worker
+
+    def settled(completed):
+        try:
+            original_slot = completed.result()
+            if original_slot is not slot:
+                slot.qualification_outcome = "ORIGINAL_SLOT_MISMATCH"
+            else:
+                slot.qualification_outcome = slot.load_outcome
+        except BaseException:
+            slot.qualification_outcome = (
+                slot.load_outcome if slot.load_attempted else "UNBOUND")
+    worker.add_done_callback(settled)
+    # Cancelling this observer cannot cancel the underlying native load thread.
+    # The slot retains that original worker and prevents a second attempt.
+    await asyncio.shield(worker)
+
+
+
+def _install_consumer_seam(launch, vendor: Path, role_home: Path, *, gateway=True):
+    """Fence the exact held package before discovery, then use native events."""
+    import asyncio
+    from integrations.hermes_harness.native_executive_consumer import (
+        CONSUMER_PLUGIN_NAME, CONSUMER_PLUGIN_SOURCE, CONSUMER_SLOT_ATTRIBUTE,
+        ConsumerSlot, held_plugin_package_digest, install_consumer_slot,
+        publication_from_document, validate_consumer_publication)
+    raw = launch.recipe.get("executive_consumer")
+    if raw is None:
+        return None
+    document = validate_consumer_publication(raw)
+    publication = publication_from_document(document)
+    owner = launch.owner.root.name
+    package = launch.owner.root / "integrations/hermes_harness" / CONSUMER_PLUGIN_NAME
+
+    def package_check():
+        launch.check()
+        if (publication_from_document(launch.recipe["executive_consumer"]) != publication
+                or held_plugin_package_digest(launch.owner) != publication.plugin.digest):
+            raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_PACKAGE_MISMATCH")
+        launch.check()
+        return True
+
+    # This occurs before native discovery and before any plugin module import.
+    package_check()
+    from hermes_cli.plugins import get_plugin_manager
+    from hermes_cli.plugins_manifest import PluginManifest
+    from hermes_cli.profiles import get_active_profile_name
+    manager = get_plugin_manager()
+    if str(manager.scope_key) != str(role_home):
+        raise RuntimeRefusal("NATIVE_CONSUMER_PROFILE_SCOPE_MISMATCH")
+    slot = install_consumer_slot(manager, ConsumerSlot(
+        owner=owner, profile_id=get_active_profile_name(), source=CONSUMER_PLUGIN_SOURCE,
+        plugin_id=CONSUMER_PLUGIN_NAME, publication=publication))
+    manifest = PluginManifest(
+        name=CONSUMER_PLUGIN_NAME, version="1.0.0", source=CONSUMER_PLUGIN_SOURCE,
+        path=str(package), provides_tools=["mmx_delegate"], key=CONSUMER_PLUGIN_NAME)
+    if slot.package_path is not None:
+        raise RuntimeRefusal("NATIVE_CONSUMER_LOADER_ALREADY_BOUND")
+    slot.package_path, slot.package_check = str(package), package_check
+    original_load = manager._load_plugin
+
+    def load_plugin(candidate):
+        if (getattr(candidate, "name", None) != CONSUMER_PLUGIN_NAME
+                and getattr(candidate, "key", None) != CONSUMER_PLUGIN_NAME):
+            return original_load(candidate)
+        package_check()
+        if (getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None) is not slot
+                or manager.scope_key != slot.scope
+                or getattr(candidate, "source", None) != CONSUMER_PLUGIN_SOURCE
+                or str(getattr(candidate, "path", "")) != str(package)):
+            raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_PACKAGE_MISMATCH")
+        # Native census/unbound discovery cannot import a role-owned substitute
+        # or start registration. Only the held qualified load gets one admission.
+        with slot._lock:
+            if slot.startup.binding is None:
+                return None
+            if (candidate is not manifest or not slot.load_attempted
+                    or slot.loader_entered or slot.load_outcome != "LOAD_PENDING"):
+                raise RuntimeRefusal("NATIVE_CONSUMER_ORIGINAL_LOAD_RETAINED")
+            slot.loader_entered = True
+        package_check()
+        return original_load(candidate)
+
+    manager._load_plugin = load_plugin
+    import contextvars
+    profile_context = contextvars.copy_context()
+    if not gateway:
+        return None
+
+    def transition(runner):
+        if slot.load_attempted:
+            return
+        if any(task is not None and not task.done()
+               for task in (slot.qualification_task, slot.qualification_worker)):
+            return
+        from .native_session_control import read_enrolled_session
+        observed = read_enrolled_session(
+            runner, role_home, owner, publication.session.request_id,
+            publication.session.principal_id)
+        target = observed["target"] or {}
+        key = (observed["status"], target.get("session_id"), target.get("instance_id"),
+               target.get("authority_epoch"), observed["route"])
+        if key == slot.qualification_key:
+            return
+        slot.qualification_key = key
+        if observed["status"] != "ENROLLED":
+            slot.qualification_outcome = "UNBOUND"
+            return
+        loop = asyncio.get_running_loop()
+        slot.qualification_outcome = "QUALIFYING"
+        slot.qualification_task = loop.create_task(_qualify_consumer(
+            runner, document, role_home, launch, manager=manager, slot=slot,
+            manifest=manifest, package_check=package_check), context=profile_context.copy())
+        def observe(completed):
+            try:
+                completed.result()
+            except BaseException:
+                if slot.qualification_worker is None:
+                    slot.qualification_outcome = "UNBOUND"
+        slot.qualification_task.add_done_callback(observe)
+
+    runtime = _vendor_module("gateway.run_runtime", vendor)
+    original_ready = runtime.publish_gateway_runtime_ready
+    def publish_gateway_runtime_ready(runner):
+        result = original_ready(runner)
+        try:
+            transition(runner)
+        except Exception:
+            # Native readiness and enrollment retain their own actual result.
+            slot.qualification_outcome = "UNBOUND"
+        return result
     runtime.publish_gateway_runtime_ready = publish_gateway_runtime_ready
+    return transition
+
 
 
 def run(launch, argv: list[str]) -> int:
@@ -230,7 +431,11 @@ def run(launch, argv: list[str]) -> int:
     assert_role_network_profile(profile)
     assert_role_credential_isolation(profile)
     enforce_role_tcp_ports(profile)
-    expected_disabled_mcp(profile, launch.recipe.get("executive_consumer"))
+    consumer_document = launch.recipe.get("executive_consumer")
+    if consumer_document is None:
+        expected_disabled_mcp(profile)
+    else:
+        expected_disabled_mcp(profile, consumer_document)
     _selection(role, profile.gateway_host, profile.backend_port)
     gateway_args = ["-p", role, "gateway", "run", "--external-supervisor"]
     tools_args = ["-p", role, "tools", "list", "--platform", "cli"]
@@ -253,12 +458,15 @@ def run(launch, argv: list[str]) -> int:
     # Preserve the real recognized launcher and command before the native
     # module applies its profile selector at import time.
     sys.argv[:] = [str(launch.launcher), *argv]
+    _bind_consumer_provider_imports(launch, vendor)
     native_main = _vendor_module("hermes_cli.main", vendor)
     constants = _vendor_module("hermes_constants", vendor)
     role_home = home / "profiles" / role
     if (native_main.explicit_cli_profile() != role
             or constants.get_process_hermes_home().resolve() != role_home):
         raise RuntimeRefusal("NATIVE_PROFILE_HOME_MISMATCH")
+    consumer_transition = _install_consumer_seam(
+        launch, vendor, role_home, gateway=is_gateway)
     if is_gateway:
         # The one held-release owner identity of this process. It is bound
         # exactly once and is what the plugin loader checks the consumer slot
@@ -269,8 +477,8 @@ def run(launch, argv: list[str]) -> int:
         bind_native_api(api, vendor=vendor, role_home=role_home, role=role,
                         host=profile.gateway_host, port=profile.backend_port,
                         implementation_sha=launch.owner.root.name,
-                        session_enrollment=launch.recipe.get("session_enrollment"))
-        _install_consumer_seam(launch, vendor, role_home)
+                        session_enrollment=launch.recipe.get("session_enrollment"),
+                        consumer_transition=consumer_transition)
     launch.check()
     result = native_main.main()
     return result if type(result) is int else 0
