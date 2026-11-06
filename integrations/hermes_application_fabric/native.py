@@ -145,7 +145,7 @@ def execution_middleware(resolve_binding):
                         break
                     original = original.original
                 known = type(original) in (HermesFabricError, CodecError)
-                error = HermesFabricError("hermes_fabric_native_execution_failed",
+                error = HermesFabricError(original.code if known else "hermes_fabric_native_execution_failed",
                     effect_unknown=original.effect_unknown if known else True)
         if error is not None:
             if may_close:

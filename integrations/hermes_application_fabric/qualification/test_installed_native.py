@@ -85,7 +85,8 @@ class InstalledNativeTests(unittest.TestCase):
     def test_real_native_primary_turn_uses_the_original_owner(self):
         native = self.agent(enabled_toolsets=[])
         result = native.run_conversation("Reply with the fixture result.", task_id="task-fixture")
-        self.assertEqual(result.get("final_response"), "Result 世界")
+        self.assertEqual(result.get("final_response"), "Result 世界",
+            {"native_calls": len(self.native_calls), "owner_calls": len(self.calls)})
         self.assertEqual(len(self.calls), 1)
         self.assertTrue(self.calls[0]["authenticated"])
         self.assertEqual(self.native_calls[0].session_id, "session-1")
@@ -141,19 +142,24 @@ class InstalledNativeTests(unittest.TestCase):
     def test_native_tool_execution_and_original_result_continuation(self):
         from tools.registry import registry
         self.mode = "native-conversation"
-        self.tool_name, self.tool_arguments = "mmx_fixture_read", {"value": "native fixture"}
+        fixture_tool = "mmx_fixture_read"
+        # Hermes v0.23 exposes deferred tools through its real tool_call wrapper.
+        # The fixture models the exact offered schema, not an unoffered function.
+        self.tool_name = "tool_call"
+        self.tool_arguments = {"calls": [{"name": fixture_tool, "arguments": {"value": "native fixture"}}]}
         executed = []
 
         def handler(arguments, **_):
             executed.append(arguments)
             return json.dumps({"value": arguments["value"]})
 
-        registry.register(name=self.tool_name, toolset="mmx_fixture_tools", schema={"name": self.tool_name,
+        registry.register(name=fixture_tool, toolset="mmx_fixture_tools", schema={"name": fixture_tool,
             "description": "Read an immutable in-memory fixture.", "parameters": {"type": "object",
                 "properties": {"value": {"type": "string"}}, "required": ["value"]}}, handler=handler)
         native = self.agent(enabled_toolsets=["mmx_fixture_tools"])
         result = native.run_conversation("Read the fixture once, then report.", task_id="task-native-tools")
-        self.assertEqual(result.get("final_response"), "Result 世界")
+        self.assertEqual(result.get("final_response"), "Result 世界",
+            {"native_calls": len(self.native_calls), "owner_calls": len(self.calls)})
         self.assertEqual(executed, [{"value": "native fixture"}])
         self.assertEqual(len(self.calls), 2)
         self.assertNotEqual(self.calls[0]["request_id"], self.calls[1]["request_id"])
