@@ -90,10 +90,17 @@ class CoordinationWorkSupervisor(ExecutiveSupervisor):
         self._coordination_runtime = coordination_runtime
         super().__init__(*args, **kwargs)
 
-    def _prompt(self, job: Job, attempt: Attempt,
-                effective_grant: Mapping[str, Any] | None = None) -> str:
+    def _prompt(
+        self, job: Job, attempt: Attempt,
+        effective_grant: Mapping[str, Any] | None = None,
+        *,
+        commission: Mapping[str, Any] | None = None,
+        inline_commission: str | None = None,
+    ) -> str:
         if job.job_id != self._coordination_job_id:
-            return super()._prompt(job, attempt, effective_grant)
+            return super()._prompt(
+                job, attempt, effective_grant,
+                commission=commission, inline_commission=inline_commission)
         try:
             if effective_grant is None or dict(effective_grant) != attempt.effective_grant:
                 raise SupervisorError("coordination task requires original effective grant")
@@ -112,7 +119,9 @@ class CoordinationWorkSupervisor(ExecutiveSupervisor):
                     or request["effective_grant_digest"] != attempt.effective_grant_digest
                     or request["assignment_digest"] != assignment):
                 raise SupervisorError("coordination assignment changed during composition")
-            original = super()._prompt(job, attempt, effective_grant)
+            original = super()._prompt(
+                job, attempt, effective_grant,
+                commission=commission, inline_commission=inline_commission)
             _revalidate_sources(sources)
             current_job, current_attempt, _ = _current_work_assignment(
                 self._coordination_runtime, root_job_id=job.root_job_id, job_id=job.job_id,

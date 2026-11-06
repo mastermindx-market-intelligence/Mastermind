@@ -15,16 +15,17 @@ Runtime reads refuses the return before Agent Dialogue transport is attempted.
 from __future__ import annotations
 
 import dataclasses
-import re
 from collections.abc import Callable
 from typing import Any
 
-from control_plane.executive_delegation_identity import derive_delegation_identity
+from control_plane.executive_current_target import (
+    CurrentTargetEpoch as WorkspaceReturnTargetEpoch,
+    CurrentTargetUnavailable,
+    job_id_from_operation_key,
+    read_current_target,
+)
 from control_plane.executive_runtime import (
-    AttemptStatus,
     ExecutiveDialogueSource,
-    JobStatus,
-    WorkerStatus,
     _dialogue_source_from_root_creation,
 )
 from control_plane.wake_ledger import (
@@ -36,27 +37,7 @@ from control_plane.dialogue_source_resolution import PhysicalDialogueSourceIdent
 from integrations.mastermind_company_mcp.adapter import DialogueBinding
 from integrations.workspace_agent_return import WorkspaceReturnError
 
-_OPERATION_KEY = re.compile(r"\Aexec-(job-[0-9]{3,})\Z")
 _ALLOWED_MESSAGE_TYPES = ("RESULT",)
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class WorkspaceReturnTargetEpoch:
-    root_job_id: str
-    job_id: str
-    session_ref: str
-    attempt_id: str
-    worker_id: str
-    job_status: JobStatus
-    attempt_status: AttemptStatus
-    fence_generation: int
-    worker_status: WorkerStatus
-    harness_session_epoch_id: str
-    harness_generation_number: int
-    harness_provider_session_id: str
-    harness_provider: str
-    harness_account_label: str
-    harness_owner_seat: str
 
 
 TargetReader = Callable[[str], WorkspaceReturnTargetEpoch]
@@ -77,76 +58,17 @@ def _refuse() -> None:
 
 
 def _job_id_from_operation_key(operation_key: object) -> str:
-    if type(operation_key) is not str:
+    try:
+        return job_id_from_operation_key(operation_key)
+    except CurrentTargetUnavailable:
         _refuse()
-    match = _OPERATION_KEY.fullmatch(operation_key)
-    if match is None:
-        _refuse()
-    return match.group(1).upper()
 
 
 def _read_current_target(runtime: Any, operation_key: str) -> WorkspaceReturnTargetEpoch:
-    """Read one current Executive target through public Runtime registries."""
-
     try:
-        job_id = _job_id_from_operation_key(operation_key)
-        job = runtime.jobs.get_job(job_id)
-        if job is None:
-            _refuse()
-        identity = derive_delegation_identity(job)
-        if (
-            identity.operation_key != operation_key
-            or identity.job_id != job_id
-            or job.status not in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}
-            or not job.current_attempt_id
-        ):
-            _refuse()
-        attempt = runtime.attempts.get_attempt(job.current_attempt_id)
-        if (
-            attempt is None
-            or attempt.job_id != job_id
-            or attempt.status
-            not in {
-                AttemptStatus.CLAIMED,
-                AttemptStatus.RUNNING,
-                AttemptStatus.CHECKPOINTED,
-            }
-            or not attempt.worker_id
-            or job.assigned_worker_id != attempt.worker_id
-        ):
-            _refuse()
-        worker = runtime.workers.get_worker(attempt.worker_id)
-        if (
-            worker is None
-            or worker.status is not WorkerStatus.BUSY
-            or worker.active_job_id != job_id
-        ):
-            _refuse()
-        harness = runtime.current_harness_binding_source(attempt.attempt_id)
-        if harness.attempt_id != attempt.attempt_id:
-            _refuse()
-        return WorkspaceReturnTargetEpoch(
-            root_job_id=identity.root_job_id,
-            job_id=job_id,
-            session_ref=identity.session_ref,
-            attempt_id=attempt.attempt_id,
-            worker_id=attempt.worker_id,
-            job_status=job.status,
-            attempt_status=attempt.status,
-            fence_generation=attempt.fence_generation,
-            worker_status=worker.status,
-            harness_session_epoch_id=harness.session_epoch_id,
-            harness_generation_number=harness.generation_number,
-            harness_provider_session_id=harness.provider_session_id,
-            harness_provider=harness.provider,
-            harness_account_label=harness.account_label,
-            harness_owner_seat=harness.owner_seat,
-        )
-    except WorkspaceReturnError:
-        raise
-    except Exception:
+        return read_current_target(runtime, operation_key)
+    except CurrentTargetUnavailable:
         _refuse()
-
 
 def _read_dialogue_source(runtime: Any, root_job_id: str) -> ExecutiveDialogueSource:
     """Re-use Executive's immutable root-source verifier; do not copy its law."""

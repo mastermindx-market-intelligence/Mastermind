@@ -1,0 +1,180 @@
+{
+  "schema": "mm.harness.tasks",
+  "version": "2.0.0",
+  "workstream": null,
+  "updated": "2026-10-27T16:41:52Z",
+  "tasks": [
+    {
+      "id": "T001",
+      "title": "Inventory shared-shell entry points",
+      "status": "done",
+      "milestone": "M1",
+      "evidence": "Synthetic fixture evidence: an invented inventory note dated 2026-10-14 listing six fictional entry scripts and two helper modules of the fictional shared shell; no real repository, path, chat, or commit is referenced.",
+      "notes": "Invented for this fixture only; the inventory was marked complete so later synthetic rows could reference it.",
+      "history": [
+        {
+          "event": "created",
+          "ts": "2026-10-13T08:41:02Z",
+          "by": "fixture-author:shared-shell-planner"
+        },
+        {
+          "event": "done",
+          "ts": "2026-10-14T17:22:47Z",
+          "by": "fixture-author:shared-shell-planner"
+        }
+      ]
+    },
+    {
+      "id": "T002",
+      "title": "Sketch the unbound-buffer export refusal contract",
+      "status": "done",
+      "milestone": "M1",
+      "evidence": "Synthetic fixture evidence: an invented contract sketch dated 2026-10-15 stating that export must refuse while the buffer workstream is unset; the refusal wording itself lives in the harness, not in this buffer.",
+      "notes": "Invented for this fixture only.",
+      "history": [
+        {
+          "event": "created",
+          "ts": "2026-10-14T18:05:31Z",
+          "by": "fixture-author:shared-shell-planner"
+        },
+        {
+          "event": "done",
+          "ts": "2026-10-15T12:47:09Z",
+          "by": "fixture-author:shared-shell-planner"
+        }
+      ]
+    },
+    {
+      "id": "T003",
+      "title": "Catalog legacy rows a rebind must leave untouched",
+      "status": "done",
+      "milestone": "M2",
+      "evidence": "Synthetic fixture evidence: an invented catalog dated 2026-10-18 enumerating the six legacy rows of this buffer as out of scope for any workstream qualification rewrite.",
+      "notes": "Invented for this fixture only; the catalog intentionally names ids T001 through T006 and nothing else.",
+      "history": [
+        {
+          "event": "created",
+          "ts": "2026-10-17T09:30:15Z",
+          "by": "fixture-author:shared-shell-planner"
+        },
+        {
+          "event": "done",
+          "ts": "2026-10-18T15:12:58Z",
+          "by": "fixture-author:shared-shell-planner"
+        }
+      ]
+    },
+    {
+      "id": "T004",
+      "title": "Draft the null-init decision record template",
+      "status": "todo",
+      "milestone": "M2",
+      "evidence": "",
+      "notes": "Invented for this fixture only; still open in the fixture storyline pending the synthetic T003 follow-up review.",
+      "history": [
+        {
+          "event": "created",
+          "ts": "2026-10-19T10:02:44Z",
+          "by": "fixture-author:shared-shell-planner"
+        }
+      ]
+    },
+    {
+      "id": "T005",
+      "title": "Enumerate alias preservation cases for qualified tasks",
+      "status": "todo",
+      "milestone": "M2",
+      "evidence": "",
+      "notes": "Invented for this fixture only; covers the case where a short alias must survive qualification unchanged.",
+      "history": [
+        {
+          "event": "created",
+          "ts": "2026-10-19T10:11:27Z",
+          "by": "fixture-author:shared-shell-planner"
+        }
+      ]
+    },
+    {
+      "id": "T006",
+      "title": "Define qualification rules for local-proposed waves",
+      "status": "todo",
+      "milestone": "M3",
+      "evidence": "",
+      "notes": "Invented for this fixture only; expected to formalize how a bare workstream label on a wave is lifted to the qualified form.",
+      "history": [
+        {
+          "event": "created",
+          "ts": "2026-10-20T08:55:03Z",
+          "by": "fixture-author:shared-shell-planner"
+        }
+      ]
+    },
+    {
+      "id": "P1.T1",
+      "title": "Shared shell source diagnostics sweep",
+      "workstream": "MARKET-OS",
+      "wave": "shared-shell-source-diagnostics",
+      "aliases": [
+        "P1-SSDIAG"
+      ],
+      "status": "reviewed",
+      "evidence": "Synthetic fixture evidence: an invented diagnostics sweep recorded on 2026-10-26 covering twelve fictional source modules of the fictional shared shell and reporting three stale cross-references; counts are invented and nothing real is referenced.",
+      "acceptance": [
+        "Synthetic acceptance: the sweep report exists and names every scanned module.",
+        "Synthetic acceptance: each reported finding carries a suggested follow-up owner tag."
+      ],
+      "notes": "Invented for this fixture only; the sweep is wave-scoped and its follow-ups belong to later fictional waves.",
+      "depends_on": [
+        "T003"
+      ],
+      "created": "2026-10-24T09:05:19Z",
+      "created_by": "fixture-author:planner-nullbind",
+      "history": [
+        {
+          "event": "created",
+          "ts": "2026-10-24T09:05:19Z",
+          "by": "fixture-author:planner-nullbind"
+        },
+        {
+          "event": "wave-linked",
+          "ts": "2026-10-24T09:07:44Z",
+          "by": "fixture-author:planner-nullbind",
+          "wave": "shared-shell-source-diagnostics"
+        },
+        {
+          "event": "evidence-added",
+          "ts": "2026-10-26T11:20:05Z",
+          "by": "fixture-author:runner-nullbind"
+        },
+        {
+          "event": "review-passed",
+          "ts": "2026-10-27T16:41:52Z",
+          "by": "fixture-author:reviewer-nullbind"
+        }
+      ]
+    }
+  ],
+  "waves": [
+    {
+      "id": "shared-shell-source-diagnostics",
+      "p": "P1",
+      "title": "Shared shell source diagnostics",
+      "status": "proposed",
+      "workstream": "MARKET-OS",
+      "source": "local-proposed",
+      "created": "2026-10-24T09:05:19Z",
+      "created_by": "fixture-author:planner-nullbind"
+    },
+    {
+      "id": "market-os-agentos-handoff",
+      "p": "P1",
+      "title": "Market OS agentos handoff preparation",
+      "status": "committed",
+      "workstream": "WS:MARKET-OS",
+      "source": "agentos",
+      "created": "2026-10-21T10:12:38Z",
+      "created_by": "fixture-author:agentos-bridge"
+    }
+  ],
+  "binding_history": []
+}

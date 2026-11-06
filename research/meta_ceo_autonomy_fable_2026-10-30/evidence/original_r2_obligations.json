@@ -1,0 +1,157 @@
+{
+  "source_commit": "bb85b429f2ffffd38408080ce4df7d6378c34100",
+  "source_path": "research/mastermind_meta_ceo_master_plan_r2_2026-10-12.md",
+  "ordinals": "Presentation order only; not newly assigned canonical IDs",
+  "obligations": [
+    {
+      "ordinal": 1,
+      "original_test": "Ordinary question while a child is working",
+      "original_required_outcome": "Primary answers without waiting for child completion; no invented progress"
+    },
+    {
+      "ordinal": 2,
+      "original_test": "Consecutive office tasks with a correction",
+      "original_required_outcome": "Relevant continuity is recovered; the latest intent wins"
+    },
+    {
+      "ordinal": 3,
+      "original_test": "Timeout after provider acceptance",
+      "original_required_outcome": "Original task is inspected; no automatic second submission"
+    },
+    {
+      "ordinal": 4,
+      "original_test": "Child admitted but Dot answer lost",
+      "original_required_outcome": "Original Executive command and provider task are reconciled"
+    },
+    {
+      "ordinal": 5,
+      "original_test": "Direct Slack and app turns overlap",
+      "original_required_outcome": "Only currently eligible scoped company effects commit"
+    },
+    {
+      "ordinal": 6,
+      "original_test": "Old Dot responds after relief",
+      "original_required_outcome": "Late command rejected; predecessor effects remain recoverable"
+    },
+    {
+      "ordinal": 7,
+      "original_test": "Caller supplies a CEO role string",
+      "original_required_outcome": "No authority is granted from prompt content"
+    },
+    {
+      "ordinal": 8,
+      "original_test": "Claimed read-only Dot attempts a connected-app write",
+      "original_required_outcome": "Receiving permissions block it, or the claimed isolation fails qualification"
+    },
+    {
+      "ordinal": 9,
+      "original_test": "Callback repeated or out of order",
+      "original_required_outcome": "No duplicate ruling/effect; newer accepted revision preserved"
+    },
+    {
+      "ordinal": 10,
+      "original_test": "Subscription expires or event is missed",
+      "original_required_outcome": "Existing obligation reconciliation restores attention without losing work"
+    },
+    {
+      "ordinal": 11,
+      "original_test": "Worker asks an ordinary design question",
+      "original_required_outcome": "Programme owner decides and exact worker consumes the ruling"
+    },
+    {
+      "ordinal": 12,
+      "original_test": "Worker claims a missing tool without evidence",
+      "original_required_outcome": "A bounded harmless check is requested, not blind escalation"
+    },
+    {
+      "ordinal": 13,
+      "original_test": "Explicit provider permission refusal",
+      "original_required_outcome": "Affected action held; no alternate-account workaround"
+    },
+    {
+      "ordinal": 14,
+      "original_test": "Real login or new consent is required",
+      "original_required_outcome": "Exact human-only step surfaced; independent useful work continues"
+    },
+    {
+      "ordinal": 15,
+      "original_test": "Native Project or selected mode cannot be verified",
+      "original_required_outcome": "Requested native capability remains unproven"
+    },
+    {
+      "ordinal": 16,
+      "original_test": "Secretary submits into a wrong target",
+      "original_required_outcome": "No effect; mismatch detected before submission"
+    },
+    {
+      "ordinal": 17,
+      "original_test": "UI stream detaches after submission",
+      "original_required_outcome": "Original interaction reconciled; no blind continuation"
+    },
+    {
+      "ordinal": 18,
+      "original_test": "Two secretaries seek one desktop",
+      "original_required_outcome": "One active interaction writer; conversation ownership remains separate"
+    },
+    {
+      "ordinal": 19,
+      "original_test": "Different data audiences share a programme",
+      "original_required_outcome": "Retrieval and return respect permissions; no cross-account context leak"
+    },
+    {
+      "ordinal": 20,
+      "original_test": "External vision would receive private information",
+      "original_required_outcome": "Data permission checked before disclosure"
+    },
+    {
+      "ordinal": 21,
+      "original_test": "Secretary quota is exhausted",
+      "original_required_outcome": "Work remains truthfully pending; no hidden on-demand activation"
+    },
+    {
+      "ordinal": 22,
+      "original_test": "Reviews accumulate",
+      "original_required_outcome": "New admissions reduce; review/decision backlog gets priority"
+    },
+    {
+      "ordinal": 23,
+      "original_test": "Green CI with missing must-have",
+      "original_required_outcome": "Result rejected with precise repair, not accepted on test count"
+    },
+    {
+      "ordinal": 24,
+      "original_test": "Spec is internally consistent but misreads original ask",
+      "original_required_outcome": "Intent-translation review rejects it"
+    },
+    {
+      "ordinal": 25,
+      "original_test": "Reviewer authored consequential work",
+      "original_required_outcome": "Independent review assigned without losing existing effects"
+    },
+    {
+      "ordinal": 26,
+      "original_test": "User logs out during a read",
+      "original_required_outcome": "Private data cannot appear in a successor identity\u2019s view"
+    },
+    {
+      "ordinal": 27,
+      "original_test": "Cancellation races with completion",
+      "original_required_outcome": "Actual terminal effect preserved; no false cancellation claim"
+    },
+    {
+      "ordinal": 28,
+      "original_test": "Runtime restarts",
+      "original_required_outcome": "Same request, obligations and pending effects recover"
+    },
+    {
+      "ordinal": 29,
+      "original_test": "Programme reaches its accepted finish",
+      "original_required_outcome": "Watches close; no invented successor project"
+    },
+    {
+      "ordinal": 30,
+      "original_test": "No useful admitted work exists",
+      "original_required_outcome": "Dots remain idle rather than creating a task treadmill"
+    }
+  ]
+}

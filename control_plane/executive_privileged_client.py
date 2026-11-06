@@ -15,6 +15,7 @@ import hashlib
 import json
 import re
 import socket
+import time
 from pathlib import Path
 from typing import Mapping
 
@@ -39,12 +40,66 @@ DEFAULT_SOCKET = Path("/var/run/mastermind-executive/privileged.sock")
 DEFAULT_CLIENT_TIMEOUT_SECONDS = 11 * 60
 _MAX_RESPONSE_BYTES = 128 * 1024
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_DEADLINE_EXPIRED = "privileged broker client deadline expired"
 
 
-def _read_response(connection: socket.socket) -> dict[str, object]:
+def _validated_deadline(deadline_monotonic_ns: int) -> int:
+    """Return the one absolute endpoint, refusing a non-exact or non-positive int.
+
+    ``bool``, ``int`` subclasses, floats and strings are all refused, so no
+    caller can smuggle a relative or truthy value into the deadline path.
+    """
+    if type(deadline_monotonic_ns) is not int:
+        raise TypeError("deadline_monotonic_ns must be an exact int")
+    if deadline_monotonic_ns <= 0:
+        raise ValueError("deadline_monotonic_ns must be positive")
+    return deadline_monotonic_ns
+
+
+def _require_within_deadline(deadline_monotonic_ns: int) -> None:
+    """Acceptance fence: a phase returning at or after the endpoint is not success.
+
+    Syscalls, JSON parsing and close cannot be preempted mid-flight, so this
+    only refuses to accept work that finished past the endpoint. Expiry is not
+    evidence that the broker did not apply an effect.
+    """
+    if deadline_monotonic_ns - time.monotonic_ns() <= 0:
+        raise TimeoutError(_DEADLINE_EXPIRED)
+
+
+def _clamped_timeout_seconds(existing_timeout_seconds, deadline_monotonic_ns: int) -> float:
+    """Return min(existing timeout, remaining endpoint); refuse an expired wait."""
+    remaining_ns = deadline_monotonic_ns - time.monotonic_ns()
+    if remaining_ns <= 0:
+        raise TimeoutError(_DEADLINE_EXPIRED)
+    if existing_timeout_seconds is not None:
+        # Preserve nonblocking zero and let settimeout reject a negative local
+        # limit, exactly as it does without an aggregate deadline. Compare in
+        # nanoseconds before division so a large integer endpoint cannot overflow
+        # when the ordinary finite socket limit is already the tighter bound.
+        if remaining_ns >= existing_timeout_seconds * 1_000_000_000:
+            return existing_timeout_seconds
+    return remaining_ns / 1_000_000_000
+
+
+def _read_response(
+    connection: socket.socket,
+    *,
+    deadline_monotonic_ns: int | None = None,
+) -> dict[str, object]:
+    deadline = None if deadline_monotonic_ns is None else _validated_deadline(deadline_monotonic_ns)
+    if deadline is not None:
+        _require_within_deadline(deadline)
     buffer = bytearray()
     while True:
+        if deadline is not None:
+            # The live socket timeout is already at most the original bound, so
+            # clamping against it keeps every recv at min(existing, remaining).
+            connection.settimeout(_clamped_timeout_seconds(connection.gettimeout(), deadline))
         chunk = connection.recv(min(4096, _MAX_RESPONSE_BYTES + 1 - len(buffer)))
+        if deadline is not None:
+            _require_within_deadline(deadline)
         if not chunk:
             raise RuntimeError("privileged broker closed before a response")
         buffer.extend(chunk)
@@ -55,9 +110,15 @@ def _read_response(connection: socket.socket) -> dict[str, object]:
             if newline != len(buffer) - 1:
                 raise RuntimeError("privileged broker returned multiple frames")
             break
+    if deadline is not None:
+        _require_within_deadline(deadline)
     value = json.loads(bytes(buffer[:-1]).decode("utf-8", errors="strict"))
+    if deadline is not None:
+        _require_within_deadline(deadline)
     if not isinstance(value, dict) or not isinstance(value.get("ok"), bool):
         raise RuntimeError("privileged broker returned an invalid response")
+    if deadline is not None:
+        _require_within_deadline(deadline)
     return value
 
 
@@ -66,16 +127,54 @@ def _send_one_frame(
     *,
     socket_path: Path,
     timeout_seconds: int,
+    require_root_peer: bool = False,
+    deadline_monotonic_ns: int | None = None,
 ) -> dict[str, object]:
+    deadline = None
+    if deadline_monotonic_ns is not None:
+        deadline = _validated_deadline(deadline_monotonic_ns)
+        _require_within_deadline(deadline)
     encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode("ascii")
+    if deadline is None:
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            connection.settimeout(timeout_seconds)
+            connection.connect(str(socket_path))
+            if require_root_peer:
+                # P4's Control caller verifies the root end before sending any
+                # principal/approval bytes. There is no UID fallback on platforms
+                # without the Darwin connected-peer primitive.
+                if not hasattr(connection, "getpeereid") or connection.getpeereid()[0] != 0:
+                    raise RuntimeError("release broker root peer unavailable")
+            connection.sendall(encoded)
+            return _read_response(connection)
+        finally:
+            connection.close()
+    _require_within_deadline(deadline)
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        connection.settimeout(timeout_seconds)
+        _require_within_deadline(deadline)
+        connection.settimeout(_clamped_timeout_seconds(timeout_seconds, deadline))
         connection.connect(str(socket_path))
+        _require_within_deadline(deadline)
+        if require_root_peer:
+            if not hasattr(connection, "getpeereid") or connection.getpeereid()[0] != 0:
+                raise RuntimeError("release broker root peer unavailable")
+            _require_within_deadline(deadline)
+        connection.settimeout(_clamped_timeout_seconds(timeout_seconds, deadline))
         connection.sendall(encoded)
-        return _read_response(connection)
-    finally:
-        connection.close()
+        _require_within_deadline(deadline)
+        response = _read_response(connection, deadline_monotonic_ns=deadline)
+    except BaseException:
+        try:
+            connection.close()
+        except BaseException:
+            # Cleanup is attempted once without replacing the active failure.
+            pass
+        raise
+    connection.close()
+    _require_within_deadline(deadline)
+    return response
 
 
 def send_effect(
@@ -94,9 +193,13 @@ def send_status(
     *,
     socket_path: Path = DEFAULT_SOCKET,
     timeout_seconds: int = DEFAULT_CLIENT_TIMEOUT_SECONDS,
+    require_root_peer: bool = False,
 ) -> dict[str, object]:
     """Send one validated status request over one bounded connection; no retry."""
     validated = validate_status_request(request)
+    if require_root_peer:
+        return _send_one_frame(validated.to_dict(), socket_path=socket_path,
+                               timeout_seconds=timeout_seconds, require_root_peer=True)
     return _send_one_frame(validated.to_dict(), socket_path=socket_path, timeout_seconds=timeout_seconds)
 
 
@@ -194,12 +297,198 @@ def validate_status_response(
     return result
 
 
+def send_forward_recovery(
+    request: Mapping[str, object],
+    *,
+    socket_path: Path = DEFAULT_SOCKET,
+    timeout_seconds: int = DEFAULT_CLIENT_TIMEOUT_SECONDS,
+    expected_release_sha: str | None = None,
+) -> dict[str, object]:
+    """Send the one closed dormant forward request; root peer first, once.
+
+    The response is validated against the caller's exact request before it is
+    returned; no automatic retry exists and a refusal is returned as-is.
+    """
+    from ops.executive_os.provider_incident_forward import validate_forward_request
+
+    response = _send_one_frame(
+        validate_forward_request(request)[0].to_dict(),
+        socket_path=socket_path,
+        timeout_seconds=timeout_seconds,
+        require_root_peer=True,
+    )
+    return validate_forward_recovery_response(
+        response, request, expected_release_sha=expected_release_sha
+    )
+
+
+def validate_forward_recovery_response(
+    response: Mapping[str, object],
+    request: Mapping[str, object],
+    *,
+    expected_release_sha: str | None = None,
+) -> dict[str, object]:
+    """Validate a forward effect response against the exact closed request.
+
+    The forward action is deliberately absent from the ordinary action
+    catalog, so ordinary ``validate_request`` cannot correlate this schema.
+    The canonical forward digest F is re-derived from the caller's exact
+    request and bound on the embedded terminal, together with the request id
+    and the forward action; ``expected_release_sha`` optionally binds the
+    repaired release.  The wire carries no commitment bytes, so none are
+    invented here: the receipt's stdout digest stays bound only to whatever
+    commitment evidence the receipt itself asserts.
+    """
+    from ops.executive_os.provider_incident_forward import (
+        validate_forward_request,
+    )
+
+    if response.get("schema") != WIRE_RESPONSE_SCHEMA or not isinstance(response.get("ok"), bool):
+        raise RuntimeError("privileged broker returned an invalid effect response")
+    if response["ok"] is False:
+        if frozenset(response) != frozenset({"schema", "ok", "error", "detail"}):
+            raise RuntimeError("privileged broker returned an invalid refusal response")
+        if not isinstance(response.get("error"), str) or not isinstance(response.get("detail"), str):
+            raise RuntimeError("privileged broker returned an invalid refusal response")
+        return dict(response)
+    if (
+        frozenset(response) != frozenset({"schema", "ok", "replayed", "receipt"})
+        or not isinstance(response.get("replayed"), bool)
+        or not isinstance(response.get("receipt"), dict)
+    ):
+        raise RuntimeError("privileged broker returned an invalid success response")
+    validated, forward_digest = validate_forward_request(request)
+    receipt = validate_terminal_receipt(
+        response["receipt"],
+        expected_request_id=validated.request_id,
+        expected_request_sha256=forward_digest,
+        expected_release_sha=expected_release_sha,
+        expected_action=validated.action,
+    )
+    if receipt["outcome"] != "SUCCEEDED" or receipt["exit_code"] != 0:
+        raise RuntimeError("privileged broker returned a non-success forward receipt")
+    return {"schema": response["schema"], "ok": True, "replayed": response["replayed"], "receipt": receipt}
+
+
+def send_forward_status(
+    request: Mapping[str, object],
+    *,
+    socket_path: Path = DEFAULT_SOCKET,
+    timeout_seconds: int = DEFAULT_CLIENT_TIMEOUT_SECONDS,
+) -> dict[str, object]:
+    """Send the closed forward status request; root peer first, once."""
+    from ops.executive_os.provider_incident_forward import (
+        validate_forward_status_request,
+    )
+
+    validated = validate_forward_status_request(request)
+    return _send_one_frame(
+        validated.to_dict(),
+        socket_path=socket_path,
+        timeout_seconds=timeout_seconds,
+        require_root_peer=True,
+    )
+
+
+def validate_forward_status_response(
+    response: Mapping[str, object],
+    *,
+    expected_forward_request_sha256: str | None = None,
+) -> dict[str, object]:
+    """Validate the closed forward status envelope and its embedded join.
+
+    A SUCCEEDED forward_state must carry the complete join evidence; any other
+    state must carry none.  The embedded terminal is bound to the envelope's
+    own installed release and the caller's trusted expected request digest F.
+    Successful status cannot be correlated without that external expectation;
+    the terminal's own digest does not establish it.
+    Validation grants no effect or retry authority and never reinterprets the
+    unchanged original UNKNOWN history.
+    """
+    from ops.executive_os.provider_incident_forward import (
+        FORWARD_RECOVERY_ACTION,
+        ORIGINAL_ISSUER_REQUEST_ID,
+    )
+
+    if (
+        not isinstance(response, Mapping)
+        or response.get("schema") != WIRE_RESPONSE_SCHEMA
+        or response.get("ok") is not True
+        or response.get("query") is not True
+        or response.get("request_id") != ORIGINAL_ISSUER_REQUEST_ID
+        or not isinstance(response.get("installed_release_sha"), str)
+        or _SHA40_RE.fullmatch(response["installed_release_sha"]) is None
+        or response.get("original_status") not in (
+            STATUS_TERMINAL, STATUS_EFFECT_UNKNOWN,
+            STATUS_RECONCILED_NOT_APPLIED, STATUS_NOT_FOUND,
+        )
+        or response.get("forward_state") not in (
+            "NOT_RESERVED", "RESERVED_OR_UNKNOWN", "SUCCEEDED",
+        )
+    ):
+        raise RuntimeError("privileged broker returned an invalid forward status response")
+    base_keys = frozenset({
+        "schema", "ok", "query", "original_status", "request_id",
+        "installed_release_sha", "forward_state",
+    })
+    forward_state = response["forward_state"]
+    if forward_state == "SUCCEEDED":
+        expected_keys = base_keys | {"forward"}
+    else:
+        expected_keys = base_keys
+        if "forward" in response:
+            raise RuntimeError("privileged broker returned an invalid forward status envelope")
+    if frozenset(response) != expected_keys:
+        raise RuntimeError("privileged broker returned an invalid forward status envelope")
+    result = dict(response)
+    if forward_state == "SUCCEEDED":
+        join = response["forward"]
+        if (
+            not isinstance(join, Mapping)
+            or frozenset(join) != {
+                "terminal", "commitment_sha256", "reservation_sha256", "grant_sha256",
+            }
+        ):
+            raise RuntimeError("privileged broker returned an invalid forward join")
+        receipt = validate_terminal_receipt(
+            join["terminal"],
+            expected_request_id=ORIGINAL_ISSUER_REQUEST_ID,
+            expected_action=FORWARD_RECOVERY_ACTION,
+        )
+        if receipt["release_sha"] != response["installed_release_sha"]:
+            # The embedded terminal belongs to this envelope's own repair, not
+            # to some other (older or newer) installed release.
+            raise RuntimeError("privileged broker forward terminal release differs from its envelope")
+        if (not isinstance(expected_forward_request_sha256, str)
+                or _SHA256_RE.fullmatch(expected_forward_request_sha256) is None):
+            raise RuntimeError("privileged broker forward success requires the expected request digest")
+        if receipt["request_sha256"] != expected_forward_request_sha256:
+            raise RuntimeError("privileged broker forward terminal digest differs from the expected request")
+        if receipt["outcome"] != "SUCCEEDED" or receipt["exit_code"] != 0:
+            raise RuntimeError("privileged broker returned a non-success forward terminal")
+        for field in ("commitment_sha256", "reservation_sha256", "grant_sha256"):
+            value = join[field]
+            if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
+                raise RuntimeError("privileged broker returned an invalid forward join digest")
+        result["forward"] = {
+            "terminal": receipt,
+            "commitment_sha256": join["commitment_sha256"],
+            "reservation_sha256": join["reservation_sha256"],
+            "grant_sha256": join["grant_sha256"],
+        }
+    return result
+
+
 __all__ = [
     "BrokerTrustError",
     "DEFAULT_SOCKET",
     "DEFAULT_CLIENT_TIMEOUT_SECONDS",
     "send_effect",
+    "send_forward_recovery",
+    "send_forward_status",
     "send_status",
     "validate_effect_response",
+    "validate_forward_recovery_response",
+    "validate_forward_status_response",
     "validate_status_response",
 ]

@@ -21,23 +21,48 @@ from control_plane.remote_worker_transport import (
     TransportValidationError,
     encode_frame,
     validate_request,
+    REMOTE_HOST_OBSERVATION_REQUEST_SCHEMA,
+    MAX_HOST_OBSERVATION_RESPONSE_BYTES,
+    build_host_observation_response,
+    decode_host_observation_request,
+    decode_request_document,
 )
-from ops.executive_os.remote_worker_gateway_config import RemoteWorkerGatewayConfig
+from common.hermes_role_status_contract import RoleStatusError
+from ops.executive_os.remote_worker_gateway_config import (
+    FABRIC_BROKER_TARGET,
+    GatewayConfig,
+    HostObservationGatewayConfig,
+    RemoteWorkerGatewayConfig,
+)
+from ops.executive_os.remote_assignment_control import seal_original_assignment
 
 
 class RemoteWorkerGateway:
     """One-request-per-connection authenticated gateway with no durable state."""
 
-    def __init__(self, config: RemoteWorkerGatewayConfig) -> None:
+    def __init__(self, config: GatewayConfig) -> None:
+        if type(config) not in (RemoteWorkerGatewayConfig, HostObservationGatewayConfig):
+            raise TypeError("config must be a closed gateway profile")
         self.config = config
+        self._host_observer = None
+        self._broker_client = None
+        self.broker_call = self._call_broker
+        self._ssl_context = self._build_server_ssl_context()
+        if type(config) is HostObservationGatewayConfig:
+            return
+        client_arguments: dict[str, Any] = {}
+        if config.broker_target == FABRIC_BROKER_TARGET:
+            # Only the explicit Fabric target pins the broker peer uid; the
+            # socket path and identity always come from the config, never from
+            # a caller-supplied override.
+            client_arguments["expected_peer_uid"] = config.expected_broker_peer_uid
         self._broker_client = WorkerBrokerClient(
             config.broker_socket_path,
             timeout_seconds=config.request_timeout_seconds,
+            **client_arguments,
         )
         # Deliberate seam for hermetic tests; production uses the fixed AF_UNIX
         # WorkerBrokerClient above and never accepts a caller-supplied socket.
-        self.broker_call = self._call_broker
-        self._ssl_context = self._build_server_ssl_context()
 
     def _build_server_ssl_context(self) -> ssl.SSLContext:
         try:
@@ -67,21 +92,40 @@ class RemoteWorkerGateway:
         )
 
     async def _call_broker(self, operation: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if type(self.config) is HostObservationGatewayConfig or self._broker_client is None:
+            raise ValueError("host observation profile has no broker capability")
         return await self._broker_client.request(
             operation,
             payload,
             timeout_seconds=self.config.request_timeout_seconds,
         )
 
+    async def _dispatch_authenticated(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        if type(self.config) is HostObservationGatewayConfig:
+            raise ValueError("host observation profile has no broker capability")
+        if request["broker_operation"] == "assignment-seal":
+            binding = self.config.assignment_control
+            if binding is None:
+                raise ValueError("gateway assignment Control is not configured")
+            if self.config.broker_target == FABRIC_BROKER_TARGET:
+                return await seal_original_assignment(binding, request, self.broker_call,
+                                                      fabric_target=True)
+            return await seal_original_assignment(binding, request, self.broker_call)
+        return await self.broker_call(str(request["broker_operation"]),
+                                      dict(request["broker_request"]))
+
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        host_read = False
+        host_response_sent = False
+        started = asyncio.get_running_loop().time()
         try:
             if not self._peer_is_expected_control(writer):
                 return
             try:
                 raw = await self._read_frame(reader)
-                document = json.loads(raw.decode("utf-8", errors="strict"))
+                document = decode_request_document(raw)
             except (
                 asyncio.IncompleteReadError,
                 asyncio.TimeoutError,
@@ -91,6 +135,34 @@ class RemoteWorkerGateway:
             ):
                 return
             if not isinstance(document, dict):
+                return
+
+            if document.get("schema") == REMOTE_HOST_OBSERVATION_REQUEST_SCHEMA:
+                host_read = True
+                try:
+                    request = decode_host_observation_request(raw, expected_host_ref=self.config.host_ref)
+                    deadline = started + min(4.0, float(self.config.request_timeout_seconds))
+                    if asyncio.get_running_loop().time() >= deadline:
+                        return
+                    async with asyncio.timeout_at(deadline):
+                        response = await self._observe_host_request(request)
+                        encoded = self._canonical_response_bytes(response)
+                        if len(encoded) > min(MAX_HOST_OBSERVATION_RESPONSE_BYTES, self.config.max_frame_bytes):
+                            response = build_host_observation_response(request)
+                            encoded = self._canonical_response_bytes(response)
+                        writer.write(encode_frame(encoded))
+                        await writer.drain()
+                        host_response_sent = True
+                except (asyncio.TimeoutError, TransportValidationError, OSError):
+                    return
+                return
+
+            if type(self.config) is HostObservationGatewayConfig:
+                # Refuse before entering the Worker grammar or any broker
+                # callback, including authenticated status/collect requests.
+                refusal = self._bound_response(document, outcome="refused", broker_response=None)
+                if refusal is not None:
+                    await self._write_response(writer, refusal)
                 return
 
             try:
@@ -108,10 +180,7 @@ class RemoteWorkerGateway:
 
             try:
                 result = await asyncio.wait_for(
-                    self.broker_call(
-                        str(request["broker_operation"]),
-                        dict(request["broker_request"]),
-                    ),
+                    self._dispatch_authenticated(request),
                     timeout=self.config.request_timeout_seconds,
                 )
                 response = self._bound_response(
@@ -132,8 +201,26 @@ class RemoteWorkerGateway:
                 await self._write_response(writer, response)
         finally:
             writer.close()
-            with suppress(Exception):
-                await writer.wait_closed()
+            if host_read and not host_response_sent:
+                with suppress(Exception):
+                    transport = getattr(writer, "transport", None)
+                    if transport is not None:
+                        transport.abort()
+            elif not host_read:
+                with suppress(Exception):
+                    await writer.wait_closed()
+
+    async def _observe_host_request(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        """One fixed host read; never enter the Worker Broker grammar."""
+        if self.config.hermes_role_metadata_read is None or self._host_observer is None:
+            return build_host_observation_response(request)
+        try:
+            observation = await self._host_observer.read_pair()
+            return build_host_observation_response(request, observation=observation)
+        except RoleStatusError as exc:
+            return build_host_observation_response(request, reason_code=exc.code)
+        except Exception:
+            return build_host_observation_response(request)
 
     def _peer_is_expected_control(self, writer: asyncio.StreamWriter) -> bool:
         ssl_object = writer.get_extra_info("ssl_object")

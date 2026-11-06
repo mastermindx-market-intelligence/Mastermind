@@ -255,9 +255,16 @@ class CoordinationReviewSupervisor(ExecutiveSupervisor):
         self._coordination_artifact_reader = coordination_artifact_reader
         super().__init__(*args, **kwargs)
 
-    def _prompt(self, job: Job, attempt: Attempt,
-                effective_grant: Mapping[str, Any] | None = None) -> str:
-        original = super()._prompt(job, attempt, effective_grant)
+    def _prompt(
+        self, job: Job, attempt: Attempt,
+        effective_grant: Mapping[str, Any] | None = None,
+        *,
+        commission: Mapping[str, Any] | None = None,
+        inline_commission: str | None = None,
+    ) -> str:
+        original = super()._prompt(
+            job, attempt, effective_grant,
+            commission=commission, inline_commission=inline_commission)
         if job.job_id != self._coordination_review_job_id:
             return original
         try:

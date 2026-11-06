@@ -16,13 +16,16 @@ than as a clean success.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
+from decimal import Decimal, localcontext
 import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
-from scripts.agent_eval import MAX_CANONICAL_ARTIFACT_BYTES, contracts, corpus, scoring, store, validity
-from scripts.agent_eval.canonical import canonical_json_bytes
+from scripts.agent_eval import MAX_CANONICAL_ARTIFACT_BYTES, contracts, corpus, scoring, store, validity, verification
+from scripts.agent_eval.canonical import canonical_json_bytes, digest_value
 from scripts.agent_eval.errors import ArtifactConflictError, ContractError, VerificationContextError
 
 DEFAULT_ANALYSIS_VERSION = "mastermind.agent_evaluation_r0_analysis.v1"
@@ -302,6 +305,160 @@ def _cmd_summarize(args: argparse.Namespace) -> int:
     return _EXIT_INCOMPLETE
 
 
+def _resource_usage(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Evidence coverage over all verified receipts, including failed/invalid ones.
+
+    Missing observations remain null, not zero. Amounts of unlike currencies
+    remain separate. None of these observations confers product acceptance.
+    """
+    count = len(rows)
+    resources = [row["resources"] for row in rows]
+    output: dict[str, Any] = {"run_count": count}
+    for field in ("input_tokens", "output_tokens", "tool_calls", "elapsed_ms"):
+        known: list[int] = []
+        for resource in resources:
+            value = resource[field]
+            if value is not None:
+                if type(value) is not int or value < 0:
+                    raise ValueError("invalid resource count")
+                known.append(value)
+        total = sum(known)
+        if total > (2 ** 63 - 1):
+            raise ValueError("resource count exceeds signed 64-bit canonical range")
+        output[field] = {
+            "known_sum": total if known else None,
+            "total": total if count and len(known) == count else None,
+            "reported_runs": len(known),
+            "missing_runs": count - len(known),
+        }
+
+    complete = [r for r in resources if r["input_tokens"] is not None and r["output_tokens"] is not None]
+    complete_sum = sum(r["input_tokens"] + r["output_tokens"] for r in complete)
+    if complete_sum > (2 ** 63 - 1):
+        raise ValueError("combined tokens exceed signed 64-bit canonical range")
+    output["total_tokens"] = {
+        "known_sum_from_complete_runs": complete_sum if complete else None,
+        "total": complete_sum if count and len(complete) == count else None,
+        "reported_runs": len(complete),
+        "missing_runs": count - len(complete),
+    }
+
+    currencies: dict[str, list[Decimal]] = {}
+    cost_missing = 0
+    for resource in resources:
+        value, currency = resource["estimated_marginal_cost"], resource["cost_currency"]
+        if value is None or currency is None:
+            cost_missing += 1
+            continue
+        if type(value) is not str or type(currency) is not str or not currency:
+            raise ValueError("invalid estimated cost evidence")
+        amount = Decimal(value)
+        if not amount.is_finite() or amount < 0:
+            raise ValueError("estimated marginal cost must be finite and nonnegative")
+        currencies.setdefault(currency, []).append(amount)
+    groups: list[dict[str, Any]] = []
+    for currency, amounts in sorted(currencies.items()):
+        with localcontext() as ctx:
+            integer_digits = max(max(amount.adjusted() + 1, 1) for amount in amounts)
+            decimal_places = max(max(-amount.as_tuple().exponent, 0) for amount in amounts)
+            ctx.prec = max(28, integer_digits + decimal_places + len(str(len(amounts))) + 3)
+            exact_sum = sum(amounts, Decimal(0))
+            groups.append({
+                "currency": currency,
+                "known_estimated_sum": str(exact_sum),
+                "reported_runs": len(amounts),
+            })
+    output["estimated_cost"] = {
+        "by_currency": groups,
+        "missing_runs": cost_missing,
+        "complete_single_currency": bool(count) and cost_missing == 0 and len(groups) == 1,
+    }
+    output["provider_usage_reference_runs"] = sum(bool(r["provider_usage_ref"]) for r in resources)
+    output["completion_status_counts"] = dict(sorted(Counter(r["execution"]["completion_status"] for r in rows).items()))
+    output["validity_status_counts"] = dict(sorted(Counter(r["validity"]["status"] for r in rows).items()))
+    return output
+
+
+def _cmd_resources(args: argparse.Namespace) -> int:
+    """Existing-store-only EVAL query; requires non-creating ArtifactStore API."""
+    root = Path(args.root)
+    try:
+        if root.is_symlink() or not root.is_dir():
+            raise CliUsageError("resources requires an existing non-symlink store root")
+    except OSError as exc:
+        raise CliUsageError("cannot access evaluation store root") from exc
+    contracts.parse_experiment_id(args.experiment_id)
+    try:
+        source = store.ArtifactStore(root, create_root=False)
+        experiment = source.resolve_experiment(args.experiment_id)
+        if experiment is None:
+            raise CliUsageError("experiment not found in the existing store")
+        verification.verify_experiment_graph(experiment, source)
+        population = sorted(source.enumerate_runs(), key=lambda run: run["run_id"])
+        seen: set[str] = set()
+        selected = []
+        for run in population:
+            run_id = run["run_id"]
+            if run_id in seen:
+                raise ValueError("duplicate run identity in full population")
+            seen.add(run_id)
+            if run["comparison"]["experiment_id"] != args.experiment_id:
+                continue
+            if source.resolve_run(run_id) != run:
+                raise ValueError("run cannot be resolved identically by canonical identity")
+            verification.verify_run_graph(run, source)
+            selected.append(run)
+        selected.sort(key=lambda run: run["run_id"])
+        groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+        for run in selected:
+            key = (
+                run["comparison"]["arm_id"],
+                run["configuration"]["configuration_id"],
+                run["scenario"]["scenario_id"],
+                str(run["scenario"]["scenario_version"]),
+            )
+            groups.setdefault(key, []).append(run)
+        overall_usage = _resource_usage(selected)
+        all_fields_reported = bool(selected) and all(
+            overall_usage[field]["missing_runs"] == 0
+            for field in ("input_tokens", "output_tokens", "tool_calls", "elapsed_ms")
+        ) and overall_usage["estimated_cost"]["missing_runs"] == 0
+        payload = {
+            "schema": "mastermind.agent_evaluation_resource_summary.v1",
+            "experiment_id": args.experiment_id,
+            "experiment_digest": experiment["experiment_digest"],
+            "verification_scope": "EVALUATION_GRAPH_VERIFIED",
+            "external_content_verified": False,
+            "population_scope": "experiment receipts observed by one complete store enumeration",
+            "observed_receipts_digest": digest_value([
+                {"run_id": run["run_id"], "run_digest": run["run_digest"]}
+                for run in selected
+            ]),
+            "all_expected_runs_observed": None,
+            "summary": overall_usage,
+            "observed_resource_field_coverage": "COMPLETE" if all_fields_reported else "INCOMPLETE",
+            "groups": [
+                {"arm_id": key[0], "configuration_id": key[1], "scenario_id": key[2],
+                 "scenario_version": key[3], **_resource_usage(group)}
+                for key, group in sorted(groups.items())
+            ],
+            "cost_per_accepted_outcome": None,
+            "runtime_changed": False,
+            "limitations": [
+                "A verified receipt is not an independently accepted product outcome.",
+                "Elapsed times are receipt totals, not critical-path or wall-clock latency.",
+                "Parent/child usage may overlap; unique provider billing is unverified.",
+                "Token units are recorded observations, not normalized billable tokens.",
+                "Unrecorded attempts, framing, review and integration remain unknown.",
+                "Estimated costs and usage refs do not prove actual billing or subscription consumption.",
+                "Missing observations are unknown, never zero; no winner or routing policy is claimed.",
+            ],
+        }
+    except (KeyError, TypeError, ValueError, ArithmeticError, OSError) as exc:
+        raise CliUsageError("resource evidence is malformed, incomplete or inaccessible") from exc
+    _print_json(payload)
+    return _EXIT_OK if all_fields_reported else _EXIT_INCOMPLETE
+
 def _cmd_corpus_verify(args: argparse.Namespace) -> int:
     """EVAL-C0: scenario-vs-corpus consistency check over a committed public
     corpus tree (never one of R0's three verification scopes -- this is a
@@ -399,6 +556,11 @@ def _build_parser() -> argparse.ArgumentParser:
     summarize.add_argument("--created-at", required=True)
     summarize.add_argument("--id", required=True)
     summarize.set_defaults(func=_cmd_summarize)
+
+    resources = subparsers.add_parser("resources", help="read-only coverage over all graph-verified experiment receipts")
+    resources.add_argument("--root", required=True)
+    resources.add_argument("--experiment-id", required=True)
+    resources.set_defaults(func=_cmd_resources)
 
     verify_tree_graph = subparsers.add_parser(
         "verify-tree-graph", help="graph-verify every artifact under --root; never repairs"

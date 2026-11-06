@@ -1,0 +1,9 @@
+{
+  "at": "2026-10-12T04:46:10.454691+00:00",
+  "pre_sha256": "ab9ad3242933499bceb19c2a96d5bf112627b3528855021b3dce6100bd800c58",
+  "sha256": "fcf43edbe05e7a6d63f60241d4a7404477651abcb6cd32556e546f1211103a94",
+  "path": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/bootstrap_host.sh",
+  "proof": "exact718B remote body equality across both shells;3existing mocked transport/lock/dryrun checksPASS;installedsyntaxPASS",
+  "scope": "local construction only;no host command,credential,policy or worker effect",
+  "pending_policy_builder": "still original proposal only, merge against this newerpreimage"
+}

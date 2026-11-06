@@ -88,10 +88,17 @@ class CoordinationParentSupervisor(ExecutiveSupervisor):
             raise SupervisorError("parent is not the current admitted project assignment")
         return by_id
 
-    def _prompt(self, job: Job, attempt: Attempt,
-                effective_grant: Mapping[str, Any] | None = None) -> str:
+    def _prompt(
+        self, job: Job, attempt: Attempt,
+        effective_grant: Mapping[str, Any] | None = None,
+        *,
+        commission: Mapping[str, Any] | None = None,
+        inline_commission: str | None = None,
+    ) -> str:
         if job.job_id != self._coordination_root_job_id:
-            return super()._prompt(job, attempt, effective_grant)
+            return super()._prompt(
+                job, attempt, effective_grant,
+                commission=commission, inline_commission=inline_commission)
         try:
             if (type(job) is not Job or type(attempt) is not Attempt or effective_grant is None
                     or dict(effective_grant) != attempt.effective_grant):
@@ -134,7 +141,9 @@ class CoordinationParentSupervisor(ExecutiveSupervisor):
                     "coordination_brief": brief}
             _revalidate_sources(sources)
             self._current_parent(job, attempt, sources)
-            original = super()._prompt(job, attempt, effective_grant)
+            original = super()._prompt(
+                job, attempt, effective_grant,
+                commission=commission, inline_commission=inline_commission)
             if canonical_json_bytes(self.runtime.jobs.get_cycle_handoff(job.job_id)) != canonical_json_bytes(handoff):
                 raise SupervisorError("canonical parent handoff changed during composition")
             _revalidate_sources(sources)

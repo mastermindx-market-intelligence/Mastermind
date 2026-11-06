@@ -17,7 +17,9 @@ from tests.test_chairman_coordination_acquisition import (
 from tests.test_executive_os_phase1fc import _complete_ohf_role, _review_body
 from control_plane.executive_coo_cycle import CooCycle
 from control_plane.executive_runtime import JobStatus, AttemptStatus, StateConflict
-from control_plane.executive_supervisor import ExecutiveSupervisor, SupervisorError
+from control_plane.executive_supervisor import (
+    ExecutiveSupervisor, NoEligibleWorkerCapacity, SupervisorError,
+)
 
 
 def module():
@@ -472,25 +474,29 @@ def test_explicit_unusable_work_target_is_not_dropped_for_an_untargeted_review_r
     target = h["config"]["exact_target_provider"](h["work_done"].job.job_id)
     sup, adapter = native_review_supervisor(h, exact_target_provider=lambda job_id: target)
     command_id = f"coo-cycle:{h['root'].job_id}:dispatch:{h['review'].job_id}:attempt:1"
-    with pytest.raises(StateConflict, match="exact worker target"):
+    # Current admission excludes the sealed subject's worker before allocation.
+    # An eligible worker-b exists, but the explicit worker-a target cannot widen.
+    with pytest.raises(NoEligibleWorkerCapacity, match="no eligible worker capacity"):
         asyncio.run(sup.run_cycle_once(h["review"].job_id, command_id=command_id))
     current = h["runtime"].jobs.get_job(h["review"].job_id)
     assert current.status is JobStatus.QUEUED and current.current_attempt_id is None
+    assert h["runtime"].store.find_event_by_command_id(command_id) is None
     assert adapter.start_count == 0
 
 
-def test_original_parent_refuses_same_author_review_even_after_a_completed_model_result(host):
+def test_original_admission_refuses_same_author_review_before_model_launch(host):
     h = prepare_review(host, dispatch=False)
-    # Deliberately bad fixture placement, not a production policy or scheduler edit.
+    # Leave only the sealed subject's worker available. Current Runtime excludes
+    # that worker/account before a review Attempt or model result can exist.
     h["runtime"].workers.set_worker_status("worker-b", "DRAINING")
     sup, adapter = native_review_supervisor(h)
     command_id = f"coo-cycle:{h['root'].job_id}:dispatch:{h['review'].job_id}:attempt:1"
-    done = asyncio.run(sup.run_cycle_once(h["review"].job_id, command_id=command_id))
-    assert done.job.status is JobStatus.COMPLETED
-    assert done.attempt.worker_id == h["work_done"].attempt.worker_id
-    out = returned(h, done.job)
-    assert out["review_independence"] == "NOT_PROJECTED"
-    assert not out["parent_consumption_proven"] and not out["acceptance_granted"]
-    assert CooCycle(h["runtime"]).run_once(h["root"].job_id).action == "REVIEW_CREATED"
+    with pytest.raises(NoEligibleWorkerCapacity, match="no eligible worker capacity"):
+        asyncio.run(sup.run_cycle_once(h["review"].job_id, command_id=command_id))
+    current = h["runtime"].jobs.get_job(h["review"].job_id)
+    assert current.status is JobStatus.QUEUED and current.current_attempt_id is None
+    assert h["runtime"].store.find_event_by_command_id(command_id) is None
+    assert adapter.start_count == 0
+    assert h["runtime"].jobs.get_job(h["root"].job_id).status is not JobStatus.COMPLETED
     with pytest.raises(StateConflict, match="one immutable handoff"):
         h["runtime"].jobs.get_cycle_handoff(h["root"].job_id)
