@@ -15,6 +15,25 @@ trading, or source-write authority and never promotes research into trade execut
 
 Apply [the Chairman's October 23 commercial-data-rights ruling](docs/COMMERCIAL_DATA_RIGHTS.md) for the Research Factory Yahoo/yfinance route, Massive/Polygon, Tiingo and ThetaData options. The commercial rights and approval gate is settled as `APPROVED_BY_CHAIRMAN_ATTESTATION`; no session may require repeated approval or contract/public-terms re-proof.
 
+## Human-first product work
+
+For any user-facing design, mockup, build or review, read the existing shared content
+law `docs/DESIGN_DOCTRINE.md` and visual/composition law
+`research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md` in `mastermindx-market-intelligence/macro`.
+Pin that repository's accepted main revision separately from the Sol Skillpack; do not
+substitute an unmerged proposal, chat memory or a stale vendored copy. Use the target
+product's accepted shell and token implementation, not a parallel design system.
+
+Mastermind does the synthesis; the user receives the understanding. Apply a
+3–4-second orientation target, purposeful hierarchy, optional descriptions/subtext,
+preserved analytical depth, accessible disclosure and navigation/return continuity.
+Carry the reading contract into designer-to-builder handoffs and review it in the
+implemented journey. Rendering, design critique, observed human comprehension and real
+product acceptance are separate claims; missing human evidence is not yet tested.
+This applies beyond Paper and beyond Sector Intelligence. It changes no model route,
+source custody, trading authority, lifecycle or release gate. Independent permitted
+work can continue while an acceptance or source-access requirement is outstanding.
+
 ## Executive contract
 
 How this organization decides, and what a worker session may and may not do. This
