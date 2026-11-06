@@ -44,7 +44,14 @@ def _suite(name: str, *, minimum_cases: int) -> None:
 def test_minimax_first_worker_suite_runs_whenever_qualified_lane_is_present() -> None:
     task = (NATIVE / "candidate/fabric_task.py").read_text(encoding="utf-8")
     # The two feature hunks must land together; one hunk alone is a hard failure.
-    allows = 'if pool not in ("grok", "minimax")' in task
+    # The central GLM-Codex route extends, rather than replaces, MiniMax qualification.
+    allows = any(
+        clause in task
+        for clause in (
+            'if pool not in ("grok", "minimax")',
+            'if pool not in ("grok", "minimax", "glm")',
+        )
+    )
     forwards = (
         "qualification_host, pool=pool, task_class=task_class" in task
     )
