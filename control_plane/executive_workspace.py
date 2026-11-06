@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import hashlib
+import json
 import os
 import re
 import selectors
@@ -41,7 +42,7 @@ LAUNCH_CLEAN_STATUS_ARGS = (
     "status",
     "--porcelain=v1",
     "-z",
-    "--untracked-files=all",
+    "--untracked-files=no",
 )
 LAUNCH_CLEAN_UNTRACKED_ARGS = ("ls-files", "--others", "-z")
 
@@ -334,6 +335,7 @@ def seal_control_owned_paths(
     paths: dict[str, str | Path],
     *,
     control_uid: int | None = None,
+    expected_identities: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Remove worker traversal at control-owned assignment boundaries.
 
@@ -342,6 +344,10 @@ def seal_control_owned_paths(
     control-owned assignment root makes every descendant unreachable to the
     worker principal.  Every requested boundary is attempted even if another
     fails; successful revocations are never rolled back.
+
+    A remote owner may bind this effect to its retained pre-seal snapshot.
+    That snapshot is an exact filesystem precondition, not caller authority
+    or proof that worker admission/process cleanup is held.
     """
 
     if not paths or any(
@@ -353,6 +359,21 @@ def seal_control_owned_paths(
     canonical_values = [Path(value).resolve(strict=False) for value in paths.values()]
     if len(canonical_values) != len(set(canonical_values)):
         raise AssignmentSealError("assignment seal paths must be distinct")
+
+    expected: dict[str, dict[str, object]] | None = None
+    if expected_identities is not None:
+        fields = {"path", "device", "inode", "mode", "uid", "gid", "mtime_ns"}
+        if not isinstance(expected_identities, Mapping) or set(expected_identities) != set(paths):
+            raise AssignmentSealError("assignment seal snapshot labels differ")
+        expected = {}
+        for label, value in expected_identities.items():
+            if (not isinstance(value, Mapping) or set(value) != fields
+                    or type(value["path"]) is not str
+                    or value["path"] != str(Path(paths[label]).resolve(strict=False))
+                    or any(type(value[key]) is not int or value[key] < 0
+                           for key in fields - {"path"})):
+                raise AssignmentSealError("assignment seal snapshot is malformed")
+            expected[label] = dict(value)
 
     sealed: dict[str, dict[str, object]] = {}
     errors: list[str] = []
@@ -373,6 +394,11 @@ def seal_control_owned_paths(
                     f"{label} boundary is not a control-owned protected directory"
                 )
             before_identity = _seal_identity(path.resolve(strict=True), before)
+            if expected is not None and before_identity != expected[label]:
+                raise AssignmentSealError(f"{label} boundary differs from original snapshot")
+            visible = path.stat(follow_symlinks=False)
+            if (visible.st_dev, visible.st_ino) != (before.st_dev, before.st_ino):
+                raise AssignmentSealError(f"{label} boundary changed while opening")
             os.fchmod(descriptor, 0o700)
             os.fsync(descriptor)
             after = os.fstat(descriptor)
@@ -383,6 +409,9 @@ def seal_control_owned_paths(
                 for field in stable_fields
             ) or after_identity["mode"] != 0o700:
                 raise AssignmentSealError(f"{label} boundary did not seal to mode 0700")
+            visible = path.stat(follow_symlinks=False)
+            if (visible.st_dev, visible.st_ino) != (after.st_dev, after.st_ino):
+                raise AssignmentSealError(f"{label} boundary changed while sealing")
             sealed[label] = {
                 "before": before_identity,
                 "after": after_identity,
@@ -425,7 +454,10 @@ def _git_env(home: Path) -> dict[str, str]:
     }
 
 
-def _run(argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]) -> str:
+def _run(
+    argv: Sequence[str], *, cwd: Path | None, env: dict[str, str],
+    timeout_seconds: int = 60,
+) -> str:
     try:
         completed = subprocess.run(
             list(argv),
@@ -435,7 +467,7 @@ def _run(argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]) -> str:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=60,
+            timeout=timeout_seconds,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise WorkspaceError(f"workspace command could not run: {argv[0]}: {exc}") from exc
@@ -1505,6 +1537,94 @@ def _prepare_commission_dependency(
         raise WorkspaceError("commission preparation changed destination refs")
 
 
+def _pinned_sparse_directories(
+    source: Path,
+    base_sha: str,
+    *,
+    env: dict[str, str],
+    required_paths: Sequence[PurePosixPath] = (),
+) -> tuple[str, ...] | None:
+    """Read the existing repository profile from the exact admitted commit.
+
+    No caller checkout/config file supplies policy. Missing or explicitly disabled
+    profiles retain legacy materialization; malformed present profiles fail closed.
+    This is construction policy, never an active-workspace cleanup/retrofit API.
+    """
+    profile_path = "config/sparse_worktree.json"
+    entry = _run_bytes(
+        ["git", "ls-tree", "-z", base_sha, "--", profile_path], cwd=source, env=env
+    )
+    if not entry:
+        return None
+    try:
+        metadata, name = entry.rstrip(b"\x00").split(b"\t", 1)
+        mode, kind, oid = metadata.decode("ascii").split()
+        if name != profile_path.encode() or mode != "100644" or kind != "blob":
+            raise ValueError("profile must be a regular tracked file")
+        size = int(_run(["git", "cat-file", "-s", oid], cwd=source, env=env))
+        if not 0 < size <= 65536:
+            raise ValueError("profile exceeds its 64 KiB bound")
+        raw = _run_bytes(["git", "cat-file", "blob", oid], cwd=source, env=env)
+        if len(raw) != size:
+            raise ValueError("profile size changed")
+
+        def unique_pairs(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate profile key")
+                result[key] = value
+            return result
+
+        policy = json.loads(raw, object_pairs_hook=unique_pairs)
+        if type(policy) is not dict or type(policy.get("enabled")) is not bool:
+            raise ValueError("enabled must be a boolean")
+        if any(key not in {"enabled", "exclude_dirs"} and not key.startswith("_") for key in policy):
+            raise ValueError("unknown profile field")
+        excluded = policy.get("exclude_dirs")
+        if type(excluded) is not list or len(excluded) > 128:
+            raise ValueError("exclude_dirs must be a bounded list")
+        if any(
+            not isinstance(name, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,255}", name)
+            or name in {".", "..", ".git"}
+            for name in excluded
+        ) or len(set(excluded)) != len(excluded):
+            raise ValueError("exclude_dirs must contain unique safe top-level names")
+    except (ValueError, TypeError, UnicodeError) as exc:
+        raise WorkspaceError(f"invalid pinned sparse profile: {exc}") from exc
+    if not policy["enabled"]:
+        return None
+    raw_dirs = _run_bytes(
+        ["git", "ls-tree", "-d", "--name-only", "-z", base_sha], cwd=source, env=env
+    )
+    try:
+        directories = [value.decode("utf-8") for value in raw_dirs.split(b"\x00") if value]
+    except UnicodeError as exc:
+        raise WorkspaceError("sparse directory names must be UTF-8") from exc
+    if len(directories) > 4096 or any(
+        not re.fullmatch(r"[A-Za-z0-9_.-]{1,255}", name) for name in directories
+    ):
+        raise WorkspaceError("sparse directory list is unsupported or exceeds its bound")
+    # A granted write target must not be hidden. Include its existing top-level
+    # tree before sharing DAC permissions; no worker gains additional write rights.
+    required_roots = {path.parts[0] for path in required_paths}
+    return tuple(sorted(name for name in directories if name not in excluded or name in required_roots))
+
+
+def _configure_new_sparse_workspace(
+    destination: Path, directories: tuple[str, ...] | None, *, env: dict[str, str]
+) -> None:
+    if directories is None:
+        return
+    _run_bytes_with_input(
+        ["git", "sparse-checkout", "set", "--cone", "--stdin"],
+        cwd=destination,
+        env=env,
+        input_bytes="".join(name + "\n" for name in directories).encode("utf-8"),
+    )
+
+
 def prepare_credentialless_clone(
     source_repository: str | Path,
     workspace_root: str | Path,
@@ -1600,6 +1720,9 @@ def prepare_credentialless_clone(
         cwd=source,
         env=env,
     )
+    sparse_directories = _pinned_sparse_directories(
+        source, resolved_base, env=env, required_paths=normalized_write_paths
+    )
     acquisition_operation: Path | None = None
     try:
         _run(
@@ -1607,6 +1730,11 @@ def prepare_credentialless_clone(
             cwd=None,
             env=env,
         )
+        if sparse_directories is not None:
+            # The cloned HEAD can differ from the admitted base. Bind only this
+            # new, private HEAD before sparse setup can materialize any files.
+            _run(["git", "update-ref", "--no-deref", "HEAD", resolved_base], cwd=destination, env=env)
+            _configure_new_sparse_workspace(destination, sparse_directories, env=env)
         _run(["git", "checkout", "--detach", resolved_base], cwd=destination, env=env)
         _run(["git", "switch", "-c", selected_branch], cwd=destination, env=env)
         remotes = _run(["git", "remote"], cwd=destination, env=env).splitlines()
@@ -1826,6 +1954,64 @@ def _worktree_record(
     return None
 
 
+
+def _registered_linked_worktree_status_record(
+    source: Path, destination: Path, *, env: dict[str, str]
+) -> dict[str, str] | None:
+    """Verify ONE locked linked-worktree registration without enumerating the fleet.
+
+    Status reads run on hosts with thousands of other worktrees; repository-wide
+    `git worktree list --porcelain` may exceed the publisher's bounded precheck.
+    Git's own .git -> common/worktrees/<id> -> gitdir reciprocal registration and
+    the exact managed lock are sufficient for this *read-only* status lookup.
+    The regular release, removal and acquisition paths keep the existing fleet
+    enumeration and safety rules. No worktree registry is created here.
+    """
+    try:
+        dot_git = destination / ".git"
+        if dot_git.is_symlink() or not dot_git.is_file():
+            return None
+        if dot_git.stat().st_size > 4096:
+            return None
+        pointer = dot_git.read_text(encoding="utf-8")
+        if not pointer.startswith("gitdir: ") or pointer.count("\n") > 1:
+            return None
+        value = pointer[len("gitdir: "):].strip()
+        if not value or any(c in value for c in "\r\n\x00"):
+            return None
+        raw_admin = Path(value)
+        if not raw_admin.is_absolute():
+            raw_admin = destination / raw_admin
+        if raw_admin.is_symlink():
+            return None
+
+        common = _common_git_dir(source, env=env)
+        common_worktrees = common / "worktrees"
+        if common_worktrees.is_symlink():
+            return None
+        owner_dir = common_worktrees.resolve(strict=True)
+        admin = raw_admin.resolve(strict=True)
+        if admin.parent != owner_dir or not admin.is_dir():
+            return None
+
+        backref, lock = admin / "gitdir", admin / "locked"
+        if (backref.is_symlink() or lock.is_symlink()
+                or not backref.is_file() or not lock.is_file()
+                or backref.stat().st_size > 4096 or lock.stat().st_size > 2048):
+            return None
+        back = backref.read_text(encoding="utf-8").strip()
+        if (not Path(back).is_absolute() or any(c in back for c in "\r\n\x00")
+                or Path(back).resolve(strict=True) != dot_git.resolve(strict=True)):
+            return None
+        reason = lock.read_text(encoding="utf-8").strip()
+        if ("\n" in reason or "\r" in reason
+                or not reason.startswith(LINKED_WORKTREE_LOCK_PREFIX + " ")):
+            return None
+        return {"worktree": str(destination.resolve()), "locked": reason}
+    except (OSError, UnicodeError, RuntimeError, ValueError):
+        return None
+
+
 def _run_status(
     argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]
 ) -> tuple[int, str, str]:
@@ -1868,8 +2054,13 @@ def _require_linked_identity(
     *,
     env: dict[str, str],
     expected_lock_reason: str | None = None,
+    status_direct_registration: bool = False,
 ) -> tuple[dict[str, str], str, str, Path]:
-    record = _worktree_record(source, destination, env=env)
+    record = (
+        _registered_linked_worktree_status_record(source, destination, env=env)
+        if status_direct_registration
+        else _worktree_record(source, destination, env=env)
+    )
     if record is None:
         raise WorkspaceError("workspace is not registered to the source repository")
     reason = record.get("locked", "")
@@ -1982,6 +2173,15 @@ def prepare_linked_worktree(
     if branch_code not in {0, 1}:
         raise WorkspaceError("could not determine whether the linked workspace branch exists")
 
+    sparse_directories = _pinned_sparse_directories(source, resolved_base, env=env)
+    if sparse_directories is not None:
+        code, enrolled, _ = _run_status(
+            ["git", "-C", str(source), "config", "--bool", "--get", "extensions.worktreeConfig"],
+            cwd=None, env=env,
+        )
+        if code != 0 or enrolled.strip() != "true":
+            raise WorkspaceError("source worktreeConfig enrollment is required for sparse creation")
+
     created = False
     try:
         _run(
@@ -1991,6 +2191,10 @@ def prepare_linked_worktree(
                 str(source),
                 "worktree",
                 "add",
+                "--no-checkout",
+                "--lock",
+                "--reason",
+                expected_lock,
                 "-b",
                 selected_branch,
                 str(destination),
@@ -2000,20 +2204,14 @@ def prepare_linked_worktree(
             env=env,
         )
         created = True
-        _run(
-            [
-                "git",
-                "-C",
-                str(source),
-                "worktree",
-                "lock",
-                "--reason",
-                expected_lock,
-                str(destination),
-            ],
-            cwd=None,
-            env=env,
-        )
+        _configure_new_sparse_workspace(destination, sparse_directories, env=env)
+        # Hydrate the admitted HEAD without detaching its operation-bound branch.
+        # A large sparse index on an occupied host can exceed the normal 60s
+        # Git read limit. Extend only this new-worktree hydration to a finite
+        # 240s budget; reads, identity checks and other Git calls keep 60s.
+        # Failed hydration still follows the existing exact-branch cleanup.
+        _run(["git", "read-tree", "-mu", "HEAD"], cwd=destination, env=env,
+             timeout_seconds=240)
         _, head, actual_branch, common = _require_linked_identity(
             source, destination, env=env, expected_lock_reason=expected_lock
         )
@@ -2074,6 +2272,9 @@ def inspect_linked_worktree(
     workspace_path: str | Path,
     *,
     expected_operation_id: str | None = None,
+    status_direct_registration: bool = False,
+    published_branch: str | None = None,
+    published_pull_request: int | None = None,
 ) -> LinkedWorkspaceReleaseReceipt:
     """Classify whether a managed linked worktree can be removed without data loss."""
 
@@ -2087,13 +2288,46 @@ def inspect_linked_worktree(
     if destination == root:
         raise WorkspaceError("managed workspace may not be the workspace root itself")
     env = _git_env(root / ".control-home")
-    record, head, branch, _ = _require_linked_identity(source, destination, env=env)
+    record, head, branch, _ = _require_linked_identity(
+        source, destination, env=env,
+        status_direct_registration=status_direct_registration,
+    )
     lock_reason = record.get("locked", "")
     if expected_operation_id is not None:
         observed_operation = _lock_value(lock_reason, "operation")
         if observed_operation != expected_operation_id:
             raise WorkspaceError("workspace operation identity does not match the release request")
     base = _lock_value(lock_reason, "base") or ""
+    if published_branch is not None and published_pull_request is not None:
+        raise WorkspaceError("publication evidence selectors are mutually exclusive")
+    declared_publication_branch: str | None = None
+    if published_branch is not None:
+        if (
+            type(published_branch) is not str
+            or not published_branch
+            or published_branch != published_branch.strip()
+            or len(published_branch) > 256
+            or published_branch.startswith(("-", "/", ".", "refs/"))
+            or published_branch.endswith(("/", ".", ".lock"))
+            or ".." in published_branch
+            or "//" in published_branch
+            or "@{" in published_branch
+            or any(
+                character.isspace()
+                or ord(character) < 32
+                or ord(character) == 127
+                or character in "\\~^:?*["
+                for character in published_branch
+            )
+        ):
+            raise WorkspaceError("published branch is invalid")
+        declared_publication_branch = published_branch
+    if published_pull_request is not None and (
+        type(published_pull_request) is not int
+        or published_pull_request < 1
+        or published_pull_request > 2_147_483_647
+    ):
+        raise WorkspaceError("published pull request is invalid")
     cleanliness = observe_launch_cleanliness(
         lambda arguments: _run_bytes(
             ["git", *arguments], cwd=destination, env=git_observation_env(env)
@@ -2109,7 +2343,15 @@ def inspect_linked_worktree(
             dirty=True,
             recoverability="WORKSPACE_ONLY_CHANGES_PRESENT",
             removed=False,
-            reason="tracked or untracked workspace changes are present",
+            reason=(
+                "tracked or untracked workspace changes are present; "
+                f"tracked_changes={'present' if cleanliness.status else 'absent'}; "
+                f"all_untracked={'present' if cleanliness.all_untracked else 'absent'} "
+                "(including ignored files). Ordinary git status may hide ignored files. "
+                "Inspect git ls-files --others -z; retain needed source and evidence, "
+                "and remove only verified disposable outputs before requesting release. "
+                "No files were removed."
+            ),
         )
 
     if head.lower() == base.lower():
@@ -2137,10 +2379,46 @@ def inspect_linked_worktree(
             )
             if remote_code == 0:
                 remote_head = remote_value
+        declared_remote_head = ""
+        if declared_publication_branch is not None:
+            declared_code, declared_value, _ = _run_status(
+                [
+                    "git",
+                    "-C",
+                    str(source),
+                    "rev-parse",
+                    f"refs/remotes/origin/{declared_publication_branch}",
+                ],
+                cwd=None,
+                env=env,
+            )
+            if declared_code == 0:
+                declared_remote_head = declared_value
+        pull_remote_head = ""
+        if published_pull_request is not None:
+            pull_ref = f"refs/pull/{published_pull_request}/head"
+            pull_code, pull_value, _ = _run_status(
+                ["git", "-C", str(source), "ls-remote", "--refs", "origin", pull_ref],
+                cwd=None,
+                env=env,
+            )
+            rows = pull_value.splitlines() if pull_code == 0 else []
+            if len(rows) == 1:
+                observed_sha, separator, observed_ref = rows[0].partition("\t")
+                if (
+                    separator
+                    and observed_ref == pull_ref
+                    and _EXACT_SHA_RE.fullmatch(observed_sha)
+                ):
+                    pull_remote_head = observed_sha
         if ancestor_code == 0:
             recoverability = "HEAD_REACHABLE_FROM_ORIGIN_MASTER"
         elif remote_head.lower() == head.lower():
             recoverability = "HEAD_PUBLISHED_TO_ORIGIN_BRANCH"
+        elif declared_remote_head.lower() == head.lower():
+            recoverability = "HEAD_PUBLISHED_TO_DECLARED_ORIGIN_BRANCH"
+        elif pull_remote_head.lower() == head.lower():
+            recoverability = "HEAD_PUBLISHED_TO_PULL_REQUEST_REF"
         else:
             return LinkedWorkspaceReleaseReceipt(
                 source_repository=str(source),
@@ -2151,7 +2429,7 @@ def inspect_linked_worktree(
                 dirty=False,
                 recoverability="LOCAL_HEAD_NOT_RECOVERABLE_FROM_OBSERVED_ORIGIN_REFS",
                 removed=False,
-                reason="clean workspace has commits not observed on origin/master or origin branch",
+                reason="clean workspace has commits not observed on admitted origin publication refs",
             )
 
     return LinkedWorkspaceReleaseReceipt(
@@ -2173,6 +2451,8 @@ def release_linked_worktree(
     workspace_path: str | Path,
     *,
     expected_operation_id: str | None = None,
+    published_branch: str | None = None,
+    published_pull_request: int | None = None,
 ) -> LinkedWorkspaceReleaseReceipt:
     """Remove a managed linked worktree only after fail-closed recoverability checks."""
 
@@ -2181,6 +2461,8 @@ def release_linked_worktree(
         workspace_root,
         workspace_path,
         expected_operation_id=expected_operation_id,
+        published_branch=published_branch,
+        published_pull_request=published_pull_request,
     )
     if inspection.state != "RELEASABLE":
         return inspection
@@ -2233,3 +2515,97 @@ def release_linked_worktree(
         removed=True,
         reason="clean recoverable linked worktree removed; branch/ref history retained",
     )
+
+
+# This capability is local to the allocator's actual return. Persisted DTOs and
+# coincident paths cannot manufacture same-call allocation completion.
+_CREATED_CHILD_CLONE = object()
+
+
+@dataclasses.dataclass(frozen=True)
+class _CreatedChildClone:
+    receipt: WorkspaceReceipt
+    identity: dict[str, object]
+    _origin: object
+
+
+def child_workspace_directory_identity(path: Path) -> dict[str, int]:
+    """Stable directory custody; never pin mutable timestamps as live identity."""
+    path = Path(path)
+    try:
+        canonical = path.resolve(strict=True)
+        info = path.lstat()
+    except OSError as exc:
+        raise WorkspaceError("child workspace directory is unavailable") from exc
+    if not path.is_absolute() or canonical != path:
+        raise WorkspaceError("child workspace directory is not canonical")
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        raise WorkspaceError("child workspace is not a real directory")
+    return dict(device=info.st_dev, inode=info.st_ino, uid=info.st_uid,
+                gid=info.st_gid, mode=stat.S_IMODE(info.st_mode))
+
+
+def _child_git_file_identity(path: Path) -> dict[str, object]:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        raise WorkspaceError("child Git metadata is unavailable") from exc
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise WorkspaceError("child Git metadata is not a single regular file")
+        h = hashlib.sha256()
+        while block := os.read(fd, 1024 * 1024):
+            h.update(block)
+        after = os.fstat(fd)
+        stable = lambda i: (i.st_dev,i.st_ino,i.st_uid,i.st_gid,i.st_mode,i.st_nlink,
+                            i.st_size,i.st_mtime_ns,i.st_ctime_ns)
+        if stable(before) != stable(after) or stable(before) != stable(path.lstat()):
+            raise WorkspaceError("child Git metadata changed during identity read")
+        return dict(device=before.st_dev, inode=before.st_ino, uid=before.st_uid,
+                    gid=before.st_gid, mode=stat.S_IMODE(before.st_mode),
+                    size=before.st_size, sha256=h.hexdigest())
+    finally:
+        os.close(fd)
+
+
+def _child_clone_identity(workspace: Path) -> dict[str, object]:
+    env = git_observation_env({
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "HOME": str(workspace.parent / ".supervisor-home"),
+        "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never",
+    })
+    return {"workspace": child_workspace_directory_identity(workspace),
+            "git": child_workspace_directory_identity(workspace / '.git'),
+            "git_files": {name: _child_git_file_identity(workspace / '.git' / name)
+                          for name in ('config', 'index', 'HEAD')},
+            "head": _run(['git', '-C', str(workspace), 'rev-parse', '--verify', 'HEAD^{commit}'], cwd=None, env=env),
+            "status": _run(['git', '-C', str(workspace), 'status', '--porcelain=v1', '--untracked-files=all'], cwd=None, env=env)}
+
+
+def verify_child_clone_identity(workspace: Path, expected: dict, *, control_uid: int, shared_gid: int) -> None:
+    if (type(expected) is not dict or set(expected) != {"workspace", "git", "git_files", "head", "status"}
+            or expected["status"] != ""
+            or expected != _child_clone_identity(workspace)):
+        raise WorkspaceError("child workspace allocator identity changed")
+    validate_shared_git_handoff(workspace, control_uid=control_uid, shared_gid=shared_gid)
+
+
+def is_created_child_clone(value: object) -> bool:
+    return type(value) is _CreatedChildClone and value._origin is _CREATED_CHILD_CLONE
+
+
+def create_readonly_child_clone(source_repository: Path, workspace_root: Path, *,
+                                job_id: str, base_sha: str, branch: str,
+                                shared_gid: int) -> _CreatedChildClone:
+    """Actual existing allocator, no remote acquisition or write-path grant."""
+    receipt = prepare_credentialless_clone(source_repository, workspace_root,
+        job_id=job_id, base_sha=base_sha, branch=branch, shared_gid=shared_gid,
+        shared_write_paths=(), commission_dependency=None)
+    workspace = Path(receipt.workspace_path)
+    expected = _child_clone_identity(workspace)
+    if expected["head"] != base_sha:
+        raise WorkspaceError("child clone did not resolve the assigned source commit")
+    verify_child_clone_identity(workspace, expected, control_uid=os.geteuid(), shared_gid=shared_gid)
+    return _CreatedChildClone(receipt, expected, _CREATED_CHILD_CLONE)

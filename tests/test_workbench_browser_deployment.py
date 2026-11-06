@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from integrations.business_mcp_auth.contracts import load_resource_policy, subject_digest
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.workbench_action_mcp.action_artifacts import (
@@ -97,6 +99,10 @@ def _fixture(tmp_path: Path):
         run_calls.append(operation)
         return operation()
 
+    async def run_recovery_io(tool, operation):
+        run_calls.append((tool, operation))
+        return operation()
+
     services = RuntimeServices(
         authenticator=auth,
         policy=policy,
@@ -109,6 +115,10 @@ def _fixture(tmp_path: Path):
         if actual == caller and project == binding.project_ref
         else None,
         run_io=run_io,
+        resolve_recovery_binding=lambda actual, project: binding
+        if actual == caller and project == binding.project_ref
+        else None,
+        run_recovery_io=run_recovery_io,
         action_token_key=b"k" * 32,
         allowed_hosts=("127.0.0.1",),
         allowed_origins=(),
@@ -218,6 +228,21 @@ def test_deployment_refuses_a_new_browser_permission_plane(tmp_path: Path):
             assert "ACTION_SCOPE_REQUIRED" in str(error) or "AUTH_POLICY_BINDING_MISMATCH" in str(error)
         else:
             raise AssertionError("browser-specific permission plane was accepted")
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("missing", ["resolve_recovery_binding", "run_recovery_io"])
+def test_deployment_requires_the_existing_runtime_recovery_callbacks(tmp_path: Path, missing: str):
+    fd, services, host_config, catalog, _caller, _run_calls = _fixture(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="BROWSER_RECOVERY_OWNERS_REQUIRED"):
+            create_browser_deployment(
+                services=dataclasses.replace(services, **{missing: None}),
+                host_config=host_config,
+                tool_catalog=catalog,
+                profile_resolver=lambda _ref: None,
+            )
     finally:
         os.close(fd)
 

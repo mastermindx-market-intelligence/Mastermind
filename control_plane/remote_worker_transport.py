@@ -16,11 +16,27 @@ import ssl
 from pathlib import Path
 from typing import Any, Mapping
 
+from common.hermes_role_status_contract import (
+    RoleStatusError, closed_json, validate_observation,
+)
+
 REMOTE_BROKER_REQUEST_SCHEMA = "mastermind.remote_worker_broker_request/v1"
 REMOTE_BROKER_RESPONSE_SCHEMA = "mastermind.remote_worker_broker_response/v1"
 MAX_FRAME_BYTES = 1024 * 1024
+REMOTE_HOST_OBSERVATION_REQUEST_SCHEMA = "mastermind.remote_host_observation_request/v1"
+REMOTE_HOST_OBSERVATION_RESPONSE_SCHEMA = "mastermind.remote_host_observation_response/v1"
+HERMES_ROLE_OBSERVATION_OPERATION = "hermes-role-metadata-read/v1"
+MAX_HOST_OBSERVATION_REQUEST_BYTES = 1024
+MAX_HOST_OBSERVATION_RESPONSE_BYTES = 8192
+_HOST_REQUEST_KEYS = frozenset({"schema", "host_ref", "operation", "nonce", "request_sha256"})
+_HOST_RESPONSE_KEYS = _HOST_REQUEST_KEYS | {"state", "reason_code", "observation"}
+_HOST_UNAVAILABLE_REASONS = frozenset({"SOURCE_UNAVAILABLE", "SOURCE_CHANGED", "SOURCE_STALE"})
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
+_BROKER_OPERATION_RE = re.compile(
+    r"^(?:[A-Za-z0-9][A-Za-z0-9._-]{1,127}|"
+    r"[A-Za-z0-9][A-Za-z0-9._-]{1,118}/v[1-9][0-9]{0,5})$"
+)
 _HOST_REF_RE = re.compile(r"^host-[0-9a-f]{64}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _RESERVED_UNBOUND_HOST_REFS = frozenset({"local-unbound"})
@@ -33,6 +49,12 @@ _RESPONSE_KEYS = frozenset({
     "broker_operation", "request_sha256", "outcome", "broker_response", "observed_at_ms",
 })
 _IDENTITY_KEYS = ("host_ref", "job_id", "attempt_id", "worker_id", "operation_id")
+_BOUND_AUTHORITY_KEYS = frozenset({"host_ref", "job_id", "attempt_id", "worker_id"})
+_BOUND_PAYLOAD_IDENTITY_KEYS = frozenset({"session_epoch_id", "process_generation_id"})
+_ATTEMPT_RUN_OPERATIONS = frozenset({
+    "start", "status", "collect", "cancel", "validate", "attended-secret-canary",
+    "assignment-seal", "assignment-seal-prepare", "assignment-seal-commit", "assignment-seal-finalize",
+})
 
 
 class TransportValidationError(ValueError):
@@ -123,12 +145,84 @@ def validate_host_ref(value: Any) -> str:
     return value
 
 
+def validate_broker_operation(value: Any) -> str:
+    if not isinstance(value, str) or _BROKER_OPERATION_RE.fullmatch(value) is None:
+        raise TransportValidationError("transport identity is invalid")
+    return value
+
+
 def _validate_id(name: str, value: Any) -> str:
     if name == "host_ref":
         return validate_host_ref(value)
+    if name == "broker_operation":
+        return validate_broker_operation(value)
     if not isinstance(value, str) or not _ID_RE.fullmatch(value):
         raise TransportValidationError("transport identity is invalid")
     return value
+
+
+def payload_retargets_authority(
+    broker_operation: str,
+    payload: Mapping[str, Any],
+    identity: Mapping[str, Any],
+    *,
+    bound_payload_identity: Mapping[str, str] | None = None,
+) -> bool:
+    """Return whether a broker payload disagrees with its authenticated envelope.
+
+    Ordinary Worker Broker runs are Attempt-owned, so their ``run_id`` aliases
+    the outer ``attempt_id``.  OHF generation identities remain bound only when
+    the control-side owner supplies their established values; the gateway does
+    not invent a second generation registry.
+    """
+
+    operation = validate_broker_operation(broker_operation)
+    if not isinstance(payload, Mapping) or set(identity) != set(_IDENTITY_KEYS):
+        raise TransportValidationError("remote request payload identity is invalid")
+    normalized_identity = {
+        key: _validate_id(key, identity.get(key)) for key in _IDENTITY_KEYS
+    }
+    payload_identity: Mapping[str, str] | None
+    if bound_payload_identity is None:
+        payload_identity = None
+    elif isinstance(bound_payload_identity, Mapping):
+        payload_identity = bound_payload_identity
+    else:
+        raise TransportValidationError("remote request payload identity is invalid")
+
+    def retargets(value: Any) -> bool:
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                if not isinstance(key, str):
+                    raise TransportValidationError(
+                        "remote request payload identity is invalid"
+                    )
+                if (
+                    key in _BOUND_AUTHORITY_KEYS
+                    and child != normalized_identity[key]
+                ):
+                    return True
+                if (
+                    key == "run_id"
+                    and operation in _ATTEMPT_RUN_OPERATIONS
+                    and child != normalized_identity["attempt_id"]
+                ):
+                    return True
+                if (
+                    payload_identity is not None
+                    and key in _BOUND_PAYLOAD_IDENTITY_KEYS
+                ):
+                    expected = payload_identity.get(key)
+                    if expected is None or child != expected:
+                        return True
+                if retargets(child):
+                    return True
+            return False
+        if isinstance(value, (list, tuple)):
+            return any(retargets(child) for child in value)
+        return False
+
+    return retargets(payload)
 
 
 def request_sha256(request: Mapping[str, Any]) -> str:
@@ -182,6 +276,9 @@ def validate_request(
         raise TransportValidationError("remote request hash is invalid")
     if actual_hash != request_sha256(request):
         raise TransportValidationError("remote request hash is invalid")
+    envelope_identity = {key: request[key] for key in _IDENTITY_KEYS}
+    if payload_retargets_authority(operation, payload, envelope_identity):
+        raise TransportValidationError("remote request payload retargets authority")
     return dict(request)
 
 
@@ -244,3 +341,82 @@ def build_client_ssl_context(binding: BrokerTransportBinding) -> ssl.SSLContext:
         return context
     except (OSError, ssl.SSLError) as exc:
         raise TransportValidationError("transport binding TLS material is invalid") from exc
+
+
+def decode_request_document(raw: bytes) -> dict[str, Any]:
+    """Strictly decode a bounded frame after the incumbent peer authentication."""
+    try:
+        value = closed_json(raw, limit=MAX_FRAME_BYTES)
+    except RoleStatusError:
+        raise TransportValidationError("remote request JSON is invalid") from None
+    if type(value) is not dict:
+        raise TransportValidationError("remote request JSON is invalid")
+    return value
+
+
+def build_host_observation_request(host_ref: str, nonce: str) -> dict[str, Any]:
+    value = {"schema": REMOTE_HOST_OBSERVATION_REQUEST_SCHEMA,
+             "host_ref": validate_host_ref(host_ref),
+             "operation": HERMES_ROLE_OBSERVATION_OPERATION, "nonce": nonce}
+    value["request_sha256"] = request_sha256(value)
+    return validate_host_observation_request(value, expected_host_ref=host_ref)
+
+
+def validate_host_observation_request(value, *, expected_host_ref: str) -> dict[str, Any]:
+    validate_host_ref(expected_host_ref)
+    if (type(value) is not dict or set(value) != _HOST_REQUEST_KEYS
+            or value["schema"] != REMOTE_HOST_OBSERVATION_REQUEST_SCHEMA
+            or value["host_ref"] != expected_host_ref
+            or value["operation"] != HERMES_ROLE_OBSERVATION_OPERATION
+            or type(value["nonce"]) is not str or _HEX64_RE.fullmatch(value["nonce"]) is None
+            or type(value["request_sha256"]) is not str
+            or _HEX64_RE.fullmatch(value["request_sha256"]) is None
+            or value["request_sha256"] != request_sha256(value)
+            or len(_canonical_bytes(value)) > MAX_HOST_OBSERVATION_REQUEST_BYTES):
+        raise TransportValidationError("remote host observation request is invalid")
+    return dict(value)
+
+
+def decode_host_observation_request(raw: bytes, *, expected_host_ref: str) -> dict[str, Any]:
+    if len(raw) > MAX_HOST_OBSERVATION_REQUEST_BYTES:
+        raise TransportValidationError("remote host observation request exceeds ceiling")
+    return validate_host_observation_request(decode_request_document(raw), expected_host_ref=expected_host_ref)
+
+
+def validate_host_observation_response(value, request) -> dict[str, Any]:
+    validate_host_observation_request(request, expected_host_ref=request.get("host_ref"))
+    if (type(value) is not dict or set(value) != _HOST_RESPONSE_KEYS
+            or value["schema"] != REMOTE_HOST_OBSERVATION_RESPONSE_SCHEMA
+            or any(value[key] != request[key] for key in ("host_ref", "operation", "nonce", "request_sha256"))):
+        raise TransportValidationError("remote host observation response is invalid")
+    if value["state"] == "OBSERVED":
+        if value["reason_code"] != "OBSERVED":
+            raise TransportValidationError("remote host observation response is invalid")
+        try:
+            validate_observation(value["observation"])
+        except RoleStatusError:
+            raise TransportValidationError("remote host observation response is invalid") from None
+    elif (value["state"] != "UNAVAILABLE" or type(value["reason_code"]) is not str
+          or value["reason_code"] not in _HOST_UNAVAILABLE_REASONS or value["observation"] is not None):
+        raise TransportValidationError("remote host observation response is invalid")
+    raw = _canonical_bytes(value)
+    if len(raw) > MAX_HOST_OBSERVATION_RESPONSE_BYTES:
+        raise TransportValidationError("remote host observation response exceeds ceiling")
+    return json.loads(raw)
+
+
+def build_host_observation_response(request, *, observation=None, reason_code="SOURCE_UNAVAILABLE") -> dict[str, Any]:
+    value = {key: request[key] for key in ("host_ref", "operation", "nonce", "request_sha256")}
+    value.update({"schema": REMOTE_HOST_OBSERVATION_RESPONSE_SCHEMA,
+                  "state": "OBSERVED" if observation is not None else "UNAVAILABLE",
+                  "reason_code": "OBSERVED" if observation is not None else reason_code,
+                  "observation": observation})
+    return validate_host_observation_response(value, request)
+
+
+def decode_host_observation_response(raw: bytes, request) -> dict[str, Any]:
+    try:
+        value = closed_json(raw, limit=MAX_HOST_OBSERVATION_RESPONSE_BYTES)
+    except RoleStatusError:
+        raise TransportValidationError("remote host observation response JSON is invalid") from None
+    return validate_host_observation_response(value, request)

@@ -13,10 +13,24 @@ Gateway label stays com.mastermind.studio-direct-private.<account>.
 """
 from __future__ import annotations
 
+# The existing CLI remains the bootstrap trust boundary. Re-exec before any
+# path-searchable import; source library imports retain their existing behavior.
+import sys as _bootstrap_sys
+if __name__ == "__main__" and not (
+        _bootstrap_sys.flags.isolated and _bootstrap_sys.flags.no_site
+        and _bootstrap_sys.dont_write_bytecode):
+    import posix as _bootstrap_os
+    _bootstrap_os.execv(
+        _bootstrap_sys.executable,
+        [_bootstrap_sys.executable, "-I", "-S", "-B", __file__, *_bootstrap_sys.argv[1:]],
+    )
+
 import argparse
+import hashlib
 import json
 import os
 import re
+import stat
 import sys
 import time
 import urllib.error
@@ -24,7 +38,67 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-import private_service as gw
+def _load_gateway_bootstrap():
+    # This one adjacent source file is trusted bootstrap code, not a selectable
+    # dependency. Read bounded, stable regular bytes without following links.
+    # Its existing guard owns manifest validation and the process-scoped lock.
+    import importlib.util
+    path = Path(os.path.abspath(__file__)).with_name("private_service.py")
+    fd = None
+    try:
+        home = Path.home()
+        current = path.parent
+        while True:
+            info = current.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) & 0o022):
+                raise ValueError("unsafe bootstrap parent")
+            if current == home or not path.is_relative_to(home):
+                break
+            current = current.parent
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        before = os.fstat(fd)
+        limit = 2 * 1024 * 1024
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) & 0o022
+                or before.st_size > limit):
+            raise ValueError("unsafe bootstrap source")
+        data = bytearray()
+        while len(data) <= limit:
+            part = os.read(fd, min(65536, limit + 1 - len(data)))
+            if not part:
+                break
+            data.extend(part)
+        identity = lambda item: (
+            item.st_dev, item.st_ino, item.st_mode, item.st_uid, item.st_nlink,
+            item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+        if (len(data) > limit or identity(before) != identity(os.fstat(fd))
+                or identity(before) != identity(path.lstat())):
+            raise ValueError("bootstrap source changed")
+    except (OSError, ValueError):
+        raise SystemExit("CONTROL_BUNDLE_CLOSURE_REFUSED") from None
+    finally:
+        if fd is not None:
+            os.close(fd)
+    spec = importlib.util.spec_from_file_location("private_service", path)
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get(spec.name)
+    sys.modules[spec.name] = module
+    try:
+        exec(compile(bytes(data), str(path), "exec"), module.__dict__)
+    except BaseException:
+        if previous is None:
+            sys.modules.pop(spec.name, None)
+        else:
+            sys.modules[spec.name] = previous
+        raise
+    return module
+
+if sys.flags.isolated:
+    gw = _load_gateway_bootstrap()
+else:
+    # Source-worktree library imports retain their original module identity.
+    import private_service as gw
 
 RESERVED_FUNNEL_PORT = gw.RESERVED_FUNNEL_PORT
 
@@ -34,12 +108,56 @@ PINNED_TUNNEL_CLIENT = (
 TRANSPORT_TTL = "5h"
 STARTUP_WAIT = "30s"
 MAX_CONCURRENT_REQUESTS = 4
+# Verified historical C2 Business tunnel is sealed at 8; new installs retain 4.
+LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS = 8
+# Exact original on-host sealed v1 tunnel manifest, not a new 8-request grant.
+C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256 = (
+    "b6f511fc7d9c263914af0490ea0912c127979c85a0a3740e4834e12f716ee8fc"
+)
+# The other seven pre-existing eight-request seats are admitted only at their
+# exact previously observed v1 semantic AND raw manifest identities. This is
+# compatibility for already enrolled accounts, not a new 8-request grant.
+# New tunnel installations remain constrained to MAX_CONCURRENT_REQUESTS=4.
+LEGACY_PUBLIC_EIGHT_SEALS = {
+    "admin-business": (
+        "2dbbcfe81c561dc304aae2911a2828351de8d56d17b2d489ed76ad14ee9b4e00",
+        "c7cfae3f955144a12c4e6f611b459329c554d4a871f86d977efe2ef2f83ed827",
+    ),
+    "chatgpt1": (
+        "f505097d853ca471567fa54c7dbc1bfeb45e8dd2e41250cdf354153e3902897c",
+        "cfcd0578efe7a0a851ad48da6c9f6652f5ff95d4d81a226529c58ffab53cfdee",
+    ),
+    "chatgpt2-personal": (
+        "9b54addb78270eb1d47fce115a1d0f0c3be1af17d9739206177142e0ecd8e8c2",
+        "2e65e5f610a44a7717fccf34aee57df98a3689c115ec3b5073b71c71ada3e522",
+    ),
+    "chatgpt3": (
+        "9afad01b9b53b09096027bad15a865ce7173b669ac328f1f480546b857595093",
+        "b3fb25f4df0638a511ccfdf5c6d3427c6c814e07dd83dcba1615056efddcfb04",
+    ),
+    "chatgpt3-w570f6f34": (
+        "e8f688bd15f79ced968149abdc37469de167b767f8cc1d511edeefcbfa8d063e",
+        "8b7b908da1374d9c0cc50fc12917bf9c08f1cb65b0c6480560c996a5b39b178e",
+    ),
+    "chatgpt3-wa2a9e6f9": (
+        "66c23ef26dcd5077435f8ff4f6a2ae64db11aa4fd3397cd9387aed2241c847ab",
+        "bdb8e6fe6d099a606caaa76e0807df410cbb0f143cba13ddc620d5ea9c3399ac",
+    ),
+    "chatgpt4": (
+        "2b1a7fbea02a09d03c3807a0b2175da36a35343df51e737096d086cc283c4116",
+        "a86e709d5db144b0d7b6804d3d0155afb3017290e56819085c7bca21bb285d4e",
+    ),
+}
 CONTROL_PLANE_BASE_URL = "https://api.openai.com"
+# A historical successful poll is not evidence of a connected transport.
+# Allow two 30-second polls plus scheduling slack; never extend this on reads.
+MAX_CONTROL_PLANE_POLL_AGE_SECONDS = 90
 
 # Known loopback mapping. Other safe accounts take port from the gateway manifest.
 ACCOUNT_PORTS = {"chatgpt1": 45018}
 
 TUNNEL_ID_RE = re.compile(r"^tunnel_[0-9a-f]{32}$")
+ORGANIZATION_ID_RE = re.compile(r"^org-[A-Za-z0-9]+$")
 TUNNEL_LABEL_PREFIX = "com.mastermind.studio-direct-tunnel."
 GATEWAY_LABEL_PREFIX = "com.mastermind.studio-direct-private."
 MANAGED_ALIAS_PREFIX = "studio-direct-private-"
@@ -137,6 +255,14 @@ def _validate_tunnel_id(tunnel_id: str) -> None:
         )
 
 
+def _validate_organization_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or ORGANIZATION_ID_RE.fullmatch(value) is None:
+        raise SystemExit("organization id must match org-<alphanumeric>")
+    return value
+
+
 def _parse_file_ref(value: str) -> Path:
     if not isinstance(value, str) or not value.startswith("file:"):
         raise SystemExit("runtime key ref must be a file: reference")
@@ -144,15 +270,54 @@ def _parse_file_ref(value: str) -> Path:
     if not os.path.isabs(raw):
         raise SystemExit("runtime key ref path must be absolute")
     path = Path(raw)
-    if path.is_symlink():
-        raise SystemExit("runtime key ref must not be a symlink")
-    if not path.is_file():
+    home = _user_root()
+    if not home.is_absolute():
+        raise SystemExit("HOME must be absolute")
+    try:
+        home_info = os.lstat(home)
+    except OSError:
+        raise SystemExit("HOME is unavailable")
+    if stat.S_ISLNK(home_info.st_mode) or not stat.S_ISDIR(home_info.st_mode):
+        raise SystemExit("HOME must be a non-symlink directory")
+    if home_info.st_uid != os.getuid():
+        raise SystemExit("HOME owner mismatch")
+    if stat.S_IMODE(home_info.st_mode) & 0o022:
+        raise SystemExit("HOME permissions must deny group/other writes")
+    _assert_no_symlink_ancestors(path)
+    try:
+        info = os.lstat(path)
+    except OSError:
         raise SystemExit("runtime key ref not found")
+    if stat.S_ISLNK(info.st_mode):
+        raise SystemExit("runtime key ref must not be a symlink")
+    if not stat.S_ISREG(info.st_mode):
+        raise SystemExit("runtime key ref must be a regular file")
+    if info.st_uid != os.getuid():
+        raise SystemExit("runtime key ref owner mismatch")
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        raise SystemExit("runtime key ref permissions must deny group/other access")
+    parent = path.parent
+    while parent != home:
+        try:
+            parent_info = os.lstat(parent)
+        except OSError:
+            raise SystemExit("runtime key ref parent missing")
+        if not stat.S_ISDIR(parent_info.st_mode):
+            raise SystemExit("runtime key ref parent must be a directory")
+        if parent_info.st_uid != os.getuid():
+            raise SystemExit("runtime key ref parent owner mismatch")
+        if stat.S_IMODE(parent_info.st_mode) & 0o022:
+            raise SystemExit(
+                "runtime key ref parent permissions must deny group/other writes"
+            )
+        parent = parent.parent
     return path
 
 
 def _resolve_tunnel_client(value: str) -> Path:
-    return gw._resolve_abs("--tunnel-client", value)
+    if value != PINNED_TUNNEL_CLIENT:
+        raise SystemExit(f"--tunnel-client must be the pinned path {PINNED_TUNNEL_CLIENT}")
+    return gw._resolve_abs("--tunnel-client", PINNED_TUNNEL_CLIENT)
 
 
 def _canonical_profile(account: str) -> Path:
@@ -177,6 +342,8 @@ def _expected_argv(
     tunnel_client: Path,
     profile: Path,
     health_port: int,
+    *,
+    max_concurrent_requests: int = MAX_CONCURRENT_REQUESTS,
 ) -> list[str]:
     return [
         str(tunnel_client),
@@ -186,7 +353,7 @@ def _expected_argv(
         "--mcp.connection-max-ttl",
         TRANSPORT_TTL,
         "--mcp.max-concurrent-requests",
-        str(MAX_CONCURRENT_REQUESTS),
+        str(max_concurrent_requests),
         "--mcp.startup-wait-timeout",
         STARTUP_WAIT,
         "--health.listen-addr",
@@ -199,15 +366,19 @@ def _build_profile(
     runtime_key_ref: str,
     gateway_port: int,
     health_port: int,
+    organization_id: str | None = None,
 ) -> dict:
+    control_plane = {
+        "api_key": runtime_key_ref,
+        "base_url": CONTROL_PLANE_BASE_URL,
+        "tunnel_id": tunnel_id,
+    }
+    if organization_id is not None:
+        control_plane["organization_id"] = organization_id
     return {
         "admin_ui": {"open_browser": False},
         "config_version": 1,
-        "control_plane": {
-            "api_key": runtime_key_ref,
-            "base_url": CONTROL_PLANE_BASE_URL,
-            "tunnel_id": tunnel_id,
-        },
+        "control_plane": control_plane,
         "health": {"listen_addr": _health_listen_addr(health_port)},
         "log": {"format": "json", "level": "info"},
         "mcp": {
@@ -366,7 +537,29 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         return False
     if data.get("transportTTL") != TRANSPORT_TTL:
         return False
-    if data.get("maxConcurrentRequests") != MAX_CONCURRENT_REQUESTS:
+    concurrency = data.get("maxConcurrentRequests")
+    legacy_c2 = (
+        account == "chatgpt2-business"
+        and data.get("version") == 1
+        and concurrency == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS
+    )
+    legacy_public = (
+        data.get("version") == 1
+        and concurrency == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS
+        and account in LEGACY_PUBLIC_EIGHT_SEALS
+        and hashlib.sha256(json.dumps(
+            data, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest() == LEGACY_PUBLIC_EIGHT_SEALS[account][0]
+    )
+    if concurrency != MAX_CONCURRENT_REQUESTS and not (legacy_c2 or legacy_public):
+        return False
+    if data.get("tunnelClient") != PINNED_TUNNEL_CLIENT:
+        return False
+    organization_id = data.get("organizationId")
+    if organization_id is not None and (
+        not isinstance(organization_id, str)
+        or ORGANIZATION_ID_RE.fullmatch(organization_id) is None
+    ):
         return False
     if not _sha256_hex(data.get("profileHash")):
         return False
@@ -389,11 +582,31 @@ def _read_manifest(
             raise SystemExit("not staged: tunnel manifest missing")
         return None
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        # Read and authenticate exactly the bytes that will be parsed. A
+        # pathname read followed by a second hash read admits a swap race.
+        with os.fdopen(os.open(
+            manifest_path, os.O_RDONLY | os.O_NOFOLLOW |
+            getattr(os, "O_CLOEXEC", 0) | os.O_NONBLOCK,
+        ), "rb") as reader:
+            info = os.fstat(reader.fileno())
+            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 65536:
+                raise ValueError("tunnel manifest is not a bounded regular file")
+            raw = reader.read(65537)
+        if len(raw) != info.st_size:
+            raise ValueError("tunnel manifest changed during capture")
+        data = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError, UnicodeError):
         raise SystemExit("corrupt tunnel manifest")
     if not _valid_manifest(data, account, label):
         raise SystemExit("corrupt tunnel manifest")
+    if data.get("maxConcurrentRequests") == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS:
+        expected = (
+            C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256
+            if account == "chatgpt2-business" else
+            LEGACY_PUBLIC_EIGHT_SEALS.get(account, (None, None))[1]
+        )
+        if expected is None or hashlib.sha256(raw).hexdigest() != expected:
+            raise SystemExit("corrupt tunnel manifest")
     return data
 
 
@@ -413,6 +626,7 @@ def _profile_matches(
     runtime_key_ref: str,
     gateway_port: int,
     health_port: int,
+    organization_id: str | None,
 ) -> None:
     data = _read_json_file(profile_path, name="profile")
     plane = data.get("control_plane")
@@ -422,6 +636,8 @@ def _profile_matches(
         raise SystemExit("owned profile tunnel id mismatch")
     if plane.get("api_key") != runtime_key_ref:
         raise SystemExit("owned profile runtime key ref mismatch")
+    if plane.get("organization_id") != organization_id:
+        raise SystemExit("owned profile organization id mismatch")
     urls = (data.get("mcp") or {}).get("server_urls")
     if not isinstance(urls, list) or not urls:
         raise SystemExit("owned profile mcp target missing")
@@ -441,29 +657,46 @@ def _verify_prior_install(
     tunnel_client: Path,
     gateway_port: int,
     health_port: int,
+    organization_id: str | None,
+    allow_runtime_key_rotation: bool,
     roots: dict,
 ) -> None:
+    prior_organization_id = prior.get("organizationId")
+    prior_runtime_key_ref = prior.get("runtimeKeyRef")
+    runtime_key_rotation = prior_runtime_key_ref != runtime_key_ref
+    organization_enrichment = (
+        prior_organization_id is None and organization_id is not None
+    )
     if (
         prior.get("tunnelId") != tunnel_id
-        or prior.get("runtimeKeyRef") != runtime_key_ref
+        or (runtime_key_rotation and not allow_runtime_key_rotation)
         or prior.get("tunnelClient") != str(tunnel_client)
         or prior.get("gatewayPort") != gateway_port
         or prior.get("healthPort") != health_port
+        or (
+            prior_organization_id != organization_id
+            and not organization_enrichment
+        )
         or prior.get("profile") != str(roots["profile"])
         or prior.get("account") != account
         or prior.get("label") != label
     ):
         raise SystemExit(
             "refusing restage: existing tunnel manifest diverges; "
-            "stop the tunnel service first and pass the exact same "
-            "--account, --tunnel-id, --profile, --runtime-key-ref"
+            "runtime key changes require --rotate-runtime-key and only "
+            "one-way addition of a previously missing organization id is permitted"
         )
     if roots["profile"].is_symlink() or not roots["profile"].is_file():
         raise SystemExit("refusing restage: existing profile missing")
     if _sha256_file(roots["profile"]) != prior.get("profileHash"):
         raise SystemExit("refusing restage: existing profile hash diverges")
     _profile_matches(
-        roots["profile"], tunnel_id, runtime_key_ref, gateway_port, health_port
+        roots["profile"],
+        tunnel_id,
+        prior_runtime_key_ref,
+        gateway_port,
+        health_port,
+        prior_organization_id,
     )
     if roots["plist"].is_symlink() or not roots["plist"].is_file():
         raise SystemExit("refusing restage: existing plist missing")
@@ -494,7 +727,8 @@ def _verify_staged_install(account: str, label: str, roots: dict) -> dict:
     if plist is None or plist.get("Label") != label:
         raise SystemExit("plist is not our exact install")
     expected = _expected_argv(
-        tunnel_client, roots["profile"], int(manifest["healthPort"])
+        tunnel_client, roots["profile"], int(manifest["healthPort"]),
+        max_concurrent_requests=manifest["maxConcurrentRequests"],
     )
     if list(plist.get("ProgramArguments") or []) != expected:
         raise SystemExit("plist is not our exact install")
@@ -504,6 +738,7 @@ def _verify_staged_install(account: str, label: str, roots: dict) -> dict:
         manifest["runtimeKeyRef"],
         int(manifest["gatewayPort"]),
         int(manifest["healthPort"]),
+        manifest.get("organizationId"),
     )
     _parse_file_ref(manifest["runtimeKeyRef"])
     return manifest
@@ -523,6 +758,46 @@ def _probe_loopback(url: str) -> dict:
     return {"ok": 200 <= status < 300, "status": status}
 
 
+def _strict_tunnel_health(
+    tunnel_client: Path,
+    health_port: int,
+) -> tuple[bool, bool, bool]:
+    result = _run(
+        [
+            str(tunnel_client),
+            "health",
+            "--port",
+            str(health_port),
+            "--require-control-plane-poll",
+            "--json",
+        ],
+        check=False,
+        timeout=5.0,
+    )
+    if result.returncode != 0:
+        return False, False, False
+    try:
+        payload = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError):
+        return False, False, False
+    if not isinstance(payload, dict):
+        return False, False, False
+    healthz = payload.get("healthz")
+    readyz = payload.get("readyz")
+    poll = payload.get("control_plane_poll")
+    healthy = isinstance(healthz, dict) and healthz.get("ok") is True
+    local_ready = isinstance(readyz, dict) and readyz.get("ok") is True
+    polled_at = poll.get("value") if isinstance(poll, dict) else None
+    now = time.time()
+    poll_ready = (
+        isinstance(poll, dict)
+        and poll.get("ok") is True
+        and type(polled_at) in (int, float)
+        and now - MAX_CONTROL_PLANE_POLL_AGE_SECONDS <= polled_at <= now
+    )
+    return healthy, local_ready and poll_ready, poll_ready
+
+
 def _gateway_ready(port: int) -> bool:
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/readyz", timeout=2.0) as response:
@@ -539,6 +814,7 @@ def cmd_stage(args) -> int:
     _validate_tunnel_id(args.tunnel_id)
     runtime_key_ref = args.runtime_key_ref
     _parse_file_ref(runtime_key_ref)
+    organization_id = _validate_organization_id(args.organization_id)
     roots = _build_tunnel_roots(account)
     profile = _validate_profile_arg(account, args.profile)
     tunnel_client = _resolve_tunnel_client(args.tunnel_client)
@@ -559,6 +835,8 @@ def cmd_stage(args) -> int:
             tunnel_client,
             gateway_port,
             health_port,
+            organization_id,
+            bool(getattr(args, "rotate_runtime_key", False)),
             roots,
         )
     else:
@@ -582,7 +860,11 @@ def cmd_stage(args) -> int:
         profile,
         json.dumps(
             _build_profile(
-                args.tunnel_id, runtime_key_ref, gateway_port, health_port
+                args.tunnel_id,
+                runtime_key_ref,
+                gateway_port,
+                health_port,
+                organization_id,
             ),
             indent=2,
             sort_keys=True,
@@ -604,6 +886,7 @@ def cmd_stage(args) -> int:
         "profileHash": _sha256_file(profile),
         "plistHash": _sha256_file(roots["plist"]),
         "runtimeKeyRef": runtime_key_ref,
+        "organizationId": organization_id,
         "tunnelClient": str(tunnel_client),
         "gatewayLabel": _gateway_label(account),
         "managedAlias": _managed_alias(account),
@@ -626,6 +909,11 @@ def cmd_stage(args) -> int:
                 "tunnelId": args.tunnel_id,
                 "gatewayPort": gateway_port,
                 "healthPort": health_port,
+                "organizationId": organization_id,
+                "runtimeKeyRotated": bool(
+                    prior is not None
+                    and prior.get("runtimeKeyRef") != runtime_key_ref
+                ),
                 "transportTTL": TRANSPORT_TTL,
                 "maxConcurrentRequests": MAX_CONCURRENT_REQUESTS,
             }
@@ -669,6 +957,15 @@ def cmd_status(args) -> int:
     pid = info.get("pid") if info and running else None
 
     manifest = _read_manifest(roots["manifest"], account, label)
+    configuration_drift = info is not None and manifest is None
+    if manifest is not None:
+        try:
+            _verify_staged_install(account, label, roots)
+        except SystemExit:
+            configuration_drift = True
+    if info is not None and info.get("path") not in (None, str(roots["plist"])):
+        configuration_drift = True
+
     plist = _load_plist(roots["plist"])
     argv = list((plist or {}).get("ProgramArguments") or [])
     transport_ttl = _argv_transport_ttl(argv)
@@ -676,17 +973,19 @@ def cmd_status(args) -> int:
     health_port = manifest.get("healthPort") if manifest else None
     healthy = False
     tunnel_ready = False
+    control_plane_poll_ready = False
     gateway_ready = False
-    if running and isinstance(health_port, int):
-        base = f"http://127.0.0.1:{health_port}"
-        healthy = bool(_probe_loopback(f"{base}/healthz").get("ok"))
-        tunnel_ready = bool(_probe_loopback(f"{base}/readyz").get("ok"))
+    if running and isinstance(health_port, int) and manifest and not configuration_drift:
+        tunnel_client = Path(manifest["tunnelClient"])
+        healthy, tunnel_ready, control_plane_poll_ready = _strict_tunnel_health(
+            tunnel_client, health_port
+        )
         gateway_port = manifest.get("gatewayPort")
         if isinstance(gateway_port, int):
             gateway_ready = _gateway_ready(gateway_port)
 
     alias_running = False
-    if manifest and manifest.get("tunnelClient"):
+    if manifest and manifest.get("tunnelClient") and not configuration_drift:
         alias_running = _managed_alias_running(
             Path(manifest["tunnelClient"]), account
         )
@@ -699,15 +998,18 @@ def cmd_status(args) -> int:
                 "loaded": loaded,
                 "running": running,
                 "pid": pid,
+                "configurationDrift": configuration_drift,
                 "healthy": healthy,
                 "ready": tunnel_ready and gateway_ready,
                 "tunnelReady": tunnel_ready,
+                "controlPlanePollReady": control_plane_poll_ready,
                 "gatewayReady": gateway_ready,
                 "transportTTL": transport_ttl,
                 "maxConcurrentRequests": max_concurrent,
                 "gatewayPort": manifest.get("gatewayPort") if manifest else None,
                 "healthPort": health_port,
                 "tunnelId": manifest.get("tunnelId") if manifest else None,
+                "organizationId": manifest.get("organizationId") if manifest else None,
                 "managedAlias": _managed_alias(account),
                 "managedAliasRunning": alias_running,
             },
@@ -759,6 +1061,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--tunnel-id", required=True)
     s.add_argument("--profile", required=True)
     s.add_argument("--runtime-key-ref", required=True)
+    s.add_argument("--organization-id")
+    s.add_argument(
+        "--rotate-runtime-key",
+        action="store_true",
+        help=(
+            "allow an explicit runtime-key file-reference change for the same "
+            "stopped account/tunnel; current owned artifacts must verify exactly"
+        ),
+    )
     s.add_argument("--tunnel-client", default=PINNED_TUNNEL_CLIENT)
     s.set_defaults(func=cmd_stage)
 

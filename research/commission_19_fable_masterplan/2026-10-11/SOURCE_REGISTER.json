@@ -1,0 +1,294 @@
+{
+  "as_of_utc_date": "2026-10-11",
+  "protected_pin": "94bae30d53aee81a6430dcec75915b1c73ba86e1",
+  "macro_pin": "50a7771721618e373eeb6e91b92c5f07860ee9f4",
+  "sources": [
+    {
+      "id": "S01",
+      "title": "C19 canonical synthesis",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/1243",
+      "inspection": "Live issue read in this assessment",
+      "supports": "19 report carriers, 17/18 topics, incumbent owner map, M0-M5 intent; original synthesis dated 2026-10-04"
+    },
+    {
+      "id": "S02",
+      "title": "C19 corrected integration dossiers",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/tree/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/",
+      "inspection": "All named family dossiers and cross-report adjudication read; original specialist experiments not rerun",
+      "supports": "Bounded accepted research; not full integration freeze",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S03",
+      "title": "C19 portfolio projection",
+      "url": "https://linear.app/mastermindx/project/data-intelligence-integration-program-commission-19-c4a78d0177d6",
+      "inspection": "Live issue list: 20 items, no next page; MAS-263 In Progress, other 19 Backlog",
+      "supports": "Issue mapping is a portfolio projection, not code or runtime liveness"
+    },
+    {
+      "id": "S04",
+      "title": "C19 Program CEO custody",
+      "url": "https://linear.app/mastermindx/issue/MAS-263",
+      "inspection": "Detailed owner record read during preceding census in this conversation; issue still listed unchanged",
+      "supports": "Original parent and request must not be duplicated; old installation blockers need fresh interpretation"
+    },
+    {
+      "id": "S05",
+      "title": "Original package recovery",
+      "url": "https://linear.app/mastermindx/issue/MAS-282",
+      "inspection": "Detailed record read during preceding census; targeted conversation/Library searches did not recover original package",
+      "supports": "This new packet does not replace the missing original archive"
+    },
+    {
+      "id": "S06",
+      "title": "Existing composer source",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/50a7771721618e373eeb6e91b92c5f07860ee9f4/app/integrated_answer.py",
+      "inspection": "Complete source inspected in three connector ranges at pinned revision",
+      "supports": "AAPL-only fixed financial query; nine legs; clock fallbacks; relative staleness; default-off route",
+      "commit": "50a7771721618e373eeb6e91b92c5f07860ee9f4",
+      "git_blob": "fee6c1876e8d488a60be9e06493ba4b18d63caab"
+    },
+    {
+      "id": "S07",
+      "title": "Composer implementation merge",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8596",
+      "inspection": "Live PR metadata: merged, merge 55e8cf844fbfb851939d5ed91153b4c57ad5edaa",
+      "supports": "Source merge is not activation or complete C19 intelligence",
+      "merge_commit": "55e8cf844fbfb851939d5ed91153b4c57ad5edaa"
+    },
+    {
+      "id": "S08",
+      "title": "I1 composition specification",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/50a7771721618e373eeb6e91b92c5f07860ee9f4/research/product_intelligence_local_delivery/I1_INTEGRATED_ANSWER_COMPOSITION_SPEC_2026-10-06.md",
+      "inspection": "Pinned full spec read",
+      "supports": "H01 acceptance conflation; H06/MAS-273 maps to FIF publication rather than macro release; legacy spec differs from shipped v0",
+      "commit": "50a7771721618e373eeb6e91b92c5f07860ee9f4"
+    },
+    {
+      "id": "S09",
+      "title": "Actual MAS-273 scope",
+      "url": "https://linear.app/mastermindx/issue/MAS-273",
+      "inspection": "Live detailed issue read",
+      "supports": "MAS-273 owns MRI/RIC macro release and expectations bundle, not FIF publication"
+    },
+    {
+      "id": "S10",
+      "title": "TrialLedger current source",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/50a7771721618e373eeb6e91b92c5f07860ee9f4/engine/trial_ledger.py",
+      "inspection": "Focused source read and connector Git-blob equality check",
+      "supports": "Memory-before-append and tolerant read behavior remain; old probe remains relevant",
+      "commit": "50a7771721618e373eeb6e91b92c5f07860ee9f4",
+      "git_blob": "eb364fe9fa53f46d0455e194d3e3ccdbb5732778"
+    },
+    {
+      "id": "S11",
+      "title": "Accepted C9 bounded synthetic evidence",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_c9_qualification/2026-10-04/README.md",
+      "inspection": "Read accepted prior isolated owner-module report; not rerun",
+      "supports": "Failed append can poison same-instance retry; preserve original Q01-Q20",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S12",
+      "title": "Debt maturity current source",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/50a7771721618e373eeb6e91b92c5f07860ee9f4/engine/debt_maturity.py",
+      "inspection": "Lines 95-235 and matching earlier blob inspected",
+      "supports": "Latest filing selected before any as_of filtering in this function; upstream qualifier must be checked",
+      "commit": "50a7771721618e373eeb6e91b92c5f07860ee9f4",
+      "git_blob": "cb5688451aa025156aed89566f9076729526d27e"
+    },
+    {
+      "id": "S13",
+      "title": "MRI event reader current source",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/50a7771721618e373eeb6e91b92c5f07860ee9f4/engine/event_window.py",
+      "inspection": "Lines 475-550, same blob as prior probe",
+      "supports": "Expected path/top-level release sections conflict with inspected producer",
+      "commit": "50a7771721618e373eeb6e91b92c5f07860ee9f4",
+      "git_blob": "55571a389c5f65d4a5aeb2a7051ab63bdd77796e"
+    },
+    {
+      "id": "S14",
+      "title": "MRI producer current source",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/50a7771721618e373eeb6e91b92c5f07860ee9f4/scripts/build_release_forecast.py",
+      "inspection": "Lines 4300-4370 and matching prior full-file blob",
+      "supports": "release_forecast.v2 uses upcoming array; street_consensus explicitly unavailable",
+      "commit": "50a7771721618e373eeb6e91b92c5f07860ee9f4",
+      "git_blob": "35f8a1f29f8ae1986a9853683337e0752327f32b"
+    },
+    {
+      "id": "S15",
+      "title": "K3E EXP-1 current publication",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8337",
+      "inspection": "Live metadata confirms merged; body preserves scope and native prior evidence",
+      "supports": "Captured-expectation inspection exists; normalized_baseline.value remains null by contract",
+      "merge_commit": "a9f815e1bf9bb4091a0ea18caa4049308451b0d4"
+    },
+    {
+      "id": "S16",
+      "title": "Native Opus orchestrator definition",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/50a7771721618e373eeb6e91b92c5f07860ee9f4/.claude/agents/orchestrator.md",
+      "inspection": "Full pinned file read",
+      "supports": "Existing orchestrator profile explicitly supports Opus with fable-mode",
+      "commit": "50a7771721618e373eeb6e91b92c5f07860ee9f4",
+      "git_blob": "b07e018b40b470d359029e308bd8dfb7fa4ab244"
+    },
+    {
+      "id": "S17",
+      "title": "Native routing prompt contract",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/50a7771721618e373eeb6e91b92c5f07860ee9f4/.claude/agent-routing.json",
+      "inspection": "Full pinned file read",
+      "supports": "ROUTE orchestration and required line-start prompt sections; explicit Opus alternative",
+      "commit": "50a7771721618e373eeb6e91b92c5f07860ee9f4",
+      "git_blob": "cfdc29fa47d0f45a637ae409972f869abfc3546a"
+    },
+    {
+      "id": "S18",
+      "title": "Protected procedure pin",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/94bae30d53aee81a6430dcec75915b1c73ba86e1/docs/sol_skills/INDEX.md",
+      "inspection": "Protected branch verified; compatible 1.0.1/bootstrap-major 1 reused from preceding census",
+      "supports": "Same-pin procedure and owner/effect rules",
+      "commit": "94bae30d53aee81a6430dcec75915b1c73ba86e1"
+    },
+    {
+      "id": "S19",
+      "title": "Worker routing source",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/94bae30d53aee81a6430dcec75915b1c73ba86e1/docs/EXECUTIVE_WORKER_ROUTING.md",
+      "inspection": "Pinned first 210 lines read, plus source-law companions",
+      "supports": "Routing source is not installed capacity; separate task complexity, permissions, model and topology",
+      "commit": "94bae30d53aee81a6430dcec75915b1c73ba86e1"
+    },
+    {
+      "id": "S20",
+      "title": "Claude native subagent documentation",
+      "url": "https://code.claude.com/docs/en/sub-agents",
+      "inspection": "Official live documentation inspected 2026-10-11 UTC",
+      "supports": "Version-dependent nesting and tool filters; installed runtime must be checked"
+    },
+    {
+      "id": "S21",
+      "title": "Claude token-cost documentation",
+      "url": "https://code.claude.com/docs/en/costs",
+      "inspection": "Official live documentation inspected 2026-10-11 UTC",
+      "supports": "Child requests still consume usage; context isolation alone does not prove savings"
+    },
+    {
+      "id": "S22",
+      "title": "C01_C03_C04_EVENT_DRIVER_RELATION.md",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/C01_C03_C04_EVENT_DRIVER_RELATION.md",
+      "inspection": "Read in this assessment; source census within dossier dated Oct 4 unless a fresh check is separately recorded",
+      "supports": "Owner-specific findings, original report links, acceptance catalogues, exact limitations",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S23",
+      "title": "C02_NATIVE_EXPECTATIONS.md",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/C02_NATIVE_EXPECTATIONS.md",
+      "inspection": "Read in this assessment; source census within dossier dated Oct 4 unless a fresh check is separately recorded",
+      "supports": "Owner-specific findings, original report links, acceptance catalogues, exact limitations",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S24",
+      "title": "C05_C13_C14_OWNER_BOUNDARIES.md",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/C05_C13_C14_OWNER_BOUNDARIES.md",
+      "inspection": "Read in this assessment; source census within dossier dated Oct 4 unless a fresh check is separately recorded",
+      "supports": "Owner-specific findings, original report links, acceptance catalogues, exact limitations",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S25",
+      "title": "C07_EVIDENCE_OVERLAP.md",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/C07_EVIDENCE_OVERLAP.md",
+      "inspection": "Read in this assessment; source census within dossier dated Oct 4 unless a fresh check is separately recorded",
+      "supports": "Owner-specific findings, original report links, acceptance catalogues, exact limitations",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S26",
+      "title": "C08_C18_HEALTH_REGIONAL.md",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/C08_C18_HEALTH_REGIONAL.md",
+      "inspection": "Read in this assessment; source census within dossier dated Oct 4 unless a fresh check is separately recorded",
+      "supports": "Owner-specific findings, original report links, acceptance catalogues, exact limitations",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S27",
+      "title": "C10_OWNERSHIP_PLANES.md",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/C10_OWNERSHIP_PLANES.md",
+      "inspection": "Read in this assessment; source census within dossier dated Oct 4 unless a fresh check is separately recorded",
+      "supports": "Owner-specific findings, original report links, acceptance catalogues, exact limitations",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S28",
+      "title": "C11_C15_SOURCE_GRAIN.md",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/C11_C15_SOURCE_GRAIN.md",
+      "inspection": "Read in this assessment; source census within dossier dated Oct 4 unless a fresh check is separately recorded",
+      "supports": "Owner-specific findings, original report links, acceptance catalogues, exact limitations",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S29",
+      "title": "C12_PHYSICAL_TELEMETRY.md",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/C12_PHYSICAL_TELEMETRY.md",
+      "inspection": "Read in this assessment; source census within dossier dated Oct 4 unless a fresh check is separately recorded",
+      "supports": "Owner-specific findings, original report links, acceptance catalogues, exact limitations",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S30",
+      "title": "C16_OPERATIONAL_SENSORS.md",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/C16_OPERATIONAL_SENSORS.md",
+      "inspection": "Read in this assessment; source census within dossier dated Oct 4 unless a fresh check is separately recorded",
+      "supports": "Owner-specific findings, original report links, acceptance catalogues, exact limitations",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S31",
+      "title": "C17_MACRO_RELEASE_BUNDLE.md",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/C17_MACRO_RELEASE_BUNDLE.md",
+      "inspection": "Read in this assessment; source census within dossier dated Oct 4 unless a fresh check is separately recorded",
+      "supports": "Owner-specific findings, original report links, acceptance catalogues, exact limitations",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S32",
+      "title": "CROSS_REPORT_ADJUDICATIONS.md",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/90b7b32f681ec21cf6a38f9ea54a77fb055caa65/research/commission_19_integration_dossiers/2026-10-04/CROSS_REPORT_ADJUDICATIONS.md",
+      "inspection": "Read in this assessment; source census within dossier dated Oct 4 unless a fresh check is separately recorded",
+      "supports": "Owner-specific findings, original report links, acceptance catalogues, exact limitations",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    },
+    {
+      "id": "S33",
+      "title": "Adjacent buildout continuity",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/dbf0c843bf6e364a68506411bc73320c243a8e7a/agentos/workstreams/WS-MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT.md",
+      "inspection": "Read in preceding census; no new deployment recertification",
+      "supports": "W1-W7 source work done; activation and some owner dependencies remain; not C19 completion",
+      "commit": "dbf0c843bf6e364a68506411bc73320c243a8e7a"
+    },
+    {
+      "id": "S34",
+      "title": "Occupied decision snapshot carrier",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/673",
+      "inspection": "Occupied implementation identified by canonical C19 evidence; fresh exact head/custody required before dependent edits",
+      "supports": "Do not build a second decision-snapshot service"
+    },
+    {
+      "id": "S35",
+      "title": "Research Vault incumbent program",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/pull/8438",
+      "inspection": "Metadata read in preceding census, head 086c923575e80cbe4d2e9580ad51c86462fc78d6",
+      "supports": "Reuse source custody/replay work; not a C19 Vault rewrite",
+      "commit": "086c923575e80cbe4d2e9580ad51c86462fc78d6"
+    },
+    {
+      "id": "S36",
+      "title": "C19 addenda publication carrier",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1246",
+      "inspection": "Current head recorded at dossier pin; draft/unmerged in preceding census",
+      "supports": "Preserve accepted bounded evidence and existing source carrier",
+      "commit": "90b7b32f681ec21cf6a38f9ea54a77fb055caa65"
+    }
+  ]
+}

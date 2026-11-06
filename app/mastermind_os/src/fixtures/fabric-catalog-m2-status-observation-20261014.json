@@ -1,0 +1,65 @@
+{
+  "schema": "mastermind.attended_fabric_catalog.v1",
+  "availability": "PARTIAL",
+  "observed_at": "2026-10-15T03:03:34.259Z",
+  "source": {
+    "owner": "ATTENDED_FABRIC",
+    "observation_kind": "CONTROLLER_STATUS_SNAPSHOT",
+    "revision": null,
+    "scope": "EXACT_RUN_SET",
+    "atomic": false,
+    "time_basis": "LOCAL_READ"
+  },
+  "coverage": {
+    "returned_count": 2,
+    "candidate_count": null,
+    "omitted_count": null,
+    "scan_complete": false,
+    "status_complete": true
+  },
+  "items": [
+    {
+      "run_id": "mmos-fabric-interiors-review-20261013-c4-02",
+      "controller_modified_at": null,
+      "status": {
+        "schema": "mastermind.fabric_task_status.v1",
+        "run_id": "mmos-fabric-interiors-review-20261013-c4-02",
+        "root_id": "mmos-fabric-interiors-20261013-c4",
+        "parent_run_id": "mmos-fabric-interiors-20261013-c4",
+        "state": "TERMINAL",
+        "rc": 0,
+        "signal": "ok",
+        "result_available": true,
+        "result_bytes": 11052,
+        "accepted": true,
+        "accepted_by": "reviewer",
+        "acceptance_state": "ACCEPTED",
+        "acceptance_reason": "VALIDATED_OUTCOME"
+      },
+      "reason_code": null
+    },
+    {
+      "run_id": "fabric-mcp-web-20261011-c3-check-01",
+      "controller_modified_at": null,
+      "status": {
+        "schema": "mastermind.fabric_task_status.v1",
+        "run_id": "fabric-mcp-web-20261011-c3-check-01",
+        "root_id": "fabric-mcp-web-20261011-c3",
+        "parent_run_id": "fabric-mcp-web-20261011-c3",
+        "state": "TERMINAL",
+        "rc": 0,
+        "signal": "ok",
+        "result_available": true,
+        "result_bytes": 3672,
+        "accepted": false,
+        "accepted_by": null,
+        "acceptance_state": "NOT_ACCEPTED",
+        "acceptance_reason": "NO_OUTCOME"
+      },
+      "reason_code": null
+    }
+  ],
+  "reason_codes": [
+    "STATUS_PARTIAL"
+  ]
+}
