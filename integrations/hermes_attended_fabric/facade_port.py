@@ -93,10 +93,20 @@ class FabricFacadePort:
             return {**self._identity(grant, run_id), "state": "NOT_FOUND",
                     "reason": "ORIGINAL_ID_OBSERVED_NOT_FOUND",
                     "worker_started": False}
+        root, parent = status.get("root_id"), status.get("parent_run_id")
+        if root is not None and root != grant.root_id:
+            raise FabricNativeRefusal("FABRIC_STATUS_FOREIGN_ROOT")
+        if parent is not None and parent != grant.parent_id:
+            raise FabricNativeRefusal("FABRIC_STATUS_FOREIGN_PARENT")
         if (raw.get("root_verified") is not True
-                or status.get("root_id") != grant.root_id
-                or status.get("parent_run_id") != grant.parent_id):
-            raise FabricNativeRefusal("FABRIC_STATUS_LINEAGE_UNVERIFIED")
+                or root != grant.root_id or parent != grant.parent_id):
+            # The incumbent native status intentionally has no root/parent
+            # projection for many ACTIVE_OR_WAITING runs. Never invent them
+            # from the originating request. Return a truthful unverified
+            # observation without permitting a replacement submit or result.
+            return {**self._identity(grant, run_id), "state": "UNVERIFIED",
+                    "reason": "FABRIC_ACTIVE_LINEAGE_NOT_PROVEN",
+                    "worker_started": False}
         effective = raw.get("effective_run_id")
         if type(effective) is not str or not effective:
             raise FabricNativeRefusal("FABRIC_STATUS_EFFECTIVE_ID_INVALID")
