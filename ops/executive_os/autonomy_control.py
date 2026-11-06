@@ -368,6 +368,9 @@ _GATEWAY_AUDIT_GID_FIELD = "gateway_audit_directory_gid"
 _GATEWAY_AUDIT_MODE_FIELD = "gateway_audit_directory_mode"
 _GATEWAY_AUDIT_BEFORE_FIELD = "gateway_audit_directory_before_identity"
 _GATEWAY_AUDIT_AFTER_FIELD = "gateway_audit_directory_identity"
+_MCP_AUDIT_BEFORE_FIELD = "gateway_mcp_auth_audit_before"
+_MCP_AUDIT_AFTER_FIELD = "gateway_mcp_auth_audit_after"
+_MCP_AUDIT_FIELDS = frozenset({_MCP_AUDIT_BEFORE_FIELD, _MCP_AUDIT_AFTER_FIELD})
 
 
 def _gateway_inode_identity(value: Any) -> bool:
@@ -928,6 +931,7 @@ class GatewayPreparation:
     commission_templates: tuple[Mapping[str, Any], ...]
     derived_policy: Mapping[str, Any]
     audit_directory: Mapping[str, Any]
+    mcp_auth_audit: Mapping[str, Any]
     studio: GatewayStudioEvidence
 
 
@@ -3807,6 +3811,20 @@ class ProductionTransactionHost(ProductionArmHost):
         elif value.get("operation") == OS_GATEWAY_PUBLICATION:
             # A gateway marker is never valid without its own closed fields.
             raise TransactionEffectUnknown()
+        if set(value) & _MCP_AUDIT_FIELDS:
+            if value.get("operation") != OS_GATEWAY_PUBLICATION or not _MCP_AUDIT_FIELDS <= set(value):
+                raise TransactionEffectUnknown()
+            from ops.executive_os import mcp_auth_audit_directories as mcp_audit
+            try:
+                mcp_audit.validate_observation(value[_MCP_AUDIT_BEFORE_FIELD])
+                after = value[_MCP_AUDIT_AFTER_FIELD]
+                if after is not None:
+                    mcp_audit.validate_transition(value[_MCP_AUDIT_BEFORE_FIELD], after)
+                elif value.get("phase") != "LOCKED":
+                    raise ValueError("MCP audit identities were not retained")
+            except (ValueError, TypeError) as exc:
+                raise TransactionEffectUnknown() from exc
+            required |= _MCP_AUDIT_FIELDS
         if set(value) & _COMPONENT_MANIFEST_FIELDS:
             # A Control component marker is refused unless it names THIS
             # operation and every closed component field is exactly shaped.
@@ -3938,6 +3956,8 @@ class ProductionTransactionHost(ProductionArmHost):
             value.update({key: current[key] for key in _PAID_RECEIPT_FIELDS})
         if current is not None and set(current) & _GATEWAY_MANIFEST_FIELDS:
             value.update({key: current[key] for key in _GATEWAY_MANIFEST_FIELDS})
+        if current is not None and set(current) & _MCP_AUDIT_FIELDS:
+            value.update({key: current[key] for key in _MCP_AUDIT_FIELDS})
         if current is not None and set(current) & _COMPONENT_MANIFEST_FIELDS:
             value.update({key: current[key] for key in _COMPONENT_MANIFEST_FIELDS})
         if current is not None and "component_binding" in current:
@@ -7234,6 +7254,46 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             )
         except GatewayPublicationError as exc:
             raise TransactionEffectUnknown() from exc
+        self._verify_mcp_auth_audit_directories(manifest)
+
+    def _observe_mcp_auth_audit_directories(self, config_bytes: bytes) -> Mapping[str, Any]:
+        from ops.executive_os import mcp_auth_audit_directories as mcp_audit
+        try:
+            return mcp_audit.observe(mcp_audit.required_names(config_bytes))
+        except Exception as exc:
+            raise GatewayPublicationError("gateway_audit_directory_invalid") from exc
+
+    def _establish_mcp_auth_audit_directories(self, transaction: TransactionContext) -> Mapping[str, Any]:
+        from ops.executive_os import mcp_auth_audit_directories as mcp_audit
+        if self._transaction_owner_fd is None or self._active_transaction is not transaction:
+            raise TransactionEffectUnknown()
+        self._verify_published_inode(self._transaction_owner_fd)
+        manifest = self._manifest()
+        if (manifest.get("operation") != OS_GATEWAY_PUBLICATION
+                or manifest.get("transaction_id") != transaction.transaction_id
+                or manifest.get("phase") != "LOCKED"
+                or manifest.get(_MCP_AUDIT_AFTER_FIELD) is not None
+                or not _MCP_AUDIT_FIELDS <= set(manifest)):
+            raise TransactionEffectUnknown()
+        config = self._gateway_root_file(OS_GATEWAY_MCP_CONFIG, code="gateway_target_invalid")
+        if (sha256_bytes(config) != manifest["gateway_prior_mcp_config_sha256"]
+                or self._observe_mcp_auth_audit_directories(config) != manifest[_MCP_AUDIT_BEFORE_FIELD]):
+            raise TransactionEffectUnknown()
+        return mcp_audit.establish(manifest[_MCP_AUDIT_BEFORE_FIELD])
+
+    def _verify_mcp_auth_audit_directories(self, manifest: Mapping[str, Any]) -> None:
+        if not _MCP_AUDIT_FIELDS & set(manifest):
+            return  # Existing historical markers retain their original contract.
+        from ops.executive_os import mcp_auth_audit_directories as mcp_audit
+        try:
+            after = manifest[_MCP_AUDIT_AFTER_FIELD]
+            mcp_audit.validate_transition(manifest[_MCP_AUDIT_BEFORE_FIELD], after)
+            current = self._gateway_root_file(OS_GATEWAY_MCP_CONFIG, code="gateway_target_invalid")
+            if set(mcp_audit.required_names(current)) != set(after["leaves"]):
+                raise ValueError("MCP audit policy selection changed")
+            mcp_audit.verify(after)
+        except Exception as exc:
+            raise TransactionEffectUnknown() from exc
 
     # ------------------------------------------------------------------
     # Marker lifecycle for the gateway operation.
@@ -7260,14 +7320,17 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         self._verify_published_inode(self._transaction_owner_fd)
         current = self._manifest()
         value = self._manifest_document(transaction, phase, operation=OS_GATEWAY_PUBLICATION)
+        changed_fields = {_GATEWAY_AUDIT_AFTER_FIELD}
+        if _MCP_AUDIT_FIELDS <= set(current):
+            changed_fields.add(_MCP_AUDIT_AFTER_FIELD)
         if (
             current.get("operation") != OS_GATEWAY_PUBLICATION
             or current.get("phase") != "LOCKED"
             or operation not in (None, OS_GATEWAY_PUBLICATION)
             or {key: item for key, item in current.items()
-                if key not in ("phase", _GATEWAY_AUDIT_AFTER_FIELD)}
+                if key not in {"phase", *changed_fields}}
             != {key: item for key, item in value.items()
-                if key not in ("phase", _GATEWAY_AUDIT_AFTER_FIELD)}
+                if key not in {"phase", *changed_fields}}
         ):
             raise TransactionEffectUnknown()
         self._verify_gateway_audit_directory(value)
@@ -7324,6 +7387,8 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             != manifest["gateway_studio_definition_sha256"]
         ):
             raise TransactionEffectUnknown()
+        if manifest.get(_MCP_AUDIT_AFTER_FIELD) is not None:
+            self._verify_mcp_auth_audit_directories(manifest)
 
     def _recheck_gateway_preimages(
         self, transaction: TransactionContext, preparation: GatewayPreparation
@@ -7375,6 +7440,8 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
                 _GATEWAY_AUDIT_BEFORE_FIELD,
             )
         }:
+            raise TransactionEffectUnknown()
+        if self._observe_mcp_auth_audit_directories(preparation.candidate["mcp_config_bytes"]) != manifest.get(_MCP_AUDIT_BEFORE_FIELD):
             raise TransactionEffectUnknown()
 
     def _publish_gateway_grant(
@@ -7738,6 +7805,7 @@ def prepare_gateway_publication(
         commission_templates=templates,
         helper_hashes=helper_hashes,
     )
+    mcp_auth_audit = host._observe_mcp_auth_audit_directories(candidate["mcp_config_bytes"])
     candidate_configs = CandidateConfigs(
         control=configs.control,
         worker=configs.worker,
@@ -7765,6 +7833,7 @@ def prepare_gateway_publication(
         commission_templates=templates,
         derived_policy=derived_policy,
         audit_directory=audit_directory,
+        mcp_auth_audit=mcp_auth_audit,
         studio=studio,
     )
 
@@ -10827,6 +10896,8 @@ def execute_gateway_publication(
         "gateway_target_mcp_plist_sha256": preparation.candidate["mcp_plist_sha256"],
         **preparation.audit_directory,
         _GATEWAY_AUDIT_AFTER_FIELD: None,
+        _MCP_AUDIT_BEFORE_FIELD: preparation.mcp_auth_audit,
+        _MCP_AUDIT_AFTER_FIELD: None,
     }
     host._prior_grant_bytes = preparation.prior_grant_bytes
     host._active_transaction = transaction
@@ -10841,6 +10912,9 @@ def execute_gateway_publication(
         # RETAINED intent, already sealed before any effect.
         host._sealed_gateway[_GATEWAY_AUDIT_AFTER_FIELD] = (
             host._establish_gateway_audit_directory(host._manifest())
+        )
+        host._sealed_gateway[_MCP_AUDIT_AFTER_FIELD] = (
+            host._establish_mcp_auth_audit_directories(transaction)
         )
         # Retain the actual created/reused inode in THIS original operation
         # before any grant/config effect. Receipt loss cannot infer a new one.
@@ -10918,6 +10992,8 @@ def reconcile_gateway_publication(
     host._sealed_gateway = {
         field: manifest[field] for field in _GATEWAY_MANIFEST_FIELDS
     }
+    if _MCP_AUDIT_FIELDS <= set(manifest):
+        host._sealed_gateway.update({field: manifest[field] for field in _MCP_AUDIT_FIELDS})
     configs = host.checked_gateway_configs(
         request.expected_sha,
         allowed_plist_sha256s=frozenset(

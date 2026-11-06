@@ -64,7 +64,7 @@ function CodeBlock({ value, language, chinese }: { value: string; language?: str
       </button>
       <span role="status">{status === "copied" ? (chinese ? "已复制" : "Copied") : status === "failed" ? (chinese ? "复制失败" : "Copy unavailable") : ""}</span>
     </div>
-    <pre><code>{value}</code></pre>
+    <pre role="region" tabIndex={0} aria-label={chinese ? "原文代码" : "Source code"}><code>{value}</code></pre>
   </div>;
 }
 

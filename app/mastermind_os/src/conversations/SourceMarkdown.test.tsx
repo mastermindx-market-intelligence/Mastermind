@@ -11,6 +11,20 @@ afterEach(() => {
 });
 
 describe("bounded owner-source Markdown presentation", () => {
+  it.each([
+    ["en", "Source code"],
+    ["zh-CN", "原文代码"],
+  ] as const)("makes code overflow a named keyboard focus target in %s", (locale, name) => {
+    const code = "  const longLine = \"" + "x".repeat(240) + "\";\n\treturn longLine;";
+    render(<SourceMarkdown source={"```ts\n" + code + "\n```"} locale={locale} />);
+    const region = screen.getByRole("region", { name });
+    expect(region.tagName).toBe("PRE");
+    expect(region.tabIndex).toBe(0);
+    region.focus();
+    expect(document.activeElement).toBe(region);
+    expect(region.querySelector("code")?.textContent).toBe(code);
+  });
+
   it("renders structured GFM without changing the source", () => {
     const source = "# Result\n\n**Verified** and *qualified*.\n\n| Field | Value |\n| --- | --- |\n| State | Complete |\n\n- [x] Read evidence\n- [ ] Accept result\n\n```ts\nconst count = 2;\n```";
     const { container } = render(<SourceMarkdown source={source} />);

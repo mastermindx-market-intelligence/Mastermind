@@ -551,15 +551,13 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # exact-CAS publication mode, both with explicit uid=0 and gid=0. They are
 # permissions, not principals; each complete token and enclosing call was
 # inspected on these exact source bytes. No generic numeric rule changes.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': '05eebaa5bed65b3b686e422677352d6ba8d31d7a4b31d2577810594a291ac726',
-    'sites': ((348, 24, 27, 'int', '501'),
-              (6888, 35, 37, 'int', '80'),
-              (6889, 50, 55, 'int', '0o755'),
-              (7426, 41, 46, 'int', '0o644'),
-              (8163, 64, 69, 'int', '0o644'),
-              (9575, 41, 46, 'int', '0o644')),
-}
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '17201afeece707d85696d3aabef7918bca033189a888939b84dc5d701148899c',
+ 'sites': ((348, 24, 27, 'int', '501'),
+           (6908, 35, 37, 'int', '80'),
+           (6909, 50, 55, 'int', '0o755'),
+           (7493, 41, 46, 'int', '0o644'),
+           (8232, 64, 69, 'int', '0o644'),
+           (9644, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
@@ -750,3 +748,7 @@ REVIEWED_FILES['ops/executive_os/install.sh'] = {
     'sha256': '2bf7475cfc2b133459cbf914b9a9cd7b327121cd40b8f6e3c9ab3428f4ea9860',
     'sites': ((1668, 26, 31, 'int', '0o700'),),
 }
+
+
+# Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
+REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e40d488bd0c18f6cc422aeb15ce853cba330a8d5c9559cc7a7612b1ce119a3ed', 'sites': ((22, 12, 15, 'int', '458'), (23, 7, 12, 'int', '0o700'), (125, 49, 54, 'int', '0o755'), (128, 60, 65, 'int', '0o755'))}
