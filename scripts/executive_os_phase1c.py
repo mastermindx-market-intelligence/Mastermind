@@ -1844,6 +1844,7 @@ def _service_from_config(
     remote_worker_binding_source: Callable[..., Any] | None = None,
     plan_schema_version: str | None = None,
     fabric_worker_binding_source: Any | None = None,
+    secretary_binding_source: Any | None = None,
     fabric_attended_probe_source: Any | None = None,
     attended_work_placements: tuple = (),
     paid_worker_binding_source: Any | None = None,
@@ -2829,12 +2830,31 @@ def _service_from_config(
                         # File/policy drift disables only the independent
                         # cross-policy read, never grants a substitute identity.
                         trusted_policies = None
+                hermes_session = None
+                if secretary_binding_source is not None:
+                    from integrations.session_bridge.hermes_native import HermesNativeSession
+
+                    def require_secretary_read():
+                        require_session_admission()
+                        service._namespace_custody.bound_runtime(runtime)
+                        if service._require_runtime() is not runtime:
+                            raise BridgeError("ingress_unavailable", "Executive Runtime changed")
+
+                    def require_secretary_submit():
+                        require_secretary_read()
+                        service._require_ceo_submit_admission()
+
+                    hermes_session = HermesNativeSession(
+                        secretary_binding_source, read_guard=require_secretary_read,
+                        submit_guard=require_secretary_submit)
+
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=relay_readside_socket_path,
                     summon_handler=summon, codex_owner_configured=codex_owner_configured,
                     attention_requester=attention,
                     authorized_policies=trusted_policies,
-                    reference_cursor_key=session_reference_cursor_key)
+                    reference_cursor_key=session_reference_cursor_key,
+                    hermes_session=hermes_session)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
@@ -3284,6 +3304,7 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     service = _service_from_config(
         raw,
         fabric_worker_binding_source=physical_source if attended_work_placements else None,
+        secretary_binding_source=physical_source,
         byok_roles_reader=physical_source.hermes_roles_reader() if physical_source is not None else None,
         paid_worker_binding_source=paid_source,
         attended_work_placements=attended_work_placements,

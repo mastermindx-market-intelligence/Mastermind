@@ -27103,11 +27103,16 @@ class BoundedRuntimeReadObservation:
     @staticmethod
     def _load_session_original_request_bounded(
         loader: _BoundedRoleResultLoader, read_ref: str,
+        original_principals: tuple[tuple[str, ...], ...] | None = None,
     ) -> tuple[Event, dict[str, Any]]:
         """Load one original request and root through the selection's loader."""
         from control_plane.native_continuation import (
             _ACTOR, _EVENT, _PREFIX, _READ, _SCHEMA, _continue_key,
             _digest, _request_key, _validate_payload,
+        )
+        from control_plane.native_continuation import (
+            HERMES_REQUEST_SCHEMA, validate_hermes_continuation_request_event,
+            _hermes_root_event,
         )
 
         match = _READ.fullmatch(read_ref) if isinstance(read_ref, str) else None
@@ -27121,13 +27126,28 @@ class BoundedRuntimeReadObservation:
                 or event.aggregate_id != match[1]):
             raise RuntimeReadUnavailable("original request unavailable")
         value = event.payload
-        _validate_payload(value)
-        if (value.get("schema") != _SCHEMA or value.get("read_ref") != read_ref
-                or _request_key(value["operation_key"]) != match[1]
-                or value["request_message_key"] != _continue_key(value["operation_key"])
-                or (event.job_id, event.attempt_id, event.worker_id) != (
-                    value["job_id"], value["attempt_id"], value["worker_id"])):
-            raise RuntimeReadUnavailable("original request binding changed")
+        schema = value.get("schema") if type(value) is dict else None
+        if schema == HERMES_REQUEST_SCHEMA:
+            # The native Secretary request has no Dialogue, Attempt or worker
+            # carrier. Its principal filter is required and is applied before
+            # any root read; the bounded UNIQUE root join is unchanged.
+            if original_principals is None:
+                raise RuntimeReadUnavailable("original request principal filter is required")
+            try:
+                value = validate_hermes_continuation_request_event(
+                    event, original_principals=original_principals)
+            except ValueError:
+                raise RuntimeReadUnavailable("original request binding changed") from None
+        else:
+            # The legacy continuation request keeps its own closed payload law
+            # and its own ValueError refusals.
+            _validate_payload(value)
+            if (value.get("schema") != _SCHEMA or value.get("read_ref") != read_ref
+                    or _request_key(value["operation_key"]) != match[1]
+                    or value["request_message_key"] != _continue_key(value["operation_key"])
+                    or (event.job_id, event.attempt_id, event.worker_id) != (
+                        value["job_id"], value["attempt_id"], value["worker_id"])):
+                raise RuntimeReadUnavailable("original request binding changed")
         metadata = loader.execute(
             "SELECT event_id,length(CAST(payload_json AS BLOB)) AS payload_bytes "
             "FROM events WHERE job_id=? AND event_type='JOB_CREATED' "
@@ -27140,6 +27160,8 @@ class BoundedRuntimeReadObservation:
         if root_row is None:
             raise RuntimeReadUnavailable("original root disappeared")
         root = _event_from_row(root_row)
+        if schema == HERMES_REQUEST_SCHEMA:
+            _hermes_root_event(root, value["binding"])
         if (root.event_id != value["root_event_id"]
                 or _digest(root.to_dict()) != value["root_event_sha256"]):
             raise RuntimeReadUnavailable("original root changed")
@@ -27147,6 +27169,7 @@ class BoundedRuntimeReadObservation:
 
     def read_session_original_request_bounded(
         self, *, read_ref: str,
+        original_principals: tuple[tuple[str, ...], ...] | None = None,
     ) -> tuple[Event, dict[str, Any]]:
         """Select immutable reference provenance without COMMIT or live state.
 
@@ -27159,7 +27182,8 @@ class BoundedRuntimeReadObservation:
             loader = _BoundedRoleResultLoader(self._connection)
             self._vm_progress.activate()
             try:
-                return self._load_session_original_request_bounded(loader, read_ref)
+                return self._load_session_original_request_bounded(
+                    loader, read_ref, original_principals)
             except sqlite3.OperationalError as exc:
                 if self._vm_progress.tripped:
                     raise RuntimeReadUnavailable("original request VM budget exceeded") from exc
@@ -27172,6 +27196,7 @@ class BoundedRuntimeReadObservation:
 
     def read_session_reply_evidence_bounded(
         self, *, read_ref: str,
+        original_principals: tuple[tuple[str, ...], ...] | None = None,
     ) -> tuple[Event, dict[str, Any], tuple[Event, ...], Event | None, Event | None]:
         """Select complete immutable reply evidence on one bounded snapshot.
 
@@ -27184,10 +27209,15 @@ class BoundedRuntimeReadObservation:
         """
         self._select()
         try:
+            from control_plane.native_continuation import (
+                HERMES_REQUEST_SCHEMA, hermes_continuation_commit_evidence,
+            )
+
             loader = _BoundedRoleResultLoader(self._connection)
             self._vm_progress.activate()
             try:
-                event, value = self._load_session_original_request_bounded(loader, read_ref)
+                event, value = self._load_session_original_request_bounded(
+                    loader, read_ref, original_principals)
                 # One bounded metadata row retains the complete ordered ID set
                 # without consuming 256 metadata rows and 256 full Event rows.
                 # Every selected metadata/full column shares this same loader.
@@ -27220,6 +27250,15 @@ class BoundedRuntimeReadObservation:
                     row = loader.execute("SELECT * FROM events WHERE command_id=?",
                                          (prefix + event.aggregate_id,)).fetchone()
                     indexed.append(None if row is None else _event_from_row(row))
+                if type(value) is dict and value.get("schema") == HERMES_REQUEST_SCHEMA:
+                    # The native Secretary aggregate carries its own commit
+                    # fact; the pure helper proves the aggregate Event and the
+                    # independent global command index agree.
+                    try:
+                        indexed[0] = hermes_continuation_commit_evidence(
+                            event, events, indexed[0], indexed[1])
+                    except ValueError:
+                        raise RuntimeReadUnavailable("original aggregate changed") from None
                 return event, value, events, indexed[0], indexed[1]
             except sqlite3.OperationalError as exc:
                 if self._vm_progress.tripped:
@@ -27233,6 +27272,7 @@ class BoundedRuntimeReadObservation:
 
     def read_session_live_writer_bounded(
         self, *, read_ref: str,
+        original_principals: tuple[tuple[str, ...], ...] | None = None,
     ) -> tuple[
         Event, dict[str, Any], ActiveOperatorBindingFacts, Any,
         ExecutiveDialogueSource, tuple[Event, ...],
@@ -27261,11 +27301,19 @@ class BoundedRuntimeReadObservation:
                 _validate_current_target_worker_quota,
                 job_id_from_operation_key,
             )
+            from control_plane.native_continuation import HERMES_REQUEST_SCHEMA
 
             loader = _BoundedRoleResultLoader(self._connection)
             self._vm_progress.activate()
             try:
-                event, value = self._load_session_original_request_bounded(loader, read_ref)
+                event, value = self._load_session_original_request_bounded(
+                    loader, read_ref, original_principals)
+                if type(value) is dict and value.get("schema") == HERMES_REQUEST_SCHEMA:
+                    # A native Secretary request has no Attempt, worker or
+                    # harness writer. Refuse before every live-writer query
+                    # instead of synthesizing a legacy writer tuple.
+                    raise RuntimeReadUnavailable(
+                        "native continuation has no legacy live writer")
                 original_facts = _current_harness_binding_source_from_snapshot(
                     self._store, loader, value["attempt_id"])
 
@@ -27372,6 +27420,10 @@ class BoundedRuntimeReadObservation:
                 _ACTOR, _EVENT, _IDENTITY, _PREFIX, _TOKEN, _continue_key,
                 _digest, _request_key, _validate_payload,
             )
+            from control_plane.native_continuation import (
+                HERMES_REQUEST_SCHEMA, validate_hermes_continuation_request,
+                validate_hermes_continuation_request_event, _hermes_root_event,
+            )
 
             if (type(work_ref) is not str or _TOKEN.fullmatch(work_ref) is None
                     or (root_job_id is not None and
@@ -27428,21 +27480,50 @@ class BoundedRuntimeReadObservation:
                         raise RuntimeReadUnavailable("original request disappeared")
                     event = _event_from_row(row)
                     value = event.payload
-                    _validate_payload(value)
-                    if (event.event_type != _EVENT
-                            or value["read_ref"] != "session-reply-" + _request_key(value["operation_key"])
-                            or event.command_id != _PREFIX + _request_key(value["operation_key"])
-                            or event.aggregate_id != _request_key(value["operation_key"])
-                            or value["request_message_key"] != _continue_key(value["operation_key"])
-                            or (event.job_id, event.attempt_id, event.worker_id) !=
-                            (value["job_id"], value["attempt_id"], value["worker_id"])):
-                        raise RuntimeReadUnavailable("original request binding changed")
-                    if (value["context"]["work_ref"] != work_ref
+                    schema = value.get("schema") if type(value) is dict else None
+                    if schema == HERMES_REQUEST_SCHEMA:
+                        # The native Secretary request carries no Dialogue
+                        # context, Attempt or worker. Its own closed payload
+                        # law supplies the scope the filters below apply.
+                        try:
+                            value = validate_hermes_continuation_request(value)
+                        except ValueError:
+                            raise RuntimeReadUnavailable(
+                                "original request binding changed") from None
+                        if (event.event_type != _EVENT
+                                or event.aggregate_id != _request_key(value["operation_key"])
+                                or event.command_id != _PREFIX + _request_key(value["operation_key"])
+                                or event.job_id != value["root_job_id"]
+                                or event.attempt_id is not None
+                                or event.worker_id is not None):
+                            raise RuntimeReadUnavailable("original request binding changed")
+                        candidate_work_ref = value["work_ref"]
+                    else:
+                        # The legacy continuation request keeps its own closed
+                        # payload law and its own ValueError refusals.
+                        _validate_payload(value)
+                        if (event.event_type != _EVENT
+                                or value["read_ref"] != "session-reply-" + _request_key(value["operation_key"])
+                                or event.command_id != _PREFIX + _request_key(value["operation_key"])
+                                or event.aggregate_id != _request_key(value["operation_key"])
+                                or value["request_message_key"] != _continue_key(value["operation_key"])
+                                or (event.job_id, event.attempt_id, event.worker_id) !=
+                                (value["job_id"], value["attempt_id"], value["worker_id"])):
+                            raise RuntimeReadUnavailable("original request binding changed")
+                        candidate_work_ref = value["context"]["work_ref"]
+                    if (candidate_work_ref != work_ref
                             or (root_job_id is not None and value["root_job_id"] != root_job_id)
                             or tuple(value["principal"][key] for key in _IDENTITY)
                             not in original_principals):
                         continue
                     # Foreign work/principal scope never triggers a root read.
+                    if schema == HERMES_REQUEST_SCHEMA:
+                        try:
+                            validate_hermes_continuation_request_event(
+                                event, original_principals=original_principals)
+                        except ValueError:
+                            raise RuntimeReadUnavailable(
+                                "original request binding changed") from None
                     metadata = loader.execute(
                         "SELECT event_id,length(CAST(payload_json AS BLOB)) AS payload_bytes "
                         "FROM events WHERE job_id=? AND event_type='JOB_CREATED' "
@@ -27455,6 +27536,8 @@ class BoundedRuntimeReadObservation:
                     if root_row is None:
                         raise RuntimeReadUnavailable("original root disappeared")
                     root = _event_from_row(root_row)
+                    if schema == HERMES_REQUEST_SCHEMA:
+                        _hermes_root_event(root, value["binding"])
                     if (root.event_id != value["root_event_id"]
                             or _digest(root.to_dict()) != value["root_event_sha256"]):
                         raise RuntimeReadUnavailable("original root changed")

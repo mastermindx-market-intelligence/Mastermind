@@ -7,6 +7,7 @@ creates no session, retry, state store or listener.
 from __future__ import annotations
 
 import json
+import inspect
 import re
 
 from control_plane.executive_fabric_composition import FabricBindingSource
@@ -172,11 +173,27 @@ class HermesNativeSession:
         if (type(source) is not FabricBindingSource or not callable(read_guard)
                 or not callable(submit_guard)):
             raise TypeError("installed Secretary composition and admission guards required")
+        if any(inspect.iscoroutinefunction(guard)
+               or inspect.iscoroutinefunction(getattr(guard, "__call__", None))
+               for guard in (read_guard, submit_guard)):
+            raise TypeError("synchronous installed admission guards required")
         self._source = source
         self._read_guard, self._submit_guard = read_guard, submit_guard
 
+    @staticmethod
+    def _guard(callback):
+        value = callback()
+        if value is not None:
+            if inspect.iscoroutine(value):
+                value.close()
+            raise BridgeError("ingress_unavailable", "installed admission guard is invalid")
+
+    def require_read(self):
+        """Fresh ingress/custody admission independent of route availability."""
+        self._guard(self._read_guard)
+
     def selected_binding(self):
-        self._read_guard()
+        self.require_read()
         selected = self._source.hermes_secretary_selection()
         if selected is None:
             return None
@@ -195,7 +212,7 @@ class HermesNativeSession:
             raise BridgeError("binding_unavailable", "original Secretary binding is unavailable")
 
     def require_submit(self, binding):
-        self._submit_guard()
+        self._guard(self._submit_guard)
         self.require_binding(binding)
 
     async def request(self, binding, native_request, *, before_write=None):

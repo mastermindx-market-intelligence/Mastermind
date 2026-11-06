@@ -201,13 +201,11 @@ class HermesSecretaryHostBinding:
             validate_secretary_root_id(value['root_job_id'])
             for key in ('work_ref', 'session_id', 'profile_id', 'principal_id'):
                 validate_secretary_native_id(value[key])
-            if (not value['root_job_id'].startswith('JOB-')
-                    or len(value['root_job_id']) <= 4
-                    or not value['work_ref'].startswith('WS:')
-                    or len(value['work_ref']) <= 3
-                    or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}', value['work_ref']) is None):
+            from control_plane.workstream_admission_contract import canonical_work_ref
+            canonical_work_ref(value['work_ref'])
+            if re.fullmatch(r'JOB-[0-9]{1,9}', value['root_job_id']) is None:
                 raise TransportValidationError('Secretary Runtime responsibility is invalid')
-        except TransportValidationError:
+        except (TransportValidationError, ValueError):
             raise FabricCompositionError('Secretary selection identity is invalid') from None
         observation = HermesHostObservationBinding.from_document({
             'schema': HERMES_HOST_READ_SCHEMA,
