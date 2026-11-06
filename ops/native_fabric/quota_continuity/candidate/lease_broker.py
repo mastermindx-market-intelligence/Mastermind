@@ -441,11 +441,182 @@ def _application_receipt(receipt):
     return _application_json(receipt)
 
 
+def _application_selection_task(purpose, payload):
+    """Derive capability needs; the caller cannot supply routing authority."""
+    encoded, _ = _application_selection_purpose(purpose)
+    if type(payload) is not dict or "model" not in payload:
+        raise ApplicationSelectionError("selection_model_required")
+    if payload["model"] is not None:
+        _application_model(payload["model"])
+    task = json.loads(encoded)["task"]
+    needs = set(task.get("needs") or [])
+    if payload.get("tools") or payload.get("tool_choice") or payload.get("parallel_tool_calls"):
+        needs.add("tools")
+    for message in payload["messages"]:
+        if type(message) is not dict:
+            raise ApplicationSelectionError("selection_payload_invalid")
+        if message.get("tool_calls") or message.get("role") == "tool" or message.get("tool_call_id"):
+            needs.add("tools")
+        content = message.get("content")
+        if type(content) is list:
+            if any(type(part) is not dict or part.get("type") != "text" for part in content):
+                needs.add("vision")
+        elif content is not None and type(content) is not str:
+            raise ApplicationSelectionError("selection_payload_invalid")
+    return {"task_class": task["task_class"].lower(),
+        "route_key": task["route_key"], "task_complexity": str(task.get("task_complexity") or "").upper(),
+        "needs": sorted(needs), "subject_pool": task.get("subject_pool"),
+        "escalation_reason": str(task.get("escalation_reason") or ""),
+        "requested_model": payload["model"]}
+
+def _application_requested_model(turn):
+    """Read frozen request intent without today's policy, grants or catalogue."""
+    value = dict(turn)
+    raw, digest = value.get("selection_json"), value.get("selection_digest")
+    if raw is None:
+        if digest is not None:
+            raise ApplicationAdmissionError("stored_selection_invalid")
+        return _application_model(value["model"])
+    try:
+        fields = {"schema", "purpose", "purpose_digest", "profile", "profile_digest",
+                  "identity", "commitments", "quality_records_sha256", "fresh_s"}
+        if (type(raw) is not str or len(raw.encode("utf-8")) > 32768
+                or hashlib.sha256(raw.encode("utf-8")).hexdigest() != digest):
+            raise ValueError("selection digest")
+        record = json.loads(raw)
+        if (type(record) is not dict or set(record) != fields
+                or record["schema"] != "mastermind.application_turn_selection.v1"
+                or _application_json(record) != raw):
+            raise ValueError("selection shape")
+        identity, profile = record["identity"], record["profile"]
+        task = identity["task"]
+        if (type(identity) is not dict or type(profile) is not dict or type(task) is not dict
+                or "requested_model" not in task
+                or any(identity.get(key) != value[key] for key in ("pool", "model"))
+                or identity.get("host") != value["caller_host"]
+                or identity.get("grant_ref") != {"grant_id": value["grant_id"], "digest": value["grant_digest"]}
+                or profile.get("pool") != value["pool"]
+                or identity.get("source") != profile.get("source")
+                or hashlib.sha256(_application_json(profile).encode()).hexdigest() != record["profile_digest"]):
+            raise ValueError("selection correlation")
+        _, purpose_digest = _application_selection_purpose(record["purpose"])
+        if purpose_digest != record["purpose_digest"]:
+            raise ValueError("selection purpose")
+        requested = task["requested_model"]
+        if requested is not None and _application_model(requested) != value["model"]:
+            raise ValueError("selection model")
+        return requested
+    except (ValueError, TypeError, KeyError, OverflowError, RecursionError, UnicodeError):
+        raise ApplicationAdmissionError("stored_selection_invalid") from None
+
+
+def _application_routed_request(turn, payload):
+    """Freeze the original document and substitute only its selected model."""
+    if (type(payload) is not dict or "model" not in payload
+            or payload.get("stream", False) is not False):
+        raise ApplicationAdmissionError("invalid_original_request")
+    requested = _application_requested_model(turn)
+    if payload["model"] != requested:
+        raise ApplicationAdmissionError("request_mode_conflict")
+    frozen = json.loads(_application_json(payload))
+    original = _application_json({"path": "/v1/chat/completions", "payload": frozen}).encode("utf-8")
+    if len(original) > 1024 * 1024:
+        raise ApplicationAdmissionError("request_bound")
+    original_digest = hashlib.sha256(original).hexdigest()
+    routed_digest = None
+    if requested is None:
+        frozen["model"] = _application_model(turn["model"])
+        routed = _application_json({"path": "/v1/chat/completions", "payload": frozen}).encode("utf-8")
+        if len(routed) > 1024 * 1024:
+            raise ApplicationAdmissionError("routed_request_bound")
+        routed_digest = hashlib.sha256(routed).hexdigest()
+    return frozen, original_digest, routed_digest
+
+
+def _application_request_route_digest(request, turn):
+    """No positive AUTO settlement without its immutable routed commitment."""
+    digest = dict(request).get("routed_request_digest")
+    if _application_requested_model(turn) is None:
+        _application_digest(digest)
+        if digest == request["request_digest"]:
+            raise ApplicationAdmissionError("routed_request_invalid")
+    elif digest is not None:
+        raise ApplicationAdmissionError("fixed_request_routed")
+    return digest
+
+
+def _application_auto_sql(alias):
+    return ("CASE WHEN json_valid(" + alias + ".selection_json)=1 THEN "
+            "json_type(" + alias + ".selection_json,'$.identity.task.requested_model')='null' ELSE 0 END")
+
+
+def _application_route_digest_sql(alias):
+    value = alias + ".routed_request_digest"
+    return ("typeof(" + value + ")='text' AND length(" + value + ")=64 AND "
+            + value + " NOT GLOB '*[^0-9a-f]*' AND " + value + " IS NOT " + alias + ".request_digest")
+
+
+def _application_auto_guards(conn):
+    """Additive compatibility fences; retain the historical release trigger."""
+    auto = _application_auto_sql("t")
+    valid = _application_route_digest_sql("NEW")
+    conn.execute("""CREATE TRIGGER IF NOT EXISTS application_auto_request_insert_v1
+        BEFORE INSERT ON application_requests WHEN
+        (NEW.routed_request_digest IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM application_turns t WHERE t.principal_id=NEW.principal_id
+            AND t.turn_id=NEW.turn_id AND (""" + auto + """)))
+        OR EXISTS (SELECT 1 FROM application_turns t WHERE t.principal_id=NEW.principal_id
+            AND t.turn_id=NEW.turn_id AND (""" + auto + """) AND NOT (""" + valid + """))
+        OR EXISTS (SELECT 1 FROM application_requests r JOIN application_turns t
+            ON t.principal_id=r.principal_id AND t.turn_id=r.turn_id
+            WHERE ((r.principal_id=NEW.principal_id AND r.turn_id=NEW.turn_id
+                AND r.request_id=NEW.request_id) OR r.dispatch_id=NEW.dispatch_id)
+            AND (r.routed_request_digest IS NOT NULL OR (""" + auto + """)))
+        BEGIN SELECT RAISE(ABORT,'application_auto_request_insert_refused'); END""")
+    conn.execute("""CREATE TRIGGER IF NOT EXISTS application_auto_request_binding_v1
+        BEFORE UPDATE ON application_requests WHEN
+        NEW.routed_request_digest IS NOT OLD.routed_request_digest
+        OR (OLD.routed_request_digest IS NOT NULL AND (
+            NEW.principal_id IS NOT OLD.principal_id OR NEW.turn_id IS NOT OLD.turn_id
+            OR NEW.request_id IS NOT OLD.request_id OR NEW.request_digest IS NOT OLD.request_digest
+            OR NEW.dispatch_id IS NOT OLD.dispatch_id OR NEW.created_at IS NOT OLD.created_at
+            OR (OLD.state='terminal' AND (NEW.state IS NOT OLD.state
+                OR NEW.terminal_receipt IS NOT OLD.terminal_receipt
+                OR NEW.unknown_reason IS NOT OLD.unknown_reason))))
+        BEGIN SELECT RAISE(IGNORE); END""")
+    conn.execute("""CREATE TRIGGER IF NOT EXISTS application_auto_request_delete_v1
+        BEFORE DELETE ON application_requests WHEN OLD.routed_request_digest IS NOT NULL
+        OR EXISTS (SELECT 1 FROM application_turns t WHERE t.principal_id=OLD.principal_id
+            AND t.turn_id=OLD.turn_id AND (""" + auto + """))
+        BEGIN SELECT RAISE(IGNORE); END""")
+    conn.execute("""CREATE TRIGGER IF NOT EXISTS application_auto_turn_insert_v1
+        BEFORE INSERT ON application_turns WHEN EXISTS (
+            SELECT 1 FROM application_turns t WHERE
+            ((t.principal_id=NEW.principal_id AND t.turn_id=NEW.turn_id) OR t.lease_id=NEW.lease_id)
+            AND ((""" + auto + """) OR (""" + _application_auto_sql("NEW") + """)))
+        BEGIN SELECT RAISE(ABORT,'application_auto_turn_insert_refused'); END""")
+    conn.execute("""CREATE TRIGGER IF NOT EXISTS application_auto_lease_insert_v1
+        BEFORE INSERT ON leases WHEN EXISTS (SELECT 1 FROM application_turns t
+            WHERE t.lease_id=NEW.id AND (""" + auto + """))
+        BEGIN SELECT RAISE(ABORT,'application_auto_lease_insert_refused'); END""")
+    conn.execute("""CREATE TRIGGER IF NOT EXISTS application_auto_lease_release_v1
+        BEFORE UPDATE OF state ON leases WHEN OLD.purpose='APPLICATION'
+        AND OLD.state IN ('held','rented') AND NEW.state NOT IN ('held','rented')
+        AND EXISTS (SELECT 1 FROM application_turns t WHERE t.lease_id=OLD.id AND (""" + auto + """))
+        AND NOT EXISTS (SELECT 1 FROM application_turns t WHERE t.lease_id=OLD.id
+            AND (""" + auto + """) AND t.state='closed'
+            AND NOT EXISTS (SELECT 1 FROM application_requests r
+                WHERE r.principal_id=t.principal_id AND r.turn_id=t.turn_id
+                AND NOT (""" + _application_route_digest_sql("r") + """)))
+        BEGIN SELECT RAISE(IGNORE); END""")
+
+
 def _application_stored_terminal(request, turn):
     """Positive settlement proof; corrupt or unfamiliar states retain custody."""
     if request["state"] != "terminal" or not isinstance(request["terminal_receipt"], str):
         return None
     try:
+        _application_request_route_digest(request, turn)
         receipt = json.loads(request["terminal_receipt"])
         encoded = _application_receipt(receipt)
         if (encoded != request["terminal_receipt"]
@@ -1047,7 +1218,7 @@ class Broker:
         for table, additions in (
                 ("application_turns", ("recipe_json", "recipe_digest", "selection_json", "selection_digest", "transport_kind")),
                 ("application_requests", ("recipe_digest", "logical_payload_digest", "wire_body_digest",
-                                           "invocation_json", "invocation_digest"))):
+                                           "invocation_json", "invocation_digest", "routed_request_digest"))):
             columns = {row[1] for row in conn.execute("PRAGMA table_info(" + table + ")")}
             for column in additions:
                 if column not in columns:
@@ -1144,6 +1315,7 @@ class Broker:
             BEFORE DELETE ON leases WHEN OLD.purpose='APPLICATION'
             BEGIN SELECT RAISE(IGNORE); END""")
         _application_migrate_release_trigger(conn)
+        _application_auto_guards(conn)
         # The HTTP extension retains every v1 terminal condition and adds its
         # original recipe/wire binding. An old broker's release/GC cannot turn
         # a downgraded Go-shaped receipt into proof for a Bailian operation.
@@ -2501,7 +2673,8 @@ class Broker:
                 **{key: turn[key] for key in ("principal_id", "turn_id", "grant_id", "grant_digest",
                     "caller_host", "workload", "admission_root", "pool", "account", "model",
                     "lease_id", "created_at", "expires_at", "max_steps", "state")}}
-        if turn["pool"] in (_APPLICATION_HTTP_POOLS | _APPLICATION_NATIVE_POOLS):
+        automatic = _application_requested_model(turn) is None
+        if turn["pool"] in (_APPLICATION_HTTP_POOLS | _APPLICATION_NATIVE_POOLS) or automatic:
             if disposition == "closed":
                 lease = conn.execute("SELECT state FROM leases WHERE id=?", (turn["lease_id"],)).fetchone()
                 if turn["state"] != "closed" or lease is None or lease["state"] not in {"released", "expired"}:
@@ -2630,13 +2803,16 @@ class Broker:
 
     @staticmethod
     def _application_prior_request(conn, turn, request_id, request_digest, *,
-                                   transport_commitment=None, verify_native_commitment=False):
+                                   transport_commitment=None, verify_native_commitment=False,
+                                   routed_request_digest=None):
         prior = conn.execute("SELECT * FROM application_requests WHERE principal_id=? AND turn_id=? AND request_id=?",
                              (turn["principal_id"], turn["turn_id"], request_id)).fetchone()
         if prior is None:
             return None
         if prior["request_digest"] != request_digest:
             raise ApplicationAdmissionError("request_conflict")
+        if _application_request_route_digest(prior, turn) != routed_request_digest:
+            raise ApplicationAdmissionError("routed_request_conflict")
         if turn["transport_kind"] == _APPLICATION_NATIVE_KIND:
             invocation, recipe = _application_native_invocation(prior, turn)
             if verify_native_commitment:
@@ -2653,45 +2829,79 @@ class Broker:
         return result
 
     def recover_application_request(self, *, principal_id, turn_id, request_id, request_digest,
-                                    transport_commitment=None, verify_native_commitment=False):
+                                    transport_commitment=None, verify_native_commitment=False,
+                                    routed_request_digest=None):
         """Original identity only; never admit a turn or grant another dispatch."""
         self._application_request_identity(principal_id, turn_id, request_id, request_digest)
         with self._application_transaction() as conn:
             turn = self._application_turn(conn, principal_id, turn_id)
             return self._application_prior_request(conn, turn, request_id, request_digest,
-                transport_commitment=transport_commitment, verify_native_commitment=verify_native_commitment)
+                transport_commitment=transport_commitment, verify_native_commitment=verify_native_commitment,
+                routed_request_digest=routed_request_digest)
 
     def recover_application_context(self, *, principal_id, caller_host, workload, turn_id,
-                                    model, request_id, request_digest, expected_recipe_digest, connection):
+                                    model, request_id, request_digest, expected_recipe_digest, connection,
+                                    original_payload=None):
         """One owner snapshot distinguishes absence, replay and a new turn step."""
         self._application_request_identity(principal_id, turn_id, request_id, request_digest)
         _application_id(caller_host)
         _application_id(workload)
-        _application_model(model)
+        if model is not None:
+            _application_model(model)
         # The gateway supplies its existing mode=ro connection with BEGIN.
         # Original recovery does not wait for an admission flock or write data.
         turn = connection.execute("SELECT * FROM application_turns WHERE principal_id=? AND turn_id=?",
                                   (principal_id, turn_id)).fetchone()
         if turn is None:
             return {"kind": "turn_absent"}
+        requested = _application_requested_model(turn)
         if (turn["caller_host"] != caller_host or turn["workload"] != workload
-                or turn["model"] != model or turn["recipe_digest"] != expected_recipe_digest):
+                or requested != model
+                or (expected_recipe_digest != turn["recipe_digest"]
+                    and not (requested is None and expected_recipe_digest is None))):
             raise ApplicationAdmissionError("recovery_context_conflict")
-        request = self._application_prior_request(connection, turn, request_id, request_digest)
+        routed_digest = None
+        if requested is None:
+            _, original_digest, routed_digest = _application_routed_request(turn, original_payload)
+            if original_digest != request_digest:
+                raise ApplicationAdmissionError("request_conflict")
+        request = self._application_prior_request(connection, turn, request_id, request_digest,
+            routed_request_digest=routed_digest)
         binding = self._application_binding(connection, turn)
         if request is not None:
             return {"kind": "request_present", "turn": binding, "request": request}
         return {"kind": "turn_present_new_step", "turn": binding}
 
     def prepare_application_request(self, *, principal_id, turn_id, request_id, request_digest,
-                                    transport_commitment=None, native_payload=None):
+                                    transport_commitment=None, native_payload=None, original_payload=None):
         self._application_request_identity(principal_id, turn_id, request_id, request_digest)
         with self._application_transaction() as conn:
             turn = self._application_turn(conn, principal_id, turn_id)
+            automatic = _application_requested_model(turn) is None
+            routed_digest = None
+            routed_payload = None
+            if automatic:
+                routed_payload, original_digest, routed_digest = _application_routed_request(turn, original_payload)
+                if original_digest != request_digest:
+                    raise ApplicationAdmissionError("request_conflict")
+            elif original_payload is not None:
+                raise ApplicationAdmissionError("fixed_request_original_payload")
             prior = self._application_prior_request(conn, turn, request_id, request_digest,
-                transport_commitment=transport_commitment, verify_native_commitment=True)
+                transport_commitment=transport_commitment, verify_native_commitment=True,
+                routed_request_digest=routed_digest)
             if prior is not None:
                 return prior
+            if automatic:
+                # Original recovery above is independent of current grants and
+                # source. Only a new request must retain its frozen capability
+                # needs, including callers that use an admitted token directly.
+                selected = json.loads(turn["selection_json"])
+                original_needs = selected["identity"]["task"].get("needs")
+                task = _application_selection_task(selected["purpose"], original_payload)
+                if (type(original_needs) is not list
+                        or any(type(need) is not str for need in original_needs)
+                        or not set(task["needs"]) <= set(original_needs)):
+                    raise ApplicationSelectionError("selection_capability_changed")
             commitment = {}
             native = turn["transport_kind"] == _APPLICATION_NATIVE_KIND
             output_limit = None
@@ -2701,11 +2911,13 @@ class Broker:
                 if encoded != turn["recipe_json"] or digest != turn["recipe_digest"]:
                     raise ApplicationAdmissionError("recipe_changed")
                 commitment = _application_native_commitment(transport_commitment, recipe, digest)
+                if automatic and native_payload != routed_payload:
+                    raise ApplicationAdmissionError("native_routed_input_conflict")
                 input_bytes, logical_digest, output_limit = _application_native_payload(recipe, native_payload)
                 logical_request = _application_json({"path": "/v1/chat/completions", "payload": native_payload}).encode("utf-8")
                 if (logical_digest != commitment["logical_payload_digest"]
                         or hashlib.sha256(input_bytes).hexdigest() != commitment["input_sha256"]
-                        or hashlib.sha256(logical_request).hexdigest() != request_digest):
+                        or hashlib.sha256(logical_request).hexdigest() != (routed_digest or request_digest)):
                     raise ApplicationAdmissionError("native_input_conflict")
             elif turn["transport_kind"] is not None:
                 raise ApplicationAdmissionError("unknown_transport_kind")
@@ -2716,6 +2928,8 @@ class Broker:
                 commitment = {key: _application_digest(transport_commitment[key]) for key in fields}
                 if commitment["recipe_digest"] != turn["recipe_digest"]:
                     raise ApplicationAdmissionError("recipe_changed")
+                if automatic and hashlib.sha256(_application_json(routed_payload).encode()).hexdigest() != commitment["logical_payload_digest"]:
+                    raise ApplicationAdmissionError("http_routed_input_conflict")
                 encoded, digest = _application_http_recipe(json.loads(turn["recipe_json"]),
                                                           pool=turn["pool"], model=turn["model"])
                 if digest != turn["recipe_digest"] or encoded != turn["recipe_json"]:
@@ -2766,15 +2980,26 @@ class Broker:
                 invocation_json = _application_json(invocation)
                 invocation_digest = hashlib.sha256(invocation_json.encode("utf-8")).hexdigest()
             conn.execute("INSERT INTO application_requests (principal_id,turn_id,request_id,request_digest,dispatch_id,state,created_at,"
-                         "recipe_digest,logical_payload_digest,wire_body_digest,invocation_json,invocation_digest) "
-                         "VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)", (principal_id, turn_id, request_id,
+                         "recipe_digest,logical_payload_digest,wire_body_digest,invocation_json,invocation_digest,routed_request_digest) "
+                         "VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?,?)", (principal_id, turn_id, request_id,
                           request_digest, dispatch_id, now, commitment.get("recipe_digest"),
                           commitment.get("logical_payload_digest"), commitment.get("wire_body_digest"),
-                          invocation_json, invocation_digest))
+                          invocation_json, invocation_digest, routed_digest))
+            retained = conn.execute("SELECT * FROM application_requests WHERE dispatch_id=?", (dispatch_id,)).fetchone()
+            expected_row = {"principal_id": principal_id, "turn_id": turn_id, "request_id": request_id,
+                "request_digest": request_digest, "dispatch_id": dispatch_id, "state": "pending", "created_at": now,
+                "terminal_receipt": None, "unknown_reason": None, "recipe_digest": commitment.get("recipe_digest"),
+                "logical_payload_digest": commitment.get("logical_payload_digest"),
+                "wire_body_digest": commitment.get("wire_body_digest"), "invocation_json": invocation_json,
+                "invocation_digest": invocation_digest, "routed_request_digest": routed_digest}
+            if retained is None or any(retained[key] != value for key, value in expected_row.items()):
+                raise ApplicationAdmissionError("request_insert_unverified")
             result = {"ok": True, "dispatch_permitted": True, "disposition": "dispatch_permitted", **commitment,
                     "dispatch_id": dispatch_id, "request_digest": request_digest,
                     "expires_at": expires,
                     "lease_id": turn["lease_id"], "pool": turn["pool"], "account": turn["account"], "model": turn["model"]}
+            if automatic:
+                result["routed_request_digest"] = routed_digest
             if native:
                 result.update(transport_kind=_APPLICATION_NATIVE_KIND, invocation_digest=invocation_digest,
                     native_invocation={**json.loads(invocation_json), "invocation_digest": invocation_digest})
@@ -2823,7 +3048,7 @@ class Broker:
             elif "terminal_kind" in receipt:
                 raise ApplicationAdmissionError("terminal_conflict")
             if request["state"] == "terminal":
-                if request["terminal_receipt"] != encoded:
+                if request["terminal_receipt"] != encoded or _application_stored_terminal(request, turn) is None:
                     raise ApplicationAdmissionError("terminal_conflict")
                 return {"ok": True, "disposition": "terminal", "terminal_receipt": json.loads(encoded)}
             if request["state"] not in {"pending", "unknown"}:

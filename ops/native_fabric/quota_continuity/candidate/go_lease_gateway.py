@@ -419,97 +419,112 @@ class GoLeaseGateway:
 
     @staticmethod
     def application_selection_task(purpose, payload):
-        """Derive capability needs; the caller cannot supply routing authority."""
-        from lease_broker import _application_selection_purpose
-        encoded, _ = _application_selection_purpose(purpose)
-        task = json.loads(encoded)["task"]
-        needs = set(task.get("needs") or [])
-        if payload.get("tools") or payload.get("tool_choice") or payload.get("parallel_tool_calls"):
-            needs.add("tools")
-        for message in payload["messages"]:
-            if type(message) is not dict:
-                raise ApplicationSelectionRefused("application selection payload refused")
-            if message.get("tool_calls") or message.get("role") == "tool" or message.get("tool_call_id"):
-                needs.add("tools")
-            content = message.get("content")
-            if type(content) is list:
-                if any(type(part) is not dict or part.get("type") != "text" for part in content):
-                    needs.add("vision")
-            elif content is not None and type(content) is not str:
-                raise ApplicationSelectionRefused("application selection payload refused")
-        return {"task_class": task["task_class"].lower(),
-            "route_key": task["route_key"], "task_complexity": str(task.get("task_complexity") or "").upper(),
-            "needs": sorted(needs), "subject_pool": task.get("subject_pool"),
-            "escalation_reason": str(task.get("escalation_reason") or ""),
-            "requested_model": payload["model"]}
+        """Use the same pure request-needs interpretation as atomic admission."""
+        from lease_broker import _application_selection_task
+        return _application_selection_task(purpose, payload)
 
     def select_application(self, request, *, principal_id, host, credential_ref, purpose, payload):
-        """Produce fresh owner inputs for the incumbent pure selector, once per new turn attempt."""
+        """Select a registered model in the existing service pool, once per attempt."""
         try:
             import pick
             import pool_ledger
             from lease_broker import (_application_json, _application_selection_purpose,
-                                      _read_application_accounts)
+                                      _read_application_accounts, _application_native_payload)
             broker = self._application_owner()
-            model = request["model"]
-            # Exact service pool and payload model: the selector may only pick
-            # routes that already name both, and admission re-checks the same
-            # identity against this pool and model inside its own transaction.
+            if (type(request) is not dict or set(request) != {"workload", "turn_id", "pool", "model"}
+                    or type(payload) is not dict or "model" not in payload
+                    or payload["model"] != request["model"]):
+                raise ValueError("selection request identity")
+            requested = request["model"]
             task = self.application_selection_task(purpose, payload)
             policy = pick.read_application_policy()
             quality = pool_ledger.read_recent(limit=10000, strict=True)
             document = _read_application_accounts(broker.accounts_path)
-            pools, observations, bound = {}, {}, None
+            pools, observations, projections = {}, {}, {}
             connection = self._connection()
             try:
                 connection.row_factory = sqlite3.Row
                 connection.execute("BEGIN")
                 for pool in pick._APPLICATION_POOL_ORDER:
-                    # A fixed service's execution catalogue is scoped before
-                    # ranking: another pool can expose the same model name.
-                    # The Admin metadata view still observes every pool.
+                    # Null changes model selection only. Cross-pool authority
+                    # needs the later explicit trusted route-scope contract.
                     if pool != request["pool"]:
                         continue
-                    accounts, digest, projection = self._application_route(pool, model)
-                    if accounts is None:
-                        continue
-                    if pool == request["pool"]:
-                        bound = projection
-                    try:
-                        grant, grant_digest, observation = broker.application_selection_facts(
-                            connection, principal_id=principal_id, caller_host=host,
-                            workload=request["workload"], pool=pool, model=model,
-                            credential_ref=credential_ref, transport_accounts=accounts,
-                            mode=projection["mode"], expected_recipe_digest=digest,
-                            document=document)
-                    except Exception:
-                        continue  # no fresh grant or room for this route: not offered
-                    recipe = {key: projection[key] for key in
-                        ("mode", "protocol", "streaming", "driver", "profile", "source", "capabilities")}
-                    recipe.update(model=model, order_rank=0,
-                        max_turn_seconds=grant["max_turn_seconds"], max_steps=grant["max_steps"],
-                        qualification_ref=grant["qualification_ref"],
-                        application_permission_ref=grant["application_permission_ref"],
-                        grant_ref={"grant_id": grant["grant_id"], "digest": grant_digest})
-                    pools[pool] = {"enabled": True, "recipes": [recipe]}
-                    observations[pool] = observation
+                    if requested is not None:
+                        models = (requested,)
+                    elif pool == "go":
+                        models = sorted(self._models)
+                    elif pool == "bailian":
+                        models = sorted(model for candidate_pool, model in self._application_http_recipes
+                                        if candidate_pool == pool)
+                    else:
+                        models = sorted(model for candidate_pool, model in self._application_native_recipes
+                                        if candidate_pool == pool)
+                    for model in models:
+                        accounts, digest, projection = self._application_route(pool, model)
+                        if accounts is None:
+                            continue
+                        projections[(pool, model)] = projection
+                        try:
+                            if requested is None and pool in NATIVE_APPLICATION_POOLS:
+                                recipe = json.loads(self._application_native_recipes[(pool, model)][0])
+                                concrete = dict(payload, model=model)
+                                _application_native_payload(recipe, concrete)
+                            grant, grant_digest, observation = broker.application_selection_facts(
+                                connection, principal_id=principal_id, caller_host=host,
+                                workload=request["workload"], pool=pool, model=model,
+                                credential_ref=credential_ref, transport_accounts=accounts,
+                                mode=projection["mode"], expected_recipe_digest=digest,
+                                document=document)
+                        except Exception:
+                            continue
+                        recipe = {key: projection[key] for key in
+                            ("mode", "protocol", "streaming", "driver", "profile", "source", "capabilities")}
+                        # Equal ranks assert no model preference. The existing
+                        # policy default wins; unqualified alternatives still tie.
+                        recipe.update(model=model, order_rank=0,
+                            max_turn_seconds=grant["max_turn_seconds"], max_steps=grant["max_steps"],
+                            qualification_ref=grant["qualification_ref"],
+                            application_permission_ref=grant["application_permission_ref"],
+                            grant_ref={"grant_id": grant["grant_id"], "digest": grant_digest})
+                        pools.setdefault(pool, {"enabled": True, "recipes": []})["recipes"].append(recipe)
+                        if pool not in observations:
+                            observations[pool] = dict(observation, model_room=dict(observation["model_room"]))
+                        else:
+                            previous = observations[pool]
+                            if any(previous[key] != observation[key] for key in ("source", "host", "cooldown")):
+                                raise ValueError("incoherent room observations")
+                            if set(previous["model_room"]) & set(observation["model_room"]):
+                                raise ValueError("duplicate model room")
+                            previous["model_room"].update(observation["model_room"])
+                            previous["observed_at"] = min(previous["observed_at"], observation["observed_at"])
+                            previous["fresh_s"] = min(previous["fresh_s"], observation["fresh_s"])
+                            if previous.get("mode") != observation.get("mode"):
+                                previous.pop("mode", None)
             finally:
                 connection.close()
-            if bound is None:
-                raise ValueError("unqualified selection transport")
+            expected = {"pool": request["pool"]}
+            if requested is not None:
+                bound = projections.get((request["pool"], requested))
+                if bound is None:
+                    raise ValueError("unqualified selection transport")
+                expected.update(model=requested, source=bound["source"])
             catalogue = {"schema": "mastermind.fabric_application_catalogue.v1",
                 "pool_order": list(pick._APPLICATION_POOL_ORDER), "pools": pools}
             selected = pick.select_application(task, policy=policy, catalogue=catalogue,
                 observations=observations, quality_records=quality, now=self._clock(),
-                expected_identity={"pool": request["pool"], "model": model,
-                                   "source": bound["source"]})
+                expected_identity=expected)
             if not selected["ok"]:
                 raise ValueError("selection refused")
+            identity = selected["identity"]
+            bound = projections[(identity["pool"], identity["model"])]
+            if identity["source"] != bound["source"]:
+                raise ValueError("selected source changed")
             purpose_json, purpose_digest = _application_selection_purpose(purpose)
             return {"schema": "mastermind.application_turn_selection.v1",
                 "purpose": json.loads(purpose_json), "purpose_digest": purpose_digest,
                 "profile": bound, "profile_digest": hashlib.sha256(_application_json(bound).encode()).hexdigest(),
-                "identity": selected["identity"], "commitments": selected["commitments"],
+                "identity": identity, "commitments": selected["commitments"],
                 "quality_records_sha256": hashlib.sha256(_application_json(quality).encode()).hexdigest(),
                 "fresh_s": 5.0}
         except Exception:
@@ -569,8 +584,8 @@ class GoLeaseGateway:
             broker = self._application_owner()
             if (not isinstance(request, dict) or set(request) != {"workload", "turn_id", "pool", "model"}
                     or request["pool"] not in ({"go", "bailian"} | NATIVE_APPLICATION_POOLS) or path != "/v1/chat/completions"
-                    or not isinstance(payload, dict) or payload.get("stream", False) is not False
-                    or payload.get("model") != request["model"]):
+                    or not isinstance(payload, dict) or "model" not in payload
+                    or payload.get("stream", False) is not False or payload["model"] != request["model"]):
                 raise LeaseGatewayError("application recovery refused")
             for value in (principal_id, host, request["workload"], request["turn_id"], request_id):
                 if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value) is None:
@@ -590,7 +605,8 @@ class GoLeaseGateway:
                 context = broker.recover_application_context(principal_id=principal_id,
                     caller_host=host, workload=request["workload"], turn_id=request["turn_id"],
                     model=request["model"], request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest(),
-                    expected_recipe_digest=expected_recipe_digest, connection=connection)
+                    expected_recipe_digest=expected_recipe_digest, connection=connection,
+                    original_payload=json.loads(raw)["payload"] if request["model"] is None else None)
             finally:
                 connection.close()
             return context if include_turn else context.get("request")
@@ -613,14 +629,21 @@ class GoLeaseGateway:
             connection = self._connection()
             try:
                 connection.execute("BEGIN")
+                from lease_broker import _application_routed_request
+                turn = self._application_turn_lookup(connection, principal_id, turn_id)
+                original_payload = json.loads(raw)["payload"]
+                frozen, original_digest, routed_digest = _application_routed_request(turn, original_payload)
+                if original_digest != hashlib.sha256(raw).hexdigest():
+                    raise LeaseGatewayError("application original request changed")
                 claims = authorize_application(token, self._signing_key,
                     lambda lease_id: self._lease_lookup(connection, lease_id),
                     lambda principal, turn: self._application_turn_lookup(connection, principal, turn),
                     principal_id=principal_id, host=host, turn_id=turn_id,
-                    model=payload["model"], now=self._clock(), recovery_only=True, expected_pool=expected_pool)
+                    model=frozen["model"], now=self._clock(), recovery_only=True, expected_pool=expected_pool)
                 recovered = broker.recover_application_request(principal_id=principal_id, turn_id=turn_id,
                     request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest(),
-                    transport_commitment=transport_commitment, verify_native_commitment=True)
+                    transport_commitment=transport_commitment, verify_native_commitment=True,
+                    routed_request_digest=routed_digest)
                 if recovered is not None:
                     return recovered
                 # Only a new step requires current execution permission. A prior
@@ -629,18 +652,18 @@ class GoLeaseGateway:
                     lambda lease_id: self._lease_lookup(connection, lease_id),
                     lambda principal, turn: self._application_turn_lookup(connection, principal, turn),
                     principal_id=principal_id, host=host, turn_id=turn_id,
-                    model=payload["model"], now=self._clock(), expected_pool=expected_pool)
+                    model=frozen["model"], now=self._clock(), expected_pool=expected_pool)
             finally:
                 connection.close()
             accounts, recipe, digest = self._application_scope(expected_pool, claims["model"])
             if (claims["account"] not in accounts
                     or expected_pool != "go" and claims["recipe_digest"] != digest):
                 raise LeaseGatewayError("application request refused")
-            frozen = json.loads(raw)["payload"]
             prepared = broker.prepare_application_request(principal_id=principal_id, turn_id=turn_id,
                 request_id=request_id, request_digest=hashlib.sha256(raw).hexdigest(),
                 transport_commitment=transport_commitment,
-                native_payload=frozen if expected_pool in NATIVE_APPLICATION_POOLS else None)
+                native_payload=frozen if expected_pool in NATIVE_APPLICATION_POOLS else None,
+                original_payload=original_payload if routed_digest is not None else None)
             if prepared.get("dispatch_permitted"):
                 # The original handler sends these immutable, digest-bound bytes.
                 # They are internal dispatch material, never a public receipt/log.
