@@ -185,6 +185,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "expected_mcp_plist_sha256": "c" * 64,
         "expected_grant_sha256": None,
         "expected_grant_absent": True,
+        "expected_predecessor_receipt_sha256": None,
     }
     digest_publish = list(publish_argv)
     digest_publish[-1:] = ["--expected-grant-sha256", "d" * 64]

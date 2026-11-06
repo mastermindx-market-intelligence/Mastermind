@@ -153,6 +153,9 @@ def inputs(tmp_path, monkeypatch, request):
     elif retired_edge_profile == "pre-native":
         branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
         branches[1]["match"][0]["path"] = list(PRE_DIRECT_NATIVE_POST_ROUTES)
+        # Isolate the native POST upgrade from the already accepted COO upgrade.
+        branches[3]["match"][0]["path"] = list(COMPLETE_MCP_METADATA_ROUTES)
+        branches[4]["match"][0]["path"] = list(COMPLETE_MCP_ROUTES)
     live.write_bytes(m.canonical(config))
     return dict(old_root=old, old_sha="a" * 40, old_tree="b" * 40,
                 new_bundle=bundle, source_repo=repo, new_sha=sha, new_tree=tree,

@@ -17,8 +17,12 @@ def test_only_exact_reviewed_file_and_spelling_qualifies(path):
     # Full-file scanning still exposes pre-existing topology names/modes;
     # those unchanged lines are outside the branch diff and this review.
     expected = (['_mastermind_exec', '_mastermind_exec', '_mastermind_worker',
-        '_mastermind_worker', '_mastermind_ops'] if path in {
-            'ops/executive_os/acceptance.py', 'ops/executive_os/bootstrap-host.sh'} else
+        '_mastermind_worker', '_mastermind_ops'] if path == 'ops/executive_os/acceptance.py' else
+        # Retained shell permission modes stay visible; these are not exemptions.
+        ['_mastermind_exec', '_mastermind_exec', '_mastermind_worker',
+         '_mastermind_worker', '_mastermind_ops', '700', '710', '700', '700',
+         '710', '710', '710', '700', '700', '700', '700', '700', '700', '700',
+         '700', '700', '700', '700', '700'] if path == 'ops/executive_os/bootstrap-host.sh' else
         ['_mastermind_executive_mcp', '_mastermind_exec', '_mastermind_exec',
          '_mastermind_worker', '0o644', '_mastermind_worker'] if path ==
         'ops/executive_os/autonomy_control.py' else
@@ -26,13 +30,14 @@ def test_only_exact_reviewed_file_and_spelling_qualifies(path):
         'control_plane/codex_operator_adapter.py' else
         ['430', '512', '401', '403', '409', '503', '503', '503', '503'] if path ==
         'app/mastermind_os/src-tauri/src/auth.rs' else
-        # Exact protected installer60fb9e55 retains these17 findings unchanged;
-        # only the newly reviewed initial directory-mode token is masked.
+        # Protected installer2f60dc913622 retains these24 full-file findings;
+        # only the existing reviewed initial directory-mode token is masked.
         ['_mastermind_exec', '_mastermind_exec', '_mastermind_worker',
          '_mastermind_worker', '_mastermind_ops', '_mastermind_ops',
          '_mastermind_ops', '_mastermind_ops', '452', '457',
-         '_mastermind_worker', '_mastermind_worker', '452', '432', '457',
-         '432', '432'] if path == 'ops/executive_os/install.sh' else [])
+         '_mastermind_worker', '440', '_mastermind_worker', '440',
+         '644', '644', '644', '644', '452', '432', '457',
+         '432', '432', '700'] if path == 'ops/executive_os/install.sh' else [])
     assert scan(text, path) == expected
     assert reviewed_literal_spans('unreviewed/'+path, text) == ()
 

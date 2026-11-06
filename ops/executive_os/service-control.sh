@@ -26,7 +26,7 @@ usage() {
   /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|publish-os-gateway|reconcile-os-gateway|plan-mcp-component|apply-mcp-component|reconcile-mcp-component|prepare-mcp-selected-child|plan-control-component|apply-control-component|reconcile-control-component|status}" >&2
   /bin/echo "restart-gateway requires --expected-sha <40 lowercase hex characters>" >&2
   /bin/echo "finite actions require --expected-sha <40 lowercase hex> --expected-manifest-sha256 <64 lowercase hex>" >&2
-  /bin/echo "publish-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --expected-mcp-config-sha256 <64 lowercase hex> --expected-mcp-plist-sha256 <64 lowercase hex> and exactly one of --expected-grant-sha256 <64 lowercase hex> or --expected-grant-absent" >&2
+  /bin/echo "publish-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --expected-mcp-config-sha256 <64 lowercase hex> --expected-mcp-plist-sha256 <64 lowercase hex> and exactly one of --expected-grant-sha256 <64 lowercase hex> or --expected-grant-absent; a successor also requires --expected-predecessor-receipt-sha256 <64 lowercase hex> with the existing grant digest" >&2
   /bin/echo "reconcile-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --transaction-id autonomy-<12 lowercase hex>" >&2
   /bin/echo "plan-mcp-component requires --expected-sha <40 lowercase hex> and optionally --set-public-mcp-resource; apply-mcp-component additionally requires --plan-sha256 <64 lowercase hex>; reconcile-mcp-component requires only --expected-sha" >&2
   /bin/echo "plan-mcp-component and apply-mcp-component optionally accept the PAIRED --selected-child-target-input <absolute canonical path> and --selected-child-target-sha256 <64 lowercase hex>; both or neither" >&2
@@ -493,7 +493,7 @@ os_gateway_args() {
         seen="$seen|$flag|"
         continue
         ;;
-      --expected-mcp-config-sha256|--expected-mcp-plist-sha256|--expected-grant-sha256)
+      --expected-mcp-config-sha256|--expected-mcp-plist-sha256|--expected-grant-sha256|--expected-predecessor-receipt-sha256)
         [ "$verb" = "publish-os-gateway" ] || return 1
         ;;
       --transaction-id) [ "$verb" = "reconcile-os-gateway" ] || return 1 ;;
@@ -530,6 +530,11 @@ os_gateway_args() {
         ;;
       *"|--expected-grant-sha256|"*) ;;
       *) return 1 ;;
+    esac
+    case "$seen" in
+      *"|--expected-predecessor-receipt-sha256|"*)
+        case "$seen" in *"|--expected-grant-sha256|"*) ;; *) return 1 ;; esac
+        ;;
     esac
   else
     case "$seen" in

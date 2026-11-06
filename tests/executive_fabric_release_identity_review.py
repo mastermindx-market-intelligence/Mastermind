@@ -551,13 +551,13 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # exact-CAS publication mode, both with explicit uid=0 and gid=0. They are
 # permissions, not principals; each complete token and enclosing call was
 # inspected on these exact source bytes. No generic numeric rule changes.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '17201afeece707d85696d3aabef7918bca033189a888939b84dc5d701148899c',
- 'sites': ((348, 24, 27, 'int', '501'),
-           (6908, 35, 37, 'int', '80'),
-           (6909, 50, 55, 'int', '0o755'),
-           (7493, 41, 46, 'int', '0o644'),
-           (8232, 64, 69, 'int', '0o644'),
-           (9644, 41, 46, 'int', '0o644'))}
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '384651d8cdbc428cc1d7797e7ef1b25128a01f07850a81f0b035e761a7c12ae8',
+ 'sites': ((349, 24, 27, 'int', '501'),
+           (6956, 35, 37, 'int', '80'),
+           (6957, 50, 55, 'int', '0o755'),
+           (7820, 41, 46, 'int', '0o644'),
+           (8588, 64, 69, 'int', '0o644'),
+           (10000, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
