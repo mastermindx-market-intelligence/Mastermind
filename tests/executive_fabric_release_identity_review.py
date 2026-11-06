@@ -602,4 +602,7 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
 
 # C16: fixed observation-only TLS directory; root owner and canonical Control
 # group retain the exact private traversal mode. Whole-source and token-bound.
-REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '053f801d4b28ed8cbd033c69869f1b12b2ea83c66d6d21f85fbb8d096b97ec03', 'sites': ((660, 71, 76, 'int', '0o750'),)}
+# C20 attended-parent review: archive closure and inert gateway replacement.
+# ensure_directories has the identical AST; its one whole permission token moved
+# by 15 lines. New unit publication consumes the existing canonical identities.
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'a08b20f693a9ed10fe110d69469b5cc9155243905890f3a039ac19a2bbbdbed1', 'sites': ((675, 71, 76, 'int', '0o750'),)}
