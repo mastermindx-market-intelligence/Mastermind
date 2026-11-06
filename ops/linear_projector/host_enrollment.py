@@ -203,10 +203,24 @@ def _prepare_directory(path: Path, *, uid: int, gid: int, mode: int) -> None:
         raise ProjectorHostError("PROJECTOR_HOST_PREPARE_REFUSED") from None
 
     if created:
+        # macOS inherits the parent group (often admin=80) under /Library even
+        # for a root-run mkdir. Normalize only the inode we just created.
+        # Existing paths with unexpected owner/group/mode must still refuse.
+        descriptor = None
         try:
-            path.chmod(mode)
+            flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+            descriptor = os.open(path, flags)
+            info = os.fstat(descriptor)
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != int(uid):
+                raise ProjectorHostError("PROJECTOR_HOST_PERMISSIONS_REFUSED")
+            if info.st_gid != int(gid):
+                os.fchown(descriptor, -1, int(gid))
+            os.fchmod(descriptor, mode)
         except OSError:
             raise ProjectorHostError("PROJECTOR_HOST_PREPARE_REFUSED") from None
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
     _assert_safe_directory(path, uid=uid, gid=gid, mode=mode)
 
 

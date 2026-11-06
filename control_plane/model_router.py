@@ -811,6 +811,27 @@ class ModelRouter:
             raise RoutingPolicyError(f"model alias {alias!r} is not worker eligible")
         return profile
 
+    def resolve_frontier_model_alias(self, model_alias: str) -> ModelAlias:
+        """Resolve a reviewed logical lead without conferring execution authority.
+
+        Provider enablement and capacity remain admission concerns. A successful
+        resolution may describe included-chat cognition, never a worker claim.
+        """
+        if not isinstance(model_alias, str):
+            raise RoutingPolicyError("frontier_model_alias must be a string")
+        alias = _bounded_id(model_alias, field="frontier_model_alias")
+        try:
+            profile = self.model_aliases[alias]
+        except KeyError as exc:
+            raise RoutingPolicyError(f"unknown frontier model alias {alias!r}") from exc
+        if profile.worker_eligible:
+            raise RoutingPolicyError(f"frontier model alias {alias!r} must be non-worker")
+        if not _LEAD_TASKS.issubset(profile.capabilities):
+            raise RoutingPolicyError(
+                f"frontier model alias {alias!r} lacks required lead capabilities"
+            )
+        return profile
+
     def resolve_attended_model_alias(self, model_alias: str, binding_id: str) -> ModelAlias:
         """Resolve finite attended catalogue eligibility, never claim authority."""
         from control_plane.fabric_attended_routing import resolve_attended_alias
@@ -821,6 +842,7 @@ class ModelRouter:
         self,
         request: WorkRequest,
         *,
+        frontier_model_alias: str | None = None,
         cognition_route: CognitionRoute | str | None = None,
         chat_reasoning_mode: ChatReasoningMode | str | None = None,
         metered_cognition_receipt: MeteredCognitionReceipt | None = None,
@@ -902,7 +924,18 @@ class ModelRouter:
                         )
                     reasons.append("non_pro_default")
 
-            lead_profile = self.model_aliases["frontier.orchestrator"]
+            if frontier_model_alias is None:
+                lead_profile = self.model_aliases["frontier.orchestrator"]
+            else:
+                lead_profile = self.resolve_frontier_model_alias(frontier_model_alias)
+                if not set(request.required_capabilities).issubset(
+                    lead_profile.capabilities
+                ):
+                    raise RoutingPolicyError(
+                        f"frontier model alias {lead_profile.model_alias!r} "
+                        "cannot satisfy requested capabilities"
+                    )
+                reasons.append("frontier_model_selected")
             return RoutingDecision(
                 mode=RouteMode.FRONTIER_LEAD,
                 policy_version=self.policy_version,
@@ -916,7 +949,7 @@ class ModelRouter:
                 capability_policy_digest=lead_profile.capability_policy_digest,
                 suitability_tiers=(
                     SuitabilityTier(
-                        "frontier.lead", ("frontier.orchestrator",)
+                        "frontier.lead", (lead_profile.model_alias,)
                     ),
                 ),
                 required_capabilities=request.required_capabilities,
@@ -928,6 +961,10 @@ class ModelRouter:
                 pro_mode_receipt=pro_mode_receipt,
             )
 
+        if frontier_model_alias is not None:
+            raise RoutingPolicyError(
+                "worker work does not accept a frontier model selection"
+            )
         if pro_mode_receipt is not None:
             raise RoutingPolicyError(
                 f"{_PRO_MODE_REFUSAL}: a Pro receipt cannot be attached to worker work"
@@ -994,6 +1031,97 @@ class ModelRouter:
             reason_codes=tuple(reasons),
         )
 
+    def explain_route(
+        self,
+        request: WorkRequest,
+        *,
+        considered_aliases: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Explain source eligibility, never observed price or live placement.
+
+        Reuse the authoritative pure route decision. An alias, model name or
+        admission cost class is not measured economics, qualification, current
+        capacity, a worker selection, or authority to execute. Unknown requested
+        aliases are reported rather than enrolled or silently discarded.
+        """
+        if (
+            not isinstance(considered_aliases, Sequence)
+            or isinstance(considered_aliases, (str, bytes))
+            or len(considered_aliases) > 32
+        ):
+            raise RoutingPolicyError("considered_aliases must be a sequence of at most 32 aliases")
+        considered: set[str] = set()
+        for alias in considered_aliases:
+            if not isinstance(alias, str):
+                raise RoutingPolicyError("considered alias must be a bounded identifier")
+            considered.add(_bounded_id(alias, field="considered_alias"))
+
+        decision = self.route(request)
+        positions = {
+            alias: (index, tier.tier_id)
+            for index, tier in enumerate(decision.suitability_tiers)
+            for alias in tier.model_aliases
+        }
+        required = set(decision.required_capabilities)
+        rows: list[dict[str, Any]] = []
+        for alias in sorted(set(self.model_aliases) | considered):
+            profile = self.model_aliases.get(alias)
+            position = positions.get(alias)
+            missing = sorted(required - set(profile.capabilities)) if profile else None
+            if profile is None:
+                disposition = "NOT_CONFIGURED"
+            elif decision.mode is RouteMode.FRONTIER_LEAD:
+                disposition = (
+                    "FRONTIER_JUDGMENT_ROUTE" if position is not None
+                    else "PRINCIPAL_JUDGMENT_REQUIRED"
+                )
+            elif not profile.worker_eligible:
+                disposition = "NOT_WORKER_ELIGIBLE"
+            elif missing:
+                disposition = "MISSING_REQUIRED_CAPABILITIES"
+            elif position is None:
+                disposition = "NOT_IN_TASK_ROUTE"
+            elif position[0] == 0:
+                disposition = "FIRST_LAWFUL_TIER"
+            else:
+                disposition = "LATER_SUITABILITY_TIER"
+            rows.append({
+                "model_alias": alias,
+                "configured": profile is not None,
+                "source_disposition": disposition,
+                "source_tier": position[1] if position else None,
+                "provider_alias": profile.provider_alias if profile else None,
+                "model": profile.model if profile else None,
+                "effort": profile.effort if profile else None,
+                "execution_profile_id": profile.execution_profile_id if profile else None,
+                "source_worker_eligible": profile.worker_eligible if profile else None,
+                "admission_cost_class": profile.cost_class if profile else None,
+                "missing_capabilities": missing,
+                "measured_cost": None,
+            })
+        return {
+            "schema": "mastermind.model_route_explanation/v1",
+            "authority": "NONE_SOURCE_PREVIEW_ONLY",
+            "source_policy_version": self.policy_version,
+            "decision": decision.to_dict(),
+            "aliases": rows,
+            "providers": [
+                {
+                    "provider_alias": alias,
+                    "enabled_in_source": provider.enabled,
+                    "autonomous_allowed_in_source": provider.autonomous_allowed,
+                    "live_readiness": "NOT_OBSERVED",
+                }
+                for alias, provider in sorted(self.providers.items())
+            ],
+            "runtime_observation": "NOT_PERFORMED",
+            "economic_comparison": "NOT_PERFORMED",
+            "selected_worker": None,
+            "live_admission": False,
+            "claim_time_revalidation_required": True,
+        }
+
+
 
 def route_work(
     task_kind: str,
@@ -1002,6 +1130,7 @@ def route_work(
     ambiguity: str = "low",
     required_capabilities: Sequence[str] = (),
     excluded_worker_ids: Sequence[str] = (),
+    frontier_model_alias: str | None = None,
     cognition_route: CognitionRoute | str | None = None,
     chat_reasoning_mode: ChatReasoningMode | str | None = None,
     metered_cognition_receipt: MeteredCognitionReceipt | None = None,
@@ -1023,6 +1152,7 @@ def route_work(
             required_capabilities=tuple(required_capabilities),
             excluded_worker_ids=tuple(excluded_worker_ids),
         ),
+        frontier_model_alias=frontier_model_alias,
         cognition_route=cognition_route,
         chat_reasoning_mode=chat_reasoning_mode,
         metered_cognition_receipt=metered_cognition_receipt,

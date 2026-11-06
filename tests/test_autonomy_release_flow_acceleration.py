@@ -140,7 +140,9 @@ def test_native_merge_queue_owns_final_integrated_checks_without_prequeue_circul
     assert 'do not require nonexistent prequeue merge-ref check runs' in reconcile
     assert 'do not add a manual synthetic PR merge-ref check requirement' in delivery
     assert 'If final integrated checks fail, the queue must not merge' in delivery
-    assert 'review pass and queue entry is authorized' in delivery
+    # Bind the accepted risk-tiered wording, not the obsolete universal-review clause.
+    assert ('required PR-head checks and all **actually required** reviews pass '
+            'and queue entry is authorized') in delivery
 
 
 def test_workspace_and_recovery_rules_never_demand_ancestry_only_branch_joins() -> None:

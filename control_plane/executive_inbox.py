@@ -739,6 +739,11 @@ def ceo_intent_provenance(
                 and payload.get("orchestration_provenance_digest")
                 == job.orchestration_provenance_digest
             )
+            from control_plane.frontier_selection import FrontierSelectionError, selection_from_provenance
+            try:
+                selection_from_provenance(provenance)
+            except FrontierSelectionError:
+                valid = False
             if valid:
                 projected = {
                     key: provenance[key]
@@ -749,6 +754,9 @@ def ceo_intent_provenance(
                         "fingerprint",
                         "grounding",
                         "workstream",
+                        "frontier_model_alias",
+                        "frontier_selection",
+                        "frontier_selection_digest",
                     )
                     if key in provenance
                 }

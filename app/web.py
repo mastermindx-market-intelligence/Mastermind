@@ -184,15 +184,39 @@ def _archived_performance(portfolio_id: str) -> dict[str, Any]:
             if peak > 0:
                 max_drawdown_pct = min(max_drawdown_pct, (value / peak - 1.0) * 100.0)
 
+    def _flat_unpriced_pair(prev_row: dict[str, Any], last_row: dict[str, Any]) -> bool:
+        """TR-D(a): a flat pair with no price movement did not record a day change.
+
+        Two consecutive rows with an identical ``nav`` and no price evidence behind
+        them (an absent ``invested`` on either row, or an identical NON-ZERO
+        ``invested``) mean no quotes landed — the flatness is the feed's, not the
+        book's. An all-cash book (``invested == 0`` on both rows) genuinely did not
+        move, so it keeps its true 0.00%.
+        """
+        prev_nav = _number(prev_row.get("nav"))
+        last_nav = _number(last_row.get("nav"))
+        if prev_nav is None or last_nav is None or prev_nav != last_nav:
+            return False
+        prev_invested = _number(prev_row.get("invested"))
+        last_invested = _number(last_row.get("invested"))
+        if prev_invested is None or last_invested is None:
+            return True
+        if prev_invested == 0.0 and last_invested == 0.0:
+            return False
+        return prev_invested == last_invested
+
+    # A starting NAV of zero or absent proves nothing about return, so it is None —
+    # never a fabricated 0.0% that reads as a break-even book.
     total_return_pct = ((current_nav / starting_nav - 1.0) * 100.0
-                        if starting_nav > 0 else 0.0)
-    day_change_pct = 0.0
+                        if starting_nav > 0 else None)
+    day_change_pct = None
     if len(navs) >= 2 and navs[-2] > 0:
-        day_change_pct = (navs[-1] / navs[-2] - 1.0) * 100.0
+        if not _flat_unpriced_pair(history[-2], history[-1]):
+            day_change_pct = (navs[-1] / navs[-2] - 1.0) * 100.0
 
     final_spy_nav = (_number(final.get("spy_nav")) if _benchmark_matches(final) else None)
     vs_benchmark_pct = None
-    if final_spy_nav and starting_nav > 0:
+    if final_spy_nav and starting_nav > 0 and total_return_pct is not None:
         benchmark_return_pct = (final_spy_nav / starting_nav - 1.0) * 100.0
         vs_benchmark_pct = round(total_return_pct - benchmark_return_pct, 4)
 
@@ -206,14 +230,14 @@ def _archived_performance(portfolio_id: str) -> dict[str, Any]:
         "current_nav": round(current_nav, 2),
         "cash": round(cash, 2),
         "invested": round(invested, 2),
-        "total_return_pct": round(total_return_pct, 4),
+        "total_return_pct": round(total_return_pct, 4) if total_return_pct is not None else None,
         "vs_benchmark_pct": vs_benchmark_pct,
         "vs_spy_pct": vs_benchmark_pct,
         "benchmark": benchmark,
         "benchmark_name": _portfolio_registry.benchmark_name(portfolio_id),
         "benchmark_name_zh": _portfolio_registry.benchmark_name_zh(portfolio_id),
         "benchmark_as_of": final.get("date") if final_spy_nav is not None else None,
-        "day_change_pct": round(day_change_pct, 4),
+        "day_change_pct": round(day_change_pct, 4) if day_change_pct is not None else None,
         "max_drawdown_pct": round(max_drawdown_pct, 4),
         "realized_since": history[0].get("date") if history else inception_date,
         "series": series,
@@ -222,6 +246,34 @@ def _archived_performance(portfolio_id: str) -> dict[str, Any]:
         "frozen_as_of": frozen_as_of,
         "note": "Archived portfolio: values are frozen at the final persisted mark.",
     }
+
+
+def _account_state_probe(portfolio: str) -> dict[str, Any] | None:
+    """Display-only D-ACCT-1 probe: ``{"status": "invalid", "quarantine_sha16", "problems"}`` or None.
+
+    ``problems`` are the validator's own problem codes (strings only, at most 20, each at
+    most 120 characters) for the page's evidence tier; nothing is derived or paraphrased.
+
+    Uses only the read-only ``paper_account.account_file_status(path=...)``; never loads,
+    recovers, quarantines or writes. Any failure (including the function not existing on an
+    older tree) returns None, so the caller's existing response is unchanged.
+    """
+    try:
+        from portfolio import paper_account
+
+        path = paper_account._paths(portfolio)["account"]
+        status = paper_account.account_file_status(path=path)
+        if not isinstance(status, dict) or status.get("status") != "INVALID":
+            return None
+        problems = status.get("problems")
+        return {
+            "status": "invalid",
+            "quarantine_sha16": (status.get("sha256") or "")[:16] or None,
+            "problems": [str(code)[:120] for code in (problems if isinstance(problems, list) else [])
+                         if isinstance(code, str) and code][:20],
+        }
+    except Exception:  # noqa: BLE001 — a display probe must never change the response
+        return None
 
 
 def _archived_live_marks(portfolio_id: str) -> dict[str, Any]:
@@ -1039,27 +1091,23 @@ def api_performance(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
     portfolio = _product_portfolio_id(portfolio)
     if _portfolio_registry.is_archived(portfolio):
         return JSONResponse(_archived_performance(portfolio))
+    from portfolio import paper_account
     try:
-        from portfolio import paper_account
-        payload = paper_account.performance(portfolio_id=portfolio,
-                                            prices=_book_marks(portfolio))
-        return JSONResponse(payload)
-    except Exception as exc:
-        # never 500 — return a safe minimal payload
-        return JSONResponse({
-            "inception_date": None,
-            "starting_nav": 1_000_000,
-            "current_nav": 1_000_000,
-            "cash": 1_000_000,
-            "invested": 0.0,
-            "total_return_pct": 0.0,
-            "vs_spy_pct": 0.0,
-            "day_change_pct": 0.0,
-            "max_drawdown_pct": 0.0,
-            "realized_since": None,
-            "series": [],
-            "note": f"Performance unavailable: {exc}",
-        })
+        # This read serves persisted performance. Intraday previews have their own
+        # quote/session endpoint; do not warm quotes or recover accounts here.
+        payload = paper_account.performance(portfolio_id=portfolio)
+        # An account file that exists but cannot be read must be distinguishable from
+        # "no account yet": the browser renders one canonical cell, never a zero NAV.
+        invalid_state = _account_state_probe(portfolio)
+        if invalid_state is not None:
+            payload["account_state"] = invalid_state
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+    except Exception:
+        unavailable = paper_account.unavailable_performance(portfolio)
+        invalid_state = _account_state_probe(portfolio)
+        if invalid_state is not None:
+            unavailable["account_state"] = invalid_state
+        return JSONResponse(unavailable, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/live_marks")
@@ -1188,11 +1236,16 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                     "inception_date", "starting_nav", "current_nav", "cash", "invested",
                     "total_return_pct", "vs_benchmark_pct", "vs_spy_pct", "benchmark",
                     "benchmark_name", "benchmark_name_zh", "benchmark_as_of", "day_change_pct",
-                    "max_drawdown_pct", "realized_since",
+                    "max_drawdown_pct", "realized_since", "availability", "observed_at",
+                    "day_change_window", "drawdown_window", "return_measure",
+                    "external_flow_adjustment", "benchmark_return_basis",
+                    "benchmark_total_return_status", "benchmark_comparison_scope",
                 )
             }
             current_nav = performance.get("current_nav")
-            if current_nav and current_nav > 0:
+            if (current_nav is not None and current_nav > 0
+                    and (performance.get("availability") or {}).get("valuation_basis")
+                    in {"provided_prices", "cash_only"}):
                 for row in positions:
                     market_value = row.get("market_value")
                     if market_value is not None:
@@ -1215,8 +1268,9 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                 },
             }
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
-    except Exception as exc:  # noqa: BLE001 — live preview must degrade, never sink the dashboard
-        return JSONResponse({
+    except Exception:  # noqa: BLE001 — live preview must degrade, never sink the dashboard
+        from portfolio import paper_account
+        degraded = {
             "schema_version": "live_marks.v1",
             "portfolio": pid,
             "currency": registry.currency(pid),
@@ -1224,10 +1278,16 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
             "session": session,
             "poll_after_seconds": 60 if session["is_open"] else session["poll_after_seconds"],
             "positions": [],
-            "performance": {},
+            "performance": paper_account.unavailable_performance(pid),
             "pricing": {"priced_positions": 0, "total_positions": 0, "complete": False},
-            "error": str(exc),
-        }, headers={"Cache-Control": "no-store"})
+            "error": "live_marks_unavailable",
+        }
+        # Same rule as /api/performance: say the state is invalid rather than let the
+        # browser read an empty mark set as an all-cash book.
+        invalid_state = _account_state_probe(pid)
+        if invalid_state is not None:
+            degraded["account_state"] = invalid_state
+        return JSONResponse(degraded, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/risk")
@@ -1272,8 +1332,40 @@ def api_risk(portfolio: str = _PRODUCT_DEFAULT_ID, recompute: bool = False) -> J
 
 
 @router.get("/api/portfolio")
-def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
+def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None) -> JSONResponse:
     portfolio = _product_portfolio_id(portfolio)
+    if view == "decision_availability":
+        from app.decision_availability import read_decision_availability
+        from app.settlement_price_read import read_settlement_price_evidence
+        from app.provider_diagnostic_read import read_provider_diagnostic_evidence
+        from brain import runlog
+        from bot import decision_rows
+        from portfolio import paper_account
+
+        # Resolve strictly through the registry: _portfolio_dir has a legacy fallback to Flagship.
+        # This branch must precede every quote, fresh-account fallback, and recovery-capable read.
+        observed_at = datetime.now(timezone.utc).isoformat()
+        payload = read_decision_availability(
+            portfolio, base_dir=_portfolio_registry.data_dir(portfolio),
+            observed_at=observed_at,
+            verify_receipt=_decision_execution_receipt_verified,
+            validate_pending=paper_account.pending_target_contract_error,
+            inspect_settlement_prices=lambda row: read_settlement_price_evidence(
+                portfolio, row, base_dir=_portfolio_registry.data_dir(portfolio),
+                currency=_portfolio_registry.currency(portfolio),
+                validate_receipt=paper_account.validated_settlement_receipt_prices,
+                # Decision receipt references and transaction IDs have distinct,
+                # established Unicode serialization rules. Reuse the decision owner.
+                fingerprint_receipt=decision_rows._canonical_sha256,
+            ),
+            inspect_provider_diagnostics=lambda attempt: read_provider_diagnostic_evidence(
+                portfolio, attempt, runs_dir=runlog._RUNS_DIR, observed_at=observed_at,
+            ),
+        )
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+    if view is not None:
+        return JSONResponse({"error": "unsupported_portfolio_view", "portfolio_id": portfolio},
+                            status_code=400, headers={"Cache-Control": "no-store"})
     path = _portfolio_dir(portfolio) / "latest.json"
     if not path.exists():
         return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
@@ -1387,7 +1479,12 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                         })
                     payload.setdefault("positions", []).append(account_row)
             except Exception:
-                pass
+                # Keep the swallow: a failed account read must not sink the payload.
+                # But say WHY when the file exists and is unreadable, so the browser
+                # can render the canonical cell instead of an empty positions list.
+                invalid_state = _account_state_probe(portfolio)
+                if invalid_state is not None:
+                    payload["account_state"] = invalid_state
 
         # Every book gets canonical human-readable security names on read. This
         # repairs historical US/China/HK payloads without mutating runtime state.
@@ -1536,21 +1633,36 @@ def _portfolio_status(meta: dict) -> dict:
             })
         except Exception:
             pass
-        # vs_spy and vs_defensive: benchmark_ledger already computes these bogey returns; wire the
-        # read here so the leaderboard row for self_directed carries the same performance columns
-        # as the other books. Best-effort: skip cleanly if the ledger hasn't been built yet.
+        # vs_spy and vs_defensive: the ledger's stored bogey returns are each renormalized on that
+        # BOGEY's own inception, so subtracting them from the book's since-inception return compared
+        # different windows (#1433). Recompute every leg over ONE shared window at READ time via
+        # compare_book_to_ledger, so the Self-Directed row carries the same performance columns as
+        # the other books without the cross-window error. When the window is unsupported the deltas
+        # are WITHHELD: the keys are absent — never 0, never the stale cross-window number.
+        # total_return_pct stays the book's own since-inception return. Best-effort.
         try:
             from brain import benchmark_ledger
+            from portfolio import self_directed
             ledger = benchmark_ledger.latest()
-            bogeys = ledger.get("bogeys") or {}
-            spy_ret = (bogeys.get("spy") or {}).get("return_pct")
-            def_ret = (bogeys.get("defensive") or {}).get("return_pct")
-            own_ret = status.get("total_return_pct")
-            if own_ret is not None and spy_ret is not None:
-                status["vs_spy_pct"] = round(own_ret - spy_ret, 4)
+            cmp = benchmark_ledger.compare_book_to_ledger(
+                "self_directed",
+                benchmark_ledger.read_nav_history(self_directed._NAV_PATH),
+                ledger)
+            status["benchmark_window"] = {
+                "status": cmp.get("status"), "reason": cmp.get("reason"),
+                "start": cmp.get("start"), "end": cmp.get("end"),
+                "common_point_count": cmp.get("common_point_count"),
+                "endpoint_status": cmp.get("endpoint_status")}
+            if cmp.get("status") == "descriptive":
+                for d in cmp.get("deltas_pp") or []:
+                    if d.get("right_id") == "spy":
+                        status["vs_spy_pct"] = round(d.get("delta_pp"), 4)
+                    elif d.get("right_id") == "defensive":
+                        status["vs_defensive_pct"] = round(d.get("delta_pp"), 4)
                 status["vs_benchmark_pct"] = status["vs_spy_pct"]
-            if own_ret is not None and def_ret is not None:
-                status["vs_defensive_pct"] = round(own_ret - def_ret, 4)
+            else:
+                for k in ("vs_spy_pct", "vs_defensive_pct", "vs_benchmark_pct"):
+                    status.pop(k, None)
         except Exception:  # noqa: BLE001
             pass
         return {**{k: meta.get(k) for k in (
@@ -1569,8 +1681,11 @@ def _portfolio_status(meta: dict) -> dict:
             "vs_benchmark_pct": perf.get("vs_benchmark_pct"),
             "vs_spy_pct": perf.get("vs_spy_pct"),
             "day_change_pct": perf.get("day_change_pct"),
-            "cash_pct": round((perf.get("cash") or 0) / nav * 100, 1) if nav else None,
-            "as_of": perf.get("realized_since"),
+            "cash_pct": (round(perf["cash"] / nav * 100, 1)
+                         if nav > 0 and perf.get("cash") is not None else None),
+            "performance_as_of": (perf.get("availability") or {}).get("as_of"),
+            "performance_status": (perf.get("availability") or {}).get("status"),
+            "as_of": (perf.get("availability") or {}).get("as_of"),
         })
     except Exception:
         pass
@@ -2392,13 +2507,27 @@ def api_self_directed() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001 — never 500 the dashboard
-        return JSONResponse({"nav": 1_000_000.0, "cash": 1_000_000.0, "invested": 0.0,
-                             "positions": [], "pending": [],
-                             "allocation": {"cash_pct": 1.0, "gross": 0.0, "n_positions": 0,
-                                            "largest_weight": 0.0, "total_unrealized_pnl": 0.0,
-                                            "total_return_pct": 0.0},
-                             "market": {"is_open": False, "session": "closed"},
-                             "error": str(exc)})
+        # A read we could not perform renders `unavailable` — never a fabricated funded book
+        # (a $1M all-cash, 0%-return book would be indistinguishable from a real one).
+        try:
+            from portfolio import self_directed as _sd
+            market = _sd._market_status()
+        except Exception:  # noqa: BLE001 — the clock is independent of the failed account read
+            market = None
+        payload = {"status": "unavailable",
+                   "reason_code": "self_directed_book_unreadable",
+                   "nav": None, "cash": None, "invested": None,
+                   "starting_nav": None, "positions": [], "pending": [],
+                   "allocation": None, "market": market, "error": str(exc)}
+        # E13: the typed invalid-account error keeps its own reason code and evidence instead
+        # of collapsing into the generic unreadable string.
+        reason_code = getattr(exc, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            payload["reason_code"] = reason_code
+            payload["problems"] = list(getattr(exc, "problems", []) or [])
+            payload["quarantine_file"] = (
+                getattr(exc, "record", None) or {}).get("quarantine_file")
+        return JSONResponse(payload)
 
 
 @router.get("/api/self_directed/history")
@@ -2413,8 +2542,20 @@ def api_self_directed_history() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"history": [], "pending": [], "realized_total": 0.0,
-                             "n_closed": 0, "n_buys": 0, "win_rate": None, "error": str(exc)})
+        # Unreadable is not empty: a fabricated 0-fill blotter reads as "no trades yet".
+        payload = {"status": "unavailable",
+                   "reason_code": "self_directed_history_unreadable",
+                   "history": [], "pending": [], "realized_total": None,
+                   "n_closed": None, "n_buys": None, "win_rate": None,
+                   "error": str(exc)}
+        # E13: the typed invalid-account error keeps its own reason code and evidence.
+        reason_code = getattr(exc, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            payload["reason_code"] = reason_code
+            payload["problems"] = list(getattr(exc, "problems", []) or [])
+            payload["quarantine_file"] = (
+                getattr(exc, "record", None) or {}).get("quarantine_file")
+        return JSONResponse(payload)
 
 
 @router.get("/api/self_directed/search")
@@ -2445,7 +2586,14 @@ def api_self_directed_order(req: _OrderReq) -> JSONResponse:
         return JSONResponse(self_directed.place_order(
             req.ticker, req.side, req.shares, notional=req.notional))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        payload = {"ok": False, "error": str(exc)}
+        # E13: the typed invalid-account error names itself; any other failure keeps the
+        # historical {ok, error} shape.
+        reason_code = getattr(exc, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            payload["reason_code"] = reason_code
+            payload["problems"] = list(getattr(exc, "problems", []) or [])
+        return JSONResponse(payload, status_code=500)
 
 
 @router.post("/api/self_directed/thesis")

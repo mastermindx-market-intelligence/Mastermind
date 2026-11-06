@@ -1,8 +1,10 @@
 # Mastermind Executive Ecosystem — integrated programme plan (2026-10-17)
 
 **Programme:** Executive Ecosystem Completion (Chairman brief 2026-10-17 "FABLE CEO META — Executive
-Ecosystem Completion Mission"). **Seat:** Fable Meta-CEO, Claude session `873aabd3`, holding the Chairman's
-programme delegation for this scope. **Ledger:** `research/EXECUTIVE_ECOSYSTEM_COMPLETION_CAPABILITY_LEDGER_2026-10-17.md`
+Ecosystem Completion Mission"). **Current accountable integrator:** Astra, native root
+`01a15741-5e68-7803-8eb4-ccac74a6c04b`, directly assigned by Chris on October 21.
+Fable Claude session `873aabd3` retains its original host-operation custody; this assignment does not transfer an unresolved effect.
+**Ledger:** `research/EXECUTIVE_ECOSYSTEM_COMPLETION_CAPABILITY_LEDGER_2026-10-17.md`
 (row IDs `E*` runtime, `F*` fabric/capacity, `G*` gateway/edge, `A*` app, `C*` continuity, `H*` journeys are cited
 below). **Continuity:** macro `agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md` + dated handoffs.
 **Prior plan this extends, never replaces:** `research/mastermind_meta_ceo_master_plan_r2_2026-10-12.md` (R2) and
@@ -13,6 +15,52 @@ authenticated identity, correct source custody, valid admission, economical rout
 review, original-parent consumption, recoverable continuation and a coherent Mastermind OS outcome; both a
 successful and an interrupted journey are proven. Census, architecture, a merged PR, green CI, one worker run or a
 dashboard demo are rungs, not the outcome.
+
+## Current execution — October 21 commission
+
+This is the continuation of the full programme under
+`EXECUTIVE_ECOSYSTEM_ASTRA_CEO_HANDOFF_2026-10-21.md` at
+`8dd8bebfc525d6f688d7356027f3c3279be93759`, not a replacement architecture or smaller source-only outcome.
+The ledger's October21 delta supersedes stale current-state claims in the historical sections below.
+Protected procedure/source pin for this integration is `3905e79ed7996c52a42d78838ebc9df16ed2818a`.
+
+Four native Sol6.1/high coordinators have verified ancestry under original root01a15741:
+
+| Slice | Immediate parent identity | Integration responsibility and real return |
+| --- | --- | --- |
+| Release | `01a15e3f-9979-7372-81e2-8e172d948736` | Installed80f, existing Gate B/descriptor, Control-start custody and credential qualification. Read-only judgment returned and consumed; same coordinator continues the exact technical dependency. Host effects remain held. |
+| Bridge | `01a15e3f-d59f-7730-90a4-61e3b82447d1` | Preserve original #1362 staged work; integrate newer protected changes, review changed risk, consume CI and continue normal source release. Runtime target/CONTINUE/send proof remains a separate admitted operation. |
+| App | `01a15e40-1c76-79d0-8c95-debeb71ca320` | Existing app/#1515 custody, actual gateway binding and H4/H7 behavior; bounded Fabric source work with retained results consumed by this coordinator. No conflicting WIP or refused edit is taken over. |
+| Fabric | `01a15e40-6b75-7f62-810a-12f9ac4ecf20` | #1359 facade/backend and current sequence11 installation qualified; source judgment returned and consumed. Missing current admission/original-parent execution proof remains explicit. No extra manager or duplicate worker is needed. |
+
+Native children are finite foreground coordinators, not daemons. Fabric descendants keep original root01a15741,
+their verified assigning native parent, original budget and existing adapter. Request/queue evidence is not START;
+worker return is not acceptance. Root-only native-return hooks are not used by coordinator children.
+
+**Next milestone:** complete review/admission and CI for published original #1362 integration `dd9f1bbc`,
+while resolving the host-release dependency. The app slice found no demonstrated disjoint source defect;
+its signed-out browser proof passed. Its next meaningful delivery step is existing sealed transport
+installation and authenticated consumption after host predicates qualify, not another speculative patch. Keep the original H1–H8 ambition and V1 P4/P5 obligations intact.
+Acceptance advances in this dependency order:
+
+1. Attribute the current Control start and qualify the actual host-release receiver. Reconcile permitted current
+   config/seal/quiescence predicates and the exact credential mismatch. Installation80f and Gate B are complete;
+   repeating them does not repair the mismatch. Preserve the denied config read and original probe refusal.
+2. At a technically ready point, obtain the reserved new one-canary decision and explicit valid UTC deadline.
+   Preserve the same descriptor lineage; installed acceptance expects canonical digest
+   `359eac8e8a894d706e6eb547a6a3f69ccdbd884a75f10db1a5118c5e28d40ca2`, not its file byte hash15359.
+   Successful readiness precedes one acceptance, refreshed independent two-verb arming judgment and conditional arm.
+3. Qualify installed Bridge and Fabric through the actual originating parent and admitted runtime target; prove
+   retained bytes, review and original-parent consumption. A manual worker's native labels do not satisfy H1 Job ancestry.
+4. Complete sealed gateway/app composition and authenticated web/native/mobile journeys. Public `/os/` HTTP200,
+   source tests and the separate #1672 edge lane do not satisfy this step.
+5. Execute H1–H8, including one normal and one interrupted Chairman request, and record the actual result in
+   existing Agent OS records. Preserve historical root dispositions, failure/correction/source-conflict evidence,
+   original-parent consumption and consumer-rendered outcome; then adjudicate programme completion.
+
+No new canary, credential rotation, service mutation, acceptance, arm, historical replay, refused quality/legacy
+continuation or #1515 refused edit is authorized by this plan update. The reserved human decision is reached only
+after the preceding technical work; it is not a reason to stop the ready source lanes now.
 
 ## 1. Architecture (Phase B) — ownership preserved, nothing duplicated
 

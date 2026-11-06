@@ -125,7 +125,8 @@ describe("Programs collection manual recovery", () => {
     const before = location.href; await click("Refresh Projects");
     expect(read).toHaveBeenCalledTimes(3); expect(readMission).toHaveBeenCalledTimes(1);
     expect(readMission.mock.calls[0][0]).toMatchObject({ workRef: "WS:BETA", rootJobId: "JOB-B" });
-    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Overview");
+    expect(container.querySelector('.mm-project-workspace h1')?.textContent).toBe("Beta program");
+    expect(Array.from(container.querySelectorAll("button")).some(n => n.textContent === "Project details")).toBe(true);
     expect(location.href).toBe(before); expect(readWork).toHaveBeenCalledTimes(1);
   });
 
@@ -142,14 +143,14 @@ describe("Programs collection manual recovery", () => {
   it("reuses the legacy reader without qualifying bare data as Projects owner receipt", async () => {
     const readPrograms = vi.fn().mockRejectedValueOnce(new Error("first")).mockResolvedValue(controlRoomFixture());
     const readMission = vi.fn(); window.MastermindMissionHost = { readPrograms, readMission };
-    await mount(); await click("Open Programs"); await click("Refresh Projects");
+    await mount(); await click("Programs workspace"); await click("Refresh Projects");
     expect(readPrograms).toHaveBeenCalledTimes(2); expect(container.textContent).toContain("Beta program");
     await click("Projects"); expect(findButton("Open project Beta program")).toBeUndefined(); expect(readMission).not.toHaveBeenCalled();
   });
 
   it("shares the same pending read across Projects and legacy Programs navigation", async () => {
     const wait = deferred<ProgramsObservation>(); const read = vi.fn().mockRejectedValueOnce(new Error("first")).mockReturnValueOnce(wait.promise);
-    sourceHost(read); await projects(); await click("Refresh Projects"); await click("Today"); await click("Open Programs");
+    sourceHost(read); await projects(); await click("Refresh Projects"); await click("Today"); await click("Programs workspace");
     pending(button("Refresh Projects")); await click("Refresh Projects"); expect(read).toHaveBeenCalledTimes(2);
     await act(async () => { wait.resolve(qualified()); }); ready(button("Refresh Projects"));
     expect(container.textContent).toContain("Beta program"); await click("Projects"); expect(findButton("Open project Beta program")).toBeTruthy();
@@ -161,8 +162,11 @@ describe("Programs collection manual recovery", () => {
     await act(async () => { root!.unmount(); }); root = null;
     const read = vi.fn(async () => qualified()); sourceHost(read); const auth = authHost();
     // Start admitted, then revoke to exercise notification and loader fences.
-    await projects(); await auth.change(false); control = button("Refresh Projects");
-    expect(control.disabled).toBe(true); await click("Refresh Projects"); expect(read).toHaveBeenCalledTimes(1);
+    await projects(); await auth.change(false);
+    // Sign-out hands the shell to private entry: the loader is unmounted, so
+    // the revoked acquisition cannot start a read or an auth action.
+    expect(container.textContent).toContain("Sign in to your workspace.");
+    expect(read).toHaveBeenCalledTimes(1);
     expect(auth.auth.signIn).not.toHaveBeenCalled(); expect(auth.auth.signOut).not.toHaveBeenCalled();
   });
 
@@ -170,8 +174,15 @@ describe("Programs collection manual recovery", () => {
     const read = vi.fn(async () => qualified()); sourceHost(read);
     const state: AuthState = { status, reason: null, acquisition: false, content: false };
     window.MastermindMissionHost!.auth = { getState: () => state, subscribe: () => () => {}, signIn: vi.fn(async () => {}), signOut: vi.fn(async () => {}) };
-    await projects(); expect(button("Refresh Projects").disabled).toBe(true);
-    await click("Refresh Projects"); expect(read).not.toHaveBeenCalled();
+    await mount();
+    if (status === "signed_out") {
+      // Private entry owns the shell; the Projects loader is not mounted.
+      expect(container.textContent).toContain("Sign in to your workspace.");
+    } else {
+      await click("Projects"); expect(button("Refresh Projects").disabled).toBe(true);
+      await click("Refresh Projects");
+    }
+    expect(read).not.toHaveBeenCalled();
   });
 
   it.each(["success", "rejection"] as const)("aborts on unmount and tolerates late retry %s", async settlement => {
@@ -188,7 +199,11 @@ describe("Programs collection manual recovery", () => {
     const { readMission } = sourceHost(read); const auth = authHost(); await projects(); await click("Refresh Projects");
     const signal = read.mock.calls[1][0].signal as AbortSignal; await auth.change(false); expect(signal.aborted).toBe(true);
     await act(async () => { if (settlement === "success") wait.resolve(qualified()); else wait.reject(new Error("old principal")); });
-    expect(button("Refresh Projects").disabled).toBe(true); expect(findButton("Open project Beta program")).toBeUndefined();
+    // Sign-out hands the shell to private entry; the late retry must never
+    // resurface the old principal's observation or start another read.
+    expect(container.textContent).toContain("Sign in to your workspace.");
+    expect(findButton("Open project Beta program")).toBeUndefined();
+    expect(container.textContent).not.toContain("Beta program");
     expect(read).toHaveBeenCalledTimes(2); expect(readMission).not.toHaveBeenCalled();
   });
 
@@ -231,7 +246,7 @@ describe("Programs collection manual recovery", () => {
     const read = vi.fn(async () => qualified()); const { readMission, readWork } = sourceHost(read);
     readMission.mockRejectedValueOnce(new Error("mission-only"));
     await projects(); await click("Open project Beta program"); expect(container.textContent).toContain("SOURCE_UNAVAILABLE");
-    await click("Today"); const draft = container.querySelector<HTMLTextAreaElement>("#office-direction")!;
+    await click("Meta-CEO"); const draft = container.querySelector<HTMLTextAreaElement>("#office-direction")!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(draft, "Keep my unsent direction");
       draft.dispatchEvent(new Event("input", { bubbles: true }));
@@ -239,7 +254,7 @@ describe("Programs collection manual recovery", () => {
     await click("Projects"); await click("Refresh Projects");
     // Re-entering AVAILABLE re-admits the selected Mission through its existing effect.
     expect(readMission).toHaveBeenCalledTimes(2); expect(readWork).toHaveBeenCalledTimes(1);
-    await click("Today"); expect(container.querySelector<HTMLTextAreaElement>("#office-direction")!.value).toBe("Keep my unsent direction");
+    await click("Meta-CEO"); expect(container.querySelector<HTMLTextAreaElement>("#office-direction")!.value).toBe("Keep my unsent direction");
     await click("Projects"); const reads = read.mock.calls.length; await click("Open project Beta program");
     expect(read).toHaveBeenCalledTimes(reads); expect(readMission).toHaveBeenCalledTimes(3);
   });

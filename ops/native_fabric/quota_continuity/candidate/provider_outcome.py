@@ -45,6 +45,16 @@ TERMINAL_REASONS = {
     "aborted_streaming": "interrupted", "aborted_tools": "interrupted",
     "hook_stopped": "permission", "stop_hook_prevented": "permission",
 }
+# Derived outcomes contain closed diagnostics, never arbitrary provider text.
+# Raw event values remain local to classification and the private raw capture.
+CLI_SUBTYPES = frozenset({'success', 'error_during_execution', *STOP_REASONS})
+CLI_TERMINAL_REASONS = frozenset({'completed', *TERMINAL_REASONS})
+
+
+def _closed_cli_label(value: str | None, known: frozenset[str]) -> str | None:
+    return None if value is None else value if value in known else 'other'
+
+
 CODEX_ERRORS = {
     "ContextWindowExceeded": "context_limit",
     "SessionBudgetExceeded": "budget_limit",
@@ -162,13 +172,32 @@ def parse_claude(raw: bytes, command_rc: int) -> tuple[str, dict, dict | None]:
     errors = [m.get("error") for m in messages if m.get("type") == "assistant"
               and isinstance(m.get("error"), str)]
     kind = STOP_REASONS.get(subtype) or TERMINAL_REASONS.get(terminal_reason)
-    denied = bool(fields.get("permission_denials"))
-    if denied:
+    denials = fields.get("permission_denials", [])
+    denied = bool(denials)
+    # Claude reports the history of denied tool requests even when the CLI
+    # subsequently completes successfully. That history is useful for parent
+    # review, but is not a terminal permission failure. Require an unambiguous
+    # complete success before treating it as historical; a missing/failing CLI,
+    # real terminal error, malformed denial list or ambiguous stream keeps the
+    # existing fail-closed behavior. This grants neither acceptance nor replay.
+    denial_history_only = (
+        denied and isinstance(denials, list)
+        and all(isinstance(item, dict) for item in denials)
+        and complete and len(finals) == 1 and final is messages[-1]
+        and type(command_rc) is int and command_rc == 0
+        and subtype == "success" and fields.get("is_error") is False
+        and fields.get("terminal_reason") in (None, "completed")
+        and fields.get("api_error_status") is None
+        and not fields.get("errors") and not errors
+    )
+    permission_failure = denied and not denial_history_only
+    if permission_failure:
         kind = "permission"
     elif kind is None:
         kind = next((ERRORS[e] for e in reversed(errors) if e in ERRORS), None)
     failed = (command_rc != 0 or fields.get("is_error") is True
-              or subtype in STOP_REASONS or kind is not None or bool(errors) or denied)
+              or subtype in STOP_REASONS or kind is not None or bool(errors)
+              or permission_failure)
     code = fields.get("api_error_status")
     if type(code) is not int or not 100 <= code <= 599:
         code = None
@@ -218,6 +247,12 @@ def parse_claude(raw: bytes, command_rc: int) -> tuple[str, dict, dict | None]:
     return display, {
         "kind": kind, "command_rc": command_rc, "initial_rejection": initial_rejection,
         "complete_event_capture": complete, "api_status": code,
+        "cli_command_rc": command_rc,
+        "cli_subtype": _closed_cli_label(subtype, CLI_SUBTYPES),
+        "cli_terminal_reason": _closed_cli_label(terminal_reason, CLI_TERMINAL_REASONS),
+        "permission_denial_count": len(denials) if isinstance(denials, list) else None,
+        "permission_denials_role": ("historical_nonterminal" if denial_history_only
+                                   else "failure_evidence" if denied else "none"),
         "reset_at": reset, "reset_source": "provider_event" if reset else None,
         "session_id": sid, "capture_sha256": digest(raw), "capture_bytes": len(raw),
         "stdout_sha256": digest(display.encode()),
@@ -281,8 +316,57 @@ def parse_codex(home: Path, command_rc: int, last_message: bytes) -> dict:
         "stdout_sha256": digest(last_message)}
 
 
+QWEN_FEEDBACK_SCHEMA = "mastermind.qwen_adaptive429_feedback.v1"
+QWEN_FEEDBACK_POLICY_SOURCE = "bailian_keys.adaptive_http_429"
+QWEN_FEEDBACK_KEYS = frozenset({
+    "schema", "account", "classification_source", "classification",
+    "policy_source", "observed_at", "until_ts", "duration_seconds",
+    "soft_cap", "soft_cap_enabled"})
+QWEN_FEEDBACK_SOURCES = frozenset({"qwen_wrapper_inference", "codex_error_enum"})
+
+
+def load_qwen_feedback(path: Path, account: str) -> tuple[dict | None, str]:
+    """Load one real helper adaptive-429 receipt, or withhold it with a reason.
+
+    Only a plain bounded file written by the cooldown helper under its own lock
+    qualifies: the exact closed key set, closed classification sources and
+    policy identity, the leased account, integer times with
+    until_ts == observed_at + duration_seconds. Malformed, foreign or missing
+    receipts are withheld here; they are never repaired or synthesized, and a
+    receipt is diagnostic policy feedback, never a numeric HTTP proof.
+    """
+    try:
+        raw = regular_bytes(path, 4096)
+    except (OSError, ValueError):
+        return None, "receipt_unreadable"
+    try:
+        value = json.loads(raw)
+    except (ValueError, RecursionError):
+        return None, "receipt_unparseable"
+    if not isinstance(value, dict) or set(value) != QWEN_FEEDBACK_KEYS:
+        return None, "receipt_fields_unqualified"
+    if (value.get("schema") != QWEN_FEEDBACK_SCHEMA
+            or value.get("policy_source") != QWEN_FEEDBACK_POLICY_SOURCE
+            or value.get("classification") != "429"
+            or value.get("classification_source") not in QWEN_FEEDBACK_SOURCES):
+        return None, "receipt_identity_unqualified"
+    if not isinstance(account, str) or not IDENT.fullmatch(account) \
+            or value.get("account") != account:
+        return None, "receipt_account_unqualified"
+    for key in ("observed_at", "until_ts", "duration_seconds", "soft_cap"):
+        if type(value.get(key)) is not int:
+            return None, "receipt_types_unqualified"
+    if not isinstance(value.get("soft_cap_enabled"), bool):
+        return None, "receipt_types_unqualified"
+    if value["observed_at"] <= 0 or value["duration_seconds"] < 1 \
+            or value["until_ts"] != value["observed_at"] + value["duration_seconds"]:
+        return None, "receipt_times_unqualified"
+    return value, "receipt_qualified"
+
+
 def codex_main(args: list[str]) -> int:
-    home, rc, provider, model, last = args
+    home, rc, provider, model, last = args[:5]
+    feedback_path = args[5] if len(args) > 5 else ""
     target = os.environ.get("POOL_OUTCOME_FILE")
     if not target:
         return 0
@@ -290,6 +374,47 @@ def codex_main(args: list[str]) -> int:
         path = Path(last)
         display = regular_bytes(path, 8388608) if path.exists() else b""
         fields = parse_codex(Path(home), int(rc), display)
+        if provider in {"qwen", "bailian"} and fields.get("command_rc") != 0:
+            cli_kind = fields.get("kind")
+            if cli_kind in CAPACITY:
+                # Preserve the actual closed CLI diagnostic without turning an
+                # unqualified Qwen capacity event into the generic HARD policy.
+                fields["qwen_cli_kind"] = cli_kind
+                fields["qwen_cli_initial_rejection"] = fields["initial_rejection"]
+                fields["kind"] = "unknown"
+                fields["initial_rejection"] = False
+            if feedback_path and os.path.lexists(feedback_path):
+                receipt, reason = load_qwen_feedback(
+                    Path(feedback_path), os.environ.get("POOL_ACCOUNT", ""))
+                if cli_kind == "authentication":
+                    receipt, reason = None, "typed_auth_contradicts_inferred_429"
+                elif cli_kind == "quota_exhausted":
+                    receipt, reason = None, "typed_quota_contradicts_inferred_429"
+                elif cli_kind not in {"unknown", "rate_limit"}:
+                    # Only an unknown cause or the matching rate-limit enum
+                    # is compatible with inferred429 policy. A known context,
+                    # budget, permission, request or provider failure remains
+                    # the actual terminal cause and cannot mint a SOFT cap.
+                    receipt, reason = None, "typed_terminal_contradicts_inferred_429"
+                elif (receipt is not None
+                      and receipt["classification_source"] == "codex_error_enum"
+                      and cli_kind != "rate_limit"):
+                    receipt, reason = None, "typed_rate_limit_unconfirmed"
+                if receipt is not None:
+                    # A wrapper-classified policy event remains inferred even
+                    # when the private capture independently reports a CLI
+                    # rate-limit enum. Neither source proves provider HTTP429.
+                    if receipt["classification_source"] == "codex_error_enum":
+                        fields["kind"] = "rate_limit"
+                        fields["initial_rejection"] = fields.get(
+                            "qwen_cli_initial_rejection", False)
+                    else:
+                        fields["kind"] = "unknown"
+                        fields["initial_rejection"] = False
+                    fields["qwen_policy_feedback"] = receipt
+                else:
+                    print("PROVIDER_FEEDBACK_WITHHELD reason=" + reason,
+                          file=sys.stderr)
         write_new(Path(target), bound_outcome(fields, os.environ, provider, model))
     except (OSError, ValueError, RecursionError):
         print("PROVIDER_OUTCOME_UNAVAILABLE", file=sys.stderr)
@@ -375,8 +500,109 @@ def claude_main(args: list[str]) -> int:
     return rc
 
 
+def diagnostic_retention_ready(lane_root, run_id, root_id):
+    """Internal same-run cleanup predicate. No output, mutation or generic read.
+
+    Paths come from the controller's verified lane binding. Preserve proof only
+    when the original producer's private, complete capture physically matches.
+    This is not a result, acceptance, retry grant or effect-absence assertion.
+    """
+    fds=[];edges=[];files=[]
+    try:
+        root=Path(lane_root)
+        if (not root.is_absolute() or '..' in root.parts or not IDENT.fullmatch(run_id)
+                or not IDENT.fullmatch(root_id)):
+            return False
+        fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW);fds.append(fd)
+        for component in (*root.parts[1:],'ext','lanes'):
+            parent=fd;fd=os.open(component,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent)
+            fds.append(fd);edges.append((parent,component,fd))
+        def identity_of(info):
+            return (info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns,info.st_mode,info.st_uid,info.st_nlink)
+        def verify():
+            for dfd in fds:
+                info=os.fstat(dfd)
+                if not stat.S_ISDIR(info.st_mode) or info.st_uid not in (0,os.geteuid()) or info.st_mode&0o022:
+                    raise ValueError('private_diagnostic_unqualified')
+            for parent,name,child in edges:
+                a=os.stat(name,dir_fd=parent,follow_symlinks=False);b=os.fstat(child)
+                if (a.st_dev,a.st_ino,a.st_mode,a.st_uid)!=(b.st_dev,b.st_ino,b.st_mode,b.st_uid):
+                    raise ValueError('private_diagnostic_unqualified')
+            for name,handle,identity in files:
+                if identity!=identity_of(os.fstat(handle)) or identity!=identity_of(os.stat(name,dir_fd=fd,follow_symlinks=False)):
+                    raise ValueError('private_diagnostic_unqualified')
+        def read(name,limit):
+            verify();handle=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=fd)
+            fds_to_close.append(handle);info=os.fstat(handle)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid() or info.st_nlink!=1
+                    or stat.S_IMODE(info.st_mode)!=0o600 or not 0<info.st_size<=limit):
+                raise ValueError('private_diagnostic_unqualified')
+            raw=b''
+            while len(raw)<=limit:
+                part=os.read(handle,min(65536,limit+1-len(raw)))
+                if not part:break
+                raw+=part
+            files.append((name,handle,identity_of(info)));verify()
+            if len(raw)!=info.st_size:raise ValueError('private_diagnostic_unqualified')
+            return raw
+        fds_to_close=[]
+        # Hold absence is checked in the same exact marker namespace as launch.
+        active=os.open('active',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fds[-2])
+        fds.append(active);edges.append((fds[-3],'active',active))
+        def inactive():
+            verify()
+            try:os.stat(run_id,dir_fd=active,follow_symlinks=False)
+            except FileNotFoundError:return
+            raise ValueError('private_diagnostic_unqualified')
+        inactive()
+        def pairs(items):
+            result={}
+            for k,v in items:
+                if k in result:raise ValueError('duplicate')
+                result[k]=v
+            return result
+        def parse(value):
+            return json.loads(value,object_pairs_hook=pairs,
+                parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite')))
+        outcome=parse(read(run_id+'.provider.json',65536));process=parse(read(run_id+'.process.jsonl',65536))
+        validate_receipt(outcome,process,run_id)
+        if (outcome.get('root_id')!=root_id or outcome.get('provider')!='glm'
+                or type(process.get('returncode')) is not int or not 1<=process['returncode']<=255):
+            return False
+        meta=outcome.get('diagnostic_capture')
+        if (type(meta) is not dict or set(meta)!={'file','sha256','bytes','source_bytes','truncated'}
+                or meta['file']!=run_id+'.provider.capture.jsonl' or meta['truncated'] is not False
+                or type(meta['bytes']) is not int or not 0<meta['bytes']<=64*1024*1024
+                or type(meta['source_bytes']) is not int or meta['source_bytes']!=meta['bytes']
+                or type(meta['sha256']) is not str or not re.fullmatch(r'[a-f0-9]{64}',meta['sha256'])
+                or outcome.get('capture_bytes')!=meta['bytes'] or outcome.get('capture_sha256')!=meta['sha256']
+                or parse(read(run_id+'.provider.capture.json',65536))!=meta):
+            return False
+        raw=read(meta['file'],64*1024*1024)
+        if len(raw)!=meta['bytes'] or digest(raw)!=meta['sha256']:return False
+        # No classification from prose; this merely rejects incomplete captures.
+        try:events=parse(raw)
+        except ValueError:events=[parse(line) for line in raw.splitlines() if line.strip()]
+        if type(events) is dict:events=[events]
+        if (type(events) is not list or not events or any(type(e) is not dict for e in events)
+                or len([e for e in events if e.get('type')=='result'])!=1 or events[-1].get('type')!='result'):
+            return False
+        inactive();verify();return True
+    except Exception:
+        return False
+    finally:
+        for handle in reversed(locals().get('fds_to_close',[])):os.close(handle)
+        for handle in reversed(fds):os.close(handle)
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 5 and sys.argv[1] == "retained-diagnostic-ready":
+        # Predicate false is ordinary failure. Exit 76 belongs to the outer
+        # owned-process wrapper's unproved cleanup/capture result.
+        raise SystemExit(0 if diagnostic_retention_ready(*sys.argv[2:]) else 1)
     if len(sys.argv) == 7 and sys.argv[1] == "codex":
+        raise SystemExit(codex_main(sys.argv[2:]))
+    if len(sys.argv) == 8 and sys.argv[1] == "codex":
         raise SystemExit(codex_main(sys.argv[2:]))
     if len(sys.argv) == 6 and sys.argv[1] == "claude":
         raise SystemExit(claude_main(sys.argv[2:]))

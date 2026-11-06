@@ -286,7 +286,7 @@ function makeClient(
 
 function makeBinding(
   client: ExecutiveToolClient,
-  config: LaunchBindingConfig = RESEARCH_CONFIG,
+  config: LaunchBindingConfig | null = RESEARCH_CONFIG,
   store: PendingPointerStore = makeStore(),
   session: OrchestratorSessionPresentation | null = SESSION,
 ) {
@@ -315,6 +315,28 @@ function expectedResearchPayload(form: LaunchForm = RESEARCH_FORM) {
     workstream: WORKSTREAM,
   };
 }
+
+describe("Executive owner without a legacy Launch manifest", () => {
+  it("retains the existing owner and store while refusing every new legacy launch entry", async () => {
+    const idle = makeClient(() => barePreflight("not_found"));
+    const configured = makeBinding(idle.client);
+    const intent = configured.makeLaunchIntent(RESEARCH_FORM)!;
+    const pointer = configured.port.prepare(intent);
+    const store = makeStore();
+    const binding = makeBinding(idle.client, null, store, null);
+
+    expect(completeOrchestratorCommandBinding(binding)).toBe(binding);
+    expect(binding.port.context()).toEqual({ principalScope: PRINCIPAL, generation: GENERATION });
+    expect(binding.store).toBe(store);
+    expect(binding.getView()).toEqual({ projects: [], profiles: [], session: null });
+    expect(binding.makeLaunchIntent(RESEARCH_FORM)).toBeNull();
+    expect(() => binding.port.prepare(intent)).toThrow(COMMAND_ROUTE_UNAVAILABLE);
+    expect(await binding.port.submit(pointer, intent, new AbortController().signal)).toMatchObject({
+      operationKey: pointer.operationKey, disposition: "refused", reason: COMMAND_ROUTE_UNAVAILABLE,
+    });
+    expect(idle.log).toEqual([]);
+  });
+});
 
 describe("T3 makeLaunchIntent", () => {
   const idle = makeClient(() => barePreflight("not_found"));
@@ -1552,5 +1574,44 @@ describe("T14 App-outcome shape matrix", () => {
       disposition: "unknown",
       reason: "MALFORMED_RECEIPT",
     });
+  });
+});
+
+describe("requested CEO custody", () => {
+
+  it("keeps direct native launch valid when planner CEO choices are configured", () => {
+    const idle = makeClient(() => barePreflight("not_found"));
+    const nativeConfig: LaunchBindingConfig = { ...RESEARCH_CONFIG,
+      profiles: [{ ref: "native_research_only", label: "Native research" }], attemptLimit: 1 };
+    const form = { ...RESEARCH_FORM, profileRef: "native_research_only" };
+    const legacy = makeBinding(idle.client, nativeConfig).makeLaunchIntent(form);
+    expect(legacy).not.toBeNull();
+    const binding = makeBinding(idle.client, { ...nativeConfig,
+      frontierModels: [{ ref: "frontier.one", label: "CEO" }] });
+    const direct = binding.makeLaunchIntent(form);
+    expect(direct).not.toBeNull();
+    expect(direct!.payload.operation_key).toBe(legacy!.payload.operation_key);
+    expect(direct!.payload).not.toHaveProperty("frontier_model_alias");
+    expect(binding.makeLaunchIntent({ ...form, frontierModelAlias: "frontier.one" })).toBeNull();
+    expect(idle.log).toEqual([]);
+  });
+  const choices = [{ ref: "frontier.one", label: "One" }, { ref: "frontier.two", label: "Two" }];
+  const idle = makeClient(() => barePreflight("not_found"));
+  it("keeps the selected alias in the payload and exact operation identity", () => {
+    const binding = makeBinding(idle.client, { ...RESEARCH_CONFIG, frontierModels: choices });
+    const first = binding.makeLaunchIntent({ ...RESEARCH_FORM, frontierModelAlias: "frontier.one" })!;
+    const second = binding.makeLaunchIntent({ ...RESEARCH_FORM, frontierModelAlias: "frontier.two" })!;
+    expect(first.payload.frontier_model_alias).toBe("frontier.one");
+    expect(first.payload.operation_key).not.toBe(second.payload.operation_key);
+    expect(binding.getView().frontierModels).toEqual(choices);
+    expect(binding.makeLaunchIntent(RESEARCH_FORM)).toBeNull();
+  });
+  it("refuses unknown, unavailable, and unenrolled choices without falling back", () => {
+    const binding = makeBinding(idle.client, { ...RESEARCH_CONFIG,
+      frontierModels: [{ ref: "frontier.one", label: "One", unavailableReason: "Not qualified" }] });
+    for (const frontierModelAlias of ["frontier.one", "frontier.other", " FRONTIER.ONE"]) {
+      expect(binding.makeLaunchIntent({ ...RESEARCH_FORM, frontierModelAlias })).toBeNull();
+    }
+    expect(makeBinding(idle.client).makeLaunchIntent({ ...RESEARCH_FORM, frontierModelAlias: "frontier.one" })).toBeNull();
   });
 });
