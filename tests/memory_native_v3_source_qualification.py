@@ -43,11 +43,14 @@ def test_actual_macro_exchange_to_genuine_m2_original_execution_and_completed_re
     import tests
     monkeypatch.setattr(tests,'__path__',[*tests.__path__,str(source/'tests')])
     monkeypatch.syspath_prepend(str(source))
-    # Mastermind's conftest reserves only an engine.canon namespace stub.
-    # Preserve that unrelated module and add the exact archived engine path.
-    if 'engine' in sys.modules:
-        engine=sys.modules['engine']
-        monkeypatch.setattr(engine,'__path__',[str(source/'engine'),*engine.__path__])
+    # Materialize the actual archived empty package initializer: a namespace
+    # path patch alone has no __file__ for native source qualification. Keep
+    # Mastermind's unrelated engine.canon fixture module byte-for-byte intact.
+    spec=importlib.util.spec_from_file_location('engine',source/'engine/__init__.py',
+        submodule_search_locations=[str(source/'engine')])
+    engine=importlib.util.module_from_spec(spec)
+    if 'engine.canon' in sys.modules:engine.canon=sys.modules['engine.canon']
+    monkeypatch.setitem(sys.modules,'engine',engine);spec.loader.exec_module(engine)
     native=importlib.import_module('tests.test_market_memory_e0_native_issuer')
     native_case=importlib.import_module('tests.test_market_memory_e0_native_case')
     primitives=importlib.import_module('tests.market_memory_native_peer_fixtures')
