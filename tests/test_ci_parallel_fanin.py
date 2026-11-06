@@ -120,6 +120,14 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
             "",
         ),
         (
+            "gateway-fleet-git-failure.test.mjs ",
+            "",
+        ),
+        (
+            "control_bundle*test.py",
+            "",
+        ),
+        (
             "python -m unittest discover -s . -p 'private_service*test.py'",
             "echo bypass",
         ),

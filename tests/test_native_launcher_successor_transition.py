@@ -30,7 +30,7 @@ builder = historical.builder
 @pytest.fixture(scope='module')
 def source_owners(tmp_path_factory):
     root = tmp_path_factory.mktemp('successor-source').resolve()
-    raw = Path(g.__file__).read_bytes()
+    raw = installer._HISTORICAL_LAUNCHER.read_bytes()
     addition = (b'    # One vetted flat plist. Not a suffix rule and not a directory walk.\n'
                 b'    if relative == "ext/host_pull_launchd.plist.template":\n'
                 b'        return\n')
@@ -49,8 +49,7 @@ def source_owners(tmp_path_factory):
             contextlib.redirect_stdout(io.StringIO()):
         builder.main()
     current_raw = (target / 'native-manifest.json').read_bytes()
-    assert current_raw == (ROLLOUT / 'native-manifest.json').read_bytes()
-    manifest = json.loads(current_raw)
+    manifest = historical.verify_current_stage(target)
     import base64, zlib
     fixture = ROLLOUT.parents[3] / 'tests/fixtures/native-catalog-predecessor102-0be933.json'
     retained_raw = fixture.read_bytes()
@@ -166,7 +165,7 @@ def source_owners(tmp_path_factory):
                          'ext/fabric_host_qualification.py': qualification,
                          'ext/lane_runtime.py': runtime_predecessor}
     assert {name for name in manifest if manifest[name] != historical_manifest[name]} == (
-        set(predecessor_files) | new_names
+        set(predecessor_files) | new_names | set(historical.APPLICATION_PREIMAGES)
     )
     for name, digest in manifest.items():
         assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
@@ -184,6 +183,7 @@ def source_owners(tmp_path_factory):
         payload = predecessor.read_bytes()
         assert g.digest(payload) == historical_manifest[name]
         (target / 'native-code-stage' / name).write_bytes(payload)
+    historical.restore_application_preimages(target / 'native-code-stage', historical_manifest)
     manifest = historical_manifest
     historical_raw = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
     assert g.digest(historical_raw) == retained['manifest_sha256'] == installer.SUCCESSOR_MANIFEST
@@ -307,8 +307,8 @@ def test_wrong_target_cannot_be_admitted(owner):
 
 def test_source_owner_hash_is_not_a_caller_hint(owner):
     path = owner.root / 'wrong_generation.py'
-    path.write_bytes(Path(g.__file__).read_bytes() + b'\n# extra source\n')
-    with mock.patch.object(g, '__file__', str(path)):
+    path.write_bytes(installer._HISTORICAL_LAUNCHER.read_bytes() + b'\n# extra source\n')
+    with mock.patch.object(installer, '_HISTORICAL_LAUNCHER', path):
         with pytest.raises(ValueError, match='source differs'):
             prepare(owner)
     assert not owner.successor.exists()
@@ -523,3 +523,73 @@ def test_published_successor_owner_drift_refuses_before_next_authority_edge(owne
         assert (owner.ext / 'fabric_task.py').read_bytes() == task
     assert g.current(owner.store) == before
     assert (owner.store / 'bootstrap/.launcher-successor-v1.json').exists()
+
+
+def test_installed_control_resolves_actual_completed_successor(owner, tmp_path):
+    """Construct under the installer guard, then prove the sealed read context."""
+    import importlib.util
+    import os
+    import subprocess
+    repository = ROLLOUT.parents[3]
+    control_source = repository / "integrations/studio_direct_mcp"
+    spec = importlib.util.spec_from_file_location(
+        "successor_installed_control_bundle", control_source / "control_bundle.py")
+    bundle = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bundle)
+    import hashlib
+    import stat
+    def owner_bytes():
+        result = {}
+        for path in sorted(owner.root.rglob("*")):
+            info = path.lstat()
+            value = (os.readlink(path) if path.is_symlink() else
+                     hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else
+                     "directory")
+            result[str(path.relative_to(owner.root))] = (stat.S_IMODE(info.st_mode), value)
+        return result
+    plan = prepare(owner)
+    receipt = installer.apply_successor(owner.successor)
+    before = owner_bytes()
+    pointer = g.current(owner.store)
+    # Close the real installer's audited phase through its normal teardown.
+    # Its existing registered cleanup retains this disposable tree until the
+    # installed-control read phase completes; no audit exception is added.
+    owner.tearDown()
+    home = tmp_path / "installed-home"
+    home.mkdir(mode=0o700)
+    control = home / ".local/share/studio-direct-mcp/control"
+    control.mkdir(parents=True, mode=0o700)
+    launcher = home / ".local/bin/studio-direct"
+    launcher.parent.mkdir(parents=True, mode=0o700)
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o700)
+    with mock.patch.object(bundle.Path, "home", return_value=home):
+        installed = bundle.install(source=control_source, control_root=control,
+                                   launcher=launcher)
+    assert len(installed["files"]) == 13
+    code = r"""
+import importlib.util,json,sys
+from pathlib import Path
+from types import SimpleNamespace
+root=Path(sys.argv[1])
+spec=importlib.util.spec_from_file_location("installed_successor_proof",root/"private_service.py")
+svc=importlib.util.module_from_spec(spec);sys.modules[spec.name]=svc
+spec.loader.exec_module(svc)
+args=SimpleNamespace(successor_bundle=Path(sys.argv[2]),
+    successor_plan_sha256=sys.argv[3],account="chatgpt1",operation="status")
+with svc._pin_native_context(args) as observed:
+    assert observed["phase"]=="SELECTED"
+    print(json.dumps(observed,sort_keys=True))
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", code, str(control),
+         str(owner.successor), plan["digest"]],
+        cwd=home, env={"HOME": str(home), "PATH": "/usr/bin:/bin", "LANG": "C"},
+        capture_output=True, text=True, timeout=40)
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["successor_digest"] == plan["digest"]
+    assert observed["selection"] == receipt["selection"] == pointer
+    assert observed["pool_bridge"] == plan["entries"]["pool"]["bridge"]
+    assert owner_bytes() == before
+    assert g.current(owner.store) == pointer

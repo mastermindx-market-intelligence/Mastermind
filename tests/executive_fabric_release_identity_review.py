@@ -7,6 +7,85 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # Reviewed application HTTP statuses, permission modes and bounded limits.
+    # These exact 56 spans contain no account/principal identity. Byte drift
+    # exposes the source to the original guard again.
+    'app/main.py': {
+        "sha256": 'dea65255815d2a906f1b2108e889e5fbb087389b4508ce68c179037a7457513b',
+        "sites": (
+            (624, 44, 47, 'int', '400'),
+            (661, 44, 47, 'int', '400'),
+        ),
+    },
+    'ops/native_fabric/quota_continuity/candidate/go_shim.py': {
+        "sha256": '47d1ee9df7705d8552efe26af561773d59441be2a488a09f89bef0124d4bc4b4',
+        "sites": (
+            (1466, 32, 37, 'int', '0o700'),
+            (1817, 140, 143, 'int', '900'),
+            (1819, 33, 36, 'int', '900'),
+            (1882, 22, 25, 'int', '429'),
+            (2070, 79, 82, 'int', '500'),
+            (2148, 34, 37, 'int', '400'),
+            (2163, 33, 36, 'int', '500'),
+            (2183, 34, 37, 'int', '502'),
+            (2421, 92, 95, 'int', '400'),
+            (2428, 99, 102, 'int', '503'),
+            (2431, 80, 83, 'int', '409'),
+            (2436, 91, 94, 'int', '401'),
+            (2440, 96, 99, 'int', '400'),
+            (2460, 113, 116, 'int', '512'),
+            (2464, 94, 97, 'int', '400'),
+            (2476, 106, 109, 'int', '503'),
+            (2489, 101, 104, 'int', '409'),
+            (2505, 109, 112, 'int', '400'),
+            (2508, 96, 99, 'int', '400'),
+            (2528, 118, 121, 'int', '503'),
+            (2534, 108, 111, 'int', '409'),
+            (2540, 109, 112, 'int', '409'),
+            (2551, 100, 103, 'int', '409'),
+            (2554, 103, 106, 'int', '503'),
+            (2557, 96, 99, 'int', '429'),
+            (2567, 102, 105, 'int', '503'),
+            (2575, 106, 109, 'int', '429'),
+            (2612, 103, 106, 'int', '503'),
+            (2631, 74, 77, 'int', '502'),
+            (2732, 23, 26, 'int', '400'),
+            (2805, 35, 38, 'int', '429'),
+            (2834, 37, 40, 'int', '404'),
+            (2865, 27, 30, 'int', '400'),
+            (2868, 27, 30, 'int', '400'),
+            (2871, 27, 30, 'int', '400'),
+            (2877, 31, 34, 'int', '400'),
+            (2884, 31, 34, 'int', '429'),
+        ),
+    },
+    'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
+        "sha256": 'd6705a98d6f211b38d98dc5f49514dac066cac2b2a49cc283d1d8eb910247291',
+        "sites": (
+            (555, 60, 65, 'int', '0o700'),
+        ),
+    },
+    'ops/native_fabric/quota_continuity/source/go_shim.py': {
+        "sha256": '4a41548a757f763ed5210df96aff6c7148d25d9e192cd3d849e108e1e917d100',
+        "sites": (
+            (1035, 32, 37, 'int', '0o700'),
+            (1365, 140, 143, 'int', '900'),
+            (1367, 33, 36, 'int', '900'),
+            (1430, 22, 25, 'int', '429'),
+            (1516, 79, 82, 'int', '500'),
+            (1594, 34, 37, 'int', '400'),
+            (1609, 33, 36, 'int', '500'),
+            (1629, 34, 37, 'int', '502'),
+            (1872, 23, 26, 'int', '400'),
+            (1919, 35, 38, 'int', '429'),
+            (1943, 37, 40, 'int', '404'),
+            (1974, 27, 30, 'int', '400'),
+            (1977, 27, 30, 'int', '400'),
+            (1980, 27, 30, 'int', '400'),
+            (1986, 31, 34, 'int', '400'),
+            (1993, 31, 34, 'int', '429'),
+        ),
+    },
     # Frozen GLM account-admission evidence: these are elapsed-time bounds,
     # not user identities. Whole-file hashes and exact sites fail closed on
     # any changed meaning, added identity, or modified retained traceback.
