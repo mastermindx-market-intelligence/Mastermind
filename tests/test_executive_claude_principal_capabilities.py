@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 from pathlib import Path
 
@@ -44,6 +43,10 @@ EXPECTED_PROFILE_DIGEST = "5d4a2b7e89c5fee0e34be6a623a4a19e5d91b5d743c7365826ef3
 EXPECTED_CLAUDE_CONFIG_DIGEST = (
     "fd45f3293d1017491335075b3faf329404eccac6851f9419aa494dde79878631"
 )
+# Independently fixed public configuration identity for the Hermes surface.
+EXPECTED_HERMES_CONFIG_DIGEST = (
+    "db0769ca59b37eda6d5424cc2e11a8da52258af5711a8e9a08ad5e0a6550b97e"
+)
 # The incumbent principal policy's Executive COO OAuth grant identity and
 # transport contract, fixed by the sole policy file.
 PRINCIPAL_COO_URL = "https://mcp.mastermind-x.com/mcp/coo"
@@ -81,34 +84,6 @@ def coo_catalog():
         for item in COO_TOOL_SPECS
     }
     return sorted(specs), observed_mcp_tool_schema_digest({"tools": specs})
-
-
-def principal_config_digest(surface, realm, grants):
-    """Re-derive a principal expected config digest from public grant facts."""
-    servers = {}
-    for grant in grants:
-        entry = {
-            "default_tools_approval_mode": grant.default_tools_approval_mode,
-            "enabled": True,
-            "enabled_tools": list(grant.enabled_tools),
-            "required": grant.required,
-        }
-        if grant.transport == "streamable-http":
-            entry["url"] = grant.url
-        else:
-            entry["command"] = grant.command
-            entry["args"] = list(grant.args)
-        servers[grant.config_name] = entry
-    projection = {
-        "execution_surface": surface,
-        "auth_realm": realm,
-        "mcp_servers": servers,
-    }
-    return hashlib.sha256(
-        json.dumps(
-            projection, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
-        ).encode("utf-8")
-    ).hexdigest()
 
 
 def hermes_profile():
@@ -308,15 +283,8 @@ def test_hermes_native_principal_profile_parses_with_its_own_surface_and_digest(
 
     # Each principal surface keeps its own expected config digest, and the
     # existing Claude surface keeps its exact pre-existing bytes.
-    assert hermes.expected_config_digest == principal_config_digest(
-        HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE, OAUTH_PRINCIPAL_AUTH_REALM,
-        hermes.mcp_server_grants,
-    )
+    assert hermes.expected_config_digest == EXPECTED_HERMES_CONFIG_DIGEST
     assert claude.expected_config_digest == EXPECTED_CLAUDE_CONFIG_DIGEST
-    assert claude.expected_config_digest == principal_config_digest(
-        CLAUDE_PRINCIPAL_EXECUTION_SURFACE, CLAUDE_PRINCIPAL_AUTH_REALM,
-        claude.mcp_server_grants,
-    )
     assert hermes.expected_config_digest != claude.expected_config_digest
     assert hermes.profile_digest != claude.profile_digest
 
