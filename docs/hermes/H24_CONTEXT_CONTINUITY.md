@@ -1,14 +1,14 @@
 # H24-09 — Native context and original-result continuity
 
-**Source-only delivery.** This packet provides a closed immutable manifest, a
-validator and a pure original-result recovery projection. It does not restore a
+**Source-only delivery.** This packet provides closed owner-return constructors,
+an immutable manifest, a validator and a pure original-result recovery projection. It does not restore a
 live session, admit work, change a native context, consume a result or activate a
 service. The existing host and Runtime owners remain the only acquisition and
 effect boundaries.
 
 - Packet/branch: `H24-09` / `sol/h24-09-continuity-20261106`.
 - Immutable implementation base: `b54cb10e4abdd3766c62d4088f6a576ecfe80437`.
-- Procedure pin: protected `master@88a8b103a5a69e4b4e870a184655dde9fd5875c3`,
+- Continuation procedure pin: protected `master@609bc3a3e4117fed9b656a0552cecb8b8c7e3bf1`,
   `mastermind.sol_skillpack.v1`, skillpack `1.0.1`, bootstrap major `1`.
 - Scope: the new `checkpoint_projection.py`, its new
   `test_h24_checkpoint_projection.py` and this document only.
@@ -44,6 +44,7 @@ Upstream is the pin declared in
 | [Hermes `tools/checkpoint_manager.py`](https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/tools/checkpoint_manager.py) | Filesystem snapshots/rollback in a shared shadow Git store. | Not conversation recovery; not imported, invoked or duplicated. |
 | [Native continuation projection](https://github.com/mastermindx-market-intelligence/Mastermind/blob/b54cb10e4abdd3766c62d4088f6a576ecfe80437/control_plane/native_continuation.py) | Immutable original request/binding, source/root evidence, derived operation/read/submission identifiers. Hermes direct-root request events have no Attempt; native continuation requests require their original Attempt. | Validate the original identifier derivations and preserve this distinction. No new Job/Attempt identity. |
 | [Hermes SessionBridge result](https://github.com/mastermindx-market-intelligence/Mastermind/blob/b54cb10e4abdd3766c62d4088f6a576ecfe80437/integrations/session_bridge/hermes_native.py) | Closed original request/result envelope; the public result always says `parent_consumed=False`. | Retain a digest/reference, never the raw answer. That boolean alone maps to consumption `UNKNOWN`, not a positive consumption or nonconsumption proof. |
+| [Native original-reply reader](https://github.com/mastermindx-market-intelligence/Mastermind/blob/b54cb10e4abdd3766c62d4088f6a576ecfe80437/integrations/session_bridge/native_read.py) | Authenticated original request/message join, owner-validated semantic fingerprint, text/next-step, committed reply; operation-key echo only when that selector was used. | Use the existing read reference and message fingerprint. Changing lookup form must not change result identity. A PROGRESS reply is not a Job completion or parent-consumption receipt. |
 | [Runtime original return](https://github.com/mastermindx-market-intelligence/Mastermind/blob/b54cb10e4abdd3766c62d4088f6a576ecfe80437/integrations/session_bridge/runtime_return.py) | `read_hermes` reads original admission/result without live target discovery or a submit guard, then rechecks original event/commit/principal. `_read_request` retains committed provenance after writer cleanup. | The existing `read_ref` remains the only recovery selector. Retained reads gain no new writer/target/lease requirement. |
 | [Installed SessionBridge](https://github.com/mastermindx-market-intelligence/Mastermind/blob/b54cb10e4abdd3766c62d4088f6a576ecfe80437/integrations/session_bridge/installed.py) | Dispatches original result reads by the stored request schema. | Host-owned acquisition seam; H24-09 registers no tool or alternate reader. |
 | [Runtime bounded read receipt](https://github.com/mastermindx-market-intelligence/Mastermind/blob/b54cb10e4abdd3766c62d4088f6a576ecfe80437/control_plane/executive_runtime.py) | `RuntimeReadObservationReceipt` is valid only after close/finalization. `source_identity` is request-scoped; `before/after` are same-connection `data_version` samples. | Require finalized `SAME` samples. Never use these values as a stable store identity, global event cursor or clock across requests. |
@@ -58,7 +59,31 @@ Upstream Git blob receipts: session authority
 
 ## Closed schemas and trust boundary
 
-The public source functions are:
+The owner-return construction paths are implemented in the same pure module:
+
+```python
+# Inputs are supplied by the authenticated incumbent host, after its owner reads.
+owner_facts = project_hermes_owner_facts(
+    metadata, original_result=qualified_hermes_result,
+    runtime_receipt=finalized_runtime_receipt_dict)
+manifest = build_checkpoint_from_hermes_returns(
+    metadata, original_result=qualified_hermes_result,
+    runtime_receipt=finalized_runtime_receipt_dict)
+
+native_facts = project_native_owner_facts(
+    native_metadata, original_result=qualified_native_reply,
+    runtime_receipt=finalized_runtime_receipt_dict,
+    request_message_key=original_request_message_key)
+native_manifest = build_checkpoint_from_native_returns(
+    native_metadata, original_result=qualified_native_reply,
+    runtime_receipt=finalized_runtime_receipt_dict,
+    request_message_key=original_request_message_key)
+```
+
+These constructors calculate the construction checksum and derive only the
+fields supplied by the particular owner return. They never repair a retained
+manifest or bypass `validate_checkpoint`. The lower-level API remains available
+for an already normalized full owner export:
 
 ```python
 manifest = build_checkpoint(owner_facts, summary_limit_bytes=512,
@@ -74,6 +99,70 @@ document = decision.as_dict()
 is a frozen value. Returned dictionaries are detached copies. There is no callback,
 reader, transport constructor, clock read, cache, lock, queue, restore method,
 database connection or write method in the implementation.
+
+### Host metadata: `mastermind.hermes_checkpoint_metadata.v1`
+
+Both constructors take a closed dictionary with exactly `schema`, `native`,
+`runtime`, `original`, `authority`, `source`, `context`, `parent`, `observation`.
+This is a construction input, not a new stored record, permission, service or
+public endpoint. The host first authenticates and validates its full existing
+owner returns. The constructors validate only the consumed subset and joins.
+
+| Input | Exact source and treatment |
+| --- | --- |
+| `native`, `runtime`, `authority`, `source`, `context` | Same closed groups as the facts schema below; supplied independently by the respective owners. A public answer does not supply these groups. |
+| Hermes `original` | The facts `original` group excluding `commit_status`, `admission_id`, `admission_sequence`, `admission_epoch`, `admission_generation`, `admission_status`. The constructor fills those six fields from the qualified return, and checks target, operation, read/request references, request revision and native-input digest against the supplied original metadata. |
+| Native-continuation `original` | The complete facts `original` group. Original Job/Attempt and Runtime commitment remain independently required. Hermes admission fields must all be null. A committed reply does not substitute for Runtime commitment. |
+| `parent` | Null for unavailable parent evidence, or exactly `parent_request_ref`, `parent_terminal_ref`, `parent_terminal_sha256`, `consumption_status`, `consumption_ref`, `executive_acceptance`, `acceptance_ref`. Null yields `UNKNOWN` consumption and `NOT_OBSERVED` acceptance, not a negative receipt. |
+| `observation` | Exactly `finalized`, `read_state`, `omitted_count`, `observed_at`, `valid_until`, `write_uncertainty`. Actual physical finalization must be supplied by the host; it is not inferred from receipt state. |
+| `runtime_receipt` argument | The existing `RuntimeReadObservationReceipt.to_dict()` shape: `schema`, `state`, `source_identity`, `before`, `after`. The constructor maps these to the corresponding facts fields. No receipt or generation is synthesized. |
+| Native `request_message_key` argument | The canonical original causal request-message key from the existing resolver; it must match `in_reply_to`. It is not selected from returned text. |
+
+The immutable request revision is the original **Event** digest. It must not be
+replaced with the input or request-payload digest. The public Hermes result joins
+that revision directly. The native reply wire envelope does not include it; its
+host must retain the original Runtime evidence separately.
+
+#### Return mapping and digest domains
+
+| Owner return | Construction result |
+| --- | --- |
+| Hermes `OBSERVED`, terminal admission, `answer is not None`, boolean `successful` | `RETAINED`; `result_ref` is the existing `read_ref`; digest is SHA-256 of the canonical complete public-result envelope; outcome is SUCCESS or FAILED. Empty answers and failed answers remain retained evidence. |
+| Hermes queued/started admission without answer | `PENDING`; preserve original admission and read/request references. |
+| Hermes terminal admission without answer | `UNAVAILABLE`; terminal metadata does not reconstruct a missing answer. |
+| Hermes unknown admission or absent native result | `UNKNOWN`; recovery reconciles the original request. |
+| Hermes `EFFECT_UNKNOWN` | Preserve Runtime commitment and force `write_uncertainty=EFFECT_UNKNOWN`; metadata cannot clear the native uncertainty. |
+| Hermes `REFUSED`, `UNAVAILABLE`, `NOT_SUBMITTED` | Preserve the independently returned commit marker; missing native admission yields original reconciliation. Never infer permission to resubmit. |
+| Native committed original PROGRESS reply | `RETAINED`; `result_ref` is the existing `read_ref`; `result_sha256` is the existing canonical message `fingerprint`; outcome remains UNKNOWN. Keep Runtime status and parent facts separate. |
+
+The native digest intentionally uses the semantic fingerprint already checked by
+`NativeReplyReader`. The optional `operation_key` echo and transport `primary_ts`
+do not enter that digest domain. Reacquiring the same reply by operation key and
+then read reference therefore yields identical facts. The consumed wire subset
+does not contain enough information to independently revalidate the full message
+fingerprint; the authenticated incumbent reader remains responsible for that.
+
+Hermes input is bounded to its existing 23 KiB canonical public envelope; native
+reply input to its existing 16 KiB envelope. Unicode and permitted line breaks
+are accepted at the transient text edge. Answer, completed text, next-step text
+and free-form admission outcome are dropped before manifest construction. These
+limits are separate from the complete checkpoint budget. An unknown wire schema,
+extra field, contradictory flag, wrong original join or oversized envelope fails
+with a closed error code. No generic `reply_unavailable` error is converted into
+evidence that a request or result does not exist.
+
+#### Principal relationship limit
+
+This version consumes exact Executive-principal fingerprints. The existing
+[`read_matches_original`](https://github.com/mastermindx-market-intelligence/Mastermind/blob/b54cb10e4abdd3766c62d4088f6a576ecfe80437/control_plane/installed_principal_read_binding.py)
+owner also supports an explicitly installed READ/SEND policy pair whose policy
+IDs differ. That pairing is not represented in this checkpoint facts schema.
+Such a fingerprint mismatch therefore remains refused even when the incumbent
+reader could authorize it. Do not erase policy IDs, hash only the subject, copy
+the original fingerprint over the current one, or infer a pair from a successful
+read. Supporting that additional projection variant requires an owner-qualified
+relationship export preserving both identities. The exact-principal path is
+implemented; no general policy-pair compatibility is claimed.
 
 ### Owner facts: `mastermind.hermes_checkpoint_owner_facts.v1`
 
@@ -198,9 +287,11 @@ The existing `NativeReplyWriter`/Dialogue/Wake owner retains any actual delivery
 Agent OS retains organizational continuity. H24-09 supplies no new writer for any
 of these facts.
 
-The normalized full H24-09 envelope is not yet an installed/public owner endpoint.
-Its future host composition must supply owner-authenticated facts and retain this
-artifact through an existing permitted artifact/checkpoint home. If a required
+The pure construction path now consumes the real Hermes public result, native
+original-reply result and Runtime receipt shapes. The full H24-09 envelope is
+not an installed/public owner endpoint. The authenticated host must still supply
+the remaining owner facts and retain this artifact through an existing permitted
+artifact/checkpoint home. If a required
 authority generation or finalized read receipt is not exported, withhold recovery;
 do not create a counter or assert availability from this source fixture.
 
@@ -230,6 +321,12 @@ secret/transcript exclusion, immutable copies and contradictory states.
 
 The contract test exercises the incumbent `_request_key`,
 `_hermes_operation_key`, `public_result` and `validate_public_result` functions.
+Construction fixtures also use the real `RuntimeReadObservationReceipt` and
+`NativeReplyReader`, with an in-memory transport that admits only `read_thread`.
+They prove operation-key/read-reference equivalence, correct semantic digest use,
+Unicode/empty/failed answer handling, missing authority and physical finalization,
+original joins, preserved uncertainty, and independent parent evidence. They do
+not open a socket, write a native reply or create a Runtime/native database.
 The production module imports no Runtime implementation. An AST test verifies its
 closed standard-library dependency set and absent write surface. Repeated
 evaluation runs with filesystem, socket, process and SQLite entry points blocked.
@@ -245,13 +342,18 @@ python -B -m unittest integrations.hermes_secretary.tests.test_native_dialogue_c
 git diff --cached --check
 ```
 
-Recorded source-fixture results with Python 3.12.14:
+Continuation source-fixture results with Python 3.12.14:
 
 | Command | Result |
 | --- | --- |
-| First H24 unittest command above | 75 tests, 1.364 seconds, `OK`, exit 0. |
-| Second H24 unittest command above | 75 tests, 1.406 seconds, `OK`, exit 0. |
-| Incumbent native-dialogue unittest command above | 22 tests, 0.042 seconds, `OK`, exit 0. |
+| First H24 unittest command above | 107 tests, 1.881 seconds, `OK`, exit 0. |
+| Second H24 unittest command above | 107 tests, 1.948 seconds, `OK`, exit 0. |
+| Incumbent native-dialogue unittest command above | 22 tests, 0.064 seconds, `OK`, exit 0. |
+
+The initial source head `bd7f3288ea8ae98227233ea354f3f0e312c3f825` had 75 H24
+cases (two passing runs) and 22 passing native-dialogue cases. This continuation
+adds 32 focused owner-return composition and contract cases; the accepted original
+fixtures remain in place.
 
 The second H24 run is an intentional no-write repeat. This source-only proof
 does not exercise a live gateway restart, real parent conversation, provider,
@@ -259,7 +361,7 @@ service installation or production restore. Exact terminal counts/results and
 the owned diff checksum are recorded in the parent checkpoint for the published
 head; no CI/production result is inferred from these source fixtures.
 
-The attempted combined adjacent-suite command also included
+The initial delivery's attempted combined adjacent-suite command also included
 `integrations.hermes_runtime.tests.test_native_session_control`; collection of
 that existing module was unavailable because this Python environment has no
 `pytest`. No dependency was installed. The incumbent native-dialogue suite is
@@ -275,3 +377,31 @@ python -B -m unittest integrations.hermes_secretary.tests.test_native_dialogue_c
 It exited 1 with `ModuleNotFoundError: No module named 'pytest'`; unittest
 reported 23 tests including one loader error. That existing native-session-control
 suite is not claimed as validated. No hosted CI run or production proof is claimed.
+
+## Continuation and parent consumption
+
+The Chairman's continuation retains the same H24-09 source branch, original base
+and three-file ownership. The added implementation closes the manual construction
+gap: both real owner return shapes now have explicit pure fact and manifest
+constructors. No endpoint, session owner, result store or acquisition loop is added.
+Direct implementation retained the existing builder for the cross-owner contract
+judgment and lower whole-cycle overhead. An optional native reasoning collaborator
+provided contract advice only; it performed no code, test, provider or external
+write labor, and its return was consumed with ACCEPTED/STOP.
+
+The parent [PR #2120](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2120)
+was observed merged at `28a894186eb56654ab4e833eb11a183d2eed46ae`. Its former
+comparison branch `sol/web-meta-ceo-secretary-native-parent-20261106-c18-01`
+returned GitHub `NOT_FOUND`. Comparing the initial H24-09 head with protected
+`609bc3a3e4117fed9b656a0552cecb8b8c7e3bf1` still includes 98 inherited foundation
+commits beyond this packet, because the histories differ. The immutable
+`b54cb10e4abdd3766c62d4088f6a576ecfe80437`-to-H24-09-head comparison remains the
+authoritative three-file delivery. No replacement integration branch or broad
+master-targeting PR was created to disguise that history.
+
+The receiving integration action is to consume the three owned paths and supply
+authenticated metadata from the unchanged C31, SessionBridge/Runtime and parent
+owners above. Retention belongs to an existing permitted artifact home. The
+exact-principal projection is built and source-tested; installed policy-pair
+projection, missing live owner metadata, host registration, service activation and
+production/browser proof remain outside this packet's permitted source surface.

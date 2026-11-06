@@ -15,6 +15,7 @@ import re
 
 
 FACTS_SCHEMA = "mastermind.hermes_checkpoint_owner_facts.v1"
+METADATA_SCHEMA = "mastermind.hermes_checkpoint_metadata.v1"
 MANIFEST_SCHEMA = "mastermind.hermes_checkpoint_projection.v1"
 RECOVERY_SCHEMA = "mastermind.hermes_checkpoint_recovery.v1"
 MAX_FACTS_BYTES = 24 * 1024
@@ -62,6 +63,25 @@ _MANIFEST_KEYS = frozenset({"schema", "facts", "summary", "omissions"})
 _SUMMARY_KEYS = frozenset({"text", "limit_bytes", "truncated", "omitted_bytes"})
 _OMITTED_CONTENT = ("RAW_PROMPT", "TRANSCRIPT", "RAW_RESULT", "SECRETS",
                     "FILESYSTEM_SNAPSHOT", "EXECUTION_AUTHORITY")
+_HERMES_RESULT_SCHEMA = "mastermind.session_bridge.hermes_secretary_result.v1"
+_HERMES_RESULT_BYTES = 23 * 1024
+_HERMES_RESULT_KEYS = frozenset({"schema", "target_ref", "operation_key", "read_ref",
+    "request_ref", "request_revision", "native_input_sha256", "commit_started",
+    "native_status", "admission", "answer", "successful", "parent_consumed"})
+_ADMISSION_KEYS = frozenset({"admission_id", "sequence", "status", "outcome",
+    "authority_epoch", "execution_generation"})
+_ADMISSION_FACT_KEYS = frozenset({"commit_status", "admission_id", "admission_sequence",
+    "admission_epoch", "admission_generation", "admission_status"})
+_RESULT_FACT_KEYS = frozenset({"result_status", "result_ref", "result_sha256", "result_outcome"})
+_OBSERVATION_FACT_KEYS = frozenset({"receipt_schema", "receipt_state", "source_identity",
+    "generation_before", "generation_after"})
+_RECEIPT_KEYS = frozenset({"schema", "state", "source_identity", "before", "after"})
+_NATIVE_RESULT_SCHEMA = "mastermind.native_reply_read.v1"
+_NATIVE_RESULT_KEYS = frozenset({"schema", "read_ref", "request_ref", "in_reply_to",
+    "message_key", "fingerprint", "text", "next_step", "primary_ts",
+    "reply_committed", "parent_consumed"})
+_NATIVE_RESULT_BYTES = 16 * 1024
+_NATIVE_REFERENCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}\Z")
 
 
 class CheckpointError(ValueError):
@@ -325,6 +345,196 @@ def _omissions(facts: dict) -> dict:
             "event_history_included": False}
 
 
+def _owner_text(value, *, answer: bool = False) -> None:
+    """Validate bounded ephemeral owner text, never include it in the manifest."""
+    limit = 64 * 1024 if answer else 1024
+    _require(type(value) is str and len(value) <= limit, "INVALID_OWNER_TEXT")
+    try:
+        encoded = value.encode("utf-8", "strict")
+    except UnicodeError:
+        raise CheckpointError("INVALID_OWNER_TEXT") from None
+    _require((not answer or len(encoded) <= limit) and all(
+        ord(c) >= 32 or (answer and c in "\n\r\t") for c in value), "INVALID_OWNER_TEXT")
+    _require(answer or "\x7f" not in value, "INVALID_OWNER_TEXT")
+
+
+def _hermes_return_subset(value: dict) -> tuple[dict, str]:
+    """Decode this consumed v1 subset; authenticate/qualify at the owner first.
+
+    No owner validator or transport is imported. Closed field/byte checks keep
+    the projection pure; contract fixtures compare with the incumbent decoder.
+    The answer and free-form outcome are only validated and hashed, then dropped.
+    """
+    _require(type(value) is dict and len(value) == len(_HERMES_RESULT_KEYS)
+             and all(type(k) is str for k in value), "INVALID_OWNER_RESULT")
+    _shape(value, _HERMES_RESULT_KEYS)
+    admission = value["admission"]
+    if admission is not None:
+        _require(type(admission) is dict and len(admission) == len(_ADMISSION_KEYS)
+                 and all(type(k) is str for k in admission),
+                 "INVALID_OWNER_ADMISSION")
+        _shape(admission, _ADMISSION_KEYS)
+        if admission["outcome"] is not None:
+            _owner_text(admission["outcome"])
+    answer = value["answer"]
+    if answer is not None:
+        _owner_text(answer, answer=True)
+    subset = {k: v for k, v in value.items() if k != "answer"}
+    if admission is not None:
+        subset["admission"] = {k: v for k, v in admission.items() if k != "outcome"}
+    _plain(subset)
+    _require(value["schema"] == _HERMES_RESULT_SCHEMA, "UNSUPPORTED_OWNER_RESULT_SCHEMA")
+    _require(type(value["commit_started"]) is bool and value["parent_consumed"] is False,
+             "INVALID_OWNER_RESULT_FLAGS")
+    status = value["native_status"]
+    if status is not None:
+        _enum(status, {"OBSERVED", "ADMITTED", "NOT_SUBMITTED", "REFUSED",
+                       "EFFECT_UNKNOWN", "UNAVAILABLE"})
+    if not value["commit_started"]:
+        _require(all(value[k] is None for k in
+            ("native_status", "admission", "answer", "successful")), "UNCOMMITTED_RESULT")
+    if status in {"OBSERVED", "ADMITTED"}:
+        _require(admission is not None, "PARTIAL_ADMISSION")
+        _enum(admission["status"], {"queued", "started", "unknown", "terminal"})
+        _ref(admission["admission_id"])
+        _number(admission["sequence"], 1)
+        _number(admission["authority_epoch"], 1)
+        _number(admission["execution_generation"], nullable=True)
+    else:
+        _require(admission is None, "PARTIAL_ADMISSION")
+    if answer is not None:
+        _require(status == "OBSERVED" and admission["status"] == "terminal"
+                 and type(value["successful"]) is bool, "NONTERMINAL_RESULT")
+    else:
+        _require(value["successful"] is None, "RESULT_OUTCOME_WITHOUT_RESULT")
+    encoded = _canonical(value)
+    _require(len(encoded) <= _HERMES_RESULT_BYTES, "OWNER_RESULT_OVER_BUDGET")
+    subset["answer_available"] = answer is not None
+    return subset, hashlib.sha256(encoded).hexdigest()
+
+
+def _owner_metadata(metadata: dict, kind: str, original_keys) -> None:
+    _plain(metadata)
+    _shape(metadata, {"schema", "native", "runtime", "original", "authority",
+                      "source", "context", "parent", "observation"})
+    _require(metadata["schema"] == METADATA_SCHEMA, "UNSUPPORTED_METADATA_SCHEMA")
+    for name in ("native", "runtime", "authority", "source", "context"):
+        _shape(metadata[name], _SHAPES[name])
+    _shape(metadata["original"], original_keys)
+    _require(metadata["original"]["kind"] == kind, "UNSUPPORTED_OWNER_RETURN_KIND")
+    _shape(metadata["observation"], _SHAPES["observation"] - _OBSERVATION_FACT_KEYS)
+    if metadata["parent"] is not None:
+        _shape(metadata["parent"], _SHAPES["return"] - _RESULT_FACT_KEYS)
+
+
+def _owner_observation(metadata: dict, runtime_receipt: dict) -> dict:
+    _plain(runtime_receipt)
+    _shape(runtime_receipt, _RECEIPT_KEYS)
+    return {**metadata["observation"], "receipt_schema": runtime_receipt["schema"],
+        "receipt_state": runtime_receipt["state"], "source_identity": runtime_receipt["source_identity"],
+        "generation_before": runtime_receipt["before"], "generation_after": runtime_receipt["after"]}
+
+
+def _owner_parent(metadata: dict) -> dict:
+    if metadata["parent"] is not None:
+        return dict(metadata["parent"])
+    return {"parent_request_ref": metadata["original"]["request_ref"], "parent_terminal_ref": None,
+        "parent_terminal_sha256": None, "consumption_status": "UNKNOWN",
+        "consumption_ref": None, "executive_acceptance": "NOT_OBSERVED", "acceptance_ref": None}
+
+
+def _assembled_facts(metadata: dict, original: dict, result: dict, observation: dict) -> dict:
+    facts = {"schema": FACTS_SCHEMA, **{name: metadata[name] for name in
+        ("native", "runtime", "authority", "source", "context")}, "original": original,
+        "return": result, "observation": observation}
+    facts["snapshot_sha256"] = _digest(facts)
+    return _validate_facts(facts)
+
+
+def project_hermes_owner_facts(metadata: dict, *, original_result: dict,
+                              runtime_receipt: dict) -> dict:
+    """Assemble a detached metadata export from qualified existing owner returns.
+
+    The host supplies original-scope/authority facts, not raw prompts or profiles.
+    ``runtime_receipt`` is the finalized Runtime receipt's existing to_dict shape;
+    successful physical finalization is separately required in metadata. Missing
+    authority and parent evidence stay missing. This is not an authentication
+    endpoint, reader, admission, persistence operation or new owner receipt.
+    """
+    _owner_metadata(metadata, "HERMES_SECRETARY", _SHAPES["original"] - _ADMISSION_FACT_KEYS)
+    observation = _owner_observation(metadata, runtime_receipt)
+    returned, result_digest = _hermes_return_subset(original_result)
+    original = dict(metadata["original"])
+    for key in ("target_ref", "operation_key", "read_ref", "request_ref",
+                "request_revision", "native_input_sha256"):
+        _require(original[key] == returned[key], "OWNER_RESULT_ORIGINAL_MISMATCH")
+    admission = returned["admission"]
+    original.update(commit_status="COMMITTED" if returned["commit_started"] else "NOT_COMMITTED",
+        admission_id=None if admission is None else admission["admission_id"],
+        admission_sequence=None if admission is None else admission["sequence"],
+        admission_epoch=None if admission is None else admission["authority_epoch"],
+        admission_generation=None if admission is None else admission["execution_generation"],
+        admission_status=None if admission is None else admission["status"])
+    if returned["answer_available"]:
+        status = "RETAINED"
+    elif admission is not None and admission["status"] in {"queued", "started"}:
+        status = "PENDING"
+    elif returned["native_status"] in {None, "EFFECT_UNKNOWN"} or (
+            admission is not None and admission["status"] == "unknown"):
+        status = "UNKNOWN"
+    else:
+        status = "UNAVAILABLE"
+    result = {**_owner_parent(metadata), "result_status": status,
+        "result_ref": returned["read_ref"] if status == "RETAINED" else None,
+        "result_sha256": result_digest if status == "RETAINED" else None,
+        "result_outcome": ("SUCCESS" if returned["successful"] else "FAILED")
+                          if status == "RETAINED" else "UNKNOWN"}
+    if returned["native_status"] == "EFFECT_UNKNOWN":
+        observation["write_uncertainty"] = "EFFECT_UNKNOWN"
+    return _assembled_facts(metadata, original, result, observation)
+
+
+def project_native_owner_facts(metadata: dict, *, original_result: dict,
+                              runtime_receipt: dict, request_message_key: str) -> dict:
+    """Consume an authenticated NativeReplyReader result without invoking it.
+
+    Its fingerprint is the existing semantic message digest; an optional lookup
+    echo or transport timestamp is not a new result identity. A committed PROGRESS
+    reply proves no Job completion, terminal parent return, consumption or success.
+    The owner must already have checked the full canonical message fingerprint.
+    """
+    _owner_metadata(metadata, "NATIVE_CONTINUATION", _SHAPES["original"])
+    observation = _owner_observation(metadata, runtime_receipt)
+    original = dict(metadata["original"])
+    _require(all(original[key] is None for key in _ADMISSION_FACT_KEYS - {"commit_status"}),
+             "INVALID_NATIVE_REQUEST_METADATA")
+    value = original_result
+    _require(type(value) is dict and len(value) in {len(_NATIVE_RESULT_KEYS), len(_NATIVE_RESULT_KEYS) + 1}
+             and all(type(k) is str for k in value), "INVALID_OWNER_RESULT")
+    _shape(value, _NATIVE_RESULT_KEYS | ({"operation_key"} if "operation_key" in value else set()))
+    for key in ("text", "next_step"):
+        _owner_text(value[key], answer=True)
+    subset = {key: item for key, item in value.items() if key not in {"text", "next_step"}}
+    _plain(subset)
+    _require(value["schema"] == _NATIVE_RESULT_SCHEMA, "UNSUPPORTED_OWNER_RESULT_SCHEMA")
+    _require(value["reply_committed"] is True and value["parent_consumed"] is False,
+             "INVALID_OWNER_RESULT_FLAGS")
+    for key in ("read_ref", "request_ref", "in_reply_to", "message_key"):
+        _ref(value[key], pattern=_NATIVE_REFERENCE)
+    _ref(request_message_key, pattern=_NATIVE_REFERENCE)
+    _hash(value["fingerprint"])
+    _require(type(value["primary_ts"]) is str and re.fullmatch(
+        r"[0-9]{10,16}\.[0-9]{6}", value["primary_ts"]) is not None, "INVALID_OWNER_TIMESTAMP")
+    _require(len(_canonical(value)) <= _NATIVE_RESULT_BYTES, "OWNER_RESULT_OVER_BUDGET")
+    _require(value["read_ref"] == original["read_ref"] and value["request_ref"] == original["request_ref"]
+             and value["in_reply_to"] == request_message_key, "OWNER_RESULT_ORIGINAL_MISMATCH")
+    if "operation_key" in value:
+        _require(value["operation_key"] == original["operation_key"], "OWNER_RESULT_ORIGINAL_MISMATCH")
+    result = {**_owner_parent(metadata), "result_status": "RETAINED", "result_ref": value["read_ref"],
+              "result_sha256": value["fingerprint"], "result_outcome": "UNKNOWN"}
+    return _assembled_facts(metadata, original, result, observation)
+
+
 @dataclass(frozen=True, slots=True)
 class CheckpointManifest:
     """Canonical immutable bytes. The existing owner chooses where to retain them."""
@@ -354,6 +564,27 @@ def build_checkpoint(facts: dict, *, summary_limit_bytes: int = 512,
     encoded = _canonical(result)
     _require(len(encoded) <= context_budget_bytes, "CONTEXT_BUDGET_EXCEEDED")
     return CheckpointManifest(encoded)
+
+
+def build_checkpoint_from_hermes_returns(metadata: dict, *, original_result: dict,
+                                       runtime_receipt: dict, summary_limit_bytes: int = 512,
+                                       context_budget_bytes: int = MAX_CONTEXT_BYTES) -> CheckpointManifest:
+    """Build a compact manifest; retain no raw owner answer or text in the return."""
+    facts = project_hermes_owner_facts(metadata, original_result=original_result,
+                                     runtime_receipt=runtime_receipt)
+    return build_checkpoint(facts, summary_limit_bytes=summary_limit_bytes,
+                            context_budget_bytes=context_budget_bytes)
+
+
+def build_checkpoint_from_native_returns(metadata: dict, *, original_result: dict,
+                                       runtime_receipt: dict, request_message_key: str,
+                                       summary_limit_bytes: int = 512,
+                                       context_budget_bytes: int = MAX_CONTEXT_BYTES) -> CheckpointManifest:
+    """Build a native original-reply checkpoint without keeping reply prose."""
+    facts = project_native_owner_facts(metadata, original_result=original_result,
+        runtime_receipt=runtime_receipt, request_message_key=request_message_key)
+    return build_checkpoint(facts, summary_limit_bytes=summary_limit_bytes,
+                            context_budget_bytes=context_budget_bytes)
 
 
 def _unique(pairs) -> dict:

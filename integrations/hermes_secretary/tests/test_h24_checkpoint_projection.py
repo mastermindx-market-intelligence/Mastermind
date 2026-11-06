@@ -112,6 +112,107 @@ def restart(value):
     return seal(value)
 
 
+def owner_returns(*, status="OBSERVED", admission_status="terminal",
+                  answer="Original owner answer.", successful=True, commit_started=True):
+    """Exercise real owner value constructors; no reader, DB or native service."""
+    from control_plane.executive_runtime import RuntimeReadObservationReceipt
+    from integrations.session_bridge.hermes_native import public_result, validate_public_result
+
+    source = facts()
+    original = source["original"]
+    event_value = {"event_id": 2, "command_id": original["request_ref"]}
+    event = SimpleNamespace(command_id=original["request_ref"], to_dict=lambda: event_value)
+    binding = {"profile_id": "/fixture/mmsecretary", "session_id": "native-fixture-001"}
+    native = None
+    if status is not None:
+        native = {"schema": "mastermind.hermes_secretary_native_control/v1", "status": status}
+        if status in {"OBSERVED", "ADMITTED"}:
+            native["admission"] = {"admission_id": original["admission_id"], "ref": binding,
+                "sequence": 1, "status": admission_status, "outcome": "completed",
+                "authority_epoch": 7, "execution_generation": 3}
+            if status == "OBSERVED" and answer is not None:
+                native.update(answer=answer, successful=successful)
+    returned = public_result(event, {**original, "binding": binding},
+                             commit_started=commit_started, native_result=native)
+    assert validate_public_result(returned) == returned
+    source["original"]["request_revision"] = returned["request_revision"]
+    metadata = {"schema": projection.METADATA_SCHEMA,
+        **{key: source[key] for key in ("native", "runtime", "authority", "source", "context")},
+        "original": {key: source["original"][key] for key in (
+            "kind", "principal_sha256", "target_ref", "operation_key", "request_ref",
+            "request_revision", "read_ref", "input_sha256", "native_input_sha256",
+            "binding_sha256", "submission_id")},
+        "parent": None,
+        "observation": {"finalized": True, "read_state": "CURRENT", "omitted_count": 0,
+            "observed_at": NOW - 1, "valid_until": NOW + 30, "write_uncertainty": "NONE"}}
+    receipt = RuntimeReadObservationReceipt(schema="mastermind.runtime_read_observation.v1",
+        state="SAME", source_identity="f" * 32, before=51, after=51).to_dict()
+    return metadata, returned, receipt
+
+
+def native_owner_returns(*, by_operation=False):
+    """Use the real reader with an in-memory read-only transport fixture."""
+    import asyncio
+    from control_plane.executive_runtime import RuntimeReadObservationReceipt
+    from control_plane.principal_projection import neutral_principal_projection
+    from integrations.session_bridge.native_read import NativeReplyReader, NativeReplyReadBinding
+    from integrations.slack_agent_dialogue.contract_v2 import MESSAGE_SCHEMA_V2, build_message_v2
+    from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
+
+    source = child_facts()
+    original = source["original"]
+    principal = neutral_principal_projection(policy_id="h24-read", issuer="https://auth.example.test/",
+        issuer_digest=hashlib.sha256(b"https://auth.example.test/").hexdigest(),
+        resource="https://executive.example.test/mcp", subject_digest="1" * 64, client_ref="2" * 64,
+        scopes=("mastermind.executive.read",), issued_at=NOW - 60, expires_at=NOW + 60, jti_digest=None)
+    identity = {key: getattr(principal, key) for key in
+                ("policy_id", "issuer_digest", "resource", "subject_digest", "client_ref")}
+    principal_hash = digest({"field": "executive_principal", "value": identity})
+    source["authority"]["principal_sha256"] = original["principal_sha256"] = principal_hash
+    request_key = "asd-executive-continue-h24-0001"
+    applies = {"kind": "executive_attempt", "job_id": "JOB-002", "attempt_id": "ATT-001", "worker_id": "W-001"}
+    context = DialogueContextV2(work_ref=source["runtime"]["work_ref"],
+        commission_ref={"repository": source["source"]["repository"], "commit": BASE,
+            "path": source["source"]["path"], "content_sha256": source["source"]["sha256"]},
+        session_ref="asd-session-h24-continuity-001", operation_key=original["operation_key"],
+        watch_mode="turn_watch_v1", actor_ref={**applies, "kind": "worker_attempt"}, applies_to=applies)
+    normalized = context.normalized()
+    message = build_message_v2({"schema": MESSAGE_SCHEMA_V2,
+        "message_key": "asd-native-reply-h24-0001", "message_type": "PROGRESS",
+        **{key: normalized[key] for key in ("work_ref", "commission_ref", "session_ref", "actor_ref", "applies_to")},
+        "reply_to_message_key": request_key, "summary": "Synthetic original child reply.",
+        "body": {"stage": "message_reply", "completed": "Original child evidence \u03b1.",
+                 "next": "Await the parent's bounded decision."},
+        "evidence_refs": [], "requires_response": False, "created_at": "2026-11-06T00:00:00Z"})
+    thread_ts = "1793923200.000001"
+    binding = NativeReplyReadBinding(authorized_principal=principal, read_ref=original["read_ref"],
+        request_ref=original["request_ref"], request_message_key=request_key, thread_ts=thread_ts,
+        reply_message_key=message["message_key"], reply_fingerprint=message["fingerprint"],
+        context=context, authorization_revision="authorization-h24-001")
+    resolver = SimpleNamespace(resolve_read=lambda **kwargs: binding,
+                               resolve_operation_read_ref=lambda **kwargs: original["read_ref"])
+    calls = []
+
+    async def read_service(path, payload):
+        assert payload["operation"] == "read_thread"
+        calls.append(payload["operation"])
+        return {"ok": True, "result": {"thread_ts": thread_ts, "historical_messages": [],
+            "mutated_count": 0, "messages": [{"message": message, "primary_ts": "1793923201.000001"}]}}
+
+    reader = NativeReplyReader(resolver, socket_path=Path("/fixture/never-opened.sock"),
+        service_call=read_service, clock=lambda: NOW, projected_principal=True)
+    selector = {"operation_key": original["operation_key"]} if by_operation else {"read_ref": original["read_ref"]}
+    returned = asyncio.run(reader(principal, selector))
+    metadata = {"schema": projection.METADATA_SCHEMA,
+        **{key: source[key] for key in ("native", "runtime", "authority", "source", "context", "original")},
+        "parent": None, "observation": {"finalized": True, "read_state": "CURRENT", "omitted_count": 0,
+            "observed_at": NOW - 1, "valid_until": NOW + 30, "write_uncertainty": "NONE"}}
+    receipt = RuntimeReadObservationReceipt(schema="mastermind.runtime_read_observation.v1",
+        state="SAME", source_identity="f" * 32, before=51, after=51).to_dict()
+    assert calls == ["read_thread"]
+    return metadata, returned, receipt, request_key
+
+
 class CheckpointProjectionTests(unittest.TestCase):
     def setUp(self):
         self.saved = facts()
@@ -699,6 +800,366 @@ class CheckpointProjectionTests(unittest.TestCase):
         self.assertNotIn(native["answer"].encode(), manifest.canonical_json)
         self.assertNotIn(binding["profile_id"].encode(), manifest.canonical_json)
         self.assertEqual(self.recover(normalized, manifest=manifest).state, "RECOVER_ORIGINAL_RESULT")
+
+
+class OwnerReturnCompositionTests(unittest.TestCase):
+    def compose(self, metadata, returned, receipt):
+        return projection.project_hermes_owner_facts(metadata, original_result=returned,
+                                                    runtime_receipt=receipt)
+
+    def recover(self, metadata, returned, receipt):
+        current = self.compose(metadata, returned, receipt)
+        manifest = projection.build_checkpoint_from_hermes_returns(metadata,
+            original_result=returned, runtime_receipt=receipt)
+        return projection.project_recovery(manifest, expected_sha256=manifest.sha256,
+                                           before=current, after=current, now=NOW)
+
+    def test_actual_owner_returns_construct_checkpoint_without_manual_sealing(self):
+        metadata, returned, receipt = owner_returns()
+        value = self.compose(metadata, returned, receipt)
+        self.assertEqual(value["return"]["result_ref"], returned["read_ref"])
+        self.assertEqual(value["return"]["result_sha256"], digest(returned))
+        self.assertEqual(value["snapshot_sha256"], seal(value)["snapshot_sha256"])
+        self.assertEqual(value["return"]["consumption_status"], "UNKNOWN")
+        self.assertEqual(value["return"]["executive_acceptance"], "NOT_OBSERVED")
+        self.assertEqual(self.recover(metadata, returned, receipt).state, "RECOVER_ORIGINAL_RESULT")
+
+    def test_consumed_hermes_wire_contract_matches_existing_owner(self):
+        from integrations.session_bridge import hermes_native
+        self.assertEqual(projection._HERMES_RESULT_SCHEMA, hermes_native.RESULT_SCHEMA)
+        self.assertEqual(projection._HERMES_RESULT_KEYS, hermes_native._RESULT_FIELDS)
+        self.assertEqual(projection._ADMISSION_KEYS, hermes_native._ADMISSION_FIELDS)
+        self.assertEqual(projection._HERMES_RESULT_BYTES, hermes_native.MAX_PUBLIC_RESULT_BYTES)
+
+    def test_raw_unicode_answer_and_freeform_outcome_never_enter_manifest(self):
+        metadata, returned, receipt = owner_returns(answer="Private answer \u03b1\n\t\U0001f600")
+        returned["admission"]["outcome"] = "private-outcome-\u03b2"
+        manifest = projection.build_checkpoint_from_hermes_returns(metadata,
+            original_result=returned, runtime_receipt=receipt)
+        text = manifest.canonical_json.decode()
+        for fragment in ("Private answer", "private-outcome", "/fixture/mmsecretary", "successful"):
+            self.assertNotIn(fragment, text)
+        self.assertEqual(manifest.as_dict()["facts"]["return"]["result_sha256"], digest(returned))
+
+    def test_empty_answer_is_retained_and_false_success_is_failed_evidence(self):
+        for answer, successful in (("", True), ("failure evidence", False)):
+            with self.subTest(answer=answer, successful=successful):
+                metadata, returned, receipt = owner_returns(answer=answer, successful=successful)
+                value = self.compose(metadata, returned, receipt)
+                self.assertEqual(value["return"]["result_status"], "RETAINED")
+                self.assertEqual(value["return"]["result_outcome"], "SUCCESS" if successful else "FAILED")
+                self.assertEqual(self.recover(metadata, returned, receipt).state, "RECOVER_ORIGINAL_RESULT")
+
+    def test_queued_and_started_result_remain_pending_original_reads(self):
+        for status in ("ADMITTED", "OBSERVED"):
+            for admission_status in ("queued", "started"):
+                with self.subTest(status=status, admission_status=admission_status):
+                    inputs = owner_returns(status=status, admission_status=admission_status, answer=None)
+                    value = self.compose(*inputs)
+                    self.assertEqual(value["return"]["result_status"], "PENDING")
+                    self.assertIsNone(value["return"]["result_sha256"])
+                    self.assertEqual(self.recover(*inputs).state, "AWAIT_ORIGINAL_RESULT")
+
+    def test_terminal_without_retained_answer_does_not_fabricate_result(self):
+        inputs = owner_returns(answer=None)
+        value = self.compose(*inputs)
+        self.assertEqual(value["return"]["result_status"], "UNAVAILABLE")
+        self.assertIsNone(value["return"]["result_ref"])
+        self.assertEqual(self.recover(*inputs).reason, "RETAINED_RESULT_UNAVAILABLE")
+
+    def test_unknown_or_missing_admission_is_original_reconciliation(self):
+        cases = [owner_returns(status=None),
+                 owner_returns(admission_status="unknown", answer=None)]
+        for inputs in cases:
+            self.assertEqual(self.compose(*inputs)["return"]["result_status"], "UNKNOWN")
+            self.assertEqual(self.recover(*inputs).state, "RECONCILE_ORIGINAL")
+
+    def test_owner_uncertainty_cannot_be_cleared_by_metadata(self):
+        inputs = owner_returns(status="EFFECT_UNKNOWN")
+        self.assertEqual(self.compose(*inputs)["observation"]["write_uncertainty"], "EFFECT_UNKNOWN")
+        self.assertEqual(self.recover(*inputs).reason, "WRITE_EFFECT_UNCERTAIN")
+        for uncertainty in ("PENDING_SUBMIT", "EFFECT_UNKNOWN"):
+            metadata, returned, receipt = owner_returns()
+            metadata["observation"]["write_uncertainty"] = uncertainty
+            self.assertEqual(self.compose(metadata, returned, receipt)["observation"]["write_uncertainty"],
+                             uncertainty)
+            self.assertEqual(self.recover(metadata, returned, receipt).state, "RECONCILE_ORIGINAL")
+
+    def test_uncommitted_or_refused_return_cannot_authorize_resubmission(self):
+        cases = [owner_returns(status=None, commit_started=False)]
+        cases += [owner_returns(status=status) for status in ("NOT_SUBMITTED", "REFUSED", "UNAVAILABLE")]
+        for inputs in cases:
+            outcome = self.recover(*inputs)
+            self.assertEqual(outcome.state, "RECONCILE_ORIGINAL")
+            self.assertFalse(outcome.can_write)
+            self.assertFalse(outcome.can_resume_execution)
+
+    def test_all_original_result_joins_are_checked(self):
+        for key in ("target_ref", "operation_key", "read_ref", "request_ref",
+                    "request_revision", "native_input_sha256"):
+            with self.subTest(key=key):
+                metadata, returned, receipt = owner_returns()
+                returned[key] = "foreign"
+                with self.assertRaisesRegex(projection.CheckpointError, "OWNER_RESULT_ORIGINAL_MISMATCH"):
+                    self.compose(metadata, returned, receipt)
+
+    def test_parent_consumption_requires_separate_owner_metadata(self):
+        metadata, returned, receipt = owner_returns()
+        metadata["parent"] = {"parent_request_ref": returned["request_ref"],
+            "parent_terminal_ref": "existing-terminal", "parent_terminal_sha256": "e" * 64,
+            "consumption_status": "CONSUMED", "consumption_ref": "existing-consumption",
+            "executive_acceptance": "NOT_OBSERVED", "acceptance_ref": None}
+        self.assertIs(returned["parent_consumed"], False)
+        self.assertEqual(self.recover(metadata, returned, receipt).state, "ALREADY_CONSUMED")
+        metadata["parent"]["parent_request_ref"] = "foreign"
+        with self.assertRaisesRegex(projection.CheckpointError, "WRONG_PARENT"):
+            self.compose(metadata, returned, receipt)
+
+    def test_incomplete_or_invented_parent_receipt_is_refused(self):
+        metadata, returned, receipt = owner_returns()
+        metadata["parent"] = {"consumption_status": "CONSUMED"}
+        with self.assertRaisesRegex(projection.CheckpointError, "INVALID_FIELDS"):
+            self.compose(metadata, returned, receipt)
+        returned["parent_consumed"] = True
+        metadata["parent"] = None
+        with self.assertRaisesRegex(projection.CheckpointError, "INVALID_OWNER_RESULT_FLAGS"):
+            self.compose(metadata, returned, receipt)
+
+    def test_no_authority_generation_or_receipt_is_invented(self):
+        metadata, returned, receipt = owner_returns()
+        metadata["authority"]["generation"] = None
+        self.assertIsNone(self.compose(metadata, returned, receipt)["authority"]["generation"])
+        self.assertEqual(self.recover(metadata, returned, receipt).reason, "AUTHORITY_GENERATION_UNAVAILABLE")
+        metadata["authority"]["generation"] = 11
+        receipt.update(state="UNKNOWN", source_identity=None, before=None, after=None)
+        self.assertEqual(self.recover(metadata, returned, receipt).reason, "RUNTIME_OBSERVATION_UNQUALIFIED")
+
+    def test_same_receipt_does_not_prove_physical_finalization(self):
+        metadata, returned, receipt = owner_returns()
+        metadata["observation"]["finalized"] = False
+        self.assertEqual(self.recover(metadata, returned, receipt).reason, "OBSERVATION_NOT_FINALIZED")
+
+    def test_read_revocation_and_policy_fingerprint_difference_are_not_erased(self):
+        metadata, returned, receipt = owner_returns()
+        metadata["authority"]["read_permitted"] = False
+        outcome = self.recover(metadata, returned, receipt)
+        self.assertEqual(outcome.reason, "READ_AUTHORITY_UNAVAILABLE")
+        self.assertIsNone(outcome.result_ref)
+        metadata["authority"]["read_permitted"] = True
+        metadata["authority"]["principal_sha256"] = "0" * 64
+        self.assertEqual(self.recover(metadata, returned, receipt).reason, "FOREIGN_PRINCIPAL")
+
+    def test_actual_owner_returns_support_restart_and_compaction_without_new_request(self):
+        metadata, returned, receipt = owner_returns()
+        saved = projection.build_checkpoint_from_hermes_returns(metadata,
+            original_result=returned, runtime_receipt=receipt)
+        metadata["native"].update(instance_sha256="0" * 64, authority_epoch=8)
+        metadata["context"].update(message_checkpoint_ref="native-message-002",
+            message_checkpoint_sha256="d" * 64, compaction_generation=1)
+        receipt.update(source_identity="0" * 32, before=0, after=0)
+        current = self.compose(metadata, returned, receipt)
+        outcome = projection.project_recovery(saved, expected_sha256=saved.sha256,
+            before=current, after=current, now=NOW)
+        self.assertEqual(outcome.state, "RECOVER_ORIGINAL_RESULT")
+        self.assertTrue(outcome.gateway_restarted)
+        self.assertTrue(outcome.context_compacted)
+        self.assertEqual(outcome.request_ref, returned["request_ref"])
+        self.assertEqual(current["original"]["admission_epoch"], 7)
+
+    def test_changed_owner_answer_after_checkpoint_is_not_the_retained_original(self):
+        metadata, returned, receipt = owner_returns()
+        saved = projection.build_checkpoint_from_hermes_returns(metadata,
+            original_result=returned, runtime_receipt=receipt)
+        returned["answer"] = "Different answer."
+        current = self.compose(metadata, returned, receipt)
+        outcome = projection.project_recovery(saved, expected_sha256=saved.sha256,
+            before=current, after=current, now=NOW)
+        self.assertEqual(outcome.reason, "ORIGINAL_RESULT_CHANGED")
+
+    def test_native_reply_wire_schema_cannot_be_mislabeled_as_hermes_result(self):
+        metadata, returned, receipt = owner_returns()
+        returned["schema"] = "mastermind.native_reply_read.v1"
+        with self.assertRaisesRegex(projection.CheckpointError, "UNSUPPORTED_OWNER_RESULT_SCHEMA"):
+            self.compose(metadata, returned, receipt)
+        metadata["original"]["kind"] = "NATIVE_CONTINUATION"
+        with self.assertRaisesRegex(projection.CheckpointError, "UNSUPPORTED_OWNER_RETURN_KIND"):
+            self.compose(metadata, returned, receipt)
+
+    def test_owner_result_unknown_fields_and_coerced_flags_fail_closed(self):
+        mutations = [("extra", "transcript"), ("commit_started", 1), ("parent_consumed", 0),
+                     ("successful", 1), ("admission", None),
+                     ("admission", {str(i): None for i in range(1000)})]
+        for key, value in mutations:
+            with self.subTest(key=key):
+                metadata, returned, receipt = owner_returns()
+                returned[key] = value
+                with self.assertRaises(projection.CheckpointError):
+                    self.compose(metadata, returned, receipt)
+
+    def test_malformed_or_oversized_text_returns_only_closed_error(self):
+        for answer in ("private\x00secret", "\ud800", "s" * (64 * 1024 + 1)):
+            metadata, returned, receipt = owner_returns()
+            returned["answer"] = answer
+            with self.assertRaisesRegex(projection.CheckpointError, "^INVALID_OWNER_TEXT$"):
+                self.compose(metadata, returned, receipt)
+        metadata, returned, receipt = owner_returns()
+        returned["answer"] = "x" * (23 * 1024)
+        with self.assertRaisesRegex(projection.CheckpointError, "^OWNER_RESULT_OVER_BUDGET$"):
+            self.compose(metadata, returned, receipt)
+
+    def test_plain_inputs_and_context_budget_are_still_required(self):
+        metadata, returned, receipt = owner_returns()
+        with self.assertRaisesRegex(projection.CheckpointError, "CONTEXT_BUDGET_EXCEEDED"):
+            projection.build_checkpoint_from_hermes_returns(metadata, original_result=returned,
+                runtime_receipt=receipt, context_budget_bytes=100)
+        with self.assertRaises(projection.CheckpointError):
+            self.compose(metadata, returned, object())
+        metadata["observation"]["finalized"] = 1
+        with self.assertRaises(projection.CheckpointError):
+            self.compose(metadata, returned, receipt)
+
+    def test_composition_is_detached_deterministic_and_has_no_io(self):
+        import os
+        import socket
+        import sqlite3
+        import subprocess
+        metadata, returned, receipt = owner_returns()
+        inputs = copy.deepcopy((metadata, returned, receipt))
+        with patch("builtins.open", side_effect=AssertionError("file I/O")), \
+             patch.object(os, "open", side_effect=AssertionError("file I/O")), \
+             patch.object(socket, "socket", side_effect=AssertionError("network")), \
+             patch.object(sqlite3, "connect", side_effect=AssertionError("state DB")), \
+             patch.object(subprocess, "Popen", side_effect=AssertionError("process")):
+            first = self.compose(metadata, returned, receipt)
+            for _ in range(3):
+                self.assertEqual(self.compose(metadata, returned, receipt), first)
+                self.assertEqual(self.recover(metadata, returned, receipt).state, "RECOVER_ORIGINAL_RESULT")
+        self.assertEqual((metadata, returned, receipt), inputs)
+        first["native"]["profile_sha256"] = "0" * 64
+        self.assertEqual(metadata["native"]["profile_sha256"], "1" * 64)
+
+
+class NativeOwnerReturnCompositionTests(unittest.TestCase):
+    def compose(self, metadata, returned, receipt, request_key):
+        return projection.project_native_owner_facts(metadata, original_result=returned,
+            runtime_receipt=receipt, request_message_key=request_key)
+
+    def recover(self, metadata, returned, receipt, request_key):
+        current = self.compose(metadata, returned, receipt, request_key)
+        manifest = projection.build_checkpoint_from_native_returns(metadata,
+            original_result=returned, runtime_receipt=receipt, request_message_key=request_key)
+        return projection.project_recovery(manifest, expected_sha256=manifest.sha256,
+            before=current, after=current, now=NOW)
+
+    def test_actual_native_reader_result_builds_metadata_only_checkpoint(self):
+        metadata, returned, receipt, request_key = native_owner_returns()
+        value = self.compose(metadata, returned, receipt, request_key)
+        self.assertEqual(value["return"]["result_ref"], returned["read_ref"])
+        self.assertEqual(value["return"]["result_sha256"], returned["fingerprint"])
+        self.assertEqual(value["return"]["result_outcome"], "UNKNOWN")
+        self.assertEqual(value["return"]["consumption_status"], "UNKNOWN")
+        self.assertIsNone(value["return"]["parent_terminal_ref"])
+        self.assertEqual(self.recover(metadata, returned, receipt, request_key).state, "RECOVER_ORIGINAL_RESULT")
+        manifest = projection.build_checkpoint_from_native_returns(metadata,
+            original_result=returned, runtime_receipt=receipt, request_message_key=request_key)
+        for text in ("Original child evidence", "bounded decision", "primary_ts", "message_key"):
+            self.assertNotIn(text.encode(), manifest.canonical_json)
+
+    def test_operation_lookup_echo_does_not_change_original_result_digest(self):
+        by_operation = native_owner_returns(by_operation=True)
+        by_reference = native_owner_returns()
+        self.assertIn("operation_key", by_operation[1])
+        self.assertNotIn("operation_key", by_reference[1])
+        self.assertNotEqual(digest(by_operation[1]), digest(by_reference[1]))
+        first, second = self.compose(*by_operation), self.compose(*by_reference)
+        self.assertEqual(first, second)
+        manifest = projection.build_checkpoint(first)
+        outcome = projection.project_recovery(manifest, expected_sha256=manifest.sha256,
+            before=second, after=second, now=NOW)
+        self.assertEqual(outcome.state, "RECOVER_ORIGINAL_RESULT")
+
+    def test_progress_reply_does_not_complete_a_running_attempt_or_accept_product(self):
+        metadata, returned, receipt, request_key = native_owner_returns()
+        metadata["runtime"]["attempt_status"] = "RUNNING"
+        value = self.compose(metadata, returned, receipt, request_key)
+        self.assertEqual(value["runtime"]["attempt_status"], "RUNNING")
+        self.assertEqual(value["return"]["executive_acceptance"], "NOT_OBSERVED")
+        self.assertIsNone(value["return"]["parent_terminal_ref"])
+        self.assertFalse(self.recover(metadata, returned, receipt, request_key).can_resume_execution)
+
+    def test_original_job_attempt_and_commit_still_require_runtime_evidence(self):
+        for group, key, change in (("runtime", "attempt_id", None),
+                                   ("original", "commit_status", "UNKNOWN"),
+                                   ("original", "admission_id", "fabricated-native-admission")):
+            metadata, returned, receipt, request_key = native_owner_returns()
+            metadata[group][key] = change
+            with self.assertRaises(projection.CheckpointError):
+                self.compose(metadata, returned, receipt, request_key)
+
+    def test_wrong_parent_and_optional_operation_echo_are_refused(self):
+        for key in ("read_ref", "request_ref", "in_reply_to", "operation_key"):
+            metadata, returned, receipt, request_key = native_owner_returns(by_operation=True)
+            returned[key] = "foreign-reference"
+            with self.assertRaisesRegex(projection.CheckpointError, "OWNER_RESULT_ORIGINAL_MISMATCH"):
+                self.compose(metadata, returned, receipt, request_key)
+
+    def test_changed_native_fingerprint_is_not_the_retained_original(self):
+        metadata, returned, receipt, request_key = native_owner_returns()
+        manifest = projection.build_checkpoint(self.compose(metadata, returned, receipt, request_key))
+        returned["fingerprint"] = "0" * 64
+        current = self.compose(metadata, returned, receipt, request_key)
+        outcome = projection.project_recovery(manifest, expected_sha256=manifest.sha256,
+            before=current, after=current, now=NOW)
+        self.assertEqual(outcome.reason, "ORIGINAL_RESULT_CHANGED")
+
+    def test_native_source_result_is_not_a_parent_consumption_receipt(self):
+        metadata, returned, receipt, request_key = native_owner_returns()
+        metadata["parent"] = {"parent_request_ref": returned["request_ref"],
+            "parent_terminal_ref": "existing-child-terminal", "parent_terminal_sha256": "a" * 64,
+            "consumption_status": "CONSUMED", "consumption_ref": "existing-parent-consumption",
+            "executive_acceptance": "ACCEPTED", "acceptance_ref": "existing-product-acceptance"}
+        outcome = self.recover(metadata, returned, receipt, request_key)
+        self.assertEqual(outcome.state, "ALREADY_CONSUMED")
+        self.assertEqual(outcome.executive_acceptance, "ACCEPTED")
+        self.assertIs(returned["parent_consumed"], False)
+
+    def test_native_read_revocation_and_uncertainty_remain_effective(self):
+        metadata, returned, receipt, request_key = native_owner_returns()
+        metadata["authority"]["read_permitted"] = False
+        outcome = self.recover(metadata, returned, receipt, request_key)
+        self.assertEqual(outcome.reason, "READ_AUTHORITY_UNAVAILABLE")
+        self.assertIsNone(outcome.result_ref)
+        metadata["authority"]["read_permitted"] = True
+        metadata["observation"]["write_uncertainty"] = "EFFECT_UNKNOWN"
+        self.assertEqual(self.recover(metadata, returned, receipt, request_key).state, "RECONCILE_ORIGINAL")
+
+    def test_native_schema_flags_digest_timestamp_and_budget_are_closed(self):
+        mutations = [("schema", "foreign"), ("reply_committed", 1), ("parent_consumed", 0),
+                     ("fingerprint", "invalid"), ("primary_ts", "invalid"),
+                     ("prompt", "must not be retained"), ("text", "x" * (16 * 1024))]
+        for key, value in mutations:
+            with self.subTest(key=key):
+                metadata, returned, receipt, request_key = native_owner_returns()
+                returned[key] = value
+                with self.assertRaises(projection.CheckpointError):
+                    self.compose(metadata, returned, receipt, request_key)
+
+    def test_native_repeat_and_parallel_composition_have_no_effect_entrypoint(self):
+        import os
+        import socket
+        import sqlite3
+        import subprocess
+        inputs = native_owner_returns()
+        retained = copy.deepcopy(inputs)
+        with patch("builtins.open", side_effect=AssertionError("file I/O")), \
+             patch.object(os, "open", side_effect=AssertionError("file I/O")), \
+             patch.object(socket, "socket", side_effect=AssertionError("network")), \
+             patch.object(sqlite3, "connect", side_effect=AssertionError("state DB")), \
+             patch.object(subprocess, "Popen", side_effect=AssertionError("process")):
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                outcomes = list(pool.map(lambda _: self.recover(*inputs), range(24)))
+        self.assertEqual(len(set(outcomes)), 1)
+        self.assertEqual(inputs, retained)
 
 
 if __name__ == "__main__":
