@@ -4,9 +4,45 @@
 for live paper-portfolio state; GitHub owns code, configuration, tests, and
 reviewable documentation.
 
-## Start every session in isolation
+## Start every session with an isolated source owner
 
-From any clean administrative checkout, harness-provisioned sessions use the exact workspace already assigned by their harness. Attended ChatGPT Web/host sessions use the installed canonical source-custody launcher instead of raw clone/worktree commands or the repository Python payload:
+The protected `master` commit pins **governing procedure and release identity**, not
+the machine or directory in which a proposed change must be authored. Authorized
+sessions may use either of the following pre-effect authoring paths. Choose one
+supported path for the original operation; a refused or uncertain effect is never
+permission to replay it using the other path.
+
+### GitHub-native authoring (no host worktree required)
+
+An attended Web session with an actually authorized GitHub connector/API can create
+and update an isolated GitHub branch and open a PR **without** `mmx-workspace`,
+Studio Direct, a local checkout, an external SSD, an Executive Job, or a second
+publisher chat. These host-local requirements do not apply to a GitHub-native
+mutation. This is a source-authoring route, **not** a protected-merge bypass.
+
+1. Verify the exact repository, current protected `master` commit and compatible
+   procedure. Recover the original branch/PR and any active writer, denial or
+   uncertain effect. Continue an existing operation on its **same branch/carrier**;
+   for a genuinely new, unstarted operation create a unique branch from an exact
+   protected commit. Do not duplicate an active or held PR to escape its gates.
+2. Verify actual GitHub write permission. Make narrowly scoped changes on that
+   branch through the authorized native file/tree/commit/ref APIs. Bind updates to
+   the current file blob SHA and/or an expected branch-head SHA (compare-and-swap);
+   inspect changed head/preimages on a conflict. Never force-update a shared ref,
+   write directly to `master`, select arbitrary credentials, or overwrite a
+   concurrent writer. An ambiguous mutation response requires original-branch
+   readback before another effect; an explicit safety/permission denial is final
+   for that effect, not a reason to switch to Studio/local publishing.
+3. Inspect the resulting exact-head diff and path set, run available affected
+   validation, and truthfully distinguish local tests from GitHub-hosted checks.
+   Without a local runner, use hosted PR CI and do not claim unexecuted local
+   tests. Keep incomplete/failing work Draft; make qualified, reviewable work
+   Ready and use the same protected review/CI/merge-queue procedure below. GitHub
+   native authoring does not waive any actual release hold or formal approval.
+
+### Host-local worktree authoring
+
+From any clean administrative checkout, harness-provisioned sessions use the exact workspace already assigned by their harness. When actually editing or publishing through a host-local checkout, attended ChatGPT Web/host sessions use the installed canonical source-custody launcher instead of raw clone/worktree commands or the repository Python payload:
 
 ```bash
 git fetch origin --prune
@@ -66,14 +102,24 @@ adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.m
    CI is a merge/release gate, not a prerequisite for review readiness. Keep unfinished
    or locally failing work in Draft; do not imply a reviewer is working just because
    a request exists.
-2. Review `git diff --check`, `git status`, and the staged diff. Never stage
-   `.env*`, credentials, logs, caches, runtime `data/`, or backup archives.
-3. Commit a scoped change, push the branch, and open a PR:
+2. On a local checkout, review `git diff --check`, `git status` and the
+   staged diff. On a GitHub-native branch, inspect exact-head changed-file
+   enumeration, complete diff and file preimages using available GitHub reads.
+   Never publish `.env*`, credentials, logs, caches, runtime `data/`, or
+   backup archives.
+3. Publish the scoped change on the operation's isolated branch and open a PR.
+   For a host-local worktree:
 
    ```bash
    git push -u origin HEAD
    gh pr create --fill
    ```
+
+   For GitHub-native authoring, use the authorized branch/file/commit and PR
+   tools with their expected preimages/head leases, then read back the branch
+   SHA, exact PR head and diff. No local `git push` or launcher receipt is
+   required for that path. Neither authoring path may directly merge a
+   protected branch.
 
 4. CI blocks merge/release, not independent useful work. Incomplete scope, failed
    local qualification, or a known failing hosted check keeps release held; diagnose the failure and repair it within the assigned scope. A **pending** hosted check alone is not a reason
@@ -307,7 +353,9 @@ and must pass its failing acceptance tests before it is eligible to merge.
 
 ## Release attended Web workspaces
 
-After the operation is terminal, release the same workspace through the custody owner:
+**Only if this operation acquired a host-local `mmx-workspace` checkout**, release
+that same workspace through the custody owner. A GitHub-native operation has no
+local worktree to release or register:
 
 ```bash
 mmx-workspace release \

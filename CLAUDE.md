@@ -85,6 +85,17 @@ Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; thi
 runtime authority, required form, new watcher or extra human approval. Existing exact grants,
 source custody, effect reconciliation, review and release controls remain in force.
 
+**Source-authoring surfaces are alternatives, not sequential gates.** An assigned session
+with permitted GitHub-native tools can author/commit a scoped branch and create a PR
+without Studio Direct, a host worktree, `mmx-workspace`, or a separate publishing
+chat. Use exact repository/branch identity, file preimages or expected-head CAS,
+original-operation custody and truthful tests. Protected-source pinning governs
+procedure, not candidate checkout origin. For actual host-local edits retain the
+host-selected workspace launcher and its isolation rules. Never switch an explicitly
+denied/uncertain effect to another carrier; never push directly to protected
+`master`, self-approve, bypass CI/review/queue or infer installed adoption from
+this source rule. See `docs/DELIVERY_WORKFLOW.md`.
+
 ### Standing authorization: saved credentials for assigned website access
 
 The Chairman authorizes an actively assigned Mastermind engineering/operations session to use
