@@ -14,6 +14,7 @@ from tests.test_protected_memory_economic import economy
 from control_plane import protected_memory_execution as execution
 from control_plane import protected_memory_original as original
 from control_plane.executive_supervisor import ExecutiveSupervisor
+from control_plane.executive_runtime import StateConflict
 
 
 @pytest.fixture
@@ -41,23 +42,40 @@ def test_terminal_original_reference_is_readonly_without_active_lease_or_private
 
 
 @pytest.mark.parametrize('damage',['preinput','result','parent','phase','flags','missing-original'])
-def test_foreign_partial_or_changed_original_cannot_rebind_retained_reference(completed,damage):
+def test_existing_immutable_runtime_refuses_original_rebinding_before_reference_changes(completed,damage):
+    runtime,job,lease=completed
+    ref=original.completed_original_reference(runtime,lease.attempt.attempt_id)
+    before=original.current_reference(ref)
+    # Retain the actual earlier boundary; do not disable immutable-event or
+    # terminal-state guards to manufacture a corrupt Runtime in this fixture.
+    with pytest.raises(StateConflict):
+        with runtime.store.transaction() as con:
+            if damage=='parent':con.execute('UPDATE jobs SET parent_job_id=? WHERE job_id=?',(job.job_id,job.job_id))
+            elif damage=='phase':con.execute("UPDATE attempts SET status='RUNNING' WHERE attempt_id=?",(lease.attempt.attempt_id,))
+            elif damage=='missing-original':con.execute("DELETE FROM events WHERE event_type='MEMORY_ECONOMIC_ADMISSION_ATTEMPT'")
+            else:
+                kind='MEMORY_ECONOMIC_ADMISSION_ATTEMPT' if damage=='preinput' else 'MEMORY_ORIGINAL_RESULT_RETAINED'
+                row=con.execute('SELECT event_id,payload_json FROM events WHERE event_type=?',(kind,)).fetchone()
+                value=json.loads(row['payload_json'])
+                if damage=='preinput':value['pre_input']['native_source_locator']['root_id']='foreign-original'
+                elif damage=='result':value['result_sha256']='e'*64
+                else:value['verification']['authenticated']=0
+                con.execute('UPDATE events SET payload_json=? WHERE event_id=?',(json.dumps(value),row['event_id']))
+    assert original.current_reference(ref)==before
+    assert original.current_reference(original.completed_original_reference(runtime,lease.attempt.attempt_id))==before
+
+
+def test_additional_mixed_original_result_receipt_is_rejected_without_rewriting_original(completed):
     runtime,job,lease=completed
     ref=original.completed_original_reference(runtime,lease.attempt.attempt_id)
     with runtime.store.transaction() as con:
-        if damage=='parent':con.execute('UPDATE jobs SET parent_job_id=? WHERE job_id=?',(job.job_id,job.job_id))
-        elif damage=='phase':con.execute("UPDATE attempts SET status='RUNNING' WHERE attempt_id=?",(lease.attempt.attempt_id,))
-        elif damage=='missing-original':con.execute("DELETE FROM events WHERE event_type='MEMORY_ECONOMIC_ADMISSION_ATTEMPT'")
-        else:
-            kind='MEMORY_ECONOMIC_ADMISSION_ATTEMPT' if damage=='preinput' else 'MEMORY_ORIGINAL_RESULT_RETAINED'
-            row=con.execute('SELECT event_id,payload_json FROM events WHERE event_type=?',(kind,)).fetchone()
-            value=json.loads(row['payload_json'])
-            if damage=='preinput':value['pre_input']['native_source_locator']['root_id']='foreign-original'
-            elif damage=='result':value['result_sha256']='e'*64
-            else:value['verification']['authenticated']=0
-            con.execute('UPDATE events SET payload_json=? WHERE event_id=?',(json.dumps(value),row['event_id']))
+        row=con.execute("SELECT payload_json FROM events WHERE event_type='MEMORY_ORIGINAL_RESULT_RETAINED'").fetchone()
+        payload=json.loads(row['payload_json']);payload['result_sha256']='e'*64
+        runtime.store.append_event(con,aggregate_type='attempt',aggregate_id=lease.attempt.attempt_id,
+            event_type='MEMORY_ORIGINAL_RESULT_RETAINED',job_id=job.job_id,attempt_id=lease.attempt.attempt_id,
+            worker_id=lease.attempt.worker_id,quota_class=lease.attempt.quota_class,actor='supervisor',
+            command_id='inert-conflicting-result-observation',payload=payload)
     with pytest.raises(original.OriginalReferenceRefused):original.current_reference(ref)
-    with pytest.raises(original.OriginalReferenceRefused):original.completed_original_reference(runtime,lease.attempt.attempt_id)
 
 
 @pytest.mark.parametrize('shape',['dict','clone','subclass'])
