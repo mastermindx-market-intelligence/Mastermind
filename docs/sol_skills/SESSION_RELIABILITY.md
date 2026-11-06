@@ -103,7 +103,12 @@ On timeout: preserve exact PID/command/carrier/effect; start no replacement or
 equivalent broad command; read status/output once; deliberately retain or terminate
 only that process; verify; checkpoint before broad work. A timeout is never permission
 to replay the command. `EFFECT_UNKNOWN` stays on its original carrier until canonical
-readback proves accepted, conflicted, absent or still unknown.
+readback proves accepted, conflicted, absent or still unknown. For a legacy Git
+source publication only, `RECONCILE_STATE.md` Step 4C allows a **distinct guarded
+forward-only ref transition** after original-process fencing, current-state and
+writer verification, and actual installed publisher support; it does not replay
+or resolve the old operation's historical outcome. Missing journal receipts do
+not freeze disjoint source, tests, CI or research.
 
 ## Connector taint
 
