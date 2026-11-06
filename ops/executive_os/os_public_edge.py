@@ -24,8 +24,8 @@ CONTROL_ROOM_ACTION_ROUTES = (
 )
 READER_POST_ROUTES = LEGACY_POST_ROUTES + SESSION_READ_POST_ROUTES
 CONTROL_ROOM_POST_ROUTES = LEGACY_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
-# Session context/reply/references are reads. The effectful session/send route
-# is deliberately absent; this composition does not change its authorization.
+# Keep the historical reader profile exact. Qualified Session SEND is a separate
+# final-profile addition below; this does not change generic submit authority.
 POST_ROUTES = READER_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
 LEGACY_GET_ROUTES = (
     "/os/", "/os/auth/callback", "/workspace/programs/current",
@@ -126,6 +126,13 @@ PRE_NATIVE_DRAFT_GET_ROUTES = GET_ROUTES
 PRE_NATIVE_DRAFT_POST_ROUTES = POST_ROUTES
 GET_ROUTES = PRE_NATIVE_DRAFT_GET_ROUTES + ("/workspace/native-draft-identity/current",)
 
+# One separately qualified existing-session write, with the entire incumbent
+# profile retained. Authentication, target and original-key authority remain
+# with the existing Session owner; no generic path or new grant is introduced.
+PRE_NATIVE_SESSION_SEND_GET_ROUTES = GET_ROUTES
+PRE_NATIVE_SESSION_SEND_POST_ROUTES = POST_ROUTES
+POST_ROUTES = PRE_NATIVE_SESSION_SEND_POST_ROUTES + ("/os/executive/session/send",)
+
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
@@ -158,6 +165,7 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_CONVERSATION_READ_GET_ROUTES, PRE_CONVERSATION_READ_POST_ROUTES),
     (PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES, PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES),
     (PRE_NATIVE_DRAFT_GET_ROUTES, PRE_NATIVE_DRAFT_POST_ROUTES),
+    (PRE_NATIVE_SESSION_SEND_GET_ROUTES, PRE_NATIVE_SESSION_SEND_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 
