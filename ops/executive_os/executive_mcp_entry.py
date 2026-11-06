@@ -128,16 +128,20 @@ def validate_public_mcp_resource(raw):
     """Opt-in public MCP audience: this gateway process serves /mcp for it alone.
 
     Absent keeps the installed behavior unchanged. Present, the value must be the
-    exact public resource on the plain Web-CEO v3 composition; the COO wrappers,
-    release control and every other profile refuse it. A process that offers this
+    exact public resource on Web-CEO v3, optionally with its explicit COO
+    receiver. Release control and every other profile refuse it. A process that offers this
     audience at /mcp offers no other one there (the OS audience stays on its own
     transport routes), so the tunnel entrypoint needs its own gateway instance.
     """
     if 'public_mcp_resource' not in raw:
         return None
+    coo = raw.get('coo')
+    malformed_coo = 'coo' in raw and (
+        type(coo) is not dict or not {'policy', 'binding'} <= set(coo)
+        or set(coo) - {'policy', 'binding', 'missions'})
     if (raw.get('executive_mcp_profile') != 'web_ceo_v3'
             or raw['public_mcp_resource'] != PUBLIC_MCP_RESOURCE
-            or {'coo', 'principal_ruling_target'} & set(raw)):
+            or 'principal_ruling_target' in raw or malformed_coo):
         raise ValueError(
             'public MCP resource must be the exact public audience on the plain v3 profile'
         )
@@ -258,9 +262,13 @@ def validate_optional_mounts(raw):
             _jwks_cache_contract, load_app_policies,
         )
         base = load_app_policies(raw['policies'])
+        # Only the explicit public v3 receiver selects this separate resource.
+        # Keep the primary pair intact for the other installed transports.
+        receiver = build_public_policies(raw, base,
+            build_additional_policies(raw, base)) or base
         coo = policies['coo']
-        if (coo.resource_metadata_url != base.read.resource_metadata_url
-                or _jwks_cache_contract(coo) != _jwks_cache_contract(base.read)):
+        if (coo.resource_metadata_url != receiver.read.resource_metadata_url
+                or _jwks_cache_contract(coo) != _jwks_cache_contract(receiver.read)):
             raise ValueError('COO policy must share the Executive resource and JWKS authority')
         if coo.policy_id in {base.read.policy_id, base.submit.policy_id}:
             raise ValueError('COO policy ID must be distinct from CEO policies')
@@ -580,8 +588,12 @@ def build_installed_coo_settings(raw, source, config_path, executive, *, expecte
     validate_document(raw)
     from integrations.mastermind_executive_app.coo import CooAppSettings
     from integrations.mastermind_executive_app.coo_installed import CooFactsClient
+    public_mcp = executive.public_policies is not None
+    if public_mcp and raw.get('executive_mcp_profile') != 'web_ceo_v3':
+        raise ValueError('public COO requires the installed Web-CEO v3 profile')
     client = CooFactsClient(raw['ceo_ingress_socket_path'])
     settings = dict(executive=executive, policy=optional_policies(raw)['coo'],
+        public_mcp=public_mcp,
         load_binding=current_projection_loader(config_path, source, raw, 'coo', 'binding'),
         authority_provider=client.authority, mission_provider=client.mission)
     publication = build_installed_selected_child_target(raw)

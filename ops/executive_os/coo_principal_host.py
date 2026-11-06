@@ -18,6 +18,8 @@ from control_plane.coo_principal_mandate import PrincipalFact
 from control_plane.executive_agent_capabilities import (
     CLAUDE_PRINCIPAL_AUTH_REALM,
     CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
+    HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE,
+    HERMES_NATIVE_PRINCIPAL_PROFILE_ID,
     ExecutionCapabilityRegistry,
     observed_mcp_tool_schema_digest,
 )
@@ -142,29 +144,38 @@ class CooInstalledSource:
         reader = self._selected_child_target_reader
         return reader() if reader is not None else None
 
-    def snapshot(self, work_ref):
+    def snapshot(self, work_ref, *, principal_binding_digest=None):
+        return self._snapshot(work_ref, self._load_coo(),
+            principal_binding_digest=principal_binding_digest)
+
+    def _snapshot(self, work_ref, coo, *, principal_binding_digest=None):
         from integrations.business_mcp_auth.contracts import load_resource_policy
-        from integrations.mastermind_executive_app.coo_binding import validate_coo_binding, _digest
+        from integrations.mastermind_executive_app.coo_binding import coo_binding_records, _digest
         from integrations.executive_mcp.coo import COO_SERVER_NAME, COO_SERVER_VERSION, COO_TOOL_SPECS
         if not _check_work_ref(work_ref):
             _refuse()
-        coo = self._load_coo()
         policy = load_resource_policy(coo["policy"])
-        bound = validate_coo_binding(coo["binding"], policy)
-        if bound["enabled"] is not True:
-            _refuse()
-        binding = bound["binding"]
+        records = coo_binding_records(coo["binding"], policy)
         rows = [r for r in validate_missions(coo.get("missions", [])) if r["work_ref"] == work_ref]
-        if len(rows) != 1 or rows[0]["principal_binding_digest"] != _digest(binding):
+        if len(rows) != 1:
             _refuse()
         row = rows[0]
+        digest = row["principal_binding_digest"]
+        matches = [record for record in records if _digest(record) == digest]
+        if (len(matches) != 1 or (principal_binding_digest is not None
+                and principal_binding_digest != digest)):
+            _refuse()
+        binding = matches[0]
         registry = self._registry_loader()
         if type(registry) is not ExecutionCapabilityRegistry:
             _refuse()
         profile = registry.profiles.get(row["capability_profile_id"])
         if (profile is None or not profile.enabled
                 or profile.profile_digest != row["capability_profile_digest"]
-                or profile.execution_surface != CLAUDE_PRINCIPAL_EXECUTION_SURFACE
+                or profile.execution_surface not in {
+                    CLAUDE_PRINCIPAL_EXECUTION_SURFACE, HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE}
+                or (profile.execution_surface == HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE
+                    and profile.profile_id != HERMES_NATIVE_PRINCIPAL_PROFILE_ID)
                 or profile.auth_realm != CLAUDE_PRINCIPAL_AUTH_REALM):
             _refuse()
         specs = {s.name: {"name": s.name, "inputSchema": s.input_schema,
@@ -182,7 +193,15 @@ class CooInstalledSource:
         return row, fact, _authority(row)
 
     def for_principal(self, principal, work_ref):
-        row, fact, authority = self.snapshot(work_ref)
+        from integrations.business_mcp_auth.contracts import load_resource_policy
+        from integrations.mastermind_executive_app.coo_binding import select_coo_binding, _digest
+        coo = self._load_coo()
+        binding = select_coo_binding(coo["binding"],
+            load_resource_policy(coo["policy"]), principal)
+        if binding is None:
+            _refuse()
+        row, fact, authority = self._snapshot(work_ref, coo,
+            principal_binding_digest=_digest(binding))
         expected = {"policy_id": fact.policy_id, "issuer_digest": fact.issuer_digest,
             "subject_digest": fact.subject_digest, "client_ref": fact.client_ref,
             "resource": fact.resource_ref, "scopes": list(fact.scopes)}

@@ -58,16 +58,23 @@ class CooAppSettings:
     # The trusted host's frozen selected-child target. It defaults to unbound:
     # this App never selects, creates or derives a child on its own.
     selected_child_target: ExecutiveSelectedChildTarget | None = None
+    # Explicit installed Web-CEO v3 host composition, never a request field.
+    public_mcp: bool = False
 
     def __post_init__(self):
         policy = validate_resource_policy(self.policy)
         base = self.executive
         if not isinstance(base, AppSettings) or not base.read_from_ceo_ingress or base.read_only:
             raise ValueError("COO requires the existing installed ingress readers")
+        if type(self.public_mcp) is not bool:
+            raise ValueError("COO public MCP composition must be explicit")
+        pair = base.public_policies if self.public_mcp else base.policies
+        if pair is None:
+            raise ValueError("public COO requires the installed public policy pair")
         if (policy.required_scopes != COO_SCOPES
                 or policy.policy_id in {base.policies.read.policy_id, base.policies.submit.policy_id}
-                or policy.resource_metadata_url != base.policies.read.resource_metadata_url
-                or _jwks_cache_contract(policy) != _jwks_cache_contract(base.policies.read)):
+                or policy.resource_metadata_url != pair.read.resource_metadata_url
+                or _jwks_cache_contract(policy) != _jwks_cache_contract(pair.read)):
             raise ValueError("COO must share the Executive resource and JWKS, with distinct exact scopes")
         if not all(callable(x) for x in (self.load_binding, self.authority_provider, self.mission_provider)):
             raise ValueError("COO requires explicit installed binding and canonical fact providers")
@@ -118,8 +125,17 @@ class CooApp:
             raise ValueError("exact COO settings and existing audit sink required")
         self.settings = settings
         self._policy = validate_resource_policy(settings.policy)
-        self.authenticator = JwtAuthenticator(policy=self._policy,
-            jwks_cache=settings.executive.jwks_cache or _default_jwks_cache(self._policy))
+        # The injected Executive cache belongs only to its primary resource.
+        # Public COO gets the existing public pair's bounded cache factory;
+        # sharing keys never widens the exact role scopes or enrolled identity.
+        if settings.public_mcp:
+            from integrations.mastermind_executive_app.gateway import make_shared_jwks_cache
+            cache = make_shared_jwks_cache(settings.executive.public_policies)
+            if cache is None:
+                raise ValueError("public COO requires one qualified JWKS authority")
+        else:
+            cache = settings.executive.jwks_cache or _default_jwks_cache(self._policy)
+        self.authenticator = JwtAuthenticator(policy=self._policy, jwks_cache=cache)
         self.authorizer = coo_authorizer(policy=self._policy, load_binding=settings.load_binding)
         self._audit_sink = audit_sink
         self._client = CeoIngressClient(connect_timeout=settings.executive.connect_timeout,

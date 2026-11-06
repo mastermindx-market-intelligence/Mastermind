@@ -2011,17 +2011,22 @@ def build_web_ceo_v3_with_coo_mcp_app(
 
     if type(coo_settings) is not CooAppSettings or coo_settings.executive != settings:
         raise ValueError("COO and CEO must use the exact same installed Executive settings")
-    _refuse_public_policies(settings, "the Web-CEO v3 COO composition")
+    public_mode = settings.public_policies is not None
+    if coo_settings.public_mcp is not public_mode:
+        raise ValueError("COO must explicitly match the installed public composition")
+    if public_mode and principal_ruling_target is not None:
+        raise ValueError("public COO composition admits only its literal COO route")
     cache = settings.jwks_cache or make_shared_jwks_cache(settings.policies)
     if cache is None:
         raise ValueError("a shared Executive JWKS authority is required")
     configured = dataclasses.replace(settings, jwks_cache=cache)
     coo_configured = dataclasses.replace(coo_settings, executive=configured)
-    _, metadata_path = _metadata_policy_and_path(configured.policies)
+    metadata_policies = configured.public_policies if public_mode else configured.policies
+    _, metadata_path = _metadata_policy_and_path(metadata_policies)
     if (metadata_path.startswith("/mcp/coo") or (principal_ruling_target is not None
             and metadata_path.startswith("/mcp/principal-ruling"))):
         raise ValueError("metadata route collides with the static COO transport")
-    metadata = protected_resource_metadata(configured.policies.submit)
+    metadata = protected_resource_metadata(metadata_policies.submit)
     metadata["scopes_supported"] = sorted(
         set(metadata["scopes_supported"]) | set(coo_configured.policy.required_scopes)
     )
@@ -2043,9 +2048,9 @@ def build_web_ceo_v3_with_coo_mcp_app(
         os_commission_preparer=os_commission_preparer,
         os_session_bridge_client=os_session_bridge_client,
     )
-    coo = build_coo_mcp_app(coo_configured, audit_sink=audit_sink,
+    coo = _build_coo_mcp_app(coo_configured, audit_sink=audit_sink,
         principal_ruling_target=principal_ruling_target)
-    return _ExecutiveWithCoo(ceo, coo, metadata_path, metadata)
+    return _ExecutiveWithCoo(ceo, coo, metadata_path, metadata, public_mcp=public_mode)
 
 
 def build_web_ceo_sessions_mcp_app(
@@ -2258,7 +2263,16 @@ def describe(config: GatewayConfig) -> str:
 
 
 def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target=None) -> Any:
-    """Static COO route for composition in the existing listener; never a daemon."""
+    """Legacy standalone composition retains its primary-resource-only fence."""
+    _refuse_public_policies(getattr(settings, "executive", None), "the COO MCP builder")
+    if getattr(settings, "public_mcp", False):
+        raise ValueError("public COO requires the explicit Web-CEO v3 composition")
+    return _build_coo_mcp_app(settings, audit_sink=audit_sink,
+        principal_ruling_target=principal_ruling_target)
+
+
+def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target=None) -> Any:
+    """One static COO implementation, reached through a qualified host builder."""
     from control_plane.coo_principal_request import principal_request_ref, principal_intent_id
     from control_plane import ceo_intent
     from integrations.executive_mcp.coo import (
@@ -2267,7 +2281,6 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
     )
     from integrations.mastermind_executive_app.coo import create_coo_app, unknown
 
-    _refuse_public_policies(getattr(settings, "executive", None), "the COO MCP builder")
     core = create_coo_app(settings, audit_sink=audit_sink)
     inner = BoundedE1App(core)
     oauth = MastermindTokenVerifier(authenticator=core.authenticator, policy=settings.policy,
@@ -2593,9 +2606,10 @@ class _CooWithPrincipalRuling:
 
 class _ExecutiveWithCoo:
     """Two fixed role routes, one host process and one shared resource document."""
-    def __init__(self, ceo, coo, metadata_path, metadata):
+    def __init__(self, ceo, coo, metadata_path, metadata, *, public_mcp=False):
         self._ceo, self._coo = ceo, coo
         self._metadata_path, self._metadata = metadata_path, metadata
+        self._public_mcp = public_mcp
 
         @asynccontextmanager
         async def lifespan(_app):
@@ -2617,6 +2631,21 @@ class _ExecutiveWithCoo:
             await self._coo(scope, receive, send)
         elif (path == self._metadata_path and scope.get("method") == "GET"
                 and scope.get("raw_path") == self._metadata_path.encode("ascii") and not scope.get("query_string")):
+            if self._public_mcp:
+                # The edge preserves the public Host for metadata, while its
+                # MCP POST branch rewrites Host to the SDK's loopback fence.
+                headers = scope.get("headers", ())
+                valid_headers = type(headers) in (list, tuple) and all(
+                    type(pair) in (list, tuple) and len(pair) == 2
+                    and type(pair[0]) is bytes and type(pair[1]) is bytes
+                    for pair in headers)
+                hosts = [v for k, v in headers if k.lower() == b"host"] if valid_headers else []
+                origins = [v for k, v in headers if k.lower() == b"origin"] if valid_headers else [b"invalid"]
+                if (scope.get("scheme") != "https" or hosts != [b"mcp.mastermind-x.com"]
+                        or len(origins) > 1 or (origins and origins != [b"https://mcp.mastermind-x.com"])):
+                    await JSONResponse({"error": "transport_refused"}, status_code=403,
+                        headers={"Cache-Control": "no-store"})(scope, receive, send)
+                    return
             await JSONResponse(self._metadata, headers={"Cache-Control": "no-store"})(scope, receive, send)
         else:
             await self._ceo(scope, receive, send)
