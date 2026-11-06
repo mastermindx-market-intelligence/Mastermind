@@ -151,7 +151,8 @@ def test_oversized_and_non_json_snapshots_refuse():
 def test_comparison_accepts_real_pure_fabric_v2_projector_shape():
     # Real projector, synthetic row and explicit synthetic generation; no database.
     from control_plane.executive_runtime import Job
-    from control_plane.fabric_job_view import compose_fabric_view_v2
+    from control_plane.fabric_job_view import _acquisition_receipt, compose_fabric_view_v2
+    from types import SimpleNamespace
     row = Job(job_id="JOB-1", objective="test", department="test", priority=1,
         status="RUNNING", assigned_worker_id=None, assigned_quota_class=None,
         authority_level="READ", branch=None, worktree=None, checkpoint=None,
@@ -160,12 +161,22 @@ def test_comparison_accepts_real_pure_fabric_v2_projector_shape():
     doc = compose_fabric_view_v2(root_job_id=row.job_id, root_job=row, jobs=[row],
         attempts_by_job={row.job_id: []}, joined_job_ids={row.job_id},
         runtime_identity={"root": "synthetic", "db_present": True, "identity": None},
-        armed={}, degraded=[])
-    doc["runtime"]["acquisition"] = snapshot()["runtime"]["acquisition"]
+        armed={}, degraded=[], generated_at="2026-09-26T12:00:00Z")
+    # Preserve the real acquisition owner's coverage fields. Only the source
+    # generation and snapshot object are explicitly synthetic test observations.
+    owner = SimpleNamespace(snapshot_digest="d" * 64, jobs_truncated=False,
+        attempts_truncated_job_ids=(), truncated=False)
+    receipt = _acquisition_receipt(kind="root_detail", root_job_id=row.job_id,
+        snapshot=owner, unjoined=())
+    receipt["generation"] = snapshot()["runtime"]["acquisition"]["generation"]
+    doc["runtime"]["acquisition"] = receipt
+    assert receipt["truncation"] == {
+        "jobs": False, "attempt_job_ids": [], "roots": False, "projection": False}
+    assert receipt["provenance"] == {"state": "COMPLETE", "unjoined_job_ids": []}
     after = copy.deepcopy(doc)
     after["root"]["status"] = "COMPLETED"
     result = compare(doc, after)
-    assert result["state"] in {"COMPLETE", "PARTIAL"}, json.dumps(doc, sort_keys=True)
+    assert result["state"] == "COMPLETE", json.dumps(doc, sort_keys=True)
     assert result["changes"][0]["fields"]["status"]["after"] == "COMPLETED"
 
 
@@ -182,11 +193,13 @@ def test_cli_outputs_history_without_touching_inputs_or_opening_runtime(tmp_path
     for path, doc in zip(paths, (before, after)):
         path.write_text(json.dumps(doc), encoding="utf-8")
     original = [path.read_bytes() for path in paths]
+    (tmp_path / "preexisting-entry").mkdir()
+    before_entries = set(tmp_path.iterdir())
     assert main(["--before", str(paths[0]), "--after", str(paths[1])]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result["changes"][0]["fields"]["status"]["after"] == "COMPLETED"
     assert [path.read_bytes() for path in paths] == original
-    assert set(tmp_path.iterdir()) == set(paths)
+    assert set(tmp_path.iterdir()) == before_entries
 
 
 @pytest.mark.parametrize("fault", ["duplicate_key", "oversize", "nonfinite", "not_json"])
@@ -248,3 +261,214 @@ def test_response_is_bounded_when_many_attempt_records_change():
     assert result["state"] == "PARTIAL" and result["truncated"] is True
     assert len(json.dumps(result, sort_keys=True, separators=(",", ":")).encode()) + 1 <= 128 * 1024
     assert result["total_observed_changes"] == 30
+
+
+def _checkpoint_repair_child(number, parent):
+    return {"job_id": f"JOB-{number}", "root_job_id": "JOB-1",
+            "parent_job_id": f"JOB-{parent}", "status": "RUNNING", "attempts": []}
+
+
+@pytest.mark.parametrize("shape", ["self_parent", "two_node_cycle", "tail_into_cycle"])
+def test_checkpoint_repair_rejects_lineage_that_never_reaches_root(shape):
+    before, after = snapshot(), snapshot()
+    if shape == "self_parent":
+        after["children"] = [_checkpoint_repair_child(2, 2)]
+    elif shape == "two_node_cycle":
+        after["children"] = [_checkpoint_repair_child(2, 3), _checkpoint_repair_child(3, 2)]
+    else:
+        after["children"] = [_checkpoint_repair_child(2, 3),
+                             _checkpoint_repair_child(3, 4), _checkpoint_repair_child(4, 3)]
+    result = compare(before, after)
+    assert result["state"] == "UNAVAILABLE" and result["changes"] == []
+
+
+@pytest.mark.parametrize("record_count", [3, 512])
+def test_checkpoint_repair_accepts_unordered_rooted_chains_at_record_bound(record_count):
+    doc = snapshot()
+    doc["children"] = [_checkpoint_repair_child(n, n - 1)
+                       for n in reversed(range(2, record_count + 1))]
+    result = compare(doc, copy.deepcopy(doc))
+    assert result["state"] == "COMPLETE" and result["changes"] == []
+
+
+def test_checkpoint_repair_attempt_identity_cannot_belong_to_two_jobs():
+    before, after = snapshot(), snapshot()
+    attempt = {"attempt_id": "ATT-shared", "worker_id": "worker-1", "status": "RUNNING"}
+    after["root"]["attempts"] = [attempt]
+    after["children"][0]["attempts"] = [copy.deepcopy(attempt)]
+    result = compare(before, after)
+    assert result["state"] == "UNAVAILABLE" and result["changes"] == []
+
+
+def test_checkpoint_repair_distinct_attempts_can_recur_across_snapshots():
+    doc = snapshot()
+    doc["root"]["attempts"] = [
+        {"attempt_id": "ATT-root", "worker_id": "worker-1", "status": "RUNNING"}]
+    doc["children"][0]["attempts"] = [
+        {"attempt_id": "ATT-child", "worker_id": "worker-2", "status": "COMPLETED"}]
+    result = compare(doc, copy.deepcopy(doc))
+    assert result["state"] == "COMPLETE" and result["changes"] == []
+
+
+@pytest.mark.parametrize("provenance", [
+    {"state": "PARTIAL", "unjoined_job_ids": []},
+    {"state": "UNKNOWN", "unjoined_job_ids": []},
+    {"state": "COMPLETE", "unjoined_job_ids": ["JOB-2"]},
+    {"state": "COMPLETE"},
+    {"state": "COMPLETE", "unjoined_job_ids": None},
+    {}, None,
+])
+def test_checkpoint_repair_present_provenance_controls_disappearance(provenance):
+    before, after = snapshot(), snapshot()
+    after["children"] = []
+    after["runtime"]["acquisition"]["provenance"] = provenance
+    assert after["capability"]["state"] == "PROVEN"
+    result = compare(before, after)
+    assert result["state"] == "PARTIAL"
+    assert [change["kind"] for change in result["changes"]] == [
+        "NOT_OBSERVED_IN_PARTIAL_SNAPSHOT"]
+
+
+@pytest.mark.parametrize("truncation", [
+    None, False, [],
+    {"jobs": 0}, {"jobs": 1}, {"jobs": []}, {"roots": []}, {"projection": 0},
+    {"attempt_job_ids": False}, {"attempt_job_ids": {}}, {"attempt_job_ids": None},
+    {"attempts_job_ids": False},
+    {"attempt_job_ids": ["JOB-2"]}, {"attempts_job_ids": ["JOB-2"]},
+])
+def test_checkpoint_repair_malformed_or_partial_coverage_never_certifies_removal(truncation):
+    before, after = snapshot(), snapshot()
+    after["children"] = []
+    after["runtime"]["acquisition"]["truncation"] = truncation
+    result = compare(before, after)
+    assert result["state"] == "PARTIAL"
+    assert result["changes"][0]["kind"] == "NOT_OBSERVED_IN_PARTIAL_SNAPSHOT"
+
+
+@pytest.mark.parametrize(("owner", "key", "value"), [
+    ("document", "truncated", 0),
+    ("document", "jobs_truncated", []),
+    ("document", "attempts_truncated", None),
+    ("acquisition", "truncated", "false"),
+    ("acquisition", "jobs_truncated", 1),
+    ("acquisition", "attempts_truncated", {}),
+    ("document", "unjoined_job_ids", False),
+])
+def test_checkpoint_repair_malformed_legacy_coverage_is_partial(owner, key, value):
+    before, after = snapshot(), snapshot()
+    target = after if owner == "document" else after["runtime"]["acquisition"]
+    target[key] = value
+    assert compare(before, after)["state"] == "PARTIAL"
+
+
+@pytest.mark.parametrize("coverage", ["compact", "current", "legacy"])
+def test_checkpoint_repair_complete_owner_coverage_remains_complete(coverage):
+    doc = snapshot()
+    acquisition = doc["runtime"]["acquisition"]
+    if coverage == "current":
+        acquisition["truncation"] = {
+            "jobs": False, "roots": False, "projection": False, "attempt_job_ids": []}
+        acquisition["provenance"] = {"state": "COMPLETE", "unjoined_job_ids": []}
+    elif coverage == "legacy":
+        acquisition["truncation"] = {"jobs": False, "attempts_job_ids": []}
+        doc["truncated"] = doc["jobs_truncated"] = doc["attempts_truncated"] = False
+    result = compare(doc, copy.deepcopy(doc))
+    assert result["state"] == "COMPLETE" and result["changes"] == []
+
+
+@pytest.mark.parametrize(("kind", "status"), [("job", "CLAIMED"), ("attempt", "QUEUED")])
+def test_checkpoint_repair_status_must_belong_to_the_record_kind(kind, status):
+    before, after = snapshot(), snapshot()
+    if kind == "job":
+        after["root"]["status"] = status
+    else:
+        after["root"]["attempts"] = [
+            {"attempt_id": "ATT-1", "worker_id": "worker-1", "status": status}]
+    result = compare(before, after)
+    assert result["state"] == "UNAVAILABLE" and result["changes"] == []
+
+
+def test_checkpoint_repair_accepts_every_real_owner_status_in_its_own_kind():
+    from control_plane.executive_runtime import AttemptStatus, JobStatus
+    for status in JobStatus:
+        doc = snapshot()
+        doc["root"]["status"] = status.value
+        assert compare(doc, copy.deepcopy(doc))["state"] == "COMPLETE", status
+    for status in AttemptStatus:
+        doc = snapshot()
+        doc["root"]["attempts"] = [
+            {"attempt_id": "ATT-1", "worker_id": "worker-1", "status": status.value}]
+        assert compare(doc, copy.deepcopy(doc))["state"] == "COMPLETE", status
+
+
+@pytest.mark.parametrize("kind", ["job", "attempt"])
+def test_checkpoint_repair_missing_status_is_partial(kind):
+    before, after = snapshot(), snapshot()
+    if kind == "job":
+        after["root"]["status"] = None
+    else:
+        after["root"]["attempts"] = [
+            {"attempt_id": "ATT-1", "worker_id": "worker-1", "status": None}]
+    assert compare(before, after)["state"] == "PARTIAL"
+
+
+@pytest.mark.parametrize("fault", ["cycle", "partial_provenance", "partial_truncation"])
+def test_checkpoint_repair_cli_reports_unavailable_or_partial_without_effects(
+        tmp_path, capsys, monkeypatch, fault):
+    from scripts.fabric_checkpoint_changes import main
+    from control_plane.executive_runtime import Runtime
+    def forbidden(*args, **kwargs):
+        raise AssertionError("CLI must not open any Runtime")
+    monkeypatch.setattr(Runtime, "at", forbidden)
+    before, after = snapshot(), snapshot()
+    if fault == "cycle":
+        after["children"][0]["parent_job_id"] = "JOB-2"
+    else:
+        after["children"] = []
+        if fault == "partial_provenance":
+            after["runtime"]["acquisition"]["provenance"] = {
+                "state": "PARTIAL", "unjoined_job_ids": ["JOB-2"]}
+        else:
+            after["runtime"]["acquisition"]["truncation"] = {"attempt_job_ids": False}
+    paths = [tmp_path / "before.json", tmp_path / "after.json"]
+    for path, doc in zip(paths, (before, after)):
+        path.write_text(json.dumps(doc), encoding="utf-8")
+    original = [path.read_bytes() for path in paths]
+    (tmp_path / "preexisting-entry").mkdir()
+    entries = set(tmp_path.iterdir())
+    assert main(["--before", str(paths[0]), "--after", str(paths[1])]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == ("UNAVAILABLE" if fault == "cycle" else "PARTIAL")
+    if fault == "cycle":
+        assert result["changes"] == []
+    else:
+        assert result["changes"][0]["kind"] == "NOT_OBSERVED_IN_PARTIAL_SNAPSHOT"
+    assert [path.read_bytes() for path in paths] == original
+    assert set(tmp_path.iterdir()) == entries
+
+
+@pytest.mark.parametrize("coverage", ["jobs", "attempts", "roots", "projection", "unjoined"])
+def test_checkpoint_repair_consumes_real_acquisition_owner_partial_facts(coverage):
+    # Real pure owners, synthetic Job/snapshot/generation, and no Runtime access.
+    from types import SimpleNamespace
+    from control_plane.executive_runtime import Job
+    from control_plane.fabric_job_view import _acquisition_receipt, compose_fabric_view_v2
+    row = Job(job_id="JOB-1", objective="test", department="test", priority=1,
+        status="RUNNING", assigned_worker_id=None, assigned_quota_class=None,
+        authority_level="READ", branch=None, worktree=None, checkpoint=None,
+        result=None, created_at="2026-09-26T12:00:00Z", updated_at="2026-09-26T12:00:00Z",
+        root_job_id="JOB-1")
+    doc = compose_fabric_view_v2(root_job_id=row.job_id, root_job=row, jobs=[row],
+        attempts_by_job={row.job_id: []}, joined_job_ids={row.job_id},
+        runtime_identity={"root": "synthetic", "db_present": True, "identity": None},
+        armed={}, degraded=[], generated_at="2026-09-26T12:00:00Z")
+    owner = SimpleNamespace(snapshot_digest="d" * 64, jobs_truncated=coverage == "jobs",
+        attempts_truncated_job_ids=("JOB-1",) if coverage == "attempts" else (),
+        truncated=coverage == "roots")
+    receipt = _acquisition_receipt(kind="root_detail", root_job_id=row.job_id,
+        snapshot=owner, unjoined=("JOB-2",) if coverage == "unjoined" else (),
+        projection=coverage == "projection")
+    receipt["generation"] = snapshot()["runtime"]["acquisition"]["generation"]
+    doc["runtime"]["acquisition"] = receipt
+    assert doc["capability"]["state"] == "PROVEN"
+    assert compare(doc, copy.deepcopy(doc))["state"] == "PARTIAL", coverage

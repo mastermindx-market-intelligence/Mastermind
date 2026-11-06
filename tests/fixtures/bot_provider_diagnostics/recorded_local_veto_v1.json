@@ -1,0 +1,407 @@
+{
+  "by_book": {
+    "autonomous": {
+      "rows": [
+        {
+          "_meta": {
+            "book": "autonomous",
+            "role": "deep",
+            "run_id": "2026-10-15T20-00-00-000Z00-00",
+            "ts": "2026-10-15T20:00:00+00:00"
+          }
+        },
+        {
+          "detail": "Counts cover observed SDK messages only; execution effects have not been reconciled.",
+          "provider_diagnostic": {
+            "dependencies": {
+              "bundled_cli_version": {
+                "declared_value": "2.1.301",
+                "status": "declared_only"
+              },
+              "declaration_note": "versions_are_caller_declared_inputs_never_executed_version_proof",
+              "redaction_projection_status": "limited_to_retained_fields",
+              "redaction_sanitizer": "imported",
+              "sdk_package_version": {
+                "declared_value": "0.2.168",
+                "status": "declared_only"
+              }
+            },
+            "exception": {
+              "api_error_status": null,
+              "api_error_status_field_present": false,
+              "api_error_status_read_failed": false,
+              "contradictory_success_with_is_error": false,
+              "errors": [],
+              "errors_field_present": false,
+              "errors_omitted": 0,
+              "exception_class": "ProviderStartRefused",
+              "field_source": "allowlisted_exception_attributes",
+              "has_nonempty_result_text": null,
+              "is_error": null,
+              "is_error_field_present": false,
+              "observed": true,
+              "result_field_present": false,
+              "retained_failure_text": null,
+              "stop_reason": null,
+              "stop_reason_field_present": false,
+              "stop_reason_read_failed": false,
+              "structured_projection_not_terminal_message": true,
+              "subtype": null,
+              "subtype_field_present": false,
+              "terminal_reason": null,
+              "terminal_reason_field_present": false,
+              "terminal_reason_read_failed": false
+            },
+            "exit": {
+              "end_state": "raised",
+              "exception_class": "ProviderStartRefused",
+              "exception_text": "source admission revoked before provider start",
+              "exception_text_omitted_reason": null,
+              "exception_text_source": "first_stored_string_argument",
+              "exit_code": null
+            },
+            "identity": {
+              "book": "autonomous",
+              "candidate_ordinal": 0,
+              "role": "deep",
+              "run_id": "2026-10-15T20-00-00-000Z00-00"
+            },
+            "limits": {
+              "cap_reductions_applied": [],
+              "json_cap_applied": false,
+              "serialized_json_cap_bytes": 16384
+            },
+            "observation": {
+              "content_scans_truncated": 0,
+              "contradictory_terminals_observed": 0,
+              "failed_field_reads": 0,
+              "non_string_errors_omitted": 0,
+              "observation_limits": [
+                "counts_cover_observed_sdk_messages_only",
+                "counts_never_prove_absence_of_execution_effects",
+                "unknown_or_malformed_structures_are_omitted_not_coerced",
+                "oversize_sources_omitted_entirely_not_truncated_pre_redaction",
+                "query_entry_is_not_provider_start_proof"
+              ],
+              "oversize_omissions": [],
+              "query_entered_observed": false,
+              "query_entry_is_not_provider_start_proof": true,
+              "sdk_messages_observed": 0,
+              "terminal_messages_observed": 0,
+              "tool_result_blocks_observed": 0,
+              "tool_use_blocks_observed": 0,
+              "unknown_messages_observed": 0
+            },
+            "qualifications": {
+              "cancellation_propagation": "caller_owned_not_proven_by_collector",
+              "completeness": "partial_abnormal_end_state",
+              "effect_reconciliation": "not_performed",
+              "no_invocation_wrapper": true,
+              "no_ok_error_text_verdict_fields": true,
+              "notes": [
+                "observational_only_no_retry_classification",
+                "accepted_submission_outside_collector_authority",
+                "effect_reconciliation_not_performed",
+                "exception_causes_and_groups_not_traversed",
+                "finish_before_query_entry_observed",
+                "zero_messages_observed_does_not_imply_safe_retry",
+                "abnormal_end_state_stream_partial_even_if_terminal_seen"
+              ],
+              "notes_dropped": 0,
+              "terminal_presence": "absent"
+            },
+            "schema": "mastermind.bot.sdk_diagnostic.v1",
+            "terminals": {
+              "count": 0,
+              "first": null,
+              "last": null,
+              "omitted_middle_count": 0,
+              "successful_result_text_retained": false,
+              "terminal_presence": "absent"
+            }
+          },
+          "provider_diagnostic_capture": {
+            "reason": "collector_projection_available",
+            "status": "available"
+          },
+          "run_id": "2026-10-15T20-00-00-000Z00-00",
+          "title": "SDK invocation diagnostics",
+          "ts": "2026-10-15T20:00:02+00:00",
+          "type": "provider_diagnostic"
+        }
+      ]
+    },
+    "china": {
+      "rows": [
+        {
+          "_meta": {
+            "book": "china",
+            "role": "deep",
+            "run_id": "2026-10-15T20-00-00-000Z00-00",
+            "ts": "2026-10-15T20:00:00+00:00"
+          }
+        },
+        {
+          "detail": "Counts cover observed SDK messages only; execution effects have not been reconciled.",
+          "provider_diagnostic": {
+            "dependencies": {
+              "bundled_cli_version": {
+                "declared_value": "2.1.301",
+                "status": "declared_only"
+              },
+              "declaration_note": "versions_are_caller_declared_inputs_never_executed_version_proof",
+              "redaction_projection_status": "limited_to_retained_fields",
+              "redaction_sanitizer": "imported",
+              "sdk_package_version": {
+                "declared_value": "0.2.168",
+                "status": "declared_only"
+              }
+            },
+            "exception": {
+              "api_error_status": null,
+              "api_error_status_field_present": false,
+              "api_error_status_read_failed": false,
+              "contradictory_success_with_is_error": false,
+              "errors": [],
+              "errors_field_present": false,
+              "errors_omitted": 0,
+              "exception_class": "ProviderStartRefused",
+              "field_source": "allowlisted_exception_attributes",
+              "has_nonempty_result_text": null,
+              "is_error": null,
+              "is_error_field_present": false,
+              "observed": true,
+              "result_field_present": false,
+              "retained_failure_text": null,
+              "stop_reason": null,
+              "stop_reason_field_present": false,
+              "stop_reason_read_failed": false,
+              "structured_projection_not_terminal_message": true,
+              "subtype": null,
+              "subtype_field_present": false,
+              "terminal_reason": null,
+              "terminal_reason_field_present": false,
+              "terminal_reason_read_failed": false
+            },
+            "exit": {
+              "end_state": "raised",
+              "exception_class": "ProviderStartRefused",
+              "exception_text": "source admission revoked before provider start",
+              "exception_text_omitted_reason": null,
+              "exception_text_source": "first_stored_string_argument",
+              "exit_code": null
+            },
+            "identity": {
+              "book": "china",
+              "candidate_ordinal": 0,
+              "role": "deep",
+              "run_id": "2026-10-15T20-00-00-000Z00-00"
+            },
+            "limits": {
+              "cap_reductions_applied": [],
+              "json_cap_applied": false,
+              "serialized_json_cap_bytes": 16384
+            },
+            "observation": {
+              "content_scans_truncated": 0,
+              "contradictory_terminals_observed": 0,
+              "failed_field_reads": 0,
+              "non_string_errors_omitted": 0,
+              "observation_limits": [
+                "counts_cover_observed_sdk_messages_only",
+                "counts_never_prove_absence_of_execution_effects",
+                "unknown_or_malformed_structures_are_omitted_not_coerced",
+                "oversize_sources_omitted_entirely_not_truncated_pre_redaction",
+                "query_entry_is_not_provider_start_proof"
+              ],
+              "oversize_omissions": [],
+              "query_entered_observed": false,
+              "query_entry_is_not_provider_start_proof": true,
+              "sdk_messages_observed": 0,
+              "terminal_messages_observed": 0,
+              "tool_result_blocks_observed": 0,
+              "tool_use_blocks_observed": 0,
+              "unknown_messages_observed": 0
+            },
+            "qualifications": {
+              "cancellation_propagation": "caller_owned_not_proven_by_collector",
+              "completeness": "partial_abnormal_end_state",
+              "effect_reconciliation": "not_performed",
+              "no_invocation_wrapper": true,
+              "no_ok_error_text_verdict_fields": true,
+              "notes": [
+                "observational_only_no_retry_classification",
+                "accepted_submission_outside_collector_authority",
+                "effect_reconciliation_not_performed",
+                "exception_causes_and_groups_not_traversed",
+                "finish_before_query_entry_observed",
+                "zero_messages_observed_does_not_imply_safe_retry",
+                "abnormal_end_state_stream_partial_even_if_terminal_seen"
+              ],
+              "notes_dropped": 0,
+              "terminal_presence": "absent"
+            },
+            "schema": "mastermind.bot.sdk_diagnostic.v1",
+            "terminals": {
+              "count": 0,
+              "first": null,
+              "last": null,
+              "omitted_middle_count": 0,
+              "successful_result_text_retained": false,
+              "terminal_presence": "absent"
+            }
+          },
+          "provider_diagnostic_capture": {
+            "reason": "collector_projection_available",
+            "status": "available"
+          },
+          "run_id": "2026-10-15T20-00-00-000Z00-00",
+          "title": "SDK invocation diagnostics",
+          "ts": "2026-10-15T20:00:02+00:00",
+          "type": "provider_diagnostic"
+        }
+      ]
+    },
+    "hk": {
+      "rows": [
+        {
+          "_meta": {
+            "book": "hk",
+            "role": "deep",
+            "run_id": "2026-10-15T20-00-00-000Z00-00",
+            "ts": "2026-10-15T20:00:00+00:00"
+          }
+        },
+        {
+          "detail": "Counts cover observed SDK messages only; execution effects have not been reconciled.",
+          "provider_diagnostic": {
+            "dependencies": {
+              "bundled_cli_version": {
+                "declared_value": "2.1.301",
+                "status": "declared_only"
+              },
+              "declaration_note": "versions_are_caller_declared_inputs_never_executed_version_proof",
+              "redaction_projection_status": "limited_to_retained_fields",
+              "redaction_sanitizer": "imported",
+              "sdk_package_version": {
+                "declared_value": "0.2.168",
+                "status": "declared_only"
+              }
+            },
+            "exception": {
+              "api_error_status": null,
+              "api_error_status_field_present": false,
+              "api_error_status_read_failed": false,
+              "contradictory_success_with_is_error": false,
+              "errors": [],
+              "errors_field_present": false,
+              "errors_omitted": 0,
+              "exception_class": "ProviderStartRefused",
+              "field_source": "allowlisted_exception_attributes",
+              "has_nonempty_result_text": null,
+              "is_error": null,
+              "is_error_field_present": false,
+              "observed": true,
+              "result_field_present": false,
+              "retained_failure_text": null,
+              "stop_reason": null,
+              "stop_reason_field_present": false,
+              "stop_reason_read_failed": false,
+              "structured_projection_not_terminal_message": true,
+              "subtype": null,
+              "subtype_field_present": false,
+              "terminal_reason": null,
+              "terminal_reason_field_present": false,
+              "terminal_reason_read_failed": false
+            },
+            "exit": {
+              "end_state": "raised",
+              "exception_class": "ProviderStartRefused",
+              "exception_text": "source admission revoked before provider start",
+              "exception_text_omitted_reason": null,
+              "exception_text_source": "first_stored_string_argument",
+              "exit_code": null
+            },
+            "identity": {
+              "book": "hk",
+              "candidate_ordinal": 0,
+              "role": "deep",
+              "run_id": "2026-10-15T20-00-00-000Z00-00"
+            },
+            "limits": {
+              "cap_reductions_applied": [],
+              "json_cap_applied": false,
+              "serialized_json_cap_bytes": 16384
+            },
+            "observation": {
+              "content_scans_truncated": 0,
+              "contradictory_terminals_observed": 0,
+              "failed_field_reads": 0,
+              "non_string_errors_omitted": 0,
+              "observation_limits": [
+                "counts_cover_observed_sdk_messages_only",
+                "counts_never_prove_absence_of_execution_effects",
+                "unknown_or_malformed_structures_are_omitted_not_coerced",
+                "oversize_sources_omitted_entirely_not_truncated_pre_redaction",
+                "query_entry_is_not_provider_start_proof"
+              ],
+              "oversize_omissions": [],
+              "query_entered_observed": false,
+              "query_entry_is_not_provider_start_proof": true,
+              "sdk_messages_observed": 0,
+              "terminal_messages_observed": 0,
+              "tool_result_blocks_observed": 0,
+              "tool_use_blocks_observed": 0,
+              "unknown_messages_observed": 0
+            },
+            "qualifications": {
+              "cancellation_propagation": "caller_owned_not_proven_by_collector",
+              "completeness": "partial_abnormal_end_state",
+              "effect_reconciliation": "not_performed",
+              "no_invocation_wrapper": true,
+              "no_ok_error_text_verdict_fields": true,
+              "notes": [
+                "observational_only_no_retry_classification",
+                "accepted_submission_outside_collector_authority",
+                "effect_reconciliation_not_performed",
+                "exception_causes_and_groups_not_traversed",
+                "finish_before_query_entry_observed",
+                "zero_messages_observed_does_not_imply_safe_retry",
+                "abnormal_end_state_stream_partial_even_if_terminal_seen"
+              ],
+              "notes_dropped": 0,
+              "terminal_presence": "absent"
+            },
+            "schema": "mastermind.bot.sdk_diagnostic.v1",
+            "terminals": {
+              "count": 0,
+              "first": null,
+              "last": null,
+              "omitted_middle_count": 0,
+              "successful_result_text_retained": false,
+              "terminal_presence": "absent"
+            }
+          },
+          "provider_diagnostic_capture": {
+            "reason": "collector_projection_available",
+            "status": "available"
+          },
+          "run_id": "2026-10-15T20-00-00-000Z00-00",
+          "title": "SDK invocation diagnostics",
+          "ts": "2026-10-15T20:00:02+00:00",
+          "type": "provider_diagnostic"
+        }
+      ]
+    }
+  },
+  "producer_sha256": {
+    "brain/cli_bridge.py": "9f02ba5f8ea99872ca0b72cacd2d0419d43406d986a46b59fc971b0e64f04434",
+    "brain/sdk_diagnostics.py": "7174a0464d18bfee5bc2ebd020793d307477620e958a3124b56ca2e87e1cacc0"
+  },
+  "producer_source_tree": "ee78193d5b89b8ba5a6c7ffbf0b10288c242d2ba",
+  "run_id": "2026-10-15T20-00-00-000Z00-00",
+  "schema": "mastermind.test.recorded_local_veto.v1",
+  "scope": "Actual resolved bridge/collector output with recording fake transports and explicitly synthetic run metadata/clocks. No claim of real book-caller binding or provider entry.",
+  "test_bundled_cli_declared": "2.1.301",
+  "test_sdk_version": "0.2.168"
+}

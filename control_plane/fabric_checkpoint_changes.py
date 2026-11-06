@@ -13,13 +13,15 @@ from datetime import datetime
 from typing import Any
 from control_plane.executive_runtime import AttemptStatus, JobStatus
 
-_STATUSES = frozenset(item.value for enum in (JobStatus, AttemptStatus) for item in enum)
+_JOB_STATUSES = frozenset(item.value for item in JobStatus)
+_ATTEMPT_STATUSES = frozenset(item.value for item in AttemptStatus)
 
 
-def _status(value: Any) -> str | None:
+def _status(value: Any, *, attempt: bool = False) -> str | None:
     if value is None:
         return None
-    if not isinstance(value, str) or value not in _STATUSES:
+    allowed = _ATTEMPT_STATUSES if attempt else _JOB_STATUSES
+    if not isinstance(value, str) or value not in allowed:
         raise ValueError("invalid_execution_status")
     return value
 
@@ -66,13 +68,41 @@ def _source(document: Mapping) -> str:
 
 def _partial(document: Mapping) -> bool:
     acquisition = _mapping(_mapping(document.get("runtime")).get("acquisition"))
-    truncation = _mapping(acquisition.get("truncation"))
-    return (_mapping(document.get("capability")).get("state") != "PROVEN"
-            or bool(document.get("unjoined_job_ids"))
-            or any(value is True or (isinstance(value, (list, tuple)) and bool(value))
-                   for value in truncation.values())
-            or any(owner.get(key) is True for owner in (document, acquisition)
-                   for key in ("truncated", "jobs_truncated", "attempts_truncated")))
+    # Compact legacy exports may omit these owner subdocuments. Present owner
+    # facts, including malformed coverage, must never certify a complete view.
+    partial = _mapping(document.get("capability")).get("state") != "PROVEN"
+    for owner in (document, acquisition):
+        for key in ("truncated", "jobs_truncated", "attempts_truncated"):
+            if key in owner:
+                value = owner[key]
+                partial = partial or type(value) is not bool or value
+
+    if "unjoined_job_ids" in document:
+        unjoined = document["unjoined_job_ids"]
+        partial = partial or not isinstance(unjoined, (list, tuple)) or bool(unjoined)
+
+    if "truncation" in acquisition:
+        truncation = acquisition["truncation"]
+        if not isinstance(truncation, Mapping):
+            partial = True
+        else:
+            for key, value in truncation.items():
+                if key in {"jobs", "roots", "projection"}:
+                    partial = partial or type(value) is not bool or value
+                elif key in {"attempt_job_ids", "attempts_job_ids"}:
+                    partial = partial or not isinstance(value, (list, tuple)) or bool(value)
+                else:
+                    # Retain legacy boolean/list coverage signals conservatively.
+                    partial = partial or not (
+                        type(value) is bool or isinstance(value, (list, tuple))
+                    ) or bool(value)
+
+    if "provenance" in acquisition:
+        provenance = _mapping(acquisition["provenance"])
+        unjoined = provenance.get("unjoined_job_ids")
+        partial = (partial or provenance.get("state") != "COMPLETE"
+                   or not isinstance(unjoined, (list, tuple)) or bool(unjoined))
+    return partial
 
 
 def _records(document: Mapping) -> tuple[str, dict[str, dict], bool]:
@@ -84,6 +114,7 @@ def _records(document: Mapping) -> tuple[str, dict[str, dict], bool]:
     if root_id is None or not isinstance(children, list) or len(children) >= MAX_RECORDS:
         raise ValueError("missing_or_over_budget_records")
     records: dict[str, dict] = {}
+    seen_attempts: set[str] = set()
     partial = _partial(document)
     for value in [root, *children]:
         row = _mapping(value)
@@ -102,17 +133,16 @@ def _records(document: Mapping) -> tuple[str, dict[str, dict], bool]:
         if len(attempts) > MAX_CHANGES:
             raise ValueError("attempts_over_budget")
         normalized = []
-        seen = set()
         for value in attempts:
             attempt = _mapping(value)
             attempt_id = _ref(attempt.get("attempt_id"))
-            if attempt_id is None or attempt_id in seen:
+            if attempt_id is None or attempt_id in seen_attempts:
                 raise ValueError("ambiguous_attempt_identity")
-            seen.add(attempt_id)
+            seen_attempts.add(attempt_id)
             if attempt.get("status") is None:
                 partial = True
             normalized.append({"attempt_id": attempt_id,
-                "worker_id": _ref(attempt.get("worker_id")), "status": _status(attempt.get("status"))})
+                "worker_id": _ref(attempt.get("worker_id")), "status": _status(attempt.get("status"), attempt=True)})
         if row.get("status") is None:
             partial = True
         records[job_id] = {"status": _status(row.get("status")), "parent_job_id": parent,
@@ -122,6 +152,18 @@ def _records(document: Mapping) -> tuple[str, dict[str, dict], bool]:
             "attempts": sorted(normalized, key=lambda a: a["attempt_id"])}
     if any(row["parent_job_id"] not in records for key, row in records.items() if key != root_id):
         raise ValueError("unjoined_parent")
+    # Immediate parent existence also admits self-parent and disconnected cycles.
+    # Memoized root-reaching paths keep this bounded by the existing record limit.
+    rooted = {root_id}
+    for job_id in records:
+        path: set[str] = set()
+        cursor = job_id
+        while cursor not in rooted:
+            if cursor in path:
+                raise ValueError("cyclic_root_membership")
+            path.add(cursor)
+            cursor = records[cursor]["parent_job_id"]
+        rooted.update(path)
     return root_id, records, partial
 
 

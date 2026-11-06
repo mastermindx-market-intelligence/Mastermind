@@ -46,6 +46,7 @@ from control_plane.consultation_runtime import (
     ConsultationConflict,
     ConsultationEventResult,
     ConsultationRuntime,
+    RequesterAnswerAttentionProjection,
 )
 from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.wake_events import utc_now_iso
@@ -109,11 +110,12 @@ REFUSAL_CODES = frozenset(
 # Body-over-budget threshold for the dispatcher-emitted read result.
 _BODY_BUDGET_BYTES = 60_000
 
-# Production packet carriage is intentionally declared UNAVAILABLE here.
+# The concrete Company host composes the canonical packet carrier in source.
+# No installed listener/grant or live acceptance is established by that source.
 # The owner is the existing dialogue carrier lineage (issues #611, #719,
 # #738). This dispatcher never reads bodies from a dictionary, transcript
 # store or mailbox table — only from the injected ``ConsultationPacketCarrier``.
-PRODUCTION_PACKET_CARRIAGE = "UNAVAILABLE"
+PRODUCTION_PACKET_CARRIAGE = "BUILT_NOT_INSTALLED"
 
 # Fixed default response budget used when the ``InvocationContext`` does not
 # override it. Closed shape; ``max_payload_bytes`` is the cap enforced on the
@@ -1094,7 +1096,7 @@ class RuntimeConsultationDispatcher:
     after the runtime admitted the corresponding event. The
     ``invocations`` source is the only allowed source of identity for
     ``company.consult``. Production packet carriage is declared
-    ``UNAVAILABLE``; see ``PRODUCTION_PACKET_CARRIAGE``.
+    ``BUILT_NOT_INSTALLED``; see ``PRODUCTION_PACKET_CARRIAGE``.
     """
 
     _ALLOWED_TOOLS = frozenset(
@@ -1110,6 +1112,8 @@ class RuntimeConsultationDispatcher:
         recipients: RecipientResolver,
         packets: ConsultationPacketCarrier,
         invocations: InvocationContextSource,
+        before_effect: Callable[[str], None] | None = None,
+        requester_answer_wake_dispatch: Callable[[RequesterAnswerAttentionProjection], Awaitable[None]] | None = None,
         _clock: ClockFn | None = None,
         _wake_repository: WakeLedgerRepository | None = None,
     ) -> None:
@@ -1119,6 +1123,12 @@ class RuntimeConsultationDispatcher:
             _wake_repository = WakeLedgerRepository(runtime)
         if not isinstance(_wake_repository, WakeLedgerRepository):
             raise TypeError("_wake_repository must be WakeLedgerRepository")
+        if before_effect is not None and not callable(before_effect):
+            raise TypeError("before_effect must be callable")
+        if requester_answer_wake_dispatch is not None and not callable(requester_answer_wake_dispatch):
+            raise TypeError("requester answer Wake dispatch must be callable")
+        self._requester_answer_wake_dispatch = requester_answer_wake_dispatch
+        self._before_effect = before_effect
         self._wake_repository = _wake_repository
         self.runtime = runtime
         self.repository_root = Path(repository_root).resolve()
@@ -1130,6 +1140,13 @@ class RuntimeConsultationDispatcher:
         self._consultations = ConsultationRuntime(
             runtime, repository_root=self.repository_root, _clock=self._clock
         )
+
+    def _guard_effect(self, phase: str) -> None:
+        # The host owns connected-caller authority; Runtime still owns every
+        # durable transition. Compatibility callers without a host fence retain
+        # the existing Runtime checks. Installed Company composition supplies it.
+        if self._before_effect is not None:
+            self._before_effect(phase)
 
     async def __call__(
         self, tool_name: str, request: Mapping[str, Any]
@@ -1147,7 +1164,9 @@ class RuntimeConsultationDispatcher:
 
     # -- explicit authenticated consumption seam (NOT reachable via __call__) --
 
-    async def consume_answer(self, consultation_ref: str) -> dict[str, Any]:
+    async def consume_answer(
+        self, consultation_ref: str, *, native_delivery_command_id: str | None = None,
+    ) -> dict[str, Any]:
         """Append one exact ``CONSUMED_BY_REQUESTER`` event for the requester.
 
         This is the only Python seam that appends ``CONSUMED_BY_REQUESTER``
@@ -1207,10 +1226,12 @@ class RuntimeConsultationDispatcher:
                 detail="carrier ANSWER frame does not match admitted event",
             )
         try:
+            self._guard_effect('CONSUMED_BY_REQUESTER')
             result = self._consultations.consumed_by_requester(
                 answer_frame,
                 requester_attempt_id=self.caller.attempt_id,
                 observed_at=self._clock(),
+                native_delivery_command_id=native_delivery_command_id,
             )
         except (StateConflict, ConsultationConflict) as exc:
             raise ConsultationRefusal(
@@ -1244,8 +1265,36 @@ class RuntimeConsultationDispatcher:
                 detail="semantic.to must equal peer.peer_ref",
             )
 
+        targeted = getattr(self.packets, "supports_targeted_delivery", False) is True
+        targeted_context = None
+        admitted_target = None
+        if targeted:
+            if not callable(getattr(self.packets, "get_question_for", None)):
+                raise ConsultationRefusal(
+                    "CARRIER_UNAVAILABLE", detail="targeted QUESTION lookup is unavailable"
+                )
+            targeted_context = self.invocations.current()
+            if targeted_context is None:
+                raise ConsultationRefusal(
+                    "INVOCATION_CONTEXT_UNAVAILABLE",
+                    detail="invocations.current() returned None",
+                )
+            replay_id, _ = _build_deterministic_ids(_mint_request_identity(
+                caller=self.caller, peer_ref=peer_ref,
+                invocation_id=targeted_context.invocation_id,
+            ))
+            admitted_target = _find_consultation_event(self.runtime, replay_id, "INTENT")
+
         try:
-            recipient = self.recipients(peer_ref)
+            # Once admitted, resolve the original party, not a stable peer's
+            # newer current session. New invocations still use the host resolver.
+            recipient = (
+                RecipientBinding(
+                    actor_ref=admitted_target.payload["recipient_actor_ref"],
+                    recipient_binding=admitted_target.payload["recipient_binding"],
+                )
+                if admitted_target is not None else self.recipients(peer_ref)
+            )
             recipient_actor_ref = _normalized_actor_ref(recipient.actor_ref)
             normalized_recipient_binding = dict(recipient.recipient_binding)
         except NoSuchRecipient as exc:
@@ -1260,21 +1309,30 @@ class RuntimeConsultationDispatcher:
 
         if getattr(self.packets, "requires_dialogue_binding", False):
             try:
-                _require_same_dialogue_carrier(
-                    self.caller.dialogue_binding,
-                    recipient.dialogue_binding,
-                    caller_actor_ref={
-                        "kind": "worker_attempt",
-                        "job_id": self.caller.job_id,
-                        "attempt_id": self.caller.attempt_id,
-                        "worker_id": self.caller.worker_id,
-                    },
-                    recipient_actor_ref=recipient_actor_ref,
-                )
+                caller_dialogue_actor = {
+                    "kind": "worker_attempt",
+                    "job_id": self.caller.job_id,
+                    "attempt_id": self.caller.attempt_id,
+                    "worker_id": self.caller.worker_id,
+                }
+                if targeted:
+                    # Destination facts are reconstructed by the target carrier,
+                    # not borrowed from a recipient's Company Dialogue send grant.
+                    _dialogue_carrier_identity(self.caller.dialogue_binding)
+                    if dict(self.caller.dialogue_binding.actor_ref) != caller_dialogue_actor:
+                        raise StateConflict("caller dialogue actor disagrees")
+                else:
+                    _require_same_dialogue_carrier(
+                        self.caller.dialogue_binding,
+                        recipient.dialogue_binding,
+                        caller_actor_ref=caller_dialogue_actor,
+                        recipient_actor_ref=recipient_actor_ref,
+                    )
             except StateConflict as exc:
                 raise ConsultationRefusal(
                     "NOT_A_PARTY",
-                    detail="consultation parties do not share one Agent Relay parent",
+                    detail=("caller does not match the exact Agent Relay sender" if targeted
+                            else "consultation parties do not share one Agent Relay parent"),
                 ) from exc
 
         if recipient_actor_ref["worker_id"] == self.caller.worker_id:
@@ -1283,7 +1341,7 @@ class RuntimeConsultationDispatcher:
                 detail="requester and recipient worker_ids must differ",
             )
 
-        ctx = self.invocations.current()
+        ctx = targeted_context if targeted else self.invocations.current()
         if ctx is None:
             raise ConsultationRefusal(
                 "INVOCATION_CONTEXT_UNAVAILABLE",
@@ -1376,7 +1434,13 @@ class RuntimeConsultationDispatcher:
             self.runtime, consultation_id, "INTENT"
         )
         try:
-            carrier_question_frame = await self.packets.get_question(consultation_id)
+            if targeted and existing_intent is None:
+                question_lookup = getattr(self.packets, "get_question_for", None)
+                if not callable(question_lookup):
+                    raise ConsultationPacketCarrierUnknown("targeted QUESTION lookup is unavailable")
+                carrier_question_frame = await question_lookup(question_frame)
+            else:
+                carrier_question_frame = await self.packets.get_question(consultation_id)
         except (
             ConsultationPacketCarrierUnknown,
             ConsultationPacketEffectUnknown,
@@ -1515,6 +1579,7 @@ class RuntimeConsultationDispatcher:
 
         def _append_intent() -> Any:
             try:
+                self._guard_effect('INTENT')
                 return self._consultations.intent(
                     question_frame,
                     requester_attempt_id=self.caller.attempt_id,
@@ -1820,6 +1885,7 @@ class RuntimeConsultationDispatcher:
             }
 
         try:
+            self._guard_effect('QUESTION_WAKE')
             repository.append_record(
                 requested_record(obligation), obligation=obligation
             )
@@ -2065,11 +2131,11 @@ class RuntimeConsultationDispatcher:
                 detail="answer requires canonical TARGET_ACKNOWLEDGED Wake evidence",
             )
 
-        def _reconciled_envelope(
+        async def _reconciled_envelope(
             reserved_event: Any, validated_frame: Mapping[str, Any]
         ) -> dict[str, Any]:
             attention_requested, wake_state, blocker = (
-                self._request_answer_attention(validated_frame, intent)
+                await self._request_answer_attention(validated_frame, intent)
             )
             return {
                 "ok": True,
@@ -2131,7 +2197,7 @@ class RuntimeConsultationDispatcher:
                     "CARRIER_RECONCILIATION_REQUIRED",
                     detail="admitted ANSWER_AVAILABLE but carrier frame is missing or fails validation",
                 )
-            return _reconciled_envelope(reserved, validated)
+            return await _reconciled_envelope(reserved, validated)
 
         answer_box: dict[str, Any] = {}
         runtime_refusal: ConsultationRefusal | None = None
@@ -2150,6 +2216,7 @@ class RuntimeConsultationDispatcher:
         async def _commit_answer_after_ready() -> None:
             nonlocal runtime_refusal
             try:
+                self._guard_effect('ANSWER_AVAILABLE')
                 result = self._consultations.answer_available(
                     answer_frame, observed_at=self._clock()
                 )
@@ -2246,7 +2313,7 @@ class RuntimeConsultationDispatcher:
                     "CARRIER_RECONCILIATION_REQUIRED",
                     detail="replay ANSWER_AVAILABLE admitted but carrier frame is missing or fails validation",
                 )
-            return _reconciled_envelope(current_reserved, validated)
+            return await _reconciled_envelope(current_reserved, validated)
         except ConsultationPacketEffectUnknown:
             answer = answer_box.get("result")
             current_reserved = _non_historical_answer_event(
@@ -2408,7 +2475,7 @@ class RuntimeConsultationDispatcher:
                         "blocker": "CARRIER_RECONCILIATION_REQUIRED",
                     },
                 }
-            return _reconciled_envelope(current_reserved, validated)
+            return await _reconciled_envelope(current_reserved, validated)
         event, event_type, payload_fact, historical = _answer_event_facts(answer)
         if historical or not answer.inserted:
             raise ConsultationRefusal(
@@ -2416,7 +2483,7 @@ class RuntimeConsultationDispatcher:
             )
 
         attention_requested, wake_state, blocker = (
-            self._request_answer_attention(answer_frame, intent)
+            await self._request_answer_attention(answer_frame, intent)
         )
         return {
             "ok": True,
@@ -2438,7 +2505,7 @@ class RuntimeConsultationDispatcher:
             },
         }
 
-    def _request_answer_attention(
+    async def _request_answer_attention(
         self, answer_frame: Mapping[str, Any], intent_event: Any
     ) -> tuple[bool | None, str | None, str | None]:
         """Create/reconcile the one requester-directed answer Wake request."""
@@ -2463,6 +2530,7 @@ class RuntimeConsultationDispatcher:
 
         obligation_id = projection.obligation.obligation_id
         try:
+            self._guard_effect('ANSWER_WAKE')
             extension.persist_requested_if_current(self._consultations)
         except ConsultationConflict as exc:
             present = _wake_request_readback(
@@ -2496,6 +2564,17 @@ class RuntimeConsultationDispatcher:
                 "RECONCILIATION_REQUIRED",
                 "ANSWER_ATTENTION_UNRESOLVED",
             )
+        if self._requester_answer_wake_dispatch is not None:
+            try:
+                self._guard_effect("ANSWER_WAKE")
+                await self._requester_answer_wake_dispatch(projection)
+            except Exception:
+                # The answer and any recorded delivery survive a held native
+                # consumer. Retry/restart re-enters the same Wake obligation.
+                return (
+                    True, _wake_state_readback(self._wake_repository, obligation_id),
+                    "ANSWER_ATTENTION_UNRESOLVED",
+                )
         return (
             True,
             _wake_state_readback(self._wake_repository, obligation_id),
