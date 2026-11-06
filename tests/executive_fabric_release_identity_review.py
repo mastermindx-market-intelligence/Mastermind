@@ -749,3 +749,13 @@ REVIEWED_FILES['ops/executive_os/install.sh'] = {
 
 # Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
 REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e40d488bd0c18f6cc422aeb15ce853cba330a8d5c9559cc7a7612b1ce119a3ed', 'sites': ((22, 12, 15, 'int', '458'), (23, 7, 12, 'int', '0o700'), (125, 49, 54, 'int', '0o755'), (128, 60, 65, 'int', '0o755'))}
+
+# Hermes native Fabric: two bounded escalation-reason length limits, not
+# principals, account selections, permissions or process identities. Only the
+# exact reviewed source postimage and these complete typed numeric AST tokens
+# are exempt; any source drift exposes both to the ordinary D8 scanner again.
+# This does not confer trusted session grants or Fabric execution authority.
+REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
+    "sha256": "4a646f1fcbc11158fe5bb737fef4779dfbd36fb75c2ee0cced5b6ad16875f7f1",
+    "sites": ((48, 65, 68, "int", "500"), (216, 60, 63, "int", "500")),
+}
