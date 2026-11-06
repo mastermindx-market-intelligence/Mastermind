@@ -484,7 +484,8 @@ def test_the_policy_is_never_installed_late_by_the_initializer():
     assert "paid_initializer" not in head
     assert "held_runtime_custody" not in head
     # The sentinels are installed before the first ordinary import.
-    block = source.index('if len(sys.argv) > 1 and sys.argv[1] == "hermes-runtime":')
+    assert '{"hermes-runtime", "prepare-hermes-dependencies"}' in head
+    block = head.index("_install_no_site_sentinels()\n    _HERMES_EARLY_NO_SITE = True")
     assert block < source.index("import argparse")
     assert (source.index("_install_no_site_sentinels()", block)
             < source.index("import argparse"))

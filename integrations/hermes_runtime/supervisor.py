@@ -96,6 +96,55 @@ def build_serve_argv(hermes_bin: Path, role: str, backend_port: int, host: str =
     return argv
 
 
+def expected_disabled_mcp(profile: RuntimeProfile) -> dict[str, tuple[str, ...]] | None:
+    """Require exact on-disk native config before trusting any CLI summary.
+
+    A displayed MCP summary is not a connection or admission receipt.
+    The only accepted additional config is the reviewed, *disabled*
+    Steward source. No unknown or enabled MCP/server plugin is allowed.
+    """
+    path = profile.hermes_home / "profiles" / profile.role / "config.yaml"
+    if not path.exists() and not path.is_symlink():
+        if (profile.state_dir / "install-manifest.json").exists():
+            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_MISSING")
+        # Uninstalled stub-runtime tests use a temporary profile without
+        # a native config. Real installs must carry that config.
+        return None
+    if path.is_symlink():
+        raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_SYMLINK")
+    try:
+        info = path.stat()
+        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.geteuid() or info.st_nlink != 1):
+            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNSAFE")
+        if info.st_size > 64 * 1024:
+            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_TOO_LARGE")
+        raw = path.read_bytes()
+    except OSError:
+        raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNAVAILABLE") from None
+    if (profile.native_provider_id is None
+            and raw == render_hermes_config(profile).encode("utf-8")):
+        return None
+    # The built-in WP1 package remains independent for non-integrated
+    # installs; this optional consumer is loaded only for the specific
+    # reviewed disabled native config.
+    from integrations.hermes_harness.native_mcp import render_disarmed_native_config
+    from integrations.hermes_steward.client import ALLOWED_TOOLS
+
+    if profile.extension_allowlist:
+        raise RuntimeRefusal("NATIVE_EXTENSION_NOT_INSTALLED")
+    from integrations.hermes_harness.native_byok import render_disarmed_native_byok
+    allowed_native = {render_disarmed_native_byok(profile).encode("utf-8")}
+    # An explicit persisted selection cannot downgrade to a legacy or
+    # model-less config. Only selector-free historical profiles retain
+    # the earlier source-compatible config forms.
+    if profile.native_provider_id is None:
+        allowed_native.add(render_disarmed_native_config(profile).encode("utf-8"))
+    if raw not in allowed_native:
+        raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_DRIFT")
+    return {"mastermind_steward": tuple(ALLOWED_TOOLS)}
+
+
 class ServiceRuntime:
     def __init__(
         self,
@@ -105,6 +154,7 @@ class ServiceRuntime:
         *,
         extra_child_env: dict[str, str] | None = None,
         role_status_publisher: RoleStatusPublisher | None = None,
+        native_launch=None,
     ):
         self.profile = profile
         self.secrets = secrets
@@ -124,6 +174,7 @@ class ServiceRuntime:
         self.memory: HighWaterLog | None = None
         self._role_status_publisher = role_status_publisher
         self._next_role_status_publication = 0.0
+        self._native_launch = native_launch
 
     def start(self) -> None:
         # Check native BYOK/alias policy before *any* Hermes subprocess,
@@ -219,6 +270,15 @@ class ServiceRuntime:
         its Steward MCP disabled before any key is retrieved or forwarded.
         Legacy WP1 and plain disabled-MCP profiles receive no model key.
         """
+        if self.profile.gateway_backend == "native-session-authority":
+            if self._native_launch is None:
+                raise RuntimeRefusal("NATIVE_STARTUP_CUSTODY_REQUIRED")
+            try:
+                self._native_launch.qualify(self.profile, self.hermes_bin)
+            except RuntimeRefusal:
+                raise
+            except Exception:
+                raise RuntimeRefusal("NATIVE_STARTUP_CUSTODY_UNQUALIFIED") from None
         self._expected_disabled_mcp()
         native = self.profile.hermes_home / "profiles" / self.profile.role / "config.yaml"
         from integrations.hermes_harness.native_byok import render_disarmed_native_byok
@@ -255,58 +315,15 @@ class ServiceRuntime:
         return env
 
     def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:
-        """Require exact on-disk native config before trusting any CLI summary.
-
-        A displayed MCP summary is not a connection or admission receipt.
-        The only accepted additional config is the reviewed, *disabled*
-        Steward source. No unknown or enabled MCP/server plugin is allowed.
-        """
-        path = self.profile.hermes_home / "profiles" / self.profile.role / "config.yaml"
-        if not path.exists() and not path.is_symlink():
-            if (self.profile.state_dir / "install-manifest.json").exists():
-                raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_MISSING")
-            # Uninstalled stub-runtime tests use a temporary profile without
-            # a native config. Real installs must carry that config.
-            return None
-        if path.is_symlink():
-            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_SYMLINK")
-        try:
-            info = path.stat()
-            if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
-                    or info.st_uid != os.geteuid() or info.st_nlink != 1):
-                raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNSAFE")
-            if info.st_size > 64 * 1024:
-                raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_TOO_LARGE")
-            raw = path.read_bytes()
-        except OSError:
-            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNAVAILABLE") from None
-        if (self.profile.native_provider_id is None
-                and raw == render_hermes_config(self.profile).encode("utf-8")):
-            return None
-        # The built-in WP1 package remains independent for non-integrated
-        # installs; this optional consumer is loaded only for the specific
-        # reviewed disabled native config.
-        from integrations.hermes_harness.native_mcp import render_disarmed_native_config
-        from integrations.hermes_steward.client import ALLOWED_TOOLS
-
-        if self.profile.extension_allowlist:
-            raise RuntimeRefusal("NATIVE_EXTENSION_NOT_INSTALLED")
-        from integrations.hermes_harness.native_byok import render_disarmed_native_byok
-        allowed_native = {render_disarmed_native_byok(self.profile).encode("utf-8")}
-        # An explicit persisted selection cannot downgrade to a legacy or
-        # model-less config. Only selector-free historical profiles retain
-        # the earlier source-compatible config forms.
-        if self.profile.native_provider_id is None:
-            allowed_native.add(render_disarmed_native_config(self.profile).encode("utf-8"))
-        if raw not in allowed_native:
-            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_DRIFT")
-        return {"mastermind_steward": tuple(ALLOWED_TOOLS)}
+        return expected_disabled_mcp(self.profile)
 
     def _check_registry(self) -> None:
         expected_disabled_mcp = self._expected_disabled_mcp()
         try:
             proc = subprocess.run(
-                build_tools_argv(self.hermes_bin, self.profile.role),
+                (self._native_launch.argv(self.profile, self.hermes_bin, tools=True)
+                 if self.profile.gateway_backend == "native-session-authority"
+                 else build_tools_argv(self.hermes_bin, self.profile.role)),
                 capture_output=True,
                 env=self._registry_env(),
                 timeout=30,
@@ -385,7 +402,9 @@ class ServiceRuntime:
             self.child_starts += 1
             port = self.profile.backend_port or reserve_loopback_port(self.profile.gateway_host)
             try:
-                argv = build_serve_argv(self.hermes_bin, self.profile.role, port, self.profile.gateway_host)
+                argv = (self._native_launch.argv(self.profile, self.hermes_bin)
+                        if self.profile.gateway_backend == "native-session-authority"
+                        else build_serve_argv(self.hermes_bin, self.profile.role, port, self.profile.gateway_host))
             except RuntimeRefusal as exc:
                 self.refusal_code = exc.code
                 self.failed = True
@@ -395,6 +414,8 @@ class ServiceRuntime:
             except RuntimeRefusal as exc:
                 self.refusal_code = exc.code
                 self.failed = True
+                return
+            if self._stop.is_set():
                 return
             proc = subprocess.Popen(
                 argv,
@@ -411,7 +432,18 @@ class ServiceRuntime:
             next_memory_sample = 0.0
             poll_sec = min(0.25, self.profile.memory_sample_interval_sec)
             while not self._stop.is_set() and proc.poll() is None:
-                backend_ready = _backend_health_ready(port, self.profile.gateway_host)
+                if self.profile.gateway_backend == "native-session-authority":
+                    try:
+                        self._native_launch.observe_child(proc.pid)
+                        from .native_gateway_entry import native_ready
+                        backend_ready = native_ready(
+                            vendor=Path(self._native_launch.recipe["vendor_root"]),
+                            home=(self.profile.hermes_home / "profiles" / self.profile.role).resolve(),
+                            host=self.profile.gateway_host, port=port, pid=proc.pid)
+                    except Exception:
+                        backend_ready = False
+                else:
+                    backend_ready = _backend_health_ready(port, self.profile.gateway_host)
                 with self._lock:
                     if self._child is proc:
                         self._backend_ready = backend_ready

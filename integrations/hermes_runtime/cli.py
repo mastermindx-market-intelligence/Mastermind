@@ -20,7 +20,8 @@ from .supervisor import ServiceRuntime
 
 
 def main(argv: list[str] | None = None, *,
-         custody_observer: Callable[[], Mapping[str, object]] | None = None) -> int:
+         custody_observer: Callable[[], Mapping[str, object]] | None = None,
+         native_launch=None) -> int:
     """Run one operator command.
 
     ``custody_observer`` is the private in-process dependency of the main
@@ -38,6 +39,8 @@ def main(argv: list[str] | None = None, *,
     install_p.add_argument("--systemd-user-dir", type=Path, required=True)
     install_p.add_argument("--secrets-file", type=Path, required=True)
     install_p.add_argument("--hermes-bin", type=Path, required=True)
+    install_p.add_argument("--native-installation", type=Path,
+                           help="Frozen native member selected by the installed release owner")
     source = install_p.add_mutually_exclusive_group(required=True)
     source.add_argument("--upstream-source", type=Path)
     source.add_argument("--fetch", action="store_true")
@@ -71,6 +74,17 @@ def main(argv: list[str] | None = None, *,
     args = parser.parse_args(argv)
     try:
         if args.command == "install":
+            native = None
+            if args.native_installation is not None:
+                from ops.executive_os.release_manifest import _closed_json, ReleaseManifestError
+                with args.native_installation.open("rb") as stream:
+                    raw = stream.read(16385)
+                if len(raw) > 16384:
+                    raise RuntimeRefusal("NATIVE_INSTALLATION_TOO_LARGE")
+                try:
+                    native = _closed_json(raw)
+                except (ReleaseManifestError, ValueError):
+                    raise RuntimeRefusal("NATIVE_INSTALLATION_INVALID") from None
             payload = install(
                 profile_path=args.profile,
                 state_dir=args.state,
@@ -79,6 +93,7 @@ def main(argv: list[str] | None = None, *,
                 hermes_bin=args.hermes_bin,
                 upstream_source=args.upstream_source,
                 fetch=args.fetch,
+                native_installation=native,
             )
         elif args.command == "uninstall":
             payload = uninstall(state_dir=args.state, systemd_user_dir=args.systemd_user_dir)
@@ -87,7 +102,10 @@ def main(argv: list[str] | None = None, *,
         elif args.command == "check-registry":
             payload = _check(args.profile, args.tool_list, args.stderr)
         elif args.command == "supervise":
-            return _supervise(args, custody_observer=custody_observer)
+            kwargs = {"custody_observer": custody_observer}
+            if native_launch is not None:
+                kwargs["native_launch"] = native_launch
+            return _supervise(args, **kwargs)
         elif args.command == "canary":
             return _canary(args.profile, args.hermes_bin)
         elif args.command == "text-turn":
@@ -130,6 +148,8 @@ def _prepare_installed_native(profile_path: Path, hermes_bin: Path, *, expected_
     from integrations.hermes_harness.native_turn_runner import assert_role_service_cgroup
 
     profile = load_profile(profile_path)
+    if profile.gateway_backend == "native-session-authority":
+        raise RuntimeRefusal("NATIVE_CANARY_REQUIRES_SESSION_OWNER")
     if expected_role is not None and profile.role != expected_role:
         raise RuntimeRefusal("NATIVE_TEXT_ROLE_MISMATCH")
     state = profile.state_dir
@@ -245,7 +265,8 @@ def _text_turn(profile_path: Path, hermes_bin: Path) -> int:
 
 
 def _supervise(args: argparse.Namespace, *,
-               custody_observer: Callable[[], Mapping[str, object]] | None = None) -> int:
+               custody_observer: Callable[[], Mapping[str, object]] | None = None,
+               native_launch=None) -> int:
     profile = load_profile(args.profile, state_dir=args.state, secrets_file=args.secrets_file)
     # systemd --user cannot attach IPAddressDeny eBPF on Ubuntu1. Never read
     # a provider credential or spawn Hermes from that ineffective manager.
@@ -260,11 +281,23 @@ def _supervise(args: argparse.Namespace, *,
         enforce_role_tcp_ports(profile)
         from .role_status_publisher import publisher_from_process
         publisher = publisher_from_process(profile, custody_observer=custody_observer)
+        if profile.gateway_backend == "native-session-authority":
+            if native_launch is None:
+                raise RuntimeRefusal("NATIVE_STARTUP_CUSTODY_REQUIRED")
+            try:
+                native_launch.qualify(profile, args.hermes_bin)
+            except RuntimeRefusal:
+                raise
+            except Exception:
+                raise RuntimeRefusal("NATIVE_STARTUP_CUSTODY_UNQUALIFIED") from None
     except RuntimeRefusal as exc:
         print(exc.code, file=sys.stderr)
         return CONFIG_EXIT
     secrets = load_secrets(profile.secrets_file)
-    runtime = ServiceRuntime(profile, secrets, args.hermes_bin, role_status_publisher=publisher)
+    runtime_kwargs = {"role_status_publisher": publisher}
+    if native_launch is not None:
+        runtime_kwargs["native_launch"] = native_launch
+    runtime = ServiceRuntime(profile, secrets, args.hermes_bin, **runtime_kwargs)
     try:
         runtime.start()
     except RuntimeRefusal as exc:
