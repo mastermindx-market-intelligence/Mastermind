@@ -991,7 +991,7 @@ impl SessionSelection {
         .validate()?;
         match self.target_kind.as_deref() {
             None => Ok(()),
-            Some("fabric_attempt") | Some("hermes_secretary") => Ok(()),
+            Some("fabric_attempt") | Some("hermes_secretary") | Some("hermes_meta") => Ok(()),
             Some(_) => Err("SELECTION_INVALID".into()),
         }
     }
@@ -2915,7 +2915,7 @@ pub async fn executive_session_context(app: AppHandle, selection: SessionSelecti
     selection.validate()?;
     // The Session context endpoint requires the selected variant directly,
     // whereas replies/references use the existing arguments envelope. This
-    // stays a READ. The fixed SEND command validates Fabric or Secretary targets.
+    // stays a READ. The fixed SEND command validates Fabric, Secretary or Meta targets.
     let result = executive_post(app.clone(), "/os/executive/session/context",
         serde_json::json!({ "selection": selection.wire() })).await;
     if result.is_err() { emit(&app); }
@@ -5079,7 +5079,7 @@ mod secretary_selection_contract_tests {
         let legacy: SessionSelection = serde_json::from_value(pair.clone()).unwrap();
         legacy.validate().unwrap();
         assert_eq!(legacy.wire(), pair);
-        for kind in ["fabric_attempt", "hermes_secretary"] {
+        for kind in ["fabric_attempt", "hermes_secretary", "hermes_meta"] {
             let value = serde_json::json!({
                 "work_ref": "WS:ALPHA", "root_job_id": "JOB-1", "target_kind": kind
             });

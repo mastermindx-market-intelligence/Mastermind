@@ -5,6 +5,7 @@ provider, credentials, socket, enrollment or installed authority is claimed.
 """
 import copy
 import json
+import pytest
 from pathlib import Path
 from control_plane.native_continuation import _request_key
 from tests.test_mastermind_os_session_transport import make_app,request,message_key
@@ -67,37 +68,41 @@ def test_unavailable_session_context_cannot_issue_entry_identity(rsa_key):
     path.write_text(json.dumps(body,indent=2)+"\n")
 
 
-def test_native_hermes_session_source_producer_and_signed_permissions(rsa_key):
+@pytest.mark.parametrize("kind", ("hermes_secretary", "hermes_meta"))
+def test_native_hermes_session_source_producer_and_signed_permissions(rsa_key, kind):
     """Pure native producer + real signed BFF; the retained peer is inert."""
     from control_plane import native_continuation as nc
-    from integrations.session_bridge.hermes_native import public_result, NATIVE_SCHEMA
+    from integrations.session_bridge.hermes_native import public_result
     from tests.test_hermes_session_continuation import (
         BINDING, NATIVE_TARGET, build_request, root_event, request_event)
 
-    instruction = "Read the original Secretary result.\n  保留原文  \n"
+    family = nc.hermes_family(kind)
+    binding = {**BINDING, "schema": family.binding_schema}
+    label = "Secretary" if kind == "hermes_secretary" else "Meta-CEO"
+    instruction = f"Read the original {label} result.\n  保留原文  \n"
     stop_condition = "Return one original finding.\n"
     target = nc.build_hermes_continuation_target(
-        binding=BINDING, root_event=root_event(), native_target=NATIVE_TARGET)
-    source_request = build_request(instruction=instruction, stop_condition=stop_condition)
+        binding=binding, root_event=root_event(), native_target=NATIVE_TARGET)
+    source_request = build_request(binding=binding, instruction=instruction, stop_condition=stop_condition)
     event = request_event(source_request)
     selection = {k: target[k] for k in ("work_ref", "root_job_id")}
-    selection["target_kind"] = "hermes_secretary"
+    selection["target_kind"] = kind
     key = target["continuation_operation_key"]
     args = dict(target_ref=target["target_ref"], operation_key=key,
                 instruction=instruction, stop_condition=stop_condition)
     admission = dict(admission_id="native-hermes-fixture-1",
-                     ref={k: BINDING[k] for k in ("profile_id", "session_id")},
+                     ref={k: binding[k] for k in ("profile_id", "session_id")},
                      sequence=1, status="queued", outcome=None,
                      authority_epoch=3, execution_generation=None)
     app, peer, clock, _ = make_app(rsa_key)
     peer.rows = [target]
     peer.send_result = public_result(event, source_request, commit_started=True,
-        native_result=dict(schema=NATIVE_SCHEMA, status="ADMITTED", admission=admission))
+        native_result=dict(schema=family.native_schema, status="ADMITTED", admission=admission))
     peer.reply_result = public_result(event, source_request, commit_started=True,
-        native_result=dict(schema=NATIVE_SCHEMA, status="OBSERVED",
+        native_result=dict(schema=family.native_schema, status="OBSERVED",
             admission={**admission, "status": "terminal", "outcome": "completed",
                        "execution_generation": 2},
-            answer="Original qualified Secretary reply. 日本語 ✓", successful=True))
+            answer=f"Original qualified {label} reply. 日本語 ✓", successful=True))
     submit, read = auth_fixture._submit_token(rsa_key), auth_fixture._read_token(rsa_key)
     status, context = request(app, submit, payload={"selection": selection})
     assert status == 200 and context["data"]["target"] == target
@@ -123,5 +128,7 @@ def test_native_hermes_session_source_producer_and_signed_permissions(rsa_key):
         premises=["actual pure Hermes target/request/public-result derivation over inert material",
                   "actual RS256 verifier/authenticator and fixed OsSessionTransportApp",
                   "inert InstalledSessionBridgeClient peer; no live Runtime, provider or installed authority"])
-    path = Path(__file__).parents[1] / "app/mastermind_os/src/fixtures/native-hermes-session-send-producer.json"
+    filename = ("native-hermes-session-send-producer.json" if kind == "hermes_secretary"
+                else "native-hermes-meta-session-send-producer.json")
+    path = Path(__file__).parents[1] / "app/mastermind_os/src/fixtures" / filename
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")

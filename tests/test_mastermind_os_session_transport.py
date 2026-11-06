@@ -806,18 +806,10 @@ def hermes_arguments(**updates):
 
 
 @pytest.fixture
-def secretary_target_kind(monkeypatch):
-    """Stand in for the parent-owned target-kind admission.
-
-    ``integrations/session_bridge/schemas.py`` belongs to the parent slice and
-    does not yet admit ``hermes_secretary``.  This test-only admission lets
-    the consumer's own closed contract run end to end; no other rule changes.
-    """
-    from integrations.session_bridge import schemas
-    kinds = tuple(schemas.TARGET_KINDS)
-    if "hermes_secretary" not in kinds:
-        monkeypatch.setattr(schemas, "TARGET_KINDS",
-                            kinds + ("hermes_secretary",))
+def secretary_target_kind():
+    """Exercise the actual admitted schema; no test-only family admission."""
+    from integrations.session_bridge.schemas import TARGET_KINDS
+    assert "hermes_secretary" in TARGET_KINDS and "hermes_meta" in TARGET_KINDS
 
 
 def test_explicit_secretary_context_reads_one_secretary_target_only(rsa_key, secretary_target_kind):
@@ -953,6 +945,10 @@ def test_committed_secretary_send_without_admission_is_unknown(rsa_key, status_v
 ])
 def test_foreign_malformed_or_oversized_secretary_result_is_unknown(rsa_key, change):
     app, peer, _, _ = make_app(rsa_key)
+    peer.send_result = hermes_result()
+    status, control = request(app, auth_fixture._submit_token(rsa_key), "send",
+                              {"arguments": hermes_arguments()})
+    assert status == 200 and control["data"] == peer.send_result
     change(peer.send_result)
     status, result = request(app, auth_fixture._submit_token(rsa_key), "send",
                               {"arguments": hermes_arguments()})
@@ -1042,6 +1038,9 @@ def test_secretary_send_uses_the_one_validated_private_call(rsa_key):
 
 def test_secretary_send_joins_the_requested_target_even_when_the_return_is_self_consistent(rsa_key):
     app, peer, _, _ = make_app(rsa_key)
+    peer.send_result = hermes_result()
+    from integrations.session_bridge.hermes_native import validate_public_result
+    assert validate_public_result(peer.send_result) == peer.send_result
     arguments = dict(hermes_arguments(), target_ref="hermes_secretary:" + "f" * 64)
     status, result = request(app, auth_fixture._submit_token(rsa_key), "send",
                              {"arguments": arguments})

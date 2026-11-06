@@ -185,8 +185,8 @@ It does not automatically resume a conversation whose turn has ended.
 
 ## Remaining product integration
 
-The closed Secretary mTLS request family, Runtime commit/recovery variant and
-explicit Office question/answer consumer are source-composed. The remaining
+The closed Secretary and Meta mTLS families, Runtime commit/recovery variants
+and explicit Office question/answer consumers are source-composed. The remaining
 installed/product work is:
 
 1. Select the actual protected release and finish qualified host preparation,
@@ -197,10 +197,8 @@ installed/product work is:
    originating request/turn through the existing owners. Never choose the latest
    request for a root or equate native UID/session identity with the Office or
    COO OAuth principal.
-4. Complete the Meta-CEO participant's existing Office/native selection.
-   Native enrollment/control, role gateway, shared remote transport and Runtime
-   continuation now support explicit mmmeta identity; source support does not
-   authorize a COO Attempt or establish an installed Meta conversation.
+Source support for both roles does not authorize a COO Attempt or establish
+an installed Meta conversation.
 
 The installed role/proxy/provider/canary/cutover restrictions remain separate
 from source completion. Independent review is not a blanket prerequisite for
@@ -268,8 +266,8 @@ formats and default Secretary behavior are unchanged.
 
 The source tests exercise HTTP through the actual native private-client wire
 using a socket pair, cross-role refusals, startup wiring and measured-listener
-doubles. Remote forwarding, Office selection, installed service/provider
-qualification and activation remain separately owed.
+doubles. The following sections supply remote and Office source composition.
+Installed service/provider qualification and activation remain separately owed.
 
 ### Dual-role remote transport and preserved composition
 
@@ -302,7 +300,7 @@ their matching original members, while an older v3 transaction retains its
 original bytes. It never selects replacement inputs or republishes an artifact.
 
 These are source integration changes. Installed credentials, role services,
-provider admission and Office Meta selection remain separately qualified work.
+provider admission and production Office behavior require their own qualification.
 
 ### Meta Runtime continuation and original-result recovery
 
@@ -333,5 +331,49 @@ The session_targets tool advertises the explicit Meta kind; installing this sour
 therefore owes the normal exact tool-publication identity qualification. This
 change does not republish a live tool or activate a role.
 
-Office/native Meta selection and authenticated installed-provider proof remain
-separate from this backend source integration.
+The Office/native consumer is described below. Authenticated installed-provider
+proof remains separate from this backend source integration.
+
+
+### Explicit Meta in the existing Office and native path
+
+The existing Session target selector offers Fabric, Hermes Secretary and Hermes
+Meta-CEO. The exact selected kind survives its current URL route, context
+qualification and native command. A kind change uses the existing selection
+epoch; unresolved original operations keep that selector locked. Unsupported
+or absent Meta context stays unavailable without querying another role.
+
+The TypeScript and Rust SEND grammars still accept exactly target_ref,
+operation_key, instruction and stop_condition, with unchanged text bounds.
+The same authenticated BFF calls the installed Bridge once. It validates the
+native family through the Runtime producer and joins the returned target and
+operation to the requested original. READ uses only the original operation key;
+a missing current target does not replace that operation or prevent an otherwise
+qualified original read.
+
+The frontend keeps the original Secretary exported interfaces and adds Meta
+peers with shared native unions. Schema, target prefix and operation domain must
+resolve to the same family before a native result is displayed. Actual native
+success/failure, answer text and original references survive unchanged; native
+answers have no fabricated next step and parent_consumed remains false.
+
+Both native kinds use the same existing IndexedDB principal slot, database
+version, record shape and atomic compare-clear. The original pointer clears
+only after its qualified answer actually commits to the current view. Historical
+Fabric/Secretary/Meta answers use the same bounded reference/read path and cannot
+clear another pending operation. The UI compares the actual success value as
+well as native family, text and original reference.
+
+A late native phase is retained under the requesting controller's captured
+binding, principal, generation and selection sequence. Replacing a live host
+cannot transfer a previous controller's phase to the replacement identity.
+The existing auth and committed-view checks also apply before presentation.
+
+Source proof exercises the actual pure native producers through the real signed
+BFF, then consumes those exact fixtures through NativeClient, Host, App and the
+durable pending store. The Secretary producer fixture remains byte-identical.
+Focused cases cover both roles, refusal without fallback, lost-result recovery,
+auth withdrawal, target disappearance, mixed history and replacement-host
+presentation. These fixtures do not claim installed OAuth, provider execution
+or browser acceptance. Local Rust execution remains deferred to the existing
+native-macos CI check.
