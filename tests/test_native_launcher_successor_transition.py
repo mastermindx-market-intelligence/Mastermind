@@ -59,9 +59,11 @@ def source_owners(tmp_path_factory):
     assert retained['schema'] == 'mastermind.test_native_catalog_predecessor102/v1'
     assert retained['source_commit'] == '58083bf128fdac2d8eab374641c78bb403e7d18c'
     historical_manifest = retained['manifest']
-    added = {'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py'}
+    added = {'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py',
+                'ext/participant_binding.py', 'ext/fabric_participant_owner.py',
+                'ext/original_advertised_artifact.py'}
     assert set(manifest) == set(historical_manifest) | added
-    # Remove only the two reviewed S14 additions inside this disposable102
+    # Remove only the two reviewed S14, two participant and one recovery additions inside this disposable102
     # inverse, after proving each is the actual current staged payload.
     for name in added:
         path = target / 'native-code-stage' / name
@@ -112,6 +114,14 @@ def source_owners(tmp_path_factory):
         # Restore only this disposable historical102 payload, not CURRENT.
         'ext/lease_broker.py':
             fixture.with_name('native-lease-broker-pre-fair-share-899ac3a9.py.txt'),
+        # Protected49c2 custody predecessors are immutable fixture data.
+        # The existing loop joins each complete payload to the frozen102 map.
+        'ext/linux_process_identity.py':
+            fixture.parent / 'native_historical_payloads/linux_process_identity.py.txt',
+        'ext/paid_host_qualification.py':
+            fixture.parent / 'native_historical_payloads/paid_host_qualification.py.txt',
+        'ext/paid_initializer.py':
+            fixture.parent / 'native_historical_payloads/paid_initializer.py.txt',
     }
     new_names = long_names | set(base_paths)
     # S9 also changes the CURRENT picker. Bind its authentic protected
@@ -140,9 +150,21 @@ def source_owners(tmp_path_factory):
     assert qualification['commit'] == 'f374289eb74587eaa755f5bc8e5a3252d00850e0'
     assert qualification['blob'] == 'f72b12eac939143b1b2ed298139d55b06667a2c2'
     assert qualification['path'] == 'ops/native_fabric/quota_continuity/candidate/fabric_host_qualification.py'
+    # Restore the byte-pinned old runtime only in this historical102 fixture.
+    # The current procfs fallback must not relabel the accepted transition.
+    runtime_raw = fixture.with_name('native-historical-lane-runtime-61350902.json').read_bytes()
+    assert g.digest(runtime_raw) == '1d658364949b3089ecb35b1ca6f3f8ac79970de1ab44dcc17dd6198a1f1eb3c0'
+    runtime = json.loads(runtime_raw)
+    assert runtime['schema'] == 'mastermind.native_historical_lane_runtime.v1'
+    assert runtime['original_sha256'] == historical_manifest['ext/lane_runtime.py']
+    runtime_predecessor = {
+        'bytes': runtime['original_bytes'], 'sha256': runtime['original_sha256'],
+        'zlib_base64': runtime['zlib_base64'],
+    }
     predecessor_files = {**retained['files'], **diagnostic['files'],
                          **observer['files'], 'ext/pick.py': selection,
-                         'ext/fabric_host_qualification.py': qualification}
+                         'ext/fabric_host_qualification.py': qualification,
+                         'ext/lane_runtime.py': runtime_predecessor}
     assert {name for name in manifest if manifest[name] != historical_manifest[name]} == (
         set(predecessor_files) | new_names
     )

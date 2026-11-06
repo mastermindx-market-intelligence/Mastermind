@@ -90,7 +90,9 @@ class PairedLauncherUpgrade(unittest.TestCase):
             retained = json.loads(raw)
             old = retained['manifest']
             removed = set(retained['removed_current_members']) | {
-                'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py'}
+                'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py',
+                'ext/participant_binding.py', 'ext/fabric_participant_owner.py',
+                'ext/original_advertised_artifact.py'}
             if (retained['schema'] != 'mastermind.test_native_paired_historical95/v1'
                     or set(cls.manifest) - set(old) != removed or set(old) - set(cls.manifest)
                     or len(old) != 95 or retained['historical_manifest_sha256'] != installer.UPGRADE_MANIFEST):
@@ -186,6 +188,10 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 # Protected899ac broker blob b39e1fbcebe88513ee9c1dd756c56a9c68ff72b1.
                 # Historical95 retains its pinned bytes; CURRENT fair-share stays unchanged.
                 'ext/lease_broker.py': fixture.with_name('native-lease-broker-pre-fair-share-899ac3a9.py.txt'),
+                # Protected49c2 predecessor, retained as data after the held
+                # process qualifier changed CURRENT. Never relabel old95.
+                'ext/linux_process_identity.py': (
+                    fixture.parent / 'native_historical_payloads/linux_process_identity.py.txt'),
             }
             for name, predecessor in baseline_sources.items():
                 original = predecessor.read_bytes()

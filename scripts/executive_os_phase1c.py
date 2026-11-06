@@ -2509,7 +2509,7 @@ def _service_from_config(
                     Path(raw["ceo_ingress_app_boot_python"])),
                 expected_source_sha=str(raw["proof_base_sha"]),
             )
-            canonical_project_data_factory = None
+            canonical_project_read_bindings_factory = None
             if "workspace_source_publication" in raw:
                 from integrations.mastermind_workspace_app.project_git_identity import InstalledProjectGitIdentity
                 from integrations.mastermind_workspace_app.installed_source_operations import InstalledWorkspaceSourceOperations
@@ -2524,14 +2524,7 @@ def _service_from_config(
                 source_factories["source_operation_provider_factory"] = InstalledWorkspaceSourceOperations(
                     collector=packet_collector, policy=policy, load_bindings=workspace_acquisition_loader,
                     git_identity=source_git_identity, runtime_guard=source_runtime_guard)
-                def canonical_project_data_factory(runtime):
-                    from integrations.mastermind_workspace_app.canonical_project_data import InstalledCanonicalProjectData
-                    from control_plane.workspace_source_operations import SourceOperationEvents
-                    source_runtime_guard(runtime)
-                    owner = InstalledCanonicalProjectData(collector=packet_collector,policy=policy,
-                        load_bindings=workspace_acquisition_loader,git_identity=source_git_identity,
-                        events=SourceOperationEvents(runtime.store),runtime_guard=lambda:source_runtime_guard(runtime))
-                    return owner.installed_binding()
+                canonical_project_read_bindings_factory = source_factories["source_operation_provider_factory"].read_bindings
             if product_acceptance_macro_root is not None:
                 product_acceptance_context_owner = packet_collector
             compose_inputs = build_workspace_composer(
@@ -2611,7 +2604,7 @@ def _service_from_config(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                 project_knowledge_source_reader=packet_collector.project_knowledge_source_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
-                canonical_project_data_factory=canonical_project_data_factory,
+                canonical_project_read_bindings_factory=canonical_project_read_bindings_factory,
                 project_session_source_factory=managed_project_session_source,
                 project_archive_reader=packet_collector.project_archive_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
@@ -2836,6 +2829,50 @@ def _service_from_config(
                     authorized_policies=trusted_policies,
                     reference_cursor_key=session_reference_cursor_key)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
+            if session_read_policy_loader is not None and installed_profile == WEB_CEO_V3_PROFILE:
+                def project_conversation_read_factory(runtime):
+                    service._namespace_custody.bound_runtime(runtime)
+                    from integrations.session_bridge.installed import build_runtime_project_conversation_reader
+                    def current_codex_owner_configured():
+                        from ops.executive_os.a2_agent_relay_enrollment import w3c_plist_configured
+                        return w3c_plist_configured(release_sha=config.proof_base_sha)
+                    return build_runtime_project_conversation_reader(runtime,
+                        dialogue_socket_path=relay_readside_socket_path,
+                        codex_owner_configured=current_codex_owner_configured,
+                        authorized_policies=session_read_policy_loader(),
+                        reference_cursor_key=session_reference_cursor_key)
+                session_factories["project_conversation_read_provider_factory"] = project_conversation_read_factory
+                def fresh_conversation_factory(runtime):
+                    # Same current root-sealed policy/namespace as the installed
+                    # Session owner, never identity or arming supplied by a frame.
+                    service._namespace_custody.bound_runtime(runtime)
+                    current = session_read_policy_loader()
+                    from control_plane.fresh_conversation import FreshConversationOwner
+                    expected = (current.submit.policy_id,
+                        hashlib.sha256(current.submit.issuer.encode("utf-8")).hexdigest(), current.submit.resource)
+                    return FreshConversationOwner(service, expected_policy=expected, authorized_policies=current)
+                session_factories["fresh_conversation_provider_factory"] = fresh_conversation_factory
+        if "workspace_read_provider_factory" in workspace_factories and installed_profile == WEB_CEO_V3_PROFILE:
+            # Same sealed Workspace collector/membership and existing root-sealed
+            # OS policy source; no second OAuth configuration or admission store.
+            def project_planning_factory(runtime, workspace_policy=policy,
+                    load_workspace_bindings=legacy_workspace_loader,
+                    creation_reader=creation_source_reader,collector=packet_collector):
+                service._namespace_custody.bound_runtime(runtime)
+                from ops.executive_os.executive_mcp_entry import installed_os_session_policy_source
+                from ops.executive_os.coo_principal_host import DEFAULT_INSTALL_PATH
+                from integrations.mastermind_executive_app.project_planning_factory import (
+                    ProjectPlanningAppFactory,build_ingress_owner)
+                from control_plane.workspace_source_operations import SourceOperationEvents
+                policy_loader=installed_os_session_policy_source(DEFAULT_INSTALL_PATH,
+                    Path(__file__).resolve().parents[1],expected_uid=int(raw["control_uid"]))
+                return build_ingress_owner(ProjectPlanningAppFactory(service=service,
+                    app_binding=service._ceo_ingress_app_binding,policies=policy_loader(),
+                    policy_loader=policy_loader,reader=creation_reader,
+                    plan_reader=collector.project_plan_reader(macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                    events=SourceOperationEvents(runtime.store),workspace_policy=workspace_policy,
+                    load_workspace_bindings=load_workspace_bindings))
+            workspace_factories["project_planning_provider_factory"]=project_planning_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
             armed=raw["ceo_ingress_app_armed"],
@@ -3121,13 +3158,16 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     physical_source = _staged_fabric_binding_source(raw)
     from control_plane.executive_paid_fabric_composition import installed_paid_source
     paid_source=installed_paid_source(raw,installed_control=_installed_control)
-    if paid_source is not None and (physical_source is not None or attended_work_placements):
+    if paid_source is not None and ((physical_source is not None and physical_source.has_execution_bindings)
+                                    or attended_work_placements):
         raise ServiceError('installed paid source cannot replace or mix an attended owner')
     if _installed_control:
         if attended_work_placements:
             raise ServiceError('installed Control cannot replace its fixed source composition')
         from control_plane.fabric_attended_routing import installed_control_placements, FINITE_SOCKET_PATH
         attended_work_placements = installed_control_placements(raw)
+        if paid_source is not None and attended_work_placements:
+            raise ServiceError('installed paid source cannot replace or mix an attended owner')
         if attended_work_placements and _sha256_file(config_path) != installed_config_sha256:
             raise ServiceError('installed finite Control definition changed while loading')
         if attended_work_placements and (physical_source is None

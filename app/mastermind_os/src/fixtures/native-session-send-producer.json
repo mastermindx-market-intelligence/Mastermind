@@ -1,0 +1,140 @@
+{
+  "schema": "mastermind.native_session_send_source_fixture.v1",
+  "now_ms": 1800000000000,
+  "selection": {
+    "work_ref": "WS:WORKSPACE-AGENT-PROGRAM",
+    "root_job_id": "JOB-100"
+  },
+  "arguments": {
+    "target_ref": "fabric_attempt:c2f883e8167ed455e054664aaef3b3a6c14f4d8518d75a403b1719f7c57c2169",
+    "operation_key": "session-continue-38654c2bfb994aa52e96de9b1433414ab0c289678147be48bbab50ffc467ffb9",
+    "instruction": "Read the original result.\n  保留原文  \n",
+    "stop_condition": "Return one finding.\n"
+  },
+  "context": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "context",
+    "ok": true,
+    "effect": "NONE",
+    "operation_key": null,
+    "data": {
+      "schema": "mastermind.os.executive.session_context.v1",
+      "principal_scope": "746ea62009ffa72215a1792dff1053e74f985463ecc1fbfe69a0744e3cf6e7c4",
+      "verified_expiry": 1800000300,
+      "selection": {
+        "work_ref": "WS:WORKSPACE-AGENT-PROGRAM",
+        "root_job_id": "JOB-100"
+      },
+      "selection_state": "RESOLVED",
+      "target": {
+        "addressable": true,
+        "continuation_operation_key": "session-continue-38654c2bfb994aa52e96de9b1433414ab0c289678147be48bbab50ffc467ffb9",
+        "generation": "c2f883e8167ed455e054664a",
+        "kind": "fabric_attempt",
+        "root_job_id": "JOB-100",
+        "target_ref": "fabric_attempt:c2f883e8167ed455e054664aaef3b3a6c14f4d8518d75a403b1719f7c57c2169",
+        "work_ref": "WS:WORKSPACE-AGENT-PROGRAM"
+      },
+      "capabilities": {
+        "send": true,
+        "reply_read": true,
+        "stop": false
+      }
+    },
+    "error": null
+  },
+  "read_context": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "context",
+    "ok": true,
+    "effect": "NONE",
+    "operation_key": null,
+    "data": {
+      "schema": "mastermind.os.executive.session_context.v1",
+      "principal_scope": "746ea62009ffa72215a1792dff1053e74f985463ecc1fbfe69a0744e3cf6e7c4",
+      "verified_expiry": 1800000300,
+      "selection": {
+        "work_ref": "WS:WORKSPACE-AGENT-PROGRAM",
+        "root_job_id": "JOB-100"
+      },
+      "selection_state": "RESOLVED",
+      "target": {
+        "addressable": true,
+        "continuation_operation_key": "session-continue-38654c2bfb994aa52e96de9b1433414ab0c289678147be48bbab50ffc467ffb9",
+        "generation": "c2f883e8167ed455e054664a",
+        "kind": "fabric_attempt",
+        "root_job_id": "JOB-100",
+        "target_ref": "fabric_attempt:c2f883e8167ed455e054664aaef3b3a6c14f4d8518d75a403b1719f7c57c2169",
+        "work_ref": "WS:WORKSPACE-AGENT-PROGRAM"
+      },
+      "capabilities": {
+        "send": false,
+        "reply_read": true,
+        "stop": false
+      }
+    },
+    "error": null
+  },
+  "sent": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "send",
+    "ok": true,
+    "effect": "CONTINUATION_COMMITTED",
+    "operation_key": "session-continue-38654c2bfb994aa52e96de9b1433414ab0c289678147be48bbab50ffc467ffb9",
+    "data": {
+      "target_ref": "fabric_attempt:c2f883e8167ed455e054664aaef3b3a6c14f4d8518d75a403b1719f7c57c2169",
+      "reply_committed": true,
+      "carrier": {
+        "action": "POSTED",
+        "fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "message_key": "asd-dot-continue-e257e9f7010515030f1017b5eb7dd043a72688c7",
+        "reply_committed": true,
+        "thread_ts": "1800000000.000001"
+      },
+      "attention": {
+        "state": "UNAVAILABLE"
+      },
+      "read_ref": "session-reply-7e5900a280fe7a74ff0cd2dfd193269b794b56bdb42a02a408771699f7de568a"
+    },
+    "error": null
+  },
+  "reply": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "reply",
+    "ok": true,
+    "effect": "CONTINUATION_COMMITTED",
+    "operation_key": "session-continue-38654c2bfb994aa52e96de9b1433414ab0c289678147be48bbab50ffc467ffb9",
+    "data": {
+      "schema": "mastermind.native_reply_read.v1",
+      "read_ref": "session-reply-7e5900a280fe7a74ff0cd2dfd193269b794b56bdb42a02a408771699f7de568a",
+      "request_ref": "session-bridge-continue:7e5900a280fe7a74ff0cd2dfd193269b794b56bdb42a02a408771699f7de568a",
+      "in_reply_to": "asd-dot-continue-e257e9f7010515030f1017b5eb7dd043a72688c7",
+      "message_key": "asd-native-reply-f1bd5de26b655c9aa67c9776ce7fcc81a9630e0d",
+      "fingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "text": "Original qualified reply.",
+      "next_step": "Review the result.",
+      "primary_ts": "1800000000.000002",
+      "reply_committed": true,
+      "parent_consumed": false,
+      "operation_key": "session-continue-38654c2bfb994aa52e96de9b1433414ab0c289678147be48bbab50ffc467ffb9"
+    },
+    "error": null
+  },
+  "unknown": {
+    "schema": "mastermind.os.executive.session_result.v1",
+    "operation": "send",
+    "ok": false,
+    "effect": "UNKNOWN",
+    "operation_key": "session-continue-38654c2bfb994aa52e96de9b1433414ab0c289678147be48bbab50ffc467ffb9",
+    "data": null,
+    "error": {
+      "code": "effect_unknown",
+      "message": "operation outcome is unknown; reconcile the original operation"
+    }
+  },
+  "premises": [
+    "actual Runtime target projector with injected current material readers",
+    "actual RS256 verifier/authenticator and fixed OsSessionTransportApp",
+    "inert InstalledSessionBridgeClient peer; no live target/dispatch or installed authority"
+  ]
+}

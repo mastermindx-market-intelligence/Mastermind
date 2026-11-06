@@ -2592,7 +2592,7 @@ def test_studio_os_principal_is_distinct_from_instance_key(gateway, monkeypatch)
 
 
 @pytest.mark.parametrize("name,expected_count", [
-    ("ops/executive_os/autonomy_control.py", 4),
+    ("ops/executive_os/autonomy_control.py", 6),
     ("ops/executive_os/os_gateway_studio_reader.py", 1),
 ])
 def test_gateway_identity_review_pins_exact_constant_tokens_and_refuses_drift(

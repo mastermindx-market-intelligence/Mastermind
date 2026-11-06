@@ -36,9 +36,8 @@ def test_only_four_fixed_reads_and_one_instruction_action_extend_the_actual_pred
     assert edge.PRE_MISSION_RESULT_GET_ROUTES == edge.PRE_PROJECT_INSTRUCTIONS_GET_ROUTES + (
         "/workspace/project-instructions/current", "/workspace/instruction-admission/current",
         "/workspace/instruction-admission/operation", "/workspace/project-access/current")
-    assert edge.GET_ROUTES == edge.PRE_MISSION_RESULT_GET_ROUTES + (
-        "/workspace/mission-result/current",)
-    assert edge.POST_ROUTES == edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES + ("/workspace/instruction-admission/pause",)
+    assert edge.MISSION_RESULT_GET_ROUTES == edge.PRE_MISSION_RESULT_GET_ROUTES + ("/workspace/mission-result/current",)
+    assert edge.PRE_MISSION_RESULT_POST_ROUTES == edge.PRE_INSTRUCTION_ADMISSION_POST_ROUTES + ("/workspace/instruction-admission/pause",)
     assert edge.SOURCE_POST_ROUTES == (
         "/workspace/source-operation/prepare", "/workspace/source-operation/submit",
         "/workspace/source-operation/reconcile", "/workspace/source-operation/advance")

@@ -47,10 +47,24 @@ describe("readable workspace shell", () => {
       expect(within(company).getByRole("button", { name })).toBeTruthy();
     const search = within(pane as HTMLElement).getByRole("button", { name: "Search" });
     expect(search.getAttribute("aria-current")).toBeNull();
+    const create = within(pane as HTMLElement).getByRole("button", { name: "New conversation" });
+    expect(create.closest('.nav-top')).toBe(pane.querySelector('.nav-top'));
+    expect(create.parentElement?.previousElementSibling).toBe(pane.querySelector('.brand'));
+    expect(create.parentElement?.nextElementSibling).toBe(search);
+    // A sidebar affordance never manufactures an Executive owner/port.
+    expect(create.hasAttribute('disabled')).toBe(true);
     // The incumbent advanced nav is wrapped by the disclosure, not duplicated.
     expect(details.querySelector("nav")?.getAttribute("aria-label")).toBe("Mission navigation");
     expect(details.contains(search)).toBe(false);
     expect(pane.querySelectorAll("details").length).toBe(1);
+  });
+  it.each([['en', 'This connection can’t start a new conversation.'], ['zh-CN', '当前连接无法新建对话。']] as const)("explains a disabled global New conversation in %s", (locale, reason) => {
+    render(<App locale={locale}/>);
+    const create = within(document.getElementById("workspace-navigation")!).getByRole("button", {name: locale === 'en' ? 'New conversation' : '新建对话'});
+    expect(create).toHaveProperty('disabled', true);
+    const description = create.getAttribute('aria-describedby');
+    expect(description).toBeTruthy();
+    expect(document.getElementById(description!)?.textContent).toBe(reason);
   });
   it("reaches every legacy advanced route through the disclosure and keeps it open while active", async () => {
     const user = userEvent.setup();
