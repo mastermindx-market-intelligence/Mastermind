@@ -1532,7 +1532,9 @@ if [ "$NEED_CLONE" = "1" ]; then
   # Root reads the operator-owned source through Git transport; the local-copy
   # optimization has a distinct ownership boundary. Trust only the validated
   # source path for this command, never persist a host-wide exception.
-  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local "$SOURCE_REPO" "$ADMIN_CHECKOUT"
+  # Only the qualified source HEAD and its complete ancestry are needed.
+  # Unrelated development branches/tags must not enter this private checkout.
+  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local --single-branch --no-tags "$SOURCE_REPO" "$ADMIN_CHECKOUT"
   /usr/bin/git -C "$ADMIN_CHECKOUT" checkout --detach "$EXPECTED_SHA"
   /usr/bin/git -C "$ADMIN_CHECKOUT" remote remove origin
 fi

@@ -119,6 +119,12 @@ import {
   type MountedExecutiveSessionBinding,
 } from "./orchestration/os-executive-session-host";
 import {
+  EXECUTIVE_SESSION_TARGET_KINDS,
+  type ExecutiveSessionTargetKind,
+  type HermesSecretaryPublicResult,
+  type QualifiedSessionAnswerValue,
+} from "./orchestration/executive-session-command-port";
+import {
   allEvidence,
   decodeMission,
   decodeMissionv3,
@@ -319,6 +325,38 @@ function isRetainedSessionOperation(value: unknown): value is OperationPointer {
     typeof pointer.operationKey === "string" && SESSION_OPERATION_KEY.test(pointer.operationKey) &&
     pointer.kind === "message" &&
     typeof pointer.targetKey === "string" && SESSION_TARGET_REF.test(pointer.targetKey);
+}
+/**
+ * The ordinary URL parameter that carries the closed session target kind.
+ * There is no new persistence owner: the parameter is the whole retention.
+ */
+const SESSION_TARGET_KIND_PARAM = "session_target_kind";
+function readSessionTargetKind(search = window.location.search): ExecutiveSessionTargetKind {
+  try {
+    const raw = search.startsWith("?") ? search.slice(1) : search;
+    for (const pair of raw.split("&")) {
+      const at = pair.indexOf("=");
+      if (at === -1) continue;
+      if (decodeURIComponent(pair.slice(0, at)) !== SESSION_TARGET_KIND_PARAM) continue;
+      const value = decodeURIComponent(pair.slice(at + 1));
+      return EXECUTIVE_SESSION_TARGET_KINDS.includes(value as ExecutiveSessionTargetKind)
+        ? (value as ExecutiveSessionTargetKind)
+        : "fabric_attempt";
+    }
+  } catch {
+    return "fabric_attempt";
+  }
+  return "fabric_attempt";
+}
+function writeSessionTargetKind(kind: ExecutiveSessionTargetKind): void {
+  try {
+    const url = new URL(window.location.href);
+    if (kind === "fabric_attempt") url.searchParams.delete(SESSION_TARGET_KIND_PARAM);
+    else url.searchParams.set(SESSION_TARGET_KIND_PARAM, kind);
+    window.history.replaceState(window.history.state, "", url.toString());
+  } catch {
+    /* The ordinary URL parameter is best-effort; the choice still applies. */
+  }
 }
 type ReopenedOperation = {
   binding: OrchestratorCommandBinding;
@@ -1677,6 +1715,35 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     ) => void;
   } | null>(null);
   const [sessionStatus, setSessionStatus] = useState<OperationState | null>(null);
+  // The explicit session target kind. It is an ordinary URL parameter and an
+  // ordinary local choice; it is never inferred from a title, a provider or a
+  // capability advertisement.
+  const [sessionTargetKind, setSessionTargetKind] = useState<ExecutiveSessionTargetKind>(
+    () => readSessionTargetKind(),
+  );
+  // Ephemeral presentation state for one validated native public result. It
+  // is fenced by the existing owner, auth and selection identity and is never
+  // a durable answer, a pointer or a consumption record.
+  const [sessionNative, setSessionNative] = useState<{
+    binding: MountedExecutiveSessionBinding;
+    principalScope: string;
+    generation: string;
+    selectionSeq: number;
+    targetKind: ExecutiveSessionTargetKind;
+    result: HermesSecretaryPublicResult;
+  } | null>(null);
+  // The session selection the host is asked to qualify. The closed target
+  // kind travels with it; a kind change is a different selection.
+  const sessionSelection = useMemo(
+    () => (selection
+      ? {
+        workRef: selection.workRef,
+        rootJobId: selection.rootJobId,
+        targetKind: sessionTargetKind,
+      }
+      : null),
+    [selection, sessionTargetKind],
+  );
   const [sessionRefusal, setSessionRefusal] = useState<{
     binding: MountedExecutiveSessionBinding;
     principalScope: string;
@@ -1926,16 +1993,74 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     // The real mounted host supplies the existing native qualified reader.
     // An older unqualified fixture is fail-dark: it cannot clear an original
     // hint by promoting a receipt without a validated answer.
-    const wrapper = createAwaitingAnswerPort<QualifiedSessionAnswer>({
-      port: binding.port,
-      readAnswer: (pointer, signal) => typeof binding.port.readQualifiedAnswer === "function"
-        ? binding.port.readQualifiedAnswer(pointer, signal)
-        : Promise.resolve({ receipt: { ...pointer, disposition: "unknown", reason: "UNKNOWN_RECEIPT" }, answer: null }),
+    // The validated native public result is captured as ephemeral presentation
+    // state under the existing owner, auth and selection fences. It is never
+    // a durable answer, a pointer or a consumption record.
+    const captureNative = (result: HermesSecretaryPublicResult | null) => {
+      if (!result) return;
+      const live = completeExecutiveSessionBinding(
+        window.MastermindMissionHost?.sessionCommandBinding,
+      );
+      const liveCtx = live ? readSessionOwnerContext(live) : null;
+      if (!live || !liveCtx) return;
+      if (!ownsSession(live, liveCtx, selectionSeq.current)) return;
+      setSessionNative({
+        binding: live, principalScope: liveCtx.principalScope,
+        generation: liveCtx.generation, selectionSeq: selectionSeq.current,
+        targetKind: sessionTargetKind, result,
+      });
+    };
+    const wrapper = createAwaitingAnswerPort<QualifiedSessionAnswerValue>({
+      // The same single SEND. The qualified entry only adds the validated
+      // native public result of that one send; it never sends twice.
+      port: {
+        context: () => binding.port.context(),
+        prepare: (intent) => binding.port.prepare(intent),
+        submit: async (pointer, intent, signal) => {
+          const qualified = binding.port.submitQualified;
+          if (!qualified) return binding.port.submit(pointer, intent, signal);
+          const dispatch = await qualified(pointer, intent, signal);
+          captureNative(dispatch.nativeResult);
+          return dispatch.receipt;
+        },
+        readOperation: (pointer, signal) => binding.port.readOperation(pointer, signal),
+      },
+      readAnswer: async (pointer, signal) => {
+        const read = typeof binding.port.readQualifiedAnswer === "function"
+          ? await binding.port.readQualifiedAnswer(pointer, signal)
+          : {
+            receipt: {
+              ...pointer, disposition: "unknown" as const, reason: "UNKNOWN_RECEIPT",
+            },
+            answer: null,
+            nativeResult: null,
+          };
+        captureNative(read.nativeResult ?? null);
+        return read;
+      },
       isCurrent: () => ownsSession(binding, ctx, sequence) && answerView.isCurrent(identity),
       onAdmission: () => { if (ownsSession(binding, ctx, sequence)) answerView.invalidate(); },
       onAnswer: (pointer, answer) => answerView.stage(identity, pointer, answer),
     });
     return new OperationController(wrapper, binding.store);
+  };
+  // An explicit kind change re-qualifies the host before any capability
+  // evidence is used.  The kind is never inferred from a title, a provider
+  // or a capability advertisement, and it may not change underneath an
+  // unresolved original operation.
+  const changeSessionTargetKind = (kind: ExecutiveSessionTargetKind) => {
+    if (!EXECUTIVE_SESSION_TARGET_KINDS.includes(kind)) return;
+    if (kind === sessionTargetKind) return;
+    if (sessionPending.current !== null || sessionPointer !== null ||
+        sessionPointerError || sessionRecovering) return;
+    writeSessionTargetKind(kind);
+    setSessionTargetKind(kind);
+    invalidateSessionPresentation();
+    void sessionControl?.refresh(
+      selection
+        ? { workRef: selection.workRef, rootJobId: selection.rootJobId, targetKind: kind }
+        : null,
+    );
   };
   const invalidateSessionPresentation = () => {
     answerView.invalidate();
@@ -1947,6 +2072,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     sessionRecoveryFlight.current++;
     setSessionStatus(null); setSessionPointer(null); setSessionRefusal(null);
     setSessionPointerError(false); setSessionReading(true); setSessionRecovering(false);
+    // The native phase is presentation state of one qualified result; a
+    // route, selection, auth or kind transition withdraws it.
+    setSessionNative(null);
   };
   const commandReady = !!commandBinding && signedIn && !!ownerContext;
   const commandSelectionRevision = selectionSeq.current;
@@ -2022,7 +2150,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     if (!sessionBinding || !sessionControl || sessionMounted.current === sessionBinding) return;
     sessionMounted.current = sessionBinding;
     sessionControl.setStopCondition(() => undefined);
-    void sessionControl.refresh(selection);
+    void sessionControl.refresh(sessionSelection);
   }, [sessionBinding, sessionControl]);
   useEffect(() => {
     if (!commandBinding || !ownerContext) {
@@ -2731,11 +2859,15 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         return;
       }
       const next = directLocationInput().selection;
+      const nextKind = readSessionTargetKind();
       office.clearSelection(next);
       observedConversation.clear();
       selectionSeq.current += 1;
       invalidateSessionPresentation();
-      void window.MastermindMissionHost?.session?.refresh(next);
+      setSessionTargetKind(nextKind);
+      void window.MastermindMissionHost?.session?.refresh(
+        next ? { workRef: next.workRef, rootJobId: next.rootJobId, targetKind: nextKind } : null,
+      );
       commandSlot.current?.controller.invalidate();
       bumpInvalidation();
       setWindowDocument(null);
@@ -3047,6 +3179,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           work_ref: next.workRef,
           root_job_id: next.rootJobId,
         }).toString();
+        // The ordinary session target kind parameter is retained across a
+        // mission change; it is the whole retention of that choice.
+        if (sessionTargetKind !== "fabric_attempt") {
+          location.searchParams.set(SESSION_TARGET_KIND_PARAM, sessionTargetKind);
+        }
         // Read-selection hint only; the authenticated direct endpoint still
         // proves the Job, original principal, receiver and terminal identity.
         if(direct)location.searchParams.set("direct_native_job",r);
@@ -3058,7 +3195,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         setMission(unavailableMission(next, "SOURCE_READ_PENDING"));
         setNotice("Reading the exact selected mission pair…");
         setSelection(next);
-        void window.MastermindMissionHost?.session?.refresh(next);
+        void window.MastermindMissionHost?.session?.refresh(
+          { workRef: next.workRef, rootJobId: next.rootJobId, targetKind: sessionTargetKind },
+        );
         setProjectTab(direct ? "Overview" : "Conversation");
         setActive("Projects");
       }
@@ -3985,6 +4124,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       key={JSON.stringify([sessionOwner?.principalScope, sessionOwner?.generation])}
       sessionKey={sessionTargetKey}
       unavailableReason={sessionContinuationUnavailable}
+      targetKind={sessionTargetKind}
+      onTargetKindChange={changeSessionTargetKind}
+      targetKindLocked={
+        sessionPending.current !== null || sessionPointer !== null ||
+        sessionPointerError || sessionRecovering
+      }
+      nativeResult={sessionNative && sessionNative.binding === sessionBinding &&
+        sessionNative.principalScope === sessionOwner?.principalScope &&
+        sessionNative.generation === sessionOwner?.generation &&
+        sessionNative.selectionSeq === selectionSeq.current &&
+        sessionNative.targetKind === sessionTargetKind
+        ? sessionNative.result
+        : null}
       status={sessionStatus}
       retainedPointer={sessionPointer}
       reading={!!sessionOwner && sessionReading}
@@ -4003,7 +4155,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       onRecover={checkSessionStatus}
       onRequalify={signedIn && !sessionOwner && sessionControl ? () => {
         invalidateSessionPresentation();
-        void sessionControl.refresh(selection);
+        void sessionControl.refresh(sessionSelection);
       } : undefined}
     />
   ) : null;
@@ -5084,7 +5236,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       authenticationCue={todayAuthenticationCue}
       retainComposerWithAuth={Boolean(passiveExpiryHold.current && (retainedComposerDrafts.launch || retainedComposerDrafts.launchDetails)) || heldKind === "launch"}
       onOpenInbox={() => { setProjectTab(null); setActive("Inbox"); }}
-      onOpenProjects={() => { setProjectTab(null); setActive("Projects"); }}
+      onOpenProjects={() => { setProjectTab(null); setCatalogueProject(null); setActive("Projects"); }}
       onOpenMission={(!authState || authState.acquisition) ? target => open(target.workRef, target.rootJobId) : undefined}
     />;
   else if (active === "Meta-CEO")

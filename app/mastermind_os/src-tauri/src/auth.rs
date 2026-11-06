@@ -965,6 +965,51 @@ impl MissionSelection {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct SessionSelection {
+    work_ref: String,
+    root_job_id: String,
+    /// The closed target kind of the selected session. An absent kind keeps
+    /// the incumbent fabric target; no other kind is admitted.
+    #[serde(default, deserialize_with = "deserialize_session_target_kind")]
+    target_kind: Option<String>,
+}
+fn deserialize_session_target_kind<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Only omission uses the default. Explicit null is not legacy Fabric.
+    String::deserialize(deserializer).map(Some)
+}
+impl SessionSelection {
+    fn validate(&self) -> Result<()> {
+        MissionSelection {
+            work_ref: self.work_ref.clone(),
+            root_job_id: self.root_job_id.clone(),
+        }
+        .validate()?;
+        match self.target_kind.as_deref() {
+            None => Ok(()),
+            Some("fabric_attempt") | Some("hermes_secretary") => Ok(()),
+            Some(_) => Err("SELECTION_INVALID".into()),
+        }
+    }
+    /// The exact wire selection. The legacy pair is carried verbatim; an
+    /// explicit kind adds the one closed key and nothing else.
+    fn wire(&self) -> Value {
+        let mut selection = serde_json::json!({
+            "work_ref": self.work_ref, "root_job_id": self.root_job_id
+        });
+        if let Some(kind) = &self.target_kind {
+            selection["target_kind"] = Value::String(kind.to_owned());
+        }
+        selection
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResultSelection {
     work_ref: String,
     root_job_id: String,
@@ -2866,14 +2911,13 @@ pub async fn executive_session_send(app:AppHandle,arguments:Value)->Result<Value
     result
 }
 #[tauri::command]
-pub async fn executive_session_context(app: AppHandle, selection: MissionSelection) -> Result<Value> {
+pub async fn executive_session_context(app: AppHandle, selection: SessionSelection) -> Result<Value> {
     selection.validate()?;
-    // The Session context endpoint requires the selected pair directly,
-    // whereas replies/references use the existing arguments envelope.
+    // The Session context endpoint requires the selected variant directly,
+    // whereas replies/references use the existing arguments envelope. This
+    // stays a READ. The separate fixed SEND command admits Fabric targets only.
     let result = executive_post(app.clone(), "/os/executive/session/context",
-        serde_json::json!({ "selection": {
-            "work_ref": selection.work_ref, "root_job_id": selection.root_job_id
-        }})).await;
+        serde_json::json!({ "selection": selection.wire() })).await;
     if result.is_err() { emit(&app); }
     result
 }
@@ -5008,4 +5052,40 @@ mod source_operation_context_tests {
         }
     }
 
+}
+
+
+#[cfg(test)]
+mod secretary_selection_contract_tests {
+    use super::*;
+
+    #[test]
+    fn session_kind_omission_and_closed_strings_preserve_the_wire_shape() {
+        let pair = serde_json::json!({"work_ref": "WS:ALPHA", "root_job_id": "JOB-1"});
+        let legacy: SessionSelection = serde_json::from_value(pair.clone()).unwrap();
+        legacy.validate().unwrap();
+        assert_eq!(legacy.wire(), pair);
+        for kind in ["fabric_attempt", "hermes_secretary"] {
+            let value = serde_json::json!({
+                "work_ref": "WS:ALPHA", "root_job_id": "JOB-1", "target_kind": kind
+            });
+            let selected: SessionSelection = serde_json::from_value(value.clone()).unwrap();
+            selected.validate().unwrap();
+            assert_eq!(selected.wire(), value);
+        }
+    }
+
+    #[test]
+    fn an_explicit_null_kind_is_never_legacy_fabric() {
+        for kind in [Value::Null, serde_json::json!(true), serde_json::json!(7), serde_json::json!([])] {
+            let value = serde_json::json!({
+                "work_ref": "WS:ALPHA", "root_job_id": "JOB-1", "target_kind": kind
+            });
+            assert!(serde_json::from_value::<SessionSelection>(value).is_err());
+        }
+        let unsupported: SessionSelection = serde_json::from_value(serde_json::json!({
+            "work_ref": "WS:ALPHA", "root_job_id": "JOB-1", "target_kind": "other"
+        })).unwrap();
+        assert!(unsupported.validate().is_err());
+    }
 }
