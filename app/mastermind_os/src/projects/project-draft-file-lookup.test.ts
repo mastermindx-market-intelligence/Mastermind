@@ -14,6 +14,8 @@ it('refuses getters, symbols, duplicate JSON and noncanonical serialized fields'
  expect(()=>decodeProjectDraftFileLookup(forged,work)).toThrow();expect(called).toBe(false);
  expect(()=>decodeProjectDraftFileLookup({...lookup,[Symbol('extra')]:true},work)).toThrow();
  const raw=serializeProjectDraftFileLookup(lookup,work);
- expect(()=>parseProjectDraftFileLookup('{"action":"add_project_file",'+raw.slice(1),work)).toThrow();
+ expect(raw.startsWith('{')).toBe(true);
+ const duplicateAction='{"action":"add_project_file",'+raw.slice(1);
+ expect(()=>parseProjectDraftFileLookup(duplicateAction,work)).toThrow();
  expect(()=>parseProjectDraftFileLookup(' '+raw,work)).toThrow();expect(()=>parseProjectDraftFileLookup(raw,'WS:OTHER')).toThrow();
 });

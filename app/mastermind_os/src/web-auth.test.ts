@@ -1508,6 +1508,16 @@ describe("fixed H2 direct-native authenticated routes",()=>{
     await expect(e.client.executive!.directNative!.read(selection,new AbortController().signal)).rejects.toThrow('RESPONSE_INVALID_JSON');
     expect(e.fetcher).toHaveBeenCalledTimes(2);
   });
+  it("rejects HTTP 400 on the existing direct-native route even with a typed unavailable body", async () => {
+    const e = setup({executiveResource: resource});
+    await e.login(); e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(unavailable), {
+      status: 400, headers: {"content-type": "application/json"},
+    }));
+    await expect(e.client.executive!.directNative!.read(selection, new AbortController().signal))
+      .rejects.toThrow("EXECUTIVE_REQUEST_FAILED");
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
   it("rejects malformed digest/selection before fetch and fences a late reply after signout",async()=>{
     const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
     await expect(e.client.executive!.directNative!.consume({...selection,attempt_id:'ATT-456',result_digest:'x'+'d'.repeat(64),operation_key:'original'},new AbortController().signal)).rejects.toThrow('DIRECT_SELECTION_INVALID');
@@ -2154,7 +2164,7 @@ describe("fixed project execution two-resource requests", () => {
       .toThrow("PROJECT_EXECUTION_INPUT_INVALID");
     expect(e.fetcher).not.toHaveBeenCalled();
   });
-  it.each([["context_changed", 403], ["operation_conflict", 409], ["source_unavailable", 503], ["effect_unknown", 202]] as const)
+  it.each([["invalid_request", 400], ["context_changed", 403], ["operation_conflict", 409], ["source_unavailable", 503], ["effect_unknown", 202]] as const)
     ("preserves typed %s without retrying or replacing the original request", async (code, httpStatus) => {
       const e = setup({executiveResource: resource});
       await e.login(); e.fetcher.mockReset();

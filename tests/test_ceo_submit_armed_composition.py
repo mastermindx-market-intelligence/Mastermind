@@ -1577,11 +1577,13 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # 2026-11-06 source audit: project input custody and paired canonical READ
     # composition retain protected c571acc9's exact 060525... wrapper AST. This
     # composed-file pin grants no native SEND or installed-release approval.
+    # d3f observation-only Fabric coexistence adds no event loop: the exact
+    # installed wrapper AST below and paid/attended non-mixing guards remain.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '090e3e423cb29a3761a032548bd2528479e6ba6c7f56f60841e74d5b8a5df450'):
+            '4d6e98524f460ae9a0dbb38ed35b95b80e27979563c7043deed37df9b61564ab'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

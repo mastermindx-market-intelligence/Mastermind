@@ -3168,13 +3168,16 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     physical_source = _staged_fabric_binding_source(raw)
     from control_plane.executive_paid_fabric_composition import installed_paid_source
     paid_source=installed_paid_source(raw,installed_control=_installed_control)
-    if paid_source is not None and (physical_source is not None or attended_work_placements):
+    if paid_source is not None and ((physical_source is not None and physical_source.has_execution_bindings)
+                                    or attended_work_placements):
         raise ServiceError('installed paid source cannot replace or mix an attended owner')
     if _installed_control:
         if attended_work_placements:
             raise ServiceError('installed Control cannot replace its fixed source composition')
         from control_plane.fabric_attended_routing import installed_control_placements, FINITE_SOCKET_PATH
         attended_work_placements = installed_control_placements(raw)
+        if paid_source is not None and attended_work_placements:
+            raise ServiceError('installed paid source cannot replace or mix an attended owner')
         if attended_work_placements and _sha256_file(config_path) != installed_config_sha256:
             raise ServiceError('installed finite Control definition changed while loading')
         if attended_work_placements and (physical_source is None

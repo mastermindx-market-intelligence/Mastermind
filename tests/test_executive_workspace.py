@@ -805,7 +805,7 @@ _INSTALL_SH = Path(__file__).resolve().parents[1] / "ops" / "executive_os" / "in
 
 def test_install_sh_packs_the_administrative_checkout_outside_the_existence_guard():
     install_text = _INSTALL_SH.read_text(encoding="utf-8")
-    guard = 'if [ ! -d "$ADMIN_CHECKOUT/.git" ]; then'
+    guard = 'if [ "$NEED_CLONE" = "1" ]; then'
     assert guard in install_text
     _, after_guard = install_text.split(guard, 1)
     body, after_fi = after_guard.split("\nfi\n", 1)

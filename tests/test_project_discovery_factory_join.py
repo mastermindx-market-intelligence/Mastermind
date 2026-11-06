@@ -42,7 +42,8 @@ def test_shared_installed_read_factory_uses_one_owner_without_supervisor_and_rea
     baseline=CanonicalFixtureCache(j['code_root'],j['tmp_path']/'canonical-baseline',
         mastermind_revision=j['factory'].service.config.proof_base_sha)
     cfg=publisher.ServerConfig(repo_root=Path.cwd(),macro_root=str(j['code_root']),bindings_path=None,
-        token='inert-fixed-read',origin=publisher.UNIX_CONTROL_ROOM_ORIGIN,port=0,state_ttl=3600)
+        token='inert-fixed-read',origin=publisher.UNIX_CONTROL_ROOM_ORIGIN,port=0,state_ttl=3600,
+        validity_sample_fn=baseline.owner.validity_sample_fn)
     cfg.compose_inputs=lambda *_args,**_kwargs:baseline.compile()
     listener,path=spawn_workspace_room_listener(monkeypatch)
     hosted=HostedControlRoom(cfg,listener=listener,socket_path=path,allowed_peer_uids=(os.geteuid(),))

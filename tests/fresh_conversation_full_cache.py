@@ -22,11 +22,14 @@ def git(root, *args):
     return subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
 
 
-def _fixture_source_clock_sample():
-    """Inert paired clock for portable source fixtures; no Darwin capability claim."""
-    elapsed = time.monotonic_ns() // 1000000
-    wall = time.time_ns() // 1000000
-    return (elapsed, wall, elapsed, wall)
+def fixture_clock_sample():
+    """Explicit portable test clock premise, never installed Darwin capability.
+
+    Preserve the Mlo/Wlo/Mhi/Whi bracket and live wall/monotonic movement.
+    Production _source_clock_sample remains Darwin-only and fail-closed.
+    """
+    return (time.monotonic_ns() // 1000000, time.time_ns() // 1000000,
+            time.monotonic_ns() // 1000000, time.time_ns() // 1000000)
 
 
 class CanonicalFixtureCache:
@@ -40,7 +43,7 @@ class CanonicalFixtureCache:
         assert self.code == (self.root / 'scripts/agentos.py').read_bytes()
         self.owner = cache_owner.ServerConfig(repo_root=Path.cwd(), macro_root=str(self.root),
             bindings_path=None, token='inert-private-fixture', origin='http://127.0.0.1:0', port=0,
-            validity_sample_fn=_fixture_source_clock_sample)
+            validity_sample_fn=fixture_clock_sample)
         self.cache = ExistingControlRoomCache(lambda: self.owner)
         self.publish()
 
@@ -113,4 +116,5 @@ class CanonicalFixtureCache:
                 'actual pinned Store/build_state/build_brief and canonical compose_control_room',
                 'physical AgentOS brief child evaluated in-process over exact captured code',
                 'absent Inbox/active builds/bindings remain explicitly unavailable',
+                'portable fixture Mlo/Wlo/Mhi/Whi clock is synthetic; no Darwin clock capability claim',
                 'fixture READ binding and private kernel/provider enrollment remain synthetic'])

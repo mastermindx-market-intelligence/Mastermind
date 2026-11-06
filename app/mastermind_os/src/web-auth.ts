@@ -1172,7 +1172,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         if (!response.ok && !direct && !execution) throw new Error("EXECUTIVE_REQUEST_FAILED");
         const decoded = await boundedJson(response, direct ? DIRECT_RESULT_BYTES : 262_144, direct ? parseDirectNativeJson : JSON.parse);
         if (!response.ok) {
-          if (![400,401,403,409,503].includes(response.status)) throw new Error("EXECUTIVE_REQUEST_FAILED");
+          const errorStatuses = execution ? [400, 401, 403, 409, 503] : [401, 403, 409, 503];
+          if (!errorStatuses.includes(response.status)) throw new Error("EXECUTIVE_REQUEST_FAILED");
           if (execution) {
             if (projectExecutionResult(decoded, route.slice("project-execution/".length) as ProjectExecutionOperation).ok !== false)
               throw new Error("EXECUTIVE_REQUEST_FAILED");
