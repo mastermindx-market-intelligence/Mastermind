@@ -90,7 +90,8 @@ class PairedLauncherUpgrade(unittest.TestCase):
             retained = json.loads(raw)
             old = retained['manifest']
             removed = set(retained['removed_current_members']) | {
-                'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py'}
+                'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py',
+                'ext/participant_binding.py', 'ext/fabric_participant_owner.py'}
             if (retained['schema'] != 'mastermind.test_native_paired_historical95/v1'
                     or set(cls.manifest) - set(old) != removed or set(old) - set(cls.manifest)
                     or len(old) != 95 or retained['historical_manifest_sha256'] != installer.UPGRADE_MANIFEST):
