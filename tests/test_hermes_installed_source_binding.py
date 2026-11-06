@@ -397,6 +397,36 @@ async def test_direct_parent_kill_preimage_leaves_the_owned_descendant_pipe_open
 
 
 @pytest.mark.anyio
+async def test_exited_parent_with_waiting_descendant_is_bounded_refusal_not_a_group_signal(monkeypatch):
+    script="import subprocess,sys,time;subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);print('READY',flush=True);time.sleep(60)"
+    process=await asyncio.create_subprocess_exec(sys.executable,'-I','-S','-B','-c',script,
+        stdin=asyncio.subprocess.DEVNULL,stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,start_new_session=True)
+    assert await process.stdout.readline()==b'READY\n'
+    process.kill()
+    async with asyncio.timeout(1):
+        while process.returncode is None: await asyncio.sleep(0.001)
+    real_killpg=os.killpg
+    signals=[]
+    def forbidden(group,sig):
+        signals.append((group,sig))
+        raise AssertionError('exited leader cannot authenticate a group signal')
+    monkeypatch.setattr(observer.os,'killpg',forbidden)
+    started=asyncio.get_running_loop().time()
+    try:
+        with pytest.raises(RoleStatusError):
+            await asyncio.wait_for(observer._settle_owned_read(process,session=True),timeout=1.5)
+        assert asyncio.get_running_loop().time()-started < 1.5 and signals==[]
+    finally:
+        # Fixture-only custody remains known separately, so settle its child
+        # without routing that authority through the production helper.
+        try: real_killpg(process.pid,signal.SIGKILL)
+        except ProcessLookupError: pass
+        assert await asyncio.wait_for(process.stdout.read(),timeout=1)==b''
+        await process.wait()
+
+
+@pytest.mark.anyio
 async def test_absent_installed_command_refuses_before_subprocess_or_unit(monkeypatch):
     from ops.executive_os import release_manifest as m
     monkeypatch.setattr(observer.sys, 'platform', 'linux')

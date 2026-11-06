@@ -35,10 +35,11 @@ async def _settle_owned_read(process, *, session=False):
     targets only that new owned group if the graceful cleanup cannot finish.
     No kill call is itself reported as successful settlement.
     """
-    if process.returncode is not None:
-        await process.wait()
-        return
     def stop(sig):
+        # A reaped leader no longer proves a current group identity. Do not
+        # signal that numeric group or probe unrelated processes to recover it.
+        if process.returncode is not None:
+            return
         try:
             if session:
                 # start_new_session is part of this exact create call. Refuse
@@ -50,18 +51,29 @@ async def _settle_owned_read(process, *, session=False):
                 process.send_signal(sig)
         except ProcessLookupError:
             pass
-    stop(signal.SIGTERM if session else signal.SIGKILL)
+    if process.returncode is None:
+        stop(signal.SIGTERM if session else signal.SIGKILL)
     waiter = asyncio.create_task(process.wait())
     try:
-        await asyncio.wait_for(asyncio.shield(waiter), timeout=0.5)
-    except asyncio.TimeoutError:
-        stop(signal.SIGKILL)
         try:
             await asyncio.wait_for(asyncio.shield(waiter), timeout=0.5)
         except asyncio.TimeoutError:
-            raise RoleStatusError() from None
-    if process.returncode is None:
-        raise RoleStatusError()
+            stop(signal.SIGKILL)
+            await asyncio.wait_for(asyncio.shield(waiter), timeout=0.5)
+        if process.returncode is None:
+            raise RoleStatusError()
+        # Direct exit is insufficient if an inherited stdout pipe remains
+        # held by a descendant. Bound this check too; never wait for natural
+        # descendant expiry, and never call that an affirmative settlement.
+        if process.stdout is not None and not process.stdout.at_eof():
+            extra = await asyncio.wait_for(process.stdout.read(1), timeout=0.5)
+            if extra or not process.stdout.at_eof():
+                raise RoleStatusError()
+    except asyncio.TimeoutError:
+        raise RoleStatusError() from None
+    finally:
+        if not waiter.done():
+            waiter.cancel()
 
 
 async def _await_owned_cleanup(cleanup):
