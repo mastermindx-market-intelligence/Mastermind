@@ -175,3 +175,61 @@ def test_real_vendor_shape_does_not_copy_viewer_or_account_identity():
     assert result["suggested_parallelism"] is None
     assert result["autonomous_allowed"] is False
     assert "do-not-project-private" not in str(result)
+
+
+@pytest.mark.parametrize("exhausted", ["session", "weekly", "monthly"])
+def test_each_window_can_independently_exhaust_same_subscription(exhausted):
+    holdings, usage = fixture()
+    for row in usage["items"][0]["periods"]:
+        row["percent"] = 100 if row["label"] == exhausted else 7
+    result = project_byteplus_plan_readback(holdings, usage,
+        subscription_ref="subscription-" + "a" * 64, verified_at_unix=1792692727)
+    assert result["quota_constraint_state"] == "EXHAUSTED"
+    assert result["exhausted_windows"] == [exhausted]
+    assert result["minimum_remaining_percent_rounded"] == 0
+    assert result["live_admission"] is False
+    assert result["estimated_startable_jobs"] is None
+
+
+def test_rounded_percentages_never_become_counts_or_parallelism():
+    holdings, usage = fixture()
+    for row, value in zip(usage["items"][0]["periods"], (20, 40, 70)):
+        row["percent"] = value
+    first = project_byteplus_plan_readback(holdings, usage,
+        subscription_ref="subscription-" + "a" * 64, verified_at_unix=1792692727)
+    second = project_byteplus_plan_readback(holdings, usage,
+        subscription_ref="subscription-" + "b" * 64, verified_at_unix=1792692727)
+    assert first["quota_constraint_state"] == "NOT_EXHAUSTED_ROUNDED"
+    assert first["minimum_remaining_percent_rounded"] == 30
+    assert first["subscription_ref"] != second["subscription_ref"]
+    assert first["quota_scope"] == "ONE_SUBSCRIPTION_ALL_MODELS_AND_KEYS"
+    assert not first["account_identity_attested"]
+    assert not first["independent_concurrency_observed"]
+    assert first["suggested_parallelism"] is None
+
+
+@pytest.mark.parametrize("stamp", [1792692725, 1792693027])
+def test_stale_or_future_measurement_stays_unknown(stamp):
+    holdings, usage = fixture()
+    result = project_byteplus_plan_readback(holdings, usage,
+        subscription_ref="subscription-" + "a" * 64, verified_at_unix=stamp)
+    assert result["quota_constraint_state"] == "UNKNOWN"
+    assert "measurement_stale_or_future" in result["quota_constraint_reasons"]
+
+
+def test_elapsed_reset_does_not_automatically_replenish_quota():
+    from datetime import datetime
+    holdings, usage = fixture()
+    stamp = int(datetime.fromisoformat("2026-10-26T00:00:00+08:00").timestamp())
+    usage["items"][0]["updated_at"] = stamp
+    result = project_byteplus_plan_readback(holdings, usage,
+        subscription_ref="subscription-" + "a" * 64, verified_at_unix=stamp)
+    assert result["quota_constraint_state"] == "UNKNOWN"
+    assert "weekly_reset_requires_new_readback" in result["quota_constraint_reasons"]
+
+
+@pytest.mark.parametrize("ref", ["raw-account-id", "credential-" + "a" * 64, "", 3])
+def test_raw_or_credential_based_scope_is_rejected(ref):
+    holdings, usage = fixture()
+    with pytest.raises(HarnessBindingError, match="subscription reference"):
+        project_byteplus_plan_readback(holdings, usage, subscription_ref=ref)

@@ -1287,6 +1287,7 @@ def _build_profile_mcp_app(
             ),
             submit_authenticator=os_authenticator,
             clock=configured.clock,
+            company_read_pair=(verifier_pairs[os_pair_index][0], read_authenticators[os_pair_index]),
             commission_preparer=os_commission_preparer,
             direct_result_client=DirectNativeResultClient(configured.ceo_ingress_socket_path, CeoIngressClient(
                 connect_timeout=configured.connect_timeout, read_timeout=configured.read_timeout)),
