@@ -134,5 +134,15 @@
     "file": "omh-source-qualification-20261107-pro-05.json",
     "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/omh-source-qualification-20261107-pro-05.json",
     "sha256": "bf77754e618adb8c76bcfeed5d535e7a0ccca32686fadd9b1ed9ac79d3ab1df4"
+  },
+  {
+    "file": "1f431c6c4087-package-receipt.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/qualified/PACKAGE_RECEIPT.json",
+    "sha256": "eae1759c5706f0d975c0c08ac3e81b35d448d0dc9835ed6456a20dab4648efc8"
+  },
+  {
+    "file": "547a880894b0-composition.json",
+    "source": "existing managed workspace prepared merge and retained focused test logs",
+    "sha256": "f3e3c039e77189c382dc6caac92aa92e939ca2e26fbbd62685cf63185019e7f1"
   }
 ]

@@ -39,15 +39,15 @@ PINS = {
     "source/model_tier.py": "96093c2747d2dda69b3f2255cb84e656355c87ea",
     "source/pool_status.py": "02922043357d63b4bcfa3791899df27a5c42be12",
     "source/application_http_transports.py.preimage": "a116d8c671594552dd5c14f46f91981cd7c15f43",
+    # Historical metadata input selected by application_http_sources(); the
+    # current realm module is not a fallback for this exact retained evidence.
+    "source/codex_provider_realm.py.preimage": "eeea4c0fafc7e6df5c534c731cb6046bbe4d3f37",
     "rollout/application_http_realm_projection.py": "684c54d5c9d8dbdd5bc046d123af31d20fc99dd1",
     "tests/_offline_boundary.py": "e511ab65fe1cd30bf4d2addac6700ca43c3468da",
     "tests/test_go_application_handler_composition.py": "13ebd6bcee5167926807d7ccdc63bcabed0cf1b1",
     "tests/test_application_turn_admission.py": "efe876eec40dc8885dbc0059915f2401146be969",
 }
-# Protected #1824 (1e5f77a4) adds a spec-only ModelArk commercial realm.
-# The reviewed MiniMax/Alibaba realms remain unchanged; retain exact blob checks.
 REALM_PINS = {
-    "control_plane/codex_provider_realm.py": "a51e2bce8d9bb312107f975d503abd6541bd5000",
     "control_plane/provider_protocols.py": "92452237ac3956e8104e45ab9ee386c2fa016b76",
     "control_plane/fs_security.py": "16617789dc115b5748a3e72cc0d9a53fbc368918",
 }

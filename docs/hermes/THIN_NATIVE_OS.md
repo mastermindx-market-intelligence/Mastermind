@@ -769,3 +769,47 @@ Logs: `/tmp/hermes-thin-omh-scope-python-20261107-pro-05.log`,
 These are source receipts. The next package must retain its own source/build
 identity and continue the original1fb461 conversation's useful Send/answer,
 history and reconnect journey, without an automatic replay.
+
+
+## Protected547 composition and current internal package
+
+Protected master advanced to 547a880894b0f3d28a6d5118ee2534287b3fc1c0.
+The verified 615146aa governing source remains unchanged. Its only changed-path
+overlap with this candidate is the paired Fabric translation test. The resolution
+retains the protected historical realm-preimage pin that application_http_sources
+actually consumes; it removes the unrelated current-realm guard and its obsolete
+comment. Every other fixture pin and assertion remains. The resolved file is
+exact protected blob b3e00e1c3d507dc276f0f24d40e0665448f1e18a.
+
+At prepared merge tree 1972f1192d64680d8456b21937a934ed7a9e875a, the isolated
+canonical paired fixture with Macro f0375acf4ba076718e7cb420ed28ab61fb0a4f26
+passes 23 translation tests. The two existing historical-evidence/tampering cases
+also pass from the complete source root. The initial paired archive omitted a
+native-startup collection dependency; the complete-root run corrects that test
+environment without installing dependencies or changing source. Exact logs and
+hashes are in [the composition receipt](evidence/thin-native-os-20261107/547a880894b0-composition.json).
+
+The application tree remains e3bd08a36c4ea2363a12b061bf47f70639dd3dbe, so the
+already-built 1f431c6c4087656ae3dbdc683d96ee2572f061c9 candidate retains its actual
+identity. A copy at candidate-1f431c6c4087/qualified/Mastermind OS.app passes
+nested and deep strict ad-hoc signing verification. Its original entitlements,
+full public profile, compiled source/build/client and Terminal input are retained;
+the raw artifact remains unchanged. [Package receipt](evidence/thin-native-os-20261107/1f431c6c4087-package-receipt.json)
+SHA256 eae1759c5706f0d975c0c08ac3e81b35d448d0dc9835ed6456a20dab4648efc8;
+bundle SHA256 d35c59d3c298aa9c5129bfb0389db1c55d8af4f57afb7fcf35c24c18991d4bb9.
+This copy is unselected and uninstalled, with no new auth or callback action.
+It supplies no Apple DeveloperID/notarization/updater qualification.
+
+The selected OMH recommendation path also reads shipped trigger-pack JSON and
+user trigger-language packs, whose effective home can be selected by the profile
+configuration. These are closed data-only skill/phrase mappings consumed by the
+pinned scorer, not executable grants or dispatch. This is part of the stated
+local-advisory read scope; it is not limited to model-chains.json. The existing
+trusted-source versus executable-cache attestation limit above remains explicit.
+
+The active native continuation retains the original conversation and sole UI
+lane. A successful fresh READY hydration in the same durable scope can prove no
+outstanding pointer; absence of database rows alone cannot prove NOT_SENT.
+No historical refusal code or original request ID is fabricated. The completed
+canary remains preserved and must never be recreated or resent. Final useful
+native answer/history/reopen acceptance and the protected queue remain owed.
