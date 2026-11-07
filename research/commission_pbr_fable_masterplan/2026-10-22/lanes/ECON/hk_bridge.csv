@@ -1,0 +1,7 @@
+symbol,account_qty,replay_qty,diff,first_seen,account_strike,fill_price,notional,h1_reproduces,bound_hkd,status,evidence
+0700.HK,34.279901,33.472648,+0.807253,2026-06-24_backup (created on 2026-06-21/22 initial legs),439.00,440.20; 440.20,130000.00,YES,317.90,BOUNDED,open_diff_x_current(393.8)
+0981.HK,0.000000,49.600212,-49.600212,2026-06-24_backup (created on 2026-06-21/22 initial legs),78.80,76.50; 76.50,130000.00,YES,4434.26,BOUNDED,residual_unsold row31 2026-07-01 @89.40
+1024.HK,0.000000,-12.276828,+12.276828,2026-06-24_backup (created on 2026-06-21/22 initial legs),46.90,47.24,80000.00,YES,1046.48,BOUNDED,phantom_sold row26 2026-06-29 @41.00; phantom_sold row78 2026-08-07 @44.24
+1929.HK,0.000000,-43.202567,+43.202567,2026-06-24_backup (created on 2026-06-21/22 initial legs),12.33,12.39; 12.39,110000.00,YES,470.91,BOUNDED,phantom_sold row32 2026-07-01 @10.90
+3988.HK,0.000000,-72.563412,+72.563412,2026-06-24_backup (created on 2026-06-21/22 initial legs),5.23,5.27,50000.00,YES,399.82,BOUNDED,phantom_sold row63 2026-08-03 @5.51
+3993.HK,0.000000,23.503222,-23.503222,2026-06-24_backup (created on 2026-06-21/22 initial legs),18.94,18.87; 18.87,120000.00,YES,356.78,BOUNDED,residual_unsold row28 2026-06-30 @15.18

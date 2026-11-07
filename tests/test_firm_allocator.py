@@ -473,6 +473,7 @@ def test_shadow_guarantee_grep(tmp_path):
     Allowed importers (exhaustive list):
       - app/web.py (the endpoint)
       - tests/test_firm_allocator.py (this file)
+      - tests/test_benchmark_window_consumers.py (accepted selector regression)
       - tests/test_allocator_read_truth.py (dedicated boundary regression)
 
     Everything else is forbidden. This is the shadow guarantee: no allocation
@@ -497,6 +498,7 @@ def test_shadow_guarantee_grep(tmp_path):
         "app/web.py",
         "tests/test_firm_allocator.py",
         "tests/test_allocator_read_truth.py",  # dedicated boundary regression only
+        "tests/test_benchmark_window_consumers.py",  # A12: calls _latest_benchmark (read-only test)
         "portfolio/firm_allocator.py",  # the module itself
     }
     allowed_abs = {repo_root / rel for rel in ALLOWED_RELATIVE}

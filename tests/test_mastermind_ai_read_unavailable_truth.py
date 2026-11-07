@@ -1,11 +1,24 @@
-"""Mastermind Portfolio Loop admin reads preserve empty-vs-unavailable truth."""
+"""Mounted Portfolio Loop admin reads preserve empty-vs-unavailable truth.
+
+Use the real app and middleware without TestClient startup context, matching the
+existing dashboard-route tests; no scheduler or model transport is started.
+"""
 from __future__ import annotations
 
-import json
+from fastapi.testclient import TestClient
+
+
+def _get(path):
+    from app.main import app
+
+    response = TestClient(app, raise_server_exceptions=True).get(path)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    return response
 
 
 def _body(resp):
-    return json.loads(resp.body)
+    return resp.json()
 
 
 def _boom(*_args, **_kwargs):
@@ -13,11 +26,10 @@ def _boom(*_args, **_kwargs):
 
 
 def test_status_success_keeps_product_identity(monkeypatch):
-    from app import web
     from brain import mastermind_ai
 
     monkeypatch.setattr(mastermind_ai, "status", lambda: {"schema": "mastermind_ai_status.v1", "loop_n": 0})
-    payload = _body(web.api_mastermind_ai())
+    payload = _body(_get("/api/mastermind_ai"))
     assert payload["schema"] == "mastermind_ai_status.v1"
     assert payload["loop_n"] == 0
     assert payload["product_scope"] == "mastermind_portfolio_loop"
@@ -26,11 +38,10 @@ def test_status_success_keeps_product_identity(monkeypatch):
 
 
 def test_status_failure_is_unavailable_and_secret_safe(monkeypatch):
-    from app import web
     from brain import mastermind_ai
 
     monkeypatch.setattr(mastermind_ai, "status", _boom)
-    response = web.api_mastermind_ai()
+    response = _get("/api/mastermind_ai")
     payload = _body(response)
     assert payload == {
         "schema": "mastermind_ai_status.v1",
@@ -40,26 +51,24 @@ def test_status_failure_is_unavailable_and_secret_safe(monkeypatch):
         "legacy_route_prefix": "/api/mastermind_ai",
         "error": "mastermind_ai_status_unavailable",
     }
-    raw = response.body.decode()
+    raw = response.text
     assert "secret" not in raw and "/Users/private" not in raw and "token=bad" not in raw
 
 
 def test_loop_log_successful_empty_remains_empty(monkeypatch):
-    from app import web
     from brain import mastermind_ai
 
     monkeypatch.setattr(mastermind_ai, "loop_log", lambda limit=50: [])
     monkeypatch.setattr(mastermind_ai, "reviews", lambda limit=12: [])
-    payload = _body(web.api_mastermind_ai_loop_log())
+    payload = _body(_get("/api/mastermind_ai/loop_log"))
     assert payload == {"loop_log": [], "reviews": []}
 
 
 def test_loop_log_failure_is_unavailable_not_empty(monkeypatch):
-    from app import web
     from brain import mastermind_ai
 
     monkeypatch.setattr(mastermind_ai, "loop_log", _boom)
-    response = web.api_mastermind_ai_loop_log()
+    response = _get("/api/mastermind_ai/loop_log")
     payload = _body(response)
     assert payload == {
         "read_status": "unavailable",
@@ -67,24 +76,22 @@ def test_loop_log_failure_is_unavailable_not_empty(monkeypatch):
         "reviews": None,
         "error": "mastermind_ai_loop_log_unavailable",
     }
-    assert "secret" not in response.body.decode()
+    assert "secret" not in response.text
 
 
 def test_improvements_successful_empty_remains_empty(monkeypatch):
-    from app import web
     from brain import mastermind_ai
 
     expected = {"pins": [], "self_tune": {}, "agenda_top": [], "lessons_by_taxonomy": {}}
     monkeypatch.setattr(mastermind_ai, "improvements", lambda: expected)
-    assert _body(web.api_mastermind_ai_improvements()) == expected
+    assert _body(_get("/api/mastermind_ai/improvements")) == expected
 
 
 def test_improvements_failure_is_unavailable_not_empty(monkeypatch):
-    from app import web
     from brain import mastermind_ai
 
     monkeypatch.setattr(mastermind_ai, "improvements", _boom)
-    response = web.api_mastermind_ai_improvements()
+    response = _get("/api/mastermind_ai/improvements")
     payload = _body(response)
     assert payload == {
         "read_status": "unavailable",
@@ -94,30 +101,28 @@ def test_improvements_failure_is_unavailable_not_empty(monkeypatch):
         "lessons_by_taxonomy": None,
         "error": "mastermind_ai_improvements_unavailable",
     }
-    assert "secret" not in response.body.decode()
+    assert "secret" not in response.text
 
 
 def test_reflection_successful_absence_remains_absent(monkeypatch):
-    from app import web
     from brain import nw_reflection
 
     monkeypatch.setattr(nw_reflection, "latest", lambda: None)
-    payload = _body(web.api_mastermind_ai_reflection())
+    payload = _body(_get("/api/mastermind_ai/reflection"))
     assert payload["state"] == "absent"
     assert payload["schema"] == nw_reflection.SCHEMA
     assert "read_status" not in payload and "error" not in payload
 
 
 def test_reflection_failure_is_unavailable_not_absent(monkeypatch):
-    from app import web
     from brain import nw_reflection
 
     monkeypatch.setattr(nw_reflection, "latest", _boom)
-    response = web.api_mastermind_ai_reflection()
+    response = _get("/api/mastermind_ai/reflection")
     payload = _body(response)
     assert payload == {
         "read_status": "unavailable",
         "state": "unavailable",
         "error": "mastermind_ai_reflection_unavailable",
     }
-    assert "secret" not in response.body.decode()
+    assert "secret" not in response.text

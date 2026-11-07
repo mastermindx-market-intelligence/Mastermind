@@ -16,6 +16,8 @@ from enum import Enum
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Mapping
 
+from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+from control_plane.coo_principal_mandate import NewEffectGate
 from control_plane.executive_delegation_identity import ExecutiveDelegationIdentity
 from control_plane.executive_runtime import AttemptStatus, WorkerStatus
 from control_plane.session_targets import RuntimeBinding
@@ -37,6 +39,11 @@ _ALLOWED_MESSAGE_TYPES = (
     "PROGRESS",
     "RESULT",
 )
+_PRINCIPAL_ALLOWED_MESSAGE_TYPES = (
+    "RULING",
+    "CONTINUE",
+    "STOP",
+)
 _ACTIVE_ATTEMPT_STATUSES = frozenset(
     {
         AttemptStatus.CLAIMED,
@@ -45,6 +52,7 @@ _ACTIVE_ATTEMPT_STATUSES = frozenset(
     }
 )
 _THREAD_TS_RE = re.compile(r"\A[1-9][0-9]{9,15}\.[0-9]{6}\Z")
+_MESSAGE_KEY_RE = re.compile(r"\Aasd-[a-z0-9][a-z0-9-]{7,95}\Z")
 _WORKER_ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 _PROFILE_ID_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
@@ -72,6 +80,11 @@ class BindingReason(str, Enum):
     ACTOR_WORKER_MISMATCH = "ACTOR_WORKER_MISMATCH"
     ACTOR_PROFILE_MISMATCH = "ACTOR_PROFILE_MISMATCH"
     ACTOR_RUNTIME_BINDING_MISMATCH = "ACTOR_RUNTIME_BINDING_MISMATCH"
+    PRINCIPAL_MISSION_MISMATCH = "PRINCIPAL_MISSION_MISMATCH"
+    PRINCIPAL_EFFECT_FENCED = "PRINCIPAL_EFFECT_FENCED"
+    PRINCIPAL_TURN_RESERVED = "PRINCIPAL_TURN_RESERVED"
+    REPLY_TARGET_INVALID = "REPLY_TARGET_INVALID"
+    EXACT_CURRENT_COO_PRINCIPAL = "EXACT_CURRENT_COO_PRINCIPAL"
     THREAD_INVALID = "THREAD_INVALID"
 
 
@@ -105,6 +118,19 @@ class WorkerDialogueCaller:
 
 
 @dataclasses.dataclass(frozen=True)
+class CooPrincipalDialogueCaller:
+    """Trusted current COO facts projected by existing mandate/admission owners."""
+
+    admission_context: PrincipalAdmissionContext
+    root_job_id: str
+    reasoning_surface: str
+    capability_profile_digest: str
+    new_effect_gate: NewEffectGate
+    accountable_seat: str
+    owed_seat: str
+
+
+@dataclasses.dataclass(frozen=True)
 class CompanyDialogueBindingResolution:
     schema: str
     state: BindingState
@@ -114,7 +140,7 @@ class CompanyDialogueBindingResolution:
 
 
 class CompanyDialogueBindingError(RuntimeError):
-    """A caller is not the exact current worker for the dialogue context."""
+    """A caller is not exact/current for the requested dialogue context."""
 
     def __init__(self, resolution: CompanyDialogueBindingResolution) -> None:
         self.resolution = resolution
@@ -215,6 +241,24 @@ def _valid_actor_shape(actor: WorkerDialogueCaller) -> bool:
         and isinstance(actor.capability_policy_digest, str)
         and _SHA256_RE.fullmatch(actor.capability_policy_digest)
         and _runtime_public(actor.runtime_binding) is not None
+    )
+
+
+def _valid_principal_shape(actor: CooPrincipalDialogueCaller) -> bool:
+    return bool(
+        isinstance(actor, CooPrincipalDialogueCaller)
+        and isinstance(actor.admission_context, PrincipalAdmissionContext)
+        and isinstance(actor.root_job_id, str)
+        and JOB_ID_RE.fullmatch(actor.root_job_id)
+        and isinstance(actor.reasoning_surface, str)
+        and _PUBLIC_TOKEN_RE.fullmatch(actor.reasoning_surface)
+        and isinstance(actor.capability_profile_digest, str)
+        and _SHA256_RE.fullmatch(actor.capability_profile_digest)
+        and isinstance(actor.new_effect_gate, NewEffectGate)
+        and isinstance(actor.accountable_seat, str)
+        and _PUBLIC_TOKEN_RE.fullmatch(actor.accountable_seat)
+        and isinstance(actor.owed_seat, str)
+        and _PUBLIC_TOKEN_RE.fullmatch(actor.owed_seat)
     )
 
 
@@ -365,6 +409,172 @@ def resolve_company_dialogue_binding(
         binding=binding,
         evidence=evidence,
     )
+
+
+def resolve_company_dialogue_principal_binding(
+    *,
+    delegation_identity: ExecutiveDelegationIdentity,
+    dialogue_parent: Mapping[str, Any],
+    thread_ts: str,
+    current: CurrentWorkerDialogueSnapshot | None,
+    actor: CooPrincipalDialogueCaller,
+    reply_to_message_key: str,
+) -> CompanyDialogueBindingResolution:
+    """Resolve a current COO principal to one exact live subordinate carrier.
+
+    This is a pure source seam.  It emits no message and intentionally returns
+    a binding that the current worker-facing Company MCP gateway cannot yet
+    consume.  H6-B must separately qualify the principal message/tool schema.
+    """
+
+    from integrations.mastermind_company_mcp.adapter import DialogueBinding
+    from integrations.mastermind_company_mcp.schemas import (
+        SERVER_IDENTITY,
+        SERVER_VERSION,
+        TOOL_SCHEMA_DIGEST,
+    )
+
+    if current is None:
+        return _result(
+            BindingState.UNKNOWN,
+            BindingReason.CURRENT_RUNTIME_UNAVAILABLE,
+        )
+    if not isinstance(thread_ts, str) or _THREAD_TS_RE.fullmatch(thread_ts) is None:
+        return _result(BindingState.REFUSED, BindingReason.THREAD_INVALID)
+    if (
+        not isinstance(reply_to_message_key, str)
+        or _MESSAGE_KEY_RE.fullmatch(reply_to_message_key) is None
+    ):
+        return _result(BindingState.REFUSED, BindingReason.REPLY_TARGET_INVALID)
+    try:
+        parent = validate_parent_v2(copy.deepcopy(dict(dialogue_parent)))
+    except (DialogueContractError, TypeError, ValueError):
+        return _result(BindingState.REFUSED, BindingReason.DIALOGUE_PARENT_INVALID)
+
+    if not _valid_identity(delegation_identity) or not _valid_current_shape(current):
+        return _result(BindingState.REFUSED, BindingReason.CURRENT_JOB_MISMATCH)
+    if not _valid_principal_shape(actor):
+        return _result(BindingState.REFUSED, BindingReason.ACTOR_PROFILE_MISMATCH)
+
+    if (
+        current.root_job_id != delegation_identity.root_job_id
+        or current.job_id != delegation_identity.job_id
+        or current.job_id == current.root_job_id
+    ):
+        return _result(BindingState.REFUSED, BindingReason.CURRENT_JOB_MISMATCH)
+    if (
+        parent["operation_key"] != delegation_identity.operation_key
+        or parent["session_ref"] != delegation_identity.session_ref
+    ):
+        return _result(BindingState.REFUSED, BindingReason.DIALOGUE_IDENTITY_MISMATCH)
+    if current.parent_fingerprint != parent["fingerprint"]:
+        return _result(BindingState.REFUSED, BindingReason.DIALOGUE_PARENT_STALE)
+    if current.attempt_status not in _ACTIVE_ATTEMPT_STATUSES:
+        return _result(BindingState.REFUSED, BindingReason.CURRENT_ATTEMPT_INACTIVE)
+    if current.worker_status is not WorkerStatus.BUSY:
+        return _result(BindingState.REFUSED, BindingReason.CURRENT_WORKER_INACTIVE)
+    if (
+        current.company_dialogue_attested is not True
+        or current.company_dialogue_server_identity != SERVER_IDENTITY
+        or current.company_dialogue_server_version != SERVER_VERSION
+        or current.company_dialogue_tool_schema_digest != TOOL_SCHEMA_DIGEST
+    ):
+        return _result(BindingState.REFUSED, BindingReason.CAPABILITY_NOT_ATTESTED)
+
+    context = actor.admission_context
+    if (
+        actor.root_job_id != current.root_job_id
+        or context.work_ref != parent["work_ref"]
+    ):
+        return _result(BindingState.REFUSED, BindingReason.PRINCIPAL_MISSION_MISMATCH)
+    if actor.new_effect_gate is not NewEffectGate.OPEN:
+        return _result(BindingState.REFUSED, BindingReason.PRINCIPAL_EFFECT_FENCED)
+    if actor.accountable_seat != "coo" or actor.owed_seat != "coo":
+        return _result(BindingState.REFUSED, BindingReason.PRINCIPAL_TURN_RESERVED)
+
+    actor_ref = {
+        "kind": "executive_principal",
+        "seat": "coo",
+        "reasoning_surface": actor.reasoning_surface,
+        "principal_binding_digest": context.principal_binding_digest,
+        "mission_authority_ref": context.mission_authority_ref,
+        "authority_generation_digest": context.authority_generation_digest,
+        "capability_profile_digest": actor.capability_profile_digest,
+        "root_job_id": actor.root_job_id,
+    }
+    applies_to = {
+        "kind": "executive_attempt",
+        "job_id": current.job_id,
+        "attempt_id": current.attempt_id,
+        "worker_id": current.worker_id,
+    }
+    binding = DialogueBinding(
+        actor_ref=_frozen_mapping(actor_ref),
+        work_ref=parent["work_ref"],
+        commission_ref=_frozen_mapping(parent["commission_ref"]),
+        session_ref=parent["session_ref"],
+        operation_key=parent["operation_key"],
+        watch_mode=parent["watch_mode"],
+        applies_to=_frozen_mapping(applies_to),
+        thread_ts=thread_ts,
+        allowed_message_types=_PRINCIPAL_ALLOWED_MESSAGE_TYPES,
+        reply_to_message_key=reply_to_message_key,
+    )
+    runtime = _runtime_public(current.runtime_binding)
+    assert runtime is not None
+    evidence = {
+        "root_job_id": current.root_job_id,
+        "job_id": current.job_id,
+        "attempt_id": current.attempt_id,
+        "worker_id": current.worker_id,
+        "operation_key": parent["operation_key"],
+        "session_ref": parent["session_ref"],
+        "parent_fingerprint": parent["fingerprint"],
+        "thread_ts": thread_ts,
+        "reply_to_message_key": reply_to_message_key,
+        "principal_binding_digest": context.principal_binding_digest,
+        "mission_authority_ref": context.mission_authority_ref,
+        "authority_generation_digest": context.authority_generation_digest,
+        "capability_profile_digest": actor.capability_profile_digest,
+        "reasoning_surface": actor.reasoning_surface,
+        "target_execution_profile_id": current.execution_profile_id,
+        "target_execution_profile_digest": current.execution_profile_digest,
+        "target_capability_policy_digest": current.capability_policy_digest,
+        "target_runtime_binding": runtime,
+        "company_dialogue_server_identity": current.company_dialogue_server_identity,
+        "company_dialogue_server_version": current.company_dialogue_server_version,
+        "company_dialogue_tool_schema_digest": current.company_dialogue_tool_schema_digest,
+    }
+    return _result(
+        BindingState.RESOLVED,
+        BindingReason.EXACT_CURRENT_COO_PRINCIPAL,
+        binding=binding,
+        evidence=evidence,
+    )
+
+
+def require_company_dialogue_principal_binding(
+    *,
+    delegation_identity: ExecutiveDelegationIdentity,
+    dialogue_parent: Mapping[str, Any],
+    thread_ts: str,
+    current: CurrentWorkerDialogueSnapshot | None,
+    actor: CooPrincipalDialogueCaller,
+    reply_to_message_key: str,
+) -> DialogueBinding:
+    """Re-resolve current principal/child facts and return only an exact binding."""
+
+    resolution = resolve_company_dialogue_principal_binding(
+        delegation_identity=delegation_identity,
+        dialogue_parent=dialogue_parent,
+        thread_ts=thread_ts,
+        current=current,
+        actor=actor,
+        reply_to_message_key=reply_to_message_key,
+    )
+    if resolution.state is not BindingState.RESOLVED or resolution.binding is None:
+        raise CompanyDialogueBindingError(resolution)
+    return resolution.binding
 
 
 def require_company_dialogue_binding(

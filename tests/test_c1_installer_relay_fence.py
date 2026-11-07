@@ -24,12 +24,12 @@ def test_installer_fences_relay_before_any_release_mutation() -> None:
     cleanup = _slice(
         source,
         "leave_installed_services_stopped() {",
-        "}\ntrap leave_installed_services_stopped EXIT",
+        "\n}\n",
     )
     mutation = _slice(
         source,
         "trap leave_installed_services_stopped EXIT",
-        'if [ ! -d "$RELEASE_ROOT" ]; then',
+        'stage_sealed_release || exit 65',
     )
     relay_disable = '/bin/launchctl disable "system/$RELAY_LABEL"'
     control_disable = '/bin/launchctl disable "system/$CONTROL_LABEL"'
@@ -42,14 +42,18 @@ def test_installer_fences_relay_before_any_release_mutation() -> None:
         assert block.index(relay_disable) < block.index(control_disable)
         assert block.index(relay_bootout) < block.index(control_bootout)
 
-    relay_loaded = 'print "system/$RELAY_LABEL"'
-    control_loaded = 'print "system/$CONTROL_LABEL"'
+    relay_loaded = 'wait_for_launchd_absent "$RELAY_LABEL" relay'
+    control_loaded = 'wait_for_launchd_absent "$CONTROL_LABEL" control'
     assert relay_loaded in mutation
     assert mutation.index(relay_loaded) < mutation.index(control_loaded)
-    assert "relay LaunchDaemon remained loaded after bootout" in mutation
+    assert '"$description LaunchDaemon absence was not proven after bootout"' in source
 
-    archive = '/usr/bin/git -C "$SOURCE_REPO" archive'
-    assert source.index(relay_loaded) < source.index(archive)
+    archive = '/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive'
+    assert archive in source
+    # Definitions are inert. The ordinary call follows the complete Relay fence;
+    # only explicit unselected stage-only mode calls it before service effects.
+    ordinary_call = source.index("stage_sealed_release || exit 65", source.index("trap leave_installed_services_stopped EXIT"))
+    assert source.index(relay_loaded) < ordinary_call
     assert 'RELAY_PLIST=' not in source
     assert '/bin/launchctl bootstrap "system/$RELAY_LABEL"' not in source
 
