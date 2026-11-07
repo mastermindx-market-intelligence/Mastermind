@@ -246,8 +246,16 @@ class RuntimeCanarySubscriptionStore:
             current, _, _ = self._state(record.subscription_id, connection)
             existing = self.store.get_event_by_command_id("reply-subscription:"+digest,connection=connection)
             if existing is not None:
-                if current.record != record or current.version != existing.command_id:
-                    raise SubscriptionConflict("superseded canary event")
+                _, current_envelope, current_associated = self._state(
+                    record.subscription_id, connection)
+                prior_private = self._private(
+                    current, current_envelope, current_associated,
+                ) if current.record is not None else None
+                if (current.record != record or current.version != existing.command_id
+                        or prior_private is None
+                        or prior_private["authorization"] != authorization
+                        or prior_private["current"] != signing_secret):
+                    raise SubscriptionConflict("superseded canary event or grant")
                 return record
             if (current.version != expected_version or current.binding is not None
                     and current.binding != tuple(binding)):
