@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'tests/test_hermes_primary_application_enrollment.py'
+      - 'tests/test_hermes_primary_retained_enrollment.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_go_native_install.py'
       - 'ops/native_fabric/quota_continuity/candidate/native_go_entry.py'
       - 'ops/native_fabric/quota_continuity/rollout/native_install.py'
       - '.github/workflows/hermes-application-enrollment.yml'
@@ -35,6 +37,8 @@ jobs:
           NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -B -m pytest -q -o addopts= --noconftest \
             --junitxml="$native_rollout_test_root/proof.xml" \
             tests/test_hermes_primary_application_enrollment.py \
+            tests/test_hermes_primary_retained_enrollment.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
             ops/native_fabric/quota_continuity/tests/test_go_service_set_composition.py \
