@@ -1,0 +1,181 @@
+{
+  "actual_python_compatibility": {
+    "bundle_path": "/private/tmp/mmx-dsh-c26-acp-runtime-20261107-pro1.zip",
+    "bundle_sha256": "e3c1831b3c4ca3c6e7a760dccf3e4213f77d7fbcfa0437f1ebc8005519995a2e",
+    "completed_at": "2026-11-07T22:11:15.445207+00:00",
+    "covered_imported_modules": 75,
+    "executable_sha256": "d4f152f2a753c94e0e7935c8ebbe6b2609979e1df7898422b577d0076383d08b",
+    "inputs_unchanged": true,
+    "installed_custody_proven": false,
+    "interpreter": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+    "isolated": 1,
+    "lock_sha256": "757ca10b0d48155a62088fcec104a24ca9c527699b3f26b4c84dcceffaed493d",
+    "machine": "arm64",
+    "manifest_sha256": "22635247c40362f4c23c5c86193fd18f294c622b06c7e037e4b1cdbab5905b05",
+    "native_core_validation": true,
+    "no_bytecode": true,
+    "no_site": 1,
+    "operation": "deepseek-mastermind-chat-20261106-c2",
+    "package_file_count": 186,
+    "provider_calls": 0,
+    "python": "3.12.10",
+    "qualification": "actual qualified wheel bytes and fixed PSF interpreter; private compatibility extraction only",
+    "raw_receipt": {
+      "path": "/private/tmp/mmx-dsh-c26-acp-py312-import-20261107-pro3.json",
+      "sha256": "9ad60e72e38a3d4ce0851a74023dadfe18264e45d8250771a2944e5d1d5b26aa"
+    },
+    "schema": "mastermind.deepseek_worker_acp_compatibility/v1",
+    "sdk_schema_roundtrip": true,
+    "service_effects": 0,
+    "session_effects": 0,
+    "source_after": {
+      "ops/executive_os/control_aead_contract.py": "7c7d07a25d5a10c96ee59a5b4dbff9c7986b7b8feb1a72687412b541a1c620a8",
+      "ops/executive_os/control_aead_profile.py": "08595b2ecf5b4d5841a85532062e01cd560ae1afe4af3adfe4c7e6eaf22eb2b0",
+      "ops/executive_os/worker_acp_contract.py": "569dd7247de83d02618f86a66e88a8e1659f686ef12478cce4e5911771ba3e34",
+      "ops/executive_os/worker_acp_profile.py": "ab2166674431f91b67532e4b07ad4b52d53da5872084448fd8d7d8e48042d10c",
+      "requirements/executive-worker-acp-macos-arm64-py312.lock": "757ca10b0d48155a62088fcec104a24ca9c527699b3f26b4c84dcceffaed493d"
+    },
+    "source_before": {
+      "ops/executive_os/control_aead_contract.py": "7c7d07a25d5a10c96ee59a5b4dbff9c7986b7b8feb1a72687412b541a1c620a8",
+      "ops/executive_os/control_aead_profile.py": "08595b2ecf5b4d5841a85532062e01cd560ae1afe4af3adfe4c7e6eaf22eb2b0",
+      "ops/executive_os/worker_acp_contract.py": "569dd7247de83d02618f86a66e88a8e1659f686ef12478cce4e5911771ba3e34",
+      "ops/executive_os/worker_acp_profile.py": "ab2166674431f91b67532e4b07ad4b52d53da5872084448fd8d7d8e48042d10c",
+      "requirements/executive-worker-acp-macos-arm64-py312.lock": "757ca10b0d48155a62088fcec104a24ca9c527699b3f26b4c84dcceffaed493d"
+    },
+    "started_at": "2026-11-07T22:11:14.692798+00:00",
+    "versions": {
+      "agent-client-protocol": "0.12.1",
+      "annotated-types": "0.8.0",
+      "pydantic": "2.13.4",
+      "pydantic-core": "2.46.4",
+      "typing-extensions": "4.16.0",
+      "typing-inspection": "0.4.4"
+    },
+    "wheel_count": 6
+  },
+  "canonical_handoff_archive": {
+    "path": "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/research/evidence/deepseek-native-handoff-c25-20261107.md",
+    "sha256": "c0fb14bd67e8b85bea250a0ef1dba9dd586aa20ffac3c8368d6f7957ec02f9ea"
+  },
+  "changes": {
+    "ops/executive_os/install.sh": "be4aa8d258a5d4766382998323f76eca16a645f0bf614167885854aae9829e69",
+    "ops/executive_os/worker_acp_contract.py": "569dd7247de83d02618f86a66e88a8e1659f686ef12478cce4e5911771ba3e34",
+    "ops/executive_os/worker_acp_profile.py": "ab2166674431f91b67532e4b07ad4b52d53da5872084448fd8d7d8e48042d10c",
+    "requirements/executive-worker-acp-macos-arm64-py312.lock": "757ca10b0d48155a62088fcec104a24ca9c527699b3f26b4c84dcceffaed493d",
+    "research/evidence/deepseek-acp-runtime-wheels-20261107.json": "6d806e875c8eabbaaa062f2469a19b18d61af94543c9d9476d5007d6c9fac2cf",
+    "scripts/executive_os_phase1c_worker.py": "60fd1108816ba32b818c8fd7f076ce05cf5ddec2a1ae93aee5ed824e371f45d1",
+    "tests/test_executive_worker_acp_profile.py": "daa9c47e081d85553f9aaab44f7a00eafd87c3f0e96bced3fcf51f0a2ca9751b",
+    "tests/test_native_deepseek_worker_factory.py": "b766cbb9fb0bc88dee8e036ef7d19640ffb7f03c1ee41515b5b83cc3922f8163"
+  },
+  "diagnostics": [
+    "Initial combined run: unchanged AEAD fixtures assumed umask 022 but host inherited 077; source and assertions preserved, final wrapper sets 022.",
+    "Initial actual SDK probe used untagged TextContent instead of native prompt TextContentBlock; corrected probe passed.",
+    "An earlier read-only interpreter-path probe had a Python syntax error; no effects."
+  ],
+  "governing_pin": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "operation": "deepseek-mastermind-chat-20261106-c2",
+  "parent_source_sha": "d7a751d690d743fb80aa418997b20e26c7f830dd",
+  "pr": 2177,
+  "preserved_aead": {
+    "ops/executive_os/control_aead_contract.py": "7c7d07a25d5a10c96ee59a5b4dbff9c7986b7b8feb1a72687412b541a1c620a8",
+    "ops/executive_os/control_aead_profile.py": "08595b2ecf5b4d5841a85532062e01cd560ae1afe4af3adfe4c7e6eaf22eb2b0"
+  },
+  "production": {
+    "hermes_or_accepted_canary_repeated": false,
+    "installed_dependency_custody_proven": false,
+    "native_entry_built": false,
+    "provider_called": false,
+    "remaining": [
+      "same-process native entry",
+      "original account-model/input/policy owner joins",
+      "original installed Worker/quota/host/profile/router enrollment",
+      "signed-in packaged DeepSeek journey",
+      "eligible governed tool execution and original receipt settlement",
+      "actual protected source/release/routing identity"
+    ],
+    "service_restarted": false,
+    "session_created": false,
+    "source_merged": false
+  },
+  "schema": "mastermind.deepseek_acp_runtime_qualification/v1",
+  "tests": [
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--junitxml=/private/tmp/mmx-dsh-c26-acp-profile-20261107-pro1.xml",
+        "tests/test_executive_worker_acp_profile.py",
+        "tests/test_native_deepseek_worker_factory.py",
+        "tests/test_executive_control_aead_profile.py",
+        "tests/test_executive_control_aead_budget.py",
+        "tests/test_executive_release_stage_only.py"
+      ],
+      "base_sha": "d7a751d690d743fb80aa418997b20e26c7f830dd",
+      "completed_at": "2026-11-07T22:10:05.579160+00:00",
+      "input_count": 4440,
+      "inputs_unchanged": true,
+      "junit": [
+        {
+          "errors": "12",
+          "failures": "3",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "152",
+          "time": "69.099",
+          "timestamp": "2026-11-07T15:08:55.957591-07:00"
+        }
+      ],
+      "log_sha256": "55e81095fae60bf415d40e2f3043e9d035a341ff95623c9bf541fde0b3e75d5b",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "raw_receipt": {
+        "path": "/private/tmp/mmx-dsh-c26-acp-profile-20261107-pro1.json",
+        "sha256": "e039bbd12a370d2c5f8b487f8b75b876629c7b9bca9e9586123878caadbba777"
+      },
+      "returncode": 1,
+      "schema": "mastermind.source_test_receipt/v1",
+      "started_at": "2026-11-07T22:08:54.923824+00:00"
+    },
+    {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--junitxml=/private/tmp/mmx-dsh-c26-acp-profile-20261107-pro2.xml",
+        "tests/test_executive_worker_acp_profile.py",
+        "tests/test_native_deepseek_worker_factory.py",
+        "tests/test_executive_control_aead_profile.py",
+        "tests/test_executive_control_aead_budget.py",
+        "tests/test_executive_release_stage_only.py"
+      ],
+      "base_sha": "d7a751d690d743fb80aa418997b20e26c7f830dd",
+      "completed_at": "2026-11-07T22:12:18.580956+00:00",
+      "input_count": 4440,
+      "inputs_unchanged": true,
+      "junit": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "154",
+          "time": "72.883",
+          "timestamp": "2026-11-07T15:11:04.442358-07:00"
+        }
+      ],
+      "log_sha256": "f9d496c26bac98c384d561c0ed5a26951c5825fcea9dcd4340f7a3fbad6ea900",
+      "operation": "deepseek-mastermind-chat-20261106-c2",
+      "raw_receipt": {
+        "path": "/private/tmp/mmx-dsh-c26-acp-profile-20261107-pro2.json",
+        "sha256": "f7f213dbc6582dd645fece757c57d08f4bec52353dd5d035f3c7b0fe18b0a941"
+      },
+      "returncode": 0,
+      "schema": "mastermind.source_test_receipt/v1",
+      "started_at": "2026-11-07T22:11:03.798766+00:00"
+    }
+  ]
+}

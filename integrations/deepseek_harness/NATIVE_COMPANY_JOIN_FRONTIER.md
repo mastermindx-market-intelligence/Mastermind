@@ -639,3 +639,88 @@ C25 committed-source guard first refused numeric host UID literals in the eviden
 projection. The source projection now omits those numeric identities and names
 the exact SHA-bound original raw receipts; the guard and production checks remain
 unchanged. Its diagnostic receipt is preserved in the evidence above.
+
+
+## C26 — sealed ACP runtime dependency closure (2026-11-07)
+
+Parent source: d7a751d690d743fb80aa418997b20e26c7f830dd.
+Evidence: [ACP runtime qualification](../../research/evidence/deepseek-acp-runtime-qualification-20261107.json).
+Primary wheel evidence: [official release identities](../../research/evidence/deepseek-acp-runtime-wheels-20261107.json).
+
+The original installer now accepts --worker-acp-bundle only with unselected
+release staging. It qualifies the artifact against the committed six-wheel lock
+before the existing mutation boundary, retains that exact digest, and materializes
+the closure after its existing sealed-release publication. It does not select a
+release, change a configuration/receipt/transaction or restart a service. Same-lock
+occupants are verified rather than replaced; interrupted stages remain with the
+original installer. The original AEAD profile and contract are byte-identical.
+
+The fixed closure contains agent-client-protocol 0.12.1, annotated-types 0.8.0,
+pydantic 2.13.4, pydantic-core 2.46.4, typing-extensions 4.16.0 and
+typing-inspection 0.4.4. Each wheel's actual official filename, SHA-256, size,
+platform tag and distribution metadata are qualified. The closed manifest binds
+all 186 extracted files. Per-wheel reads use the existing held no-follow bounded
+custody primitive; no ambient package installation or framework modification occurs.
+
+The original native Worker activates that closure before importing its adapter.
+Activation binds the nominal installed DeepSeek source to this exact sealed
+Worker release directory, checks the actual canonical PSF interpreter and flags,
+and imports only from the sealed closure. The retained runtime guard checks the
+original full filesystem identity snapshot, exact import search path, module
+origins and package search locations, plus every initially loaded covered module
+object. The original broker's source callback composes this with the existing
+native receipt/Node/package guard at final writes. Check-config observes the
+dependency artifact without importing its SDK.
+
+Qualification:
+
+- **154 passed** across the new dependency profile, real installer dispatch,
+  existing native factory, untouched AEAD contracts/budgets and real unselected
+  release staging tests. All **4440** recorded inputs remained unchanged.
+- Actual fixed PSF **Python 3.12.10 arm64**, **-I -S -B**: reproducible bundle,
+  six exact versions, **75** loaded covered modules, real ACP prompt schema
+  round-trip and compiled pydantic-core validation.
+- Bundle SHA-256:
+  e3c1831b3c4ca3c6e7a760dccf3e4213f77d7fbcfa0437f1ebc8005519995a2e.
+- Manifest SHA-256:
+  22635247c40362f4c23c5c86193fd18f294c622b06c7e037e4b1cdbab5905b05.
+- Final test receipt:
+  /private/tmp/mmx-dsh-c26-acp-profile-20261107-pro2.json,
+  f7f213dbc6582dd645fece757c57d08f4bec52353dd5d035f3c7b0fe18b0a941.
+- Final actual-runtime receipt:
+  /private/tmp/mmx-dsh-c26-acp-py312-import-20261107-pro3.json,
+  9ad60e72e38a3d4ce0851a74023dadfe18264e45d8250771a2944e5d1d5b26aa.
+
+The initial combined diagnostic ran existing AEAD fixtures under the host's
+restrictive umask and had 3 failures/12 setup errors; all new tests passed. The
+final test process uses ordinary 022 fixture creation, with private owned TMPDIR.
+No AEAD source or assertion changed. The first compatibility probe used ACP's
+untagged TextContent base class; the corrected probe uses the same TextContentBlock
+as the original native prompt implementation. These diagnostics are retained and
+are not represented as product failures or successful installed acceptance.
+
+The real interpreter proof uses a private compatibility extraction. It establishes
+wheel/ABI/SDK compatibility, **not root-installed dependency custody, account
+authentication, Worker admission or a provider turn**. No installed staging,
+service change, provider call or Session creation occurred.
+
+### Immediate continuation: original same-process native entry and truthful owners
+
+Continue the existing runProfile Web Context, initializeHost seam and inherited
+native FD. Complete one-shot guarded account-model selection in the original ACP
+materialization operation, including actual config-option notifications and late
+selection outcome custody. Then join nonsecret current account/model/workspace/
+capability owner facts in the original Worker factory. Node must not invent a
+Worker ID or echo requested policy as observation.
+
+Enforce native input before original inbox insertion, consume the exact one-use
+ACP message permit, and preserve ordinary Web behavior. Use the existing tool,
+sandbox and approval services for native ceilings. Preserve the full Web roster
+and ACP's existing no-standard-preset construction. Do not claim the file sandbox
+as OS-wide network isolation.
+
+The original installed Worker/quota/host/account/profile/router join, protected
+source/release identity and real signed-in packaged DeepSeek journey remain owed.
+The existing backend-unavailable observation and previously denied live/Fabric
+lanes were not retried. Hermes #2180 and accepted native canaries remain accepted
+and were not rerun. The mission remains active beyond this dependency milestone.

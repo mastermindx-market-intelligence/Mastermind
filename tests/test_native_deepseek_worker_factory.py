@@ -37,6 +37,11 @@ def prepared(deepseek_installation,monkeypatch):
         Path(value[field]).mkdir(mode=0o700)
     monkeypatch.setattr(worker,"_ROOT",i.root/("a"*40))
     monkeypatch.setattr(worker,"_build_autonomy_canary_factory",lambda c:lambda p:{})
+    # Construction fixture only. The installed -I -S -B SDK/profile consumer
+    # has separate real-wheel and original-interpreter qualification.
+    i.dependency_checks=[]
+    monkeypatch.setattr(worker,"_activate_native_deepseek_dependencies",
+        lambda installed,uid:SimpleNamespace(require_current=lambda:i.dependency_checks.append(uid)))
     source=Path(__file__).resolve().parents[1]/"config/executive_dsh_native_conversation_capabilities.json"
     raw=json.loads(source.read_text());raw["profiles"]["operator.dsh.native-conversation.v1"]["enabled"]=True
     candidate=i.root/"candidate.json";candidate.write_text(json.dumps(raw))
@@ -85,6 +90,9 @@ def test_actual_broker_and_adapter_use_only_original_loop_and_owner(prepared,mon
         assert type(adapter) is NativeOperatorAdapter
         assert adapter.loop is asyncio.get_running_loop() and adapter.turn_input_loader is loader
         assert adapter.native is None and adapter.pending_calls==set()
+        assert i.dependency_checks==[value["worker_uid"]]
+        adapter.binding.verify_source()
+        assert i.dependency_checks==[value["worker_uid"]]*2
         assert adapter.binding.argv==(str(i.binary),str(i.entry))
         assert adapter.binding.binary.sha256==requested.harness_binary_digest
         assert adapter.binding.environment["DSH_HOME"]==value["provider_home"]

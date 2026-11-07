@@ -741,10 +741,19 @@ def _load_native_deepseek_installation(config: Mapping[str, Any]):
         raise WorkerConfigError("native DeepSeek Node/package attestation refused") from None
 
 
+def _activate_native_deepseek_dependencies(installed, worker_uid):
+    from ops.executive_os.worker_acp_profile import activate_for_native_worker
+    try:
+        return activate_for_native_worker(installed, release_root=_ROOT, worker_uid=worker_uid)
+    except Exception:
+        raise WorkerConfigError("native DeepSeek ACP dependency closure refused") from None
+
+
 def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
     _assert_service_activation_allowed(config)
     policy = _broker_policy(config)
     installed = _load_native_deepseek_installation(config)
+    dependencies = _activate_native_deepseek_dependencies(installed, policy.worker_uid)
     from control_plane.native_provider_attestation import (
         DSH_PROTOCOL_NAME, DSH_PROTOCOL_VERSION, DSH_MODEL_PROVIDER)
     from control_plane.native_conversation_result import DSH_NATIVE_HARNESS_KIND
@@ -755,6 +764,10 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
     except CapabilityPolicyError:
         raise WorkerConfigError("native DeepSeek capability policy is invalid") from None
     broker = None
+
+    def require_source():
+        installed.require_current()
+        dependencies.require_current()
 
     def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
         if (requested.worker_id != policy.worker_id or requested.provider != "acp"
@@ -782,7 +795,7 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
                 matches.append(profile)
         if len(matches) != 1:
             raise WorkerConfigError("native DeepSeek request does not resolve to one reviewed policy")
-        installed.require_current()
+        require_source()
         adapter = None
 
         def require_effect(operation, epoch, generation, method, session_id):
@@ -809,7 +822,7 @@ def _build_native_deepseek_broker(config: dict[str, Any], *, autonomy_guard):
             protocol_profile=AcpProfile(
                 DSH_PROTOCOL_NAME, DSH_PROTOCOL_VERSION, auth_method=None,
                 model_option_provider=DSH_MODEL_PROVIDER),
-            verify_source=installed.require_current, observe_attestation=observe,
+            verify_source=require_source, observe_attestation=observe,
             require_current_effect=require_effect,
         )
         # This callback is invoked by the existing broker event loop. The
@@ -1143,7 +1156,9 @@ def main(argv: list[str] | None = None) -> int:
             # loudly and up front, not only later and silently when
             # launchd first starts the daemon.
             if value.get("native_provider") == "deepseek":
-                _load_native_deepseek_installation(value)
+                installed = _load_native_deepseek_installation(value)
+                from ops.executive_os.worker_acp_profile import observe_for_native_worker
+                observe_for_native_worker(installed, release_root=_ROOT)
             elif value.get("native_provider") == "claude":
                 _load_native_claude_binary(value)
                 _native_claude_adapter_types()

@@ -29,6 +29,8 @@ ARM_PRIVILEGED_BROKER="0"
 PRIVILEGED_BROKER_LIVE="0"
 CONTROL_CONFIG_SOURCE=""
 CONTROL_AEAD_BUNDLE=""
+WORKER_ACP_BUNDLE=""
+WORKER_ACP_BUNDLE_DIGEST=""
 OS_WEB_ASSETS=""
 OS_WEB_ASSETS_DIGEST=""
 OPERATOR_USER=""
@@ -399,6 +401,7 @@ while [ "$#" -gt 0 ]; do
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
     --control-aead-bundle) CONTROL_AEAD_BUNDLE="${2:-}"; shift 2 ;;
+    --worker-acp-bundle) WORKER_ACP_BUNDLE="${2:-}"; shift 2 ;;
     --os-web-assets) OS_WEB_ASSETS="${2:-}"; shift 2 ;;
     --python-binary) PYTHON_BINARY="${2:-}"; shift 2 ;;
     --python-runtime-root) PYTHON_RUNTIME_ROOT="${2:-}"; shift 2 ;;
@@ -449,6 +452,17 @@ validate_admin_checkout_staging_options() {
 }
 validate_release_staging_options || exit 65
 validate_admin_checkout_staging_options || exit 65
+# --- BEGIN Worker ACP staging guard ---
+# The native Worker dependency closure has only an unselected artifact effect.
+# It cannot silently enter a service/configuration/administrative transaction.
+if [ -n "${WORKER_ACP_BUNDLE:-}" ]; then
+  [ "$STAGE_RELEASE_ONLY" = "1" ] && [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "0" ] || {
+    /bin/echo "Worker ACP bundle requires unselected release staging" >&2
+    exit 65
+  }
+  case "$WORKER_ACP_BUNDLE" in /*) ;; *) /bin/echo "Worker ACP bundle path must be absolute" >&2; exit 65 ;; esac
+fi
+# --- END Worker ACP staging guard ---
 [ -n "$SOURCE_REPO" ] && [ -n "$EXPECTED_SHA" ] && [ -n "$OPERATOR_USER" ] || usage
 case "$OPERATOR_USER" in
   [A-Za-z_]* ) ;;
@@ -1278,6 +1292,16 @@ if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
       exit 65
     }
 fi
+if [ -n "${WORKER_ACP_BUNDLE:-}" ]; then
+  WORKER_ACP_BUNDLE_DIGEST="$("$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/worker_acp_profile.py" check-bundle \
+    --release-root "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" \
+    --bundle "$WORKER_ACP_BUNDLE" --operator-uid "$OPERATOR_UID")" || {
+      /bin/echo "Worker ACP bundle preflight refused before maintenance" >&2
+      exit 65
+    }
+  case "$WORKER_ACP_BUNDLE_DIGEST" in *[!0-9a-f]*|'') exit 65 ;; esac
+  [ "${#WORKER_ACP_BUNDLE_DIGEST}" -eq 64 ] || exit 65
+fi
 CONTROL_CONFIG="$SYSTEM_ROOT/config/control.json"
 WORKER_CONFIG="$SYSTEM_ROOT/config/worker-codex.json"
 PRIVILEGED_CONFIG="$SYSTEM_ROOT/config/privileged-broker.json"
@@ -1617,6 +1641,13 @@ fi
 if [ "$STAGE_RELEASE_ONLY" = "1" ]; then
   # No cleanup/service trap: an interrupted stage or publication is retained.
   stage_sealed_release || exit 65
+  if [ -n "${WORKER_ACP_BUNDLE:-}" ]; then
+    WORKER_ACP_DEPENDENCIES="$("$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/worker_acp_profile.py" materialize \
+      --release-root "$RELEASE_ROOT" --bundle "$WORKER_ACP_BUNDLE" \
+      --operator-uid "$OPERATOR_UID" --expected-digest "$WORKER_ACP_BUNDLE_DIGEST")" || exit 65
+    printf '{"staged_unselected":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false,"worker_acp_dependencies":%s}\n' "$EXPECTED_SHA" "$WORKER_ACP_DEPENDENCIES"
+    exit 0
+  fi
   printf '{"staged_unselected":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false}\n' "$EXPECTED_SHA"
   exit 0
 fi
