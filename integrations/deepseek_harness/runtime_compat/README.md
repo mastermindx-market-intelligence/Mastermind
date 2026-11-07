@@ -42,17 +42,22 @@ DSH_SOURCE="$DSH_SOURCE" node "$DSH_SOURCE/node_modules/vitest/vitest.mjs" run -
 node build-native-fixture.mjs "$DSH_SOURCE"
 cd ../../..
 MMX_DSH_FULLAPP_NATIVE_SUPPLY="$PWD/integrations/deepseek_harness/runtime_compat" \
-  python3 -m pytest -q tests/harness_convergence/test_dsh_fullapp_native_agent.py
+  python3 -m pytest -q tests/harness_convergence/test_dsh_fullapp_native_agent.py \
+    tests/harness_convergence/test_dsh_fullapp_native_history.py
 ```
 
 The Python environment needs the repository test dependencies and MCP 1.28.1.
-Without the explicit native supply, those five real-process tests skip; a skip is
+Without the explicit native supply, the seven real-process tests skip; a skip is
 not successful native-path evidence. The builder uses the donor TypeScript
 decorator transform and verifies a single shared scheduler identity across the
 native Agent and the admitted tool runtime.
 
 Observed on 2026-11-07: **42 runtime cases passed**, followed by **five actual
-native-process cases passed**. The latter prove read → observed search → actual
+native-process cases passed**, then **seven passed with cold-process history**.
+The native history fixture copies only the donor-verified platform addon into its
+own hashed closure. It recovers the original persisted model delta boundaries
+and tool results after process exit, preserves the retained JSONL bytes, and
+refuses a second writer until the original writer actually closes. The Agent cases prove read → observed search → actual
 result through the current Agent/ACP/real source MCP reader; late revocation;
 original-owner cancellation; wrong-contract refusal before model work; and
 owner abort without inherited-tool reappearance. The refusal preserves the
@@ -61,11 +66,12 @@ proving child and task cleanup.
 
 ## Evidence boundary
 
-The native fixture uses a deterministic test model, explicit ephemeral test
-persistence and a synthetic registry projection whose digests cannot become an
-installed host packet. It runs the real source workspace reader, not the missing
-canonical installed launcher. It does not prove paid provider access, durable
-native JSONL storage, dedicated-UID containment, installed ACP activation or
+The native fixture uses a deterministic test model and a synthetic registry
+projection whose digests cannot become an installed host packet. Ordinary Agent
+cases use explicit ephemeral test persistence; the two durable cases use the
+unchanged native JSONL owner and its real platform file lock. It runs the real
+source workspace reader, not the canonical installed launcher. It does not prove
+paid provider access, dedicated-UID containment, installed ACP activation or
 production browser acceptance. The attended package independently retains the
 full app's native persistence implementation.
 

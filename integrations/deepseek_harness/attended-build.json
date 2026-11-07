@@ -1,0 +1,13 @@
+{
+  "schema": "mastermind.dsh_attended_build.v1",
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "package_manifest_sha256": "6de31eb746e98b32c6f0a7af3f94cff22befd6e6d93f7dcc1a19f7ee4d075448",
+  "app_config_sha256": "42a80db549c614c41ed7afcb8d07239c1e9283a8f534d4cc941412a311a78689",
+  "company_client_sha256": "9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3",
+  "native_client_build_sha256": "c7c7f3b387231d72e42b0d9addbbc7b6ed00f1752405c9c04dc177fb4d829439",
+  "index_sha256": "2690f794b0b04377d96dbfbd0d5bf3515a840045fd5f692a297f00997ab41ade",
+  "evidence_commit": "d2a41e2cc78ad247e42efdfcfa7be740a9f7e017",
+  "custody": "Protected-source acceptance of the qualified attended build; snapshot evidence only",
+  "installed": false,
+  "provider_calls": 0
+}

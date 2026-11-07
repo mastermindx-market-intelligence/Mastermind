@@ -176,7 +176,171 @@ def stage(args):
             "installed": False, "public_route_qualified": False, "provider_calls": 0}
 
 
+def inventory_identity(root):
+    """Capture direct file/link/directory identities around the full-byte read."""
+    result = {}
+    for parent, dirs, files in os.walk(root, followlinks=False):
+        for path in [Path(parent), *(Path(parent) / name for name in dirs + files)]:
+            relative = path.relative_to(root).as_posix()
+            info = path.lstat()
+            result[relative] = (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+                                info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+                                os.readlink(path) if stat.S_ISLNK(info.st_mode) else None)
+    return result
+
+
+QUALIFIED_BUILD_PATH = "integrations/deepseek_harness/attended-build.json"
+
+
+def protected_build(source_repo, source_sha):
+    """Read the accepted build from its one fixed protected source path."""
+    raw = subprocess.check_output(["git", "-C", str(source_repo), "show",
+                                   source_sha + ":" + QUALIFIED_BUILD_PATH])
+    record = json.loads(raw)
+    if (type(record) is not dict or record.get("schema") != "mastermind.dsh_attended_build.v1"
+            or record.get("donor_sha") != PIN or record.get("installed") is not False
+            or record.get("provider_calls") != 0):
+        raise ValueError("Protected attended build qualification refused")
+    for key in ("package_manifest_sha256", "app_config_sha256", "company_client_sha256",
+                "native_client_build_sha256", "index_sha256"):
+        if not re.fullmatch(r"[0-9a-f]{64}", record.get(key, "")):
+            raise ValueError("Protected attended build digest refused")
+    return raw, record
+
+
+PUBLICATION_SCHEMA = "mastermind.dsh_attended_publication_bundle.v1"
+PUBLICATION_CUSTODY = "root-qualified package snapshot; not a remote signature"
+
+
+def export_publication(*, release, source_repo, source_sha, out):
+    """Verify the complete staged app and capture bounded public asset evidence.
+
+    The existing root publisher owns publication. This export neither starts the
+    user app nor installs a service, credential, tunnel, Caddy route or DNS record.
+    """
+    import sys
+    root = HERE.parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from ops.executive_os import os_public_edge_publication as publication
+    from ops.executive_os.install_source_policy import validate_acceptance_source
+    publication._root()
+    source_repo = exact_path(source_repo)
+    source_tree = validate_acceptance_source(source_repo=source_repo, expected_sha=source_sha)
+    release = exact_path(release)
+    out = exact_path(out, exists=False)
+    if out.exists() or out.is_relative_to(release):
+        raise ValueError("Use a fresh publication export outside the immutable package")
+    manifest_path = release / "package-manifest.json"
+    if manifest_path.is_symlink() or not 0 < manifest_path.stat().st_size <= 64 * 1024 * 1024:
+        raise ValueError("Package manifest custody or budget refused")
+    identity = inventory_identity(release)
+    manifest_raw = manifest_path.read_bytes()
+    build_raw, accepted_build = protected_build(source_repo, source_sha)
+    if hashlib.sha256(manifest_raw).hexdigest() != accepted_build["package_manifest_sha256"]:
+        raise ValueError("Package manifest differs from protected build qualification")
+    # The launcher uses the same manifest. Full verification stays at this
+    # qualification boundary, never on every browser launch.
+    manifest = json.loads(manifest_raw)
+    if (manifest.get("schema") != "mastermind.dsh_attended_package_closure.v1"
+            or manifest.get("donor_sha") != PIN or type(manifest.get("files")) is not dict):
+        raise ValueError("Full native package manifest required")
+    observed = inventory(release)
+    observed.pop("package-manifest.json", None)
+    if observed != manifest["files"] or manifest_path.read_bytes() != manifest_raw:
+        raise ValueError("Full native package closure changed")
+    config = json.loads((release / "app.json").read_bytes())
+    for name, key in (("app.json", "app_config_sha256"),
+                      ("company_plugin/lib/client.js", "company_client_sha256"),
+                      ("app/.dsh-build/client-build-environment.json", "native_client_build_sha256"),
+                      ("app/apps/web/dist/index.html", "index_sha256")):
+        if sha(release / name) != accepted_build[key]:
+            raise ValueError("Captured artifact differs from protected build qualification")
+    if (config.get("schema") != "mastermind.dsh_attended_package.v1"
+            or config.get("release") != str(release) or config.get("donor_sha") != PIN
+            or config.get("public_url") != "https://chat.mastermind-x.com/"
+            or config.get("port") != 4180 or config.get("relay_port") != 4181
+            or config.get("execution") != "native-attended"
+            or config.get("company_worker_admission") is not False):
+        raise ValueError("Exact attended app publication binding required")
+    company = release / "company_plugin/lib"
+    build = json.loads((company / "build-manifest.json").read_bytes())
+    if (build.get("schema") != "mastermind.dsh.company_build.v1" or build.get("donor_sha") != PIN
+            or build.get("client_sha256") != sha(company / "client.js")
+            or build["client_sha256"] != config["company_client_sha256"]):
+        raise ValueError("Company client qualification differs")
+    for name, expected in build["source_sha256"].items():
+        if not re.fullmatch(r"src/(?:client/)?[a-z.-]+\.ts", name):
+            raise ValueError("Company source path refused")
+        raw = subprocess.check_output(["git", "-C", str(source_repo), "show",
+            source_sha + ":integrations/deepseek_harness/company_plugin/" + name])
+        if hashlib.sha256(raw).hexdigest() != expected:
+            raise ValueError("Company client source differs from protected source")
+    launcher = subprocess.check_output(["git", "-C", str(source_repo), "show",
+        source_sha + ":integrations/deepseek_harness/launch_attended.mjs"])
+    if (release / "launch_attended.mjs").read_bytes() != launcher:
+        raise ValueError("Native launcher differs from protected source")
+    expected_patch = [{"insert": [{"id": "mastermind-company",
+        "name": str(company / "index.js"), "config": {}}]}]
+    if (json.loads((release / "company.patch.yml").read_bytes()) != expected_patch
+            or sha(release / "company.patch.yml") != config["company_patch_sha256"]
+            or sha(release / "app/.dsh-build/client-build-environment.json")
+               != config["native_client_build_sha256"]):
+        raise ValueError("Native company overlay or client build differs")
+    dist = release / "app/apps/web/dist"
+    index = (dist / "index.html").read_text()
+    captures, rows = {}, []
+    for suffix, mime in (("js", "text/javascript"), ("css", "text/css")):
+        candidates = set(re.findall(r'["\'](?:\.)?(/assets/index-[A-Za-z0-9_-]+\.' + suffix + r')["\']', index))
+        if len(candidates) != 1:
+            raise ValueError("Exactly one native index asset per type required")
+        url = candidates.pop()
+        file = dist / url.removeprefix("/")
+        relative = file.relative_to(release).as_posix()
+        raw = file.read_bytes()
+        expected = manifest["files"].get(relative, {})
+        if (not 0 < len(raw) <= publication.MAX_BYTES or
+                hashlib.sha256(raw).hexdigest() != expected.get("sha256")):
+            raise ValueError("Native public asset differs from full package")
+        label = "client." + suffix + ".blob"
+        captures[label] = raw
+        rows.append({"url": url, "mime": mime, "bytes": len(raw),
+                     "sha256": hashlib.sha256(raw).hexdigest(), "capture": label})
+    record = {
+        "schema": PUBLICATION_SCHEMA, "custody": PUBLICATION_CUSTODY,
+        "source": {"sha": source_sha, "tree": source_tree}, "donor_sha": PIN,
+        "host": "chat.mastermind-x.com", "native_port": 4180, "relay_port": 4181,
+        "package_manifest_sha256": hashlib.sha256(manifest_raw).hexdigest(),
+        "build_qualification_sha256": hashlib.sha256(build_raw).hexdigest(),
+        "package_entries": len(manifest["files"]),
+        "app_config_sha256": sha(release / "app.json"),
+        "company_client_sha256": build["client_sha256"],
+        "company_patch_sha256": config["company_patch_sha256"],
+        "native_client_build_sha256": config["native_client_build_sha256"],
+        "assets": rows, "installed": False, "public_route_qualified": False,
+        "provider_calls": 0,
+    }
+    if (manifest_path.read_bytes() != manifest_raw or inventory_identity(release) != identity
+            or validate_acceptance_source(source_repo=source_repo, expected_sha=source_sha) != source_tree):
+        raise ValueError("Package or protected source changed during qualification")
+    publication._new_directory(out)
+    with publication.private(out) as area:
+        for name, raw in captures.items():
+            area.write(name, raw)
+        raw = publication.canonical(record)
+        area.write("artifact-receipt.json", raw)
+    return {"schema": PUBLICATION_SCHEMA, "state": "EXPORTED", "export": str(out),
+            "artifact_digest": publication.digest(raw), "installed": False}
+
+
 if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "export-publication":
+        parser = argparse.ArgumentParser(description="Qualify and export native public assets")
+        for name in ("release", "source-repo", "source-sha", "out"):
+            parser.add_argument("--" + name, required=True)
+        print(json.dumps(export_publication(**vars(parser.parse_args(sys.argv[2:]))), sort_keys=True))
+        raise SystemExit(0)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--donor", required=True)
     parser.add_argument("--pnpm", required=True, help="Absolute installed pnpm 11.28.5 bin/pnpm.cjs")

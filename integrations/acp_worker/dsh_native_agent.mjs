@@ -69,7 +69,7 @@ export function createNativeDshAgentAdmission({
               }
               const granted = createDshGrantedToolProfile({
                 projection: fixedProjection, isCurrentBinding: current,
-                signal: activationSignal, attemptOverlay: overlay,
+                signal: activationSignal, attemptOverlay: overlay, agent,
               })
               const mounted = await agent.ctx.plugin({
                 ...granted,

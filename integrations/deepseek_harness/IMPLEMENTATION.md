@@ -217,3 +217,57 @@ A further native process restart preserved the saved preview acknowledgement
 (`firstRunNotice=false`) with the same persistent state, reauthenticated cleanly,
 rendered the Mastermind title without page exceptions, and stopped at exit 130.
 Provider setup remained explicitly unconfigured; no successful answer is inferred.
+
+## 2026-11-07 complete ingress source milestone
+
+The native attended app now has its own closed Chisel purpose through the existing
+application transport owner: VPS loopback 4181 to native M2 loopback 4180,
+identity mastermind-deepseek-app, and its own config, credential, journal and
+launchd label. The OS and Fabric targets retain their original identities and
+ports. Both application purposes take the same authfile lock before their own
+operation lock. An unresolved peer operation blocks a new grant mutation;
+read-only reconciliation of the original operation remains available. A settled
+grant can be observed after an additive peer update without rewriting its
+historical receipt or claiming a server reload.
+
+The exact chat.mastermind-x.com site is added as a sibling of the existing OS
+site by a pure planner. It preserves the complete existing configuration and
+refuses ambiguous hosts or TLS authority. The existing Caddy publisher now owns
+the DSH stage through the same durable intent, full-config ETag, conditional POST,
+readback and receipt transaction. No parallel publisher, DNS owner or restart
+owner was introduced. Lost acknowledgement remains a reconciliation condition.
+
+The bounded app export reads attended-build.json from protected source, verifies
+its pinned complete package manifest, reads the full closure with file/link/
+directory identity checks, and captures the actual native script and stylesheet.
+It carries only bounded root-owned snapshot evidence to the edge. It does not
+attest that the user application has been installed or that provider auth exists.
+
+Focused evidence:
+- Isolated Linux root transport fixture: 162 passed, zero skipped.
+- Existing OS plus new native publication suite: 80 passed. Subsequent TLS and
+  protected-build refinements: 17 native publication tests passed.
+- Bounded package export: 3 passed, including forged local-manifest rejection and
+  non-asset drift during capture.
+- The installed Caddy 2.11.4 binary accepted the exact native candidate JSON.
+- Current full-app native Agent/ACP and fresh-process JSONL history proof:
+  7 passed. The native platform addon is verified and copied into the fixture;
+  a second native writer is refused while the original writer is retained.
+- Legacy profile compatibility repair: 19 positive cases and 4 mutation controls
+  passed. The original native profile artifact builds successfully. These repair
+  hosted failures caused by a scope-only dependency and a stale mutation target.
+- All ordinary hosted pytest shards, frontend, native-macos and CodeQL passed
+  on d2a41e2cc78ad247e42efdfcfa7be740a9f7e017. The repaired specialized MCP jobs
+  still require hosted results on the next source head.
+
+Actual access observation: the existing default SSH identity for 146.190.142.17
+was refused with Permission denied (publickey). No alternate user, key, carrier
+or retry was attempted. No production ingress, DNS, launchd or provider effect
+is claimed. The earlier Fabric multiturn operation is terminal with a provider
+permission refusal and has no accepted implementation return.
+
+The real packaged native app also passed the new ingress probe on its own M2
+listener: unauthenticated root 401/no-store, exact packaged JavaScript and CSS
+200 with matching hashes and MIME types, and original child exit 130. This
+caught and corrected relative index asset URLs in the exporter. It sent no
+provider request and did not traverse the VPS/public route.

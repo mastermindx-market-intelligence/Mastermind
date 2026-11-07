@@ -11,6 +11,7 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import EphemeralPersistence from './fixture-persistence.mjs'
+import * as JsonlPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as Acp from '@deepseek-ai/dsh-acp'
 import { createNativeDshAgentAdmission } from '../../acp_worker/dsh_native_agent.mjs'
 
@@ -24,7 +25,7 @@ const projection = JSON.parse(projectionBytes)
 const config = JSON.parse(readFileSync(input + '/config.json'))
 const expectedTools = JSON.parse(readFileSync(input + '/tools.json'))
 const mode = process.env.MMX_FULLAPP_FIXTURE_MODE ?? 'ok'
-assert.ok(['ok', 'revoked', 'owner-revoked', 'hang', 'wrong-tool-contract'].includes(mode))
+assert.ok(['ok', 'revoked', 'owner-revoked', 'hang', 'wrong-tool-contract', 'durable'].includes(mode))
 const state = { ready: false, allowed: true, attempt: undefined, calls: 0 }
 const owner = new AbortController()
 
@@ -101,7 +102,9 @@ class FixtureAdapter extends LlmAdapter {
       artifacts: [], next_actions: [], errors: failed ? ['Attempt no longer current'] : [], validations: [],
     })
     yield {type: 'block-start', index: 0, blockType: 'text'}
-    yield {type: 'text-delta', index: 0, text}
+    if (mode === 'durable') process.stderr.write('FULLAPP_MODEL_OUTPUT_SHA256 ' + sha(text) + '\n')
+    const deltas = mode === 'durable' ? [text.slice(0, 17), text.slice(17, 43), text.slice(43)] : [text]
+    for (const delta of deltas) yield {type: 'text-delta', index: 0, text: delta}
     yield {type: 'block-end', index: 0, block: {type: 'text', text}}
     yield {type: 'usage', usage: {inputTokens: 1, outputTokens: text.length}}
     yield {type: 'finish', reason: {kind: 'stop'}}
@@ -118,7 +121,8 @@ try {
     parameters: {}, output: {schema: {type: 'string'}, render: (_exec, value) => [{type: 'text', text: value}]},
     async execute() { process.stderr.write('INHERITED_SENTINEL_EXECUTED\n'); return 'forbidden' }})
   await ctx.plugin(AgentRegistry)
-  await ctx.plugin(EphemeralPersistence)
+  if (mode === 'durable') await ctx.plugin(JsonlPersistence, {root: input + '/sessions'})
+  else await ctx.plugin(EphemeralPersistence)
   await ctx.plugin(AgentLoop, {agents: []})
   ctx.llm.registerAdapter(['fixture'], new FixtureAdapter())
   if (mode === 'wrong-tool-contract') expectedTools[0].contract_sha256 = 'f'.repeat(64)

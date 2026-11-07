@@ -98,3 +98,73 @@ After installation, prove a real signed-in desktop/mobile conversation:
 send, useful reply, follow-up, stop, history, reconnect and project navigation.
 A local HTTP shell, deterministic fixture, successful build or green CI is a
 different evidence level.
+
+## Dedicated native ingress
+
+The production binding is closed in source:
+
+| Surface | Binding |
+|---|---|
+| Native public hostname | chat.mastermind-x.com |
+| M2 attended listener | 127.0.0.1:4180 |
+| VPS reverse listener | 127.0.0.1:4181 |
+| Chisel audience | mastermind-deepseek-app |
+| Client label | com.mastermind.executive.deepseek-tunnel |
+| Existing transport owner | ops/executive_os/application_tunnel_control.py |
+| Fixed DSH CLI | ops/executive_os/deepseek_tunnel_control.py |
+| Existing publication owner | ops/executive_os/os_public_edge_publication.py |
+
+The fixed DSH CLI exposes the same finite stage, apply-server, reconcile-server,
+apply-client, reconcile, start-client and stop-client operations as the incumbent
+application owner. It does not accept alternate ports, hosts, credentials,
+executables or provider routes. Carry the original server bundle and root receipt
+through the existing qualified deploy carrier. Do not reset either purpose's
+original operation to create a successor.
+
+Both new application controllers serialize the shared Chisel authfile. Before
+activation, the existing edge owner must reconcile any older controller operation
+that predates this shared lock. Source coordination is not exclusion of an old
+running writer. A grant receipt proves only the file publication; listener,
+native app and public browser acceptance remain distinct observations.
+
+### Capture the accepted build
+
+After the source is accepted on protected master, run the package owner's
+export-publication operation with the canonical staged release, protected source
+checkout/SHA and one fresh output directory under a sealed root-owned parent:
+
+    python3 integrations/deepseek_harness/package_attended.py export-publication \
+      --release /absolute/qualified/native-release \
+      --source-repo /absolute/protected/source \
+      --source-sha EXACT_PROTECTED_SHA \
+      --out /absolute/root-owned/native-export
+
+This requires root and reads the fixed attended-build.json from that protected
+commit. The current receipt pins the already-qualified 2026-11-07 full app
+package. A future rebuilt package requires its own source-reviewed build receipt;
+a caller-local manifest or supplied digest cannot approve changed bytes.
+
+The export checks the complete package without running it, captures the native
+index script and stylesheet and records their source/build identities. Keep it
+outside the immutable package to avoid a manifest cycle. Transfer its three
+private files through the existing edge carrier, preserving root custody.
+
+### Publish through the existing edge owner
+
+On the actual VPS, use the existing publisher's stage-dsh command with
+--artifact-path, --artifact-digest, --source-repo, --source-sha, --source-tree and
+--out. It captures the complete live Caddy JSON and ETag and produces one bounded
+stage. Then publish-dsh accepts only --stage-path, --stage-digest and the observed
+--listener-pid.
+
+Before its one conditional Caddy POST, the publisher validates the candidate,
+rechecks the exact loopback listener and probes the native unauthenticated root
+and the captured asset bytes with Host chat.mastermind-x.com. No launch token,
+cookie, API key or provider request is sent by that probe. The existing OS,
+Fabric and other sites retain their previous route order, TLS and storage data.
+
+The resulting PUBLISHED receipt is a Caddy configuration receipt. Public DNS/TLS,
+native cookie exchange, signed-in provider replies, reconnect/history and the OS
+iframe still need their actual browser-path acceptance. Startup/autosave durability
+stays with docs/OS_PUBLIC_EDGE_STARTUP.md; this publisher does not activate a
+service drop-in, restart Caddy or claim persistence across restart.

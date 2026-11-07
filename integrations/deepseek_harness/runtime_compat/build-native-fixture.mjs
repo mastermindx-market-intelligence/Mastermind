@@ -2,8 +2,8 @@
 /** Build an explicit test artifact; never install or arm an Executive route. */
 import {createRequire} from 'node:module'
 import {fileURLToPath, pathToFileURL} from 'node:url'
-import {dirname, resolve, join} from 'node:path'
-import {readFile, writeFile, mkdir, realpath, readdir} from 'node:fs/promises'
+import {dirname, resolve, join, relative} from 'node:path'
+import {readFile, writeFile, mkdir, realpath, readdir, copyFile, lstat} from 'node:fs/promises'
 import {execFileSync} from 'node:child_process'
 import {createHash} from 'node:crypto'
 const root = dirname(fileURLToPath(import.meta.url))
@@ -40,8 +40,8 @@ const shared = await import(pathToFileURL(join(donor, 'vitest.shared.ts')).href)
 const decorators = shared.standardDecoratorPlugin()
 const outDir = join(root, '.cache/build')
 await mkdir(outDir, {recursive: true})
-await build({
-  cwd: root, config: false, entry: {'native-agent-fixture': 'native-agent-fixture.mjs'}, outDir,
+const buildOptions = {
+  cwd: root, config: false, outDir,
   format: 'esm', platform: 'node', target: 'es2024', dts: false, clean: false, sourcemap: false,
   alias, deps: {alwaysBundle: () => true, onlyBundle: false},
   plugins: [{name: 'one-native-tools-runtime', resolveId: {order: 'pre', handler(id) {
@@ -54,9 +54,37 @@ await build({
   }}}, {name: decorators.name, transform: {order: 'pre', handler: decorators.transform}}],
   outExtensions: () => ({js: '.mjs'}),
   banner: {js: "import {createRequire as __mmxCreateRequire} from 'node:module';const require=__mmxCreateRequire(import.meta.url);"},
-})
+}
+await build({...buildOptions, clean: true, entry: {'native-agent-fixture': 'native-agent-fixture.mjs'}})
+await build({...buildOptions, entry: {'native-history-fixture': 'native-history-fixture.mjs'}})
+// The unchanged native JSONL owner loads its platform flock addon lazily.
+// Copy the donor's verified platform payload into this artifact's own module
+// closure; an ambient dependency or a substitute lock cannot qualify recovery.
+const nativeName = '@deepseek-ai/node-addon-system-' + process.platform + '-' + process.arch
+const nativeRequire = createRequire(join(donor, 'native/system/packages/entry/package.json'))
+const nativeManifest = nativeRequire.resolve(nativeName + '/package.json')
+const nativeRoot = await realpath(dirname(nativeManifest))
+if (!nativeRoot.startsWith(join(donor, 'native/system/packages') + '/')) throw new Error('Native addon source escaped donor')
+execFileSync(process.execPath, [join(donor, 'native/system/scripts/verify-launcher-binary.mjs'), nativeRoot], {stdio: 'inherit'})
+const nativeMetadata = JSON.parse(await readFile(nativeManifest, 'utf8'))
+const prebuilds = JSON.parse(await readFile(join(nativeRoot, 'prebuilds.json'), 'utf8'))
+if (nativeMetadata.name !== nativeName || prebuilds.platform !== process.platform + '-' + process.arch) {
+  throw new Error('Native platform package identity differs')
+}
+const nativeOutputs = {}
+for (const name of ['package.json', 'prebuilds.json', 'LICENSE', ...prebuilds.binaries.map(row => row.path)]) {
+  const source = join(nativeRoot, name)
+  if (resolve(source) !== source || !source.startsWith(nativeRoot + '/')
+    || !(await lstat(source)).isFile() || await realpath(source) !== source) throw new Error('Native payload path refused')
+  const output = 'node_modules/' + nativeName + '/' + name
+  const destination = join(outDir, output)
+  await mkdir(dirname(destination), {recursive: true})
+  await copyFile(source, destination)
+  nativeOutputs[output] = sha(await readFile(destination))
+  if (nativeOutputs[output] !== sha(await readFile(source))) throw new Error('Native payload copy changed')
+}
 const files = {}
-const sourcePaths = ['native-agent-fixture.mjs', 'fixture-persistence.mjs', 'build-native-fixture.mjs', 'source-manifest.json',
+const sourcePaths = ['native-agent-fixture.mjs', 'native-history-fixture.mjs', 'fixture-persistence.mjs', 'build-native-fixture.mjs', 'source-manifest.json',
   '../../acp_worker/dsh_native_agent.mjs', '../../acp_worker/dsh_native_attempt.mjs',
   '../../acp_worker/dsh_tool_profile.mjs', '../../acp_worker/dsh_dispatch_preflight.mjs',
   '../../acp_worker/dsh_attempt_overlay.mjs', '../../acp_worker/dsh_mcp_grant.mjs']
@@ -68,11 +96,14 @@ if ([...bundleText.matchAll(/Symbol\(["']@deepseek-ai\/dsh-tools\.scheduler["']\
 }
 // Native llm attribution reads this exact package metadata relative to its bundle.
 await writeFile(join(outDir, '../package.json'), await readFile(join(donor, 'packages/llm/llm/package.json')))
-const outputs = {'../package.json': sha(await readFile(join(outDir, '../package.json')))}
+const outputs = {'../package.json': sha(await readFile(join(outDir, '../package.json'))), ...nativeOutputs}
 for (const name of await readdir(outDir)) if (name.endsWith('.mjs')) outputs[name] = sha(await readFile(join(outDir, name)))
 const receipt = {schema: 'mastermind.dsh_fullapp_native_fixture.v1',
   donor_sha: manifest.donor_sha, node: process.execPath, node_version: process.version,
   node_sha256: sha(await readFile(process.execPath)), bundle_sha256: sha(await readFile(bundle)),
-  sources_sha256: files, output_sha256: outputs, production_armed: false, provider_calls: false}
+  sources_sha256: files, output_sha256: outputs,
+  native_addon: {name: nativeName, version: nativeMetadata.version, donor_path: relative(donor, nativeRoot),
+    verifier: 'native/system/scripts/verify-launcher-binary.mjs'},
+  production_armed: false, provider_calls: false}
 await writeFile(join(outDir, 'build-manifest.json'), JSON.stringify(receipt, null, 2) + '\n')
 console.log('FULLAPP_NATIVE_FIXTURE_BUILT ' + receipt.bundle_sha256)
