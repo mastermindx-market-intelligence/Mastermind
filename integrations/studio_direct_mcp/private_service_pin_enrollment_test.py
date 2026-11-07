@@ -771,10 +771,10 @@ class C4PublisherFrozenContractTests(unittest.TestCase):
         self.assertEqual(owner.C4_PUBLISHER_BEFORE, owner.TARGET_FILES["git-publish.mjs"])
         self.assertEqual(owner.C4_ADAPTER_BEFORE, owner.TARGET_FILES["workspace-access.mjs"])
         self.assertEqual(owner.C4_ADAPTER_AFTER,
-                         "53e1f5c8863ab26c892baea5c4665ae7d4abff304d428d87b7e40e8ae10b6e53")
+                         "290cf5e961db2fa30e37c32da473595518df0ded80fc850a84cf5bdae1a1ec3c")
         self.assertNotEqual(owner.C4_ADAPTER_BEFORE, owner.C4_ADAPTER_AFTER)
         self.assertEqual(owner.C4_PUBLISHER_AFTER,
-                         "abc3b4dc6f3c9574ebb116e28a44f42136f8d8df3f2b0ec1504668daaf46b6bc")
+                         "a8ce5f25f4fc606e294f58de5748a73a36de5178d8e30b27132c3660e161d58e")
         self.assertEqual(set(owner.PROFILES), {
             "chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"})
         self.assertNotEqual(owner.C4_PUBLISHER_TRANSACTION, owner.TRANSACTION)

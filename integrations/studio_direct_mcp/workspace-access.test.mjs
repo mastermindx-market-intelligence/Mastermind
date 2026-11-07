@@ -381,6 +381,17 @@ const CATALOG_METHODS = [
   ['studio_git_commit_current_changes', 'commit'],
   ['studio_git_push_current_branch', 'push'],
 ];
+const INDEX_RECOVERY = Object.freeze({
+  mode: 'APPLY',
+  expected_tree_sha: 'e'.repeat(40),
+  expected_index_sha256: 'f'.repeat(64),
+  lock: {
+    device: '66306', inode: '56040019', file_type: 'REGULAR', uid: '1000', gid: '1000',
+    mode: '0600', size: '0', mtime_ns: '1793987509342378895',
+    content_sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  },
+  custody: { maintenance_window: 'psl-c4-maintenance-window-1', pending_mutators_retired: true },
+});
 const CATALOG_SAMPLE = {
   operation_id: OP,
   action_ref: ACTION_REF,
@@ -388,6 +399,7 @@ const CATALOG_SAMPLE = {
   message: 'test: catalog agreement',
   merge: { expected_protected_base_sha: 'b'.repeat(40), expected_tree_sha: 'c'.repeat(40) },
   recovery: RECOVERY,
+  index_recovery: INDEX_RECOVERY,
 };
 
 test('the published catalog and the dispatch handlers admit exactly the same keys', async () => {
@@ -421,6 +433,68 @@ test('the repository catalog publishes the incumbent publisher own recovery fiel
   assert.equal(push.inputSchema.required.includes('recovery'), false,
     'recovery stays optional: an ordinary push never becomes a recovery');
   assert.equal(push.inputSchema.properties.repository.enum.length, 3);
+});
+
+test('the repository catalog publishes the closed index recovery object', () => {
+  const commit = api.STUDIO_REPOSITORY_GIT_TOOLS.find((tool) => tool.name === 'studio_git_commit_current_changes');
+  const recovery = commit.inputSchema.properties.index_recovery;
+  assert.equal(recovery.additionalProperties, false);
+  assert.deepEqual(recovery.required, ['mode']);
+  assert.deepEqual(recovery.properties.mode.enum, ['PREVIEW', 'APPLY', 'RECONCILE']);
+  assert.equal(recovery.properties.lock.additionalProperties, false);
+  assert.deepEqual(recovery.properties.lock.required,
+    ['device', 'inode', 'file_type', 'uid', 'gid', 'mode', 'size', 'mtime_ns', 'content_sha256']);
+  assert.equal(recovery.properties.custody.additionalProperties, false);
+  assert.deepEqual(recovery.properties.custody.required,
+    ['maintenance_window', 'pending_mutators_retired']);
+  assert.equal(commit.inputSchema.required.includes('message'), false,
+    'the message is optional in the catalog because the recovery variant carries no message');
+  assert.equal(commit.inputSchema.oneOf.length, 2);
+  assert.equal(commit.inputSchema.properties.repository.enum.length, 3);
+  assert.match(commit.description, /index_recovery/);
+});
+
+for (const repository of ROUTES) {
+  test(`the index recovery object reaches the incumbent publisher unchanged for ${repository ?? 'legacy'}`, async () => {
+    const { gateway, publications } = setup();
+    const args = { operation_id: OP, expected_head_sha: HEAD, index_recovery: INDEX_RECOVERY,
+      ...(repository === undefined ? {} : { repository }) };
+    const result = await gateway.commit(args);
+    assert.equal(result.args.index_recovery, INDEX_RECOVERY,
+      'the supplied index recovery object is forwarded verbatim, not normalized or replaced');
+    assert.equal(result.args.index_recovery.mode, 'APPLY');
+    assert.equal(result.args.index_recovery.expected_tree_sha, INDEX_RECOVERY.expected_tree_sha);
+    assert.equal(result.args.index_recovery.expected_index_sha256, INDEX_RECOVERY.expected_index_sha256);
+    assert.equal(result.args.index_recovery.lock.inode, INDEX_RECOVERY.lock.inode);
+    assert.equal(result.args.index_recovery.lock.mtime_ns, INDEX_RECOVERY.lock.mtime_ns);
+    assert.equal(result.args.index_recovery.lock.mode, '0600');
+    assert.equal(result.args.index_recovery.custody.pending_mutators_retired, true);
+    assert.equal(result.args.repository, undefined,
+      'the repository is consumed by the host router, not forwarded to the publisher');
+    assert.equal(publications.at(-1).repository, repository);
+  });
+}
+
+test('only commit admits the index recovery selector', async () => {
+  const { gateway, publications } = setup();
+  await assert.rejects(gateway.status({ operation_id: OP, index_recovery: INDEX_RECOVERY }),
+    /WORKSPACE_ARGUMENTS_INVALID/);
+  await assert.rejects(gateway.push({ operation_id: OP, expected_head_sha: HEAD, index_recovery: INDEX_RECOVERY }),
+    /WORKSPACE_ARGUMENTS_INVALID/);
+  await assert.rejects(gateway.commissionStatus({ operation_id: OP, index_recovery: INDEX_RECOVERY }),
+    /WORKSPACE_ARGUMENTS_INVALID/);
+  await assert.rejects(gateway.commitCommission({ operation_id: OP, expected_head_sha: HEAD,
+    expected_content_sha256: 'a'.repeat(64), index_recovery: INDEX_RECOVERY }), /WORKSPACE_ARGUMENTS_INVALID/);
+  assert.equal(publications.length, 1, 'no refusal reached a publisher');
+});
+
+test('the adapter owns no index recovery interpretation and forwards the nested object verbatim', async () => {
+  const { gateway } = setup();
+  const recovery = { ...INDEX_RECOVERY, unknown_nested: 'x' };
+  const result = await gateway.commit({ operation_id: OP, expected_head_sha: HEAD, index_recovery: recovery });
+  assert.equal(result.args.index_recovery, recovery);
+  assert.equal(result.args.index_recovery.unknown_nested, 'x',
+    'nested closedness stays with the incumbent publisher, never with the router');
 });
 
 for (const repository of ROUTES) {

@@ -160,20 +160,32 @@ The successor requires the completed original native pin, enrollment, Paper-v20 
 
 | Module | Preserved predecessor SHA256 | New C4 SHA256 |
 |---|---|---|
-| git-publish.mjs | `f67119198a0e63c34ae148633402a7ec3ab351ecf7f40a24bdc355b9890f8a2c` | `abc3b4dc6f3c9574ebb116e28a44f42136f8d8df3f2b0ec1504668daaf46b6bc` |
-| workspace-access.mjs | `e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5` | `53e1f5c8863ab26c892baea5c4665ae7d4abff304d428d87b7e40e8ae10b6e53` |
+| git-publish.mjs | `f67119198a0e63c34ae148633402a7ec3ab351ecf7f40a24bdc355b9890f8a2c` | `a8ce5f25f4fc606e294f58de5748a73a36de5178d8e30b27132c3660e161d58e` |
+| workspace-access.mjs | `e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5` | `290cf5e961db2fa30e37c32da473595518df0ded80fc850a84cf5bdae1a1ec3c` |
 
-Generation `c4-publisher-recovery-20261107-v2` uses the existing `native-pool-pin-enrollment` CLI and a distinct retained `native-pool-pin-enrollment-publisher` transaction. The two source modules are required together. The only legal write prefixes are `OLD → PUBLISHER_ONLY → MODULES → COMMITTED`: publisher first, adapter second, manifest third, result last. Both modules' exact modes and before/after bytes are plan-bound. A prior publisher-only prototype intent is not a compatible transaction and must never be silently migrated.
+Generation `c4-publisher-recovery-20261107-v4` uses the existing `native-pool-pin-enrollment` CLI and a distinct retained `native-pool-pin-enrollment-publisher` transaction. The two source modules are required together. The only legal write prefixes are `OLD → PUBLISHER_ONLY → MODULES → COMMITTED`: publisher first, adapter second, manifest third, result last. Both modules' exact modes and before/after bytes are plan-bound. A prior publisher-only prototype intent is not a compatible transaction and must never be silently migrated.
 
-The adapter forwards `status.action_ref` and `push.recovery` to the existing publisher unchanged, removing only the repository selector after its closed binding. The existing publisher owns validation, journal and recovery. Commission status and commit inputs retain their original closed contracts.
+The adapter forwards `status.action_ref` and `push.recovery` to the existing publisher unchanged, removing only the repository selector after its closed binding. The existing publisher owns validation, journal and recovery. Commission status keeps its original closed contract. Commit admits the publisher-owned, mutually exclusive `index_recovery` selector; ordinary message/merge inputs remain closed and unchanged. The adapter forwards this object without interpreting it.
 
-Original enrollment `TARGET_FILES` and generic fleet installation maps remain immutable. The generic compatibility test uses the actual protected old adapter bytes in `fixtures/workspace-access.fleet-v10-merge.mjs`, independently pinned to `e4f74c…`; the C4 source test checks the actual current pair. This fixture is not a runtime bundle member or another admitted installation generation.
+Original enrollment `TARGET_FILES` and generic fleet installation maps remain immutable. The generic compatibility test uses the actual historical publisher and adapter bytes in `fixtures/git-publish.fleet-v10-merge.mjs` (`abc3b4…`) and `fixtures/workspace-access.fleet-v10-merge.mjs` (`e4f74c…`). The C4 source test checks the actual current pair. These fixtures are not runtime bundle members or new admitted installation generations.
 
 ### Source and actual-carrier qualification
 
 The initial two-module focused run passed 47 tests, including the C4 filesystem transactions and generic compatibility class. The returned adapter passed all 67 tests on M2. The final full installer run passed **590/590**, including the exhaustive eight-state prefix proof; control-bundle closure passed **53/53**; composition with the actual held C2 patch passed **45/45**. [Exact source hashes, commands and retained logs](../evidence/persistent-sector-leadership-2026-11-07/c4-publisher-pair/README.md) accompany this source. These qualify source, not installation.
 
 A harmless fixture using the **actual configured C4 `/usr/bin/git`**, version **2.50.1 (Apple Git-155)**, proved the publisher's repeated-`-c` URL-clearing projection resolves exactly one pinned URL. The adapter worker's optional test-binary discovery is not relied on as proof for installed C4, and C4's configured binary is unchanged.
+
+### Exact v4 settlement qualification
+
+The same publisher now owns the explicit index-lock recovery variant. Its preview is read-only; apply uses exact HEAD/tree/index and lock identity fences plus declared maintenance custody, and makes at most one unique same-filesystem quarantine move. It never rewrites the real index, creates a commit, deletes a replacement lock or grants retry. Historical origin remains unknown; writer exclusion is caller-declared.
+
+Retained actions are admitted before current-index preparation. Receipt reads and terminal writes require owner-controlled, non-symlink ancestry and a bound action generation. All routes to a new applied settlement establish source and quarantine-ancestor directory durability. Unreadable owner state, uncertain moves and unavailable durability remain structured unknown outcomes. These checks are not atomic inode CAS and do not replace maintenance custody.
+
+Paid candidates `8d2eec…` and `641a37…` remained unaccepted after concrete defects were found. The next two-file corrective request was retained but refused before launch with unclassified code75; it was not retried or rehomed. The assigned parent completed the correction directly in this original source workspace under the authorized blocked-Fabric fallback.
+
+On actual M2, all **11 focused regression cases failed before and passed after**. Four demonstrate formerly missed canonical-path fault injection; seven cover retained receipt ancestry, replacement-time drift, repeat-apply truth and directory durability. The complete final publisher/adapter suite passed **206/206**, zero skips. The final v4 installer suite passed **590/590** with `TMPDIR=/private/tmp`; production HOME and path guards were unchanged. Earlier three canonical-path fixture errors and their separate three-case pass remain distinct historical evidence. Current source evidence is [the v4 receipt](../evidence/persistent-sector-leadership-2026-11-07/c4-publisher-pair/index-recovery-v4.json).
+
+This source qualification does not install the pair, settle any original Macro action, retire its actual lock, establish CI green or prove product acceptance. The inherited Brain composition CI dependency remains with original APPLICATION #2175/#2194 and its existing package-effect fences.
 
 ### Protected adoption and recovery order
 

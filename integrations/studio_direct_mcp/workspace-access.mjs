@@ -34,7 +34,7 @@ export const STUDIO_WORKSPACE_TOOLS = Object.freeze([
 
 const PUBLICATION_DESCRIPTIONS = [
   'Read publication status for one existing managed workspace. Optional repository is a closed host-enrolled alias; omission preserves the legacy Mastermind route. The installed owner supplies the workspace and source binding. No workspace allocation, commit or push is performed.',
-  'MODIFYING. Commit current committable changes in one existing managed workspace through the existing exact-HEAD-fenced publisher. Optional repository is a closed host-enrolled alias; omission preserves Mastermind. Optional merge fences retain the exact host-fixed protected-base ancestry and prepared tree. No caller path, branch, remote, credential or command. This operation is local-only and has no push capability.',
+  'MODIFYING. Commit current committable changes in one existing managed workspace through the existing exact-HEAD-fenced publisher, or recover one orphaned zero-byte Git index.lock in that same owner. Optional repository is a closed host-enrolled alias; omission preserves Mastermind. Optional merge fences retain the exact host-fixed protected-base ancestry and prepared tree. The optional index_recovery object carries the exact HEAD tree, real-index digest, lock identity and custody condition for one bounded local lock quarantine; it is mutually exclusive with message and merge. Recovery preserves the exact lock under a unique owner-private destination on the same filesystem and leaves the real index, the commit graph and the remote untouched. No caller path, branch, remote, credential or command. This operation is local-only and has no push capability.',
   'MODIFYING. Push the exact expected HEAD of one existing clean managed workspace through the existing same-branch, canonical-origin publisher. Optional repository is a closed host-enrolled alias; omission preserves Mastermind. No force, tag, arbitrary destination or credential input. Unknown effects convey no retry or retargeting authority.',
 ];
 export const STUDIO_REPOSITORY_GIT_TOOLS = Object.freeze(STUDIO_GIT_PUBLISH_TOOLS.map((tool, i) => Object.freeze({
@@ -206,7 +206,7 @@ export function createRepositoryWorkspaceAccess(config, gitConfig, dependencies 
     // classification. No adapter-side recovery interpretation lives here.
     const keys = method === 'status' ? ['operation_id', 'repository', 'action_ref']
       : method === 'commissionStatus' ? ['operation_id', 'repository']
-      : method === 'commit' ? ['operation_id', 'repository', 'expected_head_sha', 'message', 'merge']
+      : method === 'commit' ? ['operation_id', 'repository', 'expected_head_sha', 'message', 'merge', 'index_recovery']
       : method === 'commitCommission' ? ['operation_id', 'repository', 'expected_head_sha', 'expected_content_sha256']
       : ['operation_id', 'repository', 'expected_head_sha', 'recovery'];
     closed(args, keys);

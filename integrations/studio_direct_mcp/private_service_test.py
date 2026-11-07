@@ -2296,12 +2296,15 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
         # distinct two-module successor, so retain real reviewed old bytes.
         source_dir = Path(svc.__file__).parent
         frozen_adapter = source_dir / "fixtures/workspace-access.fleet-v10-merge.mjs"
+        frozen_publisher = source_dir / "fixtures/git-publish.fleet-v10-merge.mjs"
+        self.assertEqual(svc._sha256_file(frozen_publisher),
+                         "abc3b4dc6f3c9574ebb116e28a44f42136f8d8df3f2b0ec1504668daaf46b6bc")
         self.assertEqual(svc._sha256_file(frozen_adapter),
                          "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5")
         self.assertEqual(svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256["workspace-access.mjs"],
                          "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5")
         for name in expected_names:
-            payload = frozen_adapter if name == "workspace-access.mjs" else source_dir / name
+            payload = frozen_adapter if name == "workspace-access.mjs" else frozen_publisher
             self.assertEqual(
                 svc._sha256_file(payload),
                 svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256[name],

@@ -530,14 +530,14 @@ def require_start(svc, account, roots):
 # One exact C4 publisher successor of the completed enrollment/Paper/status chain.
 # The original transaction and every other account remain immutable.
 C4_PUBLISHER_SCHEMA = "mastermind.studio_c4_enrollment_publisher.v1"
-C4_PUBLISHER_GENERATION = "c4-publisher-recovery-20261107-v2"
+C4_PUBLISHER_GENERATION = "c4-publisher-recovery-20261107-v4"
 C4_PUBLISHER_TRANSACTION = "native-pool-pin-enrollment-publisher"
 C4_PUBLISHER_BEFORE_MANIFEST = "c440f2ba4c0bdfbba3aff86303a483e3ab42a1093f330ba9e3fd6c6f923783b4"
 C4_PUBLISHER_BEFORE_CONFIG = "f06dc822015fc11f34d7e1142bdf1b016cb985af701ba929f33b313ff3a570df"
 C4_PUBLISHER_BEFORE = "f67119198a0e63c34ae148633402a7ec3ab351ecf7f40a24bdc355b9890f8a2c"
-C4_PUBLISHER_AFTER = "abc3b4dc6f3c9574ebb116e28a44f42136f8d8df3f2b0ec1504668daaf46b6bc"
+C4_PUBLISHER_AFTER = "a8ce5f25f4fc606e294f58de5748a73a36de5178d8e30b27132c3660e161d58e"
 C4_ADAPTER_BEFORE = "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5"
-C4_ADAPTER_AFTER = "53e1f5c8863ab26c892baea5c4665ae7d4abff304d428d87b7e40e8ae10b6e53"
+C4_ADAPTER_AFTER = "290cf5e961db2fa30e37c32da473595518df0ded80fc850a84cf5bdae1a1ec3c"
 C4_PUBLISHER_PAYLOADS = (
     "publisher.before", "publisher.after", "adapter.before", "adapter.after",
     "manifest.before", "manifest.after",
