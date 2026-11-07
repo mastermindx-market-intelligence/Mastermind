@@ -28,8 +28,8 @@ def main():
     args = parser.parse_args()
     roots = {name: Path(value).resolve() for name, value in vars(args).items()}
     expected = {
-        "macro_root": "915189b2538c8b952a53e921ba170459cd1eb624",
-        "native_owner_root": "d5df6b2ad8b2a49e9c0a98e33f8c7cca14a630a6",
+        "macro_root": "669f2f185c86c4a2a8e9466deef051c01677ed4a",
+        "native_owner_root": "5fcb76e8274d28f37da6bb06583343c57fcdfc47",
         "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
     }
     for name, sha in expected.items():

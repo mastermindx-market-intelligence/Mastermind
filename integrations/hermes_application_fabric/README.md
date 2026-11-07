@@ -3,7 +3,7 @@
 [Canonical programme](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6695933514).
 Operation: hermes-primary-fabric-inference-20261106-sol-01.
 Compatible governing pin: e4bfd5efccc9df4d42fafedd1a75ca730de04f54.
-Current owner brief: [source, evidence and financial acceptance](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6702747606).
+Current owner brief: [source, evidence and financial acceptance](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6703609820).
 
 ## Implemented path
 
@@ -34,15 +34,23 @@ QUALIFICATION.md. Native worker delegation #2147 stays separate.
 ## Qualified native behavior
 
 The pinned Hermes v0.23 source is 1c0cd667746d3395fe9e1b6c74f8f85952486f18.
-At adapter commit 470b479b53e0120b26f238d9251489ebdef260c5, its actual native
-primary/tool implementation passed 61 tests, including AUTO attribution and
-post-tool disconnect. The host contract passed 49; the original/successor tunnel
-fixture passed 170 without skips; the offline client suite passed 46 on both
-Python 3.12 and 3.13. Three additional cases join actual Hermes, the original
-factory/client, and the actual APPLICATION handler/Gateway/Broker to a loopback
-provider, proving tool history, the step limit and unknown-effect recovery.
+At adapter commit 08b8daf9b6bdfe717007da1917aa771268011768, its actual native
+primary/tool implementation passed 69 tests, including AUTO/exact attribution
+and post-tool disconnect. The same 69 tests passed on the actual installed M2
+Hermes v0.23.0 source 2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19. The host contract
+passed 51; the original/successor tunnel fixture passed 170 without skips; the
+offline client suite passed 54 on both Python 3.12 and 3.13. Nine additional
+cases join actual Hermes, the original factory/client, and the actual APPLICATION
+handler/Gateway/Broker to a loopback provider, proving fixed/AUTO/exact tool
+history, the step limit and unknown-effect recovery.
 See [exact qualification evidence](QUALIFICATION.md).
 These are isolated source/loopback proofs, not a real Fabric account.
+
+The existing Chisel v1.12.0 Linux binary also passed a finite protocol fixture
+covering atomic ACL reload, three simultaneous role aliases, fresh forward
+channels, new reverse-client admission and original-client retirement. Existing
+reverse listeners require the original stop; an ACL reload does not revoke them.
+This protocol proof does not activate or attest the production tunnel.
 
 The adapter uses the real ProviderProfile client hook and a unique keyless
 auth-type arm in the existing native registry. Existing same-name provider,

@@ -76,7 +76,7 @@ def main():
 
     openai.OpenAI, openai.AsyncOpenAI = ForbiddenOpenAI, ForbiddenAsyncOpenAI
     print(json.dumps({"candidate": args.candidate, "hermes": actual,
-        "owner": "915189b2538c8b952a53e921ba170459cd1eb624", "owner_source_verified": True,
+        "owner": "669f2f185c86c4a2a8e9466deef051c01677ed4a", "owner_source_verified": True,
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
         "mode": "installed-native-loopback-fixture", "live_provider_acceptance": False}), flush=True)
     suite = unittest.TestSuite()

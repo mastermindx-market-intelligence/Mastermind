@@ -15,7 +15,7 @@ import tempfile
 import unittest
 
 
-OWNER_COMMIT = "915189b2538c8b952a53e921ba170459cd1eb624"
+OWNER_COMMIT = "669f2f185c86c4a2a8e9466deef051c01677ed4a"
 OWNER_SHA256 = "70fb47f5e44cfebbed86709fedc2ae0fa816a96763fc497dc5c55df82f2604f0"
 
 
