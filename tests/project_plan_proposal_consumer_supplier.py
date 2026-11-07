@@ -153,4 +153,3 @@ def completed(joined,monkeypatch,request):
     def source_owner():return j['installed'](runtime,supervisor).owner._proposal
     yield locals()
     keeper.close();os.close(fd)
-
