@@ -1,0 +1,47 @@
+2026-11-07T19:16:08.0315113Z 3.04s call     tests/test_native_company_consumption.py::test_stored_native_consumer_uses_exact_answer_and_current_runtime_transaction[absent]
+2026-11-07T19:16:08.0315659Z 3.01s call     tests/test_hermes_primary_application_enrollment.py::test_role_uses_original_enrollment_once_and_actual_startup[hermes-meta-ceo]
+2026-11-07T19:16:08.0316202Z =========================== short test summary info ============================
+2026-11-07T19:16:08.0316777Z FAILED tests/test_fabric_grok47_qwen_release_composition_20261022.py::test_grok47_merged_source_digest_is_pinned - AssertionError: assert '59728db15935...46ff157ad5a3a' == 'bcfb8c961c51...efcf5c7018c8e'
+2026-11-07T19:16:08.0317217Z   
+2026-11-07T19:16:08.0317415Z   - bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e
+2026-11-07T19:16:08.0317797Z   + 59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a
+2026-11-07T19:16:08.0318463Z FAILED tests/test_fabric_grok47_qwen_release_composition_20261022.py::test_builder_refuses_tampered_overlay_base_despite_valid_forward[artifact_delivery.py] - AssertionError: assert '59728db15935...46ff157ad5a3a' == 'bcfb8c961c51...efcf5c7018c8e'
+2026-11-07T19:16:08.0318978Z   
+2026-11-07T19:16:08.0319159Z   - bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e
+2026-11-07T19:16:08.0319431Z   + 59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a
+2026-11-07T19:16:08.0320054Z FAILED tests/test_fabric_grok47_qwen_release_composition_20261022.py::test_builder_refuses_tampered_overlay_base_despite_valid_forward[pick.py] - AssertionError: assert '59728db15935...46ff157ad5a3a' == 'bcfb8c961c51...efcf5c7018c8e'
+2026-11-07T19:16:08.0320516Z   
+2026-11-07T19:16:08.0320695Z   - bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e
+2026-11-07T19:16:08.0320963Z   + 59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a
+2026-11-07T19:16:08.0322108Z FAILED tests/test_fabric_grok47_qwen_release_composition_20261022.py::test_forward_map_retains_original_four_and_adds_three_long_horizon_bounds - AssertionError: assert '59728db15935...46ff157ad5a3a' == 'bcfb8c961c51...efcf5c7018c8e'
+2026-11-07T19:16:08.0322848Z   
+2026-11-07T19:16:08.0323134Z   - bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e
+2026-11-07T19:16:08.0323555Z   + 59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a
+2026-11-07T19:16:08.0324553Z FAILED tests/test_fabric_grok47_qwen_release_composition_20261022.py::test_protected_qwen_files_and_exact_context_reader_forward - AssertionError: assert '59728db15935...46ff157ad5a3a' == 'bcfb8c961c51...efcf5c7018c8e'
+2026-11-07T19:16:08.0325281Z   
+2026-11-07T19:16:08.0325574Z   - bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e
+2026-11-07T19:16:08.0326152Z   + 59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a
+2026-11-07T19:16:08.0326946Z FAILED tests/test_native_pool_policy_publication.py::test_publisher_successor_preserves_actual_manifest_and_prior_go_validator - ValueError: application pool composition parent closure differs
+2026-11-07T19:16:08.0327649Z FAILED tests/test_native_pool_policy_publication.py::test_unknown_publisher_never_receives_forward_compatibility - AssertionError: Regex pattern did not match.
+2026-11-07T19:16:08.0328068Z   Expected regex: 'native scoped-model parent closure'
+2026-11-07T19:16:08.0328324Z   Actual message: 'native host-pull integrity parent closure differs'
+2026-11-07T19:16:13.0926763Z ##[error]Process completed with exit code 1.
+2026-11-07T19:16:13.0978051Z ##[group]Run actions/upload-artifact@v4
+2026-11-07T19:16:13.0978230Z with:
+2026-11-07T19:16:13.0978360Z   name: ci-fixed-diagnostics-0
+2026-11-07T19:16:13.0978576Z   path: /home/runner/work/_temp/ci-fixed.Hq9PqX/ci-fixed-diagnostics.json
+2026-11-07T19:16:13.0978817Z   if-no-files-found: warn
+2026-11-07T19:16:13.0978953Z   retention-days: 3
+2026-11-07T19:16:13.0979079Z   compression-level: 0
+2026-11-07T19:16:13.0979209Z   overwrite: false
+2026-11-07T19:16:13.0979336Z   include-hidden-files: false
+2026-11-07T19:16:13.0979473Z env:
+2026-11-07T19:16:13.0979629Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-07T19:16:13.0979874Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-07T19:16:13.0980113Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-07T19:16:13.0980338Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-07T19:16:13.0980555Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-07T19:16:13.0980801Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-07T19:16:13.0981048Z   MMX_CI_FIXED_DIAGNOSTICS_DIR: /home/runner/work/_temp/ci-fixed.Hq9PqX
+2026-11-07T19:16:13.0981255Z ##[endgroup]
+2026-11-07T19:16:13.2093982Z (node:75773) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.

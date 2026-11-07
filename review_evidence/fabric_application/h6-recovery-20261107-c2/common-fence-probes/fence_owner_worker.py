@@ -149,7 +149,7 @@ def main():
                 Q._update_cache(str(stable / "quota_cache.json"), update)
                 return {"offpeak": {"fixture": True},
                         "pools": {"go": {"offpeak": True, "keys": ["fixture-key-name"],
-                                         "cap": 999}}}
+                                         "cap": 2}}}
             projection.build_status = build_status
             sys.modules["pool_status"] = projection
             result = broker.snapshot()

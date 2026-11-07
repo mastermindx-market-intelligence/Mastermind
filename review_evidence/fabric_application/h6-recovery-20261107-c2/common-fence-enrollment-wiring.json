@@ -1,0 +1,70 @@
+{
+  "root": "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-enrollment-wiring-proof-hbdrusyv",
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "/tmp/h6-common-fence-source-1jky3u6l/test_fenced_enrollment_transactions.py",
+    "--basetemp",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-enrollment-wiring-proof-hbdrusyv/fixtures",
+    "--junitxml",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-enrollment-wiring-proof-hbdrusyv/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 0,
+  "seconds": 22.13,
+  "testcases": 6,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_physical_lock_excludes_then_original_bundle_completes_once[single]",
+      "classname": "test_fenced_enrollment_transactions",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_physical_lock_excludes_then_original_bundle_completes_once[set]",
+      "classname": "test_fenced_enrollment_transactions",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_replaced_admission_inode_after_broker_lock_refuses_before_intent[single]",
+      "classname": "test_fenced_enrollment_transactions",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_replaced_admission_inode_after_broker_lock_refuses_before_intent[set]",
+      "classname": "test_fenced_enrollment_transactions",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_late_admission_replacement_preserves_prepared_effect_without_binding_rename[single]",
+      "classname": "test_fenced_enrollment_transactions",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_late_admission_replacement_preserves_prepared_effect_without_binding_rename[set]",
+      "classname": "test_fenced_enrollment_transactions",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    }
+  ],
+  "files": {
+    "result.log": "357113d5374c2cc49f0a3791b31f83801d9f7ca3a508a61fe590d54a645eaa9c",
+    "result.xml": "55c2a04b4a5d8e45e8581baae5a9e3edc2e09bf08049c4ccfd2264bcfc889093"
+  }
+}

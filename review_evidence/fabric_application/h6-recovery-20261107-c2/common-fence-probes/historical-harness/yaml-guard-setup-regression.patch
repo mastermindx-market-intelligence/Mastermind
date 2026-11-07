@@ -1,0 +1,15 @@
+--- a/fence_owner_worker.py
++++ b/fence_owner_worker.py
+@@ -60,11 +60,9 @@
+         cache_path.write_text('{"cache_owner":"canonical-current-owner"}\n')
+         cache_path.chmod(0o600)
+     broker = None
+-    def source_check():
+-        G.verify(store, generation)
+     with Y.held_yaml((here / "paid_pyyaml_6_0_3.zip").read_bytes(),
+                      (here / "paid_pyyaml_provenance.json").read_bytes(),
+-                     source_check):
++                     lambda: G.verify(store, generation)):
+         if action not in {"quota", "foreign-helper"}:
+             broker = B.Broker(
+                 db_path=str(stable / "broker/leases.sqlite"),

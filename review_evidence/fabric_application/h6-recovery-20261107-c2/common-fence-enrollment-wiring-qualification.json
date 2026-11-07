@@ -1,0 +1,57 @@
+{
+  "schema": "mastermind.h6.common_fence_enrollment_wiring.v1",
+  "source_commit_at_execution": "f677e924cac854e6052dd4b69ecc365023a9f4bc",
+  "candidate_installer_sha256": "2daa1ff46e22d8e8329b060f17fc46f38a832a363dc5453b1e6215c911cb7459",
+  "candidate_helper_sha256": "c38319838f286f1cc1591d1050870a91c44df5c787ac6fa27f7bc916b0f1411e",
+  "historical_fixture": {
+    "path": "ops/native_fabric/quota_continuity/rollout/test_native_launcher_upgrade.py",
+    "sha256": "01699f5fb92b43424ed3f49d41d7641f4613cd4b8744e9efcd4c50a053031416",
+    "original_verified_donor": "cfc3192602fa2ec5bd851c8b3be1ce2209931fc6",
+    "source_relative_inputs_preserved": true
+  },
+  "probe": {
+    "executed_sha256": "a58bde1a83a12947e695bea28202c872463b109b3e984068f1501f1ab6bdc967",
+    "persisted_sha256": "c673b2bc29813924c9929036c95cb0ef7ccb94d1f7728ecb5e0ad61ffd5cba08",
+    "replay_change": "explicit H6_REPOSITORY and H6_COMMON_FENCE_SOURCE environment inputs only"
+  },
+  "receipts": [
+    {
+      "stem": "common-fence-advisory-cap-repair",
+      "rc": 0,
+      "seconds": 2.26,
+      "testcases": 2,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "0e84bf7f9d088f1ef05ae532632895389d40de5b8ea291aca4f6896a7bbc9429",
+        "result.xml": "42abce5d70c56a53d30376269ecc696b859ce4726dc10f711770ae1c1ceb15ee"
+      }
+    },
+    {
+      "stem": "common-fence-enrollment-wiring",
+      "rc": 0,
+      "seconds": 22.13,
+      "testcases": 6,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "357113d5374c2cc49f0a3791b31f83801d9f7ca3a508a61fe590d54a645eaa9c",
+        "result.xml": "55c2a04b4a5d8e45e8581baae5a9e3edc2e09bf08049c4ccfd2264bcfc889093"
+      }
+    }
+  ],
+  "scope": "Real single-service and two-role set transactions; authentic historical Go lineage, parser, target preparation/rename/progress/completion and physical locks",
+  "explicit_seam": "Existing historical generation module retains launcher identity. Its verified_admission_scope is wired to real candidate support_bundle.admission_scope after the actual historical release/stable-owner verify. Helper delivery authentication remains separately proven; this is not a full source-authenticated successor enrollment.",
+  "behaviors": [
+    "physical admission contention refuses before Broker/mint/write, then same prepared bundle completes once after release and replays read-only",
+    "inode replacement after actual Broker lock acquisition refuses before intent/private effects",
+    "inode replacement after actual binding-prepared commitment refuses before canonical rename, retaining original intent/private/prepared effects; accounts and ingress unchanged"
+  ],
+  "source_patch_unchanged": true,
+  "accepted_manifest_changed": false,
+  "runtime_changed": false,
+  "full_successor_enrollment_proven": false,
+  "mission_complete": false
+}

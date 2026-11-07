@@ -1,0 +1,43 @@
+{
+  "root": "/private/tmp/h6-advisory-cap-repair-proof-maedczhz",
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py::test_advisory_status_refresh_releases_broker_before_quota_publication",
+    "/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py::test_original_snapshot_boundary_reproduces_broker_to_admission_inversion",
+    "--basetemp",
+    "/private/tmp/h6-advisory-cap-repair-proof-maedczhz/fixtures",
+    "--junitxml",
+    "/private/tmp/h6-advisory-cap-repair-proof-maedczhz/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 0,
+  "seconds": 2.26,
+  "testcases": 2,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_advisory_status_refresh_releases_broker_before_quota_publication",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_snapshot_boundary_reproduces_broker_to_admission_inversion",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    }
+  ],
+  "files": {
+    "result.log": "0e84bf7f9d088f1ef05ae532632895389d40de5b8ea291aca4f6896a7bbc9429",
+    "result.xml": "42abce5d70c56a53d30376269ecc696b859ce4726dc10f711770ae1c1ceb15ee"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "reason": "D8 scan flagged advisory fixture capacity literal; change two-valued test contrast to2 without changing production limits or guard",
+  "source_patch_unchanged": true,
+  "worker": {
+    "before_sha256": "ee61381291079dee84e2ead6fbc4d3fd466bf03503f3af3cc23fe43b2c15159a",
+    "after_sha256": "5c0542398cb4b045b9c8f545e68a7cd3655b9bf0c0f84b17a95ad1f24130ba87"
+  },
+  "historical_setup_worker": {
+    "executed_sha256": "d8f24e6e0e0b279e3c269a5aa8fb3a0c139f974bd378d9f8cda80a222bf9c85d",
+    "retained_commit": "f677e924cac854e6052dd4b69ecc365023a9f4bc",
+    "current_replay": "historical-harness/yaml-guard-setup-regression.patch against repaired worker",
+    "scope": "Initial8 setup errors happened before any advisory projection executed"
+  },
+  "next_proof": "Both actual advisory-status inversion cases"
+}

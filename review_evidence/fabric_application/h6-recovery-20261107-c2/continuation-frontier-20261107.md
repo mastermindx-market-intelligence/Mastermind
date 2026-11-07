@@ -226,3 +226,33 @@ All unknown configuration/credential writers, legacy transition/drain, actual
 billable meter, service permission/account envelope, remote APPLICATION owner,
 protected delivery and real consumer acceptance remain separate gates.
 MISSION_COMPLETE=false. Continue the next ready enrollment proof in this session.
+
+Post-commit f677e924 D8 guard failed on two advisory fixture capacity literals. No protected source or registry was weakened. The current worker projects2 against original capacity1, and the redundant historical worker is replaced by a minimal setup-callback regression patch; original executed bytes remain in f677e924. Retain the failed receipt and rerun the two affected status probes, then the actual next-head guard.
+
+## Enrollment wiring and current hosted-CI result
+
+Six actual single/set enrollment wiring cases passed,0 failures/errors/skips
+(22.13s), with real temporary files/locks and unchanged historical ingress.
+Both forms refused physical contention before Broker/mint/write, completed the
+same bundle once after release, and replayed read-only. Early inode drift
+refused before intent; late drift retained original private/prepared effects
+and stopped before canonical binding rename. The explicit seam retains the
+historical launcher's source identity while calling the real candidate physical
+helper; this does NOT claim emitted successor cohort enrollment. That remains
+with the existing source owner after preserving selected116 composition.
+
+The two advisory-cap fixture repair cases passed with unchanged production patch.
+Next actual committed-head D8 guard remains required before this checkpoint push.
+
+Hosted680 run42402147021: private HTTP164/164 passed; shards1-5 succeeded;
+shard0's Python batch has7 failures in two historical/source-closure test modules.
+The aggregate was still queued at last read. See hosted-680-ci-observation.json.
+Next safe action is source judgment against current canonical donor repairs,
+then only the exact required test repair and focused qualification. No CI retry
+or second dispatch while its original run remains active.
+
+Original2175 is still51b. Hermes2186 advanced toe3ff065c; original root published
+completed current composition906bb682 on its existing followthrough branch
+(comment6711837521). Hermes2225 is Ready at60894ba (comment6711828478).
+These source developments preserve active H6 and#2232/#2234 custody; do not
+duplicate their mutations or treat source delivery as runtime acceptance.

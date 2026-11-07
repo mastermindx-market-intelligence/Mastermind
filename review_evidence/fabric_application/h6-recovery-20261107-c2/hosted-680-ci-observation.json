@@ -1,0 +1,33 @@
+{
+  "schema": "mastermind.h6.hosted_ci_observation.v1",
+  "head": "680dc0ca78b9b3fcd081d3750304d1c47e5b5b9f",
+  "run": 42402147021,
+  "job": 128492040680,
+  "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42402147021/job/128492040680",
+  "node_private_http": {
+    "cases": 164,
+    "passed": 164,
+    "failed": 0,
+    "finished": "2026-11-07T18:44:50Z"
+  },
+  "shards": {
+    "0": "failure",
+    "1": "success",
+    "2": "success",
+    "3": "success",
+    "4": "success",
+    "5": "success"
+  },
+  "aggregate_at_last_read": "queued",
+  "python_failures": 7,
+  "failing_modules": [
+    "tests/test_fabric_grok47_qwen_release_composition_20261022.py",
+    "tests/test_native_pool_policy_publication.py"
+  ],
+  "cause_observation": [
+    "5 current-source manifest pin assertions expectbcfb8c but actual source59728d",
+    "2 historical inverse/refusal checks omit earlier host-pull inverse"
+  ],
+  "excerpt_sha256": "7941976df0bfd81245e143e6b996b555616b66153b234450bc16cc8069e277a7",
+  "next_action": "Check current canonical donor/source order before any repair; no retry or duplicate CI dispatch while original run active"
+}

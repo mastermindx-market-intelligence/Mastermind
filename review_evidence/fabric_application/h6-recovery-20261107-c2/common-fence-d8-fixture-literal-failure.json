@@ -1,0 +1,36 @@
+{
+  "root": "/private/tmp/h6-known-owners-committed-guard-elpdg068",
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults",
+    "--basetemp",
+    "/private/tmp/h6-known-owners-committed-guard-elpdg068/fixtures",
+    "--junitxml",
+    "/private/tmp/h6-known-owners-committed-guard-elpdg068/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 1,
+  "seconds": 53.49,
+  "testcases": 1,
+  "failures": 1,
+  "errors": 0,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_d8_template_topology_and_protected_defaults",
+      "classname": "tests.test_ceo_submit_armed_composition",
+      "failure": true,
+      "error": false,
+      "skipped": false,
+      "message": "AssertionError: assert ['999', '999'] == []\n  \n  Left contains 2 more items, first extra item: '999'\n  Use -v to get more diff"
+    }
+  ],
+  "files": {
+    "result.log": "e28e02b3bb035d4c1c41224ba3cfaa35601286efac0abcd4cf8c027ba55af350",
+    "result.xml": "8ed36b53d027ce49b579f3a7c55b34c5545cf3038af0cb96f56140f255b5c033"
+  }
+}
