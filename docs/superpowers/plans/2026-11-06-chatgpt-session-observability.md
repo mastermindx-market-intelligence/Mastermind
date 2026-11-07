@@ -370,3 +370,33 @@ Remaining S4 acceptance is unchanged: qualified live organizational context,
 real steering/restart consumption, a bounded delegation and scoped peer exchange
 consumed by their original parent. Authored wave visibility does not replace the
 missing Executive pending-effect contract or prove that acceptance.
+
+
+### O5F — ordinary harness integration after ModelArk source merge
+
+The first ordinary Hermes harness run on S4 head `f04b0ee316f1383d4bb2a914574323cf4c051417`,
+[42345842134](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42345842134),
+failed on both Python 3.12 and 3.13. The exact integrated checkout was
+`27bf3e8992635cec1195ce4ee890f3bad0868029`. Its failure was
+`test_loaded_model_router_grants_no_authority`: a historical assertion required
+all commercial aliases to remain absent until PR #1824 merged. PR #1824 had in
+fact merged as `1e5f77a4e7aa5131ecbaef9bb00487882dec4d79`; the accepted aliases
+remain disabled and worker-ineligible.
+
+Repair only the stale test contract, on the original #2179 carrier. Check exact
+alias membership and served models, distinguish absent versus present catalog
+entries, require the loaded commercial provider to remain disabled and
+non-autonomous, and snapshot all provider/alias records around binding.
+Explicit absent, disabled-present and eligible-present fixtures prove that
+catalog presence or eligibility never grants authority, production arming,
+Capacity claims or selection commitment. The production router, profile,
+credential, admission and provider-call code is unchanged.
+
+Focused verification: `python -m unittest discover -v -s integrations/hermes_models/tests -p 'test_*.py'`
+passed **23 tests** (including three presence/eligibility subcases), Python 3.12,
+0.312 seconds; `git diff --check` passed. This is a repair to an observed required
+integration path, not a substitute runner or a retry of the denied AF_UNIX
+action. Ordinary hosted checks on the resulting exact head remain the release
+evidence. The earlier 58-test frontier receipt remains applicable because this
+repair changes no continuity source or frontier tests. Installed host/grant
+qualification and original-parent consumption remain outstanding.
