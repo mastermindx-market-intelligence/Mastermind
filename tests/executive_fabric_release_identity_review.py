@@ -707,7 +707,9 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
 # complete bounded-path lines; the optional callback shifts them by three lines.
 # The full-source hash and both spans still reject all path/context/byte drift.
 # This source audit supplies no native runtime or release approval.
-REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '95b83a757611e0c5c4930dcce2457b8a6eb4a135565f3cb587ccd29dddac8c30', 'sites': ((363, 26, 29, 'int', '512'), (479, 57, 60, 'int', '512'))}
+# Accepted S24 composition (4aabd797 custody /578ec12e persistence review):
+# only the same two512 path-length bounds move eight lines; no identity or limit change.
+REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '1bfbec76a4f007d5ab5570eb5080891c896714129d4f0c51d7cfaf56a260b419', 'sites': ((371, 26, 29, 'int', '512'), (487, 57, 60, 'int', '512'))}
 
 # fixed HTTP not-found status. Exact full postimage and literal sites only.
 REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': 'b5fd60efebebc04ea12d1d1976663c74f907dec2f151a2d71a6f442182b5e5b2', 'sites': ((93, 39, 42, 'int', '404'),)}
@@ -790,6 +792,11 @@ REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
 # the same sole 512 operand remains at (23, 17, 20), with no new identity mask.
 
+# Test-owned frozen source data, merged into this same finite review table.
+from tests.test_hermes_workspace_oauth_identity_review import (
+    REVIEWED_FILES as HERMES_WORKSPACE_OAUTH_REVIEWED_FILES,
+)
+REVIEWED_FILES.update(HERMES_WORKSPACE_OAUTH_REVIEWED_FILES)
 
 # Original #852 held subscription principals, source-qualified at exact sites.
 # This fixed source evidence grants no installed identity, credential or capacity.

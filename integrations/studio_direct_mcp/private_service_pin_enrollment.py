@@ -160,7 +160,41 @@ def pin_fingerprint(svc, pin, path):
 
 
 @contextmanager
-def original_pin(svc, roots, operation, profile):
+def _c4_publisher_native_context(svc, args):
+    """Read the completed parent while retaining its canonical publication lock.
+
+    This child does not install or select native code. Generic native modifying
+    verbs keep their strict bootstrap reader; only this closed C4 continuation
+    authenticates the historical parent through the existing status reader.
+    """
+    if args.account != ACCOUNT or args.operation not in ("apply", "reconcile"):
+        fail("INPUT_REFUSED")
+    proof_args = SimpleNamespace(**{**vars(args), "operation": "status"})
+    with svc._pin_native_context(proof_args) as binding:
+        first = copy.deepcopy(binding)
+    if svc._INSTALLED_CONTROL_CONTEXT is not None:
+        generation = svc._installed_control_module(
+            "_studio_c4_parent_native_generation",
+            "ops/native_fabric/quota_continuity/rollout/native_generation.py")
+    else:
+        import importlib.util
+        source = (Path(svc.__file__).resolve().parents[2]
+                  / "ops/native_fabric/quota_continuity/rollout/native_generation.py")
+        spec = importlib.util.spec_from_file_location(
+            "_studio_c4_parent_native_generation", source)
+        generation = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generation)
+    with generation.publication_lock(Path(first["store"])):
+        with svc._pin_native_context(proof_args) as checked:
+            if checked != first:
+                fail("ORIGINAL_PIN_REFUSED")
+            # Keep the same native lock through child publication and the final
+            # original-pin fingerprint check. No nested native modifying lock.
+            yield checked
+
+
+@contextmanager
+def original_pin(svc, roots, operation, profile, *, c4_publisher=False):
     """Authenticate retained proof with the actual existing native selection owner."""
     pin = svc._pin_owner_module()
     path = roots["state"] / "native-pool-pin"
@@ -180,7 +214,9 @@ def original_pin(svc, roots, operation, profile):
         # The existing owner takes its publication lock for these exact verbs.
         operation=operation if operation in ("apply", "reconcile") else "status",
     )
-    with svc._pin_native_context(args) as binding:
+    context = (_c4_publisher_native_context(svc, args) if c4_publisher
+               else svc._pin_native_context(args))
+    with context as binding:
         prior, raw = pin.read_transaction(svc, path, args, binding)
         expected = {"schema": pin.SCHEMA, "planSha256": args.expected_plan_sha256,
                     "effect": "APPLIED"}
@@ -751,7 +787,8 @@ def _run_c4_publisher(svc, args, effect):
     target = roots["state"] / C4_PUBLISHER_TRANSACTION
     modifying = args.operation in ("apply", "reconcile")
     lock = svc._c2_lifecycle_mutex(ACCOUNT) if modifying else nullcontext()
-    with lock, original_pin(svc, roots, args.operation, profile) as (pin, original, fingerprint):
+    with lock, original_pin(svc, roots, args.operation, profile,
+                            c4_publisher=modifying) as (pin, original, fingerprint):
         owner, status_plan, status_raw, parents = _c4_publisher_parents(
             svc, pin, roots, original, fingerprint)
         if args.operation in ("preview", "apply"):
