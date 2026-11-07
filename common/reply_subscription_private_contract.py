@@ -7,8 +7,12 @@ from dataclasses import dataclass
 
 PRIVATE_SCHEMA = "mastermind.executive_ceo_ingress_reply_events.v1"
 RESULT_SCHEMA = "mastermind.executive_ceo_ingress_reply_events_result.v1"
-OPERATIONS = ("can_discover", "subscribe", "unsubscribe")
-MODIFYING = ("subscribe", "unsubscribe")
+# The original three operations retain their exact identity and response schema.
+# Additional canary operations reuse this SAME authenticated App-peer carrier;
+# absent an explicitly selected owner, the host rejects them before effects.
+CANARY_OPERATIONS = ("canary_policy", "canary_subscribe", "canary_unsubscribe", "canary_deliver")
+OPERATIONS = ("can_discover", "subscribe", "unsubscribe") + CANARY_OPERATIONS
+MODIFYING = ("subscribe", "unsubscribe", "canary_subscribe", "canary_unsubscribe", "canary_deliver")
 
 
 def result(operation, *, data=None, code=None):

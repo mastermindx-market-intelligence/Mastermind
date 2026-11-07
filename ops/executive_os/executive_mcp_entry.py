@@ -43,12 +43,14 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource', 'selected_child_target'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource', 'selected_child_target', 'dot_canary'}):
         raise ValueError('installed MCP configuration fields differ')
     if type(raw.get('reply_events_armed',False)) is not bool:
         raise ValueError('event receiver selection must be boolean')
     if raw.get('reply_events_armed',False) and raw.get('executive_mcp_profile') != 'web_ceo_v3':
         raise ValueError('reply events require explicit Web-CEO v3 receiver')
+    from integrations.session_bridge.dot_canary_policy_selection import validate_dot_canary_settings
+    validate_dot_canary_settings(raw)
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
     profile = validate_installed_mcp_profile_current(raw.get('executive_mcp_profile', 'legacy'))
@@ -608,7 +610,8 @@ def build_installed_coo_settings(raw, source, config_path, executive, *, expecte
         authority_provider=client.authority, mission_provider=client.mission,
         catalogue_provider=lambda principal, work_ref=None: catalogue_source.catalogue_for_principal(
             principal_frame(principal), work_ref=work_ref),
-        agentos_context_provider=client.agentos_context)
+        agentos_context_provider=client.agentos_context,
+        agentos_current_context_provider=client.agentos_current_context)
     publication = build_installed_selected_child_target(raw)
     if publication is not None:
         # One frozen publication, read through the SHARED generation-bound
@@ -860,9 +863,11 @@ def main(argv=None):
             if raw.get("reply_events_armed",False):
                 from integrations.session_bridge.installed_reply_events import build_installed_reply_event_rpc
                 from integrations.session_bridge.reply_policy_selection import ReplyPolicySelection
+                from integrations.session_bridge.dot_canary_policy_selection import validate_dot_canary_settings
                 v3_kwargs["reply_event_rpc"] = build_installed_reply_event_rpc(
                     settings.ceo_ingress_socket_path,ReplyPolicySelection((policies,*additional_policies)),
-                    clock=lambda:int(settings.clock()),enabled=True)
+                    clock=lambda:int(settings.clock()),enabled=True,
+                    canary_enabled=validate_dot_canary_settings(raw) is not None)
             # One installed client instance; the opt-in OS session transport
             # receives this same object only while the transport is enabled.
             os_transport_enabled = raw.get('os_executive_transport', False)

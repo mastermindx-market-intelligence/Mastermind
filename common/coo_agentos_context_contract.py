@@ -20,6 +20,11 @@ CATALOGUE = "coo.agentos_context.v1"
 LEGACY_CATALOGUE = "coo.v1"
 ACTION = "read_adopted_agentos_context"
 TOOL = "executive_agentos_context"
+CURRENT_FRAME_SCHEMA = "mastermind.ceo_ingress.coo_agentos_current_context.v1"
+CURRENT_RESULT_SCHEMA = "mastermind.coo_agentos_current_context_result.v1"
+CURRENT_CATALOGUE = "coo.agentos_current_context.v1"
+CURRENT_ACTION = "read_current_agentos_context"
+CURRENT_TOOL = "executive_agentos_current_context"
 MAX_REQUEST_BYTES = 8192
 MAX_RESPONSE_BYTES = 224 * 1024
 MAX_BUNDLE_BYTES = 128 * 1024
@@ -28,6 +33,8 @@ _CONTEXT_KEYS = {field.name for field in dataclasses.fields(PrincipalAdmissionCo
 _FRAME_KEYS = {"schema", "principal", "principal_context", "capability_profile_digest"}
 _RESULT_KEYS = {"schema", "catalogue", "principal_context", "capability_profile_digest",
                 "bundle_encoding", "bundle_base64", "receipt"}
+_CURRENT_FRAME_KEYS = _FRAME_KEYS | {"workspace_principal"}
+_CURRENT_RESULT_KEYS = _RESULT_KEYS | {"workspace_principal"}
 
 
 def _refuse():
@@ -92,8 +99,33 @@ def decode(raw, *, limit=MAX_RESPONSE_BYTES):
 
 
 def validate_frame(frame):
-    _shape(frame, _FRAME_KEYS)
-    if type(frame["schema"]) is not str or frame["schema"] != FRAME_SCHEMA:
+    return _validate_frame(frame, current=False)
+
+
+def workspace_principal(value, *, executive=None):
+    """Validate a projection of an independently verified Workspace bearer.
+
+    A successful shape check does not authenticate or enroll either resource.
+    """
+    from common.executive_workspace_contract import PRINCIPAL_KEYS, RESOURCE, SCOPE
+    _shape(value, PRINCIPAL_KEYS)
+    if (value["resource"] != RESOURCE or value["scopes"] != [SCOPE]
+            or any(type(value[key]) is not str or not 1 <= len(value[key]) <= 256
+                   for key in PRINCIPAL_KEYS - {"scopes"})):
+        _refuse()
+    if executive is not None and any(value[key] != executive[key]
+            for key in ("issuer_digest", "subject_digest", "client_ref")):
+        _refuse()
+    return value
+
+
+def validate_current_frame(frame):
+    return _validate_frame(frame, current=True)
+
+
+def _validate_frame(frame, *, current):
+    _shape(frame, _CURRENT_FRAME_KEYS if current else _FRAME_KEYS)
+    if type(frame["schema"]) is not str or frame["schema"] != (CURRENT_FRAME_SCHEMA if current else FRAME_SCHEMA):
         _refuse()
     selected = context(frame["principal_context"])
     _digest(frame["capability_profile_digest"])
@@ -102,21 +134,37 @@ def validate_frame(frame):
     from control_plane.coo_principal_host import FACT_SCHEMA, validate_facts_frame
     validate_facts_frame({"schema": FACT_SCHEMA, "operation": "authority",
         "work_ref": selected.work_ref, "principal": frame["principal"]})
+    if current:
+        workspace_principal(frame["workspace_principal"], executive=frame["principal"])
     encode(frame, limit=MAX_REQUEST_BYTES)
     return frame
 
 
 def validate_result(value, *, expected_context, capability_profile_digest):
     """Bind the original bytes, owner receipt and this request's authority echo."""
-    from control_plane.agentos_context_bundle import validate_context_read, TOKEN_BUDGET
+    return _validate_result(value, expected_context=expected_context,
+        capability_profile_digest=capability_profile_digest, expected_workspace_principal=None)
+
+
+def validate_current_result(value, *, expected_context, capability_profile_digest, expected_workspace_principal):
+    workspace_principal(expected_workspace_principal)
+    return _validate_result(value, expected_context=expected_context,
+        capability_profile_digest=capability_profile_digest, expected_workspace_principal=expected_workspace_principal)
+
+
+def _validate_result(value, *, expected_context, capability_profile_digest, expected_workspace_principal):
+    from control_plane.agentos_context_bundle import validate_context_read, validate_current_context_read, TOKEN_BUDGET
     from ops.fabric_launch.agentos import validate_bundle
-    _shape(value, _RESULT_KEYS)
+    current = expected_workspace_principal is not None
+    _shape(value, _CURRENT_RESULT_KEYS if current else _RESULT_KEYS)
     expected = context(expected_context)
     observed = context(value["principal_context"])
-    if (type(value["schema"]) is not str or value["schema"] != RESULT_SCHEMA
-            or type(value["catalogue"]) is not str or value["catalogue"] != CATALOGUE
+    if (type(value["schema"]) is not str or value["schema"] != (CURRENT_RESULT_SCHEMA if current else RESULT_SCHEMA)
+            or type(value["catalogue"]) is not str or value["catalogue"] != (CURRENT_CATALOGUE if current else CATALOGUE)
             or observed != expected or _digest(value["capability_profile_digest"]) != _digest(capability_profile_digest)
             or type(value["bundle_encoding"]) is not str or value["bundle_encoding"] != "base64"):
+        _refuse()
+    if current and workspace_principal(value["workspace_principal"]) != expected_workspace_principal:
         _refuse()
     encoded = value["bundle_base64"]
     if type(encoded) is not str or not 0 < len(encoded) <= MAX_BASE64_CHARS:
@@ -127,7 +175,8 @@ def validate_result(value, *, expected_context, capability_profile_digest):
         _refuse()
     if base64.b64encode(raw).decode("ascii") != encoded:
         _refuse()
-    raw, receipt = validate_context_read(raw, value["receipt"], work_ref=expected.work_ref)
+    validator = validate_current_context_read if current else validate_context_read
+    raw, receipt = validator(raw, value["receipt"], work_ref=expected.work_ref)
     # The base64 body must also be strict finite JSON. The incumbent bundle
     # validator rejects named nonfinite constants but exponent overflow takes
     # json.loads' separate parse_float path. Preserve the original bytes.
@@ -151,3 +200,15 @@ def result(raw, receipt, *, principal_context, capability_profile_digest):
         "bundle_encoding": "base64", "bundle_base64": base64.b64encode(raw).decode("ascii"), "receipt": receipt}
     validate_result(value, expected_context=principal_context, capability_profile_digest=capability_profile_digest)
     return decode(encode(value))  # Detach the already bounded owner result.
+
+
+def current_result(raw, receipt, *, principal_context, capability_profile_digest, workspace_principal):
+    if type(raw) is not bytes or not 0 < len(raw) <= MAX_BUNDLE_BYTES:
+        _refuse()
+    value = {"schema": CURRENT_RESULT_SCHEMA, "catalogue": CURRENT_CATALOGUE,
+        "principal_context": dict(principal_context), "capability_profile_digest": capability_profile_digest,
+        "workspace_principal": dict(workspace_principal), "bundle_encoding": "base64",
+        "bundle_base64": base64.b64encode(raw).decode("ascii"), "receipt": receipt}
+    validate_current_result(value, expected_context=principal_context,
+        capability_profile_digest=capability_profile_digest, expected_workspace_principal=workspace_principal)
+    return decode(encode(value))

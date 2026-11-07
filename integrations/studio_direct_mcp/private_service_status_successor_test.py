@@ -907,11 +907,16 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
         manifest["configHash"] = owner.digest(owner.encode(config))
         roots["manifest"].write_bytes(owner.encode(manifest))
         patch(svc, "C2_PAPER_FILES_SHA256", original_modules)
+        native_store = home / "native-code-releases"
+        native_store.mkdir(mode=0o700)
         binding = {
-            "successor_digest": "1" * 64, "target_generation": "2" * 64,
+            "successor_digest": getattr(self, "native_successor_digest", "1" * 64),
+            "target_generation": getattr(self, "native_target_generation", "2" * 64),
             "expected_selection": {"generation": "3" * 64, "sequence": 23},
             "pool_target": str(pool), "pool_previous": owner.digest(pool.read_bytes()),
             "pool_bridge": owner.digest(future_pool), "phase": "PREVIOUS",
+            "store": str(native_store),
+            "selection": {"generation": "3" * 64, "sequence": 23},
         }
         after_config = copy.deepcopy(config)
         after_config["fleetStatus"]["fabricLauncherSha256"] = binding["pool_bridge"]
@@ -933,7 +938,8 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
         pin_args = SimpleNamespace(
             account=account,
             expected_manifest_sha256=owner.digest(owner.encode(manifest)),
-            successor_bundle=str(home / "successor"), successor_plan_sha256="1" * 64,
+            successor_bundle=str(home / "successor"),
+            successor_plan_sha256=binding["successor_digest"],
             operation="preview", expected_plan_sha256=None)
         preview = svc._pin_owner_module().run(svc, pin_args)
         pin_args.expected_plan_sha256 = preview["planSha256"]
@@ -941,6 +947,10 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
         svc._pin_owner_module().run(svc, pin_args)
         pool.write_bytes(future_pool)
         binding["phase"] = "SELECTED"
+        binding["selection"] = {"schema": "native-code-selection.v1",
+                                "generation": binding["target_generation"],
+                                "previous": binding["expected_selection"]["generation"],
+                                "sequence": 24}
         original_receipt = {p.name: p.read_bytes()
                             for p in (roots["state"] / "native-pool-pin").iterdir()}
         fixture = {
