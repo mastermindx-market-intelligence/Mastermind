@@ -129,5 +129,10 @@
     "file": "386578f66392-uat-send-preflight-diagnostic.json",
     "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-386578f66392/uat-send-preflight-diagnostic.json",
     "sha256": "7051d46578628797461360ae53cd46e82f268060d870bfdf32cadcc652d6f942"
+  },
+  {
+    "file": "omh-source-qualification-20261107-pro-05.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/omh-source-qualification-20261107-pro-05.json",
+    "sha256": "bf77754e618adb8c76bcfeed5d535e7a0ccca32686fadd9b1ed9ac79d3ab1df4"
   }
 ]

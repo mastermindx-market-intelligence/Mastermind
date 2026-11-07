@@ -716,3 +716,56 @@ and all existing positive/negative assertions are retained. The existing full
 review-fixture test module passes, exit0:
 `/tmp/hermes-thin-auth-review-fixture-20261107-pro-05.log`.
 These source repairs are not relabelled as behavior of the still-running386 app.
+
+
+## Exact installed OMH advisory scope composition
+
+The runtime's resolved inventory adds enabled plugin toolsets even when the
+frozen launch request has toolsets=[]. The existing mmx_omh entry is a real
+deferred tool, not an empty label: tool_search/tool_describe/tool_call can reach
+its closed handler. Ignoring it would incorrectly claim capacity-only access.
+
+The adapter now recognizes the exact combined inventory
+`["mastermind-fabric-capacity","mmx_omh"]` only after both source qualifications
+pass, still requiring the same frozen launch policy, exact three bridge schemas,
+and current no-running/no-pending/no-prompt holds. The resulting presentation
+scope is ADVISORY_READ_ONLY: “Local planning advice and capacity previews.”
+Unknown extra toolsets, changed inventory or missing qualification remain refused.
+No grant, plugin registration/configuration, service restart or execution owner
+was added. History and original-admission recovery do not depend on OMH
+qualification and retain their original read-only paths.
+
+Installed Mastermind OMH release58ac65ae47824750cae32c5ab85b58b6f38e6d5e
+provides only status, detached-plan preparation, advisory recommendation, and an
+existing Capacity/Fabric route preview requiring reserved=false and the exact
+PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH proof. Its selected OMH4.0.6 helpers
+perform strict chain-data parsing/overlay and skill-catalog scoring, not provider
+calls, entitlement shaping, worker admission or memory-provider registration.
+
+Qualification reads, without importing or invoking the plugin: exact handler and
+manifest; complete descriptor and expected paths; all19 adapter source files and
+no extra Python source; actual interpreter, pyvenv and distribution metadata;
+all1240 OMH Python source files (26,923,696bytes); native deferred-tool dispatch
+source; and the exact Homebrew startup customization. Unexpected .pth hooks,
+startup overrides or extension-module shadows fail qualification. The Python
+source-tree manifest SHA256 is
+`5178ac807671d0218b7668ebc3cd5d24a2d8fc4459ec245142cabc149afc03e4`.
+This is trusted installed-source qualification; it does not claim attestation
+against a hostile interpreter or tampered executable bytecode cache.
+
+The actual installed-source check returned true with zero plugin imports and
+zero runtime calls. Receipt:
+[omh-source-qualification-20261107-pro-05.json](evidence/thin-native-os-20261107/omh-source-qualification-20261107-pro-05.json),
+SHA256 `bf77754e618adb8c76bcfeed5d535e7a0ccca32686fadd9b1ed9ac79d3ab1df4`.
+The check binds working bridge SHA256
+`9b267a5b9697bb1f327f4e2c1d8526b24694bda679b5d3bd5f83ed2dd0e786a8`.
+
+Focused validation passes:46Python bridge/history tests (including changed-source,
+startup-hook, extension-shadow and scope/no-double-submit regressions),44frontend
+contract/port/panel tests across3files, and TypeScript. Existing assertions remain.
+Logs: `/tmp/hermes-thin-omh-scope-python-20261107-pro-05.log`,
+`/tmp/hermes-thin-omh-scope-frontend-20261107-pro-05.log`,
+`/tmp/hermes-thin-omh-scope-typecheck-20261107-pro-05.log`.
+These are source receipts. The next package must retain its own source/build
+identity and continue the original1fb461 conversation's useful Send/answer,
+history and reconnect journey, without an automatic replay.

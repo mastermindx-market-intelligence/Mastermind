@@ -186,7 +186,8 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
       <div className="hermes-native-session-heading"><h4>{title(session.title)}</h4>
         <button type="button" disabled={busy} onClick={() => void readOriginal()}>{t("Read original conversation", "读取原会话")}</button></div>
       <p className="hermes-native-muted">{t("Configured model", "已配置模型")}: {session.requestedModel || t("Not reported", "未提供")} · {
-        session.toolAccess === "CAPACITY_READ_ONLY" ? t("Capacity catalog and route preview only", "仅容量目录与路由预览")
+        session.toolAccess === "ADVISORY_READ_ONLY" ? t("Local planning advice and capacity previews", "本地规划建议与容量预览")
+          : session.toolAccess === "CAPACITY_READ_ONLY" ? t("Capacity catalog and route preview only", "仅容量目录与路由预览")
           : session.toolAccess === "NONE" ? t("Text only", "仅文本") : session.sendCheckRequired
             ? t("Saved history · current send access is checked when you send", "已保存的历史 · 发送时检查当前权限")
             : t("Tool scope not qualified for sending", "工具范围未确认，暂不可发送")}</p>

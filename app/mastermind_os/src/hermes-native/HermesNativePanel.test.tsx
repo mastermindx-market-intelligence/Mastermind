@@ -50,6 +50,16 @@ describe("thin native Hermes Office", () => {
     expect(screen.getByText(/Capacity catalog and route preview only/i)).toBeTruthy();
     expect(screen.getByText(/configured-model/)).toBeTruthy();
   });
+  it("labels qualified OMH advice without claiming execution or capacity-only scope", async () => {
+    const p = port(); const base = p.request.getMockImplementation()!;
+    p.request.mockImplementation(async r => r.operation === "create"
+      ? view({ state: "OPENED", session: { ...nativeSession(), toolAccess: "ADVISORY_READ_ONLY" } }) : base(r));
+    await openChat(p);
+    expect(screen.getByText(/Local planning advice and capacity previews/)).toBeTruthy();
+    expect(screen.queryByText(/Capacity catalog and route preview only/)).toBeNull();
+    expect(screen.getByText(/Worker dispatch is not enabled/)).toBeTruthy();
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(0);
+  });
   it("sends original text once even under a rapid second click", async () => {
     const p = await openChat();
     const original = "  Original\n 中文\t";
