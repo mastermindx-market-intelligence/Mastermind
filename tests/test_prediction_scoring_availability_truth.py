@@ -58,3 +58,91 @@ def test_score_does_not_rewrite_canonical_ledger_failure_as_building(monkeypatch
     monkeypatch.setattr(p, "_load_ledger", explode)
     with pytest.raises(RuntimeError, match="prediction-ledger"):
         p.score("2026-09-17")
+
+
+
+def _force_engine_validation_unavailable(monkeypatch):
+    real_import = builtins.__import__
+    calls = []
+
+    def unavailable(name, *args, **kwargs):
+        if name == "engine.validation":
+            calls.append(name)
+            raise ModuleNotFoundError("engine.validation unavailable for source qualification")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", unavailable)
+    return calls
+
+
+def test_actual_prediction_summary_statistical_failure_is_unavailable(monkeypatch, caplog):
+    import json
+    from app import web
+    from portfolio import predictions as p
+
+    rows = [{"id": f"rank-{i}", "ticker": f"T{i}", "asof": "2026-09-17",
+             "dir": "up", "score": i * 10, "prob": 0.7, "horizon_d": 21,
+             "status": "resolved", "realized": i / 1000.0, "resolved_on": "2026-10-16"}
+            for i in range(10)]
+    monkeypatch.setattr(p, "_load_ledger", lambda: rows)
+    coverage = p.coverage()
+    assert coverage["n_total"] == 10 and coverage["n_resolved"] == 10
+    assert coverage["by_horizon"] == {"21": {"open": 0, "resolved": 10}}
+    imports = _force_engine_validation_unavailable(monkeypatch)
+    entered = []
+    sentinel = "secret /Users/private/rank-statistics token=do-not-return"
+
+    def fail_rank(signal, forward):
+        assert len(signal) == 10 and len(forward) == 10
+        entered.append((len(signal), len(forward)))
+        raise RuntimeError(sentinel)
+
+    monkeypatch.setattr(p, "_rank_ic_fallback", fail_rank)
+    helpers = p._validation_helpers()
+    assert helpers == (fail_rank, p._newey_west_tstat_fallback, p._brier_reliability_fallback)
+    response = web.api_predictions()
+    assert imports and entered
+    assert response.status_code == 200
+    assert json.loads(response.body) == {
+        "read_status": "unavailable", "error": "predictions_unavailable",
+        "coverage": None, "scorecard": None,
+    }
+    assert sentinel not in response.body.decode() and sentinel not in caplog.text
+    assert "/Users/private" not in response.body.decode() and "/Users/private" not in caplog.text
+    assert "RuntimeError" in caplog.text
+
+
+def test_actual_prediction_summary_empty_ledger_remains_building(monkeypatch):
+    import json
+    from app import web
+    from portfolio import predictions as p
+
+    monkeypatch.setattr(p, "_load_ledger", lambda: [])
+    imports = _force_engine_validation_unavailable(monkeypatch)
+    response = web.api_predictions()
+    payload = json.loads(response.body)
+    assert response.status_code == 200 and imports
+    assert "read_status" not in payload and "error" not in payload
+    assert payload["coverage"]["n_total"] == 0 and payload["coverage"]["n_resolved"] == 0
+    assert payload["scorecard"]["status"] == "building" and payload["scorecard"]["n_resolved"] == 0
+    assert set(payload["scorecards_by_horizon"]) == {"3", "5", "10", "21"}
+    for horizon, scorecard in payload["scorecards_by_horizon"].items():
+        assert scorecard["status"] == "building" and scorecard["n_resolved"] == 0
+        assert scorecard["horizon_d"] == int(horizon)
+
+
+def test_non_import_error_validation_initialization_propagates(monkeypatch):
+    from portfolio import predictions as p
+    real_import = builtins.__import__
+    calls = []
+
+    def broken_initialization(name, *args, **kwargs):
+        if name == "engine.validation":
+            calls.append(name)
+            raise RuntimeError("validation initialization failed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", broken_initialization)
+    with pytest.raises(RuntimeError, match="validation initialization failed"):
+        p._validation_helpers()
+    assert calls == ["engine.validation"]

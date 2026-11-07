@@ -22,12 +22,7 @@ reliability still works from day one; lens_edge compounds as fully-recorded coho
 """
 from __future__ import annotations
 
-import fcntl
 import json
-import os
-import tempfile
-import threading
-from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -35,7 +30,6 @@ from brain.ledger import all_theses
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PATH = _ROOT / "data" / "brain" / "outcome_ledger.jsonl"
-_LOCAL_LOCK = threading.RLock()
 
 _GROUP_MIN_N = 12       # below this many graded records in a bucket, don't report it (cold-start safety)
 
@@ -44,70 +38,22 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _lock_path() -> Path:
-    return _PATH.with_name(f".{_PATH.name}.lock")
-
-
-@contextmanager
-def _ledger_lock():
-    """Serialize KEEP-FIRST resolution across threads and processes."""
-    with _LOCAL_LOCK:
-        _PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _lock_path().open("a+", encoding="utf-8") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                try:
-                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-                except OSError:
-                    # A completed atomic replace already decided the data effect.
-                    pass
-
-
-def _read_unlocked() -> list[dict]:
+def _read() -> list[dict]:
     if not _PATH.exists():
         return []
     out: list[dict] = []
-    for line in _PATH.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        row = json.loads(line)
-        if not isinstance(row, dict):
-            raise ValueError("outcome ledger row is not a mapping")
-        out.append(row)
-    return out
-
-
-def _read() -> list[dict]:
-    # Writers publish by atomic replace, so readers see a complete prior or successor file.
-    # Malformed canonical evidence is never silently dropped or reinterpreted as an empty ledger.
-    return _read_unlocked()
-
-
-def _atomic_write(rows: list[dict]) -> None:
-    """Replace the canonical outcome ledger atomically; preserve prior bytes on failure."""
-    _PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = "".join(json.dumps(row, default=str, ensure_ascii=False) + "\n" for row in rows)
-    tmp_name: str | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=_PATH.parent,
-            prefix=f".{_PATH.name}.", suffix=".tmp", delete=False,
-        ) as tmp:
-            tmp_name = tmp.name
-            tmp.write(payload)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-        os.replace(tmp_name, _PATH)
-        tmp_name = None
-    finally:
-        if tmp_name:
+        for line in _PATH.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
             try:
-                Path(tmp_name).unlink(missing_ok=True)
-            except OSError:
+                out.append(json.loads(line))
+            except Exception:
                 pass
+    except Exception:
+        return []
+    return out
 
 
 def _scored_ids() -> set[str]:
@@ -129,20 +75,18 @@ def _realized_map(asof) -> dict[str, float]:
         return {}
 
 
-def _lens_snapshot(subject: str, asof_decided: str | None) -> dict | None:
-    """Return the PIT signal row, or ``None`` only after a successful absence read.
-
-    Canonical signal-history read failure deliberately propagates. Outcome rows are KEEP-FIRST, so
-    converting a temporary/unreadable history failure into an empty snapshot would permanently erase
-    decision-time lens evidence and prevent later recovery.
-    """
+def _lens_snapshot(subject: str, asof_decided: str | None) -> dict:
+    """The PIT signal_history row for this name at its decision date (empty if it predates recording)."""
     if not asof_decided:
-        return None
-    from brain import signal_history
-    for row in signal_history.load(asof_decided):
-        if (row.get("ticker") or "").upper() == (subject or "").upper():
-            return row
-    return None
+        return {}
+    try:
+        from brain import signal_history
+        for r in signal_history.load(asof_decided):
+            if (r.get("ticker") or "").upper() == (subject or "").upper():
+                return r
+    except Exception:
+        pass
+    return {}
 
 
 def _outcome(check: dict, realized: float) -> int | None:
@@ -157,57 +101,50 @@ def _outcome(check: dict, realized: float) -> int | None:
 
 
 def resolve(asof, realized: dict | None = None, *, theses: list | None = None) -> int:
-    """Emit resolved-thesis records exactly once and return the count written.
-
-    Missing realized input is a normal no-op. Canonical thesis/outcome-ledger read failures and
-    publish failures raise to the existing production caller boundaries instead of masquerading as
-    "nothing resolved". KEEP-FIRST is decided under the outcome-ledger mutation lock.
-    """
-    rmap = realized if realized is not None else _realized_map(asof)
-    if not rmap:
-        return 0
-    rows = theses if theses is not None else all_theses()
-    by_id = {t.get("id"): t for t in rows}
-    candidates: list[dict] = []
-    asof_resolved = asof if isinstance(asof, str) else (asof.isoformat() if isinstance(asof, date) else None)
-    for tid, rel in rmap.items():
-        if tid not in by_id:
-            continue
-        t = by_id[tid]
-        check = (t.get("falsifier") or {}).get("check") or {}
-        outcome = _outcome(check, rel)
-        if outcome is None:                       # non-directional (watch/hold) — not a graded bet
-            continue
-        asof_decided = t.get("state_asof")
-        snapshot = _lens_snapshot(t.get("subject"), asof_decided)
-        snapshot_status = "available" if snapshot is not None else "missing"
-        snap = snapshot or {}
-        candidates.append({
-            "thesis_id": tid, "subject": t.get("subject"),
-            "asof_decided": asof_decided, "asof_resolved": asof_resolved,
-            "prob_correct": t.get("prob_correct"), "lean": t.get("lean"),
-            "horizon_d": t.get("horizon_d"), "sleeve": t.get("sleeve"),
-            "realized_rel": round(float(rel), 4), "outcome": outcome,
-            # What it SAW at decision time. ``missing`` means the history read completed but this
-            # thesis predates/has no matching snapshot; unavailable history never reaches this write.
-            "lens_snapshot_status": snapshot_status,
-            "lens_dirs": snap.get("lens_dirs") or {},
-            "confluence_at_entry": snap.get("confluence"),
-            "size_authority_at_entry": snap.get("size_authority"),
-            "quad_at_entry": snap.get("quad"),
-            "recorded_at": _now_iso(),
-        })
-    if not candidates:
-        return 0
-
-    with _ledger_lock():
-        existing = _read_unlocked()
-        already = {r.get("thesis_id") for r in existing if r.get("thesis_id")}
-        fresh = [row for row in candidates if row["thesis_id"] not in already]
+    """Emit ledger records for every thesis that has resolved (id present in `realized`), joining
+    prediction + outcome + the decision-time lens snapshot. KEEP-FIRST per thesis_id. Returns the
+    count written. `realized` defaults to outcomes.realized_returns(asof). Never raises."""
+    try:
+        rmap = realized if realized is not None else _realized_map(asof)
+        if not rmap:
+            return 0
+        rows = theses if theses is not None else all_theses()
+        by_id = {t.get("id"): t for t in rows}
+        already = _scored_ids()
+        fresh: list[dict] = []
+        asof_resolved = asof if isinstance(asof, str) else (asof.isoformat() if isinstance(asof, date) else None)
+        for tid, rel in rmap.items():
+            if tid in already or tid not in by_id:
+                continue
+            t = by_id[tid]
+            check = (t.get("falsifier") or {}).get("check") or {}
+            outcome = _outcome(check, rel)
+            if outcome is None:                       # non-directional (watch/hold) — not a graded bet
+                continue
+            asof_decided = t.get("state_asof")
+            snap = _lens_snapshot(t.get("subject"), asof_decided)
+            fresh.append({
+                "thesis_id": tid, "subject": t.get("subject"),
+                "asof_decided": asof_decided, "asof_resolved": asof_resolved,
+                "prob_correct": t.get("prob_correct"), "lean": t.get("lean"),
+                "horizon_d": t.get("horizon_d"), "sleeve": t.get("sleeve"),
+                "realized_rel": round(float(rel), 4), "outcome": outcome,
+                # what it SAW at decision time (empty if decided before signal_history existed)
+                "lens_dirs": snap.get("lens_dirs") or {},
+                "confluence_at_entry": snap.get("confluence"),
+                "size_authority_at_entry": snap.get("size_authority"),
+                "quad_at_entry": snap.get("quad"),
+                "recorded_at": _now_iso(),
+            })
         if not fresh:
             return 0
-        _atomic_write(existing + fresh)
+        _PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _PATH.open("a", encoding="utf-8") as fh:
+            for r in fresh:
+                fh.write(json.dumps(r, default=str, ensure_ascii=False) + "\n")
         return len(fresh)
+    except Exception:
+        return 0
 
 
 # ---------------------------------------------------------------------------

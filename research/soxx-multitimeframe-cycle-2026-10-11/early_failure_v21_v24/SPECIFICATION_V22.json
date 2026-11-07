@@ -1,0 +1,57 @@
+{
+  "schema": "soxx.walk_forward_economic_cycle_failure.v22",
+  "created": "2026-10-12",
+  "predeclared_before_model_fitting": true,
+  "mission": "Test whether only PREVIOUS calendar week outcomes can estimate when an early sale has greater *incremental monetary value* than continued trade at first 0.5/3 RTH hour, using fixed low-capacity model.",
+  "source": "Existing private Terminal 5m RTH snapshots and v21 matched force-vs-hold differences; no new market data collected",
+  "cohort": [
+    "SOXX",
+    "SMH",
+    "QQQ",
+    "AMD",
+    "NVDA",
+    "MU",
+    "INTC",
+    "AMAT",
+    "LRCX",
+    "KLAC",
+    "XLV",
+    "XLE"
+  ],
+  "target_times_RTH_hours": [
+    0.5,
+    3.0
+  ],
+  "features_from_completed5m": [
+    "net five minute close gain since entry pct",
+    "momentum last three 5m closes pct",
+    "maximum observed favorable excursion pct",
+    "minimum observed adverse excursion pct",
+    "closing position in observed high-low range (0..1)",
+    "mean 12 prior observed 5m high-low ranges as pct of entry"
+  ],
+  "predictand": "force early close at next observed 5m open net minus matched original 52-RTH-hour hold net, in percentage points. This is NOT a prediction of trade direction or a live training signal.",
+  "model": "single fixed ordinary ridge regression: intercept+6 z-scored features; L2 penalty 12 per standardized feature, zero intercept penalty; labels clipped to +/-10 pp ONLY while training; no hyperparameter search.",
+  "admission": "A test market week is permitted when at least 20 previous eligible events across at least 6 distinct previous market weeks exist; other entries are no-forecast, kept in denominators; same-week events never train each other.",
+  "decision": "sell remainder at designated checkpoint only if predicted incremental net return > 0.25 percentage points; otherwise continue baseline; cost differences are already included in labels. Predicted score is derived from prior weeks only.",
+  "controls": [
+    "Always hold = 0 incremental",
+    "At checkpoint sell if completed 5m close below original entry",
+    "Perfect future oracle max(delta,0) only for theoretical upper bound, not tradeable"
+  ],
+  "primary_metric": "Paired mean incremental net return PER ORIGINAL PARENT episode on weeks when model is active, compare to hold and naive below-entry policy using same episodes.",
+  "secondary_metrics": [
+    "number model sales",
+    "original losers saved",
+    "original winners harmed",
+    "market-week-clustered bootstrap",
+    "source coverage and unforecastable early weeks",
+    "leave-largest-out",
+    "realized total per original across all original market weeks with no action in warmup"
+  ],
+  "rule": "Do not tune threshold or ridge penalty after viewing results; no model-derived position sizing. Published code is research only.",
+  "data_rights": "No licensed raw prices or proprietary event quotes published. point-in-time/source adjustment not verified.",
+  "NO_NEW_VENDOR_CALLS": true,
+  "NO_LIVE_TRADING": true,
+  "UNTOUCHED_HOLDOUT_CLAIM": false
+}

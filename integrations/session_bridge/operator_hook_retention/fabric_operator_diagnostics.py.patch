@@ -1,0 +1,133 @@
+--- /dev/null
++++ b/fabric_operator_diagnostics.py
+@@ -0,0 +1,130 @@
++"""Bounded, non-authoritative hook diagnostics; no lifecycle or secret material."""
++import fcntl
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import stat
++
++SCHEMA = 'mastermind.fabric_operator_hook_diagnostics.v1'
++ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}')
++MAX_BYTES = 4096
++MAX_RECORDS = 32
++EVENTS = frozenset({'entered', 'invalid_event', 'not_stop', 'binding_missing',
++    'initialize', 'query', 'observation_failed', 'no_outstanding', 'decision_ready',
++    'persistence_failed', 'attention_already_attempted', 'block_emitted', 'internal_error'})
++
++
++def _open(here, run, write=False):
++    if type(run) is not str or not ID.fullmatch(run):
++        raise ValueError('diagnostic_run')
++    # The immutable support generation's lanes symlink is an existing fixed link.
++    directory = (Path(here) / 'lanes').resolve(strict=True)
++    parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++    fd = None
++    try:
++        st = os.fstat(parent)
++        if st.st_uid != os.getuid() or not stat.S_ISDIR(st.st_mode):
++            raise ValueError('diagnostic_directory')
++        name = run + '.operator-hook-diagnostics.jsonl'
++        flags = (os.O_RDWR | os.O_CREAT) if write else os.O_RDONLY
++        fd = os.open(name, flags | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=parent)
++        st = os.fstat(fd)
++        if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid()
++                or stat.S_IMODE(st.st_mode) != 0o600 or st.st_nlink != 1):
++            raise ValueError('diagnostic_metadata')
++        fcntl.flock(fd, (fcntl.LOCK_EX if write else fcntl.LOCK_SH) | fcntl.LOCK_NB)
++        seen = os.stat(name, dir_fd=parent, follow_symlinks=False)
++        if (seen.st_dev, seen.st_ino) != (st.st_dev, st.st_ino):
++            raise ValueError('diagnostic_changed')
++        return parent, fd, name, (st.st_dev, st.st_ino)
++    except BaseException:
++        if fd is not None:
++            os.close(fd)
++        os.close(parent)
++        raise
++
++
++def _read(fd):
++    os.lseek(fd, 0, os.SEEK_SET)
++    raw = os.read(fd, MAX_BYTES + 1)
++    if len(raw) > MAX_BYTES or (raw and not raw.endswith(b'\n')):
++        raise ValueError('diagnostic_bound_or_partial')
++    def unique(pairs):
++        row = {}
++        for key, value in pairs:
++            if key in row:
++                raise ValueError('diagnostic_duplicate')
++            row[key] = value
++        return row
++    rows = [json.loads(line, object_pairs_hook=unique) for line in raw.splitlines()]
++    if len(rows) > MAX_RECORDS:
++        raise ValueError('diagnostic_bound')
++    for row in rows:
++        if (type(row) is not dict or set(row) != {'event'}
++                or type(row['event']) is not str or row['event'] not in EVENTS):
++            raise ValueError('diagnostic_shape')
++    return raw, rows
++
++
++def _verify(parent, fd, name, identity):
++    visible = os.stat(name, dir_fd=parent, follow_symlinks=False)
++    opened = os.fstat(fd)
++    if (visible.st_dev, visible.st_ino) != identity or (opened.st_dev, opened.st_ino) != identity:
++        raise ValueError('diagnostic_changed')
++
++
++def record(here, run, event):
++    if event not in EVENTS:
++        return False
++    parent = fd = None
++    try:
++        parent, fd, name, identity = _open(here, run, True)
++        raw, rows = _read(fd)
++        if len(rows) >= MAX_RECORDS:
++            return False
++        addition = json.dumps({'event': event}, separators=(',', ':')).encode() + b'\n'
++        if len(raw) + len(addition) > MAX_BYTES:
++            return False
++        os.lseek(fd, 0, os.SEEK_END)
++        if os.write(fd, addition) != len(addition):
++            return False
++        os.fsync(fd)
++        os.fsync(parent)
++        _verify(parent, fd, name, identity)
++        return True
++    except (OSError, ValueError, TypeError):
++        return False
++    finally:
++        if fd is not None:
++            os.close(fd)
++        if parent is not None:
++            os.close(parent)
++
++
++def collect(here, run):
++    result = {'schema': SCHEMA, 'authority': False, 'invocation_authenticated': False}
++    parent = fd = None
++    try:
++        parent, fd, name, identity = _open(here, run)
++        raw, rows = _read(fd)
++        _verify(parent, fd, name, identity)
++        if _read(fd)[0] != raw:
++            raise ValueError('diagnostic_changed')
++        # A saturated log cannot establish that subsequent outcomes were retained.
++        if len(rows) >= MAX_RECORDS:
++            raise ValueError('diagnostic_bound')
++        result.update(state='OBSERVED' if rows else 'NO_RECORD',
++                      events=[r['event'] for r in rows], bytes=len(raw),
++                      sha256=hashlib.sha256(raw).hexdigest())
++    except FileNotFoundError:
++        result.update(state='NO_RECORD', events=[])
++    except (OSError, ValueError, TypeError):
++        result.update(state='UNAVAILABLE', events=[])
++    finally:
++        if fd is not None:
++            os.close(fd)
++        if parent is not None:
++            os.close(parent)
++    return result

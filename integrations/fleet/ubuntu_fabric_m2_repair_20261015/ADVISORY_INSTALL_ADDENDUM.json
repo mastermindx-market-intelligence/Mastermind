@@ -1,0 +1,27 @@
+{
+  "schema": "mastermind.fabric_broker_controller_advisory_installed_addendum.v1",
+  "observed_at_utc": "2026-10-16T00:27:00Z",
+  "installed_on": "M2 Studio original kit ext",
+  "change_type": "read_only_existing_broker_operator_status_display",
+  "original_lease_broker_sha256": "9766f7c445ab430ea5a516e56602baec00a998129395ab85aa04853716d0853f",
+  "updated_lease_broker_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
+  "rollback_backup": "lease_broker.py.bak-controller-pid-advisory-20261016",
+  "patch_path": "broker_controller_pid_advisory.patch",
+  "patch_sha256": "293ab3aae9e401eef4278aaf065d74c7c981daa862e5e41bb87f9f8d315c831c",
+  "test_path": "test_broker_controller_pid_advisory.py",
+  "test_sha256": "345f8beb1ed664f2e437a5496ecc25d16fb42a81d3f24a2e24e31e027ea10fa0",
+  "verification": {
+    "isolated_broker_tests_passed": 23,
+    "installed_integrated_tests_passed": 79,
+    "existing_pytest_cleanup_warnings": 2,
+    "verdict": "PASS",
+    "live_leases_released": 0,
+    "worker_process_changes": 0,
+    "provider_spend_or_quota_changes": 0
+  },
+  "semantics": "Controller PID absence is advisory. Remote execution and original result remain UNKNOWN; the patch contains no lease expiry/release paths.",
+  "custody": "Original remote worker roots unchanged; no cross-session takeover or new GC owner.",
+  "manifest_precedence": "This additive observation supersedes the old lease_broker.py AFTER_SHA256 in historical SOURCE_MANIFEST.json only for M2 installed-source tracking. Historical 13-file replay evidence remains valid for its original earlier snapshot.",
+  "original_fleet_owner_pr": 1404,
+  "source_record_pr": 1552
+}
