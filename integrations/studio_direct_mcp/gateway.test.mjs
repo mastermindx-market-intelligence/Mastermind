@@ -494,6 +494,9 @@ test('configured fleet routing advertises one-way host selection and refuses lat
   const selector = listed.tools.find((tool) => tool.name === 'studio_select_host');
   assert.ok(selector, 'configured fleet router must advertise studio_select_host');
   // Verify the metadata that an actual MCP client sees, not just the library constant.
+  assert.equal(selector.annotations.title, 'Select Remote Studio Host');
+  assert.match(selector.inputSchema.properties.hostRef.description,
+    /For local M2 Studio, leave this session unselected/);
   assert.match(selector.description, /leave the MCP session unselected and use local tools/);
   assert.match(selector.description, /Only fleetRouting.routes entries are selectable/);
   assert.match(selector.description, /physicalFleet is advisory, not the route allowlist/);
