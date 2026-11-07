@@ -1,0 +1,54 @@
+# Fixed offline Compose override for the derived Rakazo topology runner.
+# The donor CLI passes one --file, so this override is a second --file on the
+# derived runner only. It does not edit the preserved upstream checkout.
+# Attempt-owned image tags are required from the runner environment. This file
+# does not name the donor shared default topology tags.
+services:
+  app-image:
+    image: ${TOPOLOGY_APP_IMAGE:?attempt-owned-app-image-required}
+  computer-image:
+    image: ${TOPOLOGY_COMPUTER_IMAGE:?attempt-owned-computer-image-required}
+  supervisor:
+    image: ${TOPOLOGY_APP_IMAGE:?attempt-owned-app-image-required}
+    environment:
+      RAKAZO_COMPUTER_IMAGE: ${TOPOLOGY_COMPUTER_IMAGE:?attempt-owned-computer-image-required}
+  api:
+    image: ${TOPOLOGY_APP_IMAGE:?attempt-owned-app-image-required}
+    environment:
+      RAKAZO_LIVE_MODEL_CATALOG: "off"
+      AGENT_RUNTIME: scripted
+      WAKEUP_DRIVER: graphile
+      SANDBOX_PROVIDER: docker
+      CLOUD_AGENT_PROVIDER: "none"
+      CLOUD_AGENT_SPACE_ID: ""
+      CURSOR_API_KEY: ""
+      OIDC_ISSUER: ""
+      OIDC_CLIENT_ID: ""
+      OIDC_CLIENT_SECRET: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      NO_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      no_proxy: ""
+  web:
+    image: ${TOPOLOGY_APP_IMAGE:?attempt-owned-app-image-required}
+  worker:
+    image: ${TOPOLOGY_APP_IMAGE:?attempt-owned-app-image-required}
+    environment:
+      RAKAZO_LIVE_MODEL_CATALOG: "off"
+      AGENT_RUNTIME: scripted
+      WAKEUP_DRIVER: graphile
+      SANDBOX_PROVIDER: docker
+      CLOUD_AGENT_PROVIDER: "none"
+      CLOUD_AGENT_SPACE_ID: ""
+      CURSOR_API_KEY: ""
+      OIDC_ISSUER: ""
+      OIDC_CLIENT_ID: ""
+      OIDC_CLIENT_SECRET: ""
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      NO_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      no_proxy: ""

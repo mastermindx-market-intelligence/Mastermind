@@ -1,0 +1,40 @@
+{
+  "mission": "Frozen SOXX extreme-MACD + 1H pivot and cycle-failure cross-symbol generalization; never tune to peers",
+  "base_v10": "/Users/mini4/.local/share/mastermind-review-artifacts/SOXX_COHERENT_CYCLE_20261010_v10",
+  "protected_sha": "326c8469a21d7f50fc9ecb1848196bf1c6e66685",
+  "symbols_precommitted": [
+    "AMD",
+    "AVGO",
+    "MU",
+    "INTC",
+    "NVDA",
+    "AMAT",
+    "LRCX",
+    "KLAC",
+    "SPY",
+    "XLV"
+  ],
+  "comparators_existing": [
+    "SOXX",
+    "SMH",
+    "QQQ"
+  ],
+  "window": [
+    "2025-10-09",
+    "2026-10-08"
+  ],
+  "entry": [
+    "frozen_3h_1h",
+    "pivot_valid",
+    "strict_structure_1p5",
+    "pivot_retest_1p5"
+  ],
+  "exit": [
+    "previous_early_guard_and_3h_rollover",
+    "time52",
+    "confirmed_cycle_failure_from_v9"
+  ],
+  "rules": "No re-optimization. Same threshold, gross same notional, same 5bp per side. Skips counted as zero; censor gaps.",
+  "basket_assumptions": "Semiconductor constituents share factors; not independent out-of-sample SOXX evidence",
+  "scope": "Offline local research only; no trading, production, git or credential writes"
+}

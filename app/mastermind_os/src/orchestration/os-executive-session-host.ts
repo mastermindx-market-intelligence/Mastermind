@@ -1,0 +1,289 @@
+import {
+  createExecutiveSessionBinding,
+  type ExecutiveSessionBinding,
+  type ExecutiveSessionSelection,
+  type ExecutiveSessionTargetKind,
+  type ExecutiveSessionTransport,
+  type QualifiedSessionAnswerRead,
+  type QualifiedSessionDispatch,
+  sessionTargetKind,
+} from "./executive-session-command-port";
+import type { MissionSelection } from "../mission";
+import type {
+  CommandIntent,
+  FiniteCommandPort,
+  PendingPointerStore,
+  OperationPointer,
+} from "./operation-controller";
+
+/**
+ * Session capability/controller lifecycle, composed separately from the
+ * Launch host. The mounted binding exists independently of any Launch
+ * catalog: it re-qualifies only through the authenticated session context
+ * envelope, so absent Executive configuration/auth keeps the capability
+ * unavailable and sends no requests. Selection changes are pushed in by the
+ * app shell on every transition (including initial, clear, same-value and
+ * A→B→A); each push invalidates first, so a stale context reply can never
+ * re-qualify an abandoned selection.
+ */
+/**
+ * The session port is the existing FiniteCommandPort plus the host-projected
+ * target read the UI presents truthfully. The getter is observation only:
+ * it never mints, selects or looks up a target.
+ */
+/** Read-only original-owner correlation, never a DSH or company-session ID. */
+export interface CurrentExecutiveSessionObservation {
+  readonly targetRef: string;
+  /** The verified session selection; it carries the closed target kind. */
+  readonly selection: ExecutiveSessionSelection;
+  readonly principalScope: string;
+  readonly generation: string;
+}
+export type SessionCommandPort = FiniteCommandPort & {
+  readonly currentTargetRef: () => string | null;
+  /** Optional for old mounts; absence cannot be treated as a bound session. */
+  readonly currentObservation?: () => CurrentExecutiveSessionObservation | null;
+  /** The one qualified SEND. It returns the closed receipt and, for a
+   * Secretary target, the validated native public result of that same send. */
+  readonly submitQualified?: (
+    pointer: OperationPointer,
+    intent: CommandIntent,
+    signal: AbortSignal,
+  ) => Promise<QualifiedSessionDispatch>;
+  readonly readOriginalReferences?: (selection: MissionSelection, signal: AbortSignal,
+                                     cursor?: string) => Promise<unknown>;
+  /** Bounded same-project saved history, independent of the selected root's
+   * current window. Its owner remains the existing authenticated Session Bridge. */
+  readonly projectHistory?: {
+    context(): ReturnType<FiniteCommandPort["context"]>;
+    authGeneration(): number;
+    readReferences(request: { workRef: string; pageSize: 4; cursor?: string;
+                              signal: AbortSignal }): Promise<unknown>;
+    readAnswer(pointer: OperationPointer, signal: AbortSignal): Promise<QualifiedSessionAnswerRead>;
+  };
+  /** Existing native READ operation; optional only for older injected hosts. */
+  readonly readQualifiedAnswer?: (pointer: OperationPointer, signal: AbortSignal) =>
+    Promise<QualifiedSessionAnswerRead>;
+};
+
+export type MountedExecutiveSessionBinding = Omit<ExecutiveSessionBinding, "port"> & {
+  readonly port: SessionCommandPort;
+};
+
+export interface OsExecutiveSessionHost {
+  readonly binding: MountedExecutiveSessionBinding;
+  readonly ready: Promise<void>;
+  /** Push the exact current selection and closed target kind; invalidates
+   * before any re-read. */
+  refresh(selection: ExecutiveSessionSelection | null): Promise<void>;
+  /** Register the explicit synchronous completion-condition provider. */
+  setStopCondition(provider: () => unknown): void;
+  dispose(): void;
+}
+
+export function createOsExecutiveSessionHost(
+  transport: ExecutiveSessionTransport,
+  store: PendingPointerStore,
+): OsExecutiveSessionHost {
+  let selection: ExecutiveSessionSelection | null = null;
+  let stopCondition: () => unknown = () => undefined;
+  const handle = createExecutiveSessionBinding({
+    transport,
+    store,
+    selection: () => selection,
+    stopCondition: () => stopCondition(),
+  });
+  const original = handle.binding.port;
+  const binding: MountedExecutiveSessionBinding = {
+    ...handle.binding,
+    port: {
+      context: () => original.context(),
+      prepare: (intent) => original.prepare(intent),
+      submit: (pointer, intent, signal) => original.submit(pointer, intent, signal),
+      // The same single send; the qualified entry only adds the validated
+      // native public result of that one send.
+      submitQualified: (pointer, intent, signal) =>
+        original.submitQualified(pointer, intent, signal),
+      readOperation: (pointer, signal) => original.readOperation(pointer, signal),
+      readQualifiedAnswer: (pointer, signal) => original.readQualifiedAnswer(pointer, signal),
+      projectHistory: transport.projectReferences ? {
+        context: () => original.context(),
+        authGeneration: () => transport.authGeneration(),
+        readAnswer: (pointer, signal) => original.readQualifiedAnswer(pointer, signal),
+        readReferences: async ({ workRef, pageSize, cursor, signal }) => {
+          const state = handle.sessionState();
+          const owner = original.context();
+          const authGeneration = transport.authGeneration();
+          const read = transport.projectReferences;
+          if (!state || !owner || !state.capabilities.reply_read || !read || signal.aborted ||
+              workRef !== state.selection.workRef || pageSize !== 4 ||
+              (cursor !== undefined && (typeof cursor !== "string" ||
+                !/^[A-Za-z0-9_=-]{1,2048}$/.test(cursor) || cursor.includes("\n")))) {
+            throw new Error("session_references_unavailable");
+          }
+          // Omit root_job_id entirely. This is the existing owner-authorized
+          // project reference API, never a guessed root, provider history or SEND.
+          const raw = await read({ work_ref: state.selection.workRef, page_size: 4,
+            ...(cursor !== undefined ? { cursor } : {}) }, signal);
+          const after = handle.sessionState();
+          const afterOwner = original.context();
+          if (signal.aborted || !after || !afterOwner || !after.capabilities.reply_read ||
+              transport.projectReferences !== read || transport.authGeneration() !== authGeneration ||
+              afterOwner.principalScope !== owner.principalScope || afterOwner.generation !== owner.generation ||
+              after.selection.workRef !== state.selection.workRef ||
+              after.selection.rootJobId !== state.selection.rootJobId) {
+            throw new Error("session_references_unavailable");
+          }
+          return raw;
+        },
+      } : undefined,
+      readOriginalReferences: transport.references ? async (selected, signal, cursor) => {
+        // This READ lives under the *same* verified Session owner as the
+        // qualified native reply. A stale/unverified or foreign selection
+        // must never start an HTTP call merely because a UI closure survives.
+        const state = handle.sessionState();
+        const owner = original.context();
+        const authGeneration = transport.authGeneration();
+        if (!state || !owner || signal.aborted ||
+            selected.workRef !== state.selection.workRef ||
+            selected.rootJobId !== state.selection.rootJobId) {
+          throw new Error("session_references_unavailable");
+        }
+        const args = { work_ref: state.selection.workRef,
+                       root_job_id: state.selection.rootJobId,
+                       page_size: 16, ...(cursor ? { cursor } : {}) };
+        const raw = await transport.references!(args, signal);
+        // An auth, expiry, selection, or host refresh during the await must
+        // withhold the old frame, even if the HTTP response itself succeeded.
+        const current = handle.sessionState();
+        const afterOwner = original.context();
+        if (signal.aborted || !current || !afterOwner ||
+            transport.authGeneration() !== authGeneration ||
+            afterOwner.principalScope !== owner.principalScope ||
+            afterOwner.generation !== owner.generation ||
+            current.selection.workRef !== state.selection.workRef ||
+            current.selection.rootJobId !== state.selection.rootJobId) {
+          throw new Error("session_references_unavailable");
+        }
+        return raw;
+      } : undefined,
+      currentTargetRef: () => {
+        const state = handle.sessionState();
+        return state?.capabilities.send ? state.target?.target_ref ?? null : null;
+      },
+      currentObservation: () => {
+        // SessionState is the existing canonical response, decoded against the
+        // exact refresh selection and owner epoch. Do not infer association
+        // from a target digest or the visible session title alone.
+        const state = handle.sessionState();
+        const owner = original.context();
+        const kind = state ? sessionTargetKind(state.selection) : null;
+        if (!state || state.selectionState !== "RESOLVED" ||
+            !state.capabilities.send || !state.target || !owner || kind === null ||
+            state.target.kind !== kind ||
+            state.principalScope !== owner.principalScope) return null;
+        return {
+          targetRef: state.target.target_ref,
+          selection: { ...state.selection },
+          principalScope: owner.principalScope,
+          generation: owner.generation,
+        };
+      },
+    },
+  };
+  return {
+    binding,
+    ready: handle.ready,
+    refresh(next) {
+      // The closed target kind travels with the selection; a kind change is a
+      // different selection and invalidates before any re-read.
+      selection = next
+        ? { workRef: next.workRef, rootJobId: next.rootJobId, targetKind: next.targetKind }
+        : null;
+      return handle.refresh();
+    },
+    setStopCondition(provider) {
+      stopCondition = provider;
+    },
+    dispose() {
+      handle.dispose();
+      stopCondition = () => undefined;
+    },
+  };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFn(value: unknown): value is (...args: never[]) => unknown {
+  return typeof value === "function";
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+/**
+ * Closed shape check for the separately mounted session binding. Mirrors
+ * completeOrchestratorCommandBinding and additionally requires the explicit
+ * three-argument message entry; bindings that expose store write/clear
+ * aliases are refused exactly as the launch check refuses them.
+ */
+export function completeExecutiveSessionBinding(
+  value: unknown,
+): MountedExecutiveSessionBinding | null {
+  if (!isPlainObject(value)) return null;
+  const port = value.port;
+  const store = value.store;
+  if (!isPlainObject(port) || !isPlainObject(store)) return null;
+  if (
+    !isFn(port.context) ||
+    !isFn(port.prepare) ||
+    !isFn(port.submit) ||
+    !isFn(port.readOperation) ||
+    !isFn((port as Record<string, unknown>).currentTargetRef)
+  )
+    return null;
+  if (
+    !isFn(store.read) ||
+    !isFn(store.reserve) ||
+    !isFn(store.clearIfEqual)
+  )
+    return null;
+  if (port.projectHistory !== undefined) {
+    const history = port.projectHistory;
+    if (!isPlainObject(history) || Object.keys(history).sort().join(",") !==
+        "authGeneration,context,readAnswer,readReferences" || !isFn(history.context) ||
+        !isFn(history.authGeneration) || !isFn(history.readReferences) || !isFn(history.readAnswer)) return null;
+  }
+  if ("currentObservation" in port && !isFn(port.currentObservation)) return null;
+  if (port.readQualifiedAnswer !== undefined && !isFn(port.readQualifiedAnswer)) return null;
+  if (port.readOriginalReferences !== undefined && !isFn(port.readOriginalReferences)) return null;
+  if (isFn((store as Record<string, unknown>).write)) return null;
+  if (isFn((store as Record<string, unknown>).clear)) return null;
+  if (
+    !isFn(value.getView) ||
+    !isFn(value.subscribe) ||
+    !isFn(value.makeLaunchIntent) ||
+    !isFn(value.makeMessageIntent) ||
+    !isFn(value.makeStopIntent) ||
+    !isFn(value.makeSessionMessageIntent)
+  )
+    return null;
+  return value as unknown as MountedExecutiveSessionBinding;
+}
+
+/** The owner context this binding reports, fenced against throwing ports. */
+export function readSessionOwnerContext(
+  binding: MountedExecutiveSessionBinding,
+): { principalScope: string; generation: string } | null {
+  try {
+    const ctx = binding.port.context();
+    if (!isPlainObject(ctx)) return null;
+    if (!nonEmptyString(ctx.principalScope) || !nonEmptyString(ctx.generation)) return null;
+    return { principalScope: ctx.principalScope, generation: ctx.generation };
+  } catch {
+    return null;
+  }
+}

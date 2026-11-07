@@ -40,6 +40,7 @@ import stat
 import subprocess
 import weakref
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator, Mapping, Sequence
 from uuid import uuid4
@@ -63,6 +64,9 @@ from control_plane.worker_execution_contract import (
     ValidationReceipt,
     WorkerLaunchSpec,
     WorkerProcessRef,
+    WorkerRecoveryBinding,
+    WorkerRecoveryContractError,
+    worker_launch_spec_sha256,
     WorkerResult,
     WorkerRunStatus,
 )
@@ -88,13 +92,20 @@ _MAX_VALIDATION_ARGV_BYTES = 64 * 1024
 _MAX_PROJECT_CONFIG_BYTES = 64 * 1024
 _LOCAL_TRANSPORT_FINALIZATION_SECONDS = 5.0
 _LOCAL_STREAM_DRAIN_SECONDS = 0.1
-_AUDITED_PROJECT_CONFIG_SHA256 = "d7e836eb5a6cbd4cb4e97de41f8182add663cb2a152dc4e381f82553f571bb7f"
+# Both exact project configurations are audited. The legacy pin preserves
+# already-selected source workspaces; the current pin permits the Chairman's
+# coordinator defaults. Leaf launches still disable agents and both multi-agent
+# feature generations in their explicit argv, regardless of these defaults.
+_AUDITED_PROJECT_CONFIG_SHA256S = frozenset({
+    "d7e836eb5a6cbd4cb4e97de41f8182add663cb2a152dc4e381f82553f571bb7f",
+    "f29f8839f10304b69fd24571aa2303dfe11900ac6ca3bad02b7dc764ec5c2bca",
+})
 _ALLOWED_AUTHORITIES = frozenset({"READ", "RESEARCH", "WRITE_BRANCH", "RUN_TESTS"})
 _GIT_COMMAND_TIMEOUT_SECONDS = 15.0
 _SAFE_GIT_OPERATION_IDENTITIES = {
     ("remote",): "remote",
     ("rev-parse", "--verify", "HEAD"): "rev-parse --verify HEAD",
-    LAUNCH_CLEAN_STATUS_ARGS: "status --porcelain=v1 -z --untracked-files=all",
+    LAUNCH_CLEAN_STATUS_ARGS: "status --porcelain=v1 -z --untracked-files=no",
     LAUNCH_CLEAN_UNTRACKED_ARGS: "ls-files --others -z",
     ("diff", "--name-only", "-z", "HEAD", "--"): "diff --name-only -z HEAD --",
 }
@@ -126,6 +137,19 @@ _DISABLED_FEATURES = (
     "image_generation",
     "memories",
     "multi_agent",
+    "auth_elicitation",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "daemon_auto_start",
+    "enable_mcp_apps",
+    "mcp_2026_07_28",
+    "multi_agent_v2",
+    "shell_snapshot",
+    "shell_snapshot_v2",
+    "skill_mcp_dependency_install",
+    "skill_search",
+    "tool_call_mcp_elicitation",
+    "workspace_dependencies",
     "remote_plugin",
 )
 _JSONL_EVENT_TYPES = frozenset({
@@ -252,6 +276,7 @@ class ProcessIdentity:
     effective_gid: int
     real_uid: int
     real_gid: int
+    parent_pid: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -395,6 +420,41 @@ class _RunState:
     receipt: CollectionReceipt | None = None
 
 
+class _RecoveredPresence(str, Enum):
+    LIVE = "LIVE"
+    ABSENT = "ABSENT"
+    RESIDUAL_GROUP = "RESIDUAL_GROUP"
+    IDENTITY_CHANGED = "IDENTITY_CHANGED"
+    BOOT_CHANGED = "BOOT_CHANGED"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclasses.dataclass
+class _RecoveredRunState:
+    spec: LaunchSpec
+    ref: ProcessRef
+    parser: _JSONLState
+    baseline: _GitSnapshot
+    monitor_task: asyncio.Task[None] | None = None
+    termination_lock: asyncio.Lock = dataclasses.field(default_factory=asyncio.Lock)
+    status: WorkerRunStatus = WorkerRunStatus.RUNNING
+    stream_errors: list[str] = dataclasses.field(default_factory=list)
+    cancel_reason: str | None = None
+    timed_out: bool = False
+    escalated: bool = False
+    finished_at: str | None = None
+    receipt: CollectionReceipt | None = None
+    cancel_receipt: CancelReceipt | None = None
+    signal_sent: bool = False
+    sigkill_sent: bool = False
+    signal_error: ProcessIdentityError | None = None
+    cancel_task: asyncio.Task[CancelReceipt] | None = None
+    group_member_identities: dict[int, str] = dataclasses.field(default_factory=dict)
+
+
+_RunStateLike = _RunState | _RecoveredRunState
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
@@ -488,6 +548,60 @@ def validate_secret_canary_verdict(
 ) -> dict[str, Any]:
     """Validate a hash/status-only canary receipt; raw sentinel values are forbidden."""
 
+    return _validate_secret_canary_verdict(value, require_passed=require_passed)
+
+
+def validate_attended_claude_secret_canary(
+    value: Mapping[str, Any] | None,
+    *,
+    spec: WorkerLaunchSpec,
+    execution_profile_id: str,
+    harness_binding_id: str,
+    physical_binding_sha256: str,
+    provider_home: str,
+) -> dict[str, Any]:
+    """Validate the exact finite supported-harness exception, never issue it.
+
+    A remote owner's actual canary and authenticated assignment transport must
+    supply this receipt. This validation does not establish their provenance,
+    enroll a provider realm, admit execution or change catalog readiness.
+    Default Codex callers continue to accept only their original V1 receipt.
+    """
+    from control_plane.subscription_harness_bindings import get_binding
+
+    if (execution_profile_id != "fabric.attended.claude.bounded.v1"
+            or harness_binding_id != "minimax-token-plan.claude-code-anthropic"
+            or not isinstance(spec, WorkerLaunchSpec)
+            or spec.require_secret_canary is not True
+            or not isinstance(physical_binding_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", physical_binding_sha256) is None
+            or not isinstance(provider_home, str)
+            or not Path(provider_home).is_absolute()
+            or str(Path(provider_home)) != provider_home
+            or ".." in Path(provider_home).parts):
+        raise LaunchValidationError("unsupported attended secret canary binding")
+    binding = get_binding(harness_binding_id)
+    if (binding.provider != "minimax" or binding.harness_id != "claude-code"
+            or binding.adapter_id != "claude-compatible-subscription"
+            or binding.protocol != "anthropic"):
+        raise LaunchValidationError("attended secret canary catalog binding changed")
+    expected = dict(
+        execution_profile_id=execution_profile_id,
+        harness_binding_id=harness_binding_id,
+        run_id=spec.run_id, job_id=spec.job_id, worker_id=spec.worker_id,
+        physical_binding_sha256=physical_binding_sha256,
+        provider_home=provider_home,
+    )
+    return _validate_secret_canary_verdict(
+        value, require_passed=True, attended_realm=expected,
+    )
+
+
+def _validate_secret_canary_verdict(
+    value: Mapping[str, Any] | None, *, require_passed: bool,
+    attended_realm: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+
     if not value:
         if require_passed:
             raise LaunchValidationError("a passing distinct-principal secret canary is required")
@@ -519,10 +633,16 @@ def validate_secret_canary_verdict(
         "observed_at",
         "worker_auth_exception",
     }
+    if attended_realm is not None:
+        allowed_top.add("realm_binding")
     if set(document) != allowed_top:
         raise LaunchValidationError("secret canary verdict fields are incomplete or unknown")
-    if document.get("schema_version") != SECRET_CANARY_SCHEMA_VERSION:
+    schema = ("mastermind.executive_secret_canary/v2" if attended_realm is not None
+              else SECRET_CANARY_SCHEMA_VERSION)
+    if document.get("schema_version") != schema:
         raise LaunchValidationError("secret canary verdict schema is unsupported")
+    if attended_realm is not None and document.get("realm_binding") != attended_realm:
+        raise LaunchValidationError("secret canary belongs to another assigned realm")
     checks = document.get("checks")
     if not isinstance(checks, dict) or set(checks) != _SECRET_CANARY_CHECKS:
         raise LaunchValidationError("secret canary verdict is missing required checks")
@@ -539,7 +659,9 @@ def validate_secret_canary_verdict(
         raise LaunchValidationError(
             "secret canary verdict requires a control-environment probe SHA-256"
         )
-    if document.get("worker_auth_exception") != "DEDICATED_CODEX_HOME_ONLY":
+    exception = ("ASSIGNED_CLAUDE_PROVIDER_REALM_ONLY" if attended_realm is not None
+                 else "DEDICATED_CODEX_HOME_ONLY")
+    if document.get("worker_auth_exception") != exception:
         raise LaunchValidationError("worker authentication exception is not explicit")
     if document.get("passed") is not True:
         raise LaunchValidationError("secret canary verdict did not pass")
@@ -1050,6 +1172,12 @@ class ProcessInspector:
     """OS process identity source, injectable in model-free tests."""
 
     def boot_session_id(self) -> str:
+        if platform.system() == "Linux":
+            from control_plane.linux_process_identity import LinuxProcessIdentityError, read_linux_boot_id
+            try:
+                return read_linux_boot_id()
+            except LinuxProcessIdentityError as exc:
+                raise ProcessIdentityError("cannot qualify Linux boot identity") from exc
         if platform.system() == "Darwin":
             result = _run_checked(["/usr/sbin/sysctl", "-n", "kern.bootsessionuuid"])
             if result.returncode == 0 and result.stdout.strip():
@@ -1059,6 +1187,12 @@ class ProcessInspector:
         return f"adapter-{os.getpid()}"
 
     def inspect(self, pid: int) -> ProcessIdentity:
+        if platform.system() == "Linux":
+            from control_plane.linux_process_identity import LinuxProcessIdentityError, inspect_linux_process
+            try:
+                return ProcessIdentity(**inspect_linux_process(pid))
+            except LinuxProcessIdentityError as exc:
+                raise ProcessIdentityError("cannot qualify Linux process identity") from exc
         if platform.system() == "Darwin":
             libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
             proc_pidinfo = libproc.proc_pidinfo
@@ -1090,6 +1224,7 @@ class ProcessInspector:
                 effective_gid=int(info.pbi_gid),
                 real_uid=int(info.pbi_ruid),
                 real_gid=int(info.pbi_rgid),
+                parent_pid=int(info.pbi_ppid),
             )
 
         try:
@@ -1395,10 +1530,11 @@ def _git_snapshot(workspace: Path, *, require_clean: bool) -> _GitSnapshot:
         cleanliness = observe_launch_cleanliness(
             lambda arguments: _git_command(workspace, *arguments)
         )
-        # `git status` intentionally respects ignore rules. A per-job clone
-        # must also be free of pre-existing ignored/untracked material, since
-        # ignored runtime files are still a mutation and secret-smuggling
-        # surface.
+        # The tracked-status leg deliberately skips untracked traversal.
+        # The dedicated `ls-files --others` leg then enumerates all untracked
+        # material (including ignored files because no exclude rules are
+        # supplied). A per-job clone must be free of both: ignored runtime
+        # files are still a mutation and secret-smuggling surface.
         if require_clean and cleanliness.dirty:
             raise LaunchValidationError("workspace clone must be clean before launch")
     return _GitSnapshot(head=head.lower(), status=cleanliness.status)
@@ -1433,7 +1569,7 @@ def _validate_project_configuration(workspace: Path) -> None:
         raise LaunchValidationError("workspace .codex/config.toml is not immutable enough")
     raw = _read_limited(config_path, _MAX_PROJECT_CONFIG_BYTES)
     actual_hash = hashlib.sha256(raw).hexdigest()
-    if actual_hash != _AUDITED_PROJECT_CONFIG_SHA256:
+    if actual_hash not in _AUDITED_PROJECT_CONFIG_SHA256S:
         raise LaunchValidationError(
             "workspace .codex/config.toml does not match the audited worker-safe hash"
         )
@@ -1791,6 +1927,145 @@ async def _pump_stream(
             os.close(fd)
 
 
+async def _tail_durable_stream(
+    path: Path,
+    *,
+    fd: int,
+    name: str,
+    maximum: int,
+    line_maximum: int | None,
+    parser: _JSONLState | None,
+    state: _RunState,
+) -> None:
+    """Observe a child-written regular file while retaining one owned descriptor."""
+
+    total = 0
+    line_buffer = bytearray()
+    accepting = True
+    try:
+        with path.open("rb", buffering=0) as reader:
+            while True:
+                chunk = reader.read(64 * 1024)
+                if not chunk:
+                    if state.process_wait_task.done():
+                        break
+                    await asyncio.sleep(0.01)
+                    continue
+                total += len(chunk)
+                if accepting and total > maximum:
+                    accepting = False
+                    state.stream_errors.append(
+                        f"{name} exceeded {maximum} bytes"
+                    )
+                    state.violation.set()
+                if parser is None or not accepting:
+                    continue
+                line_buffer.extend(chunk)
+                while True:
+                    newline = line_buffer.find(b"\n")
+                    if newline < 0:
+                        break
+                    line = bytes(line_buffer[:newline])
+                    del line_buffer[: newline + 1]
+                    if line_maximum is not None and len(line) > line_maximum:
+                        state.stream_errors.append(
+                            f"{name} JSONL line exceeded {line_maximum} bytes"
+                        )
+                        state.violation.set()
+                    else:
+                        parser.consume(line)
+                if line_maximum is not None and len(line_buffer) > line_maximum:
+                    state.stream_errors.append(
+                        f"{name} JSONL line exceeded {line_maximum} bytes"
+                    )
+                    state.violation.set()
+                    accepting = False
+        if parser is not None and accepting and line_buffer:
+            if line_maximum is not None and len(line_buffer) > line_maximum:
+                state.stream_errors.append(
+                    f"{name} JSONL line exceeded {line_maximum} bytes"
+                )
+                state.violation.set()
+            else:
+                parser.consume(bytes(line_buffer))
+    except Exception as exc:  # noqa: BLE001 - invalid-result evidence
+        state.stream_errors.append(
+            f"{name} durable stream failure: {type(exc).__name__}: {exc}"
+        )
+        state.violation.set()
+    finally:
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+
+def _bound_durable_log(path: Path, *, maximum: int, name: str) -> bool:
+    """Restore the bounded-log contract after direct child writes."""
+
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise ResultValidationError(f"durable {name} is unavailable") from exc
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or stat.S_IMODE(info.st_mode) & 0o077
+    ):
+        raise ResultValidationError(
+            f"durable {name} is not a private single-link regular file"
+        )
+    if info.st_size <= maximum:
+        return False
+    flags = (
+        os.O_RDWR
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    descriptor = os.open(path, flags)
+    try:
+        observed = os.fstat(descriptor)
+        if (observed.st_dev, observed.st_ino) != (info.st_dev, info.st_ino):
+            raise ResultValidationError(f"durable {name} identity changed")
+        os.ftruncate(descriptor, maximum)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return True
+
+
+def _replay_durable_jsonl(path: Path) -> _JSONLState:
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise ResultValidationError("durable stdout is unavailable") from exc
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or stat.S_IMODE(info.st_mode) & 0o077
+        or info.st_size > _MAX_STDOUT_BYTES
+    ):
+        raise ResultValidationError(
+            "durable stdout is not a private bounded regular file"
+        )
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ResultValidationError("durable stdout is unavailable") from exc
+    if len(raw) != info.st_size:
+        raise ResultValidationError("durable stdout changed while reading")
+    parser = _JSONLState()
+    for line in raw.splitlines():
+        if len(line) > _MAX_JSONL_LINE_BYTES:
+            raise ResultValidationError(
+                f"stdout JSONL line exceeded {_MAX_JSONL_LINE_BYTES} bytes"
+            )
+        parser.consume(line)
+    return parser
+
+
 def _process_group_exists(pgid: int) -> bool:
     try:
         os.killpg(pgid, 0)
@@ -1823,7 +2098,16 @@ def _signal_process_group_once(
 
 async def _wait_for_process_group_exit(pgid: int, *, timeout: float = 2.0) -> bool:
     deadline = asyncio.get_running_loop().time() + timeout
-    while _process_group_exists(pgid):
+    while True:
+        try:
+            exists = _process_group_exists(pgid)
+        except ProcessIdentityError:
+            if asyncio.get_running_loop().time() >= deadline:
+                raise
+            await asyncio.sleep(0.02)
+            continue
+        if not exists:
+            return True
         if asyncio.get_running_loop().time() >= deadline:
             return False
         await asyncio.sleep(0.02)
@@ -2244,6 +2528,7 @@ class CodexWorkerAdapter:
         inspector: ProcessInspector | None = None,
         provider_realm: Any | None = None,
         provider_credential_loader: Any | None = None,
+        subscription_realm_owner: Any | None = None,
     ) -> None:
         path = Path(binary_path)
         if not path.is_absolute():
@@ -2271,8 +2556,16 @@ class CodexWorkerAdapter:
             raise ProviderRealmError(
                 "provider realm and credential loader must be configured together"
             )
+        self.subscription_realm_owner = subscription_realm_owner
+        if subscription_realm_owner is not None:
+            from control_plane.codex_provider_realm import SubscriptionRealmOwner
+
+            if not isinstance(subscription_realm_owner, SubscriptionRealmOwner):
+                raise LaunchValidationError(
+                    "subscription_realm_owner must be a SubscriptionRealmOwner"
+                )
         self.inspector = inspector or ProcessInspector()
-        self._runs: dict[str, _RunState] = {}
+        self._runs: dict[str, _RunStateLike] = {}
         _CONSTRUCTED_CODEX_ADAPTERS.add(self)
 
     @property
@@ -2292,6 +2585,79 @@ class CodexWorkerAdapter:
         if self.provider_realm is None or self.provider_realm.requires_codex_auth_file:
             return _validate_codex_home(self.codex_home)
         return self._validated_codex_home_directory()
+
+    def _verify_subscription_canary(self, spec: LaunchSpec, admission: Any) -> None:
+        """Re-validate the typed broker admission at the pre-credential edge.
+
+        When the adapter was constructed with a ``subscription_realm_owner``,
+        every ``start`` must carry the typed broker admission produced by
+        ``seal_broker_subscription_canary_admission``. Raw observation dicts
+        are refused; only the typed admission reaches this seam, and it must
+        re-prove identity, freshness, binding, realm and exact launch bytes
+        immediately before any provider credential or subprocess is touched.
+        """
+
+        if admission is None:
+            raise LaunchValidationError(
+                "typed subscription canary admission is required"
+            )
+        from control_plane.subscription_canary_admission import (
+            verify_broker_subscription_canary_admission,
+        )
+
+        try:
+            verify_broker_subscription_canary_admission(admission, spec=spec)
+        except Exception as exc:
+            raise LaunchValidationError(
+                "subscription canary admission was refused: "
+                f"{type(exc).__name__}"
+            ) from exc
+
+    def _refuse_subscription_for_plain_start(self, spec: LaunchSpec) -> None:
+        """Reject subscription traffic and hold commercial plain START.
+
+        ProviderRealm *transport* review cannot grant autonomous START. An
+        owner-bound Executive claim, registered Worker and issuer-attested
+        Capacity are separately required; no such live authorization is
+        installed by this source-only release. Never use transport membership
+        as a substitute for those owner facts.
+        """
+        if self.provider_realm is not None:
+            from control_plane.codex_provider_realm import BYTEPLUS_MODELARK_COMMERCIAL
+            if self.provider_realm is BYTEPLUS_MODELARK_COMMERCIAL:
+                raise LaunchValidationError(
+                    "commercial ModelArk autonomous START is not owner-authorized"
+                )
+        if (
+            self.provider_realm is not None
+            or self.subscription_realm_owner is not None
+            or spec.subscription_canary_claim
+        ):
+            raise LaunchValidationError(
+                "interactive subscription launch requires the typed admission seam"
+            )
+
+    async def start_subscription_canary(
+        self,
+        spec: LaunchSpec,
+        admission: Any,
+    ) -> ProcessRef:
+        """Start one peer-authenticated interactive subscription launch."""
+
+        if self.subscription_realm_owner is None:
+            raise LaunchValidationError(
+                "interactive subscription launch is not configured"
+            )
+        if not spec.subscription_canary_claim:
+            raise LaunchValidationError("subscription canary claim is required")
+        if admission is None:
+            raise LaunchValidationError(
+                "typed subscription canary admission is required"
+            )
+        return await self._start(
+            spec,
+            subscription_canary_admission=admission,
+        )
 
     def _bind_legacy_codex_home(self, _codex_home: str | os.PathLike[str]) -> None:
         """Reject every attempt to inject a second provider-home authority."""
@@ -3352,6 +3718,21 @@ class CodexWorkerAdapter:
         )
 
     async def start(self, spec: LaunchSpec) -> ProcessRef:
+        self._refuse_subscription_for_plain_start(spec)
+        return await self._start(spec)
+
+    async def _start(
+        self,
+        spec: LaunchSpec,
+        *,
+        subscription_canary_admission: Any | None = None,
+    ) -> ProcessRef:
+        if bool(spec.subscription_canary_claim) != (
+            subscription_canary_admission is not None
+        ):
+            raise LaunchValidationError(
+                "subscription canary claim and typed admission must be supplied together"
+            )
         codex_home = self._validated_codex_home()
         workspace, run_dir, home, tmp, baseline, _schema = self._validate_spec(
             spec,
@@ -3384,12 +3765,17 @@ class CodexWorkerAdapter:
                 tmp,
                 codex_home,
             )
+            if subscription_canary_admission is not None:
+                self._verify_subscription_canary(
+                    spec,
+                    subscription_canary_admission,
+                )
             environment = self._environment(spec, home, tmp, codex_home)
             process = await asyncio.create_subprocess_exec(
                 *argv,
                 stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stdout=stdout_fd,
+                stderr=stderr_fd,
                 cwd=str(workspace),
                 env=environment,
                 start_new_session=True,
@@ -3399,10 +3785,10 @@ class CodexWorkerAdapter:
             os.close(stdout_fd)
             os.close(stderr_fd)
             raise
-        if process.stdin is None or process.stdout is None or process.stderr is None:
+        if process.stdin is None:
             await _raise_after_unpublished_process_failure(
                 process,
-                CodexWorkerError("Codex process pipes were not created"),
+                CodexWorkerError("Codex process stdin pipe was not created"),
                 owned_fds=(stdout_fd, stderr_fd),
                 label="unpublished Codex launch",
             )
@@ -3485,6 +3871,7 @@ class CodexWorkerAdapter:
                 binary=self.binary,
                 rendered_argv=_redact_argv(argv),
                 environment_keys=tuple(sorted(environment)),
+                isolation_manifest_sha256=spec.isolation_manifest_sha256,
                 permission_profile_sha256=_canonical_sha256(permission_profile),
                 prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8")).hexdigest(),
                 expected_base_sha=spec.expected_base_sha,
@@ -3514,6 +3901,21 @@ class CodexWorkerAdapter:
                     "real_uid": ref.real_uid,
                     "real_gid": ref.real_gid,
                 },
+                subscription_canary_observation_digest=(
+                    subscription_canary_admission.observation_digest
+                    if subscription_canary_admission is not None
+                    else None
+                ),
+                subscription_canary_binding_id=(
+                    subscription_canary_admission.binding_id
+                    if subscription_canary_admission is not None
+                    else None
+                ),
+                subscription_canary_model=(
+                    subscription_canary_admission.model
+                    if subscription_canary_admission is not None
+                    else None
+                ),
             )
             parser = _JSONLState()
             process_wait_task = asyncio.create_task(process.wait())
@@ -3540,8 +3942,8 @@ class CodexWorkerAdapter:
                 label="unpublished Codex launch",
             )
         self._runs[spec.run_id] = state
-        state.stdout_task = asyncio.create_task(_pump_stream(
-            process.stdout,
+        state.stdout_task = asyncio.create_task(_tail_durable_stream(
+            stdout_path,
             fd=stdout_fd,
             name="stdout",
             maximum=_MAX_STDOUT_BYTES,
@@ -3549,8 +3951,8 @@ class CodexWorkerAdapter:
             parser=parser,
             state=state,
         ))
-        state.stderr_task = asyncio.create_task(_pump_stream(
-            process.stderr,
+        state.stderr_task = asyncio.create_task(_tail_durable_stream(
+            stderr_path,
             fd=stderr_fd,
             name="stderr",
             maximum=_MAX_STDERR_BYTES,
@@ -3569,12 +3971,522 @@ class CodexWorkerAdapter:
         state.monitor_task = asyncio.create_task(self._monitor(state))
         return ref
 
+    @staticmethod
+    def _group_presence_for_recovery(pgid: int) -> _RecoveredPresence:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return _RecoveredPresence.ABSENT
+        except (PermissionError, OSError):
+            return _RecoveredPresence.UNKNOWN
+        return _RecoveredPresence.LIVE
+
+    def _snapshot_recovered_group_identity(
+        self, ref: ProcessRef
+    ) -> tuple[_RecoveredPresence, dict[int, str]]:
+        """Observe one process-group generation with exact member identities.
+
+        PGIDs are reusable after a group disappears.  A leaderless group is
+        therefore signal-authoritative only when at least one exact member can
+        be chained to a prior trusted snapshot from this recovered execution.
+        """
+
+        try:
+            boot = self.inspector.boot_session_id()
+        except Exception:
+            return _RecoveredPresence.UNKNOWN, {}
+        if boot != ref.boot_session_id:
+            return _RecoveredPresence.BOOT_CHANGED, {}
+        try:
+            result = _run_checked(
+                ["/bin/ps", "-axo", "pid=,pgid="],
+                timeout=2.0,
+            )
+        except Exception:
+            return _RecoveredPresence.UNKNOWN, {}
+        if result.returncode != 0 or not result.stdout.strip():
+            return _RecoveredPresence.UNKNOWN, {}
+
+        members: list[int] = []
+        for raw in result.stdout.splitlines():
+            fields = raw.split()
+            if len(fields) != 2:
+                return _RecoveredPresence.UNKNOWN, {}
+            try:
+                pid, pgid = (int(value) for value in fields)
+            except ValueError:
+                return _RecoveredPresence.UNKNOWN, {}
+            if pgid == ref.pgid:
+                if pid <= 1:
+                    return _RecoveredPresence.UNKNOWN, {}
+                members.append(pid)
+        if len(members) > 1024:
+            return _RecoveredPresence.UNKNOWN, {}
+        if not members:
+            group = self._group_presence_for_recovery(ref.pgid)
+            return (
+                (
+                    _RecoveredPresence.ABSENT
+                    if group is _RecoveredPresence.ABSENT
+                    else _RecoveredPresence.UNKNOWN
+                ),
+                {},
+            )
+
+        expected = {
+            "pgid": ref.pgid,
+            "session_id": ref.session_id,
+            "effective_uid": ref.effective_uid,
+            "effective_gid": ref.effective_gid,
+            "real_uid": ref.real_uid,
+            "real_gid": ref.real_gid,
+        }
+        if any(value is None for value in expected.values()):
+            return _RecoveredPresence.UNKNOWN, {}
+
+        identities: dict[int, str] = {}
+        leader_present = False
+        for pid in members:
+            try:
+                observed = self.inspector.inspect(pid)
+            except Exception:
+                return _RecoveredPresence.UNKNOWN, {}
+            if any(
+                getattr(observed, name, None) != value
+                for name, value in expected.items()
+            ):
+                return _RecoveredPresence.IDENTITY_CHANGED, {}
+            start_identity = getattr(observed, "start_identity", None)
+            if not isinstance(start_identity, str) or not start_identity:
+                return _RecoveredPresence.UNKNOWN, {}
+            if pid == ref.pid:
+                leader_present = True
+                if start_identity != ref.process_start_identity:
+                    return _RecoveredPresence.IDENTITY_CHANGED, {}
+            identities[pid] = start_identity
+
+        group = self._group_presence_for_recovery(ref.pgid)
+        if group is _RecoveredPresence.ABSENT:
+            return _RecoveredPresence.ABSENT, {}
+        if group is not _RecoveredPresence.LIVE:
+            return _RecoveredPresence.UNKNOWN, {}
+        return (
+            _RecoveredPresence.LIVE
+            if leader_present
+            else _RecoveredPresence.RESIDUAL_GROUP,
+            identities,
+        )
+
+    def _observe_recovered_group(self, ref: ProcessRef) -> _RecoveredPresence:
+        """Classify a leaderless group without granting signal authority."""
+
+        presence, _identities = self._snapshot_recovered_group_identity(ref)
+        # The caller reached this path only after the durable leader was
+        # observed absent. Seeing that exact leader again is contradictory.
+        if presence is _RecoveredPresence.LIVE:
+            return _RecoveredPresence.UNKNOWN
+        return presence
+
+    def _verify_recovered_residual_continuity(
+        self, state: _RecoveredRunState
+    ) -> _RecoveredPresence:
+        """Bind a leaderless group to a previously witnessed exact member."""
+
+        presence, current = self._snapshot_recovered_group_identity(state.ref)
+        if presence is not _RecoveredPresence.RESIDUAL_GROUP:
+            return (
+                _RecoveredPresence.IDENTITY_CHANGED
+                if presence is _RecoveredPresence.LIVE
+                else presence
+            )
+        prior = state.group_member_identities
+        if not prior or not any(
+            prior.get(pid) == start_identity
+            for pid, start_identity in current.items()
+        ):
+            return _RecoveredPresence.IDENTITY_CHANGED
+        state.group_member_identities = current
+        return _RecoveredPresence.RESIDUAL_GROUP
+
+    def _observe_recovered_ref(self, ref: ProcessRef) -> _RecoveredPresence:
+        try:
+            boot = self.inspector.boot_session_id()
+        except Exception:
+            return _RecoveredPresence.UNKNOWN
+        if boot != ref.boot_session_id:
+            return _RecoveredPresence.BOOT_CHANGED
+        try:
+            observed = self.inspector.inspect(ref.pid)
+        except ProcessIdentityError:
+            try:
+                os.kill(ref.pid, 0)
+            except ProcessLookupError:
+                return self._observe_recovered_group(ref)
+            except (PermissionError, OSError):
+                return _RecoveredPresence.UNKNOWN
+            return _RecoveredPresence.UNKNOWN
+        except Exception:
+            return _RecoveredPresence.UNKNOWN
+        expected = {
+            "start_identity": ref.process_start_identity,
+            "pgid": ref.pgid,
+            "session_id": ref.session_id,
+            "effective_uid": ref.effective_uid,
+            "effective_gid": ref.effective_gid,
+            "real_uid": ref.real_uid,
+            "real_gid": ref.real_gid,
+        }
+        if any(
+            value is None or getattr(observed, name, None) != value
+            for name, value in expected.items()
+        ):
+            return _RecoveredPresence.IDENTITY_CHANGED
+        group = self._group_presence_for_recovery(ref.pgid)
+        if group is _RecoveredPresence.ABSENT:
+            # The exact leader may have exited after its identity was read.
+            # Require independent leader absence as well: a live/reused PID
+            # or a refused observation must not become a cleanup receipt.
+            try:
+                os.kill(ref.pid, 0)
+            except ProcessLookupError:
+                return _RecoveredPresence.ABSENT
+            except (PermissionError, OSError):
+                return _RecoveredPresence.UNKNOWN
+            return _RecoveredPresence.UNKNOWN
+        if group is not _RecoveredPresence.LIVE:
+            return _RecoveredPresence.UNKNOWN
+        return _RecoveredPresence.LIVE
+
+    @staticmethod
+    def _recovery_presence_error(
+        presence: _RecoveredPresence,
+    ) -> ProcessIdentityError:
+        messages = {
+            _RecoveredPresence.RESIDUAL_GROUP: (
+                "recovered worker leader is absent while its process group remains live"
+            ),
+            _RecoveredPresence.IDENTITY_CHANGED: (
+                "recovered worker process identity changed"
+            ),
+            _RecoveredPresence.BOOT_CHANGED: (
+                "recovered worker boot identity changed"
+            ),
+            _RecoveredPresence.UNKNOWN: (
+                "recovered worker process identity is unreadable or contradictory"
+            ),
+        }
+        return ProcessIdentityError(
+            messages.get(presence, "recovered worker identity is invalid")
+        )
+
+    def reattach(
+        self, spec: LaunchSpec, binding: WorkerRecoveryBinding
+    ) -> ProcessRef:
+        if binding.adapter_id != self.adapter_id:
+            raise ProcessIdentityError(
+                "recovery binding adapter identity changed"
+            )
+        try:
+            recovered_spec = binding.recover_launch_spec(type(spec))
+        except WorkerRecoveryContractError as exc:
+            raise ProcessIdentityError(str(exc)) from exc
+        if (
+            recovered_spec != spec
+            or worker_launch_spec_sha256(spec) != binding.launch_spec_sha256
+        ):
+            raise ProcessIdentityError(
+                "recovery launch specification changed"
+            )
+        ref = binding.process_ref
+        expected_paths = (
+            Path(spec.run_dir) / "logs" / "stdout.jsonl",
+            Path(spec.run_dir) / "logs" / "stderr.log",
+            Path(spec.run_dir) / "output" / "result.json",
+        )
+        observed_paths = tuple(
+            Path(value)
+            for value in (ref.stdout_path, ref.stderr_path, ref.result_path)
+        )
+        if tuple(path.resolve(strict=False) for path in observed_paths) != tuple(
+            path.resolve(strict=False) for path in expected_paths
+        ):
+            raise ProcessIdentityError("recovery result coordinates changed")
+        if ref.binary != self.binary or (
+            spec.expected_base_sha is not None
+            and ref.base_sha != spec.expected_base_sha
+        ):
+            raise ProcessIdentityError(
+                "recovery binary or base identity changed"
+            )
+        existing = self._runs.get(ref.run_id)
+        if existing is not None:
+            if (
+                isinstance(existing, _RecoveredRunState)
+                and existing.ref == ref
+                and existing.spec == spec
+            ):
+                return ref
+            raise ProcessIdentityError(
+                "run is already bound to another execution"
+            )
+        presence = self._observe_recovered_ref(ref)
+        group_member_identities: dict[int, str] = {}
+        if presence is _RecoveredPresence.LIVE:
+            anchored_presence, group_member_identities = (
+                self._snapshot_recovered_group_identity(ref)
+            )
+            if anchored_presence is _RecoveredPresence.ABSENT:
+                presence = _RecoveredPresence.ABSENT
+                group_member_identities = {}
+            elif anchored_presence is not _RecoveredPresence.LIVE:
+                raise self._recovery_presence_error(anchored_presence)
+        if presence not in {
+            _RecoveredPresence.LIVE,
+            _RecoveredPresence.ABSENT,
+        }:
+            raise self._recovery_presence_error(presence)
+        self._runs[ref.run_id] = _RecoveredRunState(
+            spec=spec,
+            ref=ref,
+            parser=_JSONLState(),
+            baseline=_GitSnapshot(ref.base_sha, b""),
+            group_member_identities=group_member_identities,
+        )
+        return ref
+
+    async def _monitor_recovered(self, state: _RecoveredRunState) -> None:
+        try:
+            started = datetime.fromisoformat(
+                state.ref.started_at.replace("Z", "+00:00")
+            )
+            if started.tzinfo is None:
+                raise ValueError("missing timezone")
+        except ValueError as exc:
+            raise ProcessIdentityError(
+                "recovered worker start timestamp is invalid"
+            ) from exc
+        elapsed = max(
+            0.0,
+            (
+                datetime.now(timezone.utc)
+                - started.astimezone(timezone.utc)
+            ).total_seconds(),
+        )
+        deadline = asyncio.get_running_loop().time() + max(
+            0.0, float(state.spec.timeout_seconds) - elapsed
+        )
+        while True:
+            presence = self._observe_recovered_ref(state.ref)
+            if presence is _RecoveredPresence.ABSENT:
+                state.finished_at = state.finished_at or _utc_now()
+                return
+            if presence is not _RecoveredPresence.LIVE:
+                raise self._recovery_presence_error(presence)
+            if asyncio.get_running_loop().time() >= deadline:
+                state.timed_out = True
+                await self._terminate_recovered(state)
+                state.finished_at = state.finished_at or _utc_now()
+                return
+            await asyncio.sleep(0.05)
+
+    def _ensure_recovered_monitor(
+        self, state: _RecoveredRunState
+    ) -> asyncio.Task[None]:
+        if state.monitor_task is None:
+            state.monitor_task = asyncio.create_task(
+                self._monitor_recovered(state)
+            )
+        return state.monitor_task
+
+    async def _wait_recovered_absence(
+        self, state: _RecoveredRunState, *, timeout: float
+    ) -> _RecoveredPresence:
+        deadline = asyncio.get_running_loop().time() + max(0.0, timeout)
+        while True:
+            presence = self._observe_recovered_ref(state.ref)
+            if presence not in {
+                _RecoveredPresence.LIVE,
+                _RecoveredPresence.RESIDUAL_GROUP,
+            }:
+                return presence
+            if asyncio.get_running_loop().time() >= deadline:
+                return presence
+            await asyncio.sleep(0.02)
+
+    @staticmethod
+    def _signal_recovered_group(
+        state: _RecoveredRunState, value: signal.Signals
+    ) -> bool:
+        try:
+            os.killpg(state.ref.pgid, value)
+        except ProcessLookupError:
+            return False
+        except OSError as exc:
+            state.signal_error = ProcessIdentityError(
+                f"recovered worker signal failed: {type(exc).__name__}"
+            )
+            raise state.signal_error from exc
+        return True
+
+    async def _terminate_recovered(
+        self, state: _RecoveredRunState
+    ) -> tuple[bool, bool, bool]:
+        async with state.termination_lock:
+            if state.signal_error is not None:
+                # A refused signal is a terminal local uncertainty for this
+                # exact cancellation transaction. Re-entry must not signal
+                # the same PGID again.
+                raise state.signal_error
+            presence = self._observe_recovered_ref(state.ref)
+            if presence is _RecoveredPresence.RESIDUAL_GROUP:
+                presence = self._verify_recovered_residual_continuity(state)
+            if presence is _RecoveredPresence.ABSENT:
+                return (
+                    state.signal_sent,
+                    state.sigkill_sent,
+                    not state.signal_sent,
+                )
+            if presence not in {
+                _RecoveredPresence.LIVE,
+                _RecoveredPresence.RESIDUAL_GROUP,
+            }:
+                raise self._recovery_presence_error(presence)
+            if not state.signal_sent:
+                if self._signal_recovered_group(state, signal.SIGTERM):
+                    state.signal_sent = True
+                else:
+                    presence = self._observe_recovered_ref(state.ref)
+                    if presence is _RecoveredPresence.ABSENT:
+                        return False, False, True
+                    raise self._recovery_presence_error(presence)
+            presence = await self._wait_recovered_absence(
+                state,
+                timeout=float(state.spec.cancel_grace_seconds),
+            )
+            if presence is _RecoveredPresence.ABSENT:
+                return (
+                    state.signal_sent,
+                    state.sigkill_sent,
+                    not state.signal_sent,
+                )
+            if presence not in {
+                _RecoveredPresence.LIVE,
+                _RecoveredPresence.RESIDUAL_GROUP,
+            }:
+                raise self._recovery_presence_error(presence)
+            if not state.sigkill_sent:
+                # Re-check exact identity immediately before escalation. If the
+                # verified original group has already disappeared, SIGTERM
+                # succeeded and no SIGKILL may be claimed.
+                presence = self._observe_recovered_ref(state.ref)
+                if presence is _RecoveredPresence.RESIDUAL_GROUP:
+                    presence = self._verify_recovered_residual_continuity(state)
+                if presence is _RecoveredPresence.ABSENT:
+                    return (
+                        state.signal_sent,
+                        state.sigkill_sent,
+                        not state.signal_sent,
+                    )
+                if presence not in {
+                    _RecoveredPresence.LIVE,
+                    _RecoveredPresence.RESIDUAL_GROUP,
+                }:
+                    raise self._recovery_presence_error(presence)
+                if (
+                    presence is _RecoveredPresence.RESIDUAL_GROUP
+                    and not state.signal_sent
+                ):
+                    raise self._recovery_presence_error(presence)
+                if self._signal_recovered_group(state, signal.SIGKILL):
+                    state.signal_sent = True
+                    state.sigkill_sent = True
+                    state.escalated = True
+                else:
+                    presence = self._observe_recovered_ref(state.ref)
+                    if presence is _RecoveredPresence.ABSENT:
+                        return (
+                            state.signal_sent,
+                            state.sigkill_sent,
+                            not state.signal_sent,
+                        )
+                    raise self._recovery_presence_error(presence)
+            presence = await self._wait_recovered_absence(
+                state,
+                timeout=_LOCAL_TRANSPORT_FINALIZATION_SECONDS,
+            )
+            if presence is not _RecoveredPresence.ABSENT:
+                if presence is _RecoveredPresence.LIVE:
+                    raise ProcessIdentityError(
+                        "recovered worker process group survived SIGKILL"
+                    )
+                raise self._recovery_presence_error(presence)
+            return state.signal_sent, state.sigkill_sent, False
+
+    async def _cancel_recovered(
+        self, state: _RecoveredRunState, reason: str
+    ) -> CancelReceipt:
+        if state.cancel_receipt is not None:
+            return state.cancel_receipt
+        task = state.cancel_task
+        if task is None:
+            # Cancellation belongs to the recovered run, not to a socket
+            # caller. Freeze the first diagnostic and publish exactly one
+            # owned transaction before any await can admit a second caller.
+            state.cancel_reason = reason[:1000]
+            state.status = WorkerRunStatus.CANCELLING
+
+            async def transaction() -> CancelReceipt:
+                sent, escalated, already_exited = await self._terminate_recovered(
+                    state
+                )
+                await self._ensure_recovered_monitor(state)
+                receipt = CancelReceipt(
+                    run_id=state.ref.run_id,
+                    reason=state.cancel_reason or reason,
+                    signal_sent=sent,
+                    escalated_to_sigkill=escalated,
+                    already_exited=already_exited,
+                    finished_at=state.finished_at or _utc_now(),
+                )
+                state.cancel_receipt = receipt
+                return receipt
+
+            task = asyncio.create_task(transaction())
+            state.cancel_task = task
+        pending: asyncio.CancelledError | None = None
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as exc:
+                pending = pending or exc
+            except BaseException:
+                if not task.done():
+                    raise
+                # Retrieve the exact terminal task below so a later typed
+                # failure cannot replace the caller's original cancellation.
+                break
+        try:
+            receipt = task.result()
+        except BaseException as exc:
+            if pending is not None:
+                pending.add_note(str(exc))
+                raise pending from exc
+            raise
+        if pending is not None:
+            raise pending
+        return receipt
+
     def launch_attestation(self, ref: ProcessRef) -> LaunchAttestation:
         """Return the immutable complete launch receipt for a known invocation."""
 
-        return self._state_for(ref).launch_attestation
+        state = self._state_for(ref)
+        if isinstance(state, _RecoveredRunState):
+            raise ProcessIdentityError(
+                "launch attestation belongs to the durable recovery binding"
+            )
+        return state.launch_attestation
 
-    def _state_for(self, ref: ProcessRef) -> _RunState:
+    def _state_for(self, ref: ProcessRef) -> _RunStateLike:
         state = self._runs.get(ref.run_id)
         if state is None or state.ref != ref:
             raise ProcessIdentityError("unknown or altered ProcessRef")
@@ -3988,6 +4900,18 @@ class CodexWorkerAdapter:
         state = self._state_for(ref)
         if state.receipt is not None:
             return state.receipt.result.status
+        if isinstance(state, _RecoveredRunState):
+            presence = self._observe_recovered_ref(ref)
+            if presence not in {
+                _RecoveredPresence.LIVE,
+                _RecoveredPresence.ABSENT,
+            }:
+                raise self._recovery_presence_error(presence)
+            return (
+                WorkerRunStatus.CANCELLING
+                if state.cancel_reason
+                else WorkerRunStatus.RUNNING
+            )
         if state.monitor_task is not None and state.monitor_task.done():
             # Collection performs the terminal validation; until then a clean
             # process exit is not allowed to masquerade as success.
@@ -3999,6 +4923,8 @@ class CodexWorkerAdapter:
         reason = str(reason).strip()
         if not reason:
             raise LaunchValidationError("cancellation reason is required")
+        if isinstance(state, _RecoveredRunState):
+            return await self._cancel_recovered(state, reason)
         state.cancel_reason = reason[:1000]
         state.status = WorkerRunStatus.CANCELLING
 
@@ -4207,11 +5133,40 @@ class CodexWorkerAdapter:
         state = self._state_for(ref)
         if state.receipt is not None:
             return state.receipt
-        if state.monitor_task is None:
-            raise CodexWorkerError("run monitor was not started")
-        await state.monitor_task
+        if isinstance(state, _RecoveredRunState):
+            await self._ensure_recovered_monitor(state)
+            exit_code = None
+        else:
+            if state.monitor_task is None:
+                raise CodexWorkerError("run monitor was not started")
+            await state.monitor_task
+            exit_code = state.process.returncode
         finished_at = state.finished_at or _utc_now()
-        exit_code = state.process.returncode
+        stdout_path = Path(ref.stdout_path)
+        stderr_path = Path(ref.stderr_path)
+        if _bound_durable_log(
+            stdout_path,
+            maximum=_MAX_STDOUT_BYTES,
+            name="stdout",
+        ):
+            marker = f"stdout exceeded {_MAX_STDOUT_BYTES} bytes"
+            if marker not in state.stream_errors:
+                state.stream_errors.append(marker)
+        if _bound_durable_log(
+            stderr_path,
+            maximum=_MAX_STDERR_BYTES,
+            name="stderr",
+        ):
+            marker = f"stderr exceeded {_MAX_STDERR_BYTES} bytes"
+            if marker not in state.stream_errors:
+                state.stream_errors.append(marker)
+        try:
+            state.parser = _replay_durable_jsonl(stdout_path)
+        except ResultValidationError as exc:
+            state.parser = _JSONLState()
+            message = str(exc)[:3000]
+            if message not in state.stream_errors:
+                state.stream_errors.append(message)
         status_value = WorkerRunStatus.FAILED
         output: dict[str, Any] | None = None
         artifacts: tuple[ArtifactReceipt, ...] = ()
@@ -4220,7 +5175,10 @@ class CodexWorkerAdapter:
         error: str | None = None
         git_after: _GitSnapshot | None = None
         try:
-            if not state.finalization.group_proven_absent:
+            if (
+                isinstance(state, _RunState)
+                and not state.finalization.group_proven_absent
+            ):
                 self._validate_process_ref_after_exit(state)
             if state.cancel_reason:
                 status_value = WorkerRunStatus.CANCELLED
@@ -4231,7 +5189,7 @@ class CodexWorkerAdapter:
             elif state.stream_errors:
                 status_value = WorkerRunStatus.INVALID_RESULT
                 error = "; ".join(state.stream_errors)[:3000]
-            elif exit_code != 0:
+            elif exit_code is not None and exit_code != 0:
                 status_value = WorkerRunStatus.FAILED
                 error = f"Codex exited with status {exit_code}"
             else:
@@ -4289,8 +5247,11 @@ class CodexWorkerAdapter:
                         + "; ".join(details)
                     )
                 if "WRITE_BRANCH" not in _authority_set(state.spec) and (
-                    git_after.status != state.baseline.status
+                    git_after.status != state.baseline.status or changed_paths
                 ):
+                    # Tracked status excludes untracked paths. The independent
+                    # changed-path observation includes ignored files too; an
+                    # artifact allowlist never substitutes for WRITE_BRANCH.
                     raise ResultValidationError("read-only worker changed the workspace")
                 status_value = WorkerRunStatus.SUCCEEDED
         except (CodexWorkerError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -4368,8 +5329,39 @@ __all__ = [
     "ValidationReceipt",
     "WorkerResult",
     "WorkerRunStatus",
+    "WorkerRecoveryBinding",
     "attest_codex_binary",
     "load_codex_attestation_receipt",
     "validate_secret_canary_verdict",
     "validate_json_schema",
 ]
+
+
+def render_worker_sandbox_permission_overrides(
+    spec: LaunchSpec,
+    workspace: Path,
+    run_dir: Path,
+    provider_home: Path,
+) -> list[str]:
+    """Render the existing Codex Seatbelt worker policy without an adapter.
+
+    This is a policy-only reuse seam for provider-neutral native workers.  It
+    deliberately does not run ``CodexWorkerAdapter.__init__`` and therefore
+    creates no Codex/provider lifecycle, provider realm, credential loader, or
+    constructed-adapter identity.  The underlying renderer is unchanged and
+    receives an explicit validated private home, so every method on this path
+    is configuration/stateless policy logic.  If that assumption ever drifts,
+    attribute access fails closed rather than constructing a provider adapter.
+    """
+
+    workspace = Path(workspace).resolve(strict=True)
+    expected_run = Path(spec.run_dir).resolve(strict=True)
+    if Path(run_dir).resolve(strict=True) != expected_run:
+        raise LaunchValidationError("sandbox renderer run directory drifted")
+    home = _validate_codex_home_directory(Path(provider_home))
+    renderer = CodexWorkerAdapter.__new__(CodexWorkerAdapter)
+    return renderer._permission_overrides(
+        spec,
+        workspace,
+        codex_home=home,
+    )

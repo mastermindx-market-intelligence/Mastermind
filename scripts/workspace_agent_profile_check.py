@@ -109,13 +109,22 @@ def run(argv: list[str]) -> dict[str, Any]:
     return {
         "ok": True,
         "schema": "mastermind.workspace_agent_activation_preflight.v1",
-        "activation_binding": validated,
         "activation_digest": activation_binding_digest(
             validated,
             catalog=catalog,
             now_ms=args.now_ms,
             expected_return_subject_digest=args.return_subject_digest,
         ),
+        "activation_receipt": {
+            "profile_id": validated["profile_id"],
+            "profile_revision": validated["profile_revision"],
+            "profile_digest": validated["profile_digest"],
+            "app_bindings": list(validated["app_bindings"]),
+            "economic_envelope_digest": validated["economic_envelope_digest"],
+            "concurrency_limit": validated["concurrency_limit"],
+            "live_source_write_allowed": validated["live_source_write_allowed"],
+            "production_release_allowed": validated["production_release_allowed"],
+        },
         "provider_effect_performed": False,
         "authority_granted": False,
     }

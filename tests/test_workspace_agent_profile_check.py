@@ -83,15 +83,20 @@ class WorkspaceAgentProfileCheckTests(unittest.TestCase):
         self.assertFalse(result["provider_effect_performed"])
         self.assertFalse(result["authority_granted"])
         self.assertRegex(result["activation_digest"], r"^[0-9a-f]{64}$")
-        binding = result["activation_binding"]
-        self.assertEqual(binding["concurrency_limit"], 1)
-        self.assertFalse(binding["live_source_write_allowed"])
-        self.assertFalse(binding["production_release_allowed"])
-        self.assertEqual(binding["return_subject_digest"], RETURN_SUBJECT_DIGEST)
+        receipt = result["activation_receipt"]
+        self.assertEqual(receipt["concurrency_limit"], 1)
+        self.assertFalse(receipt["live_source_write_allowed"])
+        self.assertFalse(receipt["production_release_allowed"])
         self.assertEqual(
-            binding["app_bindings"],
+            receipt["app_bindings"],
             ["mastermind-steward", "mastermind-workspace-agent-return"],
         )
+        rendered = json.dumps(result, sort_keys=True)
+        self.assertNotIn(RETURN_SUBJECT_DIGEST, rendered)
+        self.assertNotIn("AUTH:workspace-canary-20260919", rendered)
+        self.assertNotIn("COST:workspace-seat-observation-20260919", rendered)
+        self.assertNotIn('"economic_envelope"', rendered)
+        self.assertNotIn('"return_subject_digest"', rendered)
 
     def test_expired_or_invalid_input_returns_one_fixed_public_refusal(self):
         with tempfile.TemporaryDirectory() as tmp:
