@@ -223,6 +223,28 @@ def validate_marker(marker, *, text=None):
     return marker
 
 
+def retained_admission_payload(payload):
+    """Keep historical safe inputs, or only the irreversible request fence.
+
+    Called by the original terminal retirement owner. A marker key keeps the
+    admission/request identity even when its contents cannot be interpreted.
+    Full content requires the closed, versioned historical byte/privacy checks;
+    this never consults today's launch, enrollment, configuration, or store.
+    """
+    if type(payload) is not dict or MARKER_KEY not in payload:
+        return {}
+    fence = {MARKER_KEY: None}
+    if set(payload) != {"text", "finite", MARKER_KEY} or payload["finite"] is not True:
+        return fence
+    try:
+        value = _detach(payload, maximum=MAX_MARKER_BYTES + MAX_INPUT_BYTES + 1024)
+        _bytes(value["text"], MAX_INPUT_BYTES)
+        validate_marker(value[MARKER_KEY], text=value["text"])
+    except RuntimeRefusal:
+        return fence
+    return value
+
+
 def authority_source_sha(launch, vendor):
     """Select the changed authority source only through its exact held receipt."""
     from ops.executive_os.native_gateway_sources import (

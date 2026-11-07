@@ -60,6 +60,7 @@ _DIGEST_FIELD_BY_SCHEMA = {
     contracts.CONFIGURATION_SCHEMA: "configuration_digest",
     contracts.EXPERIMENT_SCHEMA: "experiment_digest",
     contracts.RUN_SCHEMA: "run_digest",
+    contracts.RUN_SCHEMA_V2: "run_digest",
     scoring.SCORER_PASS_SCHEMA: "scorer_pass_digest",
     scoring.EVIDENCE_REF_SCHEMA: "evidence_ref_digest",
     # EVAL-S1 (operation mastermind-agent-evaluation-s1-scorers-20260901-
@@ -147,7 +148,7 @@ def _artifact_path_for(document: dict) -> tuple[str, Path]:
         return document["configuration_id"], configuration_path(document["configuration_id"])
     if schema == contracts.EXPERIMENT_SCHEMA:
         return document["experiment_id"], experiment_path(document["experiment_id"])
-    if schema == contracts.RUN_SCHEMA:
+    if schema in contracts.RUN_SCHEMAS:
         return document["run_id"], run_path(document["run_id"])
     if schema == scoring.SCORER_PASS_SCHEMA:
         return document["scorer_pass_id"], scorer_pass_path(document["scorer_pass_id"])
@@ -166,7 +167,7 @@ def _graph_verify_for(document: dict, resolver) -> VerificationResult:
         return verify_configuration_graph(document, resolver)
     if schema == contracts.EXPERIMENT_SCHEMA:
         return verify_experiment_graph(document, resolver)
-    if schema == contracts.RUN_SCHEMA:
+    if schema in contracts.RUN_SCHEMAS:
         return verify_run_graph(document, resolver)
     if schema == scoring.SCORER_PASS_SCHEMA:
         return verify_scorer_pass_graph(document, resolver)
@@ -513,7 +514,7 @@ class ArtifactStore:
     def create(self, document: dict) -> WriteResult:
         if not isinstance(document, dict):
             raise ContractError([ContractDefect("$", "NOT_A_DOCUMENT", "document must be a JSON object")])
-        if document.get("schema") == contracts.RUN_DRAFT_SCHEMA:
+        if document.get("schema") in contracts.RUN_DRAFT_SCHEMAS:
             raise ContractError(
                 [ContractDefect("$.schema", "DRAFT_SCHEMA_REJECTED", "a draft is never publishable to the artifact store")]
             )

@@ -83,6 +83,17 @@ This guarantee depends on intact original profile storage and the qualified
 maintenance source. Erasing/restoring that database is the existing disaster
 recovery boundary, not an inferred empty-run state.
 
+The terminal retirement transition first retains the original closed, safe EVAL
+payload. A malformed or unknown marker retains only a sentinel and the original
+identity/digest, so its content cannot be published and its request cannot be
+re-admitted. Ordinary input/history is still cleared. Tests exercise actual
+retirement, transcript compaction, expiry, and refusal of a second admission.
+
+Incomplete observation accounting uses the existing evaluator's explicit
+[run/draft v2 contract](../HERMES_NATIVE_EVAL_RUN_V2.md). This is separate from
+producer qualification: an input marker alone cannot establish observed
+execution or a complete, technically valid run.
+
 ## Actual execution path
 
 The existing observation binding recognizes a marked row before its optional

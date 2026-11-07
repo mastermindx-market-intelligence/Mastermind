@@ -962,7 +962,20 @@
                                             payload=payload, intent=request.intent, _replay_guard=_replay_guard,
 --- a/hermes_state_mutation_retirement.py
 +++ b/hermes_state_mutation_retirement.py
-@@ -426,6 +426,12 @@
+@@ -109,8 +109,10 @@
+             row = dict(raw)
+             from hermes_state_media import retire_media
+             retire_media(conn, json.loads(row['payload_json']), row['request_id'])
+-            # Keep the digest for exact retries, not another copy of user input/history.
+-            row['payload_json'] = '{}'
++            # Ordinary input/history expires unchanged. Selected PUBLIC_SAFE EVAL
++            # input retains its original binding; malformed markers keep only a fence.
++            from integrations.hermes_runtime.native_eval_inputs import retained_admission_payload
++            row['payload_json'] = _json(retained_admission_payload(json.loads(row['payload_json'])))
+             row['lineage_json'] = '[]'
+             row['retired_at'] = time.time()
+             _compact_result(conn, row['admission_id'])
+@@ -426,6 +428,12 @@
      for key, raw in conn.execute(f'SELECT key,value FROM state_meta WHERE key GLOB ? AND {_EXPIRED}',
                                   (ADMISSION_PREFIX + '*', cutoff)).fetchall():
          row = json.loads(raw)

@@ -210,7 +210,8 @@ def verify_experiment_graph(document: dict, resolver: ArtifactResolver) -> Verif
 
 
 def collect_run_evidence_refs(document: dict) -> set[str]:
-    refs = {document["evidence"]["output"]["artifact_ref"], document["evidence"]["tool_events"]["artifact_ref"]}
+    refs = {pair["artifact_ref"] for key in ("output", "tool_events")
+            if (pair := document["evidence"][key]) is not None}
     trace = document["evidence"].get("trace")
     if trace:
         refs.add(trace["artifact_ref"])

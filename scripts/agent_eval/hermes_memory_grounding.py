@@ -225,6 +225,8 @@ def build_scorer_pass(
     if SCORER_ID not in policy["required_scorers"] + policy["optional_scorers"]:
         _reject("$.scenario.scoring_policy", "SCORER_NOT_DECLARED")
     expected_ref, input_ref, output_ref = scenario["expected_contract"], scenario["input_fixture"], run["evidence"]["output"]
+    if output_ref is None:
+        _reject("$.run.evidence.output", "RUN_OUTPUT_UNAVAILABLE")
     refs = sorted([dict(expected_ref), dict(input_ref), dict(output_ref)], key=lambda ref: ref["artifact_ref"])
     contracts.v_artifact_list(refs, "$.input_evidence")
     for raw, ref, path in ((expected_bytes, expected_ref, "$.expected"),

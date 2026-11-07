@@ -488,6 +488,7 @@ def admission_db(monkeypatch):
         CREATE TABLE sessions(id TEXT PRIMARY KEY);
         INSERT INTO sessions VALUES('session-a'),('session-b');
         CREATE TABLE state_meta(key TEXT PRIMARY KEY, value TEXT);
+        CREATE TABLE worker_executions(execution_id TEXT PRIMARY KEY, session_id TEXT, status TEXT);
         CREATE TABLE session_admissions(
             seq INTEGER PRIMARY KEY AUTOINCREMENT, admission_id TEXT NOT NULL UNIQUE,
             request_id TEXT NOT NULL, principal_id TEXT NOT NULL, target_session_id TEXT NOT NULL,
@@ -511,19 +512,25 @@ def admission_db(monkeypatch):
     terminal_path = Path(__file__).parent / "fixtures/request_observation/hermes_state_terminal.py.source"
     prefixes = {"ADMISSION_PREFIX": "gateway.terminal_admission.v1.", "RESULT_PREFIX": "gateway.admission.result.v1.",
         "WORKER_PREFIX": "gateway.terminal_worker.v1.", "IDENTITY_PREFIX": "gateway.terminal_identity.v1."}
-    terminal = module(monkeypatch, "hermes_state_terminal", **prefixes)
+    terminal = module(monkeypatch, "hermes_state_terminal", _STORED="_stored", **prefixes)
     vars(terminal).update({"json": json, **{k: core[k] for k in (
         "RuntimeStoreError", "_epoch", "_json", "_row", "_text")}, "admission_fingerprint": fingerprint})
-    compile_selected(terminal_path.read_bytes(), {"identity_key", "terminal_admission", "retry_terminal_admission"},
+    compile_selected(terminal_path.read_bytes(), {"identity_key", "terminal_admission", "retry_terminal_admission",
+                                                 "encode_result", "load_result"},
                      vars(terminal), str(terminal_path))
+    media_calls = []
+    module(monkeypatch, "hermes_state_media", retire_media=lambda conn, payload, request: media_calls.append((payload, request)))
     retirement = module(monkeypatch, "hermes_state_mutation_retirement", RETIRED_PREFIX="gateway.retired.v1.",
         ROUTE_FENCE_PREFIX="gateway.route_fence.v1.", RETRY_HORIZON_S=604800,
         _EXPIRED="json_valid(value) AND json_extract(value, '$.retired_at') < ?", json=json,
-        time=SimpleNamespace(time=lambda: 2000000))
+        time=SimpleNamespace(time=lambda: 2000000), _json=core["_json"], RuntimeStoreError=core["RuntimeStoreError"],
+        _TRANSCRIPT_FIELDS=frozenset({"messages", "last_reasoning", "tools", "_turn_user_row"}))
     patched = qualified_sources()
-    compile_selected(patched["hermes_state_mutation_retirement.py"], {"_reclaim_expired", "prune_retired_tombstones"},
+    compile_selected(patched["hermes_state_mutation_retirement.py"], {"_reclaim_expired", "prune_retired_tombstones",
+        "_compact_result", "retire_terminal_receipts"},
                      vars(retirement), "hermes_state_mutation_retirement.py")
-    yield SimpleNamespace(conn=conn, db=db, core=core, terminal=terminal, retirement=retirement, patched=patched)
+    yield SimpleNamespace(conn=conn, db=db, core=core, terminal=terminal, retirement=retirement,
+                          patched=patched, media_calls=media_calls)
     conn.close()
 
 
@@ -571,6 +578,54 @@ def test_native_pruner_keeps_only_eval_identity_beyond_retry_horizon(trial, admi
     a.retirement.prune_retired_tombstones(a.conn)
     exists = [a.conn.execute("SELECT 1 FROM state_meta WHERE key=?", (key,)).fetchone() is not None for key in keys]
     assert exists == ([True, True, False] if marked else [False, False, False])
+
+
+@pytest.mark.parametrize("kind", ["safe", "ordinary", "malformed", "unsafe"])
+def test_real_terminal_retirement_preserves_safe_input_and_only_fences_uninterpretable_markers(
+        trial, admission_db, monkeypatch, kind):
+    a, value = admission_db, marker(trial)
+    payload = {"text": trial.text, "finite": True}
+    if kind != "ordinary":
+        payload[inputs.MARKER_KEY] = value if kind != "malformed" else "unknown-historical-marker"
+    if kind == "unsafe":
+        payload["extra_user_history"] = "not an admitted evaluation input"
+    row = a.core["admit_session_input"](a.db, epoch=2, principal_id="one", session_id="session-a",
+        request_id=value["input"]["submission_id"], payload=payload)
+    admission_id = row["admission_id"]
+    persisted = dict(a.conn.execute("SELECT * FROM session_admissions WHERE admission_id=?", (admission_id,)).fetchone())
+    a.conn.execute("UPDATE session_admissions SET status='terminal',outcome='completed' WHERE admission_id=?", (admission_id,))
+    result_key = a.terminal.RESULT_PREFIX + admission_id
+    original_result = {"result": {"final_response": "retained answer", "messages": [
+        {"role": "user", "content": "expired transcript"}, {"role": "assistant", "content": "retained answer"}],
+        "last_reasoning": "expired reasoning", "tools": ["expired tool transcript"]}, "usage": {"input_tokens": 3}}
+    a.conn.execute("INSERT INTO state_meta VALUES(?,?)", (result_key, json.dumps(a.terminal.encode_result(original_result))))
+    a.db._execute_write(lambda conn: a.retirement.retire_terminal_receipts(conn, ("session-a",)))
+    assert a.media_calls == [(payload, row["request_id"])]
+    assert a.conn.execute("SELECT COUNT(*) FROM session_admissions").fetchone()[0] == 0
+    admission_key = a.terminal.ADMISSION_PREFIX + admission_id
+    retired = json.loads(a.conn.execute("SELECT value FROM state_meta WHERE key=?", (admission_key,)).fetchone()[0])
+    kept = json.loads(retired["payload_json"])
+    assert kept == (payload if kind == "safe" else {} if kind == "ordinary" else {inputs.MARKER_KEY: None})
+    assert retired["payload_digest"] == persisted["payload_digest"]
+    assert retired["lineage_json"] == "[]"
+    compacted = a.terminal.load_result(a.conn.execute("SELECT value FROM state_meta WHERE key=?", (result_key,)).fetchone()[0])
+    assert compacted["result"] == {"final_response": "retained answer", "messages": []}
+    assert compacted["usage"] == original_result["usage"]
+    # The original native serializer, retirement transition, and horizon
+    # pruning all execute; no preconstructed tombstone can hide input loss.
+    a.retirement.time.time = lambda: 3000000
+    a.db._execute_write(lambda conn: a.retirement.prune_retired_tombstones(conn))
+    identity_key = a.terminal.identity_key("one", "session-a", row["request_id"])
+    remaining = [a.conn.execute("SELECT 1 FROM state_meta WHERE key=?", (key,)).fetchone() is not None
+                 for key in (admission_key, identity_key, result_key)]
+    assert remaining == ([False, False, False] if kind == "ordinary" else [True, True, False])
+    if kind != "ordinary":
+        monkeypatch.setattr(inputs, "private_inputs_payload", lambda *_: copy.deepcopy(value))
+        guard = inputs.private_inputs_admission_guard(None, None, None, None, None)
+        with pytest.raises(RuntimeRefusal, match="ORIGINAL_CARRIER"):
+            a.core["admit_session_input"](a.db, epoch=2, principal_id="two", session_id="session-b",
+                request_id=value["input"]["submission_id"], payload=payload, _authorize_write=guard)
+        assert a.conn.execute("SELECT COUNT(*) FROM session_admissions").fetchone()[0] == 0
 
 
 def test_private_donor_always_composes_the_original_transaction_guard(trial, admission_db, monkeypatch):

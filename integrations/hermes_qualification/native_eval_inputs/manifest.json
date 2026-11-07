@@ -4,11 +4,11 @@
   "qualified_source_commits": [
     "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
   ],
-  "patch_sha256": "750385de0d48588641c6301587627d53a5f124153414f1529d0e80ce5bbdeb59",
+  "patch_sha256": "ef85e2546fb69b735b87f1dc72b492e22fdb20ea20ad6d11db1aceebffa5c17c",
   "license": "MIT",
   "license_file": "UPSTREAM_LICENSE",
   "installed": false,
-  "proof_scope": "Cumulative privacy/OAuth, original native EVAL admission and input-identity retention; output expiry unchanged; no runtime/effect grant",
+  "proof_scope": "Cumulative privacy/OAuth, original native EVAL admission, safe terminal input and request-identity retention; normal output expiry; no runtime/effect grant",
   "files": {
     "agent/agent_init.py": {
       "before_bytes": 126617,
@@ -94,9 +94,9 @@
       "before_bytes": 25909,
       "before_git_blob": "0e3afdb7d3fa450963e86e8fb3bb20edca2a47d0",
       "before_sha256": "bee966ed661abdadf4dec5556e371a17fb06c1ceef58ad51f0e62b847ac0fe73",
-      "after_bytes": 26326,
-      "after_git_blob": "89b750c4b449c4262675b7f097df826f43b7692a",
-      "after_sha256": "7c0b12ab4502411592bc19454a89a8d03730a8a764122fe4266f1d5e706cafe7"
+      "after_bytes": 26566,
+      "after_git_blob": "c85f512500c6438a02c2598c1abb1ed695c3c955",
+      "after_sha256": "12c890e1a2ae4a3b89b01de58c3f5330b87431f48f7672c04cd3b68c7e8e677c"
     }
   }
 }

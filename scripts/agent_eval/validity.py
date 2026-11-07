@@ -53,6 +53,8 @@ REASON_CODES = frozenset(
         "TEMPORAL_CUTOFF_MISMATCH",
         "CORPUS_REVISION_MISMATCH",
         "SOURCE_POLICY_DIGEST_MISMATCH",
+        "REQUIRED_OBSERVATION_UNAVAILABLE",
+        "OBSERVATION_COVERAGE_INCOMPLETE",
     }
 )
 
@@ -81,6 +83,8 @@ _CONFIGURATION_REASONS = frozenset(
         "TEMPORAL_CUTOFF_MISMATCH",
         "CORPUS_REVISION_MISMATCH",
         "SOURCE_POLICY_DIGEST_MISMATCH",
+        "REQUIRED_OBSERVATION_UNAVAILABLE",
+        "OBSERVATION_COVERAGE_INCOMPLETE",
     }
 )
 
@@ -181,15 +185,29 @@ def comparison_binding_reason_codes(run_scenario_ref: dict, configuration_ref: d
 
 def _gather_reason_codes(scenario: dict, configuration: dict, experiment, run_like: dict) -> set[str]:
     reasons: set[str] = set()
+    unavailable: set[str] = set()
+    if run_like["schema"] in {contracts.RUN_DRAFT_SCHEMA_V2, contracts.RUN_SCHEMA_V2}:
+        availability = run_like["observation_availability"]
+        unavailable = {item["path"] for item in availability["unavailable"]}
+        if unavailable:
+            reasons.add("REQUIRED_OBSERVATION_UNAVAILABLE")
+        if any(item["status"] != "COMPLETE" for item in availability["coverage"].values()):
+            reasons.add("OBSERVATION_COVERAGE_INCOMPLETE")
+
+    def mismatch(path, observed, configured):
+        # Unavailable observations are invalid in their own right. They are
+        # not evidence of a measured value that disagreed with configuration.
+        return path not in unavailable and observed != configured
+
     execution = run_like["execution"]
     config_execution = configuration["execution"]
 
-    if execution["model_served"] != config_execution["model_requested"]:
+    if mismatch("execution.model_served", execution["model_served"], config_execution["model_requested"]):
         reasons.add("MODEL_SERVED_MISMATCH")
 
     field_mismatch = False
     for field in ("execution_surface", "execution_surface_version", "provider", "model_requested", "reasoning_effort", "auth_realm_class"):
-        if execution[field] != config_execution[field]:
+        if mismatch("execution." + field, execution[field], config_execution[field]):
             field_mismatch = True
     if run_like["procedure"] != configuration["procedure"]:
         field_mismatch = True
@@ -197,7 +215,8 @@ def _gather_reason_codes(scenario: dict, configuration: dict, experiment, run_li
         field_mismatch = True
     if run_like["context"]["retrieval_configuration"] != configuration["context"]["retrieval_configuration"]:
         field_mismatch = True
-    if run_like["randomness"] != configuration["randomness"]:
+    if any(mismatch("randomness." + key, value, configuration["randomness"][key])
+           for key, value in run_like["randomness"].items()):
         field_mismatch = True
     if run_like["configuration"]["configuration_digest"] != configuration["configuration_digest"]:
         field_mismatch = True
@@ -205,9 +224,9 @@ def _gather_reason_codes(scenario: dict, configuration: dict, experiment, run_li
     config_caps = configuration["capabilities"]
     if run_caps["profile_id"] != config_caps["profile_id"] or run_caps["profile_digest"] != config_caps["profile_digest"]:
         field_mismatch = True
-    if run_caps["sandbox_digest"] != config_caps["sandbox_digest"]:
+    if mismatch("capabilities.sandbox_digest", run_caps["sandbox_digest"], config_caps["sandbox_digest"]):
         field_mismatch = True
-    if run_caps["environment_digest"] != config_caps["environment_digest"]:
+    if mismatch("capabilities.environment_digest", run_caps["environment_digest"], config_caps["environment_digest"]):
         field_mismatch = True
     if contracts.scenario_configuration_defects(scenario, configuration):
         field_mismatch = True
@@ -256,9 +275,9 @@ def _gather_reason_codes(scenario: dict, configuration: dict, experiment, run_li
         reasons.add("RESUME_FORBIDDEN")
 
     expected_network_policy_digest = contracts.compute_scenario_network_policy_digest(scenario)
-    if run_like["capabilities"]["network_policy_digest"] != expected_network_policy_digest:
+    if mismatch("capabilities.network_policy_digest", run_caps["network_policy_digest"], expected_network_policy_digest):
         reasons.add("NETWORK_POLICY_MISMATCH")
-    if run_like["capabilities"]["network_policy_digest"] != configuration["capabilities"]["network_policy_digest"]:
+    if mismatch("capabilities.network_policy_digest", run_caps["network_policy_digest"], config_caps["network_policy_digest"]):
         reasons.add("NETWORK_POLICY_MISMATCH")
 
     allowed_degradations = set(execution_policy["allowed_degradations"])
@@ -369,7 +388,8 @@ def finalize_run_receipt(
     validity = evaluate_validity(scenario, configuration, experiment_or_none, draft)
 
     run_document = {key: value for key, value in draft.items() if key != "schema"}
-    run_document["schema"] = contracts.RUN_SCHEMA
+    run_document["schema"] = (contracts.RUN_SCHEMA_V2 if draft["schema"] == contracts.RUN_DRAFT_SCHEMA_V2
+                              else contracts.RUN_SCHEMA)
     run_document["validity"] = {
         "status": validity["status"],
         "reason_codes": list(validity["reason_codes"]),
