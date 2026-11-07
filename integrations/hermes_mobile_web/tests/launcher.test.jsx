@@ -137,7 +137,11 @@ describe('canonical persistent Bot Chat', () => {
     expect(api.openSession).toHaveBeenCalledExactlyOnceWith('bot-tip', expect.objectContaining({ route: route(), workspaceMode: 'bots', workspaceOwnerKey: 'bot:m2::secretary', forceResume: true }))
     expect(api.newChat).not.toHaveBeenCalled()
   })
-  it.each([[], [{ id: 'other', title: 'Notes' }], [{ id: 'a', title: 'Bot Chat' }, { id: 'b', title: 'Bot Chat' }]])('never creates a replacement on missing or ambiguous canonical history', async rows => {
+  it.each([
+    { label: 'missing', rows: [] },
+    { label: 'wrong title', rows: [{ id: 'other', title: 'Notes' }] },
+    { label: 'ambiguous', rows: [{ id: 'a', title: 'Bot Chat' }, { id: 'b', title: 'Bot Chat' }] }
+  ])('never creates a replacement on $label canonical history', async ({ rows }) => {
     const { api, model } = await prepared()
     api.requestProfile.mockResolvedValue({ sessions: rows })
     await model.openBot()
