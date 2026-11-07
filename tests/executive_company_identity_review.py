@@ -32,16 +32,16 @@ REVIEWED_ANCHORS = {
         "node_type": "AsyncFunctionDef",
         # Existing section-sign/em-dash prose needs an exact full-source pin
         # in addition to the method AST; all three literal lines are ASCII.
-        # Selected-child App-peer admission changes the enclosing ingress AST.
+        # Model READ and selected-child admission coexist in the joined ingress.
         # The original Fabric reply operands and Company listener remain unchanged.
-        "source_sha256": "08c71c0e79126c003db57b3c3bb2c77c20858331451edd7436751dd634e4340d",
-        "ast_sha256": "597fb0de3f70a6e820946f7b64dd5712a38f66aa14d92d4c3a9482e5ee36d10c",
+        "source_sha256": "7e185e31ee5994534eaa311923e63393fb26a4965dcf4a500c9d79a1b5db8e3a",
+        "ast_sha256": "f75ff58f72f493250f5a776e24c4a9d4f2deb4c31f252a8f3612636cfbf31648",
         "sites": (
-            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 58, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 58, "body", 3, "orelse", 0, "body", 2,
               "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 58, "body", 3, "orelse", 0, "body", 2,
               "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
         ),
     },
@@ -68,3 +68,6 @@ REVIEWED_ANCHORS = {
 # catalog branch. Removing that exact insertion reproduces the previous source
 # bytes; the Company method, all three catalog operands and their AST paths are
 # unchanged. The new whole-source/method pins qualify that bounded composition.
+
+# H5 joins protected779fc3be: exact Company listener and Fabric response subtree
+# remain AST-identical; only the composed full-source and ingress pins change.
