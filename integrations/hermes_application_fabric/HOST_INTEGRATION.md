@@ -126,6 +126,16 @@ Before the successor:
   closed remotes as well as the original authfile reload semantics.
 - Build/verify the sealed source release carrying both compatible generations.
 
+The [real binary protocol receipt](qualification/chisel_protocol_receipt.json)
+qualifies Chisel v1.12.0 on a finite unprivileged Linux loopback fixture. Atomic
+authfile replacement refreshes new reverse-client admission and new forward
+channels on an existing authenticated SSH connection. It does **not** revoke an
+already-open reverse listener or an accepted stream. The original client stop
+below is therefore required before ACL replacement; reload alone is insufficient.
+The receipt separately records the existing M2 and Ubuntu1 binary digests and
+upstream source revision. It does not attest a production M2-to-Ubuntu1 session,
+the original server fingerprint, or the root-qualified activation receipt.
+
 Finite sequence:
 1. Stage v2 with --role-aliases and --predecessor-server-receipt. No --credential
    is accepted. The source-selected stage-hermes-v2 slot commits original receipt

@@ -1,5 +1,99 @@
 # Hermes APPLICATION qualification evidence
 
+## Current qualification target: the original APPLICATION owner
+
+S3 incorporated the six-path Hermes client/factory contribution into the original
+Macro #10740 carrier at **70447c5551675794eb3bdc58e1b1d566cb0c86ee**. The four
+non-engine contribution blobs are identical. The client differs only by removal
+of two trailing blank lines; independent AST comparison is identical. Its exact
+SHA256 is now **0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e**.
+The factory retains every Hermes relation and adds the owner's source-selected
+native-purpose policy. All four Hermes transports remain inference-only and
+held. Configuration, AUTO selection and the native wire protocol cannot grant
+native-worker purpose.
+
+The current original-owner successor is Macro #10740 at
+**9eb5cb6b28b510ea9e2bf05ae9040528523339df**. Its client and factory Git blobs
+are identical to70447c; the owner repaired the closed native-test source pin
+and joined its protected source. Qualification entry points now consume this
+exact successor, with native enrollment5fcb76e8274d28f37da6bb06583343c57fcdfc47.
+The current paired-source pin repair was independently reconciled by C4:
+[19-of-19 source receipt](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6704410002).
+
+The adapter's general CI at ae131aca exposed a separate obsolete Brain fixture
+checkout: Macro f0375acf has no _SERVICE_FABRIC_RELATIONS attribute, causing14
+setup errors after the published chat fixture was adopted. This change consumes
+the original APPLICATION owner's published9eb5cb6b checkout pin from Mastermind
+41e86c7a, changing only that existing CI ref line. No test, assertion or permission
+is skipped or loosened. That41e native branch revision changes only CI/E3 proof;
+it does not yet incorporate the Hermes v9 entry or primary runtime source.
+
+Completed ae131aca qualification against70447c passed all six jobs in
+[run42354521542](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42354521542),
+including69 native cases and9 actual native-to-APPLICATION conversations.
+Enrollment5fcb passed319 cases, zero failures/errors/skips, in
+[run42352255353/job128342698501](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352255353/job/128342698501).
+These remain exact prior results; the new paired9eb source gets its own CI.
+
+[Owner incorporation receipt](https://github.com/mastermindx-market-intelligence/macro/pull/10740#issuecomment-6704229101)
+records the preserved E3 source and separate 451-case/one-case results. Current
+Hermes composition must have its own result; preceding results below are not
+rewritten as proof of the updated factory. No installed-runtime test is repeated
+for the client's formatting-only change. Runtime package bytes and the completed
+real Chisel protocol proof remain unchanged.
+
+## Source composition of the completed e623fb16 and 5695de57 proofs
+
+Those qualification entry points pinned Macro #10818 at
+**669f2f185c86c4a2a8e9466deef051c01677ed4a** and native APPLICATION enrollment
+#2186 at **5fcb76e8274d28f37da6bb06583343c57fcdfc47**. Macro preserves the
+published #10740 E3 changes at 3c510817d9543b5b124a1b73277aa115883c7da7 verbatim;
+its six Hermes paths, including the previously tested client/factory, are
+unchanged. The enrollment join adopts S3's complete b955c823767b504853b6d79e44d09fc71cdbdd9c
+cohort and preserves the exact v9 delta in its shared source-identity review.
+No active J source was edited. The exact composed adapter result is recorded
+next; historical results remain tied to their earlier heads.
+
+The eleven-file runtime package remains byte-identical to tested 08b8daf9, with
+held_package_digest **1ae0d8967b7a59c92735271999ef6c79d29a1c28594b7abd59d35da5e98ee38d**.
+This update adds protocol evidence and changes qualification pins and documents.
+It does not publish an installed generation or a live role grant.
+
+During this work the incumbent joined protected master 5199647e into the adapter
+branch at 46aaa9f0a570d3647955cbb5c08ca19598e49df5. This proposal preserves that
+join in full, including its adoption of master's parameterized ModelArk tests.
+The governing INDEX and AGENTS blobs remain unchanged from the verified pin.
+
+## Current composed hosted proof at e623fb16
+
+Adapter **e623fb16dc663be5cebe73431a9e75edf0f644ed**, GitHub merge
+**562d122cb354b79361e7db3924abf7e01c714f7c** into protected
+**5199647e89166d163392905574097b2cfa16ca5b**, passed all six jobs in
+[run 42352701618](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618).
+The runtime package, test source and explicit pins are preserved by this later
+evidence/test-fixture update. [Machine-readable result](qualification/composed_e623_receipt.json).
+
+| Proof | Result | Exact job |
+| --- | --- | --- |
+| Actual pinned native primary/tools/AUTO/exact | 69 passed in 10.761 seconds; Python 3.14.10 | [128344049442](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618/job/128344049442) |
+| Actual native agent, current original factory/client and HTTP/Gateway/Broker | 9 passed in 63.531 seconds | [128344049767](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618/job/128344049767) |
+| Current native host contract | 51 passed in 21.18 seconds | [128344049634](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618/job/128344049634) |
+| Original/successor tunnel lifecycle | 170 passed in 30.37 seconds | [128344049675](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618/job/128344049675) |
+| Offline original client, Python 3.12.16 | 54 passed in 0.473 seconds | [128344049771](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618/job/128344049771) |
+| Offline original client, Python 3.13.18 | 54 passed in 0.516 seconds | [128344049656](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352701618/job/128344049656) |
+
+There were no reported failures, errors or skips. Instrumented native/offline
+paths recorded no ordinary provider SDK constructions or external attempts.
+The full-owner fixture checked exact Macro 669f2f18 and native-owner 5fcb76e8
+source identities. Its external provider, qualification and account inputs
+remain synthetic. These are overlapping suites, not separate production journeys.
+Hermes harness run 42352701585 and runtime run 42352701564 also succeeded.
+
+Macro 669f2f18 independently passed **62 tests in 2.78 seconds**, using its exact
+3c510817 base in [run 42352331675/job 128342932681](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42352331675/job/128342932681).
+These receipts do not assert the general repository CI, installed role or live
+provider/budget outcome.
+
 ## Latest completed adapter and installed-runtime proof
 
 Exact tested adapter source: **08b8daf9b6bdfe717007da1917aa771268011768**.
@@ -36,55 +130,65 @@ verified, the same carrier completed the second attempt with exit 0. Production
 installation and role configuration were not modified. Zero external attempts
 describes the completed tests, not the preceding fixture dependency setup.
 
-Current dependency composition is Macro #10818 at
+The dependency composition tested in that completed run is Macro #10818 at
 **915189b2538c8b952a53e921ba170459cd1eb624**, client SHA256
 **70fb47f5e44cfebbed86709fedc2ae0fa816a96763fc497dc5c55df82f2604f0**;
 the full-owner fixture uses APPLICATION #2175 at
 **d5df6b2ad8b2a49e9c0a98e33f8c7cca14a630a6**. Hosted Hermes remains pinned
 to **1c0cd667746d3395fe9e1b6c74f8f85952486f18**. Macro's natural
 [run 42346514961](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42346514961/job/128325333011)
-passed all 62 cases in 2.43 seconds. This is the current composition; dependency
-tables in the historical sections below describe those earlier runs only.
+passed all 62 cases in 2.43 seconds. The newer composition above retains the
+same client/factory bytes and separately qualifies the changed native owner.
 
 Separate Hermes harness run 42347086848 and runtime run 42347086735 succeeded.
-General repository CI is not claimed green. The inherited Brain chat fixture
-still lacks the dedicated chat service record after its production identity
-split in the currently published owner source. The active S3 composer has now
-included that repair and qualified 46/46 Brain cases in its retained patch;
-[receipt 6703479140](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703479140)
-records the exact source and original staged merge. That patch is not yet a
-published or installed generation. No competing fixture repair is introduced.
+General repository CI is not claimed green. The earlier inherited Brain chat
+fixture lacked its dedicated chat service record after the production identity
+split. The active S3 composer has now published that repair in b955c823 and
+reports 46/46 composed Brain cases;
+[receipt 6703951320](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703951320)
+records its exact source and retained original carrier. It is not an installed
+generation. This proposal now adopts that published seven-line test-only repair
+verbatim: tests/integration/test_fabric_chat_inference_composition.py, Git blob
+524106f247affd2d12068b3bce5c312b4f598c55. The source was verified against
+protected 5199647e: the only change supplies the existing dedicated chat transport
+and mode in fixture setUp. No production Brain code or provider policy changes.
+The new natural general CI remains a separate required result.
 
 ## Current enrollment composition and release-manifest boundary
 
-Enrollment #2186 at **505d3782b3e6d659e90fd7ceef8caee3ab5a8395** joins the
-13 disjoint incumbent APPLICATION changes through d5df6b2 without altering its
-five Hermes-owned implementation/test paths. Its current natural
+Enrollment #2186 now joins the complete S3 b955c823 cohort at
+**5fcb76e8274d28f37da6bb06583343c57fcdfc47**. Its five-path delta retains the
+closed v9 enrollment, tests and workflow. The source-identity review differs
+from b955 only in the exact native_go_entry digest and original 0o700 site moved
+to line 818. Every other owner review byte is retained. The natural
+[run 42352255353](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352255353)
+was started for this joined head; completion is not asserted here.
+
+The earlier partial join at **505d3782b3e6d659e90fd7ceef8caee3ab5a8395** had
 [run 42347901268](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42347901268/job/128329532370)
 tested merge **fa67641c1fc400d1d175693ce4f8356cf2eebfe7** and ended with
 **7 passed, 311 setup errors** in 5.66 seconds. The first error is the original
 builder's refusal: `application carrier cannot relabel a prior or mixed native base`.
-The updated handler/Broker hashes require the incumbent S3 composer's complete
-release manifest/generation. No guard was weakened and no active J-owned file
-was edited. The earlier 318-case enrollment result remains historical evidence,
-not a pass for this newly composed head. The release owner must compose the
-Hermes deltas with its current publisher/J work, not overwrite whole files.
-The same S3 receipt identifies the retained 32-path composition, its exact
-historical publisher corrections and candidate base/APPLICATION/HTTP manifests.
-Those candidates have not yet incorporated this Hermes v9 delta or established
-a current #2186 hosted pass. Consume the resulting canonical owner head and
-qualify the complete joined generation before installation.
+The following protected-base-only join 2b513fed also refused the mixed cohort:
+run 42350233134, job 128336601380, merge 2385b369302eeb22e1c40e88a19707af79a66ac1,
+8 passed and 311 setup errors in 10.87 seconds. Both are retained failures.
+The complete S3 source was then published with its original historical publisher
+corrections and base/APPLICATION/HTTP manifests, enabling the current join.
+No guard was weakened. The earlier 318-case result remains historical evidence,
+not a pass for this new head. Final installed composition remains with S3 and
+the native publisher; the separate J artifact and original unknown effects are
+not activated or replayed by this proposal.
 
 ## Exact scoped-model source join
 
-The current adapter composes the published APPLICATION exact-model v3 contract
+The completed 08b8daf9 adapter proof composes the published APPLICATION exact-model v3 contract
 at Mastermind d5df6b2ad8b2a49e9c0a98e33f8c7cca14a630a6 and the paired Macro
 owner abab96df55f82cb5c26459a6f51b568d73a6a6f8. Macro #10818 preserves its
 Hermes role identities and numeric aliases while composing those owner changes
 at 915189b2538c8b952a53e921ba170459cd1eb624. Its original natural
 [run42346514961](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42346514961/job/128325333011)
 passed all62 cases in2.43seconds, using GitHub merge15676bd into abab96d.
-Current composed client SHA256 is
+The client SHA256, unchanged in the newer Macro join, is
 70fb47f5e44cfebbed86709fedc2ae0fa816a96763fc497dc5c55df82f2604f0.
 
 The new standalone client loopback checks passed12 cases on local Python3.12:
@@ -95,7 +199,7 @@ CI's completed nine-case fixed/AUTO/exact result is recorded above.
 
 The previous source8c49f959b91d892d27f5fc24a8c9322ab86793f2 passed all six
 APPLICATION jobs in run42345675195, plus Hermes harness42345675206 and runtime
-42345675236. General CI remains separate: its inherited chat fixture lacks the
+42345675236. General CI remains separate: its inherited chat fixture lacked the
 closed chat-specific service record after the original production identity split.
 The exact failure and minimal incumbent-owner repair are recorded in
 [APPLICATION join6703255977](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703255977).
@@ -166,8 +270,8 @@ account-layout assertions remain historical failures, not pass receipts.
 Protected #1824 introduced the disabled commercial ModelArk catalog. The inherited
 Hermes package test still required that catalog to be absent, causing the separate
 Hermes harness workflow to fail even while all six APPLICATION jobs passed.
-The original #2180 owner already repaired this exact assertion and published a
-quiescent source. This proposal adopts its test blob
+The original #2180 owner repaired this exact assertion and published a
+quiescent source. The completed 08b8daf9 proposal adopted its test blob
 a7cc6976bcd71872a18a1675a8df73887520f918 verbatim from
 d7d5bfdb4bc656473a7e940dee07d0b437aed40d, retaining present-but-disabled checks and
 the explicit legacy-absence case. It does not alter the router, grant authority,
@@ -175,7 +279,10 @@ provider state, or the active #2109 source hold.
 
 [Original repair and custody](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2180#issuecomment-6702850319)
 remain with that owner. Its reported 23-case local proof is not a substitute for
-this proposal's new composed hosted result.
+the completed proposal's composed hosted result. The later incumbent 46aaa9f0
+protected merge adopts master's parameterized successor, blob
+af180a1b66febba5531ad89a21a65cdcada8c953, unchanged. This evidence/pin update
+preserves that owner resolution and does not edit the protected package test.
 
 ## Real native behavior exercised
 
@@ -216,10 +323,42 @@ same-label successor, unknown starts, lost stop acknowledgments, lost ACL/config
 publication acknowledgments, .2/.3 orphans, unrelated ACL preservation,
 client/server filesystem separation and bounded listener attribution.
 
-This is not an installed Chisel tunnel. The root-qualified v2 receipt must bind
-the actual client/server binaries and reviewed upstream semantics before use.
-The original publication receipt continues to state tunnel_proven=false and
-application_proven=false.
+These 170 tests do not prove an installed Chisel tunnel. The original publication
+receipt continues to state tunnel_proven=false and application_proven=false.
+
+### Real existing-binary protocol qualification
+
+The additional [protocol receipt](qualification/chisel_protocol_receipt.json)
+records the existing M2 and Ubuntu1 Chisel v1.12.0 binary digests, embedded
+upstream revision fe4f4fe7e6a849b4aa6d1b8ee47037e16033f42a, seven verified
+upstream source blobs, both finite fixture attempts, original process outcomes
+and log digests. The [repeatable harness](qualification/qualify_chisel_protocol.py)
+has SHA256 66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f.
+
+The successful attempt used the existing Linux binary as client and server,
+unprivileged uid 1000, unique private temporary files, synthetic credentials and
+ephemeral loopback ports. Parent process 2364730 exited 0 after 1.01 seconds.
+All owned child processes reached terminal state and synthetic private files
+were removed. No denied probe reached the backend and no nonce was duplicated.
+The preceding attempt exited 1 after a case-folding assertion error in the
+fixture; its real denial and full process cleanup were reconciled before the
+corrected source ran in a new fixture. That failure is not hidden or relabeled.
+
+| Protocol behavior | Observed result |
+| --- | --- |
+| Three reverse role addresses, 127.0.0.1/.2/.3 | Bound simultaneously and forwarded distinct probes. |
+| Atomic authfile rename | Reloaded without restarting the existing server. |
+| New forward channel on retained authenticated SSH connection | Fresh ACL denied it; backend arrivals stayed zero. The same client had exactly one authenticated connection and forwarded again after ACL restoration. |
+| Already-open reverse listener after ACL restriction | Remained usable; reload alone does not revoke it. |
+| New reverse client after original stop | Newly denied .2 refused; allowed .1 succeeded. |
+
+The original stop/reconcile-before-ACL sequence is therefore required. This
+proof does not qualify revocation of already accepted streams. The root-qualified
+v2 activation receipt must still bind the actual deployment binaries, original
+server fingerprint, predecessor journals and reviewed direction-specific
+semantics. The real protocol fixture does not prove the production M2-to-Ubuntu1
+session, role grant, APPLICATION endpoint or provider account. No production
+credential, journal, installation or tunnel configuration was read or changed.
 
 ## Historical installed runtime proof
 
@@ -247,7 +386,7 @@ Go endpoint/configuration. Unknown amounts remain unknown, and uncertain
 provider/tool effects are never silently replayed.
 
 [Current integration contract](HOST_INTEGRATION.md) and
-[canonical owner requirements](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6702747606)
+[canonical owner requirements](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6703609820)
 define the real-path return. No background runner or production completion is
 claimed.
 
