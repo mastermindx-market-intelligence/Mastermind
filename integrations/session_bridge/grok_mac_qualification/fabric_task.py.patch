@@ -1,0 +1,59 @@
+--- a/ext/fabric_task.py
++++ b/ext/fabric_task.py
+@@ -412,6 +412,7 @@
+     requested_model: str | None = None,
+     artifact_names: list[str] | None = None,
+     native_return: bool = False,
++    qualification_host: str | None = None,
+ ) -> int:
+     rid = validate_run_id(run_id)
+     if bool(packet) == bool(stdin_bytes is not None):
+@@ -424,14 +425,24 @@
+     reason = escalation_reason if escalation_reason is not None else env.get("POOL_ESCALATION_REASON", "")
+     if artifact_names:
+         import artifact_production
+-    route = _parse_route(pick.format_pick(
+-        task_class, prefer=prefer, host="auto", pool=pool,
+-        **({"subject_pool": subject_pool} if subject_pool is not None else {}),
+-        task_complexity=complexity, escalation_reason=reason,
+-        requested_model=requested_model, route_key=rid,
+-        **({"required_modes": sorted(artifact_production.MODES),
+-            "required_platforms": ["linux"]} if artifact_names else {}),
+-    ))
++    if qualification_host:
++        if pool != "grok" or artifact_names or native_return or requested_model or prefer:
++            raise FabricTaskError("QUALIFICATION_OPTIONS_REFUSED")
++        import fabric_host_qualification
++        route = _parse_route(fabric_host_qualification.qualification_route(
++            qualification_host, task_class=task_class, complexity=complexity,
++            reason=reason, subject_pool=subject_pool,
++            root=observed_root, parent=parent_run_id,
++        ))
++    else:
++        route = _parse_route(pick.format_pick(
++            task_class, prefer=prefer, host="auto", pool=pool,
++            **({"subject_pool": subject_pool} if subject_pool is not None else {}),
++            task_complexity=complexity, escalation_reason=reason,
++            requested_model=requested_model, route_key=rid,
++            **({"required_modes": sorted(artifact_production.MODES),
++                "required_platforms": ["linux"]} if artifact_names else {}),
++        ))
+     guard = pick.launch_policy(
+         route["MODE"], task_class, route["MODEL"],
+         escalation_reason=reason, task_complexity=complexity,
+@@ -555,6 +566,7 @@
+     packet_group.add_argument("--packet")
+     packet_group.add_argument("--stdin", action="store_true")
+     p_request.add_argument("--pool")
++    p_request.add_argument("--qualification-host", choices=("mb", "m1"), help="Explicit first Grok worker on a pending qualified Mac; no enrollment")
+     p_request.add_argument("--prefer")
+     p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
+     p_request.add_argument("--root")
+@@ -732,6 +744,7 @@
+                 task_complexity=args.task_complexity,
+                 escalation_reason=args.escalation_reason,
+                 requested_model=args.requested_model,
++                qualification_host=args.qualification_host,
+             )
+         if args.cmd == "status":
+             _json(inspect_run(args.run_id))

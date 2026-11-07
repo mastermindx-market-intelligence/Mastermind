@@ -9,6 +9,7 @@ import pytest
 
 from control_plane import executive_placement_commitment as c2
 from control_plane import executive_placement_selection as c1
+from control_plane import executive_placement_preference as c1p
 from control_plane.executive_steward import (
     CapacityState,
     EffectState,
@@ -1087,3 +1088,105 @@ def test_runtime_typed_decision_and_causal_replay_do_not_select_twice(
         )
         == payload
     )
+
+
+
+def _v2_tie_selection():
+    responsibility = ResponsibilityFact(
+        responsibility_ref="WS:CAP-C2",
+        title="Atomic alias-carrier placement commitment",
+        accountable_seat=Seat.CEO,
+        state="waiting_capacity",
+        root_job_id=None,
+        source=_source(SourceOwner.AGENT_OS, "agentos-workstream-cap-c2"),
+    )
+    demand = c1.PlacementDemand(
+        required_capabilities=frozenset({"executive"}),
+        quota_class="standard",
+        provider="codex",
+        allowed_modes=frozenset({c1.PlacementMode.NEW_SESSION_MATERIALIZATION}),
+    )
+    candidates = tuple(
+        c1.PlacementCandidateFact(
+            worker_id=worker_id,
+            provider="codex",
+            account_label=account_label,
+            quota_class="standard",
+            capabilities=frozenset({"executive"}),
+            observed_at_ms=1_788_400_000_000,
+            occupancy=c1.OccupancyState.FREE,
+            occupancy_source=_source(SourceOwner.RUNTIME_BINDING, f"binding-{worker_id}"),
+            capacity_state=CapacityState.AVAILABLE,
+            capacity_source=_source(SourceOwner.CAPACITY, f"capacity-{worker_id}"),
+            host_source_closure_proven=True,
+            closure_source=_source(SourceOwner.CAPACITY, f"closure-{worker_id}"),
+            effect_state=EffectState.NONE,
+            mode=c1.PlacementMode.NEW_SESSION_MATERIALIZATION,
+            creation_surface_accessible=True,
+            session_creation_allowed=True,
+        )
+        for worker_id, account_label in (
+            ("worker-1", "codex-ceo-a"),
+            ("worker-2", "codex-ceo-b"),
+        )
+    )
+    base = c1.select_placement(
+        responsibility=responsibility,
+        demand=demand,
+        candidates=candidates,
+    )
+    assert base.state is c1.SelectionState.TIE_ABSTAINED
+    source_bytes = b'{"fleet":"capacity-preference"}'
+    source = SourceRef(
+        owner=SourceOwner.CAPACITY,
+        ref="capacity-source-sha256:" + hashlib.sha256(source_bytes).hexdigest(),
+        observed_at="2026-09-25T00:00:00Z",
+        freshness=Freshness.CURRENT,
+    )
+    preference = c1p.make_capacity_preference(
+        decision=base,
+        preference_order=("worker-2", "worker-1"),
+        capacity_source=source,
+        generation=1,
+    )
+    resolved = {source.ref: source_bytes}
+    decision = c1p.select_placement_v2(
+        responsibility=responsibility,
+        demand=demand,
+        candidates=candidates,
+        preference=preference,
+        resolved_capacity_sources=resolved,
+    )
+    assert decision.state is c1.SelectionState.SELECTED
+    return decision, resolved
+
+
+def test_runtime_typed_v2_decision_binds_exact_resolved_preference_without_reselecting() -> None:
+    decision, resolved = _v2_tie_selection()
+    plan = c2.build_commitment_plan_from_selection_decision_v2(
+        source_root_job_id="job-source-1",
+        expected_source_root_revision=7,
+        placement_selection=decision,
+        resolved_capacity_sources=resolved,
+        validated_target_facts=_target_facts(),
+    )
+
+    wire = decision.to_dict()
+    assert plan.selected_worker_id == "worker-2"
+    assert plan.selected_quota_class == "standard"
+    assert plan.placement_mode == c1.PlacementMode.NEW_SESSION_MATERIALIZATION.value
+    assert plan.selection_document_digest == _independent_digest(wire)
+    assert plan.selection_evidence_digest == _independent_digest(wire["base_v1"]["evidence"])
+    assert plan.committed_placement_snapshot == wire["selected"]
+
+
+def test_runtime_typed_v2_decision_refuses_unresolved_capacity_source() -> None:
+    decision, _resolved = _v2_tie_selection()
+    with pytest.raises(c2.PlacementCommitmentError, match="PLACEMENT_SELECTION_INVALID"):
+        c2.build_commitment_plan_from_selection_decision_v2(
+            source_root_job_id="job-source-1",
+            expected_source_root_revision=7,
+            placement_selection=decision,
+            resolved_capacity_sources={},
+            validated_target_facts=_target_facts(),
+        )

@@ -1057,21 +1057,25 @@ def render_markdown(paper: dict) -> str:
     return "\n".join(out).strip()
 
 
+class _PaperSaveNotCommittedError(OSError):
+    """This save attempt failed before canonical replacement was invoked."""
+
+
 def save_paper(paper: dict) -> Path:
-    """Atomically replace the canonical paper JSON; the legacy index is best-effort only.
+    """Atomically replace the canonical paper; keep index failures auxiliary.
 
-    All production readers (`load_papers`, web research routes, and Brain consumers) scan the
-    canonical JSON files directly.  Therefore an index append must never turn a completed
-    canonical save into an apparent failed effect.  Conversely, any exception from the atomic
-    canonical phase occurs before `os.replace`, so callers may safely report that this attempt
-    did not replace the paper.
+    A classified failure before replacement proves this attempt did not replace
+    the paper. Once replacement is invoked, an exception has an unknown outcome
+    for callers; they must reconcile the canonical file before considering retry.
+    A normal replacement return establishes the canonical save independently of
+    the legacy index. Canonical readers scan the JSON files directly.
     """
-    _PAPERS.mkdir(parents=True, exist_ok=True)
-    path = _PAPERS / f"{paper['asof']}_{paper['ticker']}.json"
-    payload = json.dumps(paper, indent=2, default=str, ensure_ascii=False)
-
     tmp_name: str | None = None
+    replacement_attempted = False
     try:
+        _PAPERS.mkdir(parents=True, exist_ok=True)
+        path = _PAPERS / f"{paper['asof']}_{paper['ticker']}.json"
+        payload = json.dumps(paper, indent=2, default=str, ensure_ascii=False)
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
@@ -1084,8 +1088,15 @@ def save_paper(paper: dict) -> Path:
             tmp.write(payload)
             tmp.flush()
             os.fsync(tmp.fileno())
+        replacement_attempted = True
         os.replace(tmp_name, path)
         tmp_name = None
+    except Exception as exc:
+        if replacement_attempted:
+            raise
+        raise _PaperSaveNotCommittedError(
+            "research paper replacement was not attempted"
+        ) from exc
     finally:
         if tmp_name:
             try:
