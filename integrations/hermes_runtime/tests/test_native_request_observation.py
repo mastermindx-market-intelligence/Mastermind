@@ -210,7 +210,7 @@ def run_admission(native, *, behavior=None, text="question"):
     return ref, row, agent, response
 
 
-def test_actual_ingress_assembly_and_terminal_storage_join(native):
+def test_actual_ingress_assembly_and_terminal_storage_join(native, monkeypatch):
     ref, row, agent, response = run_admission(native)
     assert response == "PRIVATE_OUTPUT"
     outer = native.authority.pending_results[row["admission_id"]]
@@ -235,6 +235,34 @@ def test_actual_ingress_assembly_and_terminal_storage_join(native):
     metadata = json.dumps(doc)
     assert all(value not in metadata for value in ("SECRET_HEADER", "PRIVATE_OUTPUT", "hook system", "middleware instruction", "requested-label"))
     assert observation._current.get() is None
+    # Continue the actual producer/redaction/codec output through the original
+    # authenticated-owner reader. Only its storage edge is a fixture here.
+    from integrations.hermes_runtime import native_session_control as control
+    retained = dict(row, principal_id="uid:994", target_session_id=ref.session_id,
+        request_id="original-submission", intent="queue", seq=1, status="terminal",
+        outcome=outcome, owner_epoch=doc["scope"]["authority_epoch"])
+    reads, closes = [], []
+    db = SimpleNamespace(close=lambda: closes.append(True))
+    monkeypatch.setattr(control, "_db", lambda home: db)
+    module(monkeypatch, "hermes_state_runtime", find_session_admission=lambda *a, **kw: retained,
+           get_session_admission=lambda *a, **kw: retained)
+    def original(_db, admission_id):
+        assert _db is db
+        reads.append(admission_id)
+        return restored
+    monkeypatch.setattr(native.results, "admission_result", original, raising=False)
+    # A restart changes today's descriptor. Original evidence keeps its own
+    # instance/epoch and joins the stored historical receipt, not this descriptor.
+    native.runner.session_runtime_descriptor.update(instance_id="successor-instance", authority_epoch=99)
+    result = control._read_original(native.home, {
+        "operation": "read_original", "profile_id": str(native.home), "session_id": ref.session_id,
+        "submission_id": "original-submission", "input_sha256": control.input_digest(row["payload"]["text"]),
+        "admission_id": row["admission_id"]}, "uid:994")
+    assert result["request_observation"] == doc
+    assert result["answer"] == "[redacted]" and result["successful"] is True
+    assert result["terminal_metadata"]["output"]["sha256"] == hashlib.sha256(b"[redacted]").hexdigest()
+    assert reads == [row["admission_id"]] and closes == [True]
+    assert restored[observation.RESULT_KEY] == doc
 
 
 @pytest.mark.parametrize("outcome", ["failed", "interrupted"])

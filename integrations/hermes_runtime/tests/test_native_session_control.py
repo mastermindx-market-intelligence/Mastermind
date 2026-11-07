@@ -337,6 +337,7 @@ def test_unsettled_admission_never_publishes_terminal_metadata(original_terminal
     ("payload", {"text": "question", "finite": False}),
 ])
 def test_terminal_metadata_never_bypasses_original_operation_join(original_terminal, field, bad):
+    original_terminal.saved["mastermind_request_observation"] = observation_document(original_terminal)
     original_terminal.row[field] = bad
     with pytest.raises(RuntimeRefusal, match="NATIVE_SECRETARY_ORIGINAL_MISMATCH"):
         original_terminal.read()
@@ -353,6 +354,7 @@ def test_legacy_result_keeps_missing_completion_and_existing_answer_contract(ori
 
 
 def test_terminal_metadata_flows_over_the_existing_single_private_request(original_terminal, monkeypatch, tmp_path):
+    original_terminal.saved["mastermind_request_observation"] = observation_document(original_terminal)
     left, right = socket.socketpair()
     requests = []
     def serve():
@@ -376,6 +378,173 @@ def test_terminal_metadata_flows_over_the_existing_single_private_request(origin
     assert original_terminal.lookups == [{"admission_id": "original-admission"}]
     assert original_terminal.stored_reads == ["original-admission"]
     assert result["terminal_metadata"]["output"]["sha256"] == hashlib.sha256(result["answer"].encode()).hexdigest()
+    assert result["request_observation"] == original_terminal.saved["mastermind_request_observation"]
+
+
+def observation_document(state):
+    content = {"messages": [{"role": "user", "content": "question"}]}
+    raw = control._canonical(content)
+    return {"schema": "mastermind.hermes_request_observation/v1",
+        "stage": "assembled_content_after_pre_request_hooks",
+        "scope": {"role": "mmsecretary", "session_id": state.row["target_session_id"],
+            "admission_id": state.row["admission_id"], "authority_epoch": state.row["owner_epoch"],
+            "execution_generation": state.row["generation"], "instance_id": "historical-instance"},
+        "observations": [{"fields": ["messages"], "content_sha256": hashlib.sha256(raw).hexdigest(),
+            "content_bytes": len(raw), "canonicalization": "json_sorted_keys_utf8_no_spaces_v1",
+            "turn_id": "turn-1", "api_request_id": "request-1", "agent_session_id": "different-physical-session",
+            "api_call_count": 1, "retry_count": 0}],
+        "errors": [], "overflow": False, "coverage": "assembly_hooks_only",
+        "provider_dispatch_proven": False, "model_identity_verified": False}
+
+
+def test_original_outer_observation_is_detached_and_remains_historical(original_terminal):
+    doc = observation_document(original_terminal)
+    original_terminal.saved["mastermind_request_observation"] = copy.deepcopy(doc)
+    result = original_terminal.read()
+    assert result["request_observation"] == doc
+    assert result["request_observation"]["scope"]["instance_id"] == "historical-instance"
+    assert result["request_observation"]["observations"][0]["agent_session_id"] != result["admission"]["ref"]["session_id"]
+    assert result["request_observation"]["provider_dispatch_proven"] is False
+    assert result["request_observation"]["model_identity_verified"] is False
+    assert "implementation_sha" not in result["request_observation"]
+    result["request_observation"]["observations"][0]["fields"].clear()
+    assert original_terminal.saved["mastermind_request_observation"] == doc
+    assert original_terminal.stored_reads == ["original-admission"]
+
+
+def test_inner_observation_is_not_promoted_and_legacy_absence_is_ordinary(original_terminal):
+    original_terminal.saved["result"]["mastermind_request_observation"] = observation_document(original_terminal)
+    result = original_terminal.read()
+    assert "request_observation" not in result and "request_observation_error" not in result
+    assert result["successful"] is True and result["answer"] == original_terminal.saved["result"]["final_response"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("role", "mmmeta"), ("session_id", "foreign"), ("admission_id", "another"),
+    ("authority_epoch", 8), ("execution_generation", 4),
+    ("authority_epoch", True), ("execution_generation", False),
+])
+def test_observation_scope_mismatch_closes_evidence_only(original_terminal, field, value):
+    expected = original_terminal.read()
+    doc = observation_document(original_terminal)
+    doc["scope"][field] = value
+    original_terminal.saved["mastermind_request_observation"] = doc
+    actual = original_terminal.read()
+    assert actual.pop("request_observation_error") == "INVALID_RETAINED_OBSERVATION"
+    assert actual == expected
+
+
+@pytest.mark.parametrize("case", [
+    "outer_extra", "schema", "stage", "provider_claim", "model_claim", "false_integer", "scope_extra",
+    "instance_control", "instance_utf8", "instance_bytes", "too_many_events", "event_extra", "wrong_fields",
+    "duplicate_fields", "digest", "bytes_bool", "bytes_limit", "canonicalization", "identifier_control",
+    "identifier_utf8", "identifier_bytes", "counter_bool", "counter_limit", "unknown_invalid_field",
+    "empty_invalid_fields", "duplicate_invalid_fields", "retained_invalid_field", "unknown_error",
+    "duplicate_error", "unsorted_errors", "coverage", "overflow_count", "overflow_type",
+])
+def test_malformed_retained_observation_never_changes_native_result(original_terminal, case):
+    baseline = original_terminal.read()
+    doc = observation_document(original_terminal)
+    event = doc["observations"][0]
+    if case == "outer_extra": doc["raw_prompt"] = "must never be forwarded"
+    elif case == "schema": doc["schema"] = "future-schema"
+    elif case == "stage": doc["stage"] = "provider_dispatched"
+    elif case == "provider_claim": doc["provider_dispatch_proven"] = True
+    elif case == "model_claim": doc["model_identity_verified"] = True
+    elif case == "false_integer": doc["provider_dispatch_proven"] = 0
+    elif case == "scope_extra": doc["scope"]["implementation_sha"] = "a" * 40
+    elif case == "instance_control": doc["scope"]["instance_id"] = "bad\x7f"
+    elif case == "instance_utf8": doc["scope"]["instance_id"] = "\ud800"
+    elif case == "instance_bytes": doc["scope"]["instance_id"] = "Ω" * 129
+    elif case == "too_many_events": doc["observations"] *= 9
+    elif case == "event_extra": event["raw_headers"] = {"Authorization": "private"}
+    elif case == "wrong_fields": event["fields"] = ["system", "messages"]
+    elif case == "duplicate_fields": event["fields"] = ["messages", "messages"]
+    elif case == "digest": event["content_sha256"] = "F" * 64
+    elif case == "bytes_bool": event["content_bytes"] = True
+    elif case == "bytes_limit": event["content_bytes"] = 4 * 1024 * 1024 + 1
+    elif case == "canonicalization": event["canonicalization"] = "rfc8785"
+    elif case == "identifier_control": event["turn_id"] = "a\n"
+    elif case == "identifier_utf8": event["api_request_id"] = "\ud800"
+    elif case == "identifier_bytes": event["agent_session_id"] = "Ω" * 129
+    elif case == "counter_bool": event["api_call_count"] = True
+    elif case == "counter_limit": event["retry_count"] = 2**53
+    elif case == "unknown_invalid_field": event["invalid_fields"] = ["provider"]
+    elif case == "empty_invalid_fields": event["invalid_fields"] = []
+    elif case == "duplicate_invalid_fields": event.pop("turn_id"); event["invalid_fields"] = ["turn_id", "turn_id"]
+    elif case == "retained_invalid_field": event["invalid_fields"] = ["turn_id"]
+    elif case == "unknown_error": doc["errors"] = ["private error content"]
+    elif case == "duplicate_error": doc["errors"] = ["content_limit", "content_limit"]
+    elif case == "unsorted_errors": doc["errors"] = ["unsupported_content", "content_limit"]
+    elif case == "coverage": doc["coverage"] = "complete_prompt"
+    elif case == "overflow_count": doc["overflow"] = True
+    elif case == "overflow_type": doc["overflow"] = 0
+    original_terminal.saved["mastermind_request_observation"] = doc
+    result = original_terminal.read()
+    assert result.pop("request_observation_error") == "INVALID_RETAINED_OBSERVATION"
+    assert result == baseline
+
+
+@pytest.mark.parametrize("case", ["empty", "errors", "invalid_fields", "repeated", "content_empty", "optional_absent"])
+def test_legitimate_instrumentation_limits_remain_visible(original_terminal, case):
+    doc = observation_document(original_terminal)
+    event = doc["observations"][0]
+    if case == "empty": doc.update(observations=[], coverage="no_assembly_observation")
+    elif case == "errors": doc["errors"] = ["content_limit", "observation_failed", "unbound_or_stale_agent", "unsupported_content"]
+    elif case == "invalid_fields":
+        event.pop("turn_id"); event.pop("retry_count")
+        event["invalid_fields"] = ["turn_id", "retry_count"]
+    elif case == "repeated": doc["observations"] = [copy.deepcopy(event) for _ in range(8)]; doc["overflow"] = True
+    elif case == "content_empty": event.update(fields=[], content_bytes=2, content_sha256=hashlib.sha256(b"{}").hexdigest())
+    elif case == "optional_absent":
+        for key in ("turn_id", "api_request_id", "agent_session_id", "api_call_count", "retry_count"): event.pop(key)
+    original_terminal.saved["mastermind_request_observation"] = copy.deepcopy(doc)
+    result = original_terminal.read()
+    assert result["request_observation"] == doc and "request_observation_error" not in result
+
+
+@pytest.mark.parametrize("outcome", ["failed", "partial", "interrupted", "missing_answer", "missing_result"])
+def test_observation_does_not_invent_success_or_require_an_answer(original_terminal, outcome):
+    if outcome == "missing_answer": original_terminal.saved["result"].pop("final_response")
+    elif outcome == "missing_result": original_terminal.saved.pop("result")
+    else:
+        original_terminal.saved["result"][outcome] = True
+        original_terminal.row["outcome"] = outcome
+    baseline = original_terminal.read()
+    doc = observation_document(original_terminal)
+    original_terminal.saved["mastermind_request_observation"] = doc
+    result = original_terminal.read()
+    assert result.pop("request_observation") == doc and result == baseline
+
+
+@pytest.mark.parametrize("status", ["queued", "started", "unknown", "missing"])
+def test_unsettled_original_has_no_observation_projection(original_terminal, status):
+    original_terminal.saved["mastermind_request_observation"] = observation_document(original_terminal)
+    if status == "missing": original_terminal.row = None
+    else: original_terminal.row["status"] = status
+    result = original_terminal.read()
+    assert "request_observation" not in result and "request_observation_error" not in result
+    if status == "missing": assert result["status"] == "EFFECT_UNKNOWN" and original_terminal.stored_reads == []
+
+
+def test_huge_closed_container_is_refused_without_traversing_values(original_terminal):
+    class Uninspectable:
+        def __str__(self): raise AssertionError("must not stringify arbitrary retained values")
+        def __repr__(self): raise AssertionError("must not stringify arbitrary retained values")
+    original_terminal.saved["mastermind_request_observation"] = {str(i): Uninspectable() for i in range(10000)}
+    result = original_terminal.read()
+    assert result["request_observation_error"] == "INVALID_RETAINED_OBSERVATION"
+    assert "request_observation" not in result and result["successful"] is True
+
+
+@pytest.mark.parametrize("role", ["mmsecretary", "mmmeta"])
+def test_same_original_reader_preserves_selected_role_contract(original_terminal, tmp_path, role):
+    doc = observation_document(original_terminal)
+    doc["scope"]["role"] = role
+    original_terminal.saved["mastermind_request_observation"] = doc
+    result = control._read_original(tmp_path, original_terminal.params, "uid:994", role=role)
+    assert result["schema"] == control.conversation_contract(role).native_schema
+    assert result["request_observation"] == doc
 
 
 @pytest.mark.parametrize("field", ["authority_epoch", "revision", "execution_generation"])
@@ -437,3 +606,10 @@ def test_admission_fence_uses_same_transaction_and_native_busy_owner(monkeypatch
         guard(conn)
     assert checks == ["lineage", "idle", "lineage", "idle"]
     conn.close()
+
+
+def test_explicit_original_admission_mismatch_refuses_before_result_read(original_terminal):
+    original_terminal.params["admission_id"] = "different-original"
+    with pytest.raises(RuntimeRefusal, match="NATIVE_SECRETARY_ORIGINAL_MISMATCH"):
+        original_terminal.read()
+    assert original_terminal.stored_reads == []

@@ -96,6 +96,11 @@ It is historical evidence, not the present unfinished-action list.
   was inspected. New qualified role-request observations and Executive source-derivation
   work do not replace this same-OS-user attachment or require an installed upstream
   upgrade. No current owned source file overlap requires another ancestry-only merge.
+- Later protected master `1e5f77a4e7aa5131ecbaef9bb00487882dec4d79` was composed
+  for the real append/append masterplan conflict, retaining both the thin-native
+  amendment and protected P3/P7 hardening continuation. No governing delta or native
+  implementation overlap was present; the only upstream app path was the independent
+  project-continuation test fixture. The qualified native implementation is unchanged.
 - Four web-only App fixtures now explicitly mock `isTauri=false`. This repairs the
   actual frontend failure on b805a3ca without weakening the native platform check.
 

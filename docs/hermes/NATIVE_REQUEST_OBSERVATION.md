@@ -107,7 +107,46 @@ exceptions and cancellation propagate unchanged through the ingress wrapper.
 No `SessionEvents.observers` registration or extra publication changes delivery
 acceptance.
 
-## Verification and remaining consumer work
+## Authenticated original-result projection
+
+The existing `read_original` operation now exposes the original **outer** retained
+document as `request_observation`, beside the existing terminal metadata. It first
+performs the original principal, profile, submission, input-digest and admission
+checks. No new request verb, observer, store, transport or authentication plane is
+introduced. The same private client request carries the additional result field.
+
+The reader accepts the whole document only after strict bounded validation of its
+schema, stage, scope, event fields, identifiers, counters, error vocabulary and
+false proof flags. Scope role/session/admission/epoch/generation must match the
+already validated original receipt. The retained instance label is historical;
+it is neither replaced by nor compared to today's runtime instance. The physical
+agent session may differ from the logical admission session. Ordered repeated
+events and explicit errors/invalid-field markers remain visible. Empty observation
+lists remain `no_assembly_observation`, and overflow requires the full eight
+retained entries.
+
+Validation bounds each container before traversing it and each identifier before
+UTF-8 encoding. It reconstructs only admitted fields and enforces the producer's
+16KiB metadata ceiling. It never deep-copies or serializes arbitrary retained
+objects before checking their shape. It validates digest syntax and admission
+binding; raw content is deliberately unavailable, so it cannot recompute the
+content digest or establish complete prompt inclusion.
+
+An absent outer field preserves the legacy response without an error. A present
+malformed, unsupported, mismatched or oversized document produces only
+`request_observation_error: INVALID_RETAINED_OBSERVATION`; no portion is salvaged.
+The original answer, outcome, success behavior and terminal metadata are retained.
+A valid observation can accompany a failed/interrupted result or an unavailable
+answer. A same-named field inside the agent's result body is never promoted.
+Queued, started, unknown or missing original admissions emit no terminal evidence.
+
+The authenticated serving gateway's `implementation_sha` identifies the current
+reader. The producer does not retain a historical per-admission implementation
+SHA, so this projection must not manufacture one from the current release or the
+reviewed-file digest. Reading retained metadata is not fresh attestation of the
+historical process, provider dispatch, serving-model identity or EVAL validity.
+
+## Verification and remaining acceptance work
 
 The tests include complete, unmodified MIT upstream files and a five-line
 executor-method excerpt, with exact revision/blob/digest provenance and license
@@ -124,14 +163,25 @@ isolation, interleaved admissions, stale ownership, an adoption race during
 hashing, unsupported JSON and content bounds, overflow, source mutation and
 authority qualification before a listener effect.
 
+The actual producer → preparation/redaction → codec round-trip continues through
+the original result reader, including recovery after the current descriptor has
+changed. Additional checks cover outer-only custody, historical scope joins,
+closed shape and size limits, invalid evidence without result loss, absent optional
+identifiers, repeated observations, visible instrumentation errors, and a real
+AF_UNIX client request without resubmission or extra persistence. The exact final
+reader source hash remains in the existing release-identity review contract;
+its narrow numeric-token exemption is unchanged.
+
 These are source/composition tests. They do not establish an installed service,
 actual provider request, full host permissions, model identity, held-out
 performance, or learning acceptance. The original C26 host-access issue remains
 separate.
 
-The current authenticated terminal projection from PR2170 does not expose this
-new outer document. A follow-on closed projection must read and validate the
-original retained document through that same authenticated owner, and EVAL must
-join genuine admissions, original outcomes, exact source facts, and real
-held-out judgments. No downstream EVAL record or validity receipt is created
-by this change.
+EVAL must still join genuine admissions, original outcomes, exact source facts
+and real held-out judgments. No downstream EVAL record or validity receipt is
+created by the producer or this authenticated retained-observation projection.
+
+An explicit original-admission lookup also requires the returned row's
+admission ID to equal the requested ID before any stored result is read.
+Matching principal, session and submission fields cannot substitute a different
+admission returned by a faulty or changed storage lookup.
