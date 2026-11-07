@@ -1,0 +1,55 @@
+{
+  "schema": "mastermind.mmos_fabric_related_run_navigation.v1",
+  "observed_at": "2026-10-15T05:39:11.981944+00:00",
+  "source_base": "53b940fbcada2ba32f64eaf85cb7494e76db8829",
+  "immutable_source_sha256": {
+    "app/mastermind_os/src/fabric/AttendedFabricInspector.tsx": "950b95799142e5418acbc593acafafbb4b69a7396afa6d01e0577d3763679209",
+    "app/mastermind_os/src/fabric/FabricRunCatalog.tsx": "5aa2aa77bcf70612121b96019fb494508e6e1285a3eedb8e7a56f13c8687a86f",
+    "app/mastermind_os/src/fabric/fabric-catalog.css": "9d25d371193c1cefcf1b168d946fa86f652425db9a2011bf4e8cdb44bb01280d",
+    "app/mastermind_os/src/fabric/attended-status.test.tsx": "a03f7e0be5235e7da870b640a0019c75a4003436104e8b2c33e1d5e76cfc78b4",
+    "app/mastermind_os/src/fabric/FabricRunCatalog.test.tsx": "a67773c274609ebfb7dbee12705848d27a1ff3cde65a8023ed8c54b3392f7f8d"
+  },
+  "log_sha256": {
+    "catalog-source-navigation-red.log": "3b09fbcd957642f4b16cd1ce4806ed5513606499480742c7060108d3fb22e62c",
+    "catalog-source-navigation-green.log": "f95e149a3c7d357c4aa53946014e12305d7d87f07489cd85c73aa6923dd30510",
+    "catalog-identity-negative-red.log": "97f1a9c4fd94af92a007fa2e56693fc53a2fdf30fdcd3c0d231dec22a8f76a8d",
+    "catalog-identity-negative-green.log": "5e3ba3bcd860bd57a2b71abdc4617beddd966112b619aebc3c191527bd64bcd4",
+    "catalog-navigation-focused-all.log": "56098cb58c0a7e12459ee96b46cdf48d7caac9519780c598be96e961d3bf5455",
+    "catalog-navigation-identity-full-suite.log": "f49ed4fd3f50ecf64b0528acf1d6628751b406f9d7416193a1eef989d52617da",
+    "catalog-navigation-identity-ts.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "catalog-navigation-identity-build.log": "19225f360f05d658aca3f6ca5c2faf0f2887877811a931886ee88c680ab41bb8"
+  },
+  "verification": {
+    "related_run_navigation": "PASS",
+    "cross_root_jumps_blocked": true,
+    "no_implicit_m2_status_read": true,
+    "no_new_catalog_read": true,
+    "source_epoch_on_jump_rechecked": true,
+    "auth_identity_change_clears_search_and_filter": true,
+    "host_identity_change_clears_manual_run_selectors": true,
+    "locale_zh_CN": true,
+    "focused_catalog_tests": 40,
+    "full_app_passed": 1495,
+    "full_app_files": 66,
+    "full_app_skipped": 1,
+    "full_app_failed": 0,
+    "typescript_exit": 0,
+    "vite_build_exit": 0,
+    "previous_platform_browser_refusal_respected": true
+  },
+  "runtime_effects": {
+    "provider_worker_launch": 0,
+    "source_authorization_changes": 0,
+    "tunnel_changes": 0,
+    "Paper_changes": 0,
+    "new_read_endpoints": 0,
+    "browser_proof": false,
+    "production_installation": false
+  },
+  "nonclaims": [
+    "not global worker ancestry",
+    "not server-side OS resource authorization",
+    "not production deployed",
+    "not independent reviewer approval"
+  ]
+}

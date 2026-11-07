@@ -16,7 +16,12 @@ on the next turn. The map is persisted so chats survive a server restart.
 from __future__ import annotations
 
 import json
+import hashlib
+import os
+import re
+import tempfile
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,7 +67,9 @@ Options & dealer positioning (GEX / expected move / vol-hole): get_options. Forw
 read: get_anticipation. For anything else published, read_signal on the dashboard JSON.
 - Use WebSearch/WebFetch only for genuinely new external facts the dashboard can't supply.
 
-CONTEXT / CONNECTION PROTOCOL (use the typed cognition tools; never guess artifact paths):
+CONTEXT / CONNECTION PROTOCOL (use only the tools listed for this session):
+The typed cognition playbook below applies ONLY WHEN get_context_catalog and the other
+named cognition tools are listed. Never call an unlisted tool or guess an artifact path.
 - Broad market, sector, theme, or "what matters" questions: call get_context_catalog first, then
 get_market_packet. Add get_intel_hub when cross-desk opportunity ranking or divergence is material,
 and pull only the 1-3 relevant get_surface_packet reads. The catalog's freshness and authority are
@@ -72,6 +79,9 @@ get_technical_lab and get_neural_web_packet. Use get_prophet_board / get_sector_
 discovery, leadership, or timing is material.
 - For ADD / BUY questions, evaluate_gate REMAINS THE FIRST TOOL CALL. Only after it passes may you
 collect the connected ticker package, technical, Neural Web, sector, Prophet, and external evidence.
+- If cognition tools are not listed, use the available get_regime, get_daily_briefing,
+get_ticker_package / get_decision_matrix, get_divergences, and get_intel_hub reads. State which
+connected evidence is unavailable. For ADD / BUY, evaluate_gate remains first in every backend.
 - Count INDEPENDENT EVIDENCE FAMILIES, not repeated manifestations of one source. Two fields from
 the same artifact are one family; related dashboard projections are corroboration only when their
 source identities differ. Never manufacture confidence by counting correlated copies.
@@ -114,6 +124,20 @@ deterministic review," never "bought," "sold," "added," or "position changed."
 - Be concise and decisive; surface uncertainty honestly rather than hedging everything. \
 Reply in the desk owner's language (English or 中文) matching their message.
 """
+
+
+def inference_system() -> str:
+    """Keep the advisor doctrine while describing the tools this backend has."""
+    return SYSTEM.replace(
+        "- Use WebSearch/WebFetch only for genuinely new external facts the dashboard can't supply.",
+        "- This session has the listed dashboard and research tools only. External web search, "
+        "arbitrary file access and web fetch are unavailable; identify missing external facts "
+        "instead of claiming to have retrieved them.",
+    ).replace(
+        "get_decision_matrix, and WebSearch the latest earnings, guidance, filings and competitive context.",
+        "get_decision_matrix. Use the published evidence returned by those tools; clearly identify "
+        "any missing earnings, guidance, filing or competitive evidence.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +189,13 @@ _SAFE = lambda s: "".join(c for c in (s or "") if c.isalnum() or c in "-_")  # n
 
 
 def _hist_path(conversation_id: str) -> Path:
-    return _HISTORY / f"{_SAFE(conversation_id)}.json"
+    identifier = validate_conversation_id(conversation_id)
+    root = os.path.abspath(_HISTORY)
+    path = os.path.abspath(os.path.join(root, f"{identifier}.json"))
+    if not path.startswith(root + os.sep):
+        raise FabricConversationError("fabric_conversation_id_invalid")
+    # Keep the original leaf identity for the atomic conversation replacement.
+    return Path(path)
 
 
 def load_history(conversation_id: str | None) -> list:
@@ -173,7 +203,14 @@ def load_history(conversation_id: str | None) -> list:
     if not conversation_id:
         return []
     try:
-        return json.loads(_hist_path(conversation_id).read_text())
+        path = _hist_path(conversation_id)
+        if path.stat().st_size > _MAX_CONVERSATION_BYTES:
+            return []
+        value = json.loads(path.read_text())
+        if isinstance(value, dict) and value.get("schema") == _FABRIC_SCHEMA:
+            value = value.get("rendered", [])
+        # Never expose model protocol, action intent or internal turn records.
+        return value if isinstance(value, list) else []
     except Exception:
         return []
 
@@ -186,6 +223,8 @@ def append_turn(conversation_id: str | None, role: str, content: str,
     their 'open paper' buttons on reload."""
     if not conversation_id or not (content or tools or papers):
         return
+    if conversation_backend(conversation_id) == "fabric":
+        raise FabricConversationError("fabric_conversation_backend_mismatch")
     turns = load_history(conversation_id)
     turns.append({"role": role, "content": content or "",
                   "tools": tools or [], "papers": papers or [],
@@ -196,3 +235,122 @@ def append_turn(conversation_id: str | None, role: str, content: str,
         p.write_text(json.dumps(turns[-200:], ensure_ascii=False))  # cap runaway logs
     except Exception:
         pass
+
+
+# Fabric protocol continuity extends this same conversation owner. The SDK
+# session map remains SDK-only; rendered history is still the public projection.
+_FABRIC_SCHEMA = "mastermind.advisor.fabric.v1"
+_MAX_CONVERSATION_BYTES = 4 * 1024 * 1024
+_MAX_FABRIC_TURNS = 100
+
+
+class FabricConversationError(ValueError):
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+def validate_conversation_id(value: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", value):
+        raise FabricConversationError("fabric_conversation_id_invalid")
+    return value
+
+
+def _strict_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise FabricConversationError("fabric_conversation_invalid")
+        value[key] = item
+    return value
+
+
+def _read_conversation(path: Path):
+    try:
+        if path.stat().st_size > _MAX_CONVERSATION_BYTES:
+            raise FabricConversationError("fabric_conversation_limit")
+        return json.loads(path.read_text(), object_pairs_hook=_strict_object,
+                          parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+    except FabricConversationError:
+        raise
+    except Exception:
+        raise FabricConversationError("fabric_conversation_unavailable") from None
+
+
+def conversation_backend(conversation_id: str) -> str | None:
+    path = _hist_path(conversation_id)
+    if not path.exists():
+        return None
+    doc = _read_conversation(path)
+    if isinstance(doc, dict) and doc.get("schema") == _FABRIC_SCHEMA:
+        return "fabric"
+    if isinstance(doc, list):
+        return "legacy"
+    raise FabricConversationError("fabric_conversation_invalid")
+
+
+@contextmanager
+def fabric_conversation(conversation_id: str, *, scope: str):
+    """Hold the incumbent cross-process lock over one complete chat operation."""
+    from control_plane import locks
+
+    validate_conversation_id(conversation_id)
+    name = "advisor:" + hashlib.sha256(conversation_id.encode()).hexdigest()
+    lock = locks.acquire(name, root=_ROOT)
+    if lock is None:
+        raise FabricConversationError("fabric_conversation_busy")
+    with lock:
+        # An SDK session is not a Fabric conversation token. Do not silently
+        # reconstruct model history from the rendered UI transcript.
+        if _SESSIONS.exists():
+            sessions = _read_conversation(_SESSIONS)
+            if not isinstance(sessions, dict):
+                raise FabricConversationError("fabric_conversation_invalid")
+            if sessions.get(conversation_id):
+                raise FabricConversationError("fabric_conversation_backend_mismatch")
+        path = _hist_path(conversation_id)
+        if path.exists():
+            doc = _read_conversation(path)
+            if (not isinstance(doc, dict) or doc.get("schema") != _FABRIC_SCHEMA
+                    or doc.get("backend") != "fabric" or doc.get("scope") != scope
+                    or doc.get("conversation_id") != conversation_id
+                    or any(not isinstance(doc.get(key), list) for key in ("rendered", "messages", "turns"))):
+                raise FabricConversationError("fabric_conversation_backend_mismatch")
+        else:
+            doc = {"schema": _FABRIC_SCHEMA, "backend": "fabric", "scope": scope,
+                   "conversation_id": conversation_id, "rendered": [], "messages": [], "turns": []}
+        yield doc
+
+
+def save_fabric_conversation(doc: dict) -> None:
+    """Atomic, observable persistence; callers hold fabric_conversation's lock."""
+    path = _hist_path(doc["conversation_id"])
+    try:
+        raw = json.dumps(doc, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
+        if len(raw) > _MAX_CONVERSATION_BYTES:
+            raise FabricConversationError("fabric_conversation_limit")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(name, path)
+            directory = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            if os.path.exists(name):
+                os.unlink(name)
+    except FabricConversationError:
+        raise
+    except Exception:
+        raise FabricConversationError("fabric_conversation_persistence_failed") from None
+
+
+def rendered_turn(role: str, content: str, *, tools=None, papers=None) -> dict:
+    return {"role": role, "content": content, "tools": tools or [], "papers": papers or [],
+            "ts": datetime.now(timezone.utc).isoformat()}

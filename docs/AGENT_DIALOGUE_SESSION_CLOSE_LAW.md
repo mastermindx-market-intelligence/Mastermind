@@ -44,6 +44,20 @@ and must not be projected as active, STARTED, executing, waiting-on-worker, or w
 PICKUP_ACK and START are separate edges. Executive OS remains the lifecycle owner: a delivery, pickup,
 watcher receipt, or this procedure does not create a Job, Attempt, or Worker state.
 
+### 1.3 Assignment is not an ACK-of-ACK barrier
+
+Current deliberate delivery to the eligible receiving session is the assignment edge at the
+human/session layer. The receiver must not wait for a second Chairman message or Slack claim before
+performing otherwise-permitted work: recording receipt is not asking permission again. Keep pickup,
+START, execution and acceptance truthful and distinct, but do not invent a Slack dependency for a
+non-Slack assignment. A retrieved packet alone remains data, not assignment. Existing RuntimeBinding,
+source custody and effect-unknown reconciliation remain controlling; delivery cannot steal a live lease.
+
+A watcher failure blocks reliance on unattended continuation, not otherwise-authorized foreground work.
+Record WATCH_UNAVAILABLE honestly and continue safe permitted actions that do not depend on that
+watcher or on a required transport-dependent effect. Where the exact operation actually requires
+reciprocal transport, preserve that gate and carrier; never fabricate ACK, START, wake or a new carrier.
+
 ## 2. Mandatory Sol edge after every worker return
 
 After every worker/COO `BLOCKED`, `DECISION_REQUEST`, or `RESULT`, Sol must emit exactly one explicit state in the same lawful carrier/thread.
@@ -65,6 +79,37 @@ The message must:
 3. keep the same lawful carrier/operation binding;
 4. tell the worker to re-arm its approved wait/watch path after its next nonterminal return;
 5. preserve any current source-law, authority, scope and stop conditions.
+
+### Bounded installed continuation canary
+
+For an already-authorized acceptance operation, the installed
+`ops/executive_os/autonomy-control.sh` owns
+`dialogue-canary-publish --expected-sha <installed-sha> --read-ref <session-reply-ref> --validity-seconds <1..900>`.
+The reference must come from the original authenticated parent's committed CONTINUE.
+The publisher derives the exact current source, worker, binding, process generation,
+policy and obligation from Runtime and canonical Relay reads; the operator cannot
+supply those facts. It uses the existing global `AUTONOMY_TRANSACTION` owner.
+
+Publication changes only `dialogue_wake_canary_activation` and its fixed root-owned
+`dialogue-wake-canary-publication-v1.json` receipt, preserving worker config and generic
+wake/arming flags. An omitted nullable field in an older config is equivalent to null.
+An unexpired grant cannot be replaced. Expired replacement archives both exact prior
+config and receipt, including receipt absence. The control service accepts the profile
+only when its installed release, live config digest and sealed publication receipt agree.
+The receipt's worker digest is archived publication evidence, not a live worker read;
+the effect guard separately rechecks the exact current Runtime tuple before delivery.
+
+After interrupted or unknown publication, use
+`dialogue-canary-reconcile --expected-sha <same-installed-sha>`. This restores only
+the owned known preimages through the same global transaction; it neither republishes
+nor retries a provider turn. Unknown third-party config/receipt changes retain the
+transaction for reconciliation. Ordinary autonomy disarm cannot adopt this transaction.
+
+A published grant, successful attention delivery, terminal ACK, correlated native
+`PROGRESS/message_reply`, original-parent read and next parent edge are separate
+evidence. This ceremony alone proves none of the latter steps. The canary expires
+without renewing itself; wider consultation, native intake and autonomous multiworker
+acceptance remain outside this bounded proof.
 
 ### 2.2 Terminal child-wave boundary
 

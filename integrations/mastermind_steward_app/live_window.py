@@ -30,6 +30,7 @@ from integrations.business_mcp_auth.contracts import validate_resource_policy
 from integrations.mastermind_window_reader.owner_read_resource import (
     CONTENT_SCOPE,
     from_existing_business_owner,
+    snapshot_observation_binding,
 )
 
 LIVE_WINDOW_SOURCE_KIND = "live-window"
@@ -72,6 +73,7 @@ class LiveWindowConfig:
     allowed_origin: str
     audit_sink: Any
     source_kind: str = LIVE_WINDOW_SOURCE_KIND
+    observation_binding: Any = None
 
 
 class LiveWindowDispatch:
@@ -164,5 +166,6 @@ def live_window_reader(
         allowed_origin=config.allowed_origin,
         audit_sink=config.audit_sink,
         source_kind=LIVE_WINDOW_SOURCE_KIND,
+        observation_binding=snapshot_observation_binding(config.observation_binding),
     )
     return reader, path.encode("ascii")

@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 from brain import advisor, cli_bridge, cognition_mcp, portfolio_intelligence
 
 
@@ -38,6 +40,8 @@ def test_cognition_server_is_read_only_and_reuses_existing_intelligence_tools():
         for forbidden in ("submit_book", "request_context_upgrade", "get_my_book")
     )
     assert cognition_mcp.build_server() is not None
+    from brain import autonomous_mcp
+    assert all(getattr(cognition_mcp, name) is getattr(autonomous_mcp, name) for name in names)
 
 
 def test_cognition_handlers_read_the_incumbent_portfolio_intelligence_owner(monkeypatch):
@@ -62,6 +66,7 @@ class _Result:
 def test_chat_stream_arms_bot_and_read_only_cognition_servers(monkeypatch):
     async def fake_query(*, prompt, options):
         assert set(options.mcp_servers) == {"bot", "cognition"}
+        assert options.permission_mode == cli_bridge._HEADLESS_PERMISSION_MODE == "dontAsk"
         allowed = set(options.allowed_tools)
         assert "mcp__bot__get_regime" in allowed
         assert "mcp__cognition__get_context_catalog" in allowed
@@ -147,3 +152,68 @@ def test_chat_route_does_not_stream_raw_exception_repr():
     chat_route = source[source.index('@app.post("/chat")'):source.index('@app.get("/chat/history")')]
     assert "repr(exc)" not in chat_route
     assert "cli_bridge.public_chat_error_event()" in chat_route
+
+
+def test_shared_inference_prompt_keeps_cognition_guidance_conditional():
+    from brain import bot_mcp
+
+    tools = {row["name"] for row in bot_mcp.inference_tool_catalog()}
+    assert not any(name.startswith("mcp__cognition__") for name in tools)
+    prompt = advisor.inference_system()
+    assert "ONLY WHEN get_context_catalog" in prompt
+    assert "Never call an unlisted tool" in prompt
+    assert "If cognition tools are not listed" in prompt
+    assert "State which\nconnected evidence is unavailable" in prompt
+    assert "evaluate_gate remains first in every backend" in prompt
+    assert "External web search, arbitrary file access and web fetch are unavailable" in prompt
+    assert "INDEPENDENT EVIDENCE FAMILIES" in prompt
+
+
+@pytest.mark.parametrize("partial_text", [False, True])
+def test_actual_chat_generator_uses_public_error_and_preserves_bookkeeping(
+    monkeypatch, partial_text
+):
+    import ast
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    tree = ast.parse((Path(__file__).resolve().parent.parent / "app" / "main.py").read_text())
+    chat = next(node for node in ast.walk(tree) if isinstance(node, ast.AsyncFunctionDef) and node.name == "chat")
+    generator = next(node for node in chat.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "gen")
+    encoder = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_sse")
+    assert generator.decorator_list == encoder.decorator_list == []
+    namespace = {
+        "json": json, "cli_bridge": cli_bridge, "advisor": advisor,
+        "req": SimpleNamespace(message="fixture question"), "conv_id": "fixture-chat",
+        "resume": "prior-session",
+    }
+    # Execute the exact parsed generator and SSE encoder, with an inert upstream
+    # stream and bookkeeping spies. This does not start an HTTP server or model.
+    exec(compile(ast.Module(body=[encoder, generator], type_ignores=[]), "<actual-chat-generator>", "exec"), namespace)
+    secret = "opaque-route-failure-secret"
+    calls = []
+
+    async def broken_stream(*_args, **_kwargs):
+        if partial_text:
+            yield {"type": "text", "text": "Earlier grounded text."}
+        raise RuntimeError(secret + " /private/provider/path")
+
+    monkeypatch.setattr(cli_bridge, "_selected_backend", lambda: "cli")
+    monkeypatch.setattr(cli_bridge, "chat_stream", broken_stream)
+    monkeypatch.setattr(advisor, "append_turn", lambda *args: calls.append(("append", args)))
+    monkeypatch.setattr(advisor, "set_session", lambda *args: calls.append(("session", args)))
+    frames = _drain(namespace["gen"]())
+    events = [json.loads(frame.split("data: ", 1)[1].strip()) for frame in frames]
+    assert events[0] == {"type": "start", "conversation_id": "fixture-chat", "backend": "cli"}
+    assert events[-1] == {
+        "type": "error", "code": "advisor_chat_unavailable",
+        "error": "Mastermind AI is temporarily unavailable. Please retry.",
+    }
+    assert [event["text"] for event in events if event["type"] == "text"] == (["Earlier grounded text."] if partial_text else [])
+    assert secret not in "".join(frames)
+    assert "/private/provider/path" not in "".join(frames)
+    assert calls == [
+        ("append", ("fixture-chat", "user", "fixture question")),
+        ("session", ("fixture-chat", "prior-session")),
+        ("append", ("fixture-chat", "brain", "Earlier grounded text." if partial_text else "", [], [])),
+    ]

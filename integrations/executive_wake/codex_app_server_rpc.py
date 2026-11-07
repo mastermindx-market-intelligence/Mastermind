@@ -13,6 +13,7 @@ from typing import Any
 from control_plane.executive_worker_broker import RemoteBrokerError
 from control_plane.operator_harness_contract import (
     ATTENTION_TURN_INSTRUCTION,
+    AttentionCompanyReadProjection,
     AttentionTurnObservation,
     ProcessGenerationRef,
     ReconcileObservation,
@@ -248,12 +249,28 @@ class CodexCurrentWriterWakeClient:
                 obligation_ids=worker_projection.obligation_ids,
                 terminal_ack_trailer=worker_projection.terminal_ack_trailer,
             )
+        company = observation.company_read_projection
+        if company is not None and (
+            not isinstance(company, AttentionCompanyReadProjection)
+            or not observation.delivered
+            or company.target_attempt_id != self._attempt_id
+            or company.process_generation_id != self._generation.process_generation_id
+            or company.binding_id != self._runtime_binding.binding_id
+            or company.binding_generation != self._runtime_binding.binding_generation
+            or company.provider_session_id != native_handle
+            or company.provider_native_turn_id != observation.provider_native_turn_id
+            or company.nudge_id != nudge_id
+        ):
+            # Company consumption is independent of provider delivery and Wake ACK.
+            # Withhold foreign/stale evidence without inventing effect uncertainty.
+            company = None
         return CodexWakeDeliveryObservation(
             native_handle=native_handle,
             nudge_id=nudge_id,
             accepted=observation.accepted,
             delivered=observation.delivered,
             target_ack_projection=target_ack_projection,
+            company_read_projection=company,
         )
 
 
