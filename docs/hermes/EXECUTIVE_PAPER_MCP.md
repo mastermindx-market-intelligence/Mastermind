@@ -13,10 +13,10 @@ service, credential store, profile owner, agent, scheduler or queue is created.
 
 | Hermes MCP entry | Original service | Transport | Default tool scope |
 | --- | --- | --- | --- |
-| `mastermind_executive_v3` | `integrations/executive_mcp/server.py` / Web CEO v3 | Existing authenticated HTTP MCP URL through `${MASTERMIND_EXECUTIVE_V3_MCP_URL}`; bearer through `${MASTERMIND_EXECUTIVE_MCP_ACCESS_TOKEN}` | Nine Executive v3 readers, disabled |
+| `mastermind_executive_v3` | `integrations/executive_mcp/server.py` / Web CEO v3 | Existing authenticated HTTP MCP URL through `${MASTERMIND_EXECUTIVE_V3_MCP_URL}`; bearer through `${MASTERMIND_EXECUTIVE_MCP_ACCESS_TOKEN}` | Seven Executive v3 readers, disabled |
 | `mastermind_paper` | `integrations/paper_desktop/mcp_server.py` / guarded Paper bridge | Existing host-pinned local stdio Python `${MASTERMIND_PAPER_MCP_PYTHON}` and script `${MASTERMIND_PAPER_MCP_SERVER}` | `paper_inspect`, `paper_catalog`, `paper_read`, disabled |
 
-The original `mastermind_steward` remains disabled. Native toolsets stay
+Only `executive_state`, `executive_inbox`, `executive_job`, `executive_fabric`, `ceo_intent_status`, `session_targets` and `executive_mdm` are in this initial Executive read allowlist. `reconcile_ceo_request` requires CEO submission scope despite being a status read; it is not added to this read-only grant. The v3 source does not expose a `session_reply_read` tool. Actual server permissions are narrower if the host principal lacks the required reads.\n\nThe original `mastermind_steward` remains disabled. Native toolsets stay
 `clarify`, all protected disabled-toolset fences stay in place, and the
 installed BYOK model/config remains unchanged. `paper_edit`,
 `paper_prepare`, `session_send`, `session_summon` and
