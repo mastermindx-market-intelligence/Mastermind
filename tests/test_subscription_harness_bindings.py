@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
+import pytest
 import json
 import unittest
 
@@ -52,7 +54,15 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
         )
         self.assertEqual(
             {binding.protocol for binding in minimax},
-            {"anthropic", "openai-chat"},
+            {"anthropic", "openai-chat", "responses"},
+        )
+        self.assertEqual(
+            {binding.adapter_id for binding in minimax},
+            {
+                "claude-compatible-subscription",
+                "codex-cli",
+                "openai-compatible",
+            },
         )
 
     def test_profile_and_override_endpoints_resolve(self) -> None:
@@ -316,6 +326,90 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
         # row the reviewed worker rejects.
         self.assertEqual(armed, set())
 
+    def test_minimax_codex_binding_loads_and_validates(self) -> None:
+        # The production document itself validates: the row is present and the
+        # reviewed MiniMax Responses realm lets it through load_bindings.
+        self.assertIn("minimax-token-plan.codex-responses", self.raw["bindings"])
+        validate_bindings(self.raw, profiles_document=self.profiles)
+        binding = get_binding(
+            "minimax-token-plan.codex-responses",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(binding.profile_id, "minimax-token-plan")
+        self.assertEqual(binding.provider, "minimax")
+        self.assertEqual(binding.harness_id, "codex-cli")
+        self.assertEqual(binding.protocol, "responses")
+        self.assertEqual(binding.effective_base_url, "https://api.minimax.io/v1")
+        self.assertEqual(
+            binding.model_classes, ("routine", "hard", "fast", "subagent")
+        )
+        self.assertEqual(
+            binding.activation_gates,
+            (
+                "adapter_implemented",
+                "provider_realm_enrolled",
+                "capacity_known",
+                "real_canary_passed",
+                "usage_policy_satisfied",
+            ),
+        )
+
+    def test_minimax_codex_binding_uses_implemented_codex_cli_adapter(self) -> None:
+        binding = get_binding(
+            "minimax-token-plan.codex-responses",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(binding.adapter_id, "codex-cli")
+        descriptor = adapter_descriptor(binding.adapter_id)
+        self.assertTrue(descriptor.implemented)
+
+    def test_minimax_codex_binding_is_built_not_proven_and_disarmed(self) -> None:
+        binding = get_binding(
+            "minimax-token-plan.codex-responses",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(binding.implementation_state, "BUILT_NOT_PROVEN")
+        self.assertIs(binding.autonomous_allowed, False)
+        self.assertEqual(
+            autonomous_activation_blockers(
+                binding,
+                adapter_implemented=True,
+                provider_realm_enrolled=True,
+                capacity_known=True,
+                real_canary_passed=True,
+                usage_policy_satisfied=True,
+            ),
+            ("implementation_not_proven_live", "source_policy_disarmed"),
+        )
+        self.assertIn(
+            "real_canary_not_passed",
+            autonomous_activation_blockers(
+                binding,
+                adapter_implemented=True,
+                provider_realm_enrolled=True,
+                capacity_known=True,
+                real_canary_passed=False,
+                usage_policy_satisfied=True,
+            ),
+        )
+
+    def test_minimax_openai_compatible_row_stays_spec_only(self) -> None:
+        # The openai-compatible adapter is declared implemented=False in
+        # control_plane/worker_adapter.py, so this row may never claim more.
+        descriptor = adapter_descriptor("openai-compatible")
+        self.assertFalse(descriptor.implemented)
+        openai_compatible = get_binding(
+            "minimax-token-plan.openai-compatible",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(openai_compatible.implementation_state, "SPEC_ONLY")
+        self.assertIs(openai_compatible.autonomous_allowed, False)
+        self.assertEqual(openai_compatible.adapter_id, "openai-compatible")
+
     def test_minimax_rows_carry_their_truthful_states(self) -> None:
         claude_anthropic = get_binding(
             "minimax-token-plan.claude-code-anthropic",
@@ -324,6 +418,14 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
         )
         self.assertEqual(claude_anthropic.implementation_state, "BUILT_NOT_PROVEN")
         self.assertIs(claude_anthropic.autonomous_allowed, False)
+
+        codex_responses = get_binding(
+            "minimax-token-plan.codex-responses",
+            document=self.catalog,
+            profiles_document=self.profiles,
+        )
+        self.assertEqual(codex_responses.implementation_state, "BUILT_NOT_PROVEN")
+        self.assertIs(codex_responses.autonomous_allowed, False)
 
         openai_compatible = get_binding(
             "minimax-token-plan.openai-compatible",
@@ -336,3 +438,99 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_byteplus_plan_binding_built_and_private():
+    profiles = load_profiles()
+    profile = get_profile("byteplus-coding-plan-personal", document=profiles)
+    assert profile.base_url == "https://ark.ap-southeast.bytepluses.com/api/coding"
+    assert profile.models["routine"] == "glm-5.3-flash"
+    assert profile.autonomous_allowed is False
+    assert profile.usage_policy["production_backend_allowed"] is False
+    catalog = load_bindings(profiles_document=profiles)
+    row = catalog["bindings"]["byteplus-coding-plan-personal.claude-code-anthropic"]
+    assert row["implementation_state"] == "BUILT_NOT_PROVEN"
+    assert row["autonomous_allowed"] is False
+    assert "real_canary_passed" in row["activation_gates"]
+
+
+
+def test_byteplus_independent_endpoint_anchor_refuses_profile_mismatch():
+    profiles = load_profiles()
+    bindings = load_bindings(profiles_document=profiles)
+    key = "byteplus-coding-plan-personal.claude-code-anthropic"
+    assert bindings["bindings"][key]["endpoint"] == {
+        "source": "reviewed_override",
+        "base_url": "https://ark.ap-southeast.bytepluses.com/api/coding",
+    }
+    broken = copy.deepcopy(bindings)
+    broken["bindings"][key]["endpoint"]["base_url"] = (
+        "https://ark.ap-southeast.bytepluses.com/api/v3"
+    )
+    with pytest.raises(HarnessBindingError):
+        validate_bindings(broken, profiles_document=profiles)
+
+def test_byteplus_literal_endpoint_anchor_rejects_compromised_profile_and_override(monkeypatch):
+    """Mutation-discriminating defense-in-depth test for the literal anchor.
+
+    A normal profile cannot change endpoint without failing its own validator.
+    Here only the downstream trusted profile lookup is compromised in-memory
+    to demonstrate that the *independent binding literal* still refuses PAYG.
+    No file, network, credential or runtime worker is touched.
+    """
+    import control_plane.subscription_harness_bindings as harness
+    profiles = load_profiles()
+    bindings = copy.deepcopy(load_bindings(profiles_document=profiles))
+    key = "byteplus-coding-plan-personal.claude-code-anthropic"
+    payg = "https://ark.ap-southeast.bytepluses.com/api/v3"
+    bindings["bindings"][key]["endpoint"]["base_url"] = payg
+
+    original_get = harness.get_profile
+
+    def compromised_lookup(profile_id, *, document=None):
+        result = original_get(profile_id, document=document)
+        if profile_id == "byteplus-coding-plan-personal":
+            return dataclasses.replace(result, base_url=payg)
+        return result
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(harness, "get_profile", compromised_lookup)
+        # Without the independent endpoint literal, profile == override
+        # would make this fixture spuriously pass validation.
+        with pytest.raises(HarnessBindingError, match="reviewed BytePlus Coding Plan harness/endpoint"):
+            validate_bindings(bindings, profiles_document=profiles)
+
+
+def test_byteplus_bindings_review_timestamp_is_valid_and_not_stale():
+    profiles = load_profiles()
+    bindings = load_bindings(profiles_document=profiles)
+    assert bindings["verified_at"] >= profiles["verified_at"]
+    for invalid in (
+        None, "", "2026-02-31T04:00:00Z",
+        "2026-09-15T01:19:02Z", "2026-10-22",
+        "2026-10-22T12:00:00+00:00",
+    ):
+        mutated = copy.deepcopy(bindings)
+        mutated["verified_at"] = invalid
+        with pytest.raises(HarnessBindingError, match="verified_at|older than"):
+            validate_bindings(mutated, profiles_document=profiles)
+
+
+def test_byteplus_harness_rejects_unsafe_model_protocol_and_provider_changes():
+    profiles = load_profiles()
+    bindings = load_bindings(profiles_document=profiles)
+    key = "byteplus-coding-plan-personal.claude-code-anthropic"
+    for nested, field, value in (
+        ("", "provider", "glm"),
+        ("", "harness_id", "custom-http"),
+        ("", "adapter_id", "openai-compatible"),
+        ("", "protocol", "openai-chat"),
+        ("endpoint", "source", "profile"),
+        ("endpoint", "base_url", "https://ark.ap-southeast.bytepluses.com/api/v3"),
+    ):
+        changed = copy.deepcopy(bindings)
+        row = changed["bindings"][key]
+        target = row[nested] if nested else row
+        target[field] = value
+        with pytest.raises(HarnessBindingError):
+            validate_bindings(changed, profiles_document=profiles)

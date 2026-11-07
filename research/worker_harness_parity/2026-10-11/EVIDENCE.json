@@ -1,0 +1,352 @@
+{
+  "schema": "mastermind.worker_harness_parity_research/v1",
+  "operation_id": "worker-harness-parity-research-20261011-astra-001",
+  "assessment_date_utc": "2026-10-11",
+  "status": "CENSUS_AND_DESIGN; NOT_RUNTIME_ROLLOUT",
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "protected_base": "326c8469a21d7f50fc9ecb1848196bf1c6e66685",
+  "scope": {
+    "root_census": "protected source, active PRs, installed M2 files/configurations, two live projected MCP catalogs, read-only broker snapshot, current official vendor documentation",
+    "excluded_proof": "No newly launched external provider worker, browser action, fleet permission rollout, or full role-consumption canary was performed in this research mission."
+  },
+  "installed_cli_observation": {
+    "at": "2026-10-11T01:50:25.438173Z",
+    "host": "m2studio",
+    "codex": "0.159.3",
+    "claude": "2.1.296",
+    "opencode": "1.18.31",
+    "codex_version_warning": "Stale arg0 temporary-directory cleanup reported Permission denied; exit status 0. No cleanup or escalation attempted."
+  },
+  "runtime_snapshots": {
+    "executive": {
+      "at": "2026-10-11T01:40:25Z",
+      "server_version": "1.5.0",
+      "installed_source": "326c8469a21d7f50fc9ecb1848196bf1c6e66685",
+      "macro_source": "88804ed7079700c598bb8e04aa64307d1335402d",
+      "jobs": {
+        "total": 17,
+        "completed": 13,
+        "failed": 1,
+        "queued": 3,
+        "running": 0
+      },
+      "attempts": {
+        "total": 21,
+        "completed": 13,
+        "failed": 1,
+        "lost": 7,
+        "running": 0
+      },
+      "workers": {
+        "available": 1,
+        "busy": 0
+      }
+    },
+    "fabric_projection": {
+      "at": "2026-10-11T01:41:08Z",
+      "version": 2,
+      "roots_total": 16,
+      "returned": 2,
+      "truncated": true,
+      "ceo_submit_armed": false,
+      "enumeration_provenance": "partial/unjoined; not lineage acceptance"
+    },
+    "studio_chatgpt4": {
+      "at": "2026-10-11T01:40:22.980Z",
+      "gateway_version": "0.1.10",
+      "generation": "8b852df8-76ad-4c3a-bcac-9b256f71e73b",
+      "max_active": 8,
+      "max_queued": 16,
+      "reserved": 1
+    },
+    "fabric_catalogs": [
+      {
+        "at": "2026-10-11T01:48:58.906186Z",
+        "route": "studio-fabric",
+        "gateway_version": "0.1.9",
+        "negotiated_protocol": "2025-03-26",
+        "tools": [
+          "studio_ping",
+          "studio_fleet_status",
+          "paper_inspect",
+          "paper_catalog",
+          "paper_read"
+        ],
+        "initialize_http": 200,
+        "catalog_http": 200,
+        "close_http": 200,
+        "next_cursor": null
+      },
+      {
+        "at": "2026-10-11T01:48:58.976086Z",
+        "route": "studio-design",
+        "gateway_version": "0.1.9",
+        "negotiated_protocol": "2025-03-26",
+        "tools": [
+          "studio_ping",
+          "studio_fleet_status",
+          "paper_inspect",
+          "paper_catalog",
+          "paper_read",
+          "paper_prepare",
+          "paper_edit"
+        ],
+        "initialize_http": 200,
+        "catalog_http": 200,
+        "close_http": 200,
+        "next_cursor": null
+      }
+    ],
+    "catalog_interpretation": "Fixed profile-owned allowlists are injected by installed tailnet-gateway.mjs; broad underlying config flags do not expose general filesystem, browser or computer-use tools through these routes. Native local shell/file tools are separate.",
+    "host_config": {
+      "sha256": "16b63def024802165c79bd330e5d4a3e393a7525a24d839e9fe4f24b9eb86726",
+      "registered_hosts": 14,
+      "ubuntu_lane_ceilings": {
+        "ubuntu0": 2,
+        "ubuntu1": 2,
+        "ubuntu2": 5,
+        "ubuntu3": 2
+      },
+      "nominal_ubuntu_total": 11,
+      "caveat": "Configuration ceiling, not qualification/admission or free capacity."
+    },
+    "broker_readonly": {
+      "rows_total": 5266,
+      "waiters": 0,
+      "held_by_pool": {
+        "minimax": 2
+      },
+      "caveat": "Time-sensitive database snapshot; historical or expired rows are not process-absence proof."
+    }
+  },
+  "installed_fingerprints": {
+    "ext/sub.sh": "3ac95f16be472483fcd7f1957a4c9837174a23fa9b012733e971e38b0026c697",
+    "ext/remote_sub.sh": "da7335c073f588e65a78ced79b98e877f00631b67b9079db6bc53ff81d7fc9f5",
+    "ext/remote_sub_exec.py": "98407dbdefec9d21e518d95f8c43ecf73356cffb2b20c7124e4b6c9fc570fc4e",
+    "ext/slot.py": "4508794aa613f578dcd69aca7a03ccba4ad8d790698472d2c9000c3c7c9eb6a5",
+    "ext/lease_broker.py": "ff6fe4b949d6be7d985370d4629c407b5f6fe9ad638170224a55aa902d85d364",
+    "ext/fabric_client_projection.py": "96017f511fbf2e3f70c2d87787fc12f4043e7e95d95fbfc17d28b5d60c63292c",
+    "ext/studio_mcp_projection.sh": "8be4a1506e022e3bee6de6e4d7408918e8903aa494ede2152dc3021aa74e0d6b",
+    "fabric-read/tailnet-gateway.mjs": "bd46b40cfd5f2744f9b07be38ff2656676939707e753f6e846f4a2c578944d25",
+    "codex/config.toml": "4ba3f73278875e81c50a503ec62022137bed5aaa7660e711c04159ca81c69a29",
+    "claude/settings.json": "7deb3c09ec59cd4fb7a8c6e6e3443b1aef86dc3a174fd8562873600ad5fd096f"
+  },
+  "capability_policy": {
+    "schema": "mastermind.executive_agent_capabilities/v3",
+    "production_armed": false,
+    "plugins_count": 0,
+    "profiles_count": 11,
+    "all_profile_skills_empty": true,
+    "caveat": "Registry enabled status is not installed or live admission."
+  },
+  "active_carriers": [
+    {
+      "pr": 600,
+      "head": "a5c4f0f4c9561874ded59abf9a9466fe33734538",
+      "role": "existing parent integration and orchestration plan",
+      "state": "open draft"
+    },
+    {
+      "pr": 1272,
+      "head": "5dd709865d16f3c74da9b3590bef6647ad3235ef",
+      "role": "worker operating environment/bootstrap",
+      "state": "open draft",
+      "ci": "success, run 37710288876",
+      "unresolved": "bounded Agent OS subprocess/install closure repair at comment 6073419296 is NOT_APPLIED_TO_SOURCE_BRANCH; independent review owed"
+    },
+    {
+      "pr": 1267,
+      "head": "5f6b1c47b1601d5e799358d897fe9e44591c8e3d",
+      "role": "operator-first role skills",
+      "state": "open draft",
+      "ci": "failure, run 37433927831",
+      "unresolved": "package_file_size_mismatch; source and installer/session consumption separate"
+    },
+    {
+      "pr": 1216,
+      "head": "99234e302545f631ff3876487f463a95c42d4180",
+      "role": "Context Fabric",
+      "state": "open draft",
+      "ci": "failure, run 37170599691",
+      "unresolved": "test_contracts.py collection collision; rename proposed in comment 6104125196, unapplied"
+    },
+    {
+      "pr": 1217,
+      "head": "2cfa4455544de595d6f9f19f9e1d0a7f96b3355a",
+      "role": "Studio/Paper gateway and provider projection",
+      "state": "open draft"
+    },
+    {
+      "pr": 1259,
+      "head": "e790afb35f055c9ff0a95e3aa214a41e7a1974eb",
+      "role": "dual-lane browser/shared tabs design",
+      "state": "open draft"
+    },
+    {
+      "pr": 1302,
+      "head": "271c9dd9f71c827fd6b7b0752cf55a9d3c753ded",
+      "role": "signed Codex Computer Use local pilot/facet",
+      "state": "open draft",
+      "proof": "M2 screenshot, AX and Calculator click/clear reported by owner; remote exposure and Claude client consumption not proven"
+    },
+    {
+      "pr": 1271,
+      "head": "a6af0f36fd4970834f6120f887d046c6b47f83ca",
+      "role": "sealed COO principal",
+      "state": "open",
+      "caveat": "Not rich-worker admission"
+    },
+    {
+      "pr": 1126,
+      "head": "861d980c654ebfa5a375fd1fdac2f7b904d1afa8",
+      "role": "sealed native Claude",
+      "state": "open",
+      "caveat": "Operator harness arm false in candidate"
+    },
+    {
+      "pr": 1145,
+      "head": "2bb93cb898aa79997bc18bae06b1b59d96bdb636",
+      "role": "remote endpoint source",
+      "state": "merged at final refresh",
+      "evidence": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/600#issuecomment-6091528424",
+      "merge_commit": "7ac70e15f13b33d9e44067113e75c656fe6fafa9",
+      "caveat": "Source-only merge; installed Linux/fleet and original-parent acceptance remain with #1144/#1143"
+    }
+  ],
+  "merged_reuse": [
+    {
+      "pr": 703,
+      "role": "job-bound worker login"
+    },
+    {
+      "pr": 1071,
+      "role": "browser recovery/exact launch"
+    },
+    {
+      "pr": 1113,
+      "role": "execution_plan/v4 hard model/pool narrowing"
+    }
+  ],
+  "current_context_comments": [
+    {
+      "pr": 600,
+      "comment": 6091528424,
+      "meaning": "Remote endpoint storage resolved; review pending; existing #1144/#1143 ownership remains."
+    },
+    {
+      "pr": 600,
+      "comment": 6104115443,
+      "meaning": "Four-Ubuntu capacity census; nominal free capacity is not admission."
+    },
+    {
+      "pr": 600,
+      "comment": 6104204541,
+      "meaning": "native12 opt-in installations; prior Ubuntu1/2 Codex writes denied by RDC allowed-path enforcement, not replayed in this mission."
+    }
+  ],
+  "knowledge_owners": {
+    "canonical_organizational_memory": "Agent OS in Macro",
+    "derived_context": "Context Fabric / Project Atlas / Workspace Context Overlay",
+    "data_discovery": "Existing Data OS and task-authorized datasets; data paths and credentials resolved by existing owners"
+  },
+  "public_sources": [
+    "https://learn.chatgpt.com/docs/agent-configuration/subagents",
+    "https://learn.chatgpt.com/docs/build-skills",
+    "https://learn.chatgpt.com/docs/extend/mcp?surface=cli",
+    "https://learn.chatgpt.com/docs/app-server",
+    "https://code.claude.com/docs/en/sub-agents",
+    "https://code.claude.com/docs/en/agent-sdk/subagents",
+    "https://code.claude.com/docs/en/agent-sdk/permissions",
+    "https://code.claude.com/docs/en/agent-sdk/plugins",
+    "https://code.claude.com/docs/en/agent-sdk/mcp",
+    "https://code.claude.com/docs/en/agent-sdk/sessions",
+    "https://code.claude.com/docs/en/chrome",
+    "https://github.com/microsoft/playwright-mcp",
+    "https://playwright.dev/docs/browser-contexts",
+    "https://modelcontextprotocol.io/specification/2026-07-28/changelog"
+  ],
+  "interpretation_rules": [
+    "configured != loaded != authenticated != callable != task-proven",
+    "source merged != installed != armed != accepted",
+    "historical lease != live process or free capacity",
+    "documentation/current vendor support != installed provider behavior",
+    "transport catalog != native local tools",
+    "profile/skills/role label != authority"
+  ],
+  "rollout_state": "No production capability policy, launcher ceiling, provider config, gateway catalog, browser grant or fleet installation was changed by this research commission.",
+  "review": {
+    "scope": "Independent document review against the census evidence; not runtime qualification",
+    "reviewers": [
+      "fabric source researcher",
+      "capability/bootstrap researcher",
+      "vendor harness researcher"
+    ],
+    "material_corrections_applied": [
+      "Attempt-immutable capability identity; canonical migration/new admission required",
+      "Native provider session bindings remain adapter-private",
+      "Current Executive/CeoIngress preserved; no generic public spawn/raw-shell API",
+      "WP1 source/staged validation separated from later installed-session consumption",
+      "Expired/wrong-audience/wrong-actor authentication discriminator added"
+    ],
+    "rollout_claims": "No rich-worker deployment or provider-task acceptance claimed"
+  },
+  "publication_source_refresh": {
+    "at": "2026-10-11T02:02:03.763549Z",
+    "protected_master": "e67d9d2566de73ccc0ec7a5c6f86da79f7780c94",
+    "protected": true,
+    "changes": [
+      {
+        "pr": 1145,
+        "merge_commit": "7ac70e15f13b33d9e44067113e75c656fe6fafa9",
+        "merged_at": "2026-10-11T01:37:27Z",
+        "impact": "Attempt-bound remote worker transport composition/recovery; rich capability registry and installed admission unchanged"
+      },
+      {
+        "pr": 1305,
+        "commit_prefix": "7205e660c",
+        "impact": "Office inspection focus UI"
+      },
+      {
+        "pr": 1294,
+        "commit": "e67d9d2566de73ccc0ec7a5c6f86da79f7780c94",
+        "impact": "Work UI read recovery"
+      }
+    ],
+    "refreshed_open_carriers": [
+      1272,
+      1267,
+      1216,
+      1217,
+      1259,
+      1302,
+      600
+    ],
+    "open_carrier_heads_unchanged": true,
+    "delta_review": "Independent source researcher reviewed merged transport files; census and WP0/WP3/WP7/recovery acceptance updated."
+  },
+  "native_settings_late_update": {
+    "evidence": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/600#issuecomment-6104204541",
+    "type": "Owner-reported update, read at final refresh; not independently replayed",
+    "ordinary_claude": {
+      "m2": 12,
+      "ubuntu1": 12,
+      "ubuntu2": 12,
+      "ubuntu3": 2,
+      "depth": 1
+    },
+    "codex_prompt_render": {
+      "hosts": [
+        "m2",
+        "ubuntu0",
+        "ubuntu3"
+      ],
+      "total_slots_including_root": 13,
+      "actual_child_completions_verified": 0
+    },
+    "canaries": {
+      "claude": "Expired OAuth before child spawn, cost 0 reported",
+      "codex": "No child event; interrupt attempt reported blocked"
+    },
+    "permission_boundary": "Prior denied path-write, verification and interruption operations were not replayed by this research session."
+  }
+}
