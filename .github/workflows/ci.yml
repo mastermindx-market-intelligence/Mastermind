@@ -280,7 +280,7 @@ jobs:
           native_rollout_test_root="$(mktemp -d "$HOME/mmx-native-rollout.XXXXXX")"
           trap 'rm -rf "$native_rollout_test_root"' EXIT
           NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -m pytest -q -o addopts= --noconftest \
-            -p scripts.ci_xdist_guard -n 4 --dist loadfile --max-worker-restart=0 --durations=20 \
+            -p scripts.ci_xdist_guard -n 4 --dist load --max-worker-restart=0 --durations=20 \
             --junitxml="$native_rollout_test_root/native-proof.xml" \
             ops/native_fabric/quota_continuity/tests/test_go_native_stage.py \
             ops/native_fabric/quota_continuity/tests/test_go_native_release.py \

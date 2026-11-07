@@ -26,8 +26,8 @@ _REQUIRED_PR_FAST_IF = "${{ !cancelled() && (github.event_name == 'pull_request'
 # Exact extraction of the nine incumbent shard-zero qualifications plus their
 # source/runtime bootstrap. The digest covers every field, command and order;
 # the old matrix.index == 0 placement predicates are removed. The native
-# rollout pytest invocation uses the same guarded four-process loadfile policy.
-_QUALIFICATION_STEPS_SHA256 = "2f7b01e26325e1b551e7f31f783920e2b54f3e2471bd440149d0a2cd39579cd1"
+# rollout pytest invocation uses guarded four-process case scheduling.
+_QUALIFICATION_STEPS_SHA256 = "a43e71956f27d34917cddcc94863e0948bb1907f15afbf612fbac6f5666a5738"
 
 _EXPECTED_SHARD_SOURCE_STEPS = [
     {"name": "Acquire immutable corpus fixture anchor", "uses": "actions/checkout@v4",
