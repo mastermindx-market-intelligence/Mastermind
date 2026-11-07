@@ -16,6 +16,8 @@ export interface FreshConversationTurnPanelProps {
   allowNextMessage?:boolean;
   /** Previously verified local reads, retained for this open conversation. */
   recordedTurns?:readonly {data:FreshConversationTurnData;message:string|null}[];
+  /** Complete older entries were omitted from the bounded local presentation. */
+  historyLimited?:boolean;
   /** Live controller observation; null when the controller holds no state here. */
   operationState: OperationState | null;
   /** Actual caller-side await activity; never a provider state. */
@@ -126,7 +128,7 @@ function sourceRows(zh: boolean, operationState: OperationState | null,
  * decoded window and every guarded action; this component renders the handed
  * state, forwards exact draft text and never mints or infers a permission. */
 export function FreshConversationTurnPanel({ locale, data, operationState, activity, message,
-  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null, responsePending = false, allowNextMessage = false, recordedTurns = [], messageReadOnly = false, onMessageFocus, messagePreview }: FreshConversationTurnPanelProps) {
+  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null, responsePending = false, allowNextMessage = false, recordedTurns = [], historyLimited = false, messageReadOnly = false, onMessageFocus, messagePreview }: FreshConversationTurnPanelProps) {
   const inputId=useId();
   const zh = locale === "zh-CN";
   const text = (en: string, cn: string) => zh ? cn : en;
@@ -153,6 +155,7 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
       {receipt != null ? text("First response kept", "已保留第一条回复")
         : text("Keep the first response to continue.", "保留第一条回复后继续。")}
     </p>
+    {historyLimited && <p>{text("Earlier replies remain available in project conversation history.", "更早的回复仍可在项目对话历史中查看。")}</p>}
     {recordedTurns.map(turn=><section className="mm-fresh-conversation-turn-followup" key={turn.data.turn_key}>
       <FreshConversationInitialResponse locale={locale} result={turn.data.result} originalMessage={turn.message}
         responseKind="followup" headingLevel={3}/>

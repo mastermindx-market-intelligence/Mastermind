@@ -19,7 +19,7 @@ export interface ProjectConversationsProps {
 }
 type Snapshot={owner:ProjectConversationCatalogueOwner;context:NonNullable<ReturnType<ProjectConversationCatalogueOwner['context']>>;
   workRef:string;page:ProjectConversationCatalogue|null;fresh:FreshConversationCatalogue|null};
-type FreshHistory={window:FreshConversationWindow;turns:FreshConversationWindow['turns'];next:number|null;busy:boolean;unavailable:boolean};
+type FreshHistory={window:FreshConversationWindow;turns:FreshConversationWindow['turns'];next:number|null;busy:boolean;unavailable:boolean;older:boolean};
 
 /** A genuine retained-session list and bounded owned-turn reader. Catalogue
  * and body reads require explicit gestures. Back preserves the current page
@@ -84,7 +84,7 @@ export function ProjectConversations(props:ProjectConversationsProps){
   }
   async function readFreshWindow(captured:Snapshot,reference:FreshConversationReference,signal:AbortSignal){
     const value=await captured.owner.readFresh(reference,signal);
-    let history:FreshHistory={window:value,turns:[],next:freshConversationNextPage(value),busy:false,unavailable:false};
+    let history:FreshHistory={window:value,turns:value.turns,next:freshConversationNextPage(value),busy:false,unavailable:false,older:false};
     // A full initial envelope can occupy the first page. The user's Open/Send
     // gesture also reads one recent history page so the latest reply is visible.
     if(!value.turns.length&&history.next!==null){
@@ -116,9 +116,9 @@ export function ProjectConversations(props:ProjectConversationsProps){
     try{
       const page=await captured.owner.readFreshOlder(value,history.next,controller.signal);
       if(controller.signal.aborted||!current(captured)||liveFresh.current!==value||!captured.owner.currentFresh(value))throw Error();
-      const seen=new Set<string>();
-      const turns=[...page.turns,...history.turns].filter(turn=>!seen.has(turn.turn_key)&&!!seen.add(turn.turn_key));
-      setFreshHistory({window:value,turns,next:freshConversationNextPage(page),busy:false,unavailable:false});
+      // Replace one complete source page; keep the initial action witness.
+      // Earlier cursors and Return to latest stay with the canonical reader.
+      setFreshHistory({window:value,turns:page.turns,next:freshConversationNextPage(page),busy:false,unavailable:false,older:true});
     }catch{if(!controller.signal.aborted&&current(captured)&&liveFresh.current===value)setFreshHistory({...history,busy:false,unavailable:true});}
   }
   async function openFresh(row:FreshConversationCatalogue['entries'][number],button:HTMLButtonElement){
@@ -141,8 +141,7 @@ export function ProjectConversations(props:ProjectConversationsProps){
     });
   },[snapshot,freshWindow]);
   const shownHistory=freshHistory?.window===freshWindow?freshHistory:null;
-  const shownTurns=freshWindow?[...(shownHistory?.turns??[]),...freshWindow.turns]
-    .filter((turn,index,all)=>all.findIndex(row=>row.turn_key===turn.turn_key)===index):[];
+  const shownTurns=shownHistory?.turns??freshWindow?.turns??[];
   return <section className="conversations-list project-conversations" data-theme={props.theme??'dark'} lang={props.locale??'en'} aria-label={t('Project conversations','项目对话')}>
     <h2 ref={heading} tabIndex={-1}>{readerOpen&&visible?t('Conversation','对话'):t('Project conversations','项目对话')}</h2>
     <p>{props.projectTitle??t('Selected project','所选项目')}</p>
@@ -169,12 +168,13 @@ export function ProjectConversations(props:ProjectConversationsProps){
         caption={t('Opening this recorded conversation does not send or acknowledge a message.','打开此对话记录不会发送消息或确认接收。')}/>
       <div className="conversations-list__history-actions">
         <button type="button" disabled={phase==='reading'||shownHistory?.busy} onClick={()=>{if(snapshot)void refreshFresh(snapshot,freshWindow);}}>
-          {t('Refresh conversation','刷新对话')}
+          {shownHistory?.older?t('Return to latest messages','返回最新消息'):t('Refresh conversation','刷新对话')}
         </button>
         {shownHistory?.next!==null&&shownHistory?.next!==undefined?<button type="button" disabled={phase==='reading'||shownHistory.busy} onClick={()=>void readOlder()}>
           {shownHistory.busy?t('Loading earlier messages…','正在加载更早的消息…'):t('Load earlier messages','加载更早的消息')}
         </button>:null}
       </div>
+      {shownHistory?.older?<p>{t('Showing one page of earlier messages.','当前显示一页更早的消息。')}</p>:null}
       {shownHistory?.unavailable?<p role="status">{t('Earlier messages could not be loaded. Try again.','暂时无法加载更早的消息，请重试。')}</p>:null}
       {shownTurns.map(turn=><article className="conversations-list__section" key={turn.turn_key}>
         <FreshConversationInitialResponse locale={props.locale??'en'} result={turn.result} originalMessage={turn.message}

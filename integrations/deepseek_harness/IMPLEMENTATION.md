@@ -335,3 +335,59 @@ claim an installed Executive upgrade, signed-in production chat or a useful live
 provider answer. The exact VPS SSH refusal and unconfigured native provider
 remain deployment/account gates; no alternate SSH identity or paid-worker replay
 was attempted.
+
+## Native history and command admission follow-on
+
+Commit `d5d1232ebdfbe048d5f4403ceeb04832b8d3330c` adds a private company
+history reader over the donor's actual Connection/Gateway and original
+projection/page services. Six native cases qualified cold recovery under an
+existing writer lease, exact-session refusal, authority retirement, caller
+cancellation and unchanged stored bytes. The compiled company client remains
+`9434bc422db55f45f028f874fe5cd791f472999a83c6167203c99a112bf454d3`.
+
+The additional pinned native session patch propagates operation cancellation
+through the original controllers, shared resume map and supported creation-only
+factory signal. It checks prompt admission before the original inbox write,
+Stop on the actual Gateway service view, and follow before cold-writer promotion.
+Eight focused native cases passed, including both regressions reproduced against
+the unchanged donor. The donor-strict host TypeScript program plus company
+reader reported zero diagnostics. No original donor checkout was edited.
+
+The existing attended packager now applies that patch in its owned app copy
+before the upstream build and binds its receipt, manifest and compiled private
+host reader. Eleven focused real-file packaging/export cases passed, covering
+partial effects, redirected paths, exact protected source and stale host output.
+The old `attended-build.json` still identifies only the earlier staged package;
+a new build has not yet earned a replacement qualification.
+
+## Exact-original recovery and bounded presentation
+
+The follow-on UI repair uses the exact committed original read and a fresh read
+of the incumbent pending-operation store. An idle controller after remount may
+release the composer without being changed to accepted. Unknown controller
+state, failed hint reads, and any newer pending pointer remain held. The current
+App draft's submitted key precedes remembered display state after an actual
+pending pointer has been reconciled, so recovering a later turn cannot strand
+an earlier still-unsettled App submission. No automatic resend or pointer clear
+was added.
+
+Canonical history navigation displays one complete page while retaining the
+original continuation witness. Return to latest uses the existing reader.
+Confirmed local presentation retains at most eight complete entries and 65,536
+UTF-8 bytes; older replies remain with the canonical history owner.
+
+The published preimages reproduced the remount failure and unbounded local/page
+accumulation. The repaired four-file UI gate passed **63 tests**, including
+accepted/remount recovery, recovery across another pending same-conversation
+turn, foreign pending operation and unknown-controller negatives, complete-page
+navigation and existing draft behavior. Process37339 completed at rc0;
+the full OS TypeScript build also completed at rc0 with zero diagnostics.
+
+These are source and fixture proofs. The published sequential project-chat
+path uses its incumbent Executive/Codex owners. It does not by itself establish
+an installed DeepSeek company session association or an authenticated private
+carrier into the native application. The next native consumer must join the
+existing SessionBridge/Runtime to the original native process with a trusted
+installed association; Send/resume/Stop and governed tools still require their
+original admission, operation and ACP owners. Provider sign-in, installed route,
+production browser journey and production acceptance remain open.

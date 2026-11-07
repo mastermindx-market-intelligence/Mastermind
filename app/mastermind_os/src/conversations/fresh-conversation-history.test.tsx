@@ -86,18 +86,47 @@ it('loads complete earlier messages and refreshes the same open conversation aft
  await screen.findByText('Saved answer 3');const initial=supplied!;
  fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));
  await screen.findByText('Saved answer 2');expect(initial.current()).toBe(true);expect(supplied).toBe(initial);
+ expect(screen.queryByText('Saved message 3')).toBeNull();
  fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));
  await screen.findByText('Saved answer 1');
- for(const index of [1,2,3])expect(screen.getByText('Saved message '+index)).toBeTruthy();
+ expect(screen.getByText('Saved message 1')).toBeTruthy();
+ for(const index of [2,3])expect(screen.queryByText('Saved message '+index)).toBeNull();
  expect(screen.queryByRole('button',{name:'Load earlier messages'})).toBeNull();
- const messages=screen.getAllByText(/^Saved message /).map(node=>node.textContent);
- expect(messages).toEqual(['Saved message 1','Saved message 2','Saved message 3']);
- s.state.latest=4;act(()=>initial.refresh());
+ fireEvent.click(screen.getByRole('button',{name:'Return to latest messages'}));
+ await screen.findByText('Saved answer 3');expect(initial.current()).toBe(false);
+ const latest=supplied!;s.state.latest=4;act(()=>latest.refresh());
  await screen.findByText('Saved answer 4');
  await waitFor(()=>expect(supplied!.current()).toBe(true));
  expect(initial.current()).toBe(false);
  expect(screen.getByRole('button',{name:'Back to conversations'})).toBeTruthy();
  expect(screen.queryByRole('textbox',{name:'Find in these conversations'})).toBeNull();
  expect(s.transport.freshReferences).toHaveBeenCalledTimes(1);
- expect(s.transport.readFreshReference).toHaveBeenCalledTimes(4);
+ expect(s.transport.readFreshReference).toHaveBeenCalledTimes(5);
+});
+
+it('replaces the visible history page and returns to latest without accumulating complete envelopes',async()=>{
+ const s=make();
+ vi.mocked(s.transport.readFreshReference!).mockImplementation(async request=>
+  request.before_event_id===300?page(300,200,[9,10,11,12,13,14,15,16]):
+  request.before_event_id===200?page(200,null,[1,2,3,4,5,6,7,8]):
+  page(null,300,[17,18,19,20,21,22,23,24]));
+ render(<ProjectConversations workRef={work} owner={s.owner}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Read project conversations'}));
+ fireEvent.click(await screen.findByRole('button',{name:'Open'}));
+ await screen.findByText('Saved answer 24');
+ expect(screen.getAllByText(/^Saved message /)).toHaveLength(8);
+ fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));
+ await screen.findByText('Saved answer 16');
+ expect(screen.getAllByText(/^Saved message /)).toHaveLength(8);
+ expect(screen.queryByText('Saved message 24')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Load earlier messages'}));
+ await screen.findByText('Saved answer 8');
+ expect(screen.getAllByText(/^Saved message /)).toHaveLength(8);
+ expect(screen.queryByText('Saved message 16')).toBeNull();
+ expect(screen.queryByRole('button',{name:'Load earlier messages'})).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Return to latest messages'}));
+ await screen.findByText('Saved answer 24');
+ expect(screen.getAllByText(/^Saved message /)).toHaveLength(8);
+ expect(screen.queryByText('Saved message 8')).toBeNull();
+ expect(s.transport.readFreshReference).toHaveBeenCalledTimes(4);s.owner.dispose();
 });

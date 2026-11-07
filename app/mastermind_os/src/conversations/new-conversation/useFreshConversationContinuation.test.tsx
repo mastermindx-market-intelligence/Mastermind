@@ -2,6 +2,7 @@
 // Actual A4E6 raw frames, incumbent port/controller, named inert owner/store.
 import {useState,useLayoutEffect} from "react";
 import type {MissionHost} from "../../host";
+import {freshConversationTarget} from "../../orchestration/fresh-conversation-target";
 import {useFreshConversationTurnDraftState} from "./useFreshConversationTurnDraftState";
 import {afterEach,beforeEach,expect,it,vi} from "vitest";
 import {act,cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
@@ -262,4 +263,124 @@ it("sends three distinct follow-ups and keeps each confirmed reply while resetti
  expect(new Set(h.transport.turn.mock.calls.map(([request])=>"turn_key"in request?request.turn_key:null)).size).toBe(3);
  for(let index=1;index<=3;index++)expect(screen.getByText("Sequential message "+index)).toBeTruthy();
  expect(screen.getAllByText(fixture.turn_read.data.result.envelope.summary)).toHaveLength(3);
+});
+
+it.each([false,true])("recovers an accepted original after remount without inventing acceptance or resending (later pending turn: %s)",async(later)=>{
+ const h=setup(),settled=vi.fn();h.props.onOriginalSettled=settled;
+ h.transport.turnRead.mockRejectedValueOnce(Error("fixture lost original read after accepted Send"));
+ const owner=h.props.draftOwner!;
+ const host={invalidationGeneration:()=>1,auth:{getState:()=>({status:"signed_in" as const,reason:null,acquisition:true,content:true}),subscribe:()=>()=>{},signIn:async()=>{},signOut:async()=>{}},freshConversation:{request:async()=>{throw Error("fixture has no direct transport");}}};
+ window.MastermindMissionHost=host as MissionHost;h.props.host=host;
+ const ownerProps={host,authRevision:1,currentAuthRevision:()=>1,getExecutiveOwner:()=>owner};
+ let draftApi:ReturnType<typeof useFreshConversationTurnDraftState>;
+ function Coupled(){
+  const draft=useFreshConversationTurnDraftState(ownerProps);draftApi=draft;
+  const [shown,setShown]=useState(true);
+  useLayoutEffect(()=>{draft.selectOriginal(h.read.selection);},[]);
+  return <>{shown?<Owned draft={draft}/>:<p>Retained App draft</p>}
+   <button onClick={()=>setShown(value=>!value)}>{shown?"Leave original":"Reopen original"}</button></>;
+ }
+ function Owned({draft}:{draft:ReturnType<typeof useFreshConversationTurnDraftState>}){
+  return useFreshConversationContinuation({...h.props,message:draft.message,draftOwner:draft.draftOwner,
+   onMessageChange:draft.onMessageChange,draftSubmission:draft}).panel;
+ }
+ const mounted=render(<Coupled/>);await keepAndRecover(h);settled.mockClear();
+ const input=await screen.findByRole("textbox",{name:"Your next message"});
+ await waitFor(()=>expect((input as HTMLTextAreaElement).disabled).toBe(false));
+ fireEvent.change(input,{target:{value:fixture.turn_request.message}});
+ fireEvent.click(screen.getByRole("button",{name:"Review message"}));
+ fireEvent.click(await screen.findByRole("button",{name:"Send message"}));
+ await screen.findByText("Check the original request to read its response. Don’t send another message here.");
+ expect(h.peek()).toBeNull();expect(h.binding.controller.getState().status).toBe("accepted");
+ const originalKey=draftApi!.submittedTurnKey;expect(originalKey).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"Leave original"}));
+ expect(h.binding.controller.getState().status).toBe("idle");
+ if(later){
+  // A separate actual-owner hint is a named synthetic negative. It may settle
+  // first, but must never outrank this App draft after that hint is cleared.
+  h.setPointer({kind:"conversation_turn",operationKey:"mmos-conversation-turn-"+"f".repeat(40),targetKey:freshConversationTarget(h.read.selection)!});
+  const keyed=(frame:unknown,request:FreshConversationTurnRequest)=>{
+   if(!("turn_key"in request))throw Error("turn key required");
+   const value=structuredClone(frame) as {data:{turn_key:string}};value.data.turn_key=request.turn_key;return value;
+  };
+  h.transport.turnStatus.mockImplementation(async request=>keyed(fixture.status,request));
+  h.transport.turnRead.mockImplementation(async request=>keyed(fixture.turn_read,request));
+ }
+ fireEvent.click(screen.getByRole("button",{name:"Reopen original"}));
+ const check=await screen.findByRole("button",{name:"Check original request"});
+ await waitFor(()=>expect((check as HTMLButtonElement).disabled).toBe(false));
+ expect(screen.queryByRole("button",{name:"Review message"})).toBeNull();fireEvent.click(check);
+ if(later){
+  await waitFor(()=>expect(settled).toHaveBeenCalledTimes(1));
+  expect(draftApi!.submittedTurnKey).toBe(originalKey);expect(h.peek()).toBeNull();
+  expect(screen.queryByRole("button",{name:"Review message"})).toBeNull();
+  await waitFor(()=>expect((check as HTMLButtonElement).disabled).toBe(false));fireEvent.click(check);
+ }
+ await screen.findByText("Follow-up response recorded");
+ await waitFor(()=>expect(settled).toHaveBeenCalledTimes(later?2:1));
+ expect(draftApi!.message).toBe("");expect(draftApi!.submittedTurnKey).toBeNull();
+ expect((screen.getByRole("textbox",{name:"Your next message"}) as HTMLTextAreaElement).disabled).toBe(false);
+ expect(screen.getByText(fixture.turn_request.message)).toBeTruthy();
+ expect(h.binding.controller.getState().status).toBe(later?"accepted":"idle");
+ expect(h.transport.turn).toHaveBeenCalledTimes(1);expect(h.transport.turnRead).toHaveBeenCalledTimes(later?3:2);
+ expect(h.transport.turnStatus).toHaveBeenCalledTimes(later?1:0);expect(h.peek()).toBeNull();
+ const finalRead=h.transport.turnRead.mock.calls.at(-1)![0];
+ expect("turn_key"in finalRead?finalRead.turn_key:null).toBe(originalKey);
+ mounted.unmount();delete window.MastermindMissionHost;
+});
+
+it("bounds local complete replies while preserving the latest eight original turns",async()=>{
+ const h=setup();h.props.initialConsumption=h.consumption;
+ let draw=0;vi.stubGlobal("crypto",{getRandomValues:(a:Uint8Array)=>{const seed=++draw*17;for(let i=0;i<a.length;i++)a[i]=(seed+i)%256;return a;}});
+ const withKey=(frame:unknown,request:FreshConversationTurnRequest)=>{
+  if(!("turn_key"in request))throw Error("turn key required");
+  const value=structuredClone(frame) as {data:{turn_key:string}};value.data.turn_key=request.turn_key;return value;
+ };
+ h.transport.turnPreview.mockImplementation(async request=>withKey(fixture.turn_preview,request));
+ h.transport.turn.mockImplementation(async request=>withKey(fixture.turn,request));
+ h.transport.turnRead.mockImplementation(async request=>withKey(fixture.turn_read,request));
+ render(<Harness config={h.props}/>);
+ for(let index=1;index<=9;index++){
+  const input=await screen.findByRole("textbox",{name:"Your next message"});
+  await waitFor(()=>expect((input as HTMLTextAreaElement).disabled).toBe(false));
+  fireEvent.change(input,{target:{value:"Bounded message "+index}});
+  fireEvent.click(screen.getByRole("button",{name:"Review message"}));
+  fireEvent.click(await screen.findByRole("button",{name:"Send message"}));
+  await waitFor(()=>expect(h.transport.turnRead).toHaveBeenCalledTimes(index));
+  await waitFor(()=>expect((screen.getByRole("textbox",{name:"Your next message"}) as HTMLTextAreaElement).value).toBe(""));
+ }
+ expect(screen.queryByText("Bounded message 1")).toBeNull();
+ for(let index=2;index<=9;index++)expect(screen.getByText("Bounded message "+index)).toBeTruthy();
+ expect(screen.getAllByText(fixture.turn_read.data.result.envelope.summary)).toHaveLength(8);
+ expect(screen.getByText("Earlier replies remain available in project conversation history.")).toBeTruthy();
+ expect(h.transport.turn).toHaveBeenCalledTimes(9);expect(h.peek()).toBeNull();
+});
+
+it("does not release an exact recovered result over a newer foreign pending operation",async()=>{
+ const h=setup();let finish!:(value:unknown)=>void;
+ h.transport.turnRead.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+ render(<Harness config={h.props}/>);await keepAndRecover(h);
+ fireEvent.click(screen.getByRole("button",{name:"Review message"}));
+ fireEvent.click(await screen.findByRole("button",{name:"Send message"}));
+ await waitFor(()=>expect(h.transport.turnRead).toHaveBeenCalledTimes(1));
+ const foreign:OperationPointer={kind:"conversation_create",operationKey:fixture.request.operation_key,targetKey:fixture.request.work_ref};
+ h.setPointer(foreign);await act(async()=>finish(fixture.turn_read));
+ await screen.findByText("Another request needs its existing status controls before continuing.");
+ expect(h.peek()).toBe(foreign);expect(screen.queryByRole("button",{name:"Review message"})).toBeNull();
+ expect(screen.getByText("Held original")).toBeTruthy();expect(h.transport.turn).toHaveBeenCalledTimes(1);
+});
+
+it("keeps an unknown controller held when an exact read finds the store unexpectedly empty",async()=>{
+ const h=setup();h.transport.turn.mockRejectedValueOnce(Error("fixture transport loss"));
+ render(<Harness config={h.props}/>);await keepAndRecover(h);
+ fireEvent.click(screen.getByRole("button",{name:"Review message"}));
+ fireEvent.click(await screen.findByRole("button",{name:"Send message"}));
+ await screen.findByText("The original request needs a status check. Don’t send it again.");
+ expect(h.binding.controller.getState().status).toBe("unknown");
+ // Explicit negative fixture: no owner receipt accompanied this missing hint.
+ h.setPointer(null);fireEvent.click(screen.getByRole("button",{name:"Check original request"}));
+ await waitFor(()=>expect(h.transport.turnRead).toHaveBeenCalledTimes(1));
+ expect(h.binding.controller.getState().status).toBe("unknown");
+ expect(screen.queryByRole("button",{name:"Review message"})).toBeNull();
+ expect(screen.getByText("Held original")).toBeTruthy();expect(h.transport.turn).toHaveBeenCalledTimes(1);
 });
