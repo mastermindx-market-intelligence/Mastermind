@@ -908,13 +908,19 @@ def test_cli_publication_status_preserves_bounded_registration_and_release_custo
     assert status["receipt"]["removed"] is False
     assert scans == []
     assert _git(source, "worktree", "list", "--porcelain") == before_registration
+    publication = ({"published_branch": "sol/publication-status"} if selector == "branch"
+                   else {"published_pull_request": 818})
+    ordinary = workspace_owner.inspect_linked_worktree(
+        source, root, workspace, expected_operation_id=operation, **publication)
+    assert ordinary.state == "RELEASABLE" and scans
+    scans.clear()
     code, released = _call_storage_cli(
         cli, capsys, "release", "--operation-id", operation, *arguments,
     )
     assert code == 0, released
     assert released["effect"] == "APPLIED"
     assert released["receipt"]["state"] == "REMOVED"
-    assert len(scans) >= 2  # Full inspection and the final pre-unlock custody read.
+    assert scans == []  # Release separately revalidates the full original target.
     assert not workspace.exists()
 
 
