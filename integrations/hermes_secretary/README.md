@@ -19,7 +19,29 @@ Upstream pin: `NousResearch/hermes-agent@1c0cd667746d3395fe9e1b6c74f8f85952486f1
 
 Related candidate packages `integrations/hermes_runtime/`, `integrations/hermes_models/`, `integrations/hermes_delegate/` and the existing `integrations/session_bridge/` are present in this stacked release. This package does not enable or start those services.
 
-**Host integration is still missing:** The authenticated native host must supply a real `NativeReplyWriter` with its actual Runtime/Agent Dialogue resolver, role-current source, a model backend operating under the installed role's provider/network confinement, and a current native-session UUID. The helper supports only canonical CEO CONTINUE -> bounded native PROGRESS, **not** unsolicited Secretary chat, arbitrary Slack messages, new user-facing Hermes bot identities, or production-inferred delivery. Synthetic tests use an injected no-network model and a fake relay. A client-facing Slack role-bot transport still needs the approved incumbent Agent Dialogue/Relay owner, distinct per-role app credentials, host integration, negative-path validation and live observed roundtrips; do not insert another Slack polling daemon or reuse Grok Secretary's token.
+**Host integration is still missing:** The authenticated native host must supply a real `NativeReplyWriter` with its actual Runtime/Agent Dialogue resolver, role-current source, a model backend operating under the installed role's provider/network confinement, and a current native-session UUID. The helper supports only canonical CEO CONTINUE -> bounded native PROGRESS, **not** unsolicited Secretary chat, arbitrary Slack messages, new user-facing Hermes bot identities, or production-inferred delivery. Synthetic tests use an injected no-network model and a fake relay. Any live Slack transport must use the approved incumbent Agent Dialogue/Relay owner and its existing qualified identity and credentials, with host integration, negative-path validation and observed original-parent roundtrips. Do not add a second Slack scanner, bot or token holder, or reuse Grok Secretary's token.
+
+## Pre-inference currentness and remaining admission boundary
+
+After reading the canonical request, the consumer re-resolves the existing
+NativeReplyWriter's complete original binding identity and rechecks the current
+role before entering the inference callback. Observed generation, process,
+binding or role drift refuses without model entry or send. Missing evidence
+fails closed; cancellation during these checks propagates before inference.
+Existing post-inference and canonical READY/COMMIT checks remain in place.
+
+These separate asynchronous reads are not an atomic admission claim. The
+authenticated host still must join the canonical CONTINUE and NativeReplyBinding
+to the original Runtime command and native finite admission before inference,
+then recover that original result or retain its uncertain effect. The current
+helper's sequential canonical reply dedup does not prevent concurrent model
+entries or authorize reentry after cancellation or MODEL_TURN_EFFECT_UNKNOWN.
+Native admission and APPLICATION ownership remain with their existing owners;
+do not add a consumer-local lock, ledger, retry queue or prompt-derived identity.
+
+NO INSTALL / DO NOT DEPLOY remains in force. Source tests do not establish live
+native consumption, provider cancellation/settlement or original-parent
+consumption.
 
 ## Tests
 
