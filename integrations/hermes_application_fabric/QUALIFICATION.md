@@ -12,8 +12,29 @@ native-purpose policy. All four Hermes transports remain inference-only and
 held. Configuration, AUTO selection and the native wire protocol cannot grant
 native-worker purpose.
 
-Qualification entry points now consume that exact original-owner Macro source,
-with native APPLICATION enrollment 5fcb76e8274d28f37da6bb06583343c57fcdfc47.
+The current original-owner successor is Macro #10740 at
+**9eb5cb6b28b510ea9e2bf05ae9040528523339df**. Its client and factory Git blobs
+are identical to70447c; the owner repaired the closed native-test source pin
+and joined its protected source. Qualification entry points now consume this
+exact successor, with native enrollment5fcb76e8274d28f37da6bb06583343c57fcdfc47.
+The current paired-source pin repair was independently reconciled by C4:
+[19-of-19 source receipt](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6704410002).
+
+The adapter's general CI at ae131aca exposed a separate obsolete Brain fixture
+checkout: Macro f0375acf has no _SERVICE_FABRIC_RELATIONS attribute, causing14
+setup errors after the published chat fixture was adopted. This change consumes
+the original APPLICATION owner's published9eb5cb6b checkout pin from Mastermind
+41e86c7a, changing only that existing CI ref line. No test, assertion or permission
+is skipped or loosened. That41e native branch revision changes only CI/E3 proof;
+it does not yet incorporate the Hermes v9 entry or primary runtime source.
+
+Completed ae131aca qualification against70447c passed all six jobs in
+[run42354521542](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42354521542),
+including69 native cases and9 actual native-to-APPLICATION conversations.
+Enrollment5fcb passed319 cases, zero failures/errors/skips, in
+[run42352255353/job128342698501](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42352255353/job/128342698501).
+These remain exact prior results; the new paired9eb source gets its own CI.
+
 [Owner incorporation receipt](https://github.com/mastermindx-market-intelligence/macro/pull/10740#issuecomment-6704229101)
 records the preserved E3 source and separate 451-case/one-case results. Current
 Hermes composition must have its own result; preceding results below are not
