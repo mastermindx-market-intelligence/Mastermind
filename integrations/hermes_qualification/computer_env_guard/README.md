@@ -40,6 +40,7 @@ From the Mastermind source root:
 
 ```sh
 python -m unittest -v integrations.hermes_qualification.computer_env_guard.test_guard
+python -m unittest discover -v -s integrations/hermes_qualification/tests -p 'test_computer_env_guard.py'
 python -m integrations.hermes_qualification.computer_env_guard.qualify --donor-root /absolute/path/to/qualified/hermes-agent
 ```
 
@@ -61,7 +62,10 @@ Hermes application, grant host permissions, or exercise a real desktop.
 
 The attempted local pytest invocation could not run because pytest was absent;
 the complete focused suite ran through Python's standard unittest runner:
-18 tests, zero failures or skips. Hosted CI and live installation are separate.
+18 tests, zero failures or skips. The small collector in
+`integrations/hermes_qualification/tests/test_computer_env_guard.py` includes
+these same cases in the existing Python 3.12/3.13 qualification workflow.
+Hosted CI and live installation are separate.
 
 ## Delivery and remaining consumer proof
 
