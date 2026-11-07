@@ -6,6 +6,7 @@ import { ProgrammeDirection, type ProgrammeDirectionProps } from "../direction/P
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
 import { ByokRolesPanel } from "./ByokRolesPanel";
+import { HermesNativePanel } from "../hermes-native/HermesNativePanel";
 import type { ByokRoleView } from "./byok-role-view";
 import { registerUnsavedNavigationHold } from "../auth-navigation-guard";
 import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
@@ -388,6 +389,8 @@ export function MetaCeoOffice({
         {...programmeDirection}
         locale={locale} /> : <p>{t("Source unavailable")} · {t("Authored objective not supplied.")}</p>}
     </details>
+
+    <HermesNativePanel key={`hermes:${projection.context.authGeneration}`} locale={locale} />
 
     <details className="office-disclosure office-config">
       <summary>{t("Configuration")}</summary>

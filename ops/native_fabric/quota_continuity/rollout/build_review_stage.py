@@ -682,8 +682,6 @@ def before_sparse_commit_preflight(manifest):
 
 
 def application_carrier_candidate_digests(root):
-    observed = {name: sha((root / "candidate" / name).read_bytes())
-                for name in APPLICATION_CARRIER_DIGESTS}
     sparse = {**APPLICATION_CARRIER_DIGESTS,
               "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
     publisher = {**APPLICATION_CARRIER_DIGESTS,
@@ -691,6 +689,19 @@ def application_carrier_candidate_digests(root):
     combined = {**publisher,
                 "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
     cohorts = (APPLICATION_CARRIER_DIGESTS, sparse, publisher, combined)
+    # Observe regular candidate files before selecting a complete reviewed
+    # cohort. A missing, symlinked or foreign forward member must fail its
+    # named guard, never silently reselect an historical base.
+    observed = {}
+    for name in APPLICATION_CARRIER_DIGESTS:
+        source = root / "candidate" / name
+        observed[name] = (None if source.is_symlink() or not source.is_file()
+                          else sha(source.read_bytes()))
+        if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
+            accepted = {cohort[name] for cohort in cohorts}
+            accepted.add(GROK47_CANDIDATE_COMPOSITION_DIGESTS[name])
+            if observed[name] not in accepted:
+                raise ValueError("accepted Grok forward composition mismatch: " + name)
     if any(observed == cohort for cohort in cohorts):
         return observed
     if any(observed[name] in {cohort[name] for cohort in cohorts}
@@ -762,7 +773,16 @@ def main():
     application_carrier = application_carrier_candidate_digests(root)
     for name in sorted(BASE_FILES | ADDITIONS):
         if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
+            # Carrier successors still authenticate their immutable accepted
+            # overlay. Hash the exact regular candidate bytes being staged.
+            if name in GROK47_MERGED_SOURCE_DIGESTS:
+                historical = root.parent / "grok47" / "overlay" / name
+                if (historical.is_symlink() or not historical.is_file()
+                        or sha(historical.read_bytes()) != GROK47_MERGED_SOURCE_DIGESTS[name]):
+                    raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
             source = root / "candidate" / name
+            if source.is_symlink() or not source.is_file():
+                raise ValueError("application carrier source is not a regular file: " + name)
             raw = source.read_bytes()
             if sha(raw) != application_carrier[name]:
                 raise ValueError("application carrier source changed during build")

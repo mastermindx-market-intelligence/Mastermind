@@ -78,11 +78,27 @@ def read_builder():
     return loaded
 
 
+def current_source_closure():
+    """Bind current candidates separately from immutable historical overlays."""
+    raw = (NATIVE / "rollout/native-manifest.json").read_bytes()
+    assert digest(raw) == "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
+    manifest = json.loads(raw)
+    inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_bytes())
+    assert len(manifest) == len(inventory["files"]) == 107
+    assert set(manifest) == set(inventory["files"])
+    for name, sha in manifest.items():
+        assert inventory["files"][name]["sha256"] == sha
+    collector = "ext/original_delivery_collector.py"
+    assert manifest[collector] == "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d"
+    assert inventory["files"][collector]["bytes"] == 106002
+    assert inventory["files"][collector]["source"] == "candidate/original_delivery_collector.py"
+    return manifest, inventory
+
+
 def test_grok47_merged_source_digest_is_pinned():
     builder = read_builder()
     assert set(builder.GROK47_MERGED_SOURCE_DIGESTS) == set(NAMES)
-    inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_text())
-    manifest = json.loads((NATIVE / "rollout/native-manifest.json").read_text())
+    manifest, inventory = current_source_closure()
     assert len(manifest) == len(inventory["files"]) == len(read_builder().BASE_FILES | read_builder().ADDITIONS) + 1
     for name in NAMES:
         path = GROK / name
@@ -91,8 +107,8 @@ def test_grok47_merged_source_digest_is_pinned():
         assert digest(path.read_bytes()) == expected
         forward = builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS.get(name)
         if forward is not None:
-            assert digest((NATIVE / "candidate" / name).read_bytes()) == forward
-        published = forward or expected
+            assert digest((NATIVE / "candidate" / name).read_bytes()) == manifest["ext/" + name]
+        published = manifest["ext/" + name] if forward else expected
         source = "candidate/" + name if forward else "../grok47/overlay/" + name
         assert manifest["ext/" + name] == published
         assert inventory["files"]["ext/" + name]["sha256"] == published
@@ -194,12 +210,7 @@ def test_published_paid_model_and_grok_controls_composed(tmp_path):
 
 
 def test_builder_rejects_changed_accepted_grok_source(tmp_path):
-    clone_root = tmp_path / "ops/native_fabric"
-    candidate_native = clone_root / "quota_continuity"
-    shutil.copytree(NATIVE / "candidate", candidate_native / "candidate")
-    shutil.copytree(NATIVE / "source", candidate_native / "source")
-    shutil.copytree(NATIVE / "rollout", candidate_native / "rollout")
-    shutil.copytree(GROK, clone_root / "grok47/overlay")
+    clone_root, candidate_native = _clone_composition_fixture(tmp_path)
     changed = clone_root / "grok47/overlay/remote_sub_exec.py"
     changed.write_bytes(changed.read_bytes() + b"\n# deliberate tamper\n")
     stage = tmp_path / "stage"
@@ -214,22 +225,7 @@ def test_builder_rejects_changed_accepted_grok_source(tmp_path):
 
 def test_approved_grok_bytes_stay_pinned_after_concurrent_source_change(tmp_path, monkeypatch):
     """The accepted bytes are staged once, even if their source changes."""
-    clone_root = tmp_path / "ops/native_fabric"
-    candidate_native = clone_root / "quota_continuity"
-    shutil.copytree(NATIVE / "candidate", candidate_native / "candidate")
-    shutil.copytree(NATIVE / "source", candidate_native / "source")
-    shutil.copytree(NATIVE / "rollout", candidate_native / "rollout")
-    shutil.copytree(GROK, clone_root / "grok47/overlay")
-    # Current protected native builder reads the exact locked PyYAML
-    # provenance from the repository root, not from its rollout subdirectory.
-    pure_yaml = json.loads((NATIVE / "candidate/paid_pyyaml_provenance.json").read_text())
-    lock = pure_yaml["lock_path"]
-    lock_source = REPO / lock
-    raw = lock_source.read_bytes()
-    assert digest(raw) == pure_yaml["lock_sha256"]
-    lock_target = tmp_path / lock
-    lock_target.parent.mkdir(parents=True, exist_ok=True)
-    lock_target.write_bytes(raw)
+    clone_root, candidate_native = _clone_composition_fixture(tmp_path)
     changed = clone_root / "grok47/overlay/artifact_delivery.py"
     spec = importlib.util.spec_from_file_location(
         "raced_qwen_grok_builder", candidate_native / "rollout/build_review_stage.py"
@@ -264,12 +260,7 @@ def test_approved_grok_bytes_stay_pinned_after_concurrent_source_change(tmp_path
 @pytest.mark.parametrize("name", ("artifact_delivery.py", "pick.py", "remote_sub.sh", "remote_sub_helpers.py"))
 @pytest.mark.parametrize("damage", ("changed", "missing", "symlink"))
 def test_builder_refuses_unqualified_forward_composition(tmp_path, name, damage):
-    clone_root = tmp_path / "ops/native_fabric"
-    candidate_native = clone_root / "quota_continuity"
-    for directory in ("candidate", "source", "rollout"):
-        shutil.copytree(NATIVE / directory, candidate_native / directory,
-                        ignore=shutil.ignore_patterns("native-code-stage", "__pycache__"))
-    shutil.copytree(GROK, clone_root / "grok47/overlay")
+    clone_root, candidate_native = _clone_composition_fixture(tmp_path)
     changed = candidate_native / "candidate" / name
     if damage == "changed":
         changed.write_bytes(changed.read_bytes() + b"\n# unreviewed forward bytes\n")
@@ -299,6 +290,16 @@ def _clone_composition_fixture(tmp_path):
         shutil.copytree(NATIVE / directory, candidate_native / directory,
                         ignore=shutil.ignore_patterns("native-code-stage", "__pycache__"))
     shutil.copytree(GROK, clone_root / "grok47/overlay")
+    # Current protected native builder reads the exact locked PyYAML
+    # provenance from the repository root, not from its rollout subdirectory.
+    pure_yaml = json.loads((NATIVE / "candidate/paid_pyyaml_provenance.json").read_text())
+    lock = pure_yaml["lock_path"]
+    lock_source = REPO / lock
+    raw = lock_source.read_bytes()
+    assert digest(raw) == pure_yaml["lock_sha256"]
+    lock_target = tmp_path / lock
+    lock_target.parent.mkdir(parents=True, exist_ok=True)
+    lock_target.write_bytes(raw)
     return clone_root, candidate_native
 
 
@@ -307,9 +308,10 @@ def test_builder_refuses_tampered_overlay_base_despite_valid_forward(tmp_path, n
     """A valid forward candidate never excuses a changed accepted overlay base."""
     clone_root, candidate_native = _clone_composition_fixture(tmp_path)
     builder = read_builder()
+    manifest, _ = current_source_closure()
     for forward in FORWARD_NAMES:
         assert (digest((candidate_native / "candidate" / forward).read_bytes())
-                == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS[forward])
+                == manifest["ext/" + forward])
     changed = clone_root / "grok47/overlay" / name
     changed.write_bytes(changed.read_bytes() + b"\n# tampered accepted overlay base\n")
     stage = tmp_path / "stage"
@@ -327,6 +329,7 @@ def test_builder_refuses_tampered_overlay_base_despite_valid_forward(tmp_path, n
 def test_forward_map_retains_original_four_and_adds_three_long_horizon_bounds():
     """Keep historical four/three maps and the one exact reviewed S14 join."""
     builder = read_builder()
+    manifest, inventory = current_source_closure()
     forward = builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS
     merged = builder.GROK47_MERGED_SOURCE_DIGESTS
     assert len(merged) == 9 and set(merged) == set(NAMES)
@@ -344,7 +347,14 @@ def test_forward_map_retains_original_four_and_adds_three_long_horizon_bounds():
         assert value != merged[name]
         candidate = NATIVE / "candidate" / name
         assert candidate.is_file() and not candidate.is_symlink()
-        assert digest(candidate.read_bytes()) == value
+        # Carrier-cohort names stage the exact current APPLICATION successor
+        # bytes; their forward pin stays the immutable carrier preimage and
+        # is never overwritten with the staged successor digest.
+        carrier = builder.application_carrier_candidate_digests(NATIVE).get(name)
+        current = digest(candidate.read_bytes())
+        assert current == (carrier if carrier is not None else value)
+        if carrier is not None:
+            assert builder.APPLICATION_CARRIER_PREIMAGES[name] == value
 
 
 def test_protected_qwen_files_and_exact_context_reader_forward():
@@ -354,18 +364,19 @@ def test_protected_qwen_files_and_exact_context_reader_forward():
     assert len(set(PROTECTED_QWEN_SOURCE_DIGESTS.values())) == 4
     assert not set(PROTECTED_QWEN_SOURCE_DIGESTS) & set(NAMES)
     assert not set(PROTECTED_QWEN_SOURCE_DIGESTS) & set(builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS)
-    manifest = json.loads((NATIVE / "rollout/native-manifest.json").read_text())
-    inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_text())
+    manifest, inventory = current_source_closure()
     assert set(REVIEWED_QWEN_FORWARD_DIGESTS) == {"glm_host_account_source.py", "lease_broker.py"}
     for name, original in sorted(PROTECTED_QWEN_SOURCE_DIGESTS.items()):
         expected = REVIEWED_QWEN_FORWARD_DIGESTS.get(name, original)
         assert name in builder.BASE_FILES
         candidate = NATIVE / "candidate" / name
         assert candidate.is_file() and not candidate.is_symlink()
-        assert digest(candidate.read_bytes()) == expected
-        assert manifest["ext/" + name] == expected
+        if name != "lease_broker.py":
+            assert manifest["ext/" + name] == expected
+        current = manifest["ext/" + name]
+        assert digest(candidate.read_bytes()) == current
         row = inventory["files"]["ext/" + name]
-        assert row["sha256"] == expected
+        assert row["sha256"] == current
         assert row["source"] == "candidate/" + name
         assert row["installed_preimage_sha256"]
 

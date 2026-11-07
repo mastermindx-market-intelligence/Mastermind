@@ -1,0 +1,14 @@
+{
+  "sourceHead": "6e59cfeb6b00e1508eae51ec0a9dc5c03b8c193a",
+  "observation": {
+    "at": "2026-11-07T09:23:59.621Z",
+    "pid": 23348,
+    "windows": 1,
+    "signedIn": "Signed in",
+    "source": "6e59cfeb6b00e1508eae51ec0a9dc5c03b8c193a",
+    "build": "hermes-thin-native-6e59cfeb6b00-20261107-pro-06",
+    "client": "native-client:v1:47cabc2a4fe992f317c895bb619d0fcf64b49f1e03d9992781d1dca7c77cb423"
+  },
+  "signInPressAt": "2026-11-07T09:21:45.422Z",
+  "credentialCeremonyActor": "not_attributed"
+}
