@@ -148,9 +148,12 @@ def main():
             assert SERVICE_TOKEN not in rendered
             # codeql[py/clear-text-storage-sensitive-data]
             (config / "provider_production_modes.v1.json").write_text(rendered)  # lgtm[py/clear-text-storage-sensitive-data]
-            (config / "capability_manifest.yml").write_text(json.dumps({"capabilities": [{
+            rendered_manifest = json.dumps({"capabilities": [{
                 "capability_id": qualified.capability_id, "secret_ref": qualified.secret_ref,
-                "kill_state": "active", "allowed_lanes": ["hermes-secretary"]}]}))
+                "kill_state": "active", "allowed_lanes": ["hermes-secretary"]}]})
+            assert SERVICE_TOKEN not in rendered_manifest
+            # codeql[py/clear-text-storage-sensitive-data]
+            (config / "capability_manifest.yml").write_text(rendered_manifest)  # lgtm[py/clear-text-storage-sensitive-data]
             environment = patch.dict(os.environ, {qualified.secret_ref: SERVICE_TOKEN,
                 "MM_PROVIDER_WORKLOAD_PROFILE": "site_interactive"})
             environment.start()
