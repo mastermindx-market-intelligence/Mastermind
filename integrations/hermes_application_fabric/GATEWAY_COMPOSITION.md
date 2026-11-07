@@ -56,6 +56,10 @@ support, or silently drop reasoning/streaming options.
 The new qualification suite runs against an immutable archive of the pinned
 upstream source plus this patch, using the installed native runtime dependencies,
 an isolated HERMES_HOME and the original checksum-verified APPLICATION client.
+The installed launcher holds its native dependency lease while a clean child
+uses the current in-memory dependency search paths and the patched fixture.
+This avoids retaining pre-imported installed core modules; no selected dependency
+generation path is written into a launcher or persisted for later reuse.
 It exercises real CLI resolution, native SQLite admission, atomic duplicate
 entry, generation/Stop/restart fencing, native gateway hook entry and primary
 model execution over a loopback fixture. It is not a live provider canary.

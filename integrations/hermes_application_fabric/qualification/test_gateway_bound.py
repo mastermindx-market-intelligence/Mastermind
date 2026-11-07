@@ -260,5 +260,25 @@ class GatewayBoundTests(unittest.TestCase):
         self.assertEqual((len(self.calls), self.closed), (1, 1))
 
 
+    def test_native_plugin_loader_registers_and_unloads_real_entrypoint(self):
+        from hermes_cli.plugins import PluginManager
+        from hermes_cli.plugins_manifest import parse_manifest_file, manifest_key
+        from hermes_constants import get_hermes_home
+        directory = Path(gateway_plugin.__file__).parent / "gateway_plugin_entry"
+        manifest = parse_manifest_file(directory / "plugin.yaml", directory, "user", "")
+        self.assertIsNotNone(manifest)
+        manager = PluginManager(scope_key=str(get_hermes_home()))
+        try:
+            manager._load_plugin(manifest)
+            loaded = manager._plugins[manifest_key(manifest)]
+            self.assertIsNone(loaded.error)
+            self.assertEqual(len(manager._hooks.get("provide_gateway_turn_context", [])), 1)
+            self.assertEqual(len(manager._middleware.get("llm_execution", [])), 1)
+        finally:
+            manager.unload(manifest)
+        self.assertFalse(manager._hooks.get("provide_gateway_turn_context"))
+        self.assertFalse(manager._middleware.get("llm_execution"))
+
+
 if __name__ == "__main__":
     unittest.main()

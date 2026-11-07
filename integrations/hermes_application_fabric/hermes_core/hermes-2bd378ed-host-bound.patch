@@ -8,7 +8,7 @@
 +    # authenticated gateway. Its provide_gateway_turn_context hook must bind each turn;
 +    # this descriptor alone never authorizes inference or exempts an ordinary API provider.
 +    host_bound_runtime: bool = field(default=False, kw_only=True)
- 
+
      # ── Provider-owned auth (optional; non-api-key plugins) ──────────
      # ``auth_handler(action, args) -> bool``: ``hermes auth add|status|logout|refresh <name>`` calls it
 --- a/hermes_cli/runtime_provider.py
@@ -68,11 +68,11 @@
 @@ -1238,7 +1238,7 @@
                  )
              return result
- 
+
 -    def _run_sync_scoped(self):
 +    def _run_sync_scoped(self, scope):
          """Executor-thread body of the turn; returns the gateway result dict.
- 
+
          The turn message lives on the shared TurnContext (``ctx.message``) so ``_run_agent_inner`` sees
 @@ -1339,6 +1339,8 @@
          runner._reasoning_config = reasoning_config
@@ -238,7 +238,7 @@
 +    # Last host-provider attempt on this original admission, retained after local close.
 +    # A repeated executor cannot reconstruct it; the next native claim has a new stamp.
 +    host_provider_claim: tuple | None = None
- 
+
      def __post_init__(self):
          self.controls = PendingControls(self.event_stream)
 @@ -196,6 +199,11 @@
@@ -250,6 +250,6 @@
 +        """Consume the host-provider entry for this already admitted native turn."""
 +        from gateway.session_provider_context import bind_provider_turn
 +        return bind_provider_turn(self, context)
- 
+
      def authorize(self, actor, ref, capability):
          """Every handler calls this first, so a later ``self.sessions[ref.session_id]`` is
