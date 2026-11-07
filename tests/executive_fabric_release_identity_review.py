@@ -17,7 +17,7 @@ REVIEWED_FILES = {
     # These exact 56 spans contain no account/principal identity. Byte drift
     # exposes the source to the original guard again.
     'app/main.py': {
-        "sha256": 'dea65255815d2a906f1b2108e889e5fbb087389b4508ce68c179037a7457513b',
+        "sha256": '8abf77434627687cfde819dd8096d0ada754c3c42ff5ec195d36ff5343d43388',
         "sites": (
             (624, 44, 47, 'int', '400'),
             (661, 44, 47, 'int', '400'),
@@ -120,7 +120,7 @@ REVIEWED_FILES = {
         "sha256": "b8921960e7e46a472b536895b5a6491096627d1c8fd58ea0baf283ff34accc07",
         "sites": ((31, 18, 21, "int", "600"),),
     },
-    'integrations/session_bridge/bound_launch_capture/runtime/lane_runtime.py': {'sha256': 'cfb18bd9381fae4af1d13a257a8fa5986d903571f64b2aa5dc900439759e9b91',
+    'integrations/session_bridge/bound_launch_capture/runtime/lane_runtime.py': {'sha256': '764d140d598734d3607f697bea911c873d72ede08331308347d45a8f9451a996',
                                                                               'sites': ((1277,
                                                                                          50,
                                                                                          55,
@@ -721,7 +721,10 @@ REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '3b2699dffc841f1b5f1cd7381e8902b94eded1fd21b934b57bed89c1a876c85c', 'sites': ((3514, 68, 71, 'int', '503'), (3519, 69, 72, 'int', '503'), (3523, 67, 70, 'int', '503'))}
+# 2026-11-07 attended source check: native Hermes composition and exact pending
+# auth-timer expiry move these unchanged three operands. Preserve whole-file and
+# exact-token qualification; this supplies no runtime or formal release approval.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '2842f2dc712cb1b8718a2dfcba592bb390c153d4666b73c3a797f0d67380b499', 'sites': ((3613, 68, 71, 'int', '503'), (3618, 69, 72, 'int', '503'), (3622, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}
@@ -740,7 +743,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "44eef790fb1af899e2ddd24df561c7e6a909550f6e030d6b3494df8070587593",
+    "sha256": "13d174a066056bb2898f5c218bffdf5278c9ed83e7079c2c576502436622e1c8",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -775,3 +778,7 @@ REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "85a0164e5a35c3a334a68c30d967f78096856227875915766a6033052d4cc6f9",
     "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
 }
+
+# Native Agent OS v2 adds private readback and projects an optional real child.
+# Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
+# the same sole 512 operand remains at (23, 17, 20), with no new identity mask.

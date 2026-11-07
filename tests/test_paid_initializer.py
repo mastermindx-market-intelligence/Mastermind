@@ -583,7 +583,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='8a7e89dd92cd4c8252ac03188670985f9d76d498a8710a120b1a8a5adfa25cb7'
+    assert hashlib.sha256(current_raw).hexdigest()=='eb74b020c76c70081562d7be69bf8e154d5d7ad50b03381de0bd15ba24b634b7'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==107
     assert set(before)<=set(current)
@@ -620,10 +620,10 @@ def test_native_initializer_extends_only_exact_preimage_members():
     # and the application A members in the exact historical diff.
     ubuntu4_changed={'ext/fabric_host_qualification.py'}
     assert before['ext/fabric_host_qualification.py']=='1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899'
-    # Current procfs fallback changes only its current-runtime member.
+    # Procfs fallback and atomic load sampling change only the current runtime.
     census_changed={'ext/lane_runtime.py'}
     assert before['ext/lane_runtime.py']=='61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329'
-    assert current['ext/lane_runtime.py']=='a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f'
+    assert current['ext/lane_runtime.py']=='b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b'
     expected_changed=changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed
     assert {p for p in before if before[p]!=current[p]}==expected_changed
     # 37 authentically changed historic95 members; 58 unchanged, no exceptions.

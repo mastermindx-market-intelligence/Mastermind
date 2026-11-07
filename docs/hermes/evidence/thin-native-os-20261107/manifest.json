@@ -1,0 +1,288 @@
+[
+  {
+    "file": "e7b26bafc24b-uat-auth-build-confirmed.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-e7b26bafc24b/uat-auth-build-confirmed.json",
+    "sha256": "a0ba60de73c9aff8246f974acde5b4ce046d24fe4a7a739c396e250d72e71d7f"
+  },
+  {
+    "file": "e7b26bafc24b-uat-original-recovery-readback.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-e7b26bafc24b/uat-original-recovery-readback.json",
+    "sha256": "c660a76fec5254837d7ceda16cf0967fc73e8094d54aa76bbcec6c99341ccc6b"
+  },
+  {
+    "file": "e7b26bafc24b-uat-retained-canary-history.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-e7b26bafc24b/uat-retained-canary-history.json",
+    "sha256": "3385a1560c890e7d0553c5a56f38dffaa57fe795a1e39a59664bcf649f634b73"
+  },
+  {
+    "file": "486ec0275b74-uat-auth-build-confirmed.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-486ec0275b74/uat-auth-build-confirmed.json",
+    "sha256": "df57a831cea65c4a54d27b6298ffe02ace30b1bc9c720daf0fa0742d9c17d1da"
+  },
+  {
+    "file": "486ec0275b74-uat-created-conversation.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-486ec0275b74/uat-created-conversation.json",
+    "sha256": "75ceffb4e75370cc58eae4ce52fc0910288d72830449e86df1a6d1782a410451"
+  },
+  {
+    "file": "486ec0275b74-uat-created-recovery-diagnostic.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-486ec0275b74/uat-created-recovery-diagnostic.json",
+    "sha256": "bf039e7fed407bcb29b221d39133b28ec36d633f666bf71530684feb46f80d7a"
+  },
+  {
+    "file": "486ec0275b74-uat-signed-out.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-486ec0275b74/uat-signed-out.json",
+    "sha256": "91cf062705d1d0a6c7e95ba0e9c78e5d5882b664cb488ee0a7729578214452be"
+  },
+  {
+    "candidate": "candidate-e7b26bafc24b",
+    "source_revision": "e7b26bafc24bb63a6078a930ac7a56360cbc1ce9",
+    "build_identity": "hermes-thin-native-e7b26bafc24b-20261107-pro-02",
+    "app_tree": "377aba61fafa40e725625b59b9b23fbe416ff19d",
+    "build_exit": 0,
+    "application_source_unchanged": true,
+    "created_at": "2026-11-07T06:29:22.634278+00:00",
+    "profile": "debug",
+    "production_distribution_qualified": false,
+    "receipt_sha256": "ae518606b2150ff0807a62deddb9eec90c0b9d88e7b94996fe46003c8b8a2178",
+    "binary": {
+      "path": "Contents/MacOS/mastermind-os",
+      "sha256": "16671debfdc572251172bd9030ca7979d9e510546d84584863cc071c14582121",
+      "bytes": 45737152
+    }
+  },
+  {
+    "candidate": "candidate-486ec0275b74",
+    "source_revision": "486ec0275b74d8c508ca96dbe40173054b246978",
+    "build_identity": "hermes-thin-native-486ec0275b74-20261107-pro-03",
+    "app_tree": "c0f364dc51b14c9e017c90687506f66da1dee798",
+    "build_exit": 0,
+    "application_source_unchanged": true,
+    "created_at": "2026-11-07T06:46:39.766972+00:00",
+    "profile": "debug",
+    "production_distribution_qualified": false,
+    "receipt_sha256": "35db2eb020208cef65f31131bac9000f3c0e978ccc54367c7a520ebd4e3e0b92",
+    "binary": {
+      "path": "Contents/MacOS/mastermind-os",
+      "sha256": "a1ef75596f555d39304a5cdeb90715ec21ba9a33aa1ec3706afc4409dc2897bc",
+      "bytes": 45737152
+    }
+  },
+  {
+    "file": "app-source-equivalence.json",
+    "sha256": "6a40d20dc9e89b1960064c23f199d17174a2c5ce483cb13f4e1e330bc0d4b6df"
+  },
+  {
+    "file": "original-create-reconciliation.json",
+    "sha256": "97a021ca7ae61cb3520e51de52c3fe17cbb5eb40534a4f956ef54a037a93f869"
+  },
+  {
+    "file": "486ec0275b74-uat-sign-in-return.json",
+    "sha256": "7e16ed8df579ea8dda5b6e4661c11fb9fe0468bfd729bb9e1f87eedd819f35f6"
+  },
+  {
+    "file": "386578f66392-candidate-build-receipt.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-386578f66392/candidate-build-receipt.json",
+    "sha256": "b9607de94be02b0e6c3cfa374ae7f5166662102344b4d57857b5f7c5de0a8301"
+  },
+  {
+    "file": "386578f66392-uat-launch.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-386578f66392/uat-launch.json",
+    "sha256": "55b4795ce41afbf765968135b43e543d6ae7929ac2026561ea4ebbee07272caf"
+  },
+  {
+    "file": "386578f66392-uat-before-window-reopen.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-386578f66392/uat-before-window-reopen.json",
+    "sha256": "0a65ab050857ff81ffbcb296497e8a43073f3603ee71f862579786d7c6f1589a"
+  },
+  {
+    "file": "386578f66392-uat-process-reopen.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-386578f66392/uat-process-reopen.json",
+    "sha256": "3ece6f1e299e78adbe4ddc791e032a42b426047905a9ff55751a3f69285ccf94"
+  },
+  {
+    "file": "386578f66392-uat-window-restore.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-386578f66392/uat-window-restore.json",
+    "sha256": "59fa4a3958f5dd0bd7874179b05f01b3bb8ab857633bfa6cf61043949b2be470"
+  },
+  {
+    "file": "386578f66392-uat-auth-build-confirmed.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-386578f66392/uat-auth-build-confirmed.json",
+    "sha256": "ed42c79275dc80ff71fde56721db756703dd8df5fb7cfba5c223affb7ce7c8cf"
+  },
+  {
+    "file": "386578f66392-uat-original-create-recovery.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-386578f66392/uat-original-create-recovery.json",
+    "sha256": "6b6baaada7590b64c9fa14b261e50c80b89db5aee8a01ef20e9c06d0dbc6fb59"
+  },
+  {
+    "file": "386578f66392-uat-original-send-reconciliation.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-386578f66392/uat-original-send-reconciliation.json",
+    "sha256": "381aa13aa0e410c4f9b20263ea9c994e8d0cb9f1d552a95eda7755a11fe62b34"
+  },
+  {
+    "file": "386578f66392-uat-canonical-send-reconciliation.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-386578f66392/uat-canonical-send-reconciliation.json",
+    "sha256": "89df4ac3a25ce349b88b428e6a232c2a04b8b5eca000300d39fc929cd0e01ef0"
+  },
+  {
+    "file": "386578f66392-uat-send-preflight-diagnostic.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-386578f66392/uat-send-preflight-diagnostic.json",
+    "sha256": "7051d46578628797461360ae53cd46e82f268060d870bfdf32cadcc652d6f942"
+  },
+  {
+    "file": "omh-source-qualification-20261107-pro-05.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/omh-source-qualification-20261107-pro-05.json",
+    "sha256": "bf77754e618adb8c76bcfeed5d535e7a0ccca32686fadd9b1ed9ac79d3ab1df4"
+  },
+  {
+    "file": "1f431c6c4087-package-receipt.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/qualified/PACKAGE_RECEIPT.json",
+    "sha256": "eae1759c5706f0d975c0c08ac3e81b35d448d0dc9835ed6456a20dab4648efc8"
+  },
+  {
+    "file": "547a880894b0-composition.json",
+    "source": "existing managed workspace prepared merge and retained focused test logs",
+    "sha256": "f3e3c039e77189c382dc6caac92aa92e939ca2e26fbbd62685cf63185019e7f1"
+  },
+  {
+    "file": "1f431c6c4087-candidate-build-receipt.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/candidate-build-receipt.json",
+    "sha256": "47a59f7a77c7ea9d6a246f61611db822ebe92608a032b3fe17ff315fc564e702"
+  },
+  {
+    "file": "1f431c6c4087-uat-launch.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-launch.json",
+    "sha256": "1b500615d5be4da314263e5d8dc145fb180c32060c36c5c11a32b4db822e6750"
+  },
+  {
+    "file": "1f431c6c4087-uat-auth-build-confirmed.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-auth-build-confirmed.json",
+    "sha256": "15fd543a02e2d38bc72dd6351f7aceda306f96abe3fd7b61e9094651f9ad6509"
+  },
+  {
+    "file": "1f431c6c4087-uat-original-history-identity.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-original-history-identity.json",
+    "sha256": "028060861d8bc9a70e6d82854d62977bbbf920a57a984a6b54866f70c1a6760c"
+  },
+  {
+    "file": "1f431c6c4087-uat-useful-send-action.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-useful-send-action.json",
+    "sha256": "f4b64bdd28e6ba4b76438efa9e08f20ee70f575fb32433e5457d76976fbf899d"
+  },
+  {
+    "file": "1f431c6c4087-uat-useful-original-result.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-useful-original-result.json",
+    "sha256": "bff4790985a048d979267d018c90d8488f864d44136a816f345e76b7d4dff976"
+  },
+  {
+    "file": "1f431c6c4087-uat-original-recovery-action.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-original-recovery-action.json",
+    "sha256": "3390731525388dc126b77e6f2380d2e37010815d33e32fe311715f2c4abfd078"
+  },
+  {
+    "file": "1f431c6c4087-uat-original-recovery-result.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-original-recovery-result.json",
+    "sha256": "30a5678d00fecee8ae2984654188e5dd29e770020f0922bba5c5b57170cfe03a"
+  },
+  {
+    "file": "1f431c6c4087-uat-useful-canonical-answer.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-useful-canonical-answer.json",
+    "sha256": "f128fe6d3cbd90cf0bbf1505d4dd2030d7f90d88d66224e47a3993c58ba92f51"
+  },
+  {
+    "file": "1f431c6c4087-uat-logout-action.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-logout-action.json",
+    "sha256": "3ef2550f0490d049dee13b81f1f2d4068a20a769590b988c3cd3bde044b26853"
+  },
+  {
+    "file": "1f431c6c4087-uat-logout-cleared.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-logout-cleared.json",
+    "sha256": "472797caf3f9eea5bcb66391e9a3e8fe0d3835e4ae3136e691c54061ed08535a"
+  },
+  {
+    "file": "1f431c6c4087-uat-loggedout-close.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-loggedout-close.json",
+    "sha256": "99ff73923b4447746a6313cc1450032938194302c1e7a638d9457fb0f95b58f6"
+  },
+  {
+    "file": "1f431c6c4087-uat-process-reopen.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-process-reopen.json",
+    "sha256": "e9e2efc310751cd33d98c647683b8612eeef7518a939e2fed601603a0a9c31f5"
+  },
+  {
+    "file": "1f431c6c4087-uat-reconnect-signin-action.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-reconnect-signin-action.json",
+    "sha256": "53b1f9b88c4fd8fe2ce058a4d719a669570b4879e7707f3b0b0d5de8ce23440c"
+  },
+  {
+    "file": "1f431c6c4087-uat-reconnect-auth-confirmed.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-reconnect-auth-confirmed.json",
+    "sha256": "708a202a8fe3a4eed03888e9092fd56b52fe0ae890d57830380403d4367acb2d"
+  },
+  {
+    "file": "1f431c6c4087-uat-reconnect-original-answer.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-reconnect-original-answer.json",
+    "sha256": "e004e3e8286029ed4a5b613002d4ff88b118cabbea7675b8a42c94e699ea81c0"
+  },
+  {
+    "file": "1f431c6c4087-uat-organization-preserved.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-organization-preserved.json",
+    "sha256": "ac1545f7e8d0ad7c08592fc352492684661d0e7588c9acc2c7005ca03e6bb806"
+  },
+  {
+    "file": "1f431c6c4087-uat-useful-started-projection.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-useful-send-first-result.json",
+    "source_sha256": "56ca2869e10c12a7149a50d032ca11b3871725ba3749fa6404f406ae551c142e",
+    "sha256": "dbe12a5d23783bdcd50e032762da065a1ad0ee9ffb9be15a42e7dfb30d838a7d"
+  },
+  {
+    "file": "ui-feedback-tests-20261107-pro-06.json",
+    "sha256": "baabc681fdf023ad1316ae11c788f81da295db567c4a05f41ac358e70b1bb516"
+  },
+  {
+    "file": "6e59cfeb6b00-candidate-build-receipt.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-6e59cfeb6b00/candidate-build-receipt.json",
+    "sha256": "d105373a3a37875034e4eb2f795f2847a7a843be6c6eeaf673fef0df8629b3d7"
+  },
+  {
+    "file": "6e59cfeb6b00-uat-launch.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-6e59cfeb6b00/uat-launch.json",
+    "sha256": "0a33ce38295021b58f4c7444bb03842d93f13aee436cf78fa942c8917082ff46"
+  },
+  {
+    "file": "6e59cfeb6b00-uat-signin-action.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-6e59cfeb6b00/uat-signin-action.json",
+    "sha256": "f4d30cafaf7a7d2d324b150857228f894489753cee1798ee11b5b9cf993eb8ee"
+  },
+  {
+    "file": "6e59cfeb6b00-uat-auth-build-confirmed.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-6e59cfeb6b00/uat-auth-build-confirmed.json",
+    "sha256": "65b2710fc6c42894b45cca84deaa04950c612d3750d90262d24bee6a97255c68"
+  },
+  {
+    "file": "6e59cfeb6b00-uat-retained-original-answer.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-6e59cfeb6b00/uat-retained-original-answer.json",
+    "sha256": "8feae160775054128860488ebd5296c73bb87d8405b89bf3052bd8b0c5331043"
+  },
+  {
+    "file": "6e59cfeb6b00-uat-logout-action.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-6e59cfeb6b00/uat-logout-action.json",
+    "sha256": "7b66e04ca3f7e5f23b2cb56021eca61c81120b4f0fec5fbcc3b0cbd5e0690edc"
+  },
+  {
+    "file": "6e59cfeb6b00-uat-corrected-logout.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-6e59cfeb6b00/uat-corrected-logout.json",
+    "sha256": "4a943c121a39c20e6752a1ed93df76d2264f17900bcce0835ed8d3fd237637e8"
+  },
+  {
+    "file": "6e59cfeb6b00-package-receipt.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-6e59cfeb6b00/qualified/PACKAGE_RECEIPT.json",
+    "sha256": "d28ab41f39c02fc1fabde8d06271036090845b98da72c4fdfe52ee03c2d76472"
+  },
+  {
+    "file": "native-ui-acceptance-6e59cfeb6b00.json",
+    "source": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-6e59cfeb6b00/native-ui-acceptance-6e59cfeb6b00.json",
+    "sha256": "0c31d66063205603bd76b8b1224a3a288778525b501c75b3b95fe10befbd6d40"
+  }
+]
