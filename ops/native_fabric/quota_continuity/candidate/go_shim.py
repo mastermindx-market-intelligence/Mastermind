@@ -2818,7 +2818,7 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                                 or not router.application_model_supported(model, "/v1/chat/completions")):
                             continue
                     elif pool == "bailian":
-                        if (application_http_binding is None or service.workload != "site_interactive"
+                        if (application_http_binding is None
                                 or model not in application_http_binding.driver.identity.allowed_models):
                             continue
                         application_http_binding.driver.prepare_request(concrete)
@@ -3117,7 +3117,7 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             compiled, account_binding, commitment = None, None, None
             if pool == "bailian":
                 try:
-                    if application_http_binding is None or service.workload != "site_interactive":
+                    if application_http_binding is None:
                         raise ValueError("application realm workload unavailable")
                     compiled = application_http_binding.driver.prepare_request(payload)
                     recipe, expected_digest = lease_gateway.application_recipe(pool, model)

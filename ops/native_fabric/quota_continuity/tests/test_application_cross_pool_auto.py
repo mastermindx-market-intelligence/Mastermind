@@ -80,8 +80,8 @@ class CrossPoolHTTPFixture(RegisteredPoolCompositionFixture):
             "stream": False, "max_tokens": 128}
         self.configure(["go", "bailian", "codex-native"])
 
-    def configure(self, pools, *, purpose=True, bindings=True, service_pool="go"):
-        service = self.go.ApplicationServiceBinding("macro", "vps", "site_interactive",
+    def configure(self, pools, *, purpose=True, bindings=True, service_pool="go", workload="site_interactive"):
+        service = self.go.ApplicationServiceBinding("macro", "vps", workload,
             "MACRO_APPLICATION_TOKEN", SERVICE_TOKEN, pool=service_pool,
             selection_purpose=self.go.ApplicationSelectionPurpose(self.purposes["go"]) if purpose else None,
             route_scope=self.go.ApplicationRouteScope(route_scope(pools)) if pools is not None else None)
@@ -96,7 +96,7 @@ class CrossPoolHTTPFixture(RegisteredPoolCompositionFixture):
         self.expected_scope_digest = service.route_scope.digest if service.route_scope else None
         return service
 
-    def auto_request(self, turn="auto", *, step="step-1", payload=None, scope_digest="current"):
+    def auto_request(self, turn="auto", *, step="step-1", payload=None, scope_digest="current", headers=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=5)
         supplied = {"Authorization": "Bearer " + SERVICE_TOKEN, "Content-Type": "application/json",
             "Connection": "close", "X-MM-Application-Turn-ID": turn, "Idempotency-Key": step}
@@ -104,6 +104,7 @@ class CrossPoolHTTPFixture(RegisteredPoolCompositionFixture):
         value = self.auto_payload if payload is None else payload
         if expected is not None and value.get("model") is None:
             supplied["X-MM-Application-Route-Scope-Digest"] = expected
+        supplied.update(headers or {})
         try:
             connection.request("POST", "/v1/chat/completions",
                 json.dumps(self.auto_payload if payload is None else payload).encode(), supplied)
@@ -114,6 +115,93 @@ class CrossPoolHTTPFixture(RegisteredPoolCompositionFixture):
             return response.status, json.loads(raw), result_headers
         finally:
             connection.close()
+
+
+class HTTPApplicationWorkloadTests(CrossPoolHTTPFixture):
+    def qualify(self, workload, *, tools=True, fixed=False, grant_workload=None):
+        for grant in self.document["application_grants"]:
+            grant["workloads"] = [grant_workload or workload]
+        self.save()
+        policy = json.loads(self.policy_path.read_text())
+        if tools:
+            policy["pools"]["bailian"]["model_capabilities"] = {
+                "qwen3.8-flash": {"tools": True, "vision": False}}
+        self.policy_path.write_text(json.dumps(policy))
+        return self.configure(None if fixed else ["bailian"], workload=workload,
+                              service_pool="bailian" if fixed else "go")
+
+    def typed_request(self):
+        return dict(self.auto_payload, tools=[{"type": "function", "function": {
+            "name": "get_context", "parameters": {"type": "object", "properties": {},
+                                                  "additionalProperties": False}}}])
+
+    def tool_response(self):
+        return {"model": "qwen3.8-flash", "status": "completed",
+                "output": [{"type": "function_call", "call_id": "read-original",
+                            "name": "get_context", "arguments": "{}"}],
+                "usage": {"input_tokens": 11, "output_tokens": 7}}
+
+    def test_source_bound_batch_analysis_portfolio_auto_use_structured_http(self):
+        for workload in ("site_batch", "lobe_analysis", "portfolio_analysis"):
+            with self.subTest(workload=workload):
+                self.qualify(workload)
+                payload = self.typed_request()
+                self.response = self.tool_response()
+                turn_id = "http-auto-" + workload
+                status, body, _ = self.auto_request(turn_id, payload=payload)
+                self.assertEqual(status, 200, body)
+                self.assertEqual(body["application"]["routing"]["pool"], "bailian")
+                self.assertEqual(body["choices"][0]["message"]["tool_calls"][0]["id"], "read-original")
+                next_payload = copy.deepcopy(payload)
+                next_payload["messages"] += [
+                    body["choices"][0]["message"],
+                    {"role": "tool", "tool_call_id": "read-original", "content": "Dated context."}]
+                self.response = self.responses["bailian"]
+                status, body, _ = self.auto_request(turn_id, step="step-2", payload=next_payload)
+                self.assertEqual(status, 200, body)
+                turn = next(row for row in self.rows("application_turns") if row["turn_id"] == turn_id)
+                self.assertEqual(turn["workload"], workload)
+                self.assertEqual(self.close(turn_id)[0], 200)
+        self.assertEqual((len(self.posts), len(self.dispatches), len(self.rows("application_requests"))), (6, 0, 6))
+
+    def test_source_bound_workloads_use_fixed_http_without_new_authority(self):
+        for workload in ("site_batch", "lobe_analysis", "portfolio_analysis"):
+            with self.subTest(workload=workload):
+                self.qualify(workload, fixed=True)
+                payload = dict(self.typed_request(), model="qwen3.8-flash")
+                self.response = self.tool_response()
+                turn_id = "http-fixed-" + workload
+                status, body, _ = self.auto_request(turn_id, payload=payload,
+                    headers={"X-MM-Application-Recipe-Digest": self.http_digest})
+                self.assertEqual(status, 200, body)
+                turn = next(row for row in self.rows("application_turns") if row["turn_id"] == turn_id)
+                self.assertEqual((turn["workload"], turn["pool"]), (workload, "bailian"))
+                self.assertEqual(self.close(turn_id)[0], 200)
+        self.assertEqual((len(self.posts), len(self.dispatches)), (3, 0))
+
+    def test_workload_cannot_borrow_another_service_grant(self):
+        self.qualify("portfolio_analysis", grant_workload="site_interactive")
+        self.response = self.tool_response()
+        self.assertEqual(self.auto_request(payload=self.typed_request())[0], 409)
+        self.assert_no_effect()
+
+    def test_unknown_tools_policy_stays_ineligible_despite_http_grammar(self):
+        self.qualify("portfolio_analysis", tools=False)
+        self.response = self.tool_response()
+        self.assertEqual(self.auto_request(payload=self.typed_request())[0], 409)
+        self.assert_no_effect()
+
+    def test_wrong_recipe_and_caller_workload_override_refuse_before_admission(self):
+        self.qualify("portfolio_analysis")
+        self.response = self.tool_response()
+        forged = dict(self.typed_request(), workload="site_interactive")
+        self.assertGreaterEqual(self.auto_request(payload=forged)[0], 400)
+        for grant in self.document["application_grants"]:
+            if grant["pool"] == "bailian":
+                grant["recipe_digest"] = "0" * 64
+        self.save()
+        self.assertEqual(self.auto_request("wrong-recipe", payload=self.typed_request())[0], 409)
+        self.assert_no_effect()
 
 
 class CrossPoolHTTPTests(CrossPoolHTTPFixture):

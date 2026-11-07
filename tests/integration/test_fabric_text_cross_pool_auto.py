@@ -29,8 +29,8 @@ _spec.loader.exec_module(_helpers)
 PINS = {
     "candidate/lease_broker.py": "3c1360866b6a4fcdc2f9d72732d0439361e3d0c7",
     "candidate/go_lease_gateway.py": "9a30985f744be11b8ce3f2514baef5b494b4471a",
-    "candidate/go_shim.py": "75127a5540a5579215fda186db6fdf3326655d60",
-    "tests/test_application_cross_pool_auto.py": "497397c25f84038864d11b6eca67ec7b468b0ac6",
+    "candidate/go_shim.py": "969ffaf84e23ef2d1c0398761943093c9b5c9456",
+    "tests/test_application_cross_pool_auto.py": "a4844fa37548f31027b5041c35e540cd50e51ce3",
 }
 
 
@@ -316,10 +316,21 @@ class AutoTextApplicationTests(unittest.TestCase):
         self.assertEqual(self.costs()[0]["est_cost_usd"], 0.125)
         self.assertEqual(ai_costs._cost_basis_bucketname({"provider": "claude_oauth"}), "subscription")
 
-    def test_unqualified_http_batch_workload_stays_out_of_candidate_intersection(self):
-        # The H source owner currently admits site_interactive only. A route
-        # scope and an account grant cannot widen its workload qualification.
+    def test_batch_workload_uses_qualified_http_with_exact_original_grant(self):
         self.configure(["bailian"])
+        result = client.call_model("Fixture system.", "Fixture question.", max_tokens=128)
+        self.assertEqual(result, ("Bailian fixture answer.", None))
+        self.assertEqual(len(self.native.posts), 1)
+        turn = self.native.rows("application_turns")[0]
+        self.assertEqual((turn["principal_id"], turn["workload"]), ("mastermind-text", "site_batch"))
+        self.assertEqual(self.costs()[0]["model"], "qwen3.8-flash")
+        self.assertIsNone(self.costs()[0]["est_cost_usd"])
+
+    def test_batch_workload_cannot_borrow_an_interactive_grant(self):
+        self.configure(["bailian"])
+        for grant in self.native.document["application_grants"]:
+            grant["workloads"] = ["site_interactive"]
+        self.native.save()
         result = client.call_model("Fixture system.", "Fixture question.", max_tokens=128)
         self.assertIsNone(result[0])
         self.assertFalse(self.native.posts)
