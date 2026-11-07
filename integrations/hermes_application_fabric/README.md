@@ -7,7 +7,7 @@ Current owner brief: [source, evidence and financial acceptance](https://github.
 
 ## Implemented path
 
-The adapter, native host integration, role enrollment proposal, fixed/AUTO factory
+The adapter, native host integration, role enrollment proposal, fixed/AUTO/exact factory
 relations and same-owner tunnel role aliases are implemented. They remain held
 until the original APPLICATION/provider/release owners qualify and install them.
 No live role enrollment, account call, provider budget or production acceptance
@@ -60,7 +60,9 @@ session map.
 
 Publication v1 is fixed model. Publication v2 explicitly selects AUTO and the
 native route label mastermind-fabric/auto; old named-model publications are
-never reinterpreted as AUTO. The existing installation v4 joins that publication,
+never reinterpreted as AUTO. Publication v3 adds a concrete model constraint to
+the existing scoped owner, using with_requested_model before inspection freezing.
+The existing installation v4 joins that publication,
 its enrollment request, role UID, held Macro source and package digest. Native
 configuration and child environment are keyless, disable provider fallback and
 startup warmup, and forward only the exact role's original internal credential.
@@ -117,10 +119,10 @@ Selection stays in the existing ModelRouter/APPLICATION/Fabric owner:
    conversation/tool/structured requirements, context/output limits, entitlement
    and physical account headroom.
 3. Strict constraints are applied before selection. The fixed factory enforces
-   its concrete inspected model. AUTO v2 can enforce an already committed
-   singleton pool scope. Per-turn pool narrowing or concrete model plus broader
-   AUTO scope requires the incumbent scoped-selection contract; this adapter
-   refuses unsupported combinations before effects.
+   its concrete inspected model. AUTO v2 and exact v3 can enforce an already
+   committed singleton pool scope. Exact v3 preserves the original concrete
+   model while the incumbent owner chooses eligible pool/account capacity.
+   Broader per-turn pool narrowing still refuses before effects.
 4. Existing policy ranks eligible candidates by task suitability, expected queue
    and response latency, headroom and expected cost. Estimates guide ranking;
    observed usage and the account owner's financial policy control settlement.
@@ -132,10 +134,9 @@ Selection stays in the existing ModelRouter/APPLICATION/Fabric owner:
    evaluated before any new selection. Original policy/recipe/account/request
    commitments remain immutable.
 
-The adapter implements consumption of fixed and AUTO v2 contracts. It does not
+The adapter consumes fixed, AUTO v2 and exact scoped v3 owner contracts. It does not
 claim that every latency/complexity/cost policy or monetary gate is installed.
-The active scoped-model commission and shared-pool policy owner retain their
-source responsibility.
+The incumbent APPLICATION and shared-pool policy owners retain source responsibility.
 
 ## Account economics are an explicit integration requirement
 

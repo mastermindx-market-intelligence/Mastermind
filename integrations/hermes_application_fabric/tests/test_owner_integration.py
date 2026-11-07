@@ -24,6 +24,7 @@ class OwnerLoopbackTests(unittest.TestCase):
         self.structured_value = {"answer": 42}
         self.tool_name, self.tool_arguments = "read", {"path": "/tmp/x"}
         self.auto_inspection = None
+        self.route_overrides = {}
         self.serving_model = "model-1"
         self.response_release, self.response_finished = threading.Event(), threading.Event()
         parent = self
@@ -82,13 +83,17 @@ class OwnerLoopbackTests(unittest.TestCase):
                     from engine.fabric_inference_client import _auto_request_digest, AUTO_SCHEMA
                     original = parent.calls[-1]["payload"]
                     scope = parent.auto_inspection
-                    routing = dict(schema="mastermind.fabric_application_route.v1", requested_model=None,
+                    exact = scope["schema"] == "mastermind.fabric_application_inspection.v3"
+                    routing = dict(schema="mastermind.fabric_application_route.v2" if exact else "mastermind.fabric_application_route.v1",
+                        requested_model=scope["requested_model"],
                         route_scope=scope["route_scope"], route_scope_digest=scope["route_scope_digest"],
                         selection_digest="a" * 64, request_digest=_auto_request_digest(original),
-                        routed_request_digest=_auto_request_digest(dict(original, model=parent.serving_model)),
-                        pool="go", selected_model=parent.serving_model, mode="fixture-mode", protocol="chat",
+                        routed_request_digest=None if exact else _auto_request_digest(dict(original, model=parent.serving_model)),
+                        pool="go", selected_model=scope["requested_model"] if exact else parent.serving_model,
+                        mode="fixture-mode", protocol="chat",
                         driver="fixture-driver", profile="fixture-profile", source="fixture-source", recipe_digest=None,
                         output_contract={"mode": "hard_maximum", "max_tokens": original["max_tokens"]})
+                    routing.update(parent.route_overrides)
                     payload["application"] = dict(schema=AUTO_SCHEMA, disposition=state, turn_id=turn,
                         request_id=req, dispatch_permitted=False, effect_unknown=False, routing=routing,
                         serving_model=parent.serving_model, usage={"input_tokens": 11, "output_tokens": 7})

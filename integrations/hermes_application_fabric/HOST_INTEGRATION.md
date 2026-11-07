@@ -54,6 +54,22 @@ come from the original APPLICATION observation and are correlated to the exact
 native request. A configured AUTO label, capability ID or provider profile is not
 a physical-account receipt.
 
+The closed primary publication supports three distinct forms:
+
+| Publication | Native model | Owner contract |
+| --- | --- | --- |
+| v1 | Named fixed model | Original fixed inspection/binding |
+| v2, routing.mode=auto | mastermind-fabric/auto | Null requested model, inspection/binding v2 |
+| v3, routing.mode=exact | Concrete host-authorized model | with_requested_model before inspection, inspection/binding v3 |
+
+V2/v3 routing also carries strict_pool, either null or a pool whose name must
+match the owner's complete singleton scope. Hermes cannot narrow a broader
+pool list itself. V3 never converts a concrete model to AUTO. Its original wire
+model is unchanged, the selected and served models must match, and the original
+owner's route v2 has routed_request_digest=null. Old v1/v2 publications are not
+reinterpreted. The additional Qwen plaintext control form is not qualified for
+Hermes tool conversations; unsupported reasoning kwargs still refuse.
+
 ## Existing dependency closure
 
 The real held launch already supplies PyYAML 6.0.3 through

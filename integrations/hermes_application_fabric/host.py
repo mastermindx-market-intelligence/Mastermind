@@ -89,7 +89,8 @@ class _OriginalCapability:
                     profile_id=self.host.publication.role, operation_id=self.admission_id,
                     session_id=call.session_id, turn_id=call.turn_id,
                     requested_model=self.host.publication.model,
-                    strict_model=None if self.host.publication.automatic else self.host.publication.model,
+                    strict_model=(self.host.publication.strict_model if self.host.publication.automatic
+                                  else self.host.publication.model),
                     automatic=self.host.publication.automatic, strict_pool=self.host.publication.strict_pool,
                     prior_admission_possible=False, authorized=self.authorized,
                     max_output_tokens=self.host.publication.max_tokens)
@@ -254,6 +255,8 @@ class _NativeHost:
             service_mode_id=service, root=Path(self.publication.macro_root),
             workload_cfg={"workload_profile": "site_interactive", "provider_order": ["fabric"],
                           "client_timeout_s": 90.0})
+        if self.publication.strict_model is not None:
+            factory = factory.with_requested_model(self.publication.strict_model)
         factory = factory.with_inspection(factory.inspect())
         cap = _OriginalCapability(self, authority, live, sid, row["generation"],
             row["admission_id"], row["request_id"], row["owner_epoch"],

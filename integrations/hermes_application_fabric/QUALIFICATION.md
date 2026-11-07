@@ -1,5 +1,31 @@
 # Hermes APPLICATION qualification evidence
 
+## Exact scoped-model source join
+
+The current adapter composes the published APPLICATION exact-model v3 contract
+at Mastermind d5df6b2ad8b2a49e9c0a98e33f8c7cca14a630a6 and the paired Macro
+owner abab96df55f82cb5c26459a6f51b568d73a6a6f8. Macro #10818 preserves its
+Hermes role identities and numeric aliases while composing those owner changes
+at 915189b2538c8b952a53e921ba170459cd1eb624. Its original natural
+[run42346514961](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42346514961/job/128325333011)
+passed all62 cases in2.43seconds, using GitHub merge15676bd into abab96d.
+Current composed client SHA256 is
+70fb47f5e44cfebbed86709fedc2ae0fa816a96763fc497dc5c55df82f2604f0.
+
+The new standalone client loopback checks passed12 cases on local Python3.12:
+four retained AUTO cases and eight exact-selection/receipt/override/429 cases.
+They verify unchanged concrete model, null routed digest, closed schema/scope,
+serving-model equality and no third send after a post-tool refusal. The natural
+CI adds full native fixed/AUTO/exact conversations through the real handler and
+Broker. That expanded source needs its own receipt; no result is inferred here.
+
+The previous source8c49f959b91d892d27f5fc24a8c9322ab86793f2 passed all six
+APPLICATION jobs in run42345675195, plus Hermes harness42345675206 and runtime
+42345675236. General CI remains separate: its inherited chat fixture lacks the
+closed chat-specific service record after the original production identity split.
+The exact failure and minimal incumbent-owner repair are recorded in
+[APPLICATION join6703255977](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703255977).
+
 ## Current source proof
 
 Exact tested source: 470b479b53e0120b26f238d9251489ebdef260c5.

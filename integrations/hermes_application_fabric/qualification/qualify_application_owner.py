@@ -28,8 +28,8 @@ def main():
     args = parser.parse_args()
     roots = {name: Path(value).resolve() for name, value in vars(args).items()}
     expected = {
-        "macro_root": "6612f6aba4ac431d38432b500ed5c5d66122f1d0",
-        "native_owner_root": "f5c4a2365e4ec83bb5de92e7e64213264ada9324",
+        "macro_root": "915189b2538c8b952a53e921ba170459cd1eb624",
+        "native_owner_root": "d5df6b2ad8b2a49e9c0a98e33f8c7cca14a630a6",
         "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
     }
     for name, sha in expected.items():
@@ -76,6 +76,8 @@ def main():
     )
 
     class OriginalOwnerConversation(NativeApplicationHTTPFixture):
+        route_mode = "fixed"
+
         def setUp(self):
             super().setUp()
             self.grant.update(principal_id="hermes-secretary", grant_id="fixture-hermes",
@@ -83,11 +85,37 @@ def main():
                 admission_root="service:hermes-secretary", accounts=["account-a"])
             self.save()
             self.physical_before = json.loads(self.accounts.read_bytes())["providers"]
+            scoped = self.route_mode != "fixed"
+            route_scope = {"schema": "mastermind.application_route_scope.v1", "pools": ["go"]}
+            selection = {}
+            if scoped:
+                from test_application_registered_pool_selection import RegisteredPoolFixture, _policy_document
+                from go_lease_gateway import ApplicationSelectionProfile
+                import pick
+                import pool_ledger
+                self.policy_path = self.directory / "pools.yaml"
+                self.policy_path.write_text(json.dumps(_policy_document()))
+                ledger_path = self.directory / "ledger.jsonl"
+                ledger_path.write_text("")
+                for module, name, value in ((pick, "POOLS_YAML", str(self.policy_path)),
+                                           (pool_ledger, "LEDGER_PATH", str(ledger_path))):
+                    guard = patch.object(module, name, value)
+                    guard.start()
+                    self.addCleanup(guard.stop)
+                profile = ApplicationSelectionProfile(source_generation="a" * 64,
+                    ingress_digest=hashlib.sha256((roots["native_owner_root"] /
+                        "ops/native_fabric/quota_continuity/candidate/go_shim.py").read_bytes()).hexdigest(),
+                    account_profile=self.accounts)
+                self.gateway = self.new_gateway(application_selection_profile=profile)
+                purpose = RegisteredPoolFixture.purpose_for(self, "go")
+                purpose["task"]["needs"] = ["tools"]
+                selection = {"selection_purpose": self.go.ApplicationSelectionPurpose(purpose),
+                    "route_scope": self.go.ApplicationRouteScope(route_scope)}
             # Reuse the original physical Router/gateway/Broker, with a Hermes
             # service binding in the disposable owner. The prior fixture
             # listener remains unused and retains its own cleanup callback.
             self.service = self.go.ApplicationServiceBinding("hermes-secretary", "vps",
-                "site_interactive", "HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN", SERVICE_TOKEN)
+                "site_interactive", "HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN", SERVICE_TOKEN, **selection)
             self.server = self.go.make_server(self.router, lease_gateway=self.gateway,
                 application_services=(self.service,))
             self._serve(self.server)
@@ -98,11 +126,11 @@ def main():
                 (roots["macro_root"] / "config/provider_workloads.v1.json").read_bytes())
             document = json.loads((roots["macro_root"] / "config/provider_production_modes.v1.json").read_bytes())
             self.assertEqual(document["application_fabric_modes"], {})
-            transport_id = "native_go_hermes_secretary_v1"
+            transport_id = "native_fabric_hermes_secretary_auto_v1" if scoped else "native_go_hermes_secretary_v1"
             original = factory_owner._APPLICATION_FABRIC_TRANSPORTS[transport_id]
             self.assertFalse(original.qualified or original.application_allowed)
             qualified = replace(original, base_url=f"http://127.0.0.1:{self.server.server_port}/v1",
-                model="fixture-model", qualified=True, application_allowed=True)
+                model=None if scoped else "fixture-model", qualified=True, application_allowed=True)
             held = patch.dict(factory_owner._APPLICATION_FABRIC_TRANSPORTS, {transport_id: qualified})
             held.start()
             self.addCleanup(held.stop)
@@ -110,6 +138,8 @@ def main():
             row.update(transport_id=transport_id, enabled=True, application_allowed=True,
                 qualification=factory_owner.PROFILE_QUALIFIED_CANARY,
                 qualification_ref="fixture:original-owner-conversation", qualified_until=time.time() + 300)
+            if scoped:
+                row["route_scope"] = route_scope
             document["application_fabric_modes"] = {"hermes_secretary_fabric": row}
             (config / "provider_production_modes.v1.json").write_text(json.dumps(document))
             (config / "capability_manifest.yml").write_text(json.dumps({"capabilities": [{
@@ -122,13 +152,25 @@ def main():
             factory = factory_owner.make_application_fabric_factory(mode_id="shared_fabric",
                 lane="hermes-secretary", root=self.config_root, service_mode_id="hermes_secretary_fabric",
                 workload_cfg={"workload_profile": "site_interactive", "provider_order": ["fabric"]})
+            if self.route_mode == "exact":
+                factory = factory.with_requested_model("fixture-model")
             # Inspect outside native middleware so a fixture authority error
             # remains a useful qualification failure instead of a masked
             # missing-host-binding response. This performs no admission.
-            self.assertEqual(factory.inspect()["model"], "fixture-model")
+            inspected = factory.inspect()
+            if scoped:
+                self.assertEqual(inspected["schema"], "mastermind.fabric_application_inspection.v3"
+                                 if self.route_mode == "exact" else "mastermind.fabric_application_inspection.v2")
+                self.assertEqual(inspected["requested_model"], "fixture-model" if self.route_mode == "exact" else None)
+            else:
+                self.assertEqual(inspected["model"], "fixture-model")
+            factory = factory.with_inspection(inspected)
+            self.native_model = ("fixture-model" if self.route_mode == "exact" else
+                                 "mastermind-fabric/auto" if scoped else "host-selection")
             self.binding = None
             self.native_calls = []
             self.binding_errors = []
+            self.owner_results = []
 
             def resolve(call):
                 self.native_calls.append(call)
@@ -136,8 +178,15 @@ def main():
                     try:
                         self.binding = ApplicationBinding.from_factory(factory, profile_id="mmsecretary",
                             operation_id="hermes-owner-proof", session_id=call.session_id, turn_id=call.turn_id,
-                            requested_model="host-selection", authorized=lambda current: current.session_id == call.session_id,
-                            prior_admission_possible=False, strict_model="fixture-model", max_output_tokens=256)
+                            requested_model=self.native_model, authorized=lambda current: current.session_id == call.session_id,
+                            prior_admission_possible=False, strict_model=None if self.route_mode == "auto" else "fixture-model",
+                            automatic=scoped, strict_pool="go" if scoped else None, max_output_tokens=256)
+                        original_create = self.binding._owner.messages.create
+                        def observed_create(**kwargs):
+                            response = original_create(**kwargs)
+                            self.owner_results.append(response)
+                            return response
+                        self.binding._owner.messages.create = observed_create
                     except Exception as error:
                         self.binding_errors.append((type(error).__name__, getattr(error, "code", None)))
                         raise
@@ -160,7 +209,7 @@ def main():
                 schema={"name": "mmx_owner_fixture_read", "description": "Read the immutable fixture value.",
                     "parameters": {"type": "object", "properties": {"value": {"type": "string"}},
                                    "required": ["value"]}}, handler=read_value)
-            self.native = create_primary_agent(model="host-selection", session_id="hermes-owner-session",
+            self.native = create_primary_agent(model=self.native_model, session_id="hermes-owner-session",
                 enabled_toolsets=["mmx_owner_fixture_tools"], quiet_mode=True, skip_memory=True,
                 skip_background_review=True, skip_context_files=True, load_soul_identity=False,
                 save_trajectories=False, max_iterations=3, max_tokens=256)
@@ -196,9 +245,15 @@ def main():
             self.assertEqual({r["turn_id"] for r in requests}, {self.binding.operation_id})
             for row, call, sent in zip(requests, self.native_calls, self.posts):
                 self.assertEqual(row["request_id"], self.binding.request_id(call))
-                envelope = json.dumps({"path": "/v1/chat/completions", "payload": json.loads(sent[1])},
+                payload = json.loads(sent[1])
+                self.assertEqual(payload["model"], "fixture-model")
+                if self.route_mode == "auto":
+                    payload["model"] = None
+                envelope = json.dumps({"path": "/v1/chat/completions", "payload": payload},
                     sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
                 self.assertEqual(row["request_digest"], hashlib.sha256(envelope).hexdigest())
+                if self.route_mode != "auto":
+                    self.assertIsNone(row["routed_request_digest"])
             self.assertEqual(len(self.rows("leases")), 1)
             self.assertEqual(self.rows("application_turns")[0]["account"], "account-a")
             self.assertEqual(json.loads(self.accounts.read_bytes())["providers"], self.physical_before)
@@ -219,6 +274,19 @@ def main():
             self.assertEqual(len(self.usage_rows()), 2)
             self.assertTrue(all(row["model"] == "fixture-model" and row["input"] == 11
                 and row["output"] == 7 and row["est_usd"] is None for row in self.usage_rows()))
+            self.assertEqual(len(self.owner_results), 2)
+            if self.route_mode != "fixed":
+                self.assertEqual(self.native.model, self.native_model)
+                self.assertEqual(self.binding.model, "fixture-model" if self.route_mode == "exact" else None)
+                for response in self.owner_results:
+                    observed = response.application_observation.document
+                    route = observed["routing"]
+                    self.assertEqual(route["pool"], "go")
+                    self.assertEqual(route["selected_model"], observed["serving_model"])
+                    if self.route_mode == "exact":
+                        self.assertEqual(route["requested_model"], self.native.model)
+                        self.assertEqual(route["schema"], "mastermind.fabric_application_route.v2")
+                        self.assertIsNone(route["routed_request_digest"])
             self.binding.close()
             self.assertEqual(self.rows("leases")[0]["state"], "released")
 
@@ -244,22 +312,34 @@ def main():
             last = self.native_calls[-1]
             with call_scope(self.binding, NativeCall(last.session_id, last.task_id, last.turn_id, "replacement")):
                 with self.assertRaises(HermesFabricError):
-                    HermesApplicationClient().create(model="host-selection",
+                    HermesApplicationClient().create(model=self.native_model,
                         messages=[{"role": "user", "content": "retry"}], max_tokens=256)
+            payload = json.loads(self.posts[-1][1])
+            if self.route_mode == "auto":
+                payload["model"] = None
+            headers = ({} if self.route_mode == "fixed" else
+                       {"X-MM-Application-Route-Scope-Digest": self.service.route_scope.digest})
             status, body, _ = self.request(turn=self.binding.operation_id,
-                step=self.binding.request_id(last), payload=json.loads(self.posts[-1][1]))
+                step=self.binding.request_id(last), payload=payload, headers=headers)
             self.assertEqual(status, 409)
             self.assertTrue(body["application"]["effect_unknown"])
             self.assertEqual((len(self.posts), len(self.executed), len(self.usage_rows())), (2, 1, 1))
 
-    suite = unittest.defaultTestLoader.loadTestsFromTestCase(OriginalOwnerConversation)
+    class AutoOwnerConversation(OriginalOwnerConversation):
+        route_mode = "auto"
+
+    class ExactOwnerConversation(OriginalOwnerConversation):
+        route_mode = "exact"
+
+    suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(cls)
+        for cls in (OriginalOwnerConversation, AutoOwnerConversation, ExactOwnerConversation))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     print(json.dumps({"sources": expected, "tests_run": result.testsRun,
         "failures": len(result.failures), "errors": len(result.errors), "skips": len(result.skipped),
         "blocked_external_connections": len(blocked), "provider_sdk_constructions": len(constructed),
         "real_application_handler": True, "real_broker": True, "provider_is_fixture": True,
         "live_provider_acceptance": False, "monetary_acceptance": False}), flush=True)
-    return 0 if (result.wasSuccessful() and result.testsRun == 3 and not result.skipped
+    return 0 if (result.wasSuccessful() and result.testsRun == 9 and not result.skipped
                  and not blocked and not constructed) else 1
 
 

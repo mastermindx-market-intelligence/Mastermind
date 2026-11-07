@@ -116,8 +116,6 @@ class ApplicationBinding:
             raise HermesFabricError("hermes_fabric_output_bound_invalid")
         if type(automatic) is not bool:
             raise HermesFabricError("hermes_fabric_host_selection_invalid")
-        if automatic and strict_model is not None:
-            raise HermesFabricError("hermes_fabric_scoped_exact_owner_extension_required")
         if strict_pool is not None and not automatic:
             # cap_id/provider_id is not a physical-account or pool selection
             # receipt. The incumbent owner must expose that qualified constraint.
@@ -140,10 +138,20 @@ class ApplicationBinding:
             raise HermesFabricError("hermes_fabric_role_unqualified")
         bind_error = None
         try:
+            if automatic and strict_model is not None:
+                # Narrow before taking the inspection commitment. The owner's
+                # immutable v3 constraint keeps pool/account choice with Fabric.
+                factory = factory.with_requested_model(strict_model)
             inspected = factory.inspect()
             if automatic:
-                from engine.fabric_inference_client import validate_auto_inspection
+                from engine.fabric_inference_client import (
+                    AUTO_INSPECTION_SCHEMA, EXACT_INSPECTION_SCHEMA, validate_auto_inspection,
+                )
                 inspected = validate_auto_inspection(inspected)
+                expected_schema = EXACT_INSPECTION_SCHEMA if strict_model is not None else AUTO_INSPECTION_SCHEMA
+                if (inspected["schema"] != expected_schema
+                        or inspected["requested_model"] != strict_model):
+                    raise HermesFabricError("hermes_fabric_strict_model_unavailable")
                 if strict_pool is not None and inspected["route_scope"]["pools"] != [strict_pool]:
                     raise HermesFabricError("hermes_fabric_strict_pool_unavailable")
             elif "schema" in inspected or strict_model is not None and inspected["model"] != strict_model:
@@ -163,10 +171,11 @@ class ApplicationBinding:
             raise HermesFabricError("hermes_fabric_application_owner_required", effect_unknown=True)
         owner = bound["client"]
         if automatic:
-            from engine.fabric_inference_client import AUTO_BINDING_SCHEMA
+            from engine.fabric_inference_client import AUTO_BINDING_SCHEMA, EXACT_BINDING_SCHEMA
             qualified_shape = (set(bound) == {"schema", "client", "inspection"}
-                and bound["schema"] == AUTO_BINDING_SCHEMA and bound["inspection"] == inspected
-                and owner.model is None and owner.auto_inspection == inspected)
+                and bound["schema"] == (EXACT_BINDING_SCHEMA if strict_model is not None else AUTO_BINDING_SCHEMA)
+                and bound["inspection"] == inspected and owner.model == strict_model
+                and owner.auto_inspection == inspected)
         else:
             qualified_shape = (set(bound) == {"client", "model", "provider", "cost_basis", "cap_id"}
                                and owner.model == bound["model"])
@@ -266,8 +275,8 @@ class HermesApplicationClient:
                     or not math.isfinite(consumer_timeout) or consumer_timeout <= 0
                     or binding._owner._timeout > consumer_timeout):
                 raise HermesFabricError("hermes_fabric_owner_deadline_not_bound")
-        # The AUTO native label remains a label. The original owner alone
-        # changes the null wire model into a qualified physical route.
+        # The AUTO native label remains a label. Exact scoped selection carries
+        # the original concrete model. Only the owner selects physical capacity.
         label = binding.requested_model if binding.automatic else binding.model
         request["model"] = label
         request, structured = prepare_structured_request(request)

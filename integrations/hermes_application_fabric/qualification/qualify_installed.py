@@ -44,7 +44,7 @@ def main():
         if not path.is_relative_to(root) or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
             raise RuntimeError("Candidate source checksum mismatch")
     owner_bytes = (owner / "engine/fabric_inference_client.py").read_bytes()
-    if hashlib.sha256(owner_bytes).hexdigest() != "1a9cebd2269ff489815823f762fdcbe791f3b308aa339c41cb70bb3aa0833569":
+    if hashlib.sha256(owner_bytes).hexdigest() != "70fb47f5e44cfebbed86709fedc2ae0fa816a96763fc497dc5c55df82f2604f0":
         raise RuntimeError("APPLICATION owner source checksum mismatch")
     package = root / "integrations/hermes_application_fabric"
     sys.path[:0] = [str(root), str(owner), str(package / "tests"), str(package / "qualification")]
@@ -76,7 +76,7 @@ def main():
 
     openai.OpenAI, openai.AsyncOpenAI = ForbiddenOpenAI, ForbiddenAsyncOpenAI
     print(json.dumps({"candidate": args.candidate, "hermes": actual,
-        "owner": "94682b90624c17c111e9982f9fa36980bf45e3d3", "owner_source_verified": True,
+        "owner": "915189b2538c8b952a53e921ba170459cd1eb624", "owner_source_verified": True,
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
         "mode": "installed-native-loopback-fixture", "live_provider_acceptance": False}), flush=True)
     suite = unittest.TestSuite()
@@ -87,7 +87,7 @@ def main():
         "errors": len(result.errors), "skips": len(result.skipped),
         "sdk_constructions": sdk_constructions, "blocked_external_connections": len(blocked_connections),
         "live_provider_acceptance": False}), flush=True)
-    return 0 if result.wasSuccessful() and result.testsRun == 61 and not result.skipped and not sdk_constructions else 1
+    return 0 if result.wasSuccessful() and result.testsRun == 69 and not result.skipped and not sdk_constructions else 1
 
 
 if __name__ == "__main__":

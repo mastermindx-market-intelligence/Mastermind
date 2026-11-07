@@ -16,6 +16,7 @@ from .errors import HermesFabricError
 
 SCHEMA = "mastermind.hermes_primary_application/v1"
 AUTO_SCHEMA = "mastermind.hermes_primary_application/v2"
+EXACT_SCHEMA = "mastermind.hermes_primary_application/v3"
 AUTO_MODEL = "mastermind-fabric/auto"
 PROVIDER = "mastermind-fabric"
 ROLE_RELATIONS = {
@@ -61,15 +62,17 @@ class PrimaryPublication:
     package_sha256: str
     automatic: bool = False
     strict_pool: str | None = None
+    strict_model: str | None = None
 
 
 def publication_from_document(document) -> PrimaryPublication:
     keys = {"schema", "role", "enrollment_request_id", "principal_id", "macro_root",
             "macro_commit_sha", "model", "max_tokens", "package_sha256"}
-    automatic = type(document) is dict and document.get("schema") == AUTO_SCHEMA
+    exact = type(document) is dict and document.get("schema") == EXACT_SCHEMA
+    automatic = exact or type(document) is dict and document.get("schema") == AUTO_SCHEMA
     fields = keys | {"routing"} if automatic else keys
     if (type(document) is not dict or set(document) != fields
-            or document["schema"] != (AUTO_SCHEMA if automatic else SCHEMA)
+            or document["schema"] != (EXACT_SCHEMA if exact else AUTO_SCHEMA if automatic else SCHEMA)
             or type(document["role"]) is not str or document["role"] not in ROLE_RELATIONS
             or type(document["macro_commit_sha"]) is not str
             or re.fullmatch(r"[0-9a-f]{40}", document["macro_commit_sha"]) is None
@@ -80,9 +83,15 @@ def publication_from_document(document) -> PrimaryPublication:
     strict_pool = None
     if automatic:
         routing = document["routing"]
-        if (document["model"] != AUTO_MODEL or type(routing) is not dict
-                or set(routing) != {"mode", "strict_pool"} or routing["mode"] != "auto"):
+        if (type(routing) is not dict or set(routing) != {"mode", "strict_pool"}
+                or routing["mode"] != ("exact" if exact else "auto")
+                or not exact and document["model"] != AUTO_MODEL):
             _refuse()
+        if exact:
+            from .codec import ID
+            if (type(document["model"]) is not str or ID.fullmatch(document["model"]) is None
+                    or document["model"] == AUTO_MODEL):
+                _refuse()
         strict_pool = routing["strict_pool"]
         if strict_pool is not None:
             _identity(strict_pool, 128)
@@ -97,7 +106,8 @@ def publication_from_document(document) -> PrimaryPublication:
             or Path(root).name != document["macro_commit_sha"]):
         _refuse()
     return PrimaryPublication(**{key: document[key] for key in keys - {"schema"}},
-                              automatic=automatic, strict_pool=strict_pool)
+                              automatic=automatic, strict_pool=strict_pool,
+                              strict_model=document["model"] if exact else None)
 
 
 def validate_publication(document):

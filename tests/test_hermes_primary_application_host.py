@@ -44,6 +44,20 @@ def test_auto_publication_is_explicit_and_not_a_fixed_model_reinterpretation():
         with pytest.raises(HermesFabricError): pub.publication_from_document({**raw, **changed})
 
 
+def test_exact_publication_keeps_concrete_model_and_qualified_pool_constraint():
+    raw = document()
+    raw.update(schema=pub.EXACT_SCHEMA, routing={"mode": "exact", "strict_pool": "go"})
+    selected = pub.publication_from_document(raw)
+    assert selected.automatic is True
+    assert selected.strict_model == selected.model == raw["model"]
+    assert selected.strict_pool == "go"
+    for changed in ({"model": pub.AUTO_MODEL}, {"model": None}, {"schema": pub.AUTO_SCHEMA},
+                    {"routing": {"mode": "auto", "strict_pool": "go"}},
+                    {"routing": {"mode": "exact", "strict_pool": "go", "account": "foreign"}}):
+        with pytest.raises(HermesFabricError):
+            pub.publication_from_document({**raw, **changed})
+
+
 def profile(tmp_path, role="mmsecretary"):
     base = compose_profile(role, state_dir=tmp_path / role,
         hermes_home=tmp_path / role / "current/hermes-home", secrets_file=tmp_path / (role + ".env"))
@@ -165,8 +179,10 @@ def _module(monkeypatch, name, **values):
     return module
 
 
-async def claim_fixture(monkeypatch, tmp_path):
+async def claim_fixture(monkeypatch, tmp_path, *, exact=False):
     raw = document()
+    if exact:
+        raw.update(schema=pub.EXACT_SCHEMA, routing={"mode": "exact", "strict_pool": "go"})
     role_home = tmp_path / "role-home"
     owner = N(root=tmp_path / ("d" * 40), source=lambda path: ("held:" + path).encode())
     raw["package_sha256"] = pub.held_package_digest(owner)
@@ -191,7 +207,9 @@ async def claim_fixture(monkeypatch, tmp_path):
     monkeypatch.setattr(control, "current_runtime_owner", lambda: owner.root.name)
     monkeypatch.setattr(control, "read_enrolled_session", lambda *args, **kwargs: copy.deepcopy(enrolled))
     factory = N(inspect=Mock(return_value={"model": raw["model"]}))
-    factory.with_inspection = lambda inspection: factory
+    factory_calls = []
+    factory.with_requested_model = lambda model: (factory_calls.append(("model", model)), factory)[1]
+    factory.with_inspection = lambda inspection: (factory_calls.append(("inspection", inspection)), factory)[1]
     _module(monkeypatch, "engine.provider_production_modes", make_application_fabric_factory=lambda **kwargs: factory)
     launch = N(owner=owner, recipe={"primary_application": raw}, check=Mock())
     native = host._NativeHost(runner, launch, role_home, raw, manager)
@@ -211,7 +229,25 @@ async def claim_fixture(monkeypatch, tmp_path):
     authority.adopted["logical"] = (3, agent)
     call = NativeCall("physical", "physical", "native-turn", "native-api")
     return N(raw=raw, native=native, runner=runner, authority=authority, live=live, rows=rows,
-             factory=factory, ctx=ctx, turn=turn, cap=cap, agent=agent, call=call, enrolled=enrolled)
+             factory=factory, factory_calls=factory_calls, ctx=ctx, turn=turn, cap=cap,
+             agent=agent, call=call, enrolled=enrolled)
+
+
+def test_native_host_narrows_exact_model_before_freezing_original_inspection(monkeypatch, tmp_path):
+    async def check():
+        case = await claim_fixture(monkeypatch, tmp_path, exact=True)
+        assert case.factory_calls == [("model", case.raw["model"]),
+                                      ("inspection", {"model": case.raw["model"]})]
+        seen = []
+        original = object.__new__(ApplicationBinding)
+        original._owner = N(close=lambda: None)
+        monkeypatch.setattr(ApplicationBinding, "from_factory",
+            lambda factory, **kwargs: (seen.append(kwargs), original)[1])
+        assert case.cap.resolve(case.call) is original
+        assert seen[0]["strict_model"] == case.raw["model"]
+        assert seen[0]["strict_pool"] == "go" and seen[0]["automatic"] is True
+        assert seen[0]["operation_id"] == "original-admission"
+    asyncio.run(check())
 
 
 def test_current_native_claim_joins_every_identity_before_first_binding(monkeypatch, tmp_path):
