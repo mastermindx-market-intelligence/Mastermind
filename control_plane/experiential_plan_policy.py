@@ -124,6 +124,7 @@ def validate_plan_request(mode: str, endpoint: str, body: bytes) -> str | None:
 PLAN_ACCOUNT_SCHEMA = "mastermind.experiential_plan_account/v1"
 PLAN_OBSERVATION_SCHEMA = "mastermind.experiential_plan_observation/v1"
 PLAN_CHAT_MODELS = frozenset(FREE_CHAT_MODELS + PAID_UNCENSORED_MODELS)
+PLAN_MODELS = PLAN_CHAT_MODELS | frozenset(FREE_NATIVE_MODELS)
 PLAN_ACCOUNT_PREFIX = "experiential-plan-"
 PLAN_FREE_CREDITS_PER_DAY = 7000
 PLAN_PAID_ALLOWANCE_USD_PER_MONTH = 200
@@ -137,6 +138,15 @@ def route_policy_generation(base_url: str, path: str, mode: str) -> str:
     if mode != "legacy":
         target += "\n" + digest
     return hashlib.sha256(target.encode("utf-8")).hexdigest()
+
+
+def plan_model_endpoint(model: str) -> str:
+    """One exact model determines its wire protocol; callers cannot override it."""
+    if model in FREE_NATIVE_MODELS:
+        return FREE_NATIVE_MODELS[model]
+    if model in PLAN_CHAT_MODELS:
+        return "chat/completions"
+    raise PlanRequestRefused("PLAN_MODEL_NOT_ALLOWED")
 
 
 def select_plan_model(lane: str, available_models, requested_model=None) -> str:
@@ -154,7 +164,8 @@ def select_plan_model(lane: str, available_models, requested_model=None) -> str:
     order = FREE_CHAT_MODELS if lane == "free" else PAID_UNCENSORED_MODELS
     available = frozenset(available_models)
     if requested_model is not None:
-        if requested_model not in order or requested_model not in available:
+        eligible = set(order) | (set(FREE_NATIVE_MODELS) if lane == "free" else set())
+        if requested_model not in eligible or requested_model not in available:
             raise PlanRequestRefused("PLAN_SELECTED_MODEL_UNAVAILABLE")
         return requested_model
     for model in order:
@@ -181,7 +192,8 @@ def admit_plan_account(*, model, account, registration, observation, now=None):
     mode = registration.get("plan_policy")
     if mode not in {"free_only", "free_and_uncensored"}:
         raise PlanRequestRefused("PLAN_POLICY_NOT_ENROLLED")
-    lane = validate_plan_request(mode, "chat/completions", json.dumps({"model": model}).encode())
+    endpoint = plan_model_endpoint(model)
+    lane = validate_plan_request(mode, endpoint, json.dumps({"model": model}).encode())
     if registration.get("policy_digest") != plan_policy_digest(mode):
         raise PlanRequestRefused("PLAN_POLICY_GENERATION_MISMATCH")
     if (registration.get("free_credits_per_day") != PLAN_FREE_CREDITS_PER_DAY
@@ -208,7 +220,7 @@ def admit_plan_account(*, model, account, registration, observation, now=None):
         raise PlanRequestRefused("PLAN_WALLET_OBSERVATION_INVALID")
     if lane == "paid_uncensored" and balance <= 0:
         raise PlanRequestRefused("PLAN_PREPAID_WALLET_EXHAUSTED")
-    return {"account": expected_account, "plan_lane": lane,
+    return {"account": expected_account, "plan_lane": lane, "endpoint": endpoint,
             "plan_policy": mode, "policy_digest": plan_policy_digest(mode),
             "quota_owner": "provider", "free_credits_remaining": None,
             "monthly_allowance_remaining_usd": None,

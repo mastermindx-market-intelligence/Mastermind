@@ -46,14 +46,14 @@ if (_policy_source_root / "control_plane" / "experiential_plan_policy.py").is_fi
 
 try:
     from control_plane.experiential_plan_policy import (
-        PLAN_CHAT_MODELS, PlanRequestRefused, admit_plan_account,
+        PLAN_MODELS, FREE_NATIVE_MODELS, PlanRequestRefused, admit_plan_account,
         plan_policy_digest, route_policy_generation, select_plan_model,
     )
 except ModuleNotFoundError as exc:
     if exc.name not in {"control_plane", "control_plane.experiential_plan_policy"}:
         raise
     from experiential_plan_policy import (
-        PLAN_CHAT_MODELS, PlanRequestRefused, admit_plan_account,
+        PLAN_MODELS, FREE_NATIVE_MODELS, PlanRequestRefused, admit_plan_account,
         plan_policy_digest, route_policy_generation, select_plan_model,
     )
 
@@ -62,7 +62,7 @@ POOL = "experiential"
 MODEL = "glm-5.3-uncensored"
 
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
-_PACKET_ROOT_RE = re.compile(r"^/?[A-Za-z0-9][A-Za-z0-9_./:-]{0,1023}$")
+_PACKET_ROOT_RE = re.compile(r"^(?:/[A-Za-z0-9][A-Za-z0-9_./:-]{0,1022}|[A-Za-z0-9][A-Za-z0-9_./:-]{0,254})$")
 _CLASS_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
 _ADAPTER_FILE_BYTES = 4 * 1024 * 1024
 _PROMPT_FILE_BYTES = 8 * 1024 * 1024
@@ -236,13 +236,21 @@ def _strict_manual_preview(adapter: HostAdapter, run_id: str, task_class: str, m
     return {"preview": selected, "recheck": rechecked}
 
 
+def _selected_route(context, model):
+    endpoint = FREE_NATIVE_MODELS.get(model)
+    route = context.get("routes", {}).get(endpoint) if endpoint else context.get("route")
+    if type(route) is not dict:
+        _refuse("EXPERIENTIAL_GATEWAY_ROUTE_UNQUALIFIED")
+    return route
+
+
 def _transport_gates(adapter: HostAdapter, context=None, model: str = MODEL) -> dict[str, Any]:
     if adapter.transport is None:
         _refuse("EXPERIENTIAL_TRANSPORT_MODULE_MISSING",
                 "the owner transport module is not installed on this host")
-    if model in PLAN_CHAT_MODELS:
+    if model in PLAN_MODELS:
         try:
-            route = adapter.transport.GatewayRoute(**context["route"])
+            route = adapter.transport.GatewayRoute(**_selected_route(context, model))
             adapter.transport.require_plan_route_qualified(route, model)
         except Exception as exc:
             _refuse(getattr(exc, "reason", "PLAN_GATEWAY_ROUTE_UNQUALIFIED"))
@@ -285,7 +293,7 @@ def _syntax_gate(
         _refuse("EXPERIENTIAL_STRICT_PIN_REQUIRED",
                 "the sole admitted shape is --pool experiential "
                 "--model glm-5.3-uncensored --strict-manual-pin with all four consents")
-    if type(model) is not str or (model != MODEL and model not in PLAN_CHAT_MODELS):
+    if type(model) is not str or (model != MODEL and model not in PLAN_MODELS):
         _refuse("EXPERIENTIAL_MODEL_SLUG_REFUSED",
                 f"the experiential pool admits exactly {MODEL!r}")
     # All four consents are mandatory and must be true for the experiential
@@ -395,7 +403,7 @@ def preflight(
         _validate_run_id(parent, code="EXPERIENTIAL_PARENT_INVALID")
     adapter = resolve_host_adapter(runtime_root)
     previews = _strict_manual_preview(adapter, syntax["run_id"], syntax["task_class"], model)
-    context = _host_context(adapter) if model in PLAN_CHAT_MODELS else None
+    context = _host_context(adapter) if model in PLAN_MODELS else None
     transports = _transport_gates(adapter, context, model)
     context = context if context is not None else _host_context(adapter)
     route_host = context.get("route_host")
@@ -472,7 +480,7 @@ def launch_policy_witness(mode: Any, task_class: Any, model: Any) -> dict[str, A
     pick.py's own pool law stays byte-untouched for every other pool)."""
     if type(mode) is not str or mode != POOL:
         _refuse("EXPERIENTIAL_MODE_MISMATCH", "launch witness covers mode=experiential only")
-    if type(model) is not str or (model != MODEL and model not in PLAN_CHAT_MODELS):
+    if type(model) is not str or (model != MODEL and model not in PLAN_MODELS):
         _refuse("EXPERIENTIAL_MODEL_SLUG_REFUSED", f"exactly {MODEL!r} is admitted")
     if type(task_class) is not str or not _CLASS_TOKEN_RE.fullmatch(task_class.strip() or ""):
         _refuse("EXPERIENTIAL_TASK_CLASS_INVALID", "explicit class token required")
@@ -594,7 +602,7 @@ def exec_command(
                 "effect is created and reconciliation stays with the original owner")
     adapter = resolve_host_adapter(runtime_root)
     context = _host_context(adapter)
-    route = context.get("route")
+    route = _selected_route(context, witness["model"])
     if type(route) is not dict:
         _refuse("EXPERIENTIAL_GATEWAY_ROUTE_UNQUALIFIED",
                 "host context carries no attested gateway route")
@@ -617,9 +625,14 @@ def exec_command(
     if not hasattr(adapter.transport, "run_opt_in_inference"):
         _refuse("EXPERIENTIAL_TRANSPORT_MODULE_MISSING",
                 "owner transport exposes no admitted inference entry point")
+    if witness["model"] in FREE_NATIVE_MODELS:
+        try:
+            adapter.transport.validate_native_packet(prompt, witness["model"])
+        except Exception as exc:
+            _refuse(getattr(exc, "reason", "PLAN_NATIVE_PACKET_INVALID"))
     # Reserve BEFORE the effect so a lost call cannot be silently re-posted in
     # this process; the transport's own law owns cross-process uniqueness.
-    if witness["model"] in PLAN_CHAT_MODELS:
+    if witness["model"] in PLAN_MODELS:
         _reserve_native_send(context, witness["model"], rid, root, packet_root, prompt_file)
     _LAUNCH_BOUND[key] = {"run_id": rid, "root": bound_root, "admission": admitted}
     try:

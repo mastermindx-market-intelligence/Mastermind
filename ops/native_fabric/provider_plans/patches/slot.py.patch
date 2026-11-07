@@ -31,7 +31,7 @@
 +        if pool == "byteplus":
 +            from byteplus_coding_plan import MODELS
 +        else:
-+            from experiential_plan_policy import PLAN_CHAT_MODELS as MODELS
++            from experiential_plan_policy import PLAN_MODELS as MODELS
 +        if model not in MODELS:
 +            raise ValueError("PLAN_EXACT_MODEL_REQUIRED")
 +        return model

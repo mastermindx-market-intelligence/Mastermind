@@ -140,14 +140,14 @@ if (_policy_source_root / "control_plane" / "experiential_plan_policy.py").is_fi
 
 try:
     from control_plane.experiential_plan_policy import (
-        PLAN_CHAT_MODELS, PlanRequestRefused, admit_plan_account,
+        PLAN_MODELS, FREE_NATIVE_MODELS, plan_model_endpoint, PlanRequestRefused, admit_plan_account,
         plan_policy_digest, route_policy_generation, select_plan_model,
     )
 except ModuleNotFoundError as exc:
     if exc.name not in {"control_plane", "control_plane.experiential_plan_policy"}:
         raise
     from experiential_plan_policy import (
-        PLAN_CHAT_MODELS, PlanRequestRefused, admit_plan_account,
+        PLAN_MODELS, FREE_NATIVE_MODELS, plan_model_endpoint, PlanRequestRefused, admit_plan_account,
         plan_policy_digest, route_policy_generation, select_plan_model,
     )
 
@@ -219,7 +219,7 @@ PROVIDER_REQUEST_ID_MALFORMED = "PROVIDER_REQUEST_ID_MALFORMED"
 MAX_INLINE_COST_USD = 100.0
 
 _RUN_ID_RE = pin.RUN_ID_RE
-_PACKET_ROOT_RE = re.compile(r"^/?[A-Za-z0-9][A-Za-z0-9_./:-]{0,1023}$")
+_PACKET_ROOT_RE = re.compile(r"^(?:/[A-Za-z0-9][A-Za-z0-9_./:-]{0,1022}|[A-Za-z0-9][A-Za-z0-9_./:-]{0,254})$")
 _PROXY_TOKEN_RE = re.compile(r"^[\x21-\x7e]{24,256}$")
 _ROUTE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -293,6 +293,7 @@ class GatewayRoute:
     scheme: str = "http"
     base_path: str = GATEWAY_BASE_PATH
     plan_policy: str = "legacy"
+    endpoint: str = GATEWAY_CHAT_PATH
 
 
 @dataclass(frozen=True)
@@ -341,7 +342,8 @@ class InferenceOutcome:
     cost_usd_observed: Optional[float] = None
     cost_settled: bool = False
     cost_detail: str = "not_observed"
-    max_output_tokens: int = MAX_OUTPUT_TOKENS
+    max_output_tokens: Optional[int] = MAX_OUTPUT_TOKENS
+    request_endpoint: str = GATEWAY_CHAT_PATH
     plan_lane: Optional[str] = None
 
     def summary(self) -> Dict[str, Any]:
@@ -349,6 +351,7 @@ class InferenceOutcome:
         return {
             "source": self.source,
             "plan_lane": self.plan_lane,
+            "request_endpoint": self.request_endpoint,
             "run_id": self.run_id,
             "packet_root": self.packet_root,
             "pool": self.pool,
@@ -402,8 +405,13 @@ def _validate_route(route: Any) -> GatewayRoute:
     # The dialled URL is rebuilt from validated parts; the caller-supplied
     # fields can never smuggle an ambiguous path (no dot segment, no encoded
     # separator can pass the exact-path equality above).
+    allowed_paths = {GATEWAY_CHAT_PATH}
+    if route.plan_policy in {"free_only", "free_and_uncensored"}:
+        allowed_paths.update(FREE_NATIVE_MODELS.values())
+    if route.endpoint not in allowed_paths:
+        raise ExperientialTransportRefused("GATEWAY_ROUTE_ENDPOINT_REFUSED")
     split = urlsplit(_gateway_url(route))
-    if split.hostname != GATEWAY_HOST or split.path != f"{GATEWAY_BASE_PATH}/{GATEWAY_CHAT_PATH}":
+    if split.hostname != GATEWAY_HOST or split.path != f"{GATEWAY_BASE_PATH}/{route.endpoint}":
         raise ExperientialTransportRefused("GATEWAY_ROUTE_URL_MISMATCH")
     return route
 
@@ -426,7 +434,7 @@ def _validate_proxy_token(token: Any) -> str:
 
 def _gateway_url(route: GatewayRoute) -> str:
     return (f"{route.scheme}://{route.host}:{route.port}"
-            f"{route.base_path}/{GATEWAY_CHAT_PATH}")
+            f"{route.base_path}/{route.endpoint}")
 
 
 class _RedirectRefused(urllib.request.HTTPRedirectHandler):
@@ -512,6 +520,158 @@ def _build_request_frame(prompt: str, system: Any, max_tokens: int, model: str =
     return body
 
 
+def _native_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate native field")
+        value[key] = item
+    return value
+
+
+def _native_constant(_value):
+    raise ValueError("nonfinite native value")
+
+
+def validate_native_packet(prompt: str, model: str) -> dict:
+    """A typed decision packet is data; its answers never execute an action."""
+    try:
+        payload = json.loads(prompt, object_pairs_hook=_native_object,
+                             parse_constant=_native_constant)
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise ExperientialTransportRefused("PLAN_NATIVE_PACKET_INVALID") from exc
+    endpoint = FREE_NATIVE_MODELS.get(model)
+    state_key = "state" if endpoint == "systemone" else "input"
+    if (endpoint is None or type(payload) is not dict
+            or set(payload) != {state_key, "questions"}
+            or not isinstance(payload[state_key], (str, dict, list))
+            or not payload[state_key]
+            or (endpoint == "decisions" and type(payload[state_key]) is dict)):
+        raise ExperientialTransportRefused("PLAN_NATIVE_PACKET_INVALID")
+    questions = payload["questions"]
+    if endpoint == "systemone":
+        if type(questions) is not dict or not 1 <= len(questions) <= 32:
+            raise ExperientialTransportRefused("PLAN_NATIVE_QUESTIONS_INVALID")
+        if any(type(name) is not str or not _ROUTE_ID_RE.fullmatch(name) for name in questions):
+            raise ExperientialTransportRefused("PLAN_NATIVE_QUESTIONS_INVALID")
+        rows = list(questions.values())
+    else:
+        if type(questions) is not list or not 1 <= len(questions) <= 32:
+            raise ExperientialTransportRefused("PLAN_NATIVE_QUESTIONS_INVALID")
+        rows = questions
+    names = set()
+    for question in rows:
+        if type(question) is not dict:
+            raise ExperientialTransportRefused("PLAN_NATIVE_QUESTIONS_INVALID")
+        kind = question.get("type")
+        kinds = {"noul", "choice", "score"} if endpoint == "systemone" else {"predicate", "choice", "score"}
+        instructions = question.get("instructions")
+        allowed = {"type", "instructions", "criteria"} if endpoint == "systemone" else {"type", "instructions", "name", "choices", "levels"}
+        if (type(kind) is not str or kind not in kinds or set(question) - allowed
+                or type(instructions) is not str or not instructions.strip()
+                or len(instructions) > 65536):
+            raise ExperientialTransportRefused("PLAN_NATIVE_QUESTIONS_INVALID")
+        name = question.get("name")
+        if name is not None:
+            if type(name) is not str or not _ROUTE_ID_RE.fullmatch(name) or name in names:
+                raise ExperientialTransportRefused("PLAN_NATIVE_QUESTIONS_INVALID")
+            names.add(name)
+        if kind in {"noul", "predicate"}:
+            if set(question).intersection({"criteria", "choices", "levels"}):
+                raise ExperientialTransportRefused("PLAN_NATIVE_QUESTIONS_INVALID")
+            continue
+        if endpoint == "systemone":
+            options = question.get("criteria")
+            if kind == "choice":
+                valid = (type(options) is dict and 2 <= len(options) <= 64
+                         and all(type(k) is str and k and type(v) is str and v for k, v in options.items()))
+            else:
+                valid = type(options) is list and 2 <= len(options) <= 10 and all(type(v) is str and v for v in options)
+        else:
+            options = question.get("choices" if kind == "choice" else "levels")
+            label = "value" if kind == "choice" else "label"
+            limit = 64 if kind == "choice" else 10
+            valid = (type(options) is list and 2 <= len(options) <= limit
+                     and all(type(v) is dict and set(v) == {label, "description"}
+                             and type(v[label]) is str and v[label]
+                             and type(v["description"]) is str and v["description"] for v in options))
+            if valid:
+                valid = len({v[label] for v in options}) == len(options)
+            if ("levels" if kind == "choice" else "choices") in question:
+                valid = False
+        if not valid:
+            raise ExperientialTransportRefused("PLAN_NATIVE_QUESTIONS_INVALID")
+    return payload
+
+
+def _build_native_frame(prompt: str, system: Any, model: str) -> bytes:
+    if system:
+        raise ExperientialTransportRefused("PLAN_NATIVE_SYSTEM_PROMPT_REFUSED")
+    frame = validate_native_packet(prompt, model)
+    frame["model"] = model
+    frame["gateway"] = {"routing": {"allow_fallbacks": False},
+        "retry": {"max_attempts_per_route": 1, "max_total_attempts": 1,
+                  "backoff": {"type": "none"}}}
+    raw = json.dumps(frame, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    if len(raw) > MAX_REQUEST_BYTES:
+        raise ExperientialTransportRefused("REQUEST_BODY_TOO_LARGE")
+    return raw
+
+
+def _parse_native_completion(raw, content_type, model, packet, canonical_model=None):
+    """Return typed native answers in their original question order/identity."""
+    if not content_type.lower().startswith("application/json"):
+        raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED")
+    try:
+        frame = json.loads(raw, object_pairs_hook=_native_object, parse_constant=_native_constant)
+    except (ValueError, UnicodeError, RecursionError) as exc:
+        raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED") from exc
+    if type(frame) is not dict or "error" in frame:
+        raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED")
+    echo = frame.get("model")
+    allowed_echoes = {model, model.removesuffix(":free")}
+    # The Decisions alias exposes the documented underlying OpenAI Luna model.
+    if model == "gpt-6-luna-decisions:free":
+        allowed_echoes.add("gpt-6-luna")
+    if echo is not None and (type(echo) is not str or echo not in allowed_echoes):
+        # Jev's latest alias may report its concrete semantic version. Require
+        # the gateway's independent canonical alias header as the binding.
+        if not (model == "jev-latest:free" and type(echo) is str
+                and re.fullmatch(r"jev-\d+\.\d+\.\d+", echo)
+                and canonical_model in allowed_echoes):
+            raise ExperientialTransportRefused("GATEWAY_RESPONSE_MODEL_MISMATCH")
+    questions, answers = packet["questions"], frame.get("answers")
+    if FREE_NATIVE_MODELS[model] == "systemone":
+        if type(answers) is not dict or set(answers) != set(questions):
+            raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED")
+        pairs = [(questions[name], answers[name]) for name in questions]
+    else:
+        if type(answers) is not list or len(answers) != len(questions):
+            raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED")
+        pairs = list(zip(questions, answers))
+    for question, answer in pairs:
+        if type(answer) is not dict:
+            raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED")
+        if answer.get("type") == "refusal":
+            raise ExperientialTransportRefused("GATEWAY_RESPONSE_REFUSAL")
+        kind = question["type"]
+        if answer.get("type") != kind or answer.get("name") != question.get("name"):
+            raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED")
+        if kind in {"predicate", "noul", "score"}:
+            key = "probability" if kind == "predicate" else kind
+            value = answer.get(key)
+            top = len(question.get("criteria", question.get("levels", []))) - 1 if kind == "score" else 1
+            if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= top:
+                raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED")
+        else:
+            values = question.get("criteria")
+            if values is None:
+                values = [item["value"] for item in question["choices"]]
+            if type(answer.get("choice")) is not str or answer["choice"] not in values:
+                raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED")
+    return json.dumps(frame, ensure_ascii=False, allow_nan=False), echo, frame.get("usage")
+
+
 def _classify_http_error(status: int, content_type: str,
                          provider_request_id: str = "") -> ExperientialTransportRefused:
     """One typed refusal per status class.  No status is silently accepted.
@@ -581,7 +741,7 @@ def _parse_completion(raw: bytes, content_type: str, expected_model: str = MODEL
     model_echo = frame.get("model")
     if model_echo is not None:
         allowed_echoes = {expected_model}
-        if expected_model in PLAN_CHAT_MODELS and expected_model.endswith(":free"):
+        if expected_model in PLAN_MODELS and expected_model.endswith(":free"):
             allowed_echoes.add(expected_model[:-5])
         if not isinstance(model_echo, str) or model_echo not in allowed_echoes:
             raise ExperientialTransportRefused(
@@ -722,10 +882,12 @@ def require_plan_route_qualified(route: GatewayRoute, model: str) -> None:
     must use a distinct scoped account, fresh metadata and a policy-bound route.
     """
     _validate_route(route)
-    if model not in PLAN_CHAT_MODELS or route.plan_policy not in {"free_only", "free_and_uncensored"}:
+    if model not in PLAN_MODELS or route.plan_policy not in {"free_only", "free_and_uncensored"}:
         raise ExperientialTransportRefused("PLAN_GATEWAY_POLICY_REQUIRED")
     base = f"{route.scheme}://{route.host}:{route.port}{route.base_path}"
-    if route.route_generation != route_policy_generation(base, GATEWAY_CHAT_PATH, route.plan_policy):
+    if route.endpoint != plan_model_endpoint(model):
+        raise ExperientialTransportRefused("PLAN_GATEWAY_MODEL_PROTOCOL_MISMATCH")
+    if route.route_generation != route_policy_generation(base, route.endpoint, route.plan_policy):
         raise ExperientialTransportRefused("PLAN_GATEWAY_GENERATION_MISMATCH")
 
 
@@ -831,7 +993,7 @@ def run_opt_in_inference(
         account=account, quota_readback=quota_readback)
 
     # Transport-owned attestation + structure, after the admission law.
-    if admitted["model"] in PLAN_CHAT_MODELS:
+    if admitted["model"] in PLAN_MODELS:
         require_plan_route_qualified(route, admitted["model"])
         if route.plan_policy != admitted["plan_policy"]:
             raise ExperientialTransportRefused("PLAN_GATEWAY_POLICY_MISMATCH")
@@ -839,19 +1001,27 @@ def run_opt_in_inference(
         require_route_qualified()
         _validate_route(route)
     _validate_prompt(prompt, system, bounded)
-    output_cap = _validate_output_tokens(max_output_tokens)
-    body = _build_request_frame(prompt, system, output_cap, admitted["model"])
+    native_packet = None
+    if admitted["model"] in FREE_NATIVE_MODELS:
+        if max_output_tokens is not None:
+            raise ExperientialTransportRefused("PLAN_NATIVE_OUTPUT_TOKEN_OPTION_REFUSED")
+        native_packet = validate_native_packet(prompt, admitted["model"])
+        output_cap = None  # Native decision models are input-billed, not chat generation.
+        body = _build_native_frame(prompt, system, admitted["model"])
+    else:
+        output_cap = _validate_output_tokens(max_output_tokens)
+        body = _build_request_frame(prompt, system, output_cap, admitted["model"])
 
     headers = {
         "Authorization": f"Bearer {route.proxy_token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
         # One logical request; the gateway's idempotency law (#1849).
-        "Idempotency-Key": rid,
+        **({"Idempotency-Key": rid} if native_packet is None else {}),
         # Content-Length is deliberately NOT set here: urllib computes it, and
         # a duplicate Content-Length is refused by the attempt boundary law.
     }
-    if admitted["model"] in PLAN_CHAT_MODELS:
+    if admitted["model"] in PLAN_MODELS:
         headers["X-Fabric-Plan-Policy"] = admitted["policy_digest"]
     request = urllib.request.Request(_gateway_url(route), data=body,
                                      headers=headers, method="POST")
@@ -912,11 +1082,22 @@ def run_opt_in_inference(
         raise ExperientialTransportRefused(
             "GATEWAY_RESPONSE_TOO_LARGE",
             f"exceeds {MAX_RESPONSE_BYTES} bytes")
-    content, model_echo, usage = _parse_completion(raw, content_type, admitted["model"])
-    # Fail-closed BYOK law first, then the typed (never invented) cost
-    # observation.  Neither dials anything: settlement belongs to the
-    # existing billing owner via the provider request id / usage export.
-    cost_status, cost_usd, cost_settled, cost_detail = _observe_cost(usage)
+    try:
+        if native_packet is None:
+            content, model_echo, usage = _parse_completion(raw, content_type, admitted["model"])
+        else:
+            content, model_echo, usage = _parse_native_completion(
+                raw, content_type, admitted["model"], native_packet,
+                response.headers.get("X-Gateway-Canonical-Model"))
+        # Inline observation is never settled billing and cannot authorize BYOK.
+        cost_status, cost_usd, cost_settled, cost_detail = _observe_cost(usage)
+    except ExperientialTransportRefused as exc:
+        # A completed HTTP exchange can still have an invalid result. Keep its
+        # nonsecret handle so the original request can be reconciled, not resent.
+        detail = exc.detail
+        if provider_handle:
+            detail += ("; " if detail else "") + "provider_request_id=" + provider_handle
+        raise ExperientialTransportRefused(exc.reason, detail) from exc
     return InferenceOutcome(
         run_id=rid,
         packet_root=root,
@@ -927,7 +1108,7 @@ def run_opt_in_inference(
         route_generation=route.route_generation,
         request_url_host=route.host,
         request_url_port=route.port,
-        idempotency_key=rid,
+        idempotency_key=rid if native_packet is None else "",
         http_status=200,
         bytes_received=len(raw),
         content=content,
@@ -940,6 +1121,7 @@ def run_opt_in_inference(
         cost_settled=cost_settled,
         cost_detail=cost_detail,
         max_output_tokens=output_cap,
+        request_endpoint=route.endpoint,
         plan_lane=admitted.get("plan_lane"),
     )
 

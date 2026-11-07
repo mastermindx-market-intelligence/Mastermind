@@ -121,3 +121,22 @@ The repair passed 61 focused initializer/new-provider tests and all 83 exact
 native-stage tests that exercise the affected accepted closure. The latter
 reproduced the hosted shard-0 parent-integrity dependency and now passes with
 its sealed preimages unchanged. These are source checks, not live inference.
+
+The final scope check found gateway-only coverage for Jev and Luna Decisions.
+The existing native bridge/transport now carries their exact System One and
+Decisions protocols under explicit `:free` pins, shared original leases and
+one-shot custody. Typed JSON packets and ordered/named answers are validated;
+results never execute actions. The default free selector remains chat-shaped.
+Provider contract references: [Jev](https://platform.experientiallabs.ai/models/jev-latest),
+[TypeSafe wire examples](https://docs.typesafe.ai/introduction/quickstart),
+[Luna Decisions](https://platform.experientiallabs.ai/models/gpt-6-luna-decisions),
+and [Decisions API](https://developers.openai.com/api/docs/guides/decisions).
+
+Native protocol qualification: 216 tests passed with one pre-existing optional
+SDK seam skip across pin/transport/plan behavior. The final protocol, policy,
+and shared-gateway delta passed 88 cases, including all three question types,
+wrong protocol/model/answer identity, malformed packets before send, one POST
+on 429, restart duplicate-send refusal, and retained reconciliation handles.
+The 116-file composed release compiles and both shell entrypoints pass syntax
+checks. The legacy relative packet-root bound is preserved while real absolute
+workspace roots are supported.

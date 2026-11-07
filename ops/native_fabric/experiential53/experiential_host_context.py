@@ -26,14 +26,14 @@ if (_policy_source_root / "control_plane" / "experiential_plan_policy.py").is_fi
 try:
     from control_plane.experiential_plan_policy import (
         PLAN_ACCOUNT_SCHEMA, PLAN_OBSERVATION_SCHEMA, PLAN_ACCOUNT_PREFIX,
-        PLAN_CHAT_MODELS, plan_policy_digest, route_policy_generation,
+        PLAN_MODELS, FREE_NATIVE_MODELS, plan_policy_digest, route_policy_generation,
     )
 except ModuleNotFoundError as exc:
     if exc.name not in {"control_plane", "control_plane.experiential_plan_policy"}:
         raise
     from experiential_plan_policy import (
         PLAN_ACCOUNT_SCHEMA, PLAN_OBSERVATION_SCHEMA, PLAN_ACCOUNT_PREFIX,
-        PLAN_CHAT_MODELS, plan_policy_digest, route_policy_generation,
+        PLAN_MODELS, FREE_NATIVE_MODELS, plan_policy_digest, route_policy_generation,
     )
 
 
@@ -145,7 +145,7 @@ def _observed_context(provider: dict, *, read, token: str, base: str, now=None):
     catalog_ids = {row.get("id") for row in catalog if type(row) is dict}
     # The documented :free qualifier authorizes as its base catalog slug.
     # Preserve that qualifier on the wire; grant exhaustion is provider-enforced.
-    models = sorted(model for model in PLAN_CHAT_MODELS
+    models = sorted(model for model in PLAN_MODELS
                     if model in catalog_ids or
                     (model.endswith(":free") and model[:-5] in catalog_ids))
     if not models:
@@ -165,6 +165,12 @@ def _observed_context(provider: dict, *, read, token: str, base: str, now=None):
             "wallet_balance_usd": total - used, "available_models": models,
         },
         "route_host": route_host,
+        "routes": {endpoint: {
+            "host": "127.0.0.1", "port": gateway["port"], "proxy_token": token,
+            "route_id": gateway["route_id"], "endpoint": endpoint,
+            "route_generation": route_policy_generation(route_base, endpoint, mode),
+            "plan_policy": mode,
+        } for endpoint in set(FREE_NATIVE_MODELS.values())},
         "route": {"host": "127.0.0.1", "port": gateway["port"],
                   "proxy_token": token, "route_id": gateway["route_id"],
                   "route_generation": route_policy_generation(route_base, "chat/completions", mode),

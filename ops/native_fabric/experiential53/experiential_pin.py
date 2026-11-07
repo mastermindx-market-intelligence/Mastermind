@@ -55,14 +55,14 @@ if (_policy_source_root / "control_plane" / "experiential_plan_policy.py").is_fi
 
 try:
     from control_plane.experiential_plan_policy import (
-        PLAN_CHAT_MODELS, PlanRequestRefused, admit_plan_account,
+        PLAN_MODELS, PlanRequestRefused, admit_plan_account,
         plan_policy_digest, route_policy_generation, select_plan_model,
     )
 except ModuleNotFoundError as exc:
     if exc.name not in {"control_plane", "control_plane.experiential_plan_policy"}:
         raise
     from experiential_plan_policy import (
-        PLAN_CHAT_MODELS, PlanRequestRefused, admit_plan_account,
+        PLAN_MODELS, PlanRequestRefused, admit_plan_account,
         plan_policy_digest, route_policy_generation, select_plan_model,
     )
 
@@ -168,7 +168,7 @@ def enforce_pin(pool: Any, model: Any) -> Tuple[str, str]:
             "EXPERIENTIAL_MODEL_DISTINCT",
             f"{named_model!r} is a canonical glm-pool model, not this provider",
         )
-    if named_model.casefold() != MODEL and named_model not in PLAN_CHAT_MODELS:
+    if named_model.casefold() != MODEL and named_model not in PLAN_MODELS:
         raise ExperientialPinRefused(
             "EXPERIENTIAL_MODEL_SLUG_MISMATCH",
             "exact registered legacy or plan model slug required",
@@ -317,7 +317,7 @@ def admit_execution(
         raise ExperientialPinRefused(
             "PROPRIETARY_CODE_EXPOSURE_REFUSED",
             "proprietary code is never exposed automatically")
-    if pinned[1] in PLAN_CHAT_MODELS:
+    if pinned[1] in PLAN_MODELS:
         try:
             plan = admit_plan_account(
                 model=pinned[1], account=account,

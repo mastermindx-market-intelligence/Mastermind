@@ -15,10 +15,30 @@ dependencies. Six existing files receive exact preimage/postimage patches.
 | `experiential --model uncensored` | DeepSeek Flash Uncensored first | Existing prepaid wallet/plan allowance |
 | `experiential --model glm-5.3-flash-uncensored` | Exact GLM Flash Uncensored | Same paid allowance |
 
-The five native chat free IDs are DeepSeek V4.1 Flash, DeepSeek V4.1 Flash 1017,
-GPT-6 Luna, Clef and Clef Flash, all with `:free`. The existing gateway additionally
-maps `jev-latest:free` to System One and `gpt-6-luna-decisions:free` to Decisions.
-Those protocols are not misrepresented as chat-completion workers.
+All seven screenshot free models have native Fabric paths. DeepSeek V4.1 Flash,
+DeepSeek V4.1 Flash 1017, GPT-6 Luna, Clef and Clef Flash use Chat Completions,
+all with `:free`. Explicit `jev-latest:free` uses System One and
+`gpt-6-luna-decisions:free` uses Decisions through the same bridge, account,
+leases and result path. The default `free` selector chooses a chat model;
+typed decision models require an explicit model and JSON packet.
+
+A Jev packet contains `state` and a `questions` object, for example:
+
+```json
+{"state":"The list contains apple and pear.","questions":{"has_apple":{"type":"noul","instructions":"The list contains apple."}}}
+```
+
+A Luna Decisions packet contains `input` and a `questions` array:
+
+```json
+{"input":"The list contains apple and pear.","questions":[{"name":"has_apple","type":"predicate","instructions":"The list contains apple."}]}
+```
+
+Both accept bounded choice/score questions as documented by their providers.
+Fabric returns the validated typed answer JSON; it never performs an action
+chosen by a model. Native decision calls have no chat token-limit field,
+streaming or idempotency header. The ordinary one-send reservation remains.
+Malformed question/answer identities and substituted protocols fail closed.
 
 A new selection can choose an available eligible model. A request already sent
 never changes model, retries, or falls through to another paid model.

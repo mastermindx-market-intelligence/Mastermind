@@ -13,7 +13,7 @@ import time
 import pytest
 
 from control_plane.experiential_plan_policy import (
-    FREE_CHAT_MODELS, PAID_UNCENSORED_MODELS, PLAN_ACCOUNT_PREFIX,
+    FREE_CHAT_MODELS, FREE_NATIVE_MODELS, PAID_UNCENSORED_MODELS, PLAN_ACCOUNT_PREFIX,
     PLAN_ACCOUNT_SCHEMA, PLAN_OBSERVATION_SCHEMA, PlanRequestRefused,
     admit_plan_account, plan_policy_digest, select_plan_model,
 )
@@ -42,7 +42,7 @@ def facts(port=8311, mode="free_and_uncensored", balance=37.0):
                      "account_metadata_enabled": True},
         "/api/whoami": {"org_id": organization},
         "/api/v1/credits": {"data": {"total_credits": 46, "total_usage": 46 - balance}},
-        "/v1/models": {"data": [{"id": model} for model in FREE_CHAT_MODELS + PAID_UNCENSORED_MODELS]},
+        "/v1/models": {"data": [{"id": model} for model in FREE_CHAT_MODELS + tuple(FREE_NATIVE_MODELS) + PAID_UNCENSORED_MODELS]},
     }
     context = owner._observed_context(provider, read=replies.__getitem__, token="fixture-proxy-token-32-characters",
                                       base=f"http://127.0.0.1:{port}")
@@ -108,6 +108,33 @@ def test_account_owner_refuses_other_org_or_policy_before_admission():
         owner._observed_context(provider, read=replies.__getitem__, token="fixture-proxy-token-32-characters", base="http://127.0.0.1:8311")
 
 
+def native_packet(model):
+    if model == "jev-latest:free":
+        return {"state": "The list contains apple and pear.", "questions": {
+            "present": {"type": "noul", "instructions": "The list contains apple."},
+            "fruit": {"type": "choice", "instructions": "Which named fruit is present?",
+                      "criteria": {"apple": "apple", "orange": "orange"}},
+            "count": {"type": "score", "instructions": "Rate fruit variety.",
+                      "criteria": ["one fruit", "two fruits", "three fruits"]}}}
+    return {"input": "The list contains apple and pear.", "questions": [
+        {"name": "present", "type": "predicate", "instructions": "The list contains apple."},
+        {"name": "fruit", "type": "choice", "instructions": "Which named fruit is present?",
+         "choices": [{"value": "apple", "description": "apple"}, {"value": "orange", "description": "orange"}]},
+        {"name": "count", "type": "score", "instructions": "Rate fruit variety.",
+         "levels": [{"label": "one", "description": "one fruit"}, {"label": "two", "description": "two fruits"},
+                    {"label": "three", "description": "three fruits"}]}]}
+
+
+def native_answer(model):
+    if model == "jev-latest:free":
+        return {"present": {"type": "noul", "noul": 0.99},
+                "fruit": {"type": "choice", "choice": "apple", "confidence": 0.98},
+                "count": {"type": "score", "score": 1, "confidence": 0.98}}
+    return [{"name": "present", "type": "predicate", "probability": 0.99},
+            {"name": "fruit", "type": "choice", "choice": "apple", "confidence": 0.98},
+            {"name": "count", "type": "score", "score": 1, "confidence": 0.98}]
+
+
 @pytest.fixture
 def local_gateway():
     requests = []
@@ -119,10 +146,17 @@ def local_gateway():
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            requests.append((body, dict(self.headers)))
-            payload = json.dumps({"model": body["model"], "choices": [
-                {"message": {"role": "assistant", "content": "native plan proof"}, "finish_reason": "stop"}
-            ], "usage": {"prompt_tokens": 8, "completion_tokens": 4}}).encode()
+            requests.append((body, {**dict(self.headers), "_request_path": self.path}))
+            if body["model"] in FREE_NATIVE_MODELS:
+                assert self.path == "/v1/" + FREE_NATIVE_MODELS[body["model"]]
+                answer = native_answer(body["model"])
+                payload = json.dumps({"model": body["model"].removesuffix(":free"),
+                    "answers": answer, "usage": {"input_tokens": 12, "cost": 0}}).encode()
+            else:
+                assert self.path == "/v1/chat/completions"
+                payload = json.dumps({"model": body["model"], "choices": [
+                    {"message": {"role": "assistant", "content": "native plan proof"}, "finish_reason": "stop"}
+                ], "usage": {"prompt_tokens": 8, "completion_tokens": 4}}).encode()
             self.send_response(response_status[0])
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
@@ -145,7 +179,8 @@ def run_bridge(tmp_path, monkeypatch, port, model):
         SimpleNamespace(host_owned_context=lambda: copy.deepcopy(context)), tmp_path)
     monkeypatch.setattr(bridge, "resolve_host_adapter", lambda *_: adapter)
     prompt = tmp_path / "prompt.txt"
-    prompt.write_text("Return the fixed proof phrase.")
+    prompt.write_text(json.dumps(native_packet(model)) if model in FREE_NATIVE_MODELS
+                      else "Return the fixed proof phrase.")
     args = dict(run_id="native-plan-" + str(time.time_ns()), task_class="mechanical", model=model,
                 packet_root=str(tmp_path), prompt_file=str(prompt), root="fixture-root",
                 strict_manual_pin=True, retention_acknowledged=True, sensitive_data_opt_in=True,
@@ -258,3 +293,102 @@ def test_base_catalog_ids_authorize_free_qualifiers_without_stripping_wire_model
     frame["model"] = PAID_UNCENSORED_MODELS[0]
     with pytest.raises(transport.ExperientialTransportRefused, match="MODEL_MISMATCH"):
         transport._parse_completion(json.dumps(frame).encode(), "application/json", FREE_CHAT_MODELS[0])
+
+
+@pytest.mark.parametrize("model", tuple(FREE_NATIVE_MODELS))
+def test_native_free_protocol_uses_original_bridge_lease_and_result(tmp_path, monkeypatch, local_gateway, model):
+    port, requests, _ = local_gateway
+    args, context = run_bridge(tmp_path, monkeypatch, port, model)
+    outcome = bridge.exec_command(**args)
+    assert outcome["state"] == "EXECUTED" and outcome["model"] == model
+    detail = outcome["outcome"]
+    assert detail["request_endpoint"] == FREE_NATIVE_MODELS[model]
+    assert detail["plan_lane"] == "free" and detail["max_output_tokens"] is None
+    assert detail["idempotency_key"] == ""
+    assert json.loads(detail["content"])["answers"] == native_answer(model)
+    assert detail["cost_usd_observed"] == 0 and detail["cost_settled"] is False
+    assert len(requests) == 1
+    body, headers = requests[0]
+    assert body["model"] == model and body["questions"] == native_packet(model)["questions"]
+    assert headers["_request_path"] == "/v1/" + FREE_NATIVE_MODELS[model]
+    assert not {"messages", "stream", "max_tokens", "max_output_tokens"}.intersection(body)
+    assert "idempotency-key" not in {key.lower() for key in headers}
+    assert body["gateway"]["retry"]["max_total_attempts"] == 1
+    bridge._LAUNCH_BOUND.clear()
+    with pytest.raises(bridge.ExperientialBridgeRefused, match="SEND_RESERVATION_REFUSED"):
+        bridge.exec_command(**args)
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize("model", tuple(FREE_NATIVE_MODELS))
+def test_native_free_refusal_has_one_send_and_no_paid_fallback(tmp_path, monkeypatch, local_gateway, model):
+    port, requests, status = local_gateway
+    status[0] = 429
+    args, _ = run_bridge(tmp_path, monkeypatch, port, model)
+    with pytest.raises(bridge.ExperientialBridgeRefused, match="RATE_LIMITED"):
+        bridge.exec_command(**args)
+    with pytest.raises(bridge.ExperientialBridgeRefused, match="DUPLICATE_LAUNCH"):
+        bridge.exec_command(**args)
+    assert len(requests) == 1 and requests[0][0]["model"] == model
+
+
+@pytest.mark.parametrize("model", tuple(FREE_NATIVE_MODELS))
+@pytest.mark.parametrize("bad", ["not json", '{"state":"a","state":"b","questions":{}}',
+                               '{"input":"x","questions":[],"model":"paid"}'])
+def test_native_invalid_packet_refuses_before_send(tmp_path, monkeypatch, local_gateway, model, bad):
+    port, requests, _ = local_gateway
+    args, _ = run_bridge(tmp_path, monkeypatch, port, model)
+    Path(args["prompt_file"]).write_text(bad)
+    with pytest.raises(bridge.ExperientialBridgeRefused, match="PLAN_NATIVE"):
+        bridge.exec_command(**args)
+    assert requests == []
+    marker = tmp_path / "ext/state/remote_sub" / (args["run_id"] + ".task-cli-started.json")
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("model", tuple(FREE_NATIVE_MODELS))
+def test_native_protocol_binding_cannot_be_changed_to_chat(model):
+    _, _, context = facts()
+    with pytest.raises(transport.ExperientialTransportRefused, match="PROTOCOL_MISMATCH"):
+        transport.require_plan_route_qualified(transport.GatewayRoute(**context["route"]), model)
+    assert admit(context, model)["endpoint"] == FREE_NATIVE_MODELS[model]
+
+
+@pytest.mark.parametrize("model", tuple(FREE_NATIVE_MODELS))
+@pytest.mark.parametrize("fault", ["answers", "value", "model", "refusal"])
+def test_native_answer_validation_preserves_question_and_model_identity(model, fault):
+    frame = {"model": model, "answers": native_answer(model), "usage": {}}
+    first = frame["answers"]["present"] if type(frame["answers"]) is dict else frame["answers"][0]
+    if fault == "answers":
+        frame["answers"] = {}
+    elif fault == "value":
+        first["noul" if model == "jev-latest:free" else "probability"] = 1.1
+    elif fault == "model":
+        frame["model"] = "other-model"
+    else:
+        first["type"] = "refusal"
+    with pytest.raises(transport.ExperientialTransportRefused):
+        transport._parse_native_completion(json.dumps(frame).encode(), "application/json", model, native_packet(model))
+
+
+def test_native_latest_version_requires_gateway_alias_binding():
+    model = "jev-latest:free"
+    frame = json.dumps({"model": "jev-1.13.0", "answers": native_answer(model)}).encode()
+    with pytest.raises(transport.ExperientialTransportRefused, match="MODEL_MISMATCH"):
+        transport._parse_native_completion(frame, "application/json", model, native_packet(model))
+    assert transport._parse_native_completion(frame, "application/json", model,
+        native_packet(model), canonical_model="jev-latest")[1] == "jev-1.13.0"
+
+
+def test_invalid_native_response_keeps_original_reconciliation_handle(tmp_path, monkeypatch, local_gateway):
+    port, requests, _ = local_gateway
+    args, _ = run_bridge(tmp_path, monkeypatch, port, "jev-latest:free")
+    def invalid(*_args, **_kwargs):
+        raise transport.ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED")
+    monkeypatch.setattr(transport, "_parse_native_completion", invalid)
+    with pytest.raises(bridge.ExperientialBridgeRefused, match="provider_request_id=fixture-provider-request"):
+        bridge.exec_command(**args)
+    assert len(requests) == 1
+    with pytest.raises(bridge.ExperientialBridgeRefused, match="DUPLICATE_LAUNCH"):
+        bridge.exec_command(**args)
+    assert len(requests) == 1

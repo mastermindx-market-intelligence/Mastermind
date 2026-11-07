@@ -128,11 +128,11 @@
     "ext/commission_deadline.py": "76d6523f94d9d8a7323766eb957b93bdd37240c7b4c13a4b097555ed53e8829a",
     "ext/current_failed_artifact_evidence.py": "d37e0ad11f116e630b825fde62e28c6bc441d102bc534666b9fff248537cb02f",
     "ext/current_source_observation.py": "42ebe6f4db11669447f499099299bcf02c881a1e7d334b73e72f1675429f9f18",
-    "ext/experiential_bridge.py": "ca7d9c414c1f7113b1f3a4ee58796f34acde26b18bcb0c75bd5d59ab0d10bc95",
-    "ext/experiential_host_context.py": "71944b7ec3850d243e62c9383a2c2cab84d3d0a10afca0a3649bfffe025377df",
-    "ext/experiential_pin.py": "3aa68c66b10039918b77310016ba67c0a594ae8a37322167d50f7929b61ecdce",
-    "ext/experiential_plan_policy.py": "992c5765f2b458b45ceba145fe25688b27717505197e3395b05cf251471d62c0",
-    "ext/experiential_transport.py": "ff6a803adc5104e121e2b190bed3e955805214057b954d851c3ddb2e163c0a26",
+    "ext/experiential_bridge.py": "288471efc8b10e1471102b34096d77d725ab935cc6574e4c943909f68cb346de",
+    "ext/experiential_host_context.py": "ad157e490bdd949ca19c64897db0257434c3a0a0b45c69361dd57a3db223c276",
+    "ext/experiential_pin.py": "f65b1f3f56afe4f3ad7d1d7538545c9a68b23e52176e205d42d1482f91e57a44",
+    "ext/experiential_plan_policy.py": "4c0927912ffb247d4ba4bda41143471e31322ea7c9bf4541573ba0f6ca013ae8",
+    "ext/experiential_transport.py": "099baa82153c8a331ba335e44a9ef35e1df44bcb4219182af71523d9c6d1b16d",
     "ext/fabric_client_projection.py": "39a138f88f6a3e4fb9b60f4365620ca05903e9f15783f95495627a54a13402e6",
     "ext/fabric_continuation.py": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
     "ext/fabric_cpu_scope.py": "15891591aba64e7d5658b7c92fd5ff90a89f6c57df952f8e5673c2a638fc0c63",
@@ -220,12 +220,12 @@
     "ext/quota_remote.py": "3c1484864848b5cdf4daeecde092f7c407ab313a9f0d94a7f0fd204dbcf813b8",
     "ext/qwen_exec.sh": "acb5477907820c9c29908f6675a785e5b8999dbfd21aba8d60ca972213b4fa58",
     "ext/recovery_artifacts.py": "c67db5c395403b34b2095380fd5f68dcc547c01fcce1ae85c6e78accbd8ad28f",
-    "ext/remote_sub.sh": "596e7e56ba6d9b1508b2e37083f07fb2ae2e6d13976eac822584b3260bb91858",
+    "ext/remote_sub.sh": "1b181b47e0d149c7a2b01218e3d49e85dfb461f005f527af9b3cd4dedc32fb0c",
     "ext/remote_sub_exec.py": "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea",
     "ext/remote_sub_helpers.py": "cacbb576e82c57d625143610b858714dc37135acf28a82ccb9aec297c49bff2a",
     "ext/run_observation.py": "cbe4b0b4db3783e44d9cc442ab973996e8b5102c178ab61e172bfd0aae7accfb",
     "ext/run_observation_delivery.py": "c18ab07723b42a8dece4c072256ad161384508f65bac44bbb9781948710f675b",
-    "ext/slot.py": "da030aef94a836b5ce8f17ced6552907d7821552a00fdafe76f63cafcfb543c5",
+    "ext/slot.py": "65e388b09099071c05afec9d198f01abd704c489e4b6264805aa3d5c3be5f95b",
     "ext/studio_mcp_projection.sh": "098bd6d97a1375e5b7304cd85eadbe82a2d1519a334679d1d7dec39d987f97ec",
     "ext/sub.sh": "5584e28dbaebb18469ccf3f190dca27a40a820358b32a8a4ffee2fa29bc0875d",
     "ext/support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
@@ -255,13 +255,13 @@
       "after": "596e7e56ba6d9b1508b2e37083f07fb2ae2e6d13976eac822584b3260bb91858",
       "before": "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
       "patch": "patches/remote_sub.sh.patch",
-      "patch_sha256": "5665fafb9e7f81e86ba72b5d4777aabed296a0ebecd06398b50b6f926f44835e"
+      "patch_sha256": "a48d3fd2d2359760eb65caeaaa0dc1671a16c7bd33c9d34590ebab050e34a720"
     },
     "ext/slot.py": {
       "after": "da030aef94a836b5ce8f17ced6552907d7821552a00fdafe76f63cafcfb543c5",
       "before": "85c8c2140d314241d8d8e324cf07428672f842ecacfc126570c25400affe406f",
       "patch": "patches/slot.py.patch",
-      "patch_sha256": "c3b0bcf680a02000e05631e44b1cb2f372b34e6c740ce72b299de53628ed52f4"
+      "patch_sha256": "a49ae4840820dababa5a1dd44f735e1b03568086d791db995084d01c71002454"
     },
     "ext/sub.sh": {
       "after": "5584e28dbaebb18469ccf3f190dca27a40a820358b32a8a4ffee2fa29bc0875d",

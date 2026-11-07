@@ -16,7 +16,7 @@
 +  experiential)
 +    [ -n "$MODEL" ] || { echo "EXPERIENTIAL_MODEL_SLUG_REQUIRED" >&2; exit 2; }
 +    case "$MODEL" in
-+      glm-5.3-uncensored|deepseek-v4.1-flash:free|deepseek-v4.1-flash-1017:free|gpt-6-luna:free|clef:free|clef-flash:free|deepseek-v4.1-flash-uncensored|glm-5.3-flash-uncensored) ;;
++      glm-5.3-uncensored|deepseek-v4.1-flash:free|deepseek-v4.1-flash-1017:free|gpt-6-luna:free|clef:free|clef-flash:free|jev-latest:free|gpt-6-luna-decisions:free|deepseek-v4.1-flash-uncensored|glm-5.3-flash-uncensored) ;;
 +      *) echo "EXPERIENTIAL_MODEL_SLUG_REFUSED" >&2; exit 2 ;;
 +    esac ;;
 +  byteplus)
