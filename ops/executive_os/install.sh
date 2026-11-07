@@ -31,6 +31,7 @@ CONTROL_CONFIG_SOURCE=""
 CONTROL_AEAD_BUNDLE=""
 OS_WEB_ASSETS=""
 OS_WEB_ASSETS_DIGEST=""
+HERMES_ATTENDED_SOURCE=""
 OPERATOR_USER=""
 PYTHON_BINARY=""
 PYTHON_RUNTIME_ROOT=""
@@ -400,6 +401,7 @@ while [ "$#" -gt 0 ]; do
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
     --control-aead-bundle) CONTROL_AEAD_BUNDLE="${2:-}"; shift 2 ;;
     --os-web-assets) OS_WEB_ASSETS="${2:-}"; shift 2 ;;
+    --hermes-attended-source) HERMES_ATTENDED_SOURCE="${2:-}"; shift 2 ;;
     --python-binary) PYTHON_BINARY="${2:-}"; shift 2 ;;
     --python-runtime-root) PYTHON_RUNTIME_ROOT="${2:-}"; shift 2 ;;
     --python-team-identifier) PYTHON_TEAM_ID="${2:-}"; shift 2 ;;
@@ -480,6 +482,12 @@ if [ -n "$CONTROL_CONFIG_SOURCE" ]; then
 fi
 if [ -n "$OS_WEB_ASSETS" ]; then
   case "$OS_WEB_ASSETS" in /*) ;; *) /bin/echo "OS web asset path must be absolute" >&2; exit 65 ;; esac
+fi
+if [ -n "$HERMES_ATTENDED_SOURCE" ]; then
+  case "$HERMES_ATTENDED_SOURCE" in /*) ;; *) /bin/echo "Hermes attended source path must be absolute" >&2; exit 65 ;; esac
+  [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "0" ] || {
+    /bin/echo "admin-checkout staging does not publish Hermes dependency sources" >&2; exit 65
+  }
 fi
 if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
   case "$CONTROL_AEAD_BUNDLE" in /*) ;; *) /bin/echo "control AEAD bundle path must be absolute" >&2; exit 65 ;; esac
@@ -1268,6 +1276,16 @@ if [ -n "$OS_WEB_ASSETS" ]; then
       exit 65
     }
 fi
+# The attended projection is inert source data tied to this reviewed release.
+# Validate it before maintenance; no Git or projected Python executes here.
+if [ -n "$HERMES_ATTENDED_SOURCE" ]; then
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/capacity_host_artifacts.py" check-hermes-attended-source \
+    --archive "$HERMES_ATTENDED_SOURCE" \
+    --commitment "$SOURCE_REPO/integrations/hermes_application_fabric/macro-source.json" >/dev/null || {
+      /bin/echo "Hermes attended source preflight refused before maintenance" >&2
+      exit 65
+    }
+fi
 # Optional event-only dependency artifact is qualified against committed lock
 # bytes before maintenance/service stop. It never reuses the MCP network runtime.
 if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
@@ -1449,6 +1467,11 @@ for directory in (stage, stage / "ext"):
 for relative in json.loads(records["native-manifest.json"]):
     (stage / relative).chmod(0o644)
 MASTERMIND_RELEASE_NATIVE_STAGE
+    if [ -n "$HERMES_ATTENDED_SOURCE" ]; then
+      "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/capacity_host_artifacts.py" stage-hermes-attended-source \
+        --archive "$HERMES_ATTENDED_SOURCE" --release-root "$STAGING" \
+        --published-release-root "$RELEASE_ROOT" >/dev/null || return 65
+    fi
     # Seal and verify while the directory is still operation-owned staging. A
     # settled interruption must never expose a canonical release without a seal.
     "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" create \
@@ -1483,6 +1506,15 @@ MASTERMIND_RELEASE_NATIVE_STAGE
     "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/os_release_assets.py" check \
       --source-repo "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" \
       --bundle "$OS_WEB_ASSETS" --expected-digest "$OS_WEB_ASSETS_DIGEST" \
+      --release-root "$RELEASE_ROOT" >/dev/null || return 65
+  fi
+  # Full release verification above proves every projected payload file. This
+  # join then verifies its reviewed Macro identity and exact installed records.
+  # A same-SHA release without the projection refuses; it is never grafted.
+  if [ -n "$HERMES_ATTENDED_SOURCE" ]; then
+    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/capacity_host_artifacts.py" check-hermes-attended-source \
+      --archive "$HERMES_ATTENDED_SOURCE" \
+      --commitment "$RELEASE_ROOT/integrations/hermes_application_fabric/macro-source.json" \
       --release-root "$RELEASE_ROOT" >/dev/null || return 65
   fi
 }

@@ -19,12 +19,12 @@ The attended contribution a664a288a3791bda3ea2b43af08278f1d8fb0d9b
 from #2166 is incorporated. Its older 81-case receipt remains historical.
 The #2225 extension adds attended AUTO and exact selection through the original
 factory, local AUTO recognition, explicit native dependency declarations, and
-verified worker successor projection. The current suite contracts require106
-patched-gateway,87 unpatched-native and68 offline cases. The attended gateway
-suite executed106 cases with zero failures, errors, skips, external connections
-or standard SDK constructions against exact Macro dcb0ef02 and the pinned2bd
-native patch fixture. The original fbf results remain historical. Current-head
-hosted results must be read from their corresponding workflow.
+verified worker successor projection. The current suite contracts require115
+patched-gateway,87 unpatched-native and68 offline cases. The new installed-source
+gateway fixture executed115 cases with zero failures, errors, skips, external
+connections or standard SDK constructions against Macrofff0025 and the 15-file
+pinned2bd patch. The prior106-case dcb proof and original fbf results remain
+historical. Current-head hosted results require their corresponding receipt.
 
 The original APPLICATION handler/Broker qualification preserves all nine
 secretary fixed/AUTO/exact conversation, limit and unknown-effect cases and
@@ -36,15 +36,15 @@ projection. The shared paired gate still consumes its original CI-owned pin.
 
 | Input | Exact identity / owner |
 | --- | --- |
-| Primary runtime package | Eleven-file digest `d5fbdcafacfaaaa62366e59a0a62c2457a9e2a56a43bc67b65a7e0aace3a808f`, computed by the existing publication.py algorithm |
+| Primary runtime package | Eleven-file digest `c6b9a7ee27c69b545ddff4d5b509746bea1e96c9dc2b6ccf597e5df3af107454`, computed by the existing publication.py algorithm |
 | Original primary runtime predecessor | 08b8daf9 digest1ae0d896; its installed69-case proof is retained but does not qualify the two amended current runtime files |
-| APPLICATION factory/client | Contribution to original Macro#10740 at dcb0ef02d700bbc97422b4e1046837641f9fe5ae, parent e85fcf2248f52a8e25a9c850ab3ebd047555c75a; client SHA2560817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e remains unchanged |
-| Attended owner declarations | Original dcb0ef02 factory blob988c4026f8a68834846a6ecc8f3c3f5b011522e9 adds the attended automatic variant; the original workload is unchanged and both source-held variants remain unqualified |
+| APPLICATION factory/client | Contribution to original Macro#10740 at fff0025e10de394c6a297c7878518513f1dbe633, preserving current12efe and original dcb histories; client SHA2560817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e remains unchanged |
+| Attended owner declarations | Fixed and AUTO source descriptors are supported in fff0025; factory SHA25656996272225840ff7adefb95d8949c871cb91b1a578bbbf981ee8b8480454df8; original workload and service identity are preserved |
 | Attended owner qualification | Macro#10832 at83aa7e16bfe0bd1f07d373e2e42aca69e5e8da20, parentc164; three-file test/workflow/evidence contribution, no production/configuration change; hosted126 and local197 cases passed |
 | Native APPLICATION installer/entry | Original #2175 plus qualified v9 contribution in #2186; current Go ingress/account/service publishers remain authoritative |
 | Role Hermes ABI | Qualified upstream1c0cd667 and installed2bd378ed; existing held role installation and source closure |
 | Attended Hermes ABI | Exact upstream2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19 plus the reviewed core patch in hermes_core/ |
-| Attended patch | SHA2560029f3c8cba4ad16a66f47af20a9efb6186eb1745db2d2436c2eeaa9218c61ba; ten exact pre/postimages in the adjacent JSON fixture contract |
+| Attended patch | SHA256f0d088d9d83311d29461161d13185aa4549f9c0ce27fcbda9fe7b0a46344e9fa; fifteen exact pre/postimages in the adjacent JSON fixture contract |
 | Dependencies | Existing native lock/runtime closure; jsonschema4.26.0 and its full immutable dependency inventory; existing held YAML6.0.3 context |
 | Tunnel | Original application_tunnel_control, same credentials and finite v2 role aliases; original root-qualified server/client receipts required |
 | Final source/release carrier | Original Mastermind#2175 paired with Macro#10740; original #2166 owns attended release provenance |
@@ -81,12 +81,11 @@ route fixture alone could not establish these properties.
 | Meta-CEO | hermes-meta-ceo / hermes_meta_fabric / site_interactive | Original mmmeta role/session/principal and HERMES_META_FABRIC_APPLICATION_TOKEN |
 | Ordinary attended | hermes-attended / hermes_attended_fabric / hermes_attended | Original attended native admission plus a separately qualified APPLICATION service relation |
 
-Original Macro dcb0ef02 supplies the attended relation, fixed and automatic
-transport variants, and the original inference workload. The shipped application mode map remains empty; the
-transport remains qualified=false, application_allowed=false and
-client_session_metadata_accepted=false. A configuration-only edit cannot
-override those source qualification flags. No enrolled attended capability,
-runtime service record, principal/grant or credential is created here.
+Macrofff0025 supplies the original attended relation, fixed and automatic
+transport variants and inference workload. The source descriptors now have
+qualified=true and application_allowed=true, with metadata reads still false.
+The shipped application mode map remains empty. No enrolled attended capability,
+runtime service record, principal/grant or credential is created by those flags.
 
 The attended factory therefore remains closed until its original owners
 qualify and enroll the actual service. It cannot borrow a Brain, secretary,
@@ -125,7 +124,8 @@ records direct readback of H4's retained M2 manifest and results:100 gateway/
 APPLICATION cases and37 targeted TUI cases passed against native2bd, all five
 live TUI files and the unchanged0029f3c8 patch. The manifest SHA256 matches
 `133487351126780b34c27dc737053b2b3465c507a63614a1ec511db3e39eafd2`,
-and all ten core postimages match this release's patch contract. Its original
+and its ten core postimages remain the preserved subset of the new fifteen-file
+patch contract. The new inventory, picker and PM files have separate proof. Its original
 candidate remains a03; unchanged runtime inputs establish component compatibility,
 not a new current-head or live-provider execution.
 
@@ -165,3 +165,11 @@ Acceptance remains one authenticated native primary turn and harmless tool
 continuation, exact selected/served model and physical/shared account attribution,
 bounded output, original durable usage, applicable budget refusal and original
 result recovery without duplicate provider or tool effects.
+
+## Ordinary attended installation successor
+
+[The installation contract](ATTENDED_INSTALLATION.md) supplies the buildable root
+package, early model-provider entry, managed picker, multi-home PM support and
+sealed Macro projection. Its 17-file attended runtime digest is distinct from
+the existing 11-file role publication. The complete installation and proof
+manifest is recorded in `review_evidence/hermes_primary/attended-installed-source-qualification-20261107.json`.

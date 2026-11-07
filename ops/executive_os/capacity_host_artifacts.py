@@ -5841,6 +5841,339 @@ def _material_rows(
     return rows
 
 
+
+# Attended Hermes consumes a closed projection inside the existing Executive
+# release. This is source publication only, never admission or enrollment.
+HERMES_ATTENDED_PROJECTION_SCHEMA = "mastermind.hermes_attended_source_projection/v1"
+HERMES_ATTENDED_RECEIPT_SCHEMA = "mastermind.hermes_attended_installed_sources/v1"
+HERMES_ATTENDED_PROJECTION = "engine-lib-config/v1"
+HERMES_ATTENDED_PREFIXES = ("config", "engine", "lib")
+HERMES_ATTENDED_COMMITMENT = "integrations/hermes_application_fabric/macro-source.json"
+HERMES_ATTENDED_SOURCE_SUFFIX = "native-dependencies/hermes-attended-macro"
+HERMES_ATTENDED_INVENTORY_SUFFIX = "native-dependencies/hermes-attended-inventory.json"
+HERMES_ATTENDED_RECEIPT_SUFFIX = "native-dependencies/hermes-attended-sources.json"
+_ATTENDED_ARCHIVE_MAX = 256 * 1024 * 1024
+_ATTENDED_MANIFEST_MAX = 8 * 1024 * 1024
+_ATTENDED_MEMBERS_MAX = 32768
+_ATTENDED_FILE_MAX = 512 * 1024 * 1024
+_ATTENDED_TOTAL_MAX = 4 * 1024 * 1024 * 1024
+
+
+def _attended_json(raw: bytes) -> Any:
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise CapacityHostArtifactError("ATTENDED_DUPLICATE_JSON_KEY")
+            result[key] = value
+        return result
+    value = json.loads(raw, object_pairs_hook=unique)
+    if canonical_json(value) + b"\n" != raw:
+        raise CapacityHostArtifactError("ATTENDED_NON_CANONICAL_JSON")
+    return value
+
+
+def _attended_material(value: Any) -> list[dict[str, Any]]:
+    if type(value) is not list or not 3 <= len(value) <= _ATTENDED_MEMBERS_MAX:
+        raise CapacityHostArtifactError("ATTENDED_MATERIAL_INVALID")
+    paths, total = [], 0
+    for row in value:
+        if type(row) is not dict or set(row) != {"path", "mode", "git_blob", "sha256", "size"}:
+            raise CapacityHostArtifactError("ATTENDED_MATERIAL_INVALID")
+        path, size = row["path"], row["size"]
+        if (type(path) is not str or not 1 <= len(path) <= 4096
+                or "\\" in path or any(ord(c) < 32 or ord(c) == 127 for c in path)
+                or any(p in {"", ".", ".."} for p in path.split("/"))
+                or len(path.split("/")) < 2 or path.split("/")[0] not in HERMES_ATTENDED_PREFIXES
+                or row["mode"] not in _MATERIAL_MODES
+                or type(row["git_blob"]) is not str or _OBJECT_RE.fullmatch(row["git_blob"]) is None
+                or type(row["sha256"]) is not str or _DIGEST_RE.fullmatch(row["sha256"]) is None
+                or type(size) is not int or not 0 <= size <= _ATTENDED_FILE_MAX):
+            raise CapacityHostArtifactError("ATTENDED_MATERIAL_INVALID")
+        paths.append(path)
+        total += size
+    if (paths != sorted(set(paths)) or total > _ATTENDED_TOTAL_MAX
+            or {p.split("/")[0] for p in paths} != set(HERMES_ATTENDED_PREFIXES)):
+        raise CapacityHostArtifactError("ATTENDED_MATERIAL_INVALID")
+    files = set(paths)
+    if any(str(parent) in files for path in paths for parent in PurePosixPath(path).parents):
+        raise CapacityHostArtifactError("ATTENDED_MATERIAL_PATH_CONFLICT")
+    return value
+
+
+def _attended_commitment(raw: bytes) -> dict[str, Any]:
+    value = _attended_json(raw)
+    if (type(value) is not dict or set(value) != {
+            "schema", "repository", "commit", "tree", "projection",
+            "material_manifest_sha256", "archive_sha256", "archive_size"}
+            or value["schema"] != HERMES_ATTENDED_PROJECTION_SCHEMA
+            or value["repository"] != "mastermindx-market-intelligence/macro"
+            or value["projection"] != HERMES_ATTENDED_PROJECTION
+            or any(type(value[k]) is not str or _COMMIT_RE.fullmatch(value[k]) is None
+                   for k in ("commit", "tree"))
+            or any(type(value[k]) is not str or _DIGEST_RE.fullmatch(value[k]) is None
+                   for k in ("material_manifest_sha256", "archive_sha256"))
+            or type(value["archive_size"]) is not int
+            or not 1 <= value["archive_size"] <= _ATTENDED_ARCHIVE_MAX):
+        raise CapacityHostArtifactError("ATTENDED_COMMITMENT_INVALID")
+    return value
+
+
+def _attended_blob_batch(repository: Path, rows: Sequence[dict[str, Any]]) -> list[bytes]:
+    raw = _git(repository, "cat-file", "--batch",
+               input_bytes=("\n".join(row["git_blob"] for row in rows) + "\n").encode("ascii"))
+    stream, result = io.BytesIO(raw), []
+    for row in rows:
+        if stream.readline() != f'{row["git_blob"]} blob {row["size"]}\n'.encode("ascii"):
+            raise CapacityHostArtifactError("ATTENDED_GIT_BLOB_INVALID")
+        payload = stream.read(row["size"])
+        if (len(payload) != row["size"] or stream.read(1) != b"\n"
+                or hashlib.sha1(f'blob {len(payload)}\0'.encode("ascii") + payload).hexdigest() != row["git_blob"]):
+            raise CapacityHostArtifactError("ATTENDED_GIT_BLOB_INVALID")
+        result.append(payload)
+    if stream.read(1):
+        raise CapacityHostArtifactError("ATTENDED_GIT_BLOB_INVALID")
+    return result
+
+
+def _attended_zip_member(name: str, mode: int) -> zipfile.ZipInfo:
+    member = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+    member.create_system = 3
+    member.external_attr = (stat.S_IFREG | mode) << 16
+    member.compress_type = zipfile.ZIP_STORED
+    return member
+
+
+def build_hermes_attended_source_projection(
+    source_repository: Path, output: Path, *, commit: str,
+) -> dict[str, Any]:
+    """Unprivileged exact-object build; no projected source is executed."""
+    if type(commit) is not str or _COMMIT_RE.fullmatch(commit) is None:
+        raise CapacityHostArtifactError("ATTENDED_COMMIT_INVALID")
+    if output.exists() or output.is_symlink():
+        raise CapacityHostArtifactError("OUTPUT_EXISTS")
+    source = source_repository.resolve(strict=True)
+    if _git(source, "rev-parse", f"{commit}^{{commit}}").decode().strip() != commit:
+        raise CapacityHostArtifactError("ATTENDED_COMMIT_INVALID")
+    tree = _git(source, "rev-parse", f"{commit}^{{tree}}").decode().strip()
+    if _OBJECT_RE.fullmatch(tree) is None:
+        raise CapacityHostArtifactError("ATTENDED_TREE_INVALID")
+    leaves = _git(source, "ls-tree", "-r", "-l", "-z", commit, "--", *HERMES_ATTENDED_PREFIXES)
+    rows = []
+    for leaf in leaves.rstrip(b"\0").split(b"\0"):
+        header, path = leaf.split(b"\t", 1)
+        mode, kind, blob, size = header.decode("ascii").split()
+        if kind != "blob" or mode not in _MATERIAL_MODES or not size.isdecimal():
+            raise CapacityHostArtifactError("ATTENDED_GIT_TREE_INVALID")
+        rows.append({"path": path.decode("utf-8", "strict"), "mode": mode,
+                     "git_blob": blob, "size": int(size), "sha256": "0" * 64})
+    rows.sort(key=lambda row: row["path"])
+    _attended_material(rows)
+    payloads = {}
+    for offset in range(0, len(rows), 32):
+        batch = rows[offset:offset + 32]
+        for row, payload in zip(batch, _attended_blob_batch(source, batch)):
+            row["sha256"] = hashlib.sha256(payload).hexdigest()
+            payloads[row["path"]] = payload
+    manifest = {"schema": HERMES_ATTENDED_PROJECTION_SCHEMA,
+                "repository": "mastermindx-market-intelligence/macro",
+                "commit": commit, "tree": tree, "projection": HERMES_ATTENDED_PROJECTION,
+                "material": rows}
+    manifest_bytes = canonical_json(manifest) + b"\n"
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", allowZip64=False) as bundle:
+        bundle.writestr(_attended_zip_member("manifest.json", 0o644), manifest_bytes)
+        for row in rows:
+            bundle.writestr(_attended_zip_member("payload/" + row["path"], int(row["mode"], 8) & 0o777),
+                            payloads[row["path"]])
+    raw = archive.getvalue()
+    commitment = {key: manifest[key] for key in ("schema", "repository", "commit", "tree", "projection")}
+    commitment.update(material_manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+                      archive_sha256=hashlib.sha256(raw).hexdigest(), archive_size=len(raw))
+    _attended_commitment(canonical_json(commitment) + b"\n")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    _write_bytes_exclusive(output, raw, 0o600)
+    return commitment
+
+
+def _read_attended_projection(archive: Path, commitment_path: Path):
+    expected = _attended_commitment(_read_small_nofollow(commitment_path, 8192))
+    raw = _read_small_nofollow(archive, _ATTENDED_ARCHIVE_MAX)
+    if len(raw) != expected["archive_size"] or hashlib.sha256(raw).hexdigest() != expected["archive_sha256"]:
+        raise CapacityHostArtifactError("ATTENDED_ARCHIVE_MISMATCH")
+    with zipfile.ZipFile(io.BytesIO(raw)) as bundle:
+        infos = bundle.infolist()
+        if (not 4 <= len(infos) <= _ATTENDED_MEMBERS_MAX + 1
+                or infos[0].filename != "manifest.json" or infos[0].file_size > _ATTENDED_MANIFEST_MAX):
+            raise CapacityHostArtifactError("ATTENDED_ARCHIVE_MEMBERS_INVALID")
+        manifest_bytes = bundle.read(infos[0])
+        if hashlib.sha256(manifest_bytes).hexdigest() != expected["material_manifest_sha256"]:
+            raise CapacityHostArtifactError("ATTENDED_MANIFEST_MISMATCH")
+        manifest = _attended_json(manifest_bytes)
+        if (type(manifest) is not dict or set(manifest) != {
+                "schema", "repository", "commit", "tree", "projection", "material"}
+                or any(manifest[key] != expected[key] for key in
+                       ("schema", "repository", "commit", "tree", "projection"))):
+            raise CapacityHostArtifactError("ATTENDED_MANIFEST_MISMATCH")
+        rows = _attended_material(manifest["material"])
+        wanted = [("manifest.json", 0o644, len(manifest_bytes))] + [
+            ("payload/" + row["path"], int(row["mode"], 8) & 0o777, row["size"]) for row in rows]
+        if len(infos) != len(wanted) or bundle.comment:
+            raise CapacityHostArtifactError("ATTENDED_ARCHIVE_MEMBERS_INVALID")
+        for info, (name, mode, size) in zip(infos, wanted):
+            if (info.filename != name or info.file_size != size or info.create_system != 3
+                    or info.external_attr != (stat.S_IFREG | mode) << 16
+                    or info.flag_bits & 1 or info.compress_type != zipfile.ZIP_STORED
+                    or info.extra or info.comment or info.is_dir()):
+                raise CapacityHostArtifactError("ATTENDED_ARCHIVE_MEMBERS_INVALID")
+        for row, info in zip(rows, infos[1:]):
+            payload = bundle.read(info)
+            if len(payload) != row["size"] or hashlib.sha256(payload).hexdigest() != row["sha256"]:
+                raise CapacityHostArtifactError("ATTENDED_MEMBER_MISMATCH")
+    return expected, manifest, raw
+
+
+def check_hermes_attended_source_projection(archive: Path, commitment_path: Path) -> dict[str, Any]:
+    expected, manifest, _ = _read_attended_projection(archive, commitment_path)
+    return {"commit": expected["commit"], "tree": expected["tree"],
+            "archive_sha256": expected["archive_sha256"], "files": len(manifest["material"]),
+            "material_bytes": sum(row["size"] for row in manifest["material"])}
+
+
+def _attended_inventory(rows, published_root: Path) -> bytes:
+    roots = []
+    for prefix in HERMES_ATTENDED_PREFIXES:
+        entries = {}
+        for row in rows:
+            path = PurePosixPath(row["path"])
+            if path.parts[0] != prefix:
+                continue
+            relative = PurePosixPath(*path.parts[1:])
+            for parent in relative.parents:
+                if str(parent) != ".":
+                    entries[str(parent)] = {"path": str(parent), "type": "directory", "mode": 0o755}
+            entries[str(relative)] = {"path": str(relative), "type": "file",
+                                      "mode": int(row["mode"], 8) & 0o777,
+                                      "sha256": row["sha256"], "size": row["size"]}
+        roots.append({"path": str(published_root / HERMES_ATTENDED_SOURCE_SUFFIX / prefix),
+                      "entries": [entries[key] for key in sorted(entries)]})
+    if sum(len(root["entries"]) for root in roots) > _ATTENDED_MEMBERS_MAX:
+        raise CapacityHostArtifactError("ATTENDED_INVENTORY_TOO_LARGE")
+    raw = canonical_json({"schema": "mastermind.hermes_native_dependencies/v1", "roots": roots}) + b"\n"
+    if len(raw) > _ATTENDED_MANIFEST_MAX:
+        raise CapacityHostArtifactError("ATTENDED_INVENTORY_TOO_LARGE")
+    return raw
+
+
+
+def hermes_attended_adapter_digest(package: Path) -> str:
+    """Hash the reviewed complete adapter projection without importing it."""
+    raw = _read_small_nofollow(package / "attended-runtime-files.json", 16384)
+    document = _attended_json(raw)
+    if (type(document) is not dict or set(document) != {"schema", "files"}
+            or document["schema"] != "mastermind.hermes_attended_adapter_files/v1"
+            or type(document["files"]) is not list
+            or not 1 <= len(document["files"]) <= 64
+            or any(type(p) is not str or not re.fullmatch(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*", p)
+                   or any(part in {".", ".."} for part in p.split("/")) for p in document["files"])
+            or document["files"] != sorted(set(document["files"]))
+            or "attended-runtime-files.json" not in document["files"]):
+        raise CapacityHostArtifactError("ATTENDED_ADAPTER_FILES_INVALID")
+    rows = []
+    for relative in document["files"]:
+        path = package / relative
+        for parent in path.parents:
+            if parent == package.parent:
+                break
+            if parent.is_symlink() or not parent.is_dir():
+                raise CapacityHostArtifactError("ATTENDED_ADAPTER_FILES_INVALID")
+        rows.append([relative, hashlib.sha256(_read_small_nofollow(path, 4 * 1024 * 1024)).hexdigest()])
+    return hashlib.sha256(canonical_json(rows)).hexdigest()
+
+
+def _attended_installed_records(expected, manifest, published_root, adapter_package_sha256):
+    inventory = _attended_inventory(manifest["material"], published_root)
+    receipt = {"schema": HERMES_ATTENDED_RECEIPT_SCHEMA,
+               "release_sha": published_root.name,
+               "repository": expected["repository"], "commit": expected["commit"], "tree": expected["tree"],
+               "projection": expected["projection"],
+               "material_manifest_sha256": expected["material_manifest_sha256"],
+               "archive_sha256": expected["archive_sha256"],
+               "adapter_package_sha256": adapter_package_sha256,
+               "dependency_inventory": {"path": str(published_root / HERMES_ATTENDED_INVENTORY_SUFFIX),
+                                        "sha256": hashlib.sha256(inventory).hexdigest(), "size": len(inventory)},
+               "import_roots": [str(published_root / HERMES_ATTENDED_SOURCE_SUFFIX / p)
+                                for p in HERMES_ATTENDED_PREFIXES]}
+    return inventory, receipt
+
+
+def check_installed_hermes_attended_sources(archive: Path, release_root: Path) -> dict[str, Any]:
+    """Same-release reinstall verifies; it never grafts files or rewrites seals."""
+    expected, manifest, _ = _read_attended_projection(archive, release_root / HERMES_ATTENDED_COMMITMENT)
+    package = release_root / "integrations/hermes_application_fabric"
+    inventory, receipt = _attended_installed_records(
+        expected, manifest, release_root, hermes_attended_adapter_digest(package))
+    if (_read_small_nofollow(release_root / HERMES_ATTENDED_INVENTORY_SUFFIX, _ATTENDED_MANIFEST_MAX) != inventory
+            or _read_small_nofollow(release_root / HERMES_ATTENDED_RECEIPT_SUFFIX, 8192)
+            != canonical_json(receipt) + b"\n"):
+        raise CapacityHostArtifactError("ATTENDED_INSTALLED_SOURCE_MISMATCH")
+    return receipt
+
+
+def materialize_hermes_attended_source_projection(
+    archive: Path, *, release_root: Path, published_release_root: Path,
+    adapter_package_sha256: str,
+) -> dict[str, Any]:
+    """Data-only staging in the incumbent installer, before its release seal.
+
+    Candidate staging is also testable as an ordinary user. Root publication,
+    immutable ownership, release selection and admission remain existing owners.
+    """
+    if (not release_root.is_absolute() or release_root.is_symlink()
+            or not release_root.is_dir() or release_root.stat().st_uid != os.geteuid()
+            or published_release_root.parent != Path("/Library/Application Support/MastermindExecutive/releases")
+            or _COMMIT_RE.fullmatch(published_release_root.name) is None
+            or type(adapter_package_sha256) is not str
+            or _DIGEST_RE.fullmatch(adapter_package_sha256) is None):
+        raise CapacityHostArtifactError("ATTENDED_STAGE_INVALID")
+    expected, manifest, raw = _read_attended_projection(archive, release_root / HERMES_ATTENDED_COMMITMENT)
+    parent = release_root / "native-dependencies"
+    if parent.exists() or parent.is_symlink():
+        if parent.is_symlink() or not parent.is_dir() or parent.stat().st_uid != os.geteuid():
+            raise CapacityHostArtifactError("ATTENDED_STAGE_INVALID")
+    else:
+        parent.mkdir(mode=0o755)
+        parent.chmod(0o755)
+    destination = release_root / HERMES_ATTENDED_SOURCE_SUFFIX
+    if any(path.exists() or path.is_symlink() for path in (
+            destination, release_root / HERMES_ATTENDED_INVENTORY_SUFFIX,
+            release_root / HERMES_ATTENDED_RECEIPT_SUFFIX)):
+        raise CapacityHostArtifactError("ATTENDED_STAGE_OCCUPIED")
+    destination.mkdir(mode=0o755)
+    destination.chmod(0o755)
+    with zipfile.ZipFile(io.BytesIO(raw)) as bundle:
+        for row in manifest["material"]:
+            path = destination / row["path"]
+            missing = []
+            ancestor = path.parent
+            while ancestor != destination and not ancestor.exists():
+                missing.append(ancestor)
+                ancestor = ancestor.parent
+            for directory in reversed(missing):
+                directory.mkdir(mode=0o755)
+                directory.chmod(0o755)
+            _write_bytes_exclusive(path, bundle.read("payload/" + row["path"]), int(row["mode"], 8) & 0o777)
+            path.chmod(int(row["mode"], 8) & 0o777)
+    inventory, receipt = _attended_installed_records(
+        expected, manifest, published_release_root, adapter_package_sha256)
+    for suffix, payload in ((HERMES_ATTENDED_INVENTORY_SUFFIX, inventory),
+                            (HERMES_ATTENDED_RECEIPT_SUFFIX, canonical_json(receipt) + b"\n")):
+        path = release_root / suffix
+        _write_bytes_exclusive(path, payload, 0o444)
+        path.chmod(0o444)
+    return receipt
+
+
 def build_source_transport(
     source_repository: Path,
     output: Path,
@@ -6160,7 +6493,7 @@ def _path_lstat(path: Path) -> os.stat_result | None:
 
 
 def _read_small_nofollow(path: Path, maximum_bytes: int) -> bytes:
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
@@ -9072,6 +9405,18 @@ def runtime_tree_digest(runtime_root: Path) -> str:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build or inspect inert CF2-H0 artifacts")
     commands = parser.add_subparsers(dest="command", required=True)
+    attended_build = commands.add_parser("build-hermes-attended-source")
+    attended_build.add_argument("--source-repository", type=Path, required=True)
+    attended_build.add_argument("--output", type=Path, required=True)
+    attended_build.add_argument("--commit", required=True)
+    attended_check = commands.add_parser("check-hermes-attended-source")
+    attended_check.add_argument("--archive", type=Path, required=True)
+    attended_check.add_argument("--commitment", type=Path, required=True)
+    attended_check.add_argument("--release-root", type=Path)
+    attended_stage = commands.add_parser("stage-hermes-attended-source")
+    attended_stage.add_argument("--archive", type=Path, required=True)
+    attended_stage.add_argument("--release-root", type=Path, required=True)
+    attended_stage.add_argument("--published-release-root", type=Path, required=True)
     build = commands.add_parser("build-source-transport")
     build.add_argument("--source-repository", type=Path, required=True)
     build.add_argument("--output", type=Path, required=True)
@@ -9173,7 +9518,19 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.command == "build-source-transport":
+        if args.command == "build-hermes-attended-source":
+            value = build_hermes_attended_source_projection(args.source_repository, args.output, commit=args.commit)
+        elif args.command == "check-hermes-attended-source":
+            value = check_hermes_attended_source_projection(args.archive, args.commitment)
+            if args.release_root is not None and (args.release_root.exists() or args.release_root.is_symlink()):
+                value = check_installed_hermes_attended_sources(args.archive, args.release_root)
+        elif args.command == "stage-hermes-attended-source":
+            value = materialize_hermes_attended_source_projection(
+                args.archive, release_root=args.release_root,
+                published_release_root=args.published_release_root,
+                adapter_package_sha256=hermes_attended_adapter_digest(
+                    args.release_root / "integrations/hermes_application_fabric"))
+        elif args.command == "build-source-transport":
             value: Any = build_source_transport(
                 args.source_repository,
                 args.output,

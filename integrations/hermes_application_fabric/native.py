@@ -20,15 +20,6 @@ def classify_error(error, **_):
             "should_rotate_credential": False, "should_fallback": False}
 
 
-def _picker_catalog(force_refresh=False):
-    """Native inventory observation; an empty list must not fall back to AUTO."""
-    try:
-        from .gateway_plugin import available_models
-        return available_models()
-    except Exception:
-        return []
-
-
 def build_profile():
     # Import only in the real native host; pure codec/client tests need no Hermes
     # installation. This function installs nothing and opens no socket.
@@ -89,6 +80,20 @@ def register_native_provider():
     REGISTRY_AUTHTYPE_ARMS[AUTH_TYPE] = _resolve_native_client
 
 
+def _require_native_provider():
+    """Agent construction validates startup registration; it never replaces it."""
+    from providers import get_provider_profile
+    from agent.auxiliary_client_registry import REGISTRY_AUTHTYPE_ARMS
+    from hermes_cli.runtime_provider_custom import has_named_custom_provider
+    profile = get_provider_profile(PROVIDER)
+    if (has_named_custom_provider(PROVIDER) or profile is None
+            or profile.auth_type != AUTH_TYPE
+            or type(profile).create_client.__module__ != __name__
+            or REGISTRY_AUTHTYPE_ARMS.get(AUTH_TYPE) is not _resolve_native_client):
+        raise HermesFabricError("hermes_fabric_native_startup_required")
+    return profile
+
+
 def create_primary_agent(*, model: str, **options):
     """Programmatic native host startup, using its existing session lifecycle.
 
@@ -100,7 +105,7 @@ def create_primary_agent(*, model: str, **options):
         "credential_pool", "fallback_model", "acp_command", "acp_args", "command", "args"}
     if set(options) & forbidden:
         raise HermesFabricError("hermes_fabric_host_runtime_override")
-    register_native_provider()
+    _require_native_provider()
     from run_agent import AIAgent
     agent = AIAgent(model=model, provider=PROVIDER, requested_provider=PROVIDER,
         api_mode="chat_completions", api_key=None, base_url=None,

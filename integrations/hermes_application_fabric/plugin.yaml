@@ -1,0 +1,8 @@
+manifest_version: 1
+name: mastermind-fabric-gateway
+version: 0.1.0
+python_dependencies:
+  - jsonschema==4.26.0
+  - PyYAML==6.0.3
+description: Bind original admitted Hermes gateway turns to the existing Capacity Fabric owner.
+author: MastermindX

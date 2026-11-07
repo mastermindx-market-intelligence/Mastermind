@@ -31,25 +31,31 @@ second admission, lease, retry, history or settlement registry is added.
 
 ## Consumer composition
 
-Install the companion model-provider and `gateway_plugin_entry` through the
-existing native plugin mechanism only after source release. Both import the
-same protected `integrations.hermes_application_fabric` package. The general
-PluginManager owns the hook and middleware registrations and their unload.
+Install the complete buildable adapter root and its companion `model_provider`
+entry through the existing native PM after source release. The root general-plugin
+entry and early provider import the same canonical
+`integrations.hermes_application_fabric` package. Installing only the old
+`gateway_plugin_entry` wrapper is insufficient. The existing PluginManager owns
+hook/middleware registrations and unload; see [installation](ATTENDED_INSTALLATION.md).
 
 `gateway_plugin.py` consumes the original admitted local turn, supplies its
 admission ID as the original APPLICATION operation ID, and resolves the
 dedicated attended factory using the original `make_application_fabric_factory`.
-The factory root comes from that installed owner module. There is no config
-string that can import an alternate factory or supply a provider key/URL.
+The factory comes from the exact Macro projection inside the selected sealed
+Executive release. The verified source context holds its complete config/engine/lib
+closure through catalog inspection and each admitted turn, without ambient
+checkout imports. There is no config string that can import an alternate factory
+or supply a provider key/URL.
 
 Native primary model calls, tool calls/results, history and interruption remain
 inside Hermes. Reused agents resolve the current turn through the same
 middleware; they do not retain an earlier turn's APPLICATION owner.
 
-The model requested by Hermes is an exact strict-model constraint. Optional
-routing/effort policy may choose a model only within owner-qualified routes.
-This patch does not convert the current owner AUTO schema into strict-model
-support, or silently drop reasoning/streaming options.
+The explicit AUTO label uses the original attended automatic descriptor. A concrete
+model under an AUTO enrollment narrows that same owner before inspection freezes;
+a fixed enrollment refuses AUTO. Selection may change between admitted turns,
+while a turn and its tools retain the original binding. Unsupported reasoning or
+streaming options continue to refuse rather than being silently dropped.
 
 ## Qualified and unqualified surfaces
 
