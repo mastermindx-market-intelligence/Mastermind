@@ -807,6 +807,21 @@ REVIEWED_FILES["integrations/hermes_application_fabric/codec.py"] = {
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
 # the same sole 512 operand remains at (23, 17, 20), with no new identity mask.
 
+
+# Original #852 held subscription principals, source-qualified at exact sites.
+# This fixed source evidence grants no installed identity, credential or capacity.
+REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af39347f1a6e762b7716b73506beca5460b05914e9e2d9f1a19d9b7fb42e',
+ 'sites': ((168, 20, 44, 'str', '"_mastermind_alibaba_01"'),
+           (169, 21, 45, 'str', '"_mastermind_alibaba_01"'),
+           (170, 19, 22, 'int', '459'),
+           (171, 19, 22, 'int', '459'),
+           (180, 20, 44, 'str', '"_mastermind_minimax_01"'),
+           (181, 21, 45, 'str', '"_mastermind_minimax_01"'),
+           (182, 19, 22, 'int', '460'),
+           (183, 19, 22, 'int', '460'),
+           (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
+           (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}
+
 # Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
 # Full-source or token-site drift restores the ordinary identity guard.
 REVIEWED_FILES[
@@ -824,18 +839,3 @@ REVIEWED_FILES[
     "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
     "sites": ((27, 26, 29, "int", "443"),),
 }
-
-
-# Original #852 held subscription principals, source-qualified at exact sites.
-# This fixed source evidence grants no installed identity, credential or capacity.
-REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af39347f1a6e762b7716b73506beca5460b05914e9e2d9f1a19d9b7fb42e',
- 'sites': ((168, 20, 44, 'str', '"_mastermind_alibaba_01"'),
-           (169, 21, 45, 'str', '"_mastermind_alibaba_01"'),
-           (170, 19, 22, 'int', '459'),
-           (171, 19, 22, 'int', '459'),
-           (180, 20, 44, 'str', '"_mastermind_minimax_01"'),
-           (181, 21, 45, 'str', '"_mastermind_minimax_01"'),
-           (182, 19, 22, 'int', '460'),
-           (183, 19, 22, 'int', '460'),
-           (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
-           (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}

@@ -162,3 +162,14 @@ The reviewable component/preimage/rollback/enrollment sequence is in
 `review_evidence/fabric_application/h6-recovery-20261107-c2/installation-map.md`.
 Source custody and live effects retain the earlier holds. This milestone is a
 qualified source contribution; continue the next safe phase in this assignment.
+
+
+### H6 current-carrier convergence and H3 boundary qualification — 2026-11-07
+
+The assigned H6 source workspace composes complete Hermes `c40f58b42383684e0ded1db7a7cb48741ddb7abf`, including original carrier `da2db3909544137ca8b0602304a9b574b18f5277`, with the complete H2 contribution `a88488670bc99f7156eff193101b76795c16733f`. H2 emitted runtime bytes and the adopted Studio fixture pair are unchanged. All 70 release-identity entries are equal across the merge; original CI blob `7eb889d42f46724c939f1d7e62b3655ebc84c0f9` is preserved. The changed historical native assertion passed. A Mac-only disposable observer selfcheck defect was repaired by canonicalizing its newly created temporary directory; the production custody guard is unchanged and all eight observed process surfaces passed.
+
+Macro original #10740 already incorporated #10832/#10833 at `c2261cb826d1bd76c2e980efb68edb9ed7d0829c`; its nineteen native candidate pins match a884/c40. Later exact head `a577dbbf605474f97bbafa4ceeb0daf841292421` adds AUTO source support and private fixture classifications while retaining runtime authority gates. Do not duplicate either contribution or relabel historical tests as emitted-H2/live proof.
+
+H3 was reconstructed from every exact upstream preimage, semantically joined to emitted H2 in a disposable complete stage, and passed its original 32 admission cases. Five additional counterexamples show the proposed join can accept pending/failed/refused/rebound outer cache evidence and prepare two application dispatches against a one-request reservation. The qualification patch is deliberately outside the native builder/installer. Strict expiry scope remains unqualified. Exact evidence, common-fence placements, bootstrap/helper/source-custody gates and next acceptance inputs are in `review_evidence/fabric_application/h6-recovery-20261107-c2/h3-contract-findings.md` and companion JSON files.
+
+P1–P4 and the handoff's phases B–D remain open. Original source/Studio/J/native/reload effects are preserved. Current-source CI, protected release, installation/enrollment, actual account/endpoint/product/workload qualification, enforceable consumption bounds, real primary/tool/settlement and original-result recovery are separate gates. The existing Agent OS plan-link/projection gap remains explicit; this unmerged source plan is not an adopted organizational status update. MISSION_COMPLETE=false.

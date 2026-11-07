@@ -1,0 +1,28 @@
+{
+  "schema": "mastermind.h6-current-source-composition.v1",
+  "original_root": "fabric-application-integration-20261104-sol",
+  "qualified_base": "a88488670bc99f7156eff193101b76795c16733f",
+  "incoming_hermes": "c40f58b42383684e0ded1db7a7cb48741ddb7abf",
+  "original_carrier_at_join": "da2db3909544137ca8b0602304a9b574b18f5277",
+  "macro_original_carrier_at_readback": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+  "macro_incorporation_commit": "c2261cb826d1bd76c2e980efb68edb9ed7d0829c",
+  "macro_10832_10833": "already incorporated; do not reapply",
+  "macro_native_candidate_pins": "19/19 matched at c226 to a884/c40; not a claim about optional emitted H2",
+  "release_registry_equal_entries": 70,
+  "h2_runtime_sources_changed": false,
+  "studio_fixture_pair_changed": false,
+  "incoming_ci_script_blob": "7eb889d42f46724c939f1d7e62b3655ebc84c0f9",
+  "local_correction": "Canonicalize newly created temporary directory before unchanged Node observer custody check; corrected selfcheck exits 0",
+  "h3_patch_sha256": "5d3ad02f01e6c68184e66a7077ee67c14c7f8ff1213920a899d967d92b54fbf2",
+  "h3_strict_scope_qualified": false,
+  "provider_calls": false,
+  "installed": false,
+  "selected": false,
+  "mission_complete": false,
+  "ci": {
+    "a884_run": 42380455963,
+    "observed": "not consumed as terminal",
+    "current_hermes_natural_run": 42380883495
+  },
+  "h3_patch_format": "zero-context unified diff; exact whole preimages required; exact two postimages independently reconstructed"
+}

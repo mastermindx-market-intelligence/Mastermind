@@ -1,0 +1,58 @@
+{
+  "schema": "mastermind.auto-paired-ci-execution-proof.v1",
+  "qualified_pre_head": "4943246498ddd5fd68cb3b56d245085eb356d86b",
+  "ci_pre_sha256": "604f587bb15a262436b5b433618b2139ea5706bc74590da913f66bd733ff04e6",
+  "ci_post_sha256": "d8249342fafab7a49cd3f7279c7c21ca57bf8839142f0e0b5a8dca31a735b907",
+  "ci_post_blob": "7eb889d42f46724c939f1d7e62b3655ebc84c0f9",
+  "change": "Add explicit AUTO chat and AUTO text unittest discover invocations to the existing required paired composition step after its regional-portfolio case. Preserve existing step, runner, environment gates, fixtures and archive.",
+  "source_coverage_receipt": "https://mastermindxgroup.slack.com/archives/C0CBC6AEAQZ/p1794059554705499",
+  "gates": {
+    "MM_REQUIRE_PRODUCTION_MODE_COMPOSITION": "1",
+    "MM_REQUIRE_FABRIC_COMPOSITION": "1",
+    "MM_REQUIRE_FABRIC_BROWSER": "1"
+  },
+  "fixture_source": "163613 paired Macro cognition fixture",
+  "results": [
+    {
+      "module": "test_fabric_chat_cross_pool_auto.py",
+      "returncode": 0,
+      "seconds": 4.371,
+      "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/auto-paired-execution-fabric_chat_cross_pool_auto-v1.log",
+      "log_sha256": "3dae2eb190c15e5dee3d9bff1c6996273d63ecbe3220f1877d85506f9f676067",
+      "tail": [
+        "test_stale_prior_observation_is_not_attached_to_new_failed_step (test_fabric_chat_cross_pool_auto.AutoAdvisorApplicationTests.test_stale_prior_observation_is_not_attached_to_new_failed_step) ... ok",
+        "test_terminal_unusable_answer_keeps_actual_usage_and_remains_held (test_fabric_chat_cross_pool_auto.AutoAdvisorApplicationTests.test_terminal_unusable_answer_keeps_actual_usage_and_remains_held) ... ok",
+        "test_unknown_usage_does_not_fabricate_counts_or_prevent_valid_answer (test_fabric_chat_cross_pool_auto.AutoAdvisorApplicationTests.test_unknown_usage_does_not_fabricate_counts_or_prevent_valid_answer) ... ok",
+        "",
+        "----------------------------------------------------------------------",
+        "Ran 16 tests in 3.977s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "module": "test_fabric_text_cross_pool_auto.py",
+      "returncode": 0,
+      "seconds": 2.63,
+      "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/auto-paired-execution-fabric_text_cross_pool_auto-v1.log",
+      "log_sha256": "c38f91a0afafb7b7f63e3af8f7e7b397097f3b459fe1392025af6ded3f2a3f4b",
+      "tail": [
+        "test_real_text_auto_serves_two_pools_and_records_actual_usage_without_price_guess (test_fabric_text_cross_pool_auto.AutoTextApplicationTests.test_real_text_auto_serves_two_pools_and_records_actual_usage_without_price_guess) ... ok",
+        "test_same_request_recovery_observes_original_receipt_without_second_invocation_or_usage (test_fabric_text_cross_pool_auto.AutoTextApplicationTests.test_same_request_recovery_observes_original_receipt_without_second_invocation_or_usage) ... ok",
+        "test_unusable_terminal_model_keeps_actual_usage_and_no_answer (test_fabric_text_cross_pool_auto.AutoTextApplicationTests.test_unusable_terminal_model_keeps_actual_usage_and_no_answer) ... ok",
+        "",
+        "----------------------------------------------------------------------",
+        "Ran 14 tests in 2.284s",
+        "",
+        "OK"
+      ]
+    }
+  ],
+  "named_tests": {
+    "chat": 16,
+    "text": 14
+  },
+  "skips": 0,
+  "hosted_execution": "PENDING_ON_NEW_HEAD",
+  "runtime_activation": "NOT_PERFORMED"
+}
