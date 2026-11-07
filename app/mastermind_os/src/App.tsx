@@ -1179,55 +1179,6 @@ function ProjectTabs({
   );
 }
 
-function ProjectPlan({ d }: { d: MissionDocument }) {
-  return (
-    <>
-      <section className="card source-gap">
-        <div className="section-title">
-          <div>
-            <h2>Plan</h2>
-            <p className="muted">
-              Agent OS plan content is not projected through the current
-              approved app source.
-            </p>
-          </div>
-          <State value="NOT_PROJECTED" />
-        </div>
-        <p>
-          This project view does not reconstruct a plan from Mission, Work,
-          GitHub, or conversation data. The current Mission context below is
-          shown only to preserve continuity while the plan owner is absent.
-        </p>
-      </section>
-      <section className="card">
-        <div className="section-title">
-          <h2>Current project context</h2>
-          <State value={d.read_state.state} />
-        </div>
-        <dl>
-          <dt>Project</dt>
-          <dd>{d.program.title || d.program.work_ref}</dd>
-          <dt>Next source-qualified action</dt>
-          <dd>
-            {display(
-              d.program.next_action,
-              "No next action was projected by the Mission source.",
-            )}
-          </dd>
-          <dt>Accountable seat</dt>
-          <dd>{display(d.principal.accountable_seat)}</dd>
-          <dt>Owed turn</dt>
-          <dd>
-            {d.principal.owed_turn
-              ? `${display(d.principal.owed_turn.seat)} · ${display(d.principal.owed_turn.reason)}`
-              : "Not established"}
-          </dd>
-        </dl>
-      </section>
-    </>
-  );
-}
-
 function ProjectMore({
   d,
   sessionPanel,
@@ -1254,16 +1205,6 @@ function ProjectMore({
       {sessionPanel}
       <OperationalNavigation label="Project operations" onNavigate={onNavigate} />
       <Connections d={d} />
-      <section className="card source-gap">
-        <div className="section-title">
-          <h2>Journal</h2>
-          <State value="NOT_PROJECTED" />
-        </div>
-        <p>
-          No qualified journal source is installed in this project view. No
-          history is inferred.
-        </p>
-      </section>
       <section className="card source-gap">
         <div className="section-title">
           <h2>Resources &amp; systems</h2>
@@ -5649,7 +5590,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               <ResultCard locale={locale} state={resultState} />
             </>
           ) : projectTab === "Plan" ? (
-            <ProjectPlan d={d} />
+            <ProjectPlanPanel {...projectPlanProps} />
           ) : projectTab === "Work" ? (
             <>
               <section ref={resourcesWorkView} tabIndex={-1} aria-label={locale === "zh-CN" ? "所选工作详情" : "Selected work inspection"}>
