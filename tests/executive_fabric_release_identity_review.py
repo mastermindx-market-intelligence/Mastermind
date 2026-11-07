@@ -76,9 +76,9 @@ REVIEWED_FILES = {
     },
     'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
         # v9 keeps the original private account directory permission check.
-        "sha256": '4506cc7cf9c325dbf916eb5f339761c78e5e8f91eb39fe4d59e578bfd5d1b121',
+        "sha256": 'c7ea4421b74658e3c21c147312e6ab8e742da3f7fc75bf0bb9d6d31e1e736b09',
         "sites": (
-            (806, 60, 65, 'int', '0o700'),
+            (814, 60, 65, 'int', '0o700'),
         ),
     },
     'ops/native_fabric/quota_continuity/source/go_shim.py': {

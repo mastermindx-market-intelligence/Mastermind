@@ -722,6 +722,12 @@ def load_all_completed_application_startup(startup):
     Family upgrades retain the original legacy-only reader. Actual startup
     joins the same physical owners and refuses partial role publications.
     """
+    paths = tuple(path for profile in (None, *SERVICE_ROLE_PROFILES)
+                  for path in application_enrollment_paths(startup, profile).values())
+    def snapshot():
+        return tuple(application_file_identity(path) if os.path.lexists(path) else None
+                     for path in paths)
+    before = snapshot()
     legacy = load_completed_application_startup(startup)
     services, host, account_profile = legacy[:3]
     http_projection = legacy[3] if len(legacy) == 4 else None
@@ -738,6 +744,8 @@ def load_all_completed_application_startup(startup):
                 raise ValueError("native application service identity collision")
             services += (candidate,)
         host, account_profile = result[1:3]
+    if snapshot() != before:
+        raise ValueError("native application enrollments changed during composition")
     result = (services, host, account_profile)
     return (*result, http_projection) if http_projection is not None else result
 

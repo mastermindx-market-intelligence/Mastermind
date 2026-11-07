@@ -121,6 +121,11 @@ def source_owners(tmp_path_factory):
             fixture.parent / 'native_historical_payloads/paid_host_qualification.py.txt',
         'ext/paid_initializer.py':
             fixture.parent / 'native_historical_payloads/paid_initializer.py.txt',
+        # The active APPLICATION carrier changes support_bundle too. Restore
+        # its exact 58083bf / e5e6153 blob historical102 bytes; historical95 owns a different
+        # retained payload and must not inherit this preimage.
+        'ext/support_bundle.py':
+            fixture.parent / 'native_historical_payloads/support_bundle.py.txt',
     }
     new_names = long_names | set(base_paths)
     # S9 also changes the CURRENT picker. Bind its authentic protected
@@ -593,3 +598,4 @@ with svc._pin_native_context(args) as observed:
     assert observed["pool_bridge"] == plan["entries"]["pool"]["bridge"]
     assert owner_bytes() == before
     assert g.current(owner.store) == pointer
+
