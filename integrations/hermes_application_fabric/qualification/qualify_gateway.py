@@ -28,11 +28,11 @@ def main():
     args = parser.parse_args()
     root, owner, hermes = (Path(p).resolve() for p in (args.adapter_root, args.owner_root, args.hermes_root))
     expected_hermes = "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
-    actual = subprocess.run(["git", "-C", str(hermes), "rev-parse", "HEAD"],
+    actual = subprocess.run(["git", "-c", "gc.auto=0", "-C", str(hermes), "rev-parse", "HEAD"],
         check=True, capture_output=True, text=True, timeout=10).stdout.strip()
     if actual != expected_hermes:
         raise RuntimeError("Installed Hermes source differs from the qualified ABI")
-    subprocess.run(["git", "-C", str(hermes), "diff", "--exit-code", "HEAD", "--"],
+    subprocess.run(["git", "-c", "gc.auto=0", "-C", str(hermes), "diff", "--exit-code", "HEAD", "--"],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
     manifest = json.loads(Path(args.manifest).read_text())
     if manifest["candidate"] != args.candidate:
@@ -84,7 +84,7 @@ def main():
     if not Path(session_provider_context.__file__).resolve().is_relative_to(fixture):
         raise RuntimeError("Native host patch did not load from the immutable fixture")
     print(json.dumps({"candidate": args.candidate, "hermes": actual,
-        "owner": "c1647bf55ad5faf07e682f7055e3791280d6d41f", "owner_source_verified": True,
+        "owner": "a577dbbf605474f97bbafa4ceeb0daf841292421", "owner_source_verified": True,
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
         "mode": "pinned-native-host-patch-loopback-fixture", "live_provider_acceptance": False}), flush=True)
     suite = unittest.TestSuite()

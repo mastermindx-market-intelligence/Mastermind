@@ -163,6 +163,9 @@ _SPARSE_GIT_SETTINGS = (
     ("core.untrackedCache", "false"), ("core.useReplaceRefs", "false"),
     ("maintenance.auto", "false"), ("gc.auto", "0"),
     ("protocol.allow", "never"),
+    # Valid sparse-index reads can emit this informational advisory on newer Git.
+    # Keep every other stderr diagnostic subject to the strict observer check.
+    ("advice.sparseIndexExpanded", "false"),
 )
 
 
@@ -603,6 +606,18 @@ def _new_macro_workspace(key: str, cwd: str, here: Path, env: dict,
             raise SparseWorkspaceRefused("FABRIC_SPARSE_REVIEWED_DONOR_DRIFT",
                                          effect_unknown=exc.effect_unknown) from exc
         raise
+    # Qualify the exact local commit before entering the effectful mint owner.
+    # Its own check remains authoritative after this observation; a later
+    # failure still retains the existing unknown-effect hold.
+    try:
+        commit_kind = _sparse_git(donor, common, "cat-file", "-t", commit)
+    except SparseWorkspaceRefused as exc:
+        if exc.effect_unknown:
+            raise
+        raise SparseWorkspaceRefused(
+            "FABRIC_SPARSE_PINNED_COMMIT_UNQUALIFIED") from exc
+    if commit_kind != b"commit\n":
+        raise SparseWorkspaceRefused("FABRIC_SPARSE_PINNED_COMMIT_UNQUALIFIED")
     try:
         if _sparse_read(helper) != (content, identity):
             raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED")

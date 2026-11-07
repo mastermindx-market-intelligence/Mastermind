@@ -26,6 +26,7 @@ _spec = importlib.util.spec_from_file_location("_auto_chat_fixture_helpers",
 _helpers = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_helpers)
 
+# Exact current APPLICATION carrier d5df6b2; no historical pins are rewritten.
 PINS = {
     "candidate/lease_broker.py": "d8577c6ee5cc9bd3e7fc22905530f4755b860ae0",
     "candidate/go_lease_gateway.py": "e21b6d6a4e4230fce5f55d90820c6391d4b79324",

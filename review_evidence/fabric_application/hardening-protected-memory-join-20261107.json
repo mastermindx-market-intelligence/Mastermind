@@ -1,0 +1,18 @@
+{
+  "schema": "hermes-protected-memory-composition.v1",
+  "source_head": "e61ee7267f7d19109b1c2b527506899b57efae70",
+  "incoming": "8ed53c807a7c6db42eaa620511b521f7ed903fbd",
+  "protected_source": "3c3bfdf8a52a6972c05eb13a1c2b3b9859aefd27",
+  "governing_pin": "e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46",
+  "governing_delta": false,
+  "resolution": "Keep primary APPLICATION codec review and protected Agent OS source review; native gateway and supervisor compose both paths. Original overnight recovery and bounded Hermes test identifiers are retained.",
+  "inherited_diff_diagnostics": [
+    {
+      "path": "integrations/hermes_qualification/diagnostic_privacy/guard.patch",
+      "diagnostic": "trailing whitespace.",
+      "count": 9
+    }
+  ],
+  "diagnostic_decision": "Preserve protected source and exact diagnostic guard.patch bytes, including blank diff-context lines. No other whitespace finding accepted.",
+  "runtime_activated": false
+}

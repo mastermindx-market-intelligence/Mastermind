@@ -1457,6 +1457,11 @@ def _pin_reject_generic_restage(account):
 def _pin_require_start(account, roots):
     if account not in NATIVE_POOL_PIN_ACCOUNTS:
         return
+    if os.path.lexists(roots["state"] / "native-pool-pin-forward"):
+        # The forward owner authenticates every incumbent predecessor against
+        # its retained before bytes, then the exact live after pair and Go.
+        _pin_owner_module().require_start(sys.modules[__name__], account, roots)
+        return
     if os.path.lexists(roots["state"] / "fleet-status-module-successor"):
         owner = _fleet_status_successor_owner_module()
         if owner.require_start(sys.modules[__name__], account, roots):

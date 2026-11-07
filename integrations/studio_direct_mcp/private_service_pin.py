@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import stat
+import tempfile
 
 SCHEMA = "mastermind.studio_native_pool_pin.v1"
 REFUSAL_CODES = frozenset(
@@ -90,6 +91,7 @@ FORWARD_PLAN_FIELDS = frozenset((
     "original_plan_sha256",
     "original_receipt_sha256",
     "original_successor_digest",
+    "predecessor_records",
     "config_before",
     "config_after",
     "manifest_before",
@@ -126,6 +128,10 @@ FORWARD_REFUSAL_CODES = frozenset(
         "STATIC_SEAL_REFUSED",
         "SUCCESSOR_ALREADY_ADVANCED",
         "TRANSACTION_EXISTS",
+        "PREDECESSOR_CHANGED",
+        "EFFECT_UNKNOWN_RECONCILE_SAME_OWNER",
+        "EFFECT_UNKNOWN_PREPARATION_RECONCILE_SAME_OWNER",
+        "EFFECT_UNKNOWN_DURABILITY_RECONCILE_SAME_OWNER",
     )
 )
 
@@ -789,7 +795,7 @@ def forward_binding_matches(plan, binding, args):
             fail_forward("RETAINED_TARGET_REFUSED")
 
 
-def original_pin_record(svc, account, roots, binding, *, before):
+def original_pin_record(svc, account, roots, binding):
     """Read the complete original APPLIED history without replaying it."""
     path = roots["state"] / "native-pool-pin"
     try:
@@ -823,21 +829,6 @@ def original_pin_record(svc, account, roots, binding, *, before):
                or stat.S_IMODE(roots[n].lstat().st_mode) != plan[n + "_mode"]
                for n in ("config", "manifest")):
             fail_forward("ORIGINAL_REFUSED")
-        current, manifest = before
-        if not (
-            (current == raw["config.after.json"]
-             and manifest == raw["manifest.after.json"])
-            or _c2_paper_v20_postpin_start(
-                svc, account, roots, plan, raw, current, manifest)
-            or _fleet_paper_v20_postpin_start(
-                svc, account, roots, plan, raw, current, manifest)
-            or _c1_fleet_git_failure_postpin_start(
-                svc, account, roots, plan, raw, current, manifest)
-            or svc._fleet_status_successor_owner_module().historical_pair(
-                svc, account, roots, original_plan=plan, original_raw=raw,
-                config_bytes=current, manifest_bytes=manifest)
-        ):
-            fail_forward("ORIGINAL_REFUSED")
     except (OSError, ValueError, KeyError, TypeError, SystemExit):
         fail_forward("ORIGINAL_REFUSED")
     return {
@@ -845,20 +836,15 @@ def original_pin_record(svc, account, roots, binding, *, before):
         "receipt_sha256": digest(receipt_raw),
         "successor_digest": plan["successor_digest"],
         "pool_target": plan["pool_target"],
+        "plan": plan, "raw": raw,
+        "fingerprint": {name: digest(svc._fabric_release_bytes(path / name))
+                        for name in sorted(FILES)},
     }
 
 
 def forward_original_matches(svc, args, roots, binding, plan, raw):
-    """Revalidate immutable history before continuing this exact transaction."""
-    original = original_pin_record(svc, args.account, roots, binding, before=(
-        raw["config.before.json"], raw["manifest.before.json"]))
-    for original_key, plan_key in (
-        ("plan_sha256", "original_plan_sha256"),
-        ("receipt_sha256", "original_receipt_sha256"),
-        ("successor_digest", "original_successor_digest"),
-    ):
-        if original[original_key] != plan[plan_key]:
-            fail_forward("ORIGINAL_REFUSED")
+    """Revalidate every authenticated predecessor before effects or acknowledgment."""
+    require_forward_predecessor(svc, args, roots, binding, plan, raw)
 
 
 def forward_sync(svc, roots, path, plan, raw, observed, *, receipt=None):
@@ -869,22 +855,26 @@ def forward_sync(svc, roots, path, plan, raw, observed, *, receipt=None):
     reconcile this durability, but never create a plan or repair a pair.
     The immutable original pin history is not synchronized or changed here.
     """
-    svc._original_install_fsync_parent(path.parent)
-    records = {
-        "plan.json": svc._fabric_release_json(plan),
-        **raw,
-        "intent.json": svc._fabric_release_json({
-            "schema": FORWARD_SCHEMA, "planSha256": plan_sha(svc, plan)}),
-    }
-    for name, expected in records.items():
-        svc._original_install_sync(path / name, expected)
-    svc._original_install_sync(roots["config"], raw[
-        "config.before.json" if observed == "OLD" else "config.after.json"])
-    svc._original_install_sync(roots["manifest"], raw[
-        "manifest.after.json" if observed == "COMPLETE" else "manifest.before.json"])
-    if receipt is not None:
-        svc._original_install_sync(
-            path / "result.json", svc._fabric_release_json(receipt))
+    try:
+        svc._original_install_fsync_parent(path.parent)
+        records = {
+            "plan.json": svc._fabric_release_json(plan),
+            **raw,
+            "intent.json": svc._fabric_release_json({
+                "schema": FORWARD_SCHEMA, "planSha256": plan_sha(svc, plan)}),
+        }
+        for name, expected in records.items():
+            svc._original_install_sync(path / name, expected)
+        svc._original_install_sync(roots["config"], raw[
+            "config.before.json" if observed == "OLD" else "config.after.json"])
+        svc._original_install_sync(roots["manifest"], raw[
+            "manifest.after.json" if observed == "COMPLETE" else "manifest.before.json"])
+        if receipt is not None:
+            svc._original_install_sync(
+                path / "result.json", svc._fabric_release_json(receipt))
+        confirm_forward_durability(svc, roots, path)
+    except BaseException:
+        fail_forward("EFFECT_UNKNOWN_DURABILITY_RECONCILE_SAME_OWNER")
 
 
 def forward_snapshot(svc, args, roots, binding):
@@ -916,7 +906,6 @@ def forward_snapshot(svc, args, roots, binding):
         fail_forward("FLEET_SHAPE_REFUSED")
     if (
         f["fabricLauncherPath"] != binding["pool_target"]
-        or f["fabricLauncherSha256"] != binding["pool_previous"]
         or not svc._sha256_hex(f["fabricLauncherSha256"])
         or not svc._sha256_hex(f["launcherSha256"])
         or type(f["launcherPath"]) is not str
@@ -937,9 +926,8 @@ def forward_snapshot(svc, args, roots, binding):
     if not svc._native_pin_manifest_valid(m_post, args.account, label):
         fail_forward("PROFILE_REFUSED")
     m_post_raw = svc._fabric_release_json(m_post)
-    original = original_pin_record(svc, args.account, roots, binding, before=(c_raw, m_raw))
-    if original["pool_target"] != binding["pool_target"]:
-        fail_forward("ORIGINAL_REFUSED")
+    original, records = forward_predecessor(
+        svc, args.account, roots, binding, c_raw, m_raw)
     plan = {
         "schema": FORWARD_SCHEMA,
         "account": args.account,
@@ -959,6 +947,7 @@ def forward_snapshot(svc, args, roots, binding):
         "original_plan_sha256": original["plan_sha256"],
         "original_receipt_sha256": original["receipt_sha256"],
         "original_successor_digest": original["successor_digest"],
+        "predecessor_records": records,
         "config_before": digest(c_raw),
         "config_after": digest(c_post),
         "manifest_before": digest(m_raw),
@@ -1091,17 +1080,9 @@ def run_forward(svc, args):
             plan, raw = forward_snapshot(svc, args, roots, binding)
             if plan_sha(svc, plan) != args.expected_plan_sha256:
                 fail_forward("PLAN_CAS_REFUSED")
-            directory(svc, roots["state"])
-            path.mkdir(mode=svc.DIR_MODE)
-            svc._fsync_dir(path.parent)
-            svc._fabric_release_new(
-                path / "plan.json", svc._fabric_release_json(plan))
-            for name, value in raw.items():
-                svc._fabric_release_new(path / name, value)
-            svc._fabric_release_new(path / "intent.json", svc._fabric_release_json({
-                "schema": FORWARD_SCHEMA, "planSha256": args.expected_plan_sha256}))
-        # Missing preparation evidence remains held. Never reconstruct it from
-        # mutable current bytes or create another plan during reconciliation.
+            publish_forward_intent(svc, path, args, binding, plan, raw)
+        # Only a complete authenticated intent is active. Retain the same
+        # transaction during reconciliation; never derive a replacement plan.
         plan, raw = forward_read_transaction(svc, path, args, binding)
         observed = forward_state(svc, roots, raw, plan)
         if phase == "SELECTED" and observed != "COMPLETE":
@@ -1130,42 +1111,53 @@ def run_forward(svc, args):
         stopped(svc, args.account, roots)
         if (args.operation == "apply" and observed != "OLD" and not has_result):
             fail_forward("RECONCILIATION_REQUIRED")
-        if observed == "OLD":
-            if phase != "PREVIOUS":
-                fail_forward("SUCCESSOR_ALREADY_ADVANCED")
-            forward_original_matches(svc, args, roots, binding, plan, raw)
-            if forward_state(svc, roots, raw, plan) != "OLD":
+        attempted = False
+        try:
+            if observed == "OLD":
+                if phase != "PREVIOUS":
+                    fail_forward("SUCCESSOR_ALREADY_ADVANCED")
+                forward_original_matches(svc, args, roots, binding, plan, raw)
+                if forward_state(svc, roots, raw, plan) != "OLD":
+                    fail_forward("FOREIGN_STATE")
+                attempted = True
+                svc._atomic_write_bytes(
+                    roots["config"], raw["config.after.json"], mode=plan["config_mode"])
+                observed = forward_state(svc, roots, raw, plan)
+                if observed != "CONFIG_ONLY":
+                    fail_forward("FOREIGN_STATE")
+            if observed == "CONFIG_ONLY":
+                if phase != "PREVIOUS":
+                    fail_forward("SUCCESSOR_ALREADY_ADVANCED")
+                stopped(svc, args.account, roots)
+                forward_sync(svc, roots, path, plan, raw, observed)
+                forward_original_matches(svc, args, roots, binding, plan, raw)
+                static_seal(svc, args, roots, raw, observed)
+                if forward_state(svc, roots, raw, plan) != "CONFIG_ONLY":
+                    fail_forward("FOREIGN_STATE")
+                attempted = True
+                svc._atomic_write_bytes(
+                    roots["manifest"], raw["manifest.after.json"],
+                    mode=plan["manifest_mode"])
+            if forward_state(svc, roots, raw, plan) != "COMPLETE":
                 fail_forward("FOREIGN_STATE")
-            svc._atomic_write_bytes(
-                roots["config"], raw["config.after.json"], mode=plan["config_mode"])
-            observed = forward_state(svc, roots, raw, plan)
-            if observed != "CONFIG_ONLY":
-                fail_forward("FOREIGN_STATE")
-        if observed == "CONFIG_ONLY":
-            if phase != "PREVIOUS":
-                fail_forward("SUCCESSOR_ALREADY_ADVANCED")
+            static_seal(svc, args, roots, raw, "COMPLETE")
             stopped(svc, args.account, roots)
-            forward_sync(svc, roots, path, plan, raw, observed)
+            forward_sync(svc, roots, path, plan, raw, "COMPLETE")
             forward_original_matches(svc, args, roots, binding, plan, raw)
-            static_seal(svc, args, roots, raw, observed)
-            if forward_state(svc, roots, raw, plan) != "CONFIG_ONLY":
+            if not has_result:
+                attempted = True
+                svc._fleet_status_successor_owner_module()._publish_result(svc, path, expected)
+            forward_sync(svc, roots, path, plan, raw, "COMPLETE", receipt=expected)
+            forward_original_matches(svc, args, roots, binding, plan, raw)
+            if forward_state(svc, roots, raw, plan) != "COMPLETE":
                 fail_forward("FOREIGN_STATE")
-            svc._atomic_write_bytes(
-                roots["manifest"], raw["manifest.after.json"],
-                mode=plan["manifest_mode"])
-        if forward_state(svc, roots, raw, plan) != "COMPLETE":
-            fail_forward("FOREIGN_STATE")
-        static_seal(svc, args, roots, raw, "COMPLETE")
-        stopped(svc, args.account, roots)
-        forward_sync(svc, roots, path, plan, raw, "COMPLETE")
-        forward_original_matches(svc, args, roots, binding, plan, raw)
-        if not has_result:
-            svc._fabric_release_new(
-                path / "result.json", svc._fabric_release_json(expected))
-        forward_sync(svc, roots, path, plan, raw, "COMPLETE", receipt=expected)
-        forward_original_matches(svc, args, roots, binding, plan, raw)
-        if forward_state(svc, roots, raw, plan) != "COMPLETE":
-            fail_forward("FOREIGN_STATE")
+        except BaseException as error:
+            if (isinstance(error, SystemExit) and isinstance(error.code, str)
+                    and error.code.startswith("NATIVE_POOL_PIN_FORWARD_EFFECT_UNKNOWN_")):
+                raise
+            if attempted:
+                fail_forward("EFFECT_UNKNOWN_RECONCILE_SAME_OWNER")
+            raise
         return forward_report(
             svc, args, plan, "APPLIED", "COMPLETE", receipt_committed=True)
 
@@ -1219,3 +1211,113 @@ def forward_selected_context(svc, account, roots, *, operation="status"):
         if forward_state(svc, roots, raw, plan) != "COMPLETE":
             fail_forward("RESULT_STATE_REFUSED")
         yield plan, raw
+
+
+def forward_predecessor(svc, account, roots, binding, config, manifest):
+    """Compose incumbent history with explicit retained before bytes."""
+    original = original_pin_record(svc, account, roots, binding)
+    records = {"native-pool-pin": original["fingerprint"]}
+    status = svc._fleet_status_successor_owner_module()
+    enrollment = svc._pin_enrollment_owner_module()
+    status_path = roots["state"] / status.TRANSACTION
+    enrollment_path = roots["state"] / enrollment.TRANSACTION
+    publisher_path = roots["state"] / enrollment.C4_PUBLISHER_TRANSACTION
+    if os.path.lexists(publisher_path) and (
+            account != enrollment.ACCOUNT or not os.path.lexists(status_path)
+            or not os.path.lexists(enrollment_path)):
+        fail_forward("ORIGINAL_REFUSED")
+    if os.path.lexists(status_path):
+        status.require_forward_predecessor(
+            svc, account, roots, config, manifest, original)
+    elif account in enrollment.PROFILES and os.path.lexists(enrollment_path):
+        enrollment.require_forward_predecessor(
+            svc, account, roots, config, manifest, original)
+    else:
+        p, raw = original["plan"], original["raw"]
+        modes = all(stat.S_IMODE(roots[n].lstat().st_mode) == p[n + "_mode"]
+                    for n in ("config", "manifest"))
+        if not modes or not (
+            (config == raw["config.after.json"] and manifest == raw["manifest.after.json"])
+            or _c2_paper_v20_postpin_start(svc, account, roots, p, raw, config, manifest)
+            or _fleet_paper_v20_postpin_start(svc, account, roots, p, raw, config, manifest)
+            or _c1_fleet_git_failure_postpin_start(svc, account, roots, p, raw, config, manifest)
+        ):
+            fail_forward("ORIGINAL_REFUSED")
+    for path, names in ((enrollment_path, enrollment.FILES),
+                        (status_path, status.FILE_NAMES),
+                        (publisher_path, enrollment.C4_PUBLISHER_FILES)):
+        if os.path.lexists(path):
+            directory(svc, path)
+            if {p.name for p in path.iterdir()} != set(names):
+                fail_forward("ORIGINAL_REFUSED")
+            records[path.name] = {name: digest(svc._fabric_release_bytes(path / name))
+                                  for name in sorted(names)}
+    return original, records
+
+
+def require_forward_predecessor(svc, args, roots, binding, plan, raw):
+    original, records = forward_predecessor(
+        svc, args.account, roots, binding,
+        raw["config.before.json"], raw["manifest.before.json"])
+    if (original["plan_sha256"] != plan["original_plan_sha256"]
+            or original["receipt_sha256"] != plan["original_receipt_sha256"]
+            or original["successor_digest"] != plan["original_successor_digest"]
+            or records != plan["predecessor_records"]):
+        fail_forward("PREDECESSOR_CHANGED")
+
+
+def publish_forward_intent(svc, target, args, binding, plan, raw):
+    """Publish the complete intent using the incumbent exclusive rename owner."""
+    owner = svc._fleet_status_successor_owner_module()
+    directory(svc, target.parent)
+    stage = Path(tempfile.mkdtemp(prefix=".native-pool-pin-forward.", dir=target.parent))
+    identity = owner._identity(stage)
+    attempted = False
+    try:
+        svc._fabric_release_new(stage / "plan.json", svc._fabric_release_json(plan))
+        for name, blob in raw.items():
+            svc._fabric_release_new(stage / name, blob)
+        svc._fabric_release_new(stage / "intent.json", svc._fabric_release_json({
+            "schema": FORWARD_SCHEMA, "planSha256": args.expected_plan_sha256}))
+        retained_plan, retained_raw = forward_read_transaction(svc, stage, args, binding)
+        if retained_plan != plan or retained_raw != raw:
+            fail_forward("RETAINED_BYTES_REFUSED")
+        owner._sync_directory(svc, stage)
+        attempted = True
+        owner._rename_new(svc, stage, target)
+    except BaseException:
+        # Preserve failed preparation for inspection. A partial staging name
+        # never becomes the active transaction or holds the incumbent start.
+        if attempted and not owner._same_identity(stage, identity):
+            fail_forward("EFFECT_UNKNOWN_PREPARATION_RECONCILE_SAME_OWNER")
+        raise
+
+
+def confirm_forward_durability(svc, roots, target):
+    """Visible bytes alone cannot acknowledge a lost file or directory sync."""
+    owner = svc._fleet_status_successor_owner_module()
+    try:
+        paths = [target / name for name in sorted(FORWARD_FILES)
+                 if name != "result.json" or os.path.lexists(target / name)]
+        paths.extend((roots["config"], roots["manifest"]))
+        for path in paths:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                before = os.fstat(fd)
+                if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                        or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) not in (0o400, 0o600)):
+                    fail_forward("FOREIGN_MODE")
+                os.fsync(fd)
+                after = os.fstat(fd)
+                current = path.lstat()
+                fields = lambda x: (x.st_dev, x.st_ino, x.st_uid, x.st_mode,
+                                    x.st_size, x.st_mtime_ns, x.st_ctime_ns, x.st_nlink)
+                if fields(before) != fields(after) or fields(after) != fields(current):
+                    fail_forward("RETAINED_BYTES_REFUSED")
+            finally:
+                os.close(fd)
+        for path in dict.fromkeys((target, target.parent, roots["base"],
+                                   roots["config"].parent, roots["manifest"].parent)):
+            owner._sync_directory(svc, path)
+    except BaseException:
+        fail_forward("EFFECT_UNKNOWN_DURABILITY_RECONCILE_SAME_OWNER")

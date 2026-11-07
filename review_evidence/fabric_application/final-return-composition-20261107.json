@@ -1,0 +1,337 @@
+{
+  "schema": "mastermind.final-application-return-composition.v1",
+  "parents": [
+    "c40f58b42383684e0ded1db7a7cb48741ddb7abf",
+    "238731bbcf559a34238326f9d373debe725e2d34"
+  ],
+  "merge_bases": [
+    "cd557dc05e26b70f2d8f56ad0da2df76a15d74ca",
+    "a4ab80d4aba948dce1b604356f7668594bbb3b12",
+    "9141013f5a969d59f508784b9f4f76794983caa5"
+  ],
+  "qualified_index_tree": "fd4d05def485602d45c36b18b1aceefa4536f80d",
+  "source_returns": [
+    "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6708081894",
+    "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6707793967"
+  ],
+  "resolutions": {
+    "parents": [
+      "c40f58b42383684e0ded1db7a7cb48741ddb7abf",
+      "238731bbcf559a34238326f9d373debe725e2d34"
+    ],
+    "merge_bases": [
+      "cd557dc05e26b70f2d8f56ad0da2df76a15d74ca",
+      "a4ab80d4aba948dce1b604356f7668594bbb3b12",
+      "9141013f5a969d59f508784b9f4f76794983caa5"
+    ],
+    "resolved": [
+      {
+        "path": "integrations/studio_direct_mcp/control_bundle_closure_test.py",
+        "resolution": "Prior action reconciled: exact original a884 paired fixture postimage from c40f already staged",
+        "git_blob": "dc17d077a6a0f787db857a6c1f66f0ad354ea857"
+      },
+      {
+        "path": "integrations/studio_direct_mcp/private_service_original_delivery_test.py",
+        "resolution": "Prior action reconciled: exact original a884 paired fixture postimage from c40f already staged",
+        "git_blob": "41dae1f1e0f29b542137ebf53f01a3e16b7f473d"
+      },
+      {
+        "path": "ops/native_fabric/quota_continuity/tests/test_support_policy_source.py",
+        "resolution": "Current107 pin only; historical inputs preserved",
+        "git_blob": "be167259ddb6971606c6c10ccae2f1fd2d2011e1"
+      },
+      {
+        "path": "tests/test_catalog_native_release_staging.py",
+        "resolution": "Current107 pin only; historical inputs preserved",
+        "git_blob": "3b4b58f8da1ce1fa8d61511abe94bee3bf3a3ef9"
+      },
+      {
+        "path": "tests/test_fabric_native_security_composition_20261018.py",
+        "resolution": "Current107 pin only; historical inputs preserved",
+        "git_blob": "c73b4c7b0140b6f44aed77995d9751332f8e26fe"
+      },
+      {
+        "path": "tests/test_host_pull_launchd_admission.py",
+        "resolution": "Current107 pin only; historical inputs preserved",
+        "git_blob": "b501d5019ecdd615aeed57cd6c219f10665a5600"
+      },
+      {
+        "path": "tests/test_paid_initializer.py",
+        "resolution": "Current107 pin only; historical inputs preserved",
+        "git_blob": "9f2a9a0dcf944e3767e3049758c8b799cad5ba22"
+      },
+      {
+        "path": "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+        "resolution": "Use qualified sparse/current cohort normalization in six conflict blocks, preserving automatic/root changes outside blocks",
+        "git_blob": "3d2967156088ce629fb5d719e5cc0f39b5913c10"
+      },
+      {
+        "path": "ops/native_fabric/quota_continuity/rollout/ROLLOUT_REVIEW.md",
+        "resolution": "Retain both source-bound chronological evidence blocks",
+        "blocks": [
+          {
+            "ours_lines": 0,
+            "incoming_lines": 234,
+            "ours_headers": [],
+            "incoming_headers": [
+              "### Existing sparse preflight repair composed on the APPLICATION successor \u2014 2026-11-07",
+              "## 2026-11-07 scoped-model and Brain fixture composition",
+              "### Exact current closure and actual dependency custody",
+              "### Actual Brain consumer qualification",
+              "### Qualification receipts and retained failures",
+              "### Delivery boundary",
+              "### Remaining paired-consumer qualification at the d5 epoch \u2014 2026-11-07",
+              "### Current protected APPLICATION consumer qualification \u2014 2026-11-07",
+              "### Admission repair on the active APPLICATION carrier \u2014 2026-11-07"
+            ]
+          },
+          {
+            "ours_lines": 0,
+            "incoming_lines": 62,
+            "ours_headers": [],
+            "incoming_headers": [
+              "### Combined publisher and sparse APPLICATION source \u2014 2026-11-07",
+              "### Retained J candidate: HTTP proof corroborated \u2014 2026-11-07",
+              "### Consumed original paired-workflow repair \u2014 2026-11-07",
+              "### Paired CI input closure and current provider proof \u2014 2026-11-07",
+              "## 2026-11-07: original J package and sparse executor composition"
+            ]
+          }
+        ],
+        "git_blob": "b458d1d26c40c9c869e21bf42640b975bc42752c"
+      },
+      {
+        "path": "integrations/studio_direct_mcp/private_service_status_successor.py",
+        "resolution": "Adopt complete qualified published238 C4/historical-forward source pair; current conflict content-read actions remain closed",
+        "git_blob": "95f47f01f7f458c2f1d801bb560d862820a064ce"
+      },
+      {
+        "path": "integrations/studio_direct_mcp/private_service_status_successor_test.py",
+        "resolution": "Adopt complete qualified published238 C4/historical-forward source pair; current conflict content-read actions remain closed",
+        "git_blob": "44ff93fdd97aabfa480630b54352fda35896989a"
+      }
+    ],
+    "remaining": [],
+    "qualification": "PENDING_COMPOSED_TESTS"
+  },
+  "qualification": [
+    {
+      "tag": "mastermind-c40f-238-native-v1",
+      "log_sha256": "c98882ebee11af544ca560cecf21cf8d372afb9bd7157ce34059e46178e03ace",
+      "xml_sha256": "130498330920ca47f460279fde5ecf9d6471d337dd4200adf972c9d392bb137a",
+      "named_testcase_elements": 409,
+      "suite_totals": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "6",
+          "tests": "455",
+          "time": "44.660",
+          "timestamp": "2026-11-07T07:31:00.667446-07:00",
+          "hostname": "m1studio"
+        }
+      ]
+    },
+    {
+      "tag": "mastermind-c40f-238-studio-v1",
+      "log_sha256": "7fd8424d55f45f016a40fd2c1000a246d4ad5383f701baee803d77f59b6acd89",
+      "xml_sha256": "599efd02ca9ee9d16db6f2ccaf8611848dbcf121499e10fc9d284f426311e459",
+      "named_testcase_elements": 297,
+      "suite_totals": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "556",
+          "time": "44.976",
+          "timestamp": "2026-11-07T07:31:09.675117-07:00",
+          "hostname": "m1studio"
+        }
+      ]
+    },
+    {
+      "tag": "mastermind-c40f-238-identity-v1",
+      "log_sha256": "1aef39059ce6dd7cd09b917b31d94600f82d86b88a265beb9272edf52f651799",
+      "xml_sha256": "5dac4677cea27f21ab4420496436c646d805cec0c273dc35c55738713844c1b7",
+      "named_testcase_elements": 195,
+      "suite_totals": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "195",
+          "time": "12.993",
+          "timestamp": "2026-11-07T07:34:20.865800-07:00",
+          "hostname": "m1studio"
+        }
+      ]
+    }
+  ],
+  "macro_pair": {
+    "macro": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+    "fixture": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/macro-paired-cognition-fixture-a577-v1",
+    "tests": [
+      {
+        "module": "test_fabric_chat_cross_pool_auto.py",
+        "returncode": 0,
+        "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/mastermind-a577-fabric_chat_cross_pool_auto-v2.log",
+        "log_sha256": "10a6124d4e7ce349254ae672b0250c453bf2c737ca73e90deb4d9e82372cbb4e",
+        "tail": [
+          "test_rich_tool_turn_freezes_actual_route_and_closes_before_public_answer (test_fabric_chat_cross_pool_auto.AutoAdvisorApplicationTests.test_rich_tool_turn_freezes_actual_route_and_closes_before_public_answer) ... ok",
+          "test_second_cancellation_during_cleanup_preserves_first_cancellation (test_fabric_chat_cross_pool_auto.AutoAdvisorApplicationTests.test_second_cancellation_during_cleanup_preserves_first_cancellation) ... ok",
+          "test_stale_prior_observation_is_not_attached_to_new_failed_step (test_fabric_chat_cross_pool_auto.AutoAdvisorApplicationTests.test_stale_prior_observation_is_not_attached_to_new_failed_step) ... ok",
+          "test_terminal_unusable_answer_keeps_actual_usage_and_remains_held (test_fabric_chat_cross_pool_auto.AutoAdvisorApplicationTests.test_terminal_unusable_answer_keeps_actual_usage_and_remains_held) ... ok",
+          "test_unknown_usage_does_not_fabricate_counts_or_prevent_valid_answer (test_fabric_chat_cross_pool_auto.AutoAdvisorApplicationTests.test_unknown_usage_does_not_fabricate_counts_or_prevent_valid_answer) ... ok",
+          "",
+          "----------------------------------------------------------------------",
+          "Ran 16 tests in 3.931s",
+          "",
+          "OK"
+        ]
+      },
+      {
+        "module": "test_fabric_text_cross_pool_auto.py",
+        "returncode": 0,
+        "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/mastermind-a577-fabric_text_cross_pool_auto-v2.log",
+        "log_sha256": "f876fef9628b27bf38dd7936034ebb0cc90ef976476a4dff6698476b6f391d29",
+        "tail": [
+          "test_malformed_route_preserves_unattributed_usage_without_answer_or_retry (test_fabric_text_cross_pool_auto.AutoTextApplicationTests.test_malformed_route_preserves_unattributed_usage_without_answer_or_retry) ... ok",
+          "test_malformed_route_type_keeps_observed_usage_unknown_and_unattributed (test_fabric_text_cross_pool_auto.AutoTextApplicationTests.test_malformed_route_type_keeps_observed_usage_unknown_and_unattributed) ... ok",
+          "test_real_text_auto_serves_two_pools_and_records_actual_usage_without_price_guess (test_fabric_text_cross_pool_auto.AutoTextApplicationTests.test_real_text_auto_serves_two_pools_and_records_actual_usage_without_price_guess) ... ok",
+          "test_same_request_recovery_observes_original_receipt_without_second_invocation_or_usage (test_fabric_text_cross_pool_auto.AutoTextApplicationTests.test_same_request_recovery_observes_original_receipt_without_second_invocation_or_usage) ... ok",
+          "test_unusable_terminal_model_keeps_actual_usage_and_no_answer (test_fabric_text_cross_pool_auto.AutoTextApplicationTests.test_unusable_terminal_model_keeps_actual_usage_and_no_answer) ... ok",
+          "",
+          "----------------------------------------------------------------------",
+          "Ran 14 tests in 2.250s",
+          "",
+          "OK"
+        ]
+      }
+    ],
+    "config_restored": true,
+    "prior_symlink_restored": true
+  },
+  "paired_pin_update": {
+    "source_parent": "c40f58b42383684e0ded1db7a7cb48741ddb7abf",
+    "incoming": "238731bbcf559a34238326f9d373debe725e2d34",
+    "old_macro": "c2261cb826d1bd76c2e980efb68edb9ed7d0829c",
+    "new_macro": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+    "updates": [
+      {
+        "path": ".github/workflows/ci.yml",
+        "count": 1,
+        "before_sha256": "100c1fc670fe60180878aa7a170bfd60cf4b5da3937c6a1768bb7ba34ded6b8e",
+        "after_sha256": "30702a8cc37653b52bf787765d5a7baee80ed74a9406c049c8c6da9e6e1bfaf2",
+        "after_git_blob": "441b4f2032edfaab367200e6d62c4ba67568c43b"
+      },
+      {
+        "path": ".github/workflows/hermes-application-inference.yml",
+        "count": 4,
+        "before_sha256": "8086301bfc571ada732e099f0650bb862538d08fe4de3f2fe17dac9c2dbaf8be",
+        "after_sha256": "555a9c4530a06fbac56a3f554d22713765aa6bd087b0607eed37a3937e02726d",
+        "after_git_blob": "7e7622ab19acff326a77fc7c886989d49612dcdb"
+      },
+      {
+        "path": "integrations/hermes_application_fabric/qualification/qualify_application_owner.py",
+        "count": 1,
+        "before_sha256": "1c051fdbd39e4adfd88c659dbc363db42c960a9cc81936c0e2e9732c8236c63f",
+        "after_sha256": "af7c54df3f34329ff7c02cfa6ad283d6bfa28ab21e1b5d1f809616eef71fd67b",
+        "after_git_blob": "b686d159efd08c48c73b8481fe8b946fcf76530d"
+      },
+      {
+        "path": "integrations/hermes_application_fabric/qualification/qualify_gateway.py",
+        "count": 1,
+        "before_sha256": "2256fbd014b7d4e7892d7293a9e6c1e6cb880bfdfc2024ef75e6980e2b571efe",
+        "after_sha256": "f4eb1bf648c3be524b637ee185c32e9c292e56098af07cb9acf529405e9084ee",
+        "after_git_blob": "ed132fb0b805910c5ae4821f994ae355ec2e56cf"
+      },
+      {
+        "path": "integrations/hermes_application_fabric/qualification/qualify_installed.py",
+        "count": 1,
+        "before_sha256": "7de5c5b04a89d47f908fa45b8c8242dbe2a8cdfedd9ce4b8904b897817935a71",
+        "after_sha256": "67a9abdd511932671c59026732854a0433409838cf394ac70decabd07907736f",
+        "after_git_blob": "15fa40cef53d0120ba63ac032d3496ceb6656cc8"
+      },
+      {
+        "path": "integrations/hermes_application_fabric/qualification/qualify_offline.py",
+        "count": 1,
+        "before_sha256": "4d4dce80d8b7cb64917c11d0a41595b1efe2dc8c7ab7251a4583831a23492edf",
+        "after_sha256": "1e32006a206164fcb3fe1a72b41f74535a10e022d64e7051fb31852f037610e7",
+        "after_git_blob": "6e43e1c51d82489b32d3391898532e27278d7a4a"
+      },
+      {
+        "path": "tests/executive_fabric_release_identity_review.py",
+        "count": 1,
+        "before_sha256": "ef7436855e52a9d464b9a0bdbb8c218df30bcc9edc720380e000bd0b0061262a",
+        "after_sha256": "daa4014e81e0f9f1c61ec19c46c75ee5a11451cd57f1cb2385bd7f685e7024f0",
+        "after_git_blob": "b8202570ef68a6737c3e068943b10898182c6de5",
+        "reviewed_numeric_site": "Unchanged by equal-length hexadecimal pin substitution"
+      }
+    ]
+  },
+  "native_packages": {
+    "schema": "mastermind.composed-native-package-source-proof.v1",
+    "source_heads": [
+      "c40f58b42383684e0ded1db7a7cb48741ddb7abf",
+      "238731bbcf559a34238326f9d373debe725e2d34"
+    ],
+    "variants": [
+      {
+        "variant": "native107",
+        "members": 107,
+        "manifest_sha256": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+        "inventory_sha256": "f98a03d15d2f656e331d0b9d943321b8c1bd4384a114f619ff818dca0e647f40",
+        "payloads_and_inventory_verified": true,
+        "path": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/mastermind-c40f-238-native-closures-v1/native107",
+        "external_go_component": null,
+        "tracked_default_exact": true
+      },
+      {
+        "variant": "go109",
+        "members": 109,
+        "manifest_sha256": "70acd19f364cbf6056e2f35ba5e334e9135eb4e1f8d171e19b862bcee9a38c0c",
+        "inventory_sha256": "75b8f3d95a44afaf872d0325915c8d17e1eba964993cbb2af39b4acc8831bf23",
+        "payloads_and_inventory_verified": true,
+        "path": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/mastermind-c40f-238-native-closures-v1/go109",
+        "external_go_component": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/mastermind-c40f-238-native-closures-v1/go109/external-go-component"
+      },
+      {
+        "variant": "http112",
+        "members": 112,
+        "manifest_sha256": "9cd9663bec9f14727dfea63cc928a446935e4b485f6847201f9c5bd5c401da4f",
+        "inventory_sha256": "94d8db08ae59b76787adb16b7751e6c2ae230188a465694a959a081a451a0f4a",
+        "payloads_and_inventory_verified": true,
+        "path": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/mastermind-c40f-238-native-closures-v1/http112",
+        "external_go_component": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/mastermind-c40f-238-native-closures-v1/http112/external-go-component"
+      }
+    ],
+    "installation": "NOT_PERFORMED",
+    "protected_rebuild": "REQUIRED_AFTER_MERGE"
+  },
+  "whitespace": {
+    "rc": 2,
+    "output": "tests/fixtures/fabric-native-sparse-commit-preflight-20261103.patch:11: trailing whitespace.\n+ \ntests/fixtures/fabric-native-sparse-commit-preflight-20261103.patch:12: trailing whitespace.\n+ \n",
+    "preserved_original_patch": {
+      "path": "tests/fixtures/fabric-native-sparse-commit-preflight-20261103.patch",
+      "git_blob": "7e4d334aa1cf4cee0056cefacb6faff74726d9a9",
+      "sha256": "34d3cbbe2033bc8a1a68d6d711407ad57ee892a951f4ef68303c719f3585a9c9",
+      "meaning": "Two required blank unified-diff context lines; original bytes retained. All other changed paths pass diff --check."
+    }
+  },
+  "boundaries": {
+    "protected_release": "NOT_MERGED",
+    "native_selection": "NOT_PERFORMED",
+    "original_J": "UNKNOWN_NOT_REPLAYED",
+    "C3_upgrade": "NOT_PERFORMED",
+    "Go_and_primary_enrollment": "Existing_H4_custody_preserved",
+    "provider_calls": "NONE",
+    "live_acceptance": "NOT_PERFORMED"
+  },
+  "closed_read_actions": [
+    "Original closed source-body actions retained",
+    "Current status-successor and status-successor-test conflict-body reads explicitly refused in optional judgment lane; no alternate read attempted. Exact qualified published238 postimages selected by verified blob identity and exercised with actual composed tests."
+  ]
+}

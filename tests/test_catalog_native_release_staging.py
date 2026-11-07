@@ -17,7 +17,7 @@ from tests.test_paid_release_archive_composition import _materialize
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = Path("ops/native_fabric/quota_continuity")
 PREIMAGE = "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e"
-CURRENT_MANIFEST = "c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459"
+CURRENT_MANIFEST = "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
 
 
 def test_current_installer_materializes_the_exact_new_catalog_readers(tmp_path):
