@@ -1129,6 +1129,9 @@ def _service_specification(entry, specification, startup=None, *, allow_inactive
     http = type(specification) is dict and specification.get("schema") == SERVICE_HTTP_SPEC_SCHEMA
     admin = type(specification) is dict and specification.get("schema") == SERVICE_ADMIN_SPEC_SCHEMA
     role = type(specification) is dict and specification.get("schema") == SERVICE_ROLE_SPEC_SCHEMA
+    routed_role = role and type(specification.get("scope")) is dict and "route_scope" in specification["scope"]
+    if routed_role:
+        fields = fields - {"grant"} | {"grants"}
     selected = type(specification) is dict and specification.get("schema") in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA, SERVICE_ROLE_SPEC_SCHEMA)
     if http:
         fields.add("application_recipe")
@@ -1141,13 +1144,18 @@ def _service_specification(entry, specification, startup=None, *, allow_inactive
         raise ValueError("invalid service enrollment specification")
     # Freeze an owned JSON value, rejecting nonfinite numbers and aliases.
     specification = generation.unique_json(generation.canonical(specification))
-    scope, grant = specification["scope"], specification["grant"]
+    scope = specification["scope"]
+    grants = specification["grants"] if routed_role else [specification["grant"]]
+    if type(grants) is not list or not 1 <= len(grants) <= 128 or any(type(g) is not dict for g in grants):
+        raise ValueError("invalid service enrollment grants")
     scope_fields = entry.SERVICE_SCOPE_FIELDS | {"selection_purpose"} if selected else entry.SERVICE_SCOPE_FIELDS
     if admin:
         scope_fields |= {"admin_pool_view"}
     if role:
         scope_fields |= {"service_profile"}
-    if type(scope) is not dict or set(scope) != scope_fields or type(grant) is not dict:
+    if routed_role:
+        scope_fields |= {"route_scope"}
+    if type(scope) is not dict or set(scope) != scope_fields:
         raise ValueError("invalid service enrollment scope")
     if admin and type(scope["admin_pool_view"]) is not bool:
         raise ValueError("invalid service metadata permission")
@@ -1160,24 +1168,28 @@ def _service_specification(entry, specification, startup=None, *, allow_inactive
             raise ValueError("invalid service enrollment identity")
     if role:
         entry.validate_application_role_scope(scope)
+    if routed_role:
+        startup.handler.ApplicationRouteScope(scope["route_scope"])
     text = scope["capability_lane"] == "mastermind-text"
-    if ((text and (selected is not True or admin or scope["workload_profile"] != "site_batch"
-                   or scope["credential_ref"] != entry.SERVICE_TEXT_CREDENTIAL_REF))
-            or not text and not role and (scope["capability_lane"] != "admin-orchestrator"
-            or scope["workload_profile"] != "site_interactive"
-            or scope["credential_ref"] != entry.SERVICE_CREDENTIAL_REF)
-            or type(scope["account_profile"]) is not str
-            or not Path(scope["account_profile"]).is_absolute() or ".." in Path(scope["account_profile"]).parts
-            or grant.get("principal_id") != scope["principal_id"]
-            or grant.get("credential_ref") != scope["credential_ref"]
-            or grant.get("caller_hosts") != [scope["caller_host"]]
-            or grant.get("workloads") != [scope["workload"]]
-            or grant.get("purpose") != "APPLICATION"
-            or (grant.get("enabled") is not True and not (allow_inactive_grant and grant.get("enabled") is False))
-            or grant.get("pool") != ("bailian" if http else "go") or grant.get("route") != "/v1/chat/completions"
-            or grant.get("stream") is not False or type(grant.get("models")) is not list
-            or len(grant["models"]) != 1):
-        raise ValueError("service enrollment mapping differs")
+    for grant in grants:
+        if ((text and (selected is not True or admin or scope["workload_profile"] != "site_batch"
+                       or scope["credential_ref"] != entry.SERVICE_TEXT_CREDENTIAL_REF))
+                or not text and not role and (scope["capability_lane"] != "admin-orchestrator"
+                or scope["workload_profile"] != "site_interactive"
+                or scope["credential_ref"] != entry.SERVICE_CREDENTIAL_REF)
+                or type(scope["account_profile"]) is not str
+                or not Path(scope["account_profile"]).is_absolute() or ".." in Path(scope["account_profile"]).parts
+                or grant.get("principal_id") != scope["principal_id"]
+                or grant.get("credential_ref") != scope["credential_ref"]
+                or grant.get("caller_hosts") != [scope["caller_host"]]
+                or grant.get("workloads") != [scope["workload"]]
+                or grant.get("purpose") != "APPLICATION"
+                or (grant.get("enabled") is not True and not (allow_inactive_grant and grant.get("enabled") is False))
+                or grant.get("pool") not in (scope["route_scope"]["pools"] if routed_role else ["bailian" if http else "go"])
+                or grant.get("route") != "/v1/chat/completions"
+                or grant.get("stream") is not False or type(grant.get("models")) is not list
+                or not routed_role and len(grant["models"]) != 1):
+            raise ValueError("service enrollment mapping differs")
     if http:
         recipe = specification["application_recipe"]
         if (startup is None or type(recipe) is not dict or scope["workload"] != "site_interactive"
@@ -1208,6 +1220,27 @@ def _service_candidate(startup, specification, before):
     if not any(existing == grant for existing in old):
         document["application_grants"] = [*old, grant]
     return generation.canonical(document) + b"\n", document
+
+
+def _service_grant_value(specification):
+    """The existing commitment slot; v9's closed routed form commits a list."""
+    return (specification["grants"] if specification["schema"] == SERVICE_ROLE_SPEC_SCHEMA
+            and "route_scope" in specification["scope"] else specification["grant"])
+
+
+def _service_grant_expiry(specification):
+    grants = _service_grant_value(specification)
+    return min(g["expires_at"] for g in grants) if type(grants) is list else grants["expires_at"]
+
+
+def _service_enrollment_candidate(startup, specification, before):
+    grants = _service_grant_value(specification)
+    if type(grants) is not list:
+        return _service_candidate(startup, specification, before)
+    after = before
+    for grant in grants:
+        after, document = _service_candidate(startup, {"grant": grant}, after)
+    return after, document
 
 
 def _validate_service_set_specification(entry, specification, startup):
@@ -1690,7 +1723,7 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
             elif service_set:
                 after, document, credentials = _service_set_candidate(entry, startup, specification, before, completed)
             else:
-                after, document = _service_candidate(startup, specification, before)
+                after, document = _service_enrollment_candidate(startup, specification, before)
                 credentials = None
             output.mkdir(mode=0o700)
             generation.atomic_bytes(output / "accounts.before.yaml", before, 0o600)
@@ -1699,7 +1732,7 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
                 raise ValueError("service candidate parser disagreement")
         expires = (_service_set_expiry(specification, predecessor=completed is not None,
                                       predecessor_schema=predecessor_schema)
-                   if service_set else specification["grant"]["expires_at"])
+                   if service_set else _service_grant_expiry(specification))
         if expires is not None and expires <= time.time():
             raise ValueError("service grant is already expired")
         if (_service_snapshot(entry, startup.paths["accounts_path"]) != (before, identity)
@@ -1747,7 +1780,7 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
                 plan["predecessor_custody"] = custody
                 plan["predecessor_private"] = {"sha256": generation.digest(private_raw), "identity": private_identity}
         else:
-            plan.update(scope=specification["scope"], grant_sha256=generation.digest(generation.canonical(specification["grant"])))
+            plan.update(scope=specification["scope"], grant_sha256=generation.digest(generation.canonical(_service_grant_value(specification))))
         if http:
             plan.update(application_recipe=specification["application_recipe"],
                 application_accounts=specification["grant"]["accounts"])
@@ -2203,10 +2236,10 @@ def _service_transaction(bundle, *, reconcile_only=False):
                 or entry.application_service_owners(startup, application_http=http) != plan["owners"]
                 or _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
                 or any(plan[key] != value for key, value in projection.items())
-                or generation.digest(generation.canonical(specification["grant"])) != plan["grant_sha256"]):
+                or generation.digest(generation.canonical(_service_grant_value(specification))) != plan["grant_sha256"]):
             raise ValueError("service enrollment plan no longer binds its original owners")
         with startup.yaml_runtime.held_yaml(startup.yaml_archive, startup.yaml_provenance, startup.yaml_check):
-            expected_after, document = _service_candidate(startup, specification, before)
+            expected_after, document = _service_enrollment_candidate(startup, specification, before)
             if (after != expected_after
                     or startup.broker_module._read_application_accounts(bundle / "accounts.after.yaml") != document):
                 raise ValueError("service enrollment candidate differs")
@@ -2241,7 +2274,7 @@ def _service_transaction(bundle, *, reconcile_only=False):
                     raise ValueError("service accounts preimage changed")
                 if reconcile_only:
                     return dict(public, disposition="prepared")
-                if specification["grant"]["expires_at"] <= time.time():
+                if _service_grant_expiry(specification) <= time.time():
                     raise ValueError("service grant expired before its original intent")
                 _record_once(paths["intent"], intent)
                 # The first intent owns the only credential generation. Any

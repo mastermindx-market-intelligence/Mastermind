@@ -26,6 +26,65 @@ PROFILES = {
 }
 
 
+def routed_role(case, profile):
+    select_role(case, profile)
+    case.specification["scope"]["route_scope"] = {
+        "schema": "mastermind.application_route_scope.v1", "pools": ["go"]}
+    first = case.specification.pop("grant")
+    second = copy.deepcopy(first)
+    second.update(grant_id=first["grant_id"] + "-second", models=["fixture-second-model"])
+    case.specification["grants"] = [first, second]
+
+
+@pytest.mark.parametrize("profile", PROFILES)
+def test_routed_role_uses_original_grants_and_one_physical_owner(service_owner, profile):
+    case = service_owner
+    routed_role(case, profile)
+    accounts_before = json.loads(case.accounts.read_bytes())["accounts"]
+    plan = prepare(case)
+    assert plan["grant_sha256"] == g.digest(g.canonical(case.specification["grants"]))
+    receipt = installer.apply_go_service_enrollment(case.service_bundle)
+    assert installer.reconcile_go_service_enrollment(case.service_bundle) == receipt
+    assert json.loads(case.accounts.read_bytes())["accounts"] == accounts_before
+    with loaded_entry(case.published, clean_yaml=True) as entry:
+        startup = entry.inspect(verified_root=case.published.release, verified_metadata=case.published.meta)
+        (binding,), _, account_profile = entry.load_completed_application_startup(startup, profile)
+        assert binding.route_scope == startup.handler.ApplicationRouteScope(case.specification["scope"]["route_scope"])
+        assert binding.credential_ref == PROFILES[profile] and not binding.admin_pool_view
+        assert account_profile == case.profile
+    installed = json.loads(case.accounts.read_bytes())["application_grants"]
+    assert installed == case.specification["grants"]
+    assert len({tuple(row["accounts"]) for row in installed}) == 1
+
+
+@pytest.mark.parametrize("mutation", ["mixed", "empty", "scope", "foreign_pool", "role", "overlap", "null_scope"])
+def test_routed_role_refuses_foreign_authority_before_original_intent(service_owner, mutation):
+    case = service_owner
+    routed_role(case, "hermes-secretary")
+    if mutation == "mixed": case.specification["grant"] = case.specification["grants"][0]
+    elif mutation == "empty": case.specification["grants"] = []
+    elif mutation == "scope": case.specification["scope"]["route_scope"]["pools"] = ["go", "go"]
+    elif mutation == "foreign_pool": case.specification["grants"][0]["pool"] = "bailian"
+    elif mutation == "role": case.specification["grants"][0]["principal_id"] = "hermes-meta-ceo"
+    elif mutation == "overlap": case.specification["grants"][1] = copy.deepcopy(case.specification["grants"][0])
+    else: case.specification["scope"]["route_scope"] = None
+    with pytest.raises(ValueError): prepare(case)
+    assert not case.intent.exists() and not case.binding.exists() and not case.service_receipt.exists()
+
+
+def test_routed_grant_change_cannot_reuse_original_plan(service_owner, monkeypatch):
+    case = service_owner
+    routed_role(case, "hermes-secretary")
+    prepare(case)
+    spec = case.service_bundle / "specification.json"
+    changed = json.loads(spec.read_bytes())
+    changed["grants"][0]["models"].append("uncommitted-model")
+    spec.write_bytes(g.canonical(changed) + b"\n")
+    monkeypatch.setattr(installer.secrets, "token_urlsafe", lambda *args: pytest.fail("replacement credential"))
+    with pytest.raises(ValueError): installer.apply_go_service_enrollment(case.service_bundle)
+    assert not case.intent.exists() and not case.binding.exists()
+
+
 def select_role(case, profile):
     case.specification = copy.deepcopy(case.specification)
     selected_purpose(case)

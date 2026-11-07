@@ -595,6 +595,8 @@ def validate_application_service_document(startup, document):
         expected_scope |= {"admin_pool_view"}
     if role:
         expected_scope |= {"service_profile"}
+        if type(scope) is dict and "route_scope" in scope:
+            expected_scope |= {"route_scope"}
     if type(scope) is not dict or set(scope) != expected_scope:
         raise ValueError("native application service scope refused")
     if admin and type(scope["admin_pool_view"]) is not bool:
@@ -617,6 +619,8 @@ def validate_application_service_document(startup, document):
         **({"pool": "bailian"} if http else {}),
         **({"selection_purpose": startup.handler.ApplicationSelectionPurpose(scope["selection_purpose"])}
            if selected else {}),
+        **({"route_scope": startup.handler.ApplicationRouteScope(scope["route_scope"])}
+           if role and "route_scope" in scope else {}),
         **({"admin_pool_view": scope["admin_pool_view"]} if admin else {}))
     if http:
         recipe, accounts = document["application_recipe"], document["application_accounts"]

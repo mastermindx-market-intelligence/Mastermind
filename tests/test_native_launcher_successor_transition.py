@@ -97,6 +97,10 @@ def source_owners(tmp_path_factory):
     assert long_retained['source_commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
     assert set(long_retained['files']) == long_names
     base_paths = {
+        # Only historical102 lacks this retained APPLICATION carrier predecessor.
+        # Historical95 already carries its distinct support bytes in its fixture.
+        'ext/support_bundle.py':
+            ROLLOUT / 'preimages/support_bundle_e5e6153.py',
         'ext/artifact_delivery.py':
             ROLLOUT.parents[1] / 'grok47/overlay/artifact_delivery.py',
         'ext/fabric_operator_contract.py':
@@ -121,11 +125,6 @@ def source_owners(tmp_path_factory):
             fixture.parent / 'native_historical_payloads/paid_host_qualification.py.txt',
         'ext/paid_initializer.py':
             fixture.parent / 'native_historical_payloads/paid_initializer.py.txt',
-        # The active APPLICATION carrier changes support_bundle too. Restore
-        # its exact 58083bf / e5e6153 blob historical102 bytes; historical95 owns a different
-        # retained payload and must not inherit this preimage.
-        'ext/support_bundle.py':
-            fixture.parent / 'native_historical_payloads/support_bundle.py.txt',
     }
     new_names = long_names | set(base_paths)
     # S9 also changes the CURRENT picker. Bind its authentic protected
@@ -598,4 +597,3 @@ with svc._pin_native_context(args) as observed:
     assert observed["pool_bridge"] == plan["entries"]["pool"]["bridge"]
     assert owner_bytes() == before
     assert g.current(owner.store) == pointer
-
