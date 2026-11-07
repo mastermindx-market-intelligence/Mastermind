@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -710,9 +711,11 @@ def staged(pinned, monkeypatch, tmp_path):
     """``run`` wired to a synthetic panel and to result and attempt files in a scratch folder."""
     from research import trend_persistence_substrate as substrate
     panel, inputs = _panel(seed=11, signal=0.6)
+    # Reuse construction within this fixture; every loader call gets fresh nested data.
+    holdout_seed = _holdout_like(panel, inputs)
     state = {"clean": True, "panel": panel}
     monkeypatch.setattr(wf, "pinned_reference", lambda: _reference())
-    monkeypatch.setattr(wf, "pinned_holdout_result", lambda: _holdout_like(panel, inputs))
+    monkeypatch.setattr(wf, "pinned_holdout_result", lambda: copy.deepcopy(holdout_seed))
     monkeypatch.setattr(wf, "_git_state", lambda: {"head": "a" * 40, "clean": state["clean"]})
     monkeypatch.setattr(substrate, "load_repaired_panel",
                         lambda *a, **k: (None, None, None, None, {"store": {"names": []}}))

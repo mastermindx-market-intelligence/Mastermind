@@ -3,12 +3,24 @@ from __future__ import annotations
 
 from tests.test_capacity_host_artifacts import (
     Path,
+    _complete_repository,
+    _repository_fixture_fingerprint,
     _repair_host_fixture,
     artifacts,
     hashlib,
     os,
     pytest,
 )
+
+
+@pytest.fixture(scope="module")
+def _crash_producer_seed(tmp_path_factory):
+    # Only immutable producer construction is shared; each case builds its real transport.
+    with pytest.MonkeyPatch.context() as seed_patch:
+        seed = _complete_repository(tmp_path_factory.mktemp("crash-producer-seed"), seed_patch)
+    before = _repository_fixture_fingerprint(seed[0])
+    yield seed
+    assert _repository_fixture_fingerprint(seed[0]) == before
 
 
 @pytest.mark.parametrize(
@@ -34,10 +46,10 @@ from tests.test_capacity_host_artifacts import (
     ),
 )
 def test_every_repair_crash_position_replays_to_one_verified_commit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_at: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_at: str, _crash_producer_seed
 ) -> None:
     system_root, transport, commit, _manifest = _repair_host_fixture(
-        tmp_path, monkeypatch
+        tmp_path, monkeypatch, producer_seed=_crash_producer_seed
     )
     arguments = {
         "mode": "repair",
@@ -67,10 +79,10 @@ def test_every_repair_crash_position_replays_to_one_verified_commit(
 
 
 def test_definite_precommit_failure_restores_only_digest_bound_old_state(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _crash_producer_seed
 ) -> None:
     system_root, transport, commit, _manifest = _repair_host_fixture(
-        tmp_path, monkeypatch
+        tmp_path, monkeypatch, producer_seed=_crash_producer_seed
     )
     original_publish = artifacts.publish_source_repair_receipt
 

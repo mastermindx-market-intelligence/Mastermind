@@ -11,6 +11,7 @@ import os
 import pwd
 import re
 import resource
+import shutil
 import stat
 import struct
 import subprocess
@@ -1262,10 +1263,32 @@ def _source_repair_intent_fields(*, filesystem_device: int = 1) -> dict[str, obj
     }
 
 
+def _repository_fixture_fingerprint(root: Path) -> dict[str, tuple[int, str | None]]:
+    """Observe fixture bytes and modes without atimes or mutable Git commands."""
+
+    result = {}
+    for path in (root, *sorted(root.rglob("*"))):
+        assert not path.is_symlink(), path
+        relative = path.relative_to(root).as_posix()
+        digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+        result[relative] = (stat.S_IMODE(path.stat().st_mode), digest)
+    return result
+
+
 def _repair_host_fixture(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    producer_seed: tuple[Path, str, str] | None = None,
 ) -> tuple[Path, Path, str, dict[str, object]]:
-    source, commit, _ = _complete_repository(tmp_path, monkeypatch)
+    if producer_seed is None:
+        source, commit, _ = _complete_repository(tmp_path, monkeypatch)
+    else:
+        seed_source, commit, _ = producer_seed
+        source = tmp_path / "complete-source"
+        # copytree creates independent files, including Git refs, index and objects.
+        shutil.copytree(seed_source, source)
+        monkeypatch.setattr(artifacts, "PRODUCER_COMMIT", commit, raising=False)
     monkeypatch.setattr(contract, "PRODUCER_COMMIT", commit)
     transport = tmp_path / "operator-transport.zip"
     manifest = artifacts.build_source_transport_v3(source, transport, commit=commit)
