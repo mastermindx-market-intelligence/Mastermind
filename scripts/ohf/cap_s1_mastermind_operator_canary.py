@@ -1419,6 +1419,7 @@ def run_canary(
     scratch_root: Path,
     operation_id: str,
     protected_join: str,
+    rich_write_candidate: bool = False,
     client_factory=None,
     run_command: Callable[..., Any] = subprocess.run,
 ) -> CanaryEvidence:
@@ -1435,6 +1436,15 @@ def run_canary(
         )
     if backend not in ("fake", "live"):
         raise ValueError(f"unsupported backend: {backend!r}")
+    if type(rich_write_candidate) is not bool:
+        raise ValueError("rich_write_candidate must be a boolean")
+    # A new write-capable source profile is qualified only with the fake
+    # App Server in this stage. Real account/worker/runtime admission is an
+    # independent, currently held capability proof -- never implicit here.
+    if rich_write_candidate and backend != "fake":
+        raise CanaryStop(
+            "PROVIDER_REALM_UNAVAILABLE", "rich write candidate is fake-only"
+        )
 
     repo_root = Path(repo_root)
     scratch_root = Path(scratch_root)
@@ -1591,6 +1601,9 @@ def run_canary(
         cleanup_actions.append(("workspace", lambda: _cleanup_dir_action(workspace)))
         if backend == "fake":
             extra_env["OHF_FAKE_WORKSPACE"] = str(workspace)
+            if rich_write_candidate:
+                extra_env["OHF_FAKE_SANDBOX_MODE"] = "workspace-write"
+                extra_env["OHF_FAKE_QUALIFIED_SKILLS"] = "1"
 
         # --- exact reviewed source package + V4 profile -------------------
         # Residual refusal row (CAP-S1 Sol review item 3): every step here
@@ -1601,9 +1614,15 @@ def run_canary(
         # failure vocabulary, and fires before the provider process ever
         # starts.
         try:
-            fixture_path = repo_root / V4_FIXTURE_RELATIVE_PATH
+            fixture_path = repo_root / (
+                Path("scripts/ohf/fixtures/executive_agent_capabilities_v4_rich_write_operator.json")
+                if rich_write_candidate else V4_FIXTURE_RELATIVE_PATH
+            )
             registry = ExecutionCapabilityRegistry.load(fixture_path, source_root=repo_root)
-            profile = registry.resolve(PROFILE_ID)
+            profile = registry.resolve(
+                "operator.appserver.write.mastermind-operator.v1"
+                if rich_write_candidate else PROFILE_ID
+            )
             raw_document = json.loads(fixture_path.read_text(encoding="utf-8"))
             raw_package = raw_document["capability_packages"][PACKAGE_CAPABILITY_ID]
             generation = build_capability_package_generation(
@@ -1728,7 +1747,7 @@ def run_canary(
             # for Sol -- an honest CONFIG_DRIFT refusal there is the correct
             # outcome, never special-cased away here.
             expected_config_digest=profile.expected_config_digest,
-            network_policy="disabled",
+            network_policy=profile.network_policy,
             base_sha_resolver=lambda _path: workspace_base_sha,
             client_factory=adapter_client_factory,
             extra_env=adapter_extra_env,
@@ -1758,13 +1777,15 @@ def run_canary(
                 ws_stat.st_uid,
                 ws_stat.st_gid,
             ),
-            sandbox_policy="read-only",
-            approval_policy="never",
-            network_policy="disabled",
+            sandbox_policy=profile.sandbox_policy,
+            approval_policy=profile.approval_policy,
+            network_policy=profile.network_policy,
             capabilities=manifest,
-            native_helper_policy=NativeHelperPolicy.DISABLED,
+            native_helper_policy=profile.native_helper_policy,
             expected_config_digest=profile.expected_config_digest,
             authority_policy_hash=_CANARY_AUTHORITY_POLICY_HASH,
+            write_capable=profile.write_capable,
+            allowed_write_paths=(str(adapter.workspace_root),) if profile.write_capable else (),
         )
 
         epoch = SessionEpochRef(session_epoch_id, attempt_id, CANARY_WORKER_ID, 1)
@@ -2148,6 +2169,36 @@ _CAP_S1_PYTEST_SOURCE_MODULES = (
         "control_plane.operator_harness_contract",
         "control_plane/operator_harness_contract.py",
     ),
+    # Explicit transitive import closure for isolated pytest bootstrap.
+    # The child imports these modules during the eight pinned top-level
+    # imports; hash-binding only the top-level files allowed mutable
+    # dependencies to execute without a source-row identity.
+    ('common', 'common/__init__.py'),
+    ('common.agent_dialogue_consultation_contract', 'common/agent_dialogue_consultation_contract.py'),
+    ('common.agent_dialogue_contract', 'common/agent_dialogue_contract.py'),
+    ('common.agent_dialogue_contract_v2', 'common/agent_dialogue_contract_v2.py'),
+    ('common.commission_ref', 'common/commission_ref.py'),
+    ('common.company_consultation_host_contract', 'common/company_consultation_host_contract.py'),
+    # Current protected principal capability source imports this common
+    # contract at module scope; the isolated CAP-S1 test bootstrap must
+    # hash-pin it rather than load unsealed ambient candidate bytes.
+    ('common.claude_principal_capability_contract', 'common/claude_principal_capability_contract.py'),
+    ('common.product_acceptance_contract', 'common/product_acceptance_contract.py'),
+    ('common.redaction', 'common/redaction.py'),
+    ('control_plane', 'control_plane/__init__.py'),
+    ('control_plane.executive_orchestration_principal', 'control_plane/executive_orchestration_principal.py'),
+    ('control_plane.executive_orchestration_result', 'control_plane/executive_orchestration_result.py'),
+    ('control_plane.executive_peer_identity', 'control_plane/executive_peer_identity.py'),
+    ('control_plane.executive_process_identity', 'control_plane/executive_process_identity.py'),
+    ('control_plane.flags', 'control_plane/flags.py'),
+    ('control_plane.native_company_receipt', 'control_plane/native_company_receipt.py'),
+    ('control_plane.visible_turn_projection', 'control_plane/visible_turn_projection.py'),
+    ('control_plane.worker_browser_b1', 'control_plane/worker_browser_b1.py'),
+    ('scripts', 'scripts/__init__.py'),
+    ('scripts.ohf', 'scripts/ohf/__init__.py'),
+    ('scripts.ohf.fixtures', 'scripts/ohf/fixtures/__init__.py'),
+    ('scripts.ohf.redaction', 'scripts/ohf/redaction.py'),
+
 )
 _CAP_S1_PYTEST_BOOTSTRAP = r'''import hashlib
 import importlib

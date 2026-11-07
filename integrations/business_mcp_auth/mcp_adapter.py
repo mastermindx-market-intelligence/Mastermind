@@ -155,8 +155,16 @@ class MastermindTokenVerifier(TokenVerifier):
 
         return self._validated_composition() is not None
 
-    async def verify_token(self, token: str) -> AccessToken | None:
-        """Return one closed MCP token projection or fail closed with ``None``."""
+    async def verify_token_with_code(
+        self, token: str
+    ) -> tuple[AccessToken | None, AuthErrorCode | None]:
+        """Return the closed projection plus its redacted refusal class.
+
+        The MCP SDK consumes only :meth:`verify_token`, which deliberately
+        collapses every refusal to ``None``.  Closed verifier compositions need
+        the refusal class to decide whether a second exact policy is eligible;
+        no dependency detail or token material crosses this boundary.
+        """
 
         # The JWT verifier and MCP adapter must be one exact policy composition.
         # Refuse before reading the clock or asking the authenticator to inspect
@@ -164,25 +172,26 @@ class MastermindTokenVerifier(TokenVerifier):
         policy = self._validated_composition()
         if policy is None:
             self._refuse_internal()
-            return None
+            return None, AuthErrorCode.INTERNAL_ERROR
 
         try:
             now = self._now()
         except Exception:
             self._refuse_internal()
-            return None
+            return None, AuthErrorCode.INTERNAL_ERROR
         if type(now) is not int:
             self._refuse_internal()
-            return None
+            return None, AuthErrorCode.INTERNAL_ERROR
 
         try:
             principal = await self._authenticator.verify_token(token, now=now)
         except AuthError as error:
-            self._emit(code=error.code.value, accepted=False)
-            return None
+            if not self._emit(code=error.code.value, accepted=False):
+                return None, AuthErrorCode.INTERNAL_ERROR
+            return None, error.code
         except Exception:
             self._refuse_internal()
-            return None
+            return None, AuthErrorCode.INTERNAL_ERROR
 
         # The awaited provider boundary permits concurrent replacement of either
         # live policy binding. Revalidate before interpreting or projecting the
@@ -190,12 +199,12 @@ class MastermindTokenVerifier(TokenVerifier):
         policy = self._validated_composition()
         if policy is None:
             self._refuse_internal()
-            return None
+            return None, AuthErrorCode.INTERNAL_ERROR
 
         try:
             if not _principal_matches_policy(principal, policy):
                 self._refuse_internal()
-                return None
+                return None, AuthErrorCode.INTERNAL_ERROR
             access = AccessToken(
                 token=token,
                 client_id=principal.client_ref,
@@ -211,10 +220,16 @@ class MastermindTokenVerifier(TokenVerifier):
             )
         except Exception:
             self._refuse_internal()
-            return None
+            return None, AuthErrorCode.INTERNAL_ERROR
 
         if not self._emit(code="accepted", accepted=True):
-            return None
+            return None, AuthErrorCode.INTERNAL_ERROR
+        return access, None
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        """Return one closed MCP token projection or fail closed with ``None``."""
+
+        access, _code = await self.verify_token_with_code(token)
         return access
 
 

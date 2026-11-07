@@ -1,0 +1,100 @@
+{
+  "artifact_kind": "TRANSCRIBED_NATIVE_READ_PROBE_EVIDENCE_NOT_CAPABILITY_ADMISSION",
+  "source_commit": "bffe2ca8506346ea278c8ee469bf1ac30a4de008",
+  "observed_date": "2026-09-14",
+  "host_description": "Authorized Mac Studio",
+  "no_model_calls": true,
+  "no_authentication_calls": true,
+  "no_session_creation_or_load": true,
+  "network_denied": true,
+  "proof_scope": "Version/help, isolated initialize advertisements, installed native schema generation only.",
+  "observations": [
+    {
+      "harness": "claude-code",
+      "version": "2.1.259",
+      "proof": "VERSION_HELP_ONLY",
+      "native_message_or_wake_tested": false
+    },
+    {
+      "harness": "grok-build",
+      "version": "1.0.30",
+      "build": "04b7ffed98c6",
+      "observed_at": "2026-09-14T21:01:54.168343Z",
+      "sha256": "d53b6e543e482716236748914331db50145c696ac7af91f1ebdedcf5654cfecb",
+      "digest_scope": "launched_executable",
+      "request_methods": ["initialize"],
+      "rpc_result": true,
+      "protocol_version": 1,
+      "advertised_auth_methods": ["grok.com"],
+      "advertised_load_session": true,
+      "advertised_mcp_http": true,
+      "advertised_mcp_sse": true,
+      "advertised_session_operations": ["close", "list", "resume"],
+      "cleanup": "EOF_EXIT",
+      "exit_code": 0,
+      "stderr_bytes": 0,
+      "model_execution_proven": false
+    },
+    {
+      "harness": "cursor-agent-new",
+      "version": "2026.09.10-fd3934a",
+      "observed_at": "2026-09-14T21:01:57.071304Z",
+      "sha256": "2ccc9a8e167797641448b5e5c936f006ba137a2555f117f38c5eb76a5238a233",
+      "digest_scope": "launched_file_not_entire_package_closure",
+      "request_methods": ["initialize"],
+      "rpc_result": true,
+      "protocol_version": 1,
+      "advertised_auth_methods": ["cursor_login"],
+      "advertised_load_session": true,
+      "advertised_mcp_http": true,
+      "advertised_mcp_sse": true,
+      "cleanup": "OWN_DISPOSABLE_PROBE_GROUP_TERM_AFTER_BOUNDED_EOF_WAIT",
+      "exit_code": 143,
+      "stderr_bytes": 0,
+      "model_execution_proven": false
+    },
+    {
+      "harness": "cursor-agent-old",
+      "version": "2026.08.11-e8db854",
+      "proof": "VERSION_HELP_ONLY",
+      "local_pool_uses_this_executable": true,
+      "new_agent_acp_result_does_not_qualify_this_binary": true
+    },
+    {
+      "harness": "codex",
+      "version": "0.154.0",
+      "observed_at": "2026-09-14T21:02:42.718977Z",
+      "sha256": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
+      "digest_scope": "launched_executable",
+      "request_methods": ["initialize"],
+      "rpc_result": true,
+      "cleanup": "EOF_EXIT",
+      "exit_code": 0,
+      "precondition_correction": "First isolated attempt lacked its configured empty CODEX_HOME directory. Creating that scratch directory allowed initialize; neither attempt created a session or model turn.",
+      "model_execution_proven": false,
+      "schema_file_count": 305,
+      "schema_total_bytes": 3492670,
+      "schema_methods_found": [
+        "thread/start", "thread/resume", "thread/read", "thread/fork",
+        "turn/start", "turn/steer", "turn/interrupt", "skills/list",
+        "config/read", "mcpServerStatus/list", "item/commandExecution/requestApproval",
+        "item/fileChange/requestApproval", "item/tool/requestUserInput", "item/tool/call"
+      ],
+      "empty_home_defaults_observed": {
+        "multi_agent": true,
+        "multi_agent_v2": false,
+        "hooks": true,
+        "plugins": true,
+        "sleep_tool": true
+      },
+      "effective_governed_profile_not_proven": true
+    }
+  ],
+  "limitations": [
+    "Capability advertisement is not execution proof.",
+    "Cursor hash does not attest an entire native dependency/package closure.",
+    "No current enrolled runtime capability generation was read because the Executive connector returned HTTP 401.",
+    "Existing source tests were inspected but were not rerun.",
+    "A separate read-only host metadata command had an unavailable tool response; no live worker was modified."
+  ]
+}

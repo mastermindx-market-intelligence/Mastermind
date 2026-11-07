@@ -1,0 +1,55 @@
+{
+  "schema": "mastermind.hermes_secretary.roster.v2",
+  "CHRIS_SLACK_USER_ID": "U0BRET6191C",
+  "chris": {
+    "name": "Chris",
+    "email": "chris@mastermind-x.com",
+    "user_id": "U0BRET6191C"
+  },
+  "peers": [
+    {
+      "name": "Grok Secretary",
+      "email": "groksecretary@mastermind-x.com",
+      "user_id": "U0BTCHX8HMF",
+      "permanent": true
+    }
+  ],
+  "hermes_agents": [
+    {
+      "name": "hermes-secretary",
+      "unit": "hermes-runtime-mmsecretary.service",
+      "secrets_file": "mmsecretary.secrets.env",
+      "self_user_id_env": "HERMES_SLACK_BOT_USER_ID",
+      "bot_token_env": "HERMES_SLACK_BOT_TOKEN"
+    },
+    {
+      "name": "hermes-metaceo",
+      "unit": "hermes-runtime-mmmeta.service",
+      "secrets_file": "mmmeta.secrets.env",
+      "self_user_id_env": "HERMES_SLACK_BOT_USER_ID",
+      "bot_token_env": "HERMES_SLACK_BOT_TOKEN"
+    }
+  ],
+  "sibling_hermes_agent_ids": [],
+  "commissioners": [
+    {"name": "ChatGPT1", "user_id": "U0BRETDUAS2"},
+    {"name": "ChatGPT2", "user_id": "U0BSB73JWNL"},
+    {"name": "ChatGPT2", "user_id": "U0C5L14LT7G"},
+    {"name": "ChatGPT3/Sol", "user_id": "U0BR1GQH7SB"},
+    {"name": "Ryan", "user_id": "U0C59APBUN4"}
+  ],
+  "authorized_post_rooms": [
+    {"name": "dotsandgroksecretary", "id": "C0CBC6AEAQZ"},
+    {"name": "metaceo", "id": "C0C5FCK1F45"}
+  ],
+  "authorized_thread_replies": ["receipt", "PICKUP", "RESULT"],
+  "watched_channels": [
+    {"name": "agent-dispatch", "id": "C0BSBM78V1N"},
+    {"name": "mastermind-exec-ops", "id": "C0BTD5804QK"},
+    {"name": "ceo-control-room", "id": "C0BRDFZPLHK"},
+    {"name": "chatgpt-web-returns", "id": "C0CCNK7JFAL"},
+    {"name": "dotsandgroksecretary", "id": "C0CBC6AEAQZ"},
+    {"name": "metaceo", "id": "C0C5FCK1F45"}
+  ],
+  "original_rooms": ["C0BSBM78V1N", "C0BTD5804QK", "C0BRDFZPLHK"]
+}

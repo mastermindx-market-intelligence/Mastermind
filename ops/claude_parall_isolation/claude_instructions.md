@@ -1,0 +1,5 @@
+<!-- claude-parall-launch-isolation-20261019 -->
+## Claude Desktop / Parall account isolation on M2 Studio
+
+Mastermind uses isolated Parall Claude Desktop accounts. Never launch generic `Claude`, `open -a Claude`, `open -b com.anthropic.claudefordesktop`, `/Applications/Claude.app`, a raw `Claude Runtimes/*/Claude.app`, a generic `claude://` URL or `claude --desktop` for an independent review: the shared Anthropic app/URL identity can reopen a different account and interrupt running numbered instances. Use the existing admitted Subagent Fabric for bounded independent reviews. A human-intended GUI navigation must choose the already-provisioned Parall wrapper for the exact approved account, not a generic runtime. Keep ordinary Claude Code CLI/headless commands (`claude`, `claude -p`, `claude --resume`) working normally. This instruction grants no account, host, spend or execution authority. Do not stop, replace or migrate a running Parall account without explicit reconciliation.
+<!-- /claude-parall-launch-isolation-20261019 -->
