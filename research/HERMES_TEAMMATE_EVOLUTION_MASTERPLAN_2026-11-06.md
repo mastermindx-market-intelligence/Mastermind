@@ -725,3 +725,37 @@ Public product documentation was checked on 6 November 2026. It can change; prod
 - **[O12]** [Mem0 README and OSS/managed distinction](https://github.com/mem0ai/mem0/blob/f1791daa86d469249c9b002f62644d58a1eb96a0/README.md) and [Apache-2.0 license](https://github.com/mem0ai/mem0/blob/f1791daa86d469249c9b002f62644d58a1eb96a0/LICENSE).
 - **[O13]** [Playwright Apache-2.0 license](https://github.com/microsoft/playwright/blob/530161aae0ba59643dbbfa3c1b8c929874cc18ec/LICENSE).
 - **[O14]** [browser-use MIT license](https://github.com/browser-use/browser-use/blob/b49a68e4060acb226da8f784194fef301c53a6d7/LICENSE) and [Stagehand MIT license](https://github.com/browserbase/stagehand/blob/c91e16776c3fb9964bbb9df6b9fe65a8f077ae7d/LICENSE).
+
+## 17. Implementation continuation — Chairman-directed leadership
+
+**Current directive:** “Take leadership to get this completely implemented.”
+**Operation key / attended root:** hermes-teammate-evolution-20261106-c3.
+**Immediate parent:** hermes-teammate-evolution-20261106-c3; this names the current attended program owner, not a fabricated native session ID.
+**Existing workstream:** WS:CHAIRMAN-CONTROL-ROOM, Meta-CEO/open-harness program.
+**Procedure/source pin:** ad6275a9c4d237bce75e52d0d6a8f41264b4ded5, protected master, Skillpack 1.0.1 / bootstrap major 1.
+**Scope:** Implement and qualify the original memory, learning, tools, execution, fleet and Office journeys in sections 5–13. Source, installation, live use and acceptance remain distinct.
+
+The assigned session owns recovery and implementation sequencing. The parent plan and source carrier remain this document and PR #2159. Existing #2134 selected-child and H24 native-context writers retain their paths and original effects. #2147 is now merged and must be reused; source merge is not worker enrollment proof.
+
+### Current delivery organization
+
+The principal owns architecture, integration choices, active-writer/effect reconciliation and original-scope acceptance. Eligible bounded implementation goes through the enrolled attended Fabric adapter with the original root, a stable child run ID and exact-source evidence. Native architectural judgment may resolve an ambiguous seam; it is not a substitute implementation worker or a mandatory review gate. WHY NOT FABLE: the first read-only adapter has a bounded existing compiler and a testable frozen contract.
+
+The first ready work is scoped recall using ops/fabric_launch/agentos.py and its existing context_bundle.v1 compiler/validator. That existing owner already provides bounded exact-workstream reads and source observations. No new memory store, index, auth service, scheduler or compiler is authorized by this packet.
+
+### First bounded packet and proof
+
+- Consumer: a newly bound Hermes session receives current company context for its host-authorized workstream, with original source/accounting preserved.
+- Scope: a new provider/registration adapter and focused tests under integrations/hermes_harness, plus its documentation. Do not edit the active selected-child/session/Control paths, shared profiles or live host configuration without separate collision reconciliation.
+- Host authority: session/role/workstream scope comes from an injected current native host binding. Model text, constructor strings and retrieved notes are not authentication.
+- Freshness: new retrieval invokes the existing owner; no persistent alternate facts cache. Currentness is checked before and after the read. Revoked/changed scope discards all returned context.
+- Correction: the canonical source is changed through its existing owner; the next fresh session observes that version and source digest. The adapter does not independently rewrite company facts.
+- Failure: bounded explicit unavailable result, no secret-bearing raw exception or partial unauthorized bundle, no manufactured durable-checkpoint success.
+- Verification: actual provider-interface compatibility; two-role/two-workstream isolation; source correction across provider instances; revoke-during-read; malformed/oversized/compiler-error paths; no writes, schedules or delegation effects.
+- Return: exact branch/head, owned paths, check commands/results, evidence digest and remaining integration/installation gap. Terminal worker output must be fully consumed and verified through the same Fabric run.
+
+A local isolated source checkout has been acquired at the exact pin. The exposed Fabric adapter is available; worker START remains unproven until a real admission receipt. The Studio fleet-status surface returned FLEET_STATUS_UNAVAILABLE, an interface-specific capability gap rather than evidence that all hosts are unavailable. No runtime effect has been attempted in that lane.
+
+### Continuing order
+
+After the first verified source result, compose the actual Hermes provider registration and an owner-compiler integration proof, then advance corrections/continuity, credential/computer qualification and the Office consumer where dependencies permit. Reconcile existing active carriers before touching shared integration paths. Retain the original R2/H1–H8 and live/endurance acceptance; a source packet does not close the program.
