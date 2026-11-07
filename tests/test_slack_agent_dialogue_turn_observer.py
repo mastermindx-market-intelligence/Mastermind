@@ -6,7 +6,21 @@ from dataclasses import dataclass, field
 from dataclasses import replace
 from unittest.mock import patch
 
+from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_PACKET_DISCRIMINATOR,
+    CONSULTATION_SCHEMA,
+    RECEIPT_KEYS,
+    build_consultation,
+    render_consultation_packet,
+)
+from control_plane.operator_harness_contract import runtime_binding_id_for
 from control_plane.session_targets import load_session_targets, route_obligation
+from control_plane.dialogue_source_resolution import (
+    DialogueDelayedAckReconciler,
+    DialogueSourceObservation,
+    DialogueSourceReconciler,
+    DialogueSourceSnapshot,
+)
 from control_plane.wake_dispatcher import WakeEffectUnknownError, WakePreSubmitError
 from integrations.slack_agent_dialogue.contract_v2 import (
     MESSAGE_SCHEMA_V2,
@@ -182,6 +196,79 @@ def _client_with_result(parent: dict[str, object]) -> InMemorySlackClient:
     return client
 
 
+def _consultation_packet() -> dict[str, object]:
+    message_key = "asd-consultation-observer-0001"
+    consultation_id = "consult-7bdf4a6f9a664bbcf1a93d67a41ba51d"
+    return build_consultation(
+        {
+            "schema": CONSULTATION_SCHEMA,
+            "message_key": message_key,
+            "consultation_id": consultation_id,
+            "purpose": "QUESTION",
+            "requester_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": "JOB-200",
+                "attempt_id": "ATT-100",
+                "worker_id": "codex-requester",
+            },
+            "recipient_actor_ref": {
+                "kind": "worker_attempt",
+                "job_id": "JOB-200",
+                "attempt_id": "ATT-200",
+                "worker_id": "codex-recipient",
+            },
+            "recipient_peer_ref": "peer-7bdf4a6f9a664bbcf1a93d67a41ba51d",
+            "recipient_binding": {
+                "binding_id": runtime_binding_id_for("ATT-200", "EPOCH-0002"),
+                "binding_generation": 1,
+                "reasoning_surface": "codex",
+            },
+            "correlation": {
+                "parent_fingerprint": "a" * 64,
+                "request_message_key": message_key,
+                "consultation_id": consultation_id,
+                "requester_actor_digest": "b" * 64,
+                "recipient_actor_digest": "c" * 64,
+            },
+            "question": "Can the observer classify this packet?",
+            "answer": None,
+            "evidence_refs": [],
+            "artifact_revisions": [
+                {
+                    "repository": REPO,
+                    "path": "research/commission.md",
+                    "commit": "a" * 40,
+                    "content_sha256": "b" * 64,
+                }
+            ],
+            "valid_until": "2026-09-25T01:00:00Z",
+            "deadline_ms": 60000,
+            "response_budget": {
+                "max_answers": 1,
+                "max_evidence_reads": 2,
+                "max_forward_hops": 0,
+                "max_payload_bytes": 2048,
+            },
+            "supersedes_message_key": None,
+            "receipts": {key: None for key in RECEIPT_KEYS},
+            "fingerprint": "",
+        }
+    )
+
+
+def _client_with_packet(parent: dict[str, object]) -> InMemorySlackClient:
+    client = _client(parent)
+    client.add_reply(
+        SlackMessage(
+            ts="1787961600.000005",
+            author_user_id=RELAY_USER,
+            text=render_consultation_packet(_consultation_packet()),
+            thread_ts=PARENT_TS,
+        )
+    )
+    return client
+
+
 def _registry():
     return load_session_targets().with_root_job_bindings(
         {
@@ -208,6 +295,70 @@ class RecordingWakeCarrier:
         self.submit_calls.append((obligation, route))
         if self.effect_unknown:
             raise WakeEffectUnknownError("provider result is ambiguous")
+
+
+class SourceAwareRecordingWakeCarrier(DialogueSourceReconciler, RecordingWakeCarrier):
+    def __init__(self, source_state: str) -> None:
+        RecordingWakeCarrier.__init__(self)
+        self.source_state = source_state
+        self.source_calls: list[DialogueSourceSnapshot] = []
+
+    async def reconcile_dialogue_sources(self, snapshot: object) -> object:
+        assert type(snapshot) is DialogueSourceSnapshot
+        self.source_calls.append(snapshot)
+        return {"state": self.source_state, "reason": "TEST_SOURCE_STATE"}
+
+    async def reconcile_from_source(self, _source, obligation, route) -> WakeCarrierState:
+        return await self.reconcile(obligation, route)
+
+    async def submit_from_source(self, _source, obligation, route) -> None:
+        await self.submit(obligation, route)
+
+
+class DelayedAckRecordingCarrier(
+    DialogueDelayedAckReconciler, SourceAwareRecordingWakeCarrier
+):
+    def __init__(self, source: DialogueSourceObservation) -> None:
+        SourceAwareRecordingWakeCarrier.__init__(self, "ACK_REQUIRED")
+        self.source = source
+        self.delayed_ack_calls = []
+
+    async def reconcile_dialogue_sources(self, snapshot: object) -> object:
+        self.source_calls.append(snapshot)
+        return {
+            "state": "ACK_REQUIRED", "reason": "DELIVERED_ACK_PENDING",
+            "source_observation": self.source,
+        }
+
+    async def reconcile_delayed_ack(self, source_observation):
+        self.delayed_ack_calls.append(source_observation)
+        return {"state": "RECORDED", "reason": "ACK_RECORDED"}
+
+
+def test_observer_echoes_server_selected_delayed_ack_once_then_holds() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        source = DialogueSourceObservation(
+            workspace_id="T0BRD2AQXQV", channel_id="C0BSBM78V1N",
+            thread_ts=PARENT_TS, predecessor_message_key="asd-old-source-01",
+            predecessor_message_fingerprint="e" * 64,
+        )
+        carrier = DelayedAckRecordingCarrier(source)
+        observer = DialogueTurnObserver(
+            policy=_policy(), client=_client_with_result(parent),
+            registry=_registry(), wake_carrier=carrier,
+        )
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert result.reason == "DIALOGUE_SOURCE_RECONCILIATION_REQUIRED"
+        assert carrier.delayed_ack_calls == [source]
+        assert len(carrier.source_calls) == 1
+        assert carrier.reconcile_calls == []
+        assert carrier.submit_calls == []
+
+    asyncio.run(scenario())
 
 
 def _attention() -> AgentDialogueAttention:
@@ -293,6 +444,119 @@ def test_adapter_preserves_existing_root_workstream_seat_routing_precedence() ->
     assert seat_route.workstream is None
 
 
+def test_observer_classifies_packet_without_lifecycle_interpretation() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client_with_packet(parent),
+            registry=_registry(),
+            wake_carrier=RecordingWakeCarrier(),
+        )
+
+        accepted = await observer._accepted_history(_context(parent))
+
+        assert len(accepted) == 4
+        observed_parent, messages, thread_ts, packet_count = accepted
+        assert observed_parent == parent
+        assert messages == ()
+        assert thread_ts == PARENT_TS
+        assert packet_count == 1
+
+    asyncio.run(scenario())
+
+
+def test_observer_refuses_malformed_consultation_packet() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        client = _client(parent)
+        client.add_reply(
+            SlackMessage(
+                ts="1787961600.000006",
+                author_user_id=RELAY_USER,
+                text=CONSULTATION_PACKET_DISCRIMINATOR + "\n{not-json}",
+                thread_ts=PARENT_TS,
+            )
+        )
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=client,
+            registry=_registry(),
+            wake_carrier=RecordingWakeCarrier(),
+        )
+
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert result.outcome is ObservationOutcome.REFUSED
+        assert result.reason == "THREAD_MESSAGE_INVALID"
+
+    asyncio.run(scenario())
+
+
+def test_observer_ignores_malformed_consultation_packet_from_unauthorized_writer() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        client = _client(parent)
+        client.add_reply(
+            SlackMessage(
+                ts="1787961600.000006",
+                author_user_id="U0UNTRUSTED",
+                text=CONSULTATION_PACKET_DISCRIMINATOR + "\n{not-json}",
+                thread_ts=PARENT_TS,
+            )
+        )
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=client,
+            registry=_registry(),
+            wake_carrier=RecordingWakeCarrier(),
+        )
+
+        accepted = await observer._accepted_history(_context(parent))
+
+        assert len(accepted) == 4
+        observed_parent, messages, thread_ts, packet_count = accepted
+        assert observed_parent == parent
+        assert messages == ()
+        assert thread_ts == PARENT_TS
+        assert packet_count == 0
+
+    asyncio.run(scenario())
+
+
+def test_observer_packet_mutation_without_creation_is_incomplete() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        client = _client(parent)
+        client.add_reply(
+            SlackMessage(
+                ts="1787961600.000007",
+                author_user_id=RELAY_USER,
+                text=render_consultation_packet(_consultation_packet()),
+                thread_ts=PARENT_TS,
+                edited=True,
+                created_text=None,
+            )
+        )
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=client,
+            registry=_registry(),
+            wake_carrier=RecordingWakeCarrier(),
+        )
+
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+
+        assert result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert result.reason == "MUTATION_RECONCILIATION_INCOMPLETE"
+
+    asyncio.run(scenario())
+
+
 def test_observer_reconstructs_initial_turn_and_submits_one_canonical_wake() -> None:
     async def scenario() -> None:
         parent = _parent()
@@ -317,6 +581,54 @@ def test_observer_reconstructs_initial_turn_and_submits_one_canonical_wake() -> 
         assert result.route.target_seat == "coo"
         assert len(carrier.reconcile_calls) == 1
         assert carrier.submit_calls == [(result.obligation, result.route)]
+
+    asyncio.run(scenario())
+
+
+def test_nominal_source_reconciler_receives_exact_history_before_wake_decision() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+        carrier = SourceAwareRecordingWakeCarrier("NO_RESOLUTION_REQUIRED")
+        observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client(parent),
+            registry=_registry(),
+            wake_carrier=carrier,
+            emitted_at=lambda: "2026-08-29T01:02:00Z",
+        )
+        result = await observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert result.outcome is ObservationOutcome.WAKE_SUBMITTED
+        assert len(carrier.source_calls) == 1
+        snapshot = carrier.source_calls[0]
+        assert snapshot.workspace_id == _policy().workspace_id
+        assert snapshot.channel_id == _policy().channel_id
+        assert snapshot.thread_ts == PARENT_TS
+        assert snapshot.parent_fingerprint == parent["fingerprint"]
+        assert snapshot.operation_key == parent["operation_key"]
+        assert snapshot.messages == ()
+        assert len(carrier.submit_calls) == 1
+
+        held = SourceAwareRecordingWakeCarrier("ACK_REQUIRED")
+        held_observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=_client_with_result(parent),
+            registry=_registry(),
+            wake_carrier=held,
+            emitted_at=lambda: "2026-08-29T01:02:00Z",
+        )
+        held_result = await held_observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert held_result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert held_result.reason == "DIALOGUE_SOURCE_RECONCILIATION_REQUIRED"
+        assert len(held.source_calls) == 1
+        assert [
+            item.to_dict()["message_key"] for item in held.source_calls[0].messages
+        ] == ["asd-result-00000002"]
+        assert held.reconcile_calls == []
+        assert held.submit_calls == []
 
     asyncio.run(scenario())
 
@@ -639,6 +951,58 @@ def test_incomplete_bounded_history_refuses_before_wake_carrier() -> None:
         assert result.reason == "BOUNDED_HISTORY_INCOMPLETE"
         assert carrier.reconcile_calls == []
         assert carrier.submit_calls == []
+
+    asyncio.run(scenario())
+
+
+def test_source_outage_and_text_only_reply_cannot_prove_source_absence() -> None:
+    async def scenario() -> None:
+        parent = _parent()
+
+        class OutageClient(InMemorySlackClient):
+            async def fetch_channel_history(self, *_args, **_kwargs):
+                raise TimeoutError("diagnostic Slack outage")
+
+        outage_carrier = SourceAwareRecordingWakeCarrier("RECORDED")
+        outage = DialogueTurnObserver(
+            policy=_policy(),
+            client=OutageClient(relay_bot_user_id=RELAY_USER),
+            registry=_registry(),
+            wake_carrier=outage_carrier,
+        )
+        outage_result = await outage.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert outage_result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert outage_result.reason == "TRANSPORT_UNAVAILABLE"
+        assert outage_carrier.source_calls == []
+        assert outage_carrier.reconcile_calls == []
+        assert outage_carrier.submit_calls == []
+
+        text_client = _client(parent)
+        text_client.add_reply(
+            SlackMessage(
+                ts="1787961600.000004",
+                author_user_id=RELAY_USER,
+                text="Completed successfully without a canonical V2 frame.",
+                thread_ts=PARENT_TS,
+            )
+        )
+        text_carrier = SourceAwareRecordingWakeCarrier("ACK_REQUIRED")
+        text_observer = DialogueTurnObserver(
+            policy=_policy(),
+            client=text_client,
+            registry=_registry(),
+            wake_carrier=text_carrier,
+        )
+        text_result = await text_observer.reconcile_once(
+            context=_context(parent), routing=_routing(parent)
+        )
+        assert text_result.outcome is ObservationOutcome.RECONCILIATION_INCOMPLETE
+        assert len(text_carrier.source_calls) == 1
+        assert text_carrier.source_calls[0].messages == ()
+        assert text_carrier.reconcile_calls == []
+        assert text_carrier.submit_calls == []
 
     asyncio.run(scenario())
 

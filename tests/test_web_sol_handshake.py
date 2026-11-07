@@ -50,7 +50,7 @@ def test_transport_protocol_has_closed_versioned_identity_and_deterministic_capa
     assert wsp.HELLO_SCHEMA == "mastermind.web_sol_transport_hello.v1"
     assert wsp.HELLO_ACK_SCHEMA == "mastermind.web_sol_transport_hello_ack.v1"
     assert wsp.TRANSPORT_PROTOCOL_MAJOR == 1
-    assert wsp.WEB_SOL_PACKAGE_VERSION == "0.1.0"
+    assert wsp.WEB_SOL_PACKAGE_VERSION == "0.2.0"
 
     digest = wsp.transport_capability_digest()
     assert digest == wsp.transport_capability_digest()

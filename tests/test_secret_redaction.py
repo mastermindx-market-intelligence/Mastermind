@@ -330,7 +330,7 @@ def _run_reason_with_sdk_exception(monkeypatch, exc):
 
     monkeypatch.setattr(cli_bridge, "_via_sdk", _boom)
     result = asyncio.run(
-        cli_bridge._reason("hello", arm=True, log_run=False, _oauth_candidates=[])
+        cli_bridge._reason("hello", arm=True, log_run=False, _subscription_slots=[])
     )
     assert "sdk_error" in result, "never reached the SDK-failure branch"
     return result
@@ -392,7 +392,7 @@ def test_cli_bridge_still_cools_a_key_on_a_long_classifiable_failure(monkeypatch
     asyncio.run(
         cli_bridge._reason(
             "hello", arm=True, log_run=False,
-            _oauth_candidates=[{"key_id": "k1", "env_name": "CLAUDE_CODE_OAUTH_TOKEN"}],
+            _subscription_slots=[{"key_id": "k1", "env_name": "CLAUDE_CODE_OAUTH_TOKEN"}],
         )
     )
 
@@ -431,3 +431,42 @@ def test_massive_api_key_is_covered_too(monkeypatch):
     out = sanitize_external_text("failed with url: ...&apiKey=shortkey1")
     assert "shortkey1" not in out
     assert REDACTION in out
+
+@pytest.mark.parametrize("separator", (": ", ": ' ", '" : " '))
+def test_authorization_whitespace_does_not_repartition_when_bearer_is_absent(separator):
+    # The former optional quote separated adjacent whitespace repetitions.
+    # This fixture preserves the real untrusted-input shape without a timing gate.
+    text = "Authorization" + separator + " " * 32768 + "Basic harmless"
+    out = sanitize_external_text(text, include_environment=False)
+    assert "Basic harmless" in out
+
+
+@pytest.mark.parametrize("separator", (": ", ": ' ", '" : " '))
+def test_authorization_keeps_short_token_redaction_after_long_whitespace(separator):
+    text = "Authorization" + separator + " " * 32768 + "Bearer short-token"
+    out = sanitize_external_text(text, include_environment=False)
+    assert "short-token" not in out and REDACTION in out
+
+
+@pytest.mark.parametrize("field", ["Authorization", "X-Mastermind-Workspace-Authorization"])
+@pytest.mark.parametrize("quote", ["", "'", '\"'])
+def test_bearer_redaction_preserves_quoted_and_unquoted_short_values(field, quote):
+    text = field + ":   " + quote + "  " * bool(quote) + "Bearer short" + quote
+    # The existing 32-character token rule also redacts the long header name.
+    visible_field = REDACTION if field.startswith("X-") else field
+    assert sanitize_external_text(text, include_environment=False) == \
+        " ".join((visible_field + ":   " + quote + "  " * bool(quote) + "Bearer " + REDACTION + quote).split())
+
+
+def test_failed_authorization_match_with_long_whitespace_is_bounded():
+    import subprocess
+    import sys
+    # A failed match used to partition the same 200k spaces between adjacent
+    # repetitions. Exercise the actual public sanitizer in a disposable process
+    # so a regression is bounded instead of hanging the entire test runner.
+    code = ("from common.redaction import sanitize_external_text; "
+            "assert sanitize_external_text('Authorization:' + ' ' * 200000 + "
+            "'not-a-bearer', include_environment=False) == 'Authorization: not-a-bearer'")
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                            text=True, timeout=5)
+    assert result.returncode == 0, result.stderr

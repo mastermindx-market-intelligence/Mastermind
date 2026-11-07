@@ -146,6 +146,11 @@ def observe_root_lanes(runtime: Runtime, root_job_id: str, *, max_rows: int = 64
     exhausted = False
     try:
         with runtime.store.read() as connection:
+            # A bound reader may not expose this public budget interface.
+            # Preserve the limit by refusing before any projection query.
+            set_progress_handler = getattr(connection, "set_progress_handler", None)
+            if not callable(set_progress_handler):
+                return _document(root, status="UNAVAILABLE", issues=("RUNTIME_UNAVAILABLE",))
             steps = 0
             interval = max(1, min(1000, MAX_SQL_STEPS))
 
@@ -155,7 +160,7 @@ def observe_root_lanes(runtime: Runtime, root_job_id: str, *, max_rows: int = 64
                 exhausted = steps >= MAX_SQL_STEPS
                 return int(exhausted)
 
-            connection.set_progress_handler(budget, interval)
+            set_progress_handler(budget, interval)
             try:
                 # Qualify this exact read snapshot, not just a cached readonly open.
                 # Runtime remains the sole migration/checksum/DDL policy owner.
@@ -175,7 +180,7 @@ def observe_root_lanes(runtime: Runtime, root_job_id: str, *, max_rows: int = 64
                     (root, max_rows + 1),
                 ).fetchall()
             finally:
-                connection.set_progress_handler(None, 0)
+                set_progress_handler(None, 0)
         truncated = len(rows) > max_rows
         lanes = [_lane(row) for row in rows[:max_rows]]
         if not _valid_graph(lanes, root):

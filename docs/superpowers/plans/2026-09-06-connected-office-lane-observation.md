@@ -90,3 +90,25 @@ Focused suite: **34 passed**. Selected observer/hierarchy/Steward/SQLite regress
 Database-integrity assertions compare main-file bytes, mode and modification time. The first test draft also compared directory inventory and exposed that SQLite's existing read-only WAL path may materialize WAL/SHM sidecars; that assertion was corrected before implementation so the RED cases discriminate the actual schema defect. No no-filesystem-effects claim is made. No journaling configuration, immutable-mode workaround or installed database was changed.
 
 This fixes schema qualification only, not the separately owned installed file-handle identity requirement. The source remains Draft/Hold pending genuine non-author review of the repaired immutable head and current-base CI. Existing native-provider, RuntimeBinding, authenticated MCP and Web consumer proof remain owed under the original connected-office contract.
+
+## 2026-11-07 parent correction: unavailable public query budget
+
+The current bound read-only Runtime returns a closed connection interface without
+the public `set_progress_handler` method. The observer now checks that capability
+inside its original read context and returns the existing opaque `UNAVAILABLE`
+envelope when it cannot enforce its own 50,000-step budget. Supported ordinary
+connections retain the same budget, schema verification, rooted queries and
+cleanup. No Runtime implementation, private guard, raw handle or installed route
+is changed.
+
+The new regression uses a real disposable Runtime, service lock, namespace owner
+and bound connection. It verifies a supported read first, the opaque result and
+unchanged sensitive-data exclusions, then proves byte preservation and release of
+the SQLite reservation through separate processes. The exact dated qualification
+and its exclusions belong in the original PR's source receipt. Historical counts
+above remain attributed to their original epochs.
+
+This is a fresh parent correction from the published original source, not acceptance
+or repair of the rejected November 5 worker artifact. The old lease and refused
+operations remain untouched. CLI bytes and all original assertions remain intact;
+no current standalone CLI/demo or installed/consumer acceptance is claimed.

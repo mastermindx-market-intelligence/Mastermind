@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import fcntl
 import importlib
 import importlib.util
 import json
+import os
 import sqlite3
+import subprocess
+import sys
 
 import pytest
 
@@ -362,3 +366,83 @@ def test_exact_schema_uses_the_same_read_transaction_before_rows(tmp_path, monke
     assert result["status"] == "OBSERVED"
     assert len(connections) == 1
     assert events == ["qualification", "projection", "projection"]
+
+
+def test_genuine_bound_reader_without_public_budget_hook_is_opaque_unavailable(tmp_path, monkeypatch):
+    from control_plane.executive_runtime import _BoundReadConnection
+    from control_plane.runtime_namespace_custody import ServiceRuntimeNamespaceCustody
+
+    # Seed through real Runtime APIs before establishing the disposable owner.
+    writer, parent, _, _, lease = seed((tmp_path / "runtime").resolve())
+    directory = writer.store.path.parent
+    lock = directory / "executive-service.lock"
+    fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    marker = directory / "executive-service.running"
+    marker.write_text(json.dumps({"instance_id": "fixture", "pid": os.getpid()}))
+    marker.chmod(0o600)
+    owner = ServiceRuntimeNamespaceCustody(runtime=writer, service_lock_fd=fd,
+        lock_path=lock, marker_path=marker, instance_id="fixture")
+    owner.start()
+    try:
+        bound = owner.bound_runtime(writer)
+        with bound.store.read() as connection:
+            assert isinstance(connection, _BoundReadConnection)
+            assert not callable(getattr(connection, "set_progress_handler", None))
+            assert connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 3
+
+        # Hash only in a separate process: closing raw SQLite/SHM descriptors in
+        # the custody process could disturb its actual POSIX locks.
+        snapshot_code = (
+            "import hashlib,json,pathlib,sys; p=pathlib.Path(sys.argv[1]); "
+            "print(json.dumps({x.name:[x.stat().st_ino,hashlib.sha256(x.read_bytes()).hexdigest()] "
+            "for x in p.iterdir() if x.is_file()},sort_keys=True))"
+        )
+        def snapshot():
+            return subprocess.check_output(
+                [sys.executable, "-c", snapshot_code, str(directory)], text=True)
+
+        before = snapshot()
+        real_read = bound.store.read
+        observed = []
+
+        @contextmanager
+        def traced_read():
+            # Observe the original context and yield its unchanged real wrapper.
+            with real_read() as connection:
+                assert isinstance(connection, _BoundReadConnection)
+                observed.append(connection)
+                yield connection
+
+        monkeypatch.setattr(bound.store, "read", traced_read)
+        result = observer().observe_root_lanes(bound, parent.job_id)
+        assert len(observed) == 1
+        assert result["status"] == "UNAVAILABLE"
+        assert result["root_job_id"] == parent.job_id
+        assert result["issues"] == ["RUNTIME_UNAVAILABLE"]
+        assert result["lanes"] is None and result["source_consistency"] is None
+        assert result["coverage"]["completeness"] == "unknown"
+        assert result["coverage"]["returned_count"] is None
+        assert result["current_permission"] == "NOT_EVALUATED"
+        assert result["gaps"] == [
+            "RUNTIME_BINDING_NOT_PROJECTED", "NATIVE_ACTIVITY_NOT_OBSERVED",
+            "ACCOUNT_ENROLLMENT_NOT_PROJECTED", "HOST_NOT_PROJECTED",
+            "EFFECT_STATE_NOT_PROJECTED", "CURRENT_PERMISSION_NOT_EVALUATED",
+            "INSTALLED_RUNTIME_IDENTITY_NOT_ATTESTED",
+        ]
+        encoded = json.dumps(result)
+        for secret in ("PRIVATE_", "private-account-sentinel", lease.lease_token,
+                       str(tmp_path), "AttributeError", "_BoundReadConnection"):
+            assert secret not in encoded
+        assert snapshot() == before
+        reservation_code = (
+            "import sqlite3,sys; c=sqlite3.connect(sys.argv[1],timeout=.03,isolation_level=None); "
+            "c.execute('BEGIN IMMEDIATE'); c.execute('ROLLBACK'); c.close(); print('RESERVED')"
+        )
+        assert subprocess.check_output(
+            [sys.executable, "-c", reservation_code, str(writer.store.path)],
+            text=True).strip() == "RESERVED"
+    finally:
+        # A failed owner close must not be followed by unconditional lock release.
+        owner.close()
+        os.close(fd)

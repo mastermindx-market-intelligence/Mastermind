@@ -474,12 +474,10 @@ def test_every_codex_agent_layer_denies_parent_portfolio_writes():
         for server, denied in codex_bridge._DELEGATION_DENIED_TOOLS.items():
             actual = set(servers[server]["disabled_tools"])
             assert denied <= actual
-            # Codex applies disabled_tools after the parent's enabled_tools. Therefore every
-            # certified write is absent while the parent-selected read list remains unchanged.
-            parent_enabled = codex_bridge._DELEGATION_READ_TOOLS[server] | denied
-            effective_child = parent_enabled - actual
-            assert not (effective_child & denied)
-            assert codex_bridge._DELEGATION_READ_TOOLS[server] <= effective_child
+            # The four portfolio servers are disabled, not alternative read transports.
+            # Active-book reads remain available through the fixed research surface below.
+            assert servers[server]["enabled"] is False
+            assert servers[server]["command"] == "false"
         research = servers["research"]
         assert research["command"] == "sh"
         assert research["args"] == [
@@ -594,3 +592,391 @@ def test_external_macro_plane_skips_git_refresh(monkeypatch):
     out = macro_refresh.refresh_and_check(log=lambda _: None)
     assert out["asof"] == "2026-07-29"
     assert out["refreshed_to"] is None
+
+
+# Standalone native-role files are deserialized before parent config overlays.
+# A deny-only MCP table is invalid transport, even when the parent is inert.
+@pytest.mark.parametrize("role_name", [
+    "default", "explorer", "worker", "deep-reasoner", "narrative-analyst",
+    "quant-coder", "signal-scout",
+])
+def test_native_role_has_standalone_disabled_transports(role_name):
+    from brain import codex_bridge
+
+    path = codex_bridge._ROOT / ".codex" / "agents" / f"{role_name}.toml"
+    role = tomllib.loads(path.read_text(encoding="utf-8"))
+    assert role["sandbox_mode"] == "read-only"
+    for name, denied in codex_bridge._DELEGATION_DENIED_TOOLS.items():
+        server = role["mcp_servers"][name]
+        assert set(server) == {"command", "enabled", "disabled_tools"}
+        assert server["command"] == "false"
+        assert server["enabled"] is False
+        assert set(server["disabled_tools"]) == denied
+
+
+def _native_role_fixture(tmp_path):
+    import shutil
+    from brain import codex_bridge
+
+    shutil.copytree(codex_bridge._ROOT / ".codex", tmp_path / ".codex")
+    return tmp_path / ".codex" / "agents" / "worker.toml"
+
+
+@pytest.mark.parametrize("replacement", [
+    'enabled = false',
+    'command = "false"',
+    'command = "false"\nenabled = true',
+    'command = "false"\nenabled = 0',
+    'command = "false"\nenabled = "false"',
+    'command = "sh"\nenabled = false',
+    'command = ""\nenabled = false',
+    'command = "false"\nenabled = false\nurl = "https://invalid.example"',
+    'command = "false"\nenabled = false\nargs = ["ignored"]',
+    'command = "false"\nenabled = false\nenabled_tools = ["submit_book"]',
+])
+def test_native_role_invalid_transport_refuses_before_process(
+    replacement, tmp_path, monkeypatch,
+):
+    from brain import codex_bridge
+
+    path = _native_role_fixture(tmp_path)
+    # Build a valid synthetic base even when testing the pre-fix source.
+    # The separate seven-role test checks the actual repository artifacts.
+    for profile in path.parent.glob("*.toml"):
+        text = profile.read_text(encoding="utf-8")
+        for name in ("bot", "desk", "china", "hk"):
+            text = text.replace(f"[mcp_servers.{name}]\ndisabled_tools",
+                f'[mcp_servers.{name}]\ncommand = "false"\nenabled = false\ndisabled_tools')
+        profile.write_text(text, encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
+    needle = '[mcp_servers.bot]\ncommand = "false"\nenabled = false'
+    assert text.count(needle) == 1
+    path.write_text(text.replace(needle, '[mcp_servers.bot]\n' + replacement), encoding="utf-8")
+    calls = []
+
+    async def forbidden_exec(*argv, **kwargs):
+        calls.append(argv)
+        raise AssertionError("invalid native roles must refuse before any launch")
+
+    monkeypatch.setattr(codex_bridge, "_ROOT", tmp_path)
+    monkeypatch.setattr(codex_bridge, "available", lambda: True)
+    monkeypatch.setattr(codex_bridge, "codex_path", lambda: "/unused/codex")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden_exec)
+    result = asyncio.run(codex_bridge.reason(
+        "synthetic read-only delegation", allowed_tools=["Task"],
+        mcp_servers={"bot": {}, "desk": {}}, book="autonomous",
+    ))
+    assert calls == []
+    assert result["ok"] is False
+    assert "fixed disabled transport" in result["error"]
+
+
+@pytest.mark.parametrize("mode", ["workspace-write", "danger-full-access", None])
+def test_native_role_sandbox_drift_refuses(mode, tmp_path, monkeypatch):
+    from brain import codex_bridge
+
+    path = _native_role_fixture(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    replacement = "" if mode is None else f'sandbox_mode = "{mode}"'
+    path.write_text(text.replace('sandbox_mode = "read-only"', replacement), encoding="utf-8")
+    monkeypatch.setattr(codex_bridge, "_ROOT", tmp_path)
+    error = codex_bridge._delegation_authority_error(
+        allowed_tools=["Task"], mcp_servers={"bot": {}, "desk": {}},
+        cwd=tmp_path, book="autonomous",
+    )
+    assert error is not None
+
+
+@pytest.mark.parametrize("book,servers", [
+    ("autonomous", {"bot": {}, "desk": {}}),
+    ("china", {"china": {}}),
+    ("hk", {"hk": {}}),
+])
+def test_native_role_valid_book_preserves_existing_admission(book, servers):
+    from brain import codex_bridge
+
+    assert codex_bridge._delegation_authority_error(
+        allowed_tools=["Task"], mcp_servers=servers,
+        cwd=codex_bridge._ROOT, book=book,
+    ) is None
+
+
+@pytest.mark.parametrize("transport", [
+    'enabled = false', 'command = "false"',
+    'command = "false"\nenabled = true',
+    'command = "false"\nenabled = 0',
+    'command = "sh"\nenabled = false',
+    'command = "false"\nenabled = false\nurl = "https://invalid.example"',
+])
+def test_native_role_guard_rejects_transport_drift(transport, tmp_path, monkeypatch):
+    """Pure admission check: no availability check or process path is exercised."""
+    from brain import codex_bridge
+
+    path = _native_role_fixture(tmp_path)
+    for profile in path.parent.glob("*.toml"):
+        text = profile.read_text(encoding="utf-8")
+        for name in ("bot", "desk", "china", "hk"):
+            text = text.replace(f"[mcp_servers.{name}]\ndisabled_tools",
+                f'[mcp_servers.{name}]\ncommand = "false"\nenabled = false\ndisabled_tools')
+        profile.write_text(text, encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
+    old = '[mcp_servers.bot]\ncommand = "false"\nenabled = false'
+    assert text.count(old) == 1
+    path.write_text(text.replace(old, '[mcp_servers.bot]\n' + transport), encoding="utf-8")
+    monkeypatch.setattr(codex_bridge, "_ROOT", tmp_path)
+    error = codex_bridge._delegation_authority_error(
+        allowed_tools=["Task"], mcp_servers={"bot": {}, "desk": {}},
+        cwd=tmp_path, book="autonomous")
+    assert error is not None
+
+
+@pytest.mark.parametrize("value", ['123', 'true', '[["nested"]]'])
+def test_native_role_guard_typed_deny_list_refuses(value, tmp_path, monkeypatch):
+    from brain import codex_bridge
+
+    path = _native_role_fixture(tmp_path)
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    inside = False
+    for index, line in enumerate(lines):
+        if line == "[mcp_servers.bot]":
+            inside = True
+        elif line.startswith("["):
+            inside = False
+        if inside and line.startswith("disabled_tools = "):
+            lines[index] = "disabled_tools = " + value
+            break
+    else:
+        raise AssertionError("fixture has no bot deny list")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(codex_bridge, "_ROOT", tmp_path)
+    error = codex_bridge._delegation_authority_error(
+        allowed_tools=["Task"], mcp_servers={"bot": {}, "desk": {}},
+        cwd=tmp_path, book="autonomous")
+    assert error is not None
+
+
+# ---------------------------------------------------------------------------
+# Result truth: an explicitly failed write tool can never be a green result (#538)
+# ---------------------------------------------------------------------------
+
+def _failed_submit_item(name: str, *, with_error: bool) -> dict:
+    """Both upstream failure projections: transport/MCP error object, or a refusal result only."""
+    item: dict = {
+        "id": "fixture-tool", "type": "mcp_tool_call", "server": "desk",
+        "tool": name, "arguments": {}, "status": "failed",
+    }
+    if with_error:
+        item["error"] = {"message": "fixture tool refusal"}
+    else:
+        item["result"] = {"content": [{"type": "text", "text": "refused: fixture"}]}
+    return item
+
+
+@pytest.mark.parametrize("name", [
+    "submit_book", "mcp__desk__submit_book", "desk.submit_book", "mcp::china::submit_book",
+])
+@pytest.mark.parametrize("with_error", [True, False])
+def test_codex_jsonl_parser_records_failed_submit_book(name, with_error):
+    from brain.codex_bridge import _parse_jsonl
+
+    raw = "\n".join([
+        json.dumps({"type": "item.completed", "item": _failed_submit_item(name, with_error=with_error)}),
+        json.dumps({"type": "item.completed",
+                    "item": {"type": "agent_message", "text": "The submission was refused."}}),
+        json.dumps({"type": "turn.completed", "usage": {"input_tokens": 4, "output_tokens": 2}}),
+    ])
+    parsed = _parse_jsonl(raw)
+    assert parsed["tools_used"] == [name]            # the attempt is never rewritten into an absent call
+    assert parsed["error"] is None                    # the turn itself completed
+    assert [row["tool"] for row in parsed["failed_write_tools"]] == [name]
+    assert parsed["failed_write_tools"][0]["error"] == (
+        "fixture tool refusal" if with_error else None
+    )
+
+
+def test_codex_jsonl_parser_ignores_completed_and_read_tool_status():
+    from brain.codex_bridge import _parse_jsonl
+
+    raw = "\n".join([
+        json.dumps({"type": "item.completed",
+                    "item": {"type": "mcp_tool_call", "tool": "mcp__desk__get_quote",
+                             "status": "failed", "error": {"message": "quote feed down"}}}),
+        json.dumps({"type": "item.completed",
+                    "item": {"type": "mcp_tool_call", "tool": "mcp__desk__submit_book",
+                             "status": "completed"}}),
+        json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "done"}}),
+    ])
+    parsed = _parse_jsonl(raw)
+    assert parsed["tools_used"] == ["mcp__desk__get_quote", "mcp__desk__submit_book"]
+    assert parsed["failed_write_tools"] == []
+
+
+def _single_phase_exec(monkeypatch, items: list[dict]) -> None:
+    """Exit-0 fake Codex process emitting ``items`` inside an otherwise healthy turn."""
+    from brain import codex_bridge
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self, payload):
+            raw = "\n".join(json.dumps(row) for row in [
+                {"type": "thread.started", "thread_id": "t-fail"},
+                *items,
+                {"type": "turn.completed", "usage": {"input_tokens": 4, "output_tokens": 2}},
+            ])
+            return raw.encode(), b""
+
+    async def fake_exec(*argv, **kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(codex_bridge, "codex_path", lambda: "/usr/bin/codex")
+    monkeypatch.setattr(codex_bridge, "available", lambda: True)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+
+@pytest.mark.parametrize("with_error", [True, False])
+def test_failed_submit_book_forces_non_success_and_keeps_effect_ambiguous(with_error, monkeypatch):
+    """Exit 0 + ordinary final prose after a failed submit_book must not be ok=True.
+
+    The result may not claim the write did NOT apply either: the tool's own error text and the
+    attempted name stay on the result for reconciliation, and ``error`` is a fixed string that
+    the provider waterfall's substring classifier can never read as auth/quota failover.
+    """
+    from brain import codex_bridge
+
+    _single_phase_exec(monkeypatch, [
+        {"type": "item.completed",
+         "item": _failed_submit_item("mcp__desk__submit_book", with_error=with_error)},
+        {"type": "item.completed",
+         "item": {"type": "agent_message", "text": "The synthetic submission was refused."}},
+    ])
+    out = asyncio.run(codex_bridge.reason(
+        "govern autonomous", allowed_tools=["mcp__desk__submit_book"],
+        mcp_servers={"desk": {}}, book="autonomous",
+    ))
+    assert out["ok"] is False
+    assert out["error"] == codex_bridge.WRITE_TOOL_FAILURE_ERROR
+    assert out["text"] == "The synthetic submission was refused."      # evidence retained
+    assert out["tools_used"] == ["mcp__desk__submit_book"]
+    assert [row["tool"] for row in out["failed_write_tools"]] == ["mcp__desk__submit_book"]
+    assert "not applied" not in out["error"].lower()
+    assert "NOT_APPLIED" not in json.dumps(out)
+
+
+def test_failed_write_tool_error_never_carries_tool_or_turn_text(monkeypatch):
+    """A tool refusal or turn error mentioning quota/429 must not reach ``error``: that string is
+    what provider_waterfall._failure_kind classifies, and a match would resend the prompt to Claude
+    after a write of unknown effect."""
+    from brain import codex_bridge
+
+    item = _failed_submit_item("mcp__desk__submit_book", with_error=True)
+    item["error"] = {"message": "book quota exceeded (429 rate limit)"}
+    _single_phase_exec(monkeypatch, [
+        {"type": "item.completed", "item": item},
+        {"type": "error", "message": "usage limit reached"},
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "stopped"}},
+    ])
+    out = asyncio.run(codex_bridge.reason(
+        "govern autonomous", allowed_tools=["mcp__desk__submit_book"],
+        mcp_servers={"desk": {}}, book="autonomous",
+    ))
+    assert out["ok"] is False
+    assert out["error"] == codex_bridge.WRITE_TOOL_FAILURE_ERROR
+    for word in ("quota", "429", "rate limit", "usage limit"):
+        assert word not in out["error"].lower()
+    # ...but the tool's own evidence is not thrown away.
+    assert out["failed_write_tools"] == [
+        {"tool": "mcp__desk__submit_book", "error": "book quota exceeded (429 rate limit)"},
+    ]
+
+
+def test_failed_read_tool_remains_recoverable(monkeypatch):
+    """Control: a failed READ tool the model recovers from is still a successful turn."""
+    from brain import codex_bridge
+
+    _single_phase_exec(monkeypatch, [
+        {"type": "item.completed",
+         "item": {"type": "mcp_tool_call", "tool": "mcp__desk__get_quote",
+                  "status": "failed", "error": {"message": "quote feed down"}}},
+        {"type": "item.completed",
+         "item": {"type": "agent_message", "text": "Proceeding on the last close."}},
+    ])
+    out = asyncio.run(codex_bridge.reason("inspect", allowed_tools=["mcp__desk__get_quote"],
+                                          mcp_servers={"desk": {}}, book="autonomous"))
+    assert out["ok"] is True
+    assert out["error"] is None
+    assert out["failed_write_tools"] == []
+
+
+def _two_phase_exec(monkeypatch, sealed_items: list[dict], *, research_items: list[dict] = ()):
+    from brain import codex_bridge
+
+    phase = 0
+    launches = []
+
+    class FakeProcess:
+        returncode = 0
+
+        def __init__(self, current: int):
+            self.current = current
+
+        async def communicate(self, payload):
+            rows = [{"type": "thread.started", "thread_id": f"t-{self.current}"}]
+            rows += list(sealed_items) if self.current else list(research_items)
+            rows.append({"type": "item.completed",
+                         "item": {"type": "agent_message", "text": "artifact"}})
+            return "\n".join(json.dumps(r) for r in rows).encode(), b""
+
+    async def fake_exec(*argv, **kwargs):
+        nonlocal phase
+        current = phase
+        phase += 1
+        launches.append(list(argv))
+        return FakeProcess(current)
+
+    monkeypatch.setattr(codex_bridge, "codex_path", lambda: "/usr/bin/codex")
+    monkeypatch.setattr(codex_bridge, "available", lambda: True)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    return launches
+
+
+def test_sealed_phase_failed_submit_book_is_not_green(monkeypatch):
+    """The exactly-once count sees one attempted call; the failed status must still win."""
+    from brain import codex_bridge
+
+    launches = _two_phase_exec(monkeypatch, [
+        {"type": "item.completed",
+         "item": _failed_submit_item("mcp__desk__submit_book", with_error=True)},
+    ])
+    out = asyncio.run(codex_bridge.reason(
+        "govern autonomous",
+        allowed_tools=["mcp__desk__get_my_book", "mcp__desk__submit_book", "Task"],
+        mcp_servers={"bot": {}, "desk": {}}, book="autonomous",
+    ))
+    assert len(launches) == 2
+    assert out["ok"] is False
+    assert out["error"] == codex_bridge.WRITE_TOOL_FAILURE_ERROR
+    assert out["delegated_research_completed"] is True
+    assert out["tools_used"] == ["mcp__desk__submit_book"]
+    assert [row["tool"] for row in out["failed_write_tools"]] == ["mcp__desk__submit_book"]
+
+
+def test_research_phase_failed_write_never_launches_sealed_submission(monkeypatch):
+    """Defense in depth: if a read-only research child somehow reports a failed write, the bridge
+    must not advance to the sealed phase and attempt the write again."""
+    from brain import codex_bridge
+
+    launches = _two_phase_exec(monkeypatch, [], research_items=[
+        {"type": "item.completed",
+         "item": _failed_submit_item("mcp__desk__submit_book", with_error=False)},
+    ])
+    out = asyncio.run(codex_bridge.reason(
+        "govern autonomous",
+        allowed_tools=["mcp__desk__get_my_book", "mcp__desk__submit_book", "Task"],
+        mcp_servers={"bot": {}, "desk": {}}, book="autonomous",
+    ))
+    assert len(launches) == 1
+    assert out["ok"] is False
+    assert out["error"] == codex_bridge.WRITE_TOOL_FAILURE_ERROR
+    assert "delegated_research_completed" not in out

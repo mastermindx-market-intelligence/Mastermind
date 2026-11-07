@@ -1,0 +1,27 @@
+{
+  "account_login_changed": false,
+  "additional_tests_sha256": "58bd9d3e7d610668b51cc3469994ab713babf64bbe7a118940d9b2a2b6bf8879",
+  "admission_granted": false,
+  "business_tests_sha256": "e4b32ca39ca3ece636f2aa93850a26b97eb6fd15749c06fffdbb31dd7025f641",
+  "patch_sha256": "2f9e0c590eed3ea5a9f58aeced29e9840f7762a2221f95c283981772911db40d",
+  "postimages_sha256": {
+    "codex_pool_policy.py": "abad4a3cc2b734578dd399ff9582dfffce4b40bb386fe81561ae54c4e70ac1bc",
+    "tests/test_codex_native_profile.py": "c74d2974847d8e14dcb02345de52c73a7b8a3f0187f8389726cc1cff2221d520"
+  },
+  "preimages_sha256": {
+    "codex_native_profile.py": "36e24e6b756394d36c1158399d740bbbd6ff85b6341be27e9d929e7c854389a1",
+    "codex_pool_policy.py": "f3764a23694fe0437598221e4b95aa27adb31633f2b2e38903ce29c446269224",
+    "tests/test_codex_native_profile.py": "1b8141f7c4335fa8bdb3705b4c2dd03866e51bc6d5ee97b0012faec18e007b23",
+    "tests/test_codex_pool_policy.py": "8b089229f4c0eb208eca2e89c7eab6322e02e226202664f41a43504035652ec7"
+  },
+  "schema": "mastermind.native_codex_six_seat_source/v1",
+  "source_owner": "existing installed M2 Fabric kit and original Fabric selector/admission owners",
+  "status": "source_candidate_not_installed",
+  "test_source_paths": [
+    "codex_pool_policy.py",
+    "codex_native_profile.py",
+    "tests/test_codex_pool_policy.py",
+    "tests/test_codex_native_profile.py"
+  ],
+  "worker_started": false
+}
