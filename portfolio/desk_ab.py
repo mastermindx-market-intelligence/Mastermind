@@ -203,9 +203,12 @@ def _clone_book_for(asof: str) -> dict:
     Returns {} when no matching submission exists. Never raises."""
     asof = str(asof)[:10]
     out: dict = {}
-    # primary: the dated decisions ledger (one row per submitted book)
+    # primary: the dated decisions ledger (one effective row per submitted book)
     try:
-        rows = [json.loads(l) for l in _AUTONOMOUS_DECISIONS.read_text().splitlines() if l.strip()]
+        from bot import decision_rows
+        rows = decision_rows.effective_rows(
+            [json.loads(l) for l in _AUTONOMOUS_DECISIONS.read_text().splitlines() if l.strip()]
+        )
         for row in rows:
             if str(row.get("asof") or "")[:10] != asof:
                 continue

@@ -73,16 +73,20 @@ def _fills(pid: str) -> list[dict]:
 
 
 def _decision_rows(pid: str) -> list[dict]:
+    """EFFECTIVE decision rows for a book — the raw ledger is append-only, so superseded
+    history stays on disk and the one-row-per-asof view is recovered through the accessor."""
+    from bot import decision_rows as dr
     from portfolio import registry
 
     path = registry.data_dir(pid) / "decisions.jsonl"
     if not path.exists():
         return []
-    return [
+    raw = [
         json.loads(line)
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+    return dr.effective_rows(raw)
 
 
 def _receipt_files(pid: str) -> list[str]:
@@ -421,8 +425,14 @@ def test_same_asof_retry_substantive_supersedes_substantive():
 
     rows = dr.replace_for_asof([first], retry, "2026-08-12")
 
-    assert rows == [retry]
-    assert len(rows) == 1
+    # raw truth: append-only — the retry is appended naming the row it supersedes, nothing rewritten
+    assert len(rows) == 2
+    assert rows[0] == first
+    assert rows[1]["supersede_mode"] == "asof"
+    assert rows[1]["supersedes"] == [dr.row_identity(first)]
+    # the SAME assertion as before, on the effective view: exactly one row survives — the later one
+    assert [dr.strip_supersession(r) for r in dr.effective_rows(rows)] == [retry]
+    assert len(dr.effective_rows(rows)) == 1
 
 
 def test_same_asof_retry_barren_never_erases_substantive():
@@ -452,10 +462,19 @@ def test_same_asof_retry_preserves_other_asofs_in_order():
     tuesday_retry = _queued_row("2026-08-12", "tuesday retry", "NVDA", 0.30)
     wednesday = _queued_row("2026-08-13", "wednesday book", "BIIB", 0.15)
 
-    assert dr.replace_for_asof([monday, tuesday], tuesday_retry, "2026-08-12") == [
+    retried = dr.replace_for_asof([monday, tuesday], tuesday_retry, "2026-08-12")
+    # raw truth: append-only — tuesday_retry appended at the end; monday/tuesday bytes untouched
+    assert len(retried) == 3
+    assert retried[:2] == [monday, tuesday]
+    assert retried[2]["supersede_mode"] == "asof"
+    assert retried[2]["supersedes"] == [dr.row_identity(tuesday)]
+    # the SAME assertion as before, on the effective view
+    assert [dr.strip_supersession(r) for r in dr.effective_rows(retried)] == [
         monday, tuesday_retry,
     ]
-    assert dr.replace_for_asof([monday, tuesday], wednesday, "2026-08-13") == [
+    appended = dr.replace_for_asof([monday, tuesday], wednesday, "2026-08-13")
+    assert appended[0] == monday and appended[1] == tuesday  # a new asof rewrites nothing
+    assert [dr.strip_supersession(r) for r in dr.effective_rows(appended)] == [
         monday, tuesday, wednesday,
     ]
 
@@ -525,7 +544,7 @@ def test_redecides_keep_one_target_and_settle_fills_it_once(tmp_path, monkeypatc
     assert second["executed"] == []
 
     # D1: exactly one pending target, equal to the SECOND decision; zero fills so far.
-    from portfolio import paper_account
+    from portfolio import paper_account, registry
 
     pending = paper_account.load_pending_target(AUTONOMOUS)
     assert pending["target"] == {"MSFT": 0.10}
@@ -544,6 +563,16 @@ def test_redecides_keep_one_target_and_settle_fills_it_once(tmp_path, monkeypatc
     assert {fill["ticker"] for fill in fills} == {"MSFT"}
     assert all(fill["ticker"] != "AAPL" for fill in fills)
     rows = _decision_rows(AUTONOMOUS)
+    # raw truth: append-only ledger — queued, re-decide, then the executed revise row
+    raw_rows = [
+        json.loads(line)
+        for line in (registry.data_dir(AUTONOMOUS) / "decisions.jsonl")
+        .read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(raw_rows) == 3
+    assert raw_rows[2]["supersede_mode"] == "revise"
+    assert raw_rows[2]["supersedes"] == [raw_rows[1]["row_id"]]
     assert len(rows) == 1
     assert rows[0]["asof"] == "2026-08-12"
     assert rows[0]["target_status"] == "executed"

@@ -372,7 +372,13 @@ def test_real_settlement_ack_retry_never_reprices_refills_or_rewrites_decision(
     assert not active.exists()
     assert paper_account.pending_settlement_receipts(book) == []
     assert len(price_calls) == 1
-    decision, = [json.loads(line) for line in journal.read_text().splitlines() if line]
+    from bot import decision_rows
+    raw_decisions = [json.loads(line) for line in journal.read_text().splitlines() if line]
+    # raw truth: append-only — the seeded queued row plus the appended executed revise row
+    assert len(raw_decisions) == 2
+    assert raw_decisions[1]["supersede_mode"] == "revise"
+    assert raw_decisions[1]["supersedes"] == [raw_decisions[0]["row_id"]]
+    decision, = decision_rows.effective_rows(raw_decisions)
     assert decision["settlement_transaction_id"] == receipt["transaction_id"]
     assert decision["settlement_receipt_sha256"] == paper_account._content_sha256(receipt)
     assert decision["settlement_fill_ids"] == [fill["fill_id"] for fill in original_fills]

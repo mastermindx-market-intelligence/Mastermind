@@ -432,20 +432,24 @@ def _conviction_conf(v) -> float:
 
 def _book_decisions(portfolio_id: str):
     """Yield decision rows for a Brain book, newest-irrelevant. Best-effort; [] if missing."""
+    from bot import decision_rows
     p = _PORTFOLIOS / portfolio_id / "decisions.jsonl"
     if not p.exists():
         return
     try:
+        parsed: list = []
         for line in p.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line:
                 continue
             try:
-                yield json.loads(line)
+                parsed.append(json.loads(line))
             except Exception:  # noqa: BLE001
                 continue
     except Exception:  # noqa: BLE001
         return
+    # Append-only ledger: yield the effective view (superseded history stays on disk, unseen).
+    yield from decision_rows.effective_rows(parsed)
 
 
 def _book_reliability(asof: date, portfolio_id: str, benchmark: str) -> dict:

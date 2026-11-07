@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -79,17 +80,42 @@ def main() -> None:
     print(f"fills: {len(fills)} -> {len(kept)}")
 
     # ---- decisions.jsonl: drop the two sells from `executed` ----
+    # The ledger is append-only: each changed EFFECTIVE row gets a revise-mode row appended
+    # naming the row it corrects; superseded history keeps its original bytes. A byte-identical
+    # twin of an already-revised row shares its identity (the one revise already scrubbed it in
+    # the effective view — count it, append nothing); a row without `asof` cannot be revised, so
+    # it is skipped uncounted and reported on stderr.
+    from bot import decision_rows
     drop_tickers = {tk for tk, _, _ in TRIMS}
-    decisions = _read_jsonl(decisions_p)
+    decisions = decision_rows.read_effective_rows(decisions_p)
     n_removed = 0
+    revised_identities: set[str] = set()
+    skipped_no_asof = 0
     for d in decisions:
+        asof = d.get("asof")
+        if not asof:
+            skipped_no_asof += 1
+            continue
         ex = d.get("executed")
         if not ex:
             continue
         new_ex = [e for e in ex if not (e.get("side") == "sell" and e.get("ticker") in drop_tickers)]
-        n_removed += len(ex) - len(new_ex)
-        d["executed"] = new_ex
-    decisions_p.write_text("".join(json.dumps(d, ensure_ascii=False, default=str) + "\n" for d in decisions))
+        removed = len(ex) - len(new_ex)
+        if not removed:
+            continue
+        n_removed += removed
+        identity = decision_rows.row_identity(d)
+        if identity in revised_identities:
+            continue
+        scrubbed = dict(d)
+        scrubbed["executed"] = new_ex
+        decision_rows.append_decision_row(decisions_p, scrubbed, asof, revises=d)
+        revised_identities.add(identity)
+    if skipped_no_asof:
+        print(
+            f"decisions.jsonl: {skipped_no_asof} effective row(s) left unscrubbed (no asof)",
+            file=sys.stderr,
+        )
     print(f"decisions: removed {n_removed} executed sell record(s)")
 
     # ---- latest.json: recompute marks/cash/gross/NAV from the fixed account ----

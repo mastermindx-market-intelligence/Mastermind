@@ -753,14 +753,14 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
                          _locked: bool = False) -> None:
     from portfolio import registry
     from brain import china_intake as _intake_mod, decision_submission
+    from bot import decision_rows
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
-    p.parent.mkdir(parents=True, exist_ok=True)
+    decision_rows.require_decision_log_directory(p)
     try:
         from brain import portfolio_learning
         lesson_links = portfolio_learning.trace_links(submission, target_status=target_status)
     except Exception:
         lesson_links = {}
-    from bot import decision_rows
     entry = {
         "asof": asof,
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -792,10 +792,9 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
     }
     from portfolio import paper_account
     def _persist() -> None:
-        existing = decision_rows.read_rows(p)
-        # Idempotent per asof — but a FAILED re-run must not erase a good book. See bot/decision_rows.
-        rows = decision_rows.replace_for_asof(existing, entry, asof)
-        decision_rows.write_rows(p, rows)
+        # Idempotent per asof in the EFFECTIVE view — but a FAILED re-run writes nothing, and the
+        # ledger file is append-only: prior bytes are never rewritten. See bot/decision_rows.
+        decision_rows.append_decision_row(p, entry, asof, strict=True)
     if _locked:
         _persist()
     else:
@@ -912,6 +911,7 @@ def republish(
 
 def load_decisions(limit: int = 60) -> list[dict]:
     """The daily decision log, NEWEST first. Backs /api/decisions?portfolio=china."""
+    from bot import decision_rows
     from portfolio import registry
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
     rows: list[dict] = []
@@ -924,6 +924,7 @@ def load_decisions(limit: int = 60) -> list[dict]:
                 rows.append(json.loads(line))
             except Exception:
                 pass
+    rows = decision_rows.effective_rows(rows)
     rows.sort(key=lambda r: (r.get("asof") or "", r.get("ts") or ""), reverse=True)
     return rows[:limit]
 
