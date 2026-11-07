@@ -1940,3 +1940,56 @@ After that, the next independent source contributions are authentic delivered-so
 The Ubuntu1/root C26 permission denial remains closed and unretried. C3 remains source validation only. Both denied local AF_UNIX cases and original paid Fabric refusals remain excluded/unretried. Original runtime carrier **meta-ceo-byok-followon-parent-20261106-c35-01** and path **/Volumes/Mastermind 2/agent-workspaces/web/meta-ceo-byok-followon-parent-20261106-c35-01** remain unchanged. Outcome Learning **#398/#409** stays held. No live inference, new profile/account, fleet activation, browser login, daemon, watcher, or Slack handoff occurred.
 
 Next action: implement the held-entry attended EVAL consumer and original retired-admission recovery on the same #2234 branch; verify with the actual pinned native bodies and exact current source gates. Reconcile original #2217 CI/queue as it advances. Runtime acceptance later requires restoration/reconciliation of the original administrative connection; no source or CI claim substitutes for installed proof.
+
+## 45. Attended native EVAL consumer and retired-original recovery — 2026-11-07
+
+**MORE_WORK_EXISTS; MISSION_COMPLETE=false.** Source implementation is published and qualified; installed acceptance, complete observations and learning promotion remain owed.
+
+### Canonical contribution and original owner
+
+Original PR [#2234](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234), original branch `sol/hermes-native-eval-inputs-20261107-c3`, now points to **4d8e0d6acbc3daabeca469672bde8e3c41f52bc2**, tree **a4b0a9e0e1d209e5d9865b67c403987f88ab2814**, parent **72693bea15fac45873d69483280c6e911f3ba3c9**. Eleven exact postimages were published through the incumbent GitHub tree/commit/CAS carrier. The independently staged Git tree matches the API tree exactly; source readback returned the new operator blob **163b00be83f74a262a88de23dac01b525e97fbc6**. PR remains Draft, with no release request.
+
+The original held runtime command selector now admits `eval-submit`, `eval-read`, and `eval-publish`. These are finite attended operations, not a daemon or inference runner. Closed stdin input carries a caller-chosen run UUID and existing native session. The private operator derives the stable submission/input identity before mutation, consults the existing enrollment only for submission, qualifies current producer/profile capability and role/owner lineage, and invokes the original client once.
+
+Read/publication recover and retain original session, submission, input digest, admission ID and evaluation binding. They do not inspect or create today's enrollment. Nonterminal and steering states return immediately without publication. The current publisher capability is qualified independently from the original execution producer. A changed owner before publication causes zero mutation calls; a changed owner or unqualified response after entry is EFFECT_UNKNOWN. Outer asyncio-runner loss also conservatively preserves the original recovery selector. No answer, terminal metadata, caller observation/root/clock or arbitrary label crosses the bounded CLI result.
+
+The shared held qualification retains source, configuration, PID1 role facts, exact native child lineage, profile identity and private-client expected PID. The existing role TCP policy is attached once synchronously before asyncio/threads; later owner observations do not reattach Landlock. Existing enrollment behavior and role isolation are preserved.
+
+The no-ID original reader now consults the incumbent terminal identity only when the live lookup is absent. It bounds and validates the pointer, reads the original admission/tombstone, requires the pointed-to admission ID to match, then reuses the unchanged principal/session/submission/input/marker checks. It issues no SQL mutation and creates no lookup index or replacement run. Actual retirement and result-expiry tests recover the same original identity and publisher.
+
+### Source proof and honest test accounting
+
+- Initial operator/retirement composition: 245 cases, 202 passed, 39 fixture setup errors and four failures. Those exposed the old consumer-schema fixture, role-validation ordering, one profile fixture comparison and a missing terminal fixture. Fixes did not loosen production qualifications.
+- Corrected affected operator/enrollment/control run: **60 passed**, zero failures/errors/skips. Actual retirement/publication cases had already passed unchanged.
+- Final narrow owner/response regression: **12 passed**, including final capability-to-publication fencing with zero mutation calls and wrong-operation NOT_SUBMITTED response classification after publication. These suites overlap and their totals are not additive.
+- Actual held archive entry: **five passed**, including all three commands and source-finder isolation.
+- Production D8 collector over this contribution selected **seven source files**, no identity/evidence findings. It used complete working postimages, including new files. Exact control source review hash becomes **e9cb6e19a5bccd42a30366ddc2fddf8bfb8566f0d938fa70d05542b73dbf82c3**; the same existing literal site remains, with no new scanner exemption.
+- Local and C3 postimage fingerprints matched. Whitespace checks passed. The new operator SHA256 is **a7c0833576a168b4d19d010f47686681b03c4e1b942faf4cb01f15aa6062522c**; final CLI is **476749556c4ae1f9c9b68c3981acd6a0358190c7ba85ab14d4001fcb55d8c152**; final operator test is **43086f96808ce7f81713ef66bb12f82cebd3add24546cf6659eee24e02d47771**.
+- C3 receipts are `eval-operator-proof.xml`, `eval-operator-fix1-proof.xml`, `eval-operator-fix2-proof.xml`, `eval-operator-archive-proof.xml`, and `eval-operator-d8.json` under the existing source-validation parent `/Users/chriswong/hermes-discovery-correction-20261107-a52esz9q`. No installed effect is claimed.
+- The 14-file MIT native derivation and previously qualified publisher remain unchanged. Both denied local AF_UNIX cases remain excluded/unretried.
+
+### Delivery reconciliation
+
+Discovery [#2217](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2217) retains original head **9353ce08dc37cb1e0d30ec9c6831dc0613db27c7** and the original auto-merge request enabled at **2026-11-07T18:23:40Z**. Latest readback: OPEN, no merge commit, no queue entry; all six required CI shards **42400966739** still running. No duplicate arm was issued.
+
+EVAL parent7269 proxy/runtime/OAuth/candidate/harness/OS workflows passed. Main CI **42401305250** failed the real shared scope preflight because the still-unmerged discovery dependency contributes control-plane/configuration paths. The EVAL fence must not be widened to swallow that dependency. After discovery's original merge, reconcile this original branch onto the accepted base and obtain current required CI. Two direct local scope tests at two-parent7269 were SKIPPED by merge-ref interpretation; they are not passing CI evidence.
+
+Observed master **c4ce5ca48303a8eac1658be4fd4034959d3a568a** adds only bot evidence-truth source and its test over2541. No protected law or overlapping implementation changed. Compatible law pin **66780ab7e3e9fdbfd40713bb5791fb1888529f7c** remains valid.
+
+### Next source contribution: actual context source evidence
+
+Proceed with a separately bounded current-context receipt v2 in the incumbent installed capture/validator, not by widening the EVAL program scope. Its initial source-inventory scope is selected direct-record content and overall coverage remains partial.
+
+The original installed `_collect_packet` already holds qualified Macro CODE C, materialized DATA N, plan.file_objects, captured bytes and same-view/generation checks. Inventory only selected direct records using repository, DATA commit, canonical path, exact content SHA256 and selected section/item positions. Verify ordinary-file mode and original Git blob identity from the held plan. Retain the receipt's inventory/digest privately in the existing provider snapshot/claim; do not inflate the model prompt by blindly rendering machine inventory.
+
+Aggregate `source_records_digest` includes consulted but excluded/superseded records and omits auxiliary joins; it cannot be inverted into delivered source facts. Artifact pointers do not imply opened document bodies. DNR content originates in compiled_kill_registry.yml, P0 in Mastermind strategic_state.yml, programs in mastermind_programs.yml, and workstream PR joins in active_builds.json. Full auxiliary coverage belongs in annotations at the original Macro compiler's loaders, not a second compiler inside Hermes.
+
+The next connected EVAL contribution must join final post-hook messages to original admission/generation/session/turn delivery, then existing request and retry-aware serialized transport evidence. Prefetch alone or a later-removed block cannot prove delivery. Freeze qualifying inventory once within the existing bounded observation scope, retain explicit overflow/incomplete coverage, check frozen EVAL source policy before dispatch, and project only retained successful joins at finalization without refreshing current DATA.
+
+V2 observed-source validation must permit identical bytes at distinct immutable refs while remaining unique/sorted by artifact ref; v1 semantics stay unchanged. Current digest-only de-duplication would lose unauthorized aliases. Focused acceptance needs C≠N, selected/omitted/superseded distinction, pointer-only sources, post-hook removal, equal-digest distinct refs, overflow and terminal replay after DATA advances. Tool-effect observations follow through incumbent tool result owners. No independent memory, identity, auth, retry, queue, publication or control plane.
+
+### Holds and continuation
+
+Original Ubuntu1/root C26 permission denial remains closed and unretried; C3 is source validation only. Original runtime carrier **meta-ceo-byok-followon-parent-20261106-c35-01** and its source path remain unchanged. Paid Fabric refusal, local AF_UNIX denials and Outcome Learning **#398/#409** holds remain. No live inference/account/browser/fleet activation or Slack transport occurred.
+
+Continue the source-addressable context receipt/delivery component while reconciling the original dependency workflows. Installed acceptance later requires restoring/reconciling the original administrative connection; no alternate carrier or source-only proof substitutes for it. The full teammate mission is not complete.
