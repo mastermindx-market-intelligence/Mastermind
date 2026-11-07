@@ -65,9 +65,10 @@ async def request(app, token, tool, arguments):
             headers={"authorization": "Bearer " + token}, json={"arguments": arguments})
 
 
-def test_static_surface_is_six_role_correct_tools():
+def test_static_surface_is_seven_role_correct_tools():
     assert COO_TOOL_NAMES == ("executive_mandate", "executive_state", "executive_inbox",
-                             "executive_fabric", "submit_principal_intent", "principal_intent_status")
+                             "executive_fabric", "submit_principal_intent", "principal_intent_status",
+                             "mmx_delegate")
     assert "submit_ceo_intent" not in COO_TOOL_NAMES
 
 

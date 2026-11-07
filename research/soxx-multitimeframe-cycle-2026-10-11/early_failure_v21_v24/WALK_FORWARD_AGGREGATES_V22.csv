@@ -1,0 +1,9 @@
+group,checkpoint_h,all_original_episodes,forecastable_eligible,calendar_weeks_with_forecasts,trades_exited_by_model,helped_original_losers,harmed_original_winners,model_economic_lift_on_test_episodes_pp,naive_close_below_entry_same_episodes_pp,baseline_always_hold_same_episodes_pp,hindsight_oracle_upper_bound_same_episodes_pp,model_economic_lift_per_all_original_opportunities_pp,model_leave_biggest_benefit_out_mean,no_forecast_original_opportunities,model_week_block95,naive_week_block95
+all,0.5,91,56,17,17,12,5,-0.151245,0.056796,0.0,0.939221,-0.093074,-0.20564,35,"[-1.010339, 0.457752]","[-0.609502, 0.563143]"
+new_semis,0.5,47,27,13,9,7,2,-0.160181,0.207145,0.0,1.280562,-0.092019,-0.275591,20,"[-1.300129, 0.785178]","[-0.48348, 0.817719]"
+inspected,0.5,34,22,9,3,3,0,0.23908,0.000867,0.0,0.568053,0.154699,0.143843,12,"[0.0, 0.686055]","[-0.601452, 0.32251]"
+sector_controls,0.5,10,7,7,5,2,3,-1.343515,-0.347342,0.0,0.789145,-0.940461,-1.988684,3,"[-3.864265, 0.720944]","[-3.04839, 1.531996]"
+all,3.0,91,34,13,6,3,3,-0.197953,0.040674,0.0,0.611026,-0.073961,-0.28618,57,"[-0.631717, 0.105203]","[-0.289303, 0.335978]"
+new_semis,3.0,47,11,7,1,1,0,0.13196,0.189241,0.0,0.976873,0.030884,0.0,36,"[0.0, 0.395879]","[-0.02765, 0.728676]"
+inspected,3.0,34,17,7,1,0,1,-0.34033,0.075199,0.0,0.222707,-0.170165,-0.361601,17,"[-0.913517, 0.0]","[0.0, 0.20185]"
+sector_controls,3.0,10,6,6,4,2,2,-0.399394,-0.329518,0.0,1.040544,-0.239636,-1.021979,4,"[-2.162726, 1.294064]","[-1.677696, 0.689142]"

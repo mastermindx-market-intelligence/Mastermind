@@ -26,6 +26,55 @@ their section coverage and missingness. Result details require the exact indexed
 five-key tuple and runtime observation; window association reuses the existing
 `observedMissionAssociation` function. No join is inferred from titles or timing.
 
+### Existing Executive native session association
+
+The Office source/draft context now accepts a strictly *read-only* projection
+from the already mounted Executive session host. That owner must supply the
+atomic `currentObservation()` of one verified RESOLVED and SEND-addressable
+Fabric Attempt target, exact `workRef/rootJobId`, principal and generation.
+`qualifyExecutiveOfficeSession` rechecks that target against the existing
+`currentTargetRef()` and the authenticated owner context; unknown, stale,
+wrong-project, malformed, old-host and signed-out states remain UNBOUND. The
+resulting `sessionRef` is the **existing** Executive `fabric_attempt:` target
+reference, **not** a newly minted DSH chat/session ID or an admission token.
+The owner scope/generation is a local presentation discriminator only.
+The current App reacquires owner Mission and Programs facts after this
+context changes; it never re-labels an old snapshot with a newer session
+identity. The Office presentation remounts on source identity changes so an
+old local preview cannot masquerade as the newly bound conversation.
+
+Native DSH developer seats from #1876, Grok Bot/OpenClaw and Hermes have not
+yet supplied a qualified Executive same-session correlation. They must remain
+UNBOUND in this Office until the original authenticated session owner extends
+its contract; titles, bot messages, raw Slack timestamps and model text are
+insufficient. The read-only owner association itself grants no new send, wake,
+model, MCP, scheduler or worker-return authority.
+
+### The Today continuation user path (source-only candidate)
+
+The existing `SelectedSessionContinuation` is now **reused**, not cloned,
+inside the Meta-CEO Today's Office whenever all of these already-qualified
+facts hold: a CURRENT original Executive Mission, one exact owner-authenticated
+native `fabric_attempt` target, the same target in the original mounted session
+control, and a non-null owner generation. The App alone supplies the existing
+continuation component and its existing `onContinue` / `onRecover` callbacks,
+which preserve the original operation-key reconciliation and no-Stop rule.
+
+The Office presents a distinct **owner-qualified session** area and continues
+to keep its direction intake as an inert preview; user-entered Office draft
+text is **never silently submitted** into the native continuation form. The
+component itself suppresses any injected continuation when Mission/current
+session correlation is missing or stale. The same native component remains
+available in its original Conversation route, but only the active navigation
+route mounts it; no second sender, store, queue, poller or session identity
+exists. A sent continuation receipt means its original operation was committed,
+**not** that a worker started, returned, passed review, or was accepted.
+
+This is a Mastermind OS source/UI bridge, not a live DSH streaming chat
+integration, new model provider, authenticated account acceptance or always-on
+resident-service proof. A real signed-in user journey and independently
+accepted current source are mandatory before claiming integration complete.
+
 Delivery, pickup, START, effect, transport return, review and acceptance remain
 independent. A completed result is not a transport return or acceptance. Work
 remains unadapted in this projection; the legacy Work route and its released source
@@ -82,11 +131,31 @@ session identity. Keep missing provenance UNKNOWN or UNAVAILABLE. Do not invent
 revisions, timestamps or session bindings to make the component show CURRENT.
 A Mission-only adapter can retain its decoded owner observation and exact
 selection, check the host invalidation epoch across acquisition, and label its
-local acquisition time explicitly. Full Result integration additionally needs
-an unmodified producer-compatible Mission v3 / Result pair or an authenticated
-host test; the mutated pairs in unit tests qualify mismatch logic only.
+local acquisition time explicitly. The compound Office path now publishes one
+authenticated Mission v3 document and one selected Workspace Result together.
+`projectOffice` remains the association authority. Acquisition stays in the App
+and the typed host; this hook does not read.
 
-`mission-adapter.ts` supplies that pure Mission presentation seam. Call
+The committed positive body remains the source-pinned HC-P6.T1 export
+(`actual-pair.json`, 10024 bytes, `content_fallback: not_captured`). The
+reviewed producer proof at `abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb` is imported
+as its own commit; that hash is not an ancestor of this branch. Fresh mounted
+positive and `CONTENT_OVER_BUDGET` bodies are produced in attempt-owned
+directories and consumed as whole HTTP bytes. A present, empty, missing, or
+mismatched explicit directory is refused and is not replaced with the committed
+file. Mutations of a committed AVAILABLE body stay labeled synthetic. Native
+clients register `read_mission_result` through the fixed authenticated transport,
+with the same exact selector, bounded response and auth-generation checks as the
+mounted typed host. Hosts without `readMissionResult` retain the legacy Result
+card and Office does not claim a pair. A failed compound read does not call the
+standalone Result route. The App captures the mounted typed method and
+checks that same function again before the queued call and before publication.
+A superseded callback stays silent. A cancellation that still owns the ticket,
+including `READ_CANCELLED` after raw-method replacement or acquisition expiry,
+settles unavailable and leaves both Office halves empty.
+
+`mission-adapter.ts` supplies that pure Mission presentation seam and the
+compound pair seam. Call
 `captureMissionOfficeRead` before the existing host read, using the host's actual
 `invalidationGeneration()` and the exact current selection. After the host read
 and existing decoder complete, call `completeMissionOfficeRead` with a fresh
@@ -104,8 +173,14 @@ as such. The revision is a tagged, ordered tuple of the decoded owner observatio
 including Control Room and runtime identity/generation/digests. Local acquisition
 time, title and UI counters do not contribute to revision identity. The source
 inspector labels that local time separately from an owner-reported clock.
-Programs, Result, Conversation and all unsupplied session/binding identity remain
-with their existing qualification gates; this adapter does not fill those gaps.
+Programs and Conversation keep their existing qualification gates. A compound
+accept advances the Mission and Result revisions together and leaves session,
+binding, effect and authority unset unless the incumbent owner supplied them.
+Local acquisition time is labelled `LOCAL_ACQUISITION`. An older compound
+completion cannot publish into or clear a newer pair. Replacing the mounted
+typed `readMissionResult` is a different fence from replacing the raw client
+method: the in-flight App callback must see the captured function still
+installed on the host.
 
 ## Verification and integration
 

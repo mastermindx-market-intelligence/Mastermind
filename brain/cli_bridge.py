@@ -29,6 +29,7 @@ import yaml
 
 import bot  # noqa: F401
 
+from brain import provider_failure  # pure typing module — no brain/bot/app imports
 from common.redaction import sanitize_external_text
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -193,10 +194,10 @@ def cli_path() -> str | None:
 
 def _selected_backend(override: str | None = None) -> str:
     """Resolve routing without evaluating a broken project config ahead of an explicit override."""
-    if override:
+    if override is not None:
         return str(override).strip().lower()
     env = os.environ.get("BOT_LLM_BACKEND")
-    if env:
+    if env is not None:
         return env.strip().lower()
     try:
         return str(_cfg().get("backend", "waterfall")).strip().lower()
@@ -207,6 +208,8 @@ def _selected_backend(override: str | None = None) -> str:
 def available() -> bool:
     """True if the configured subscription CLI backend is reachable."""
     selected = _selected_backend()
+    if selected not in {"waterfall", "codex", "cli", "sdk"}:
+        return False
     if selected == "waterfall":
         try:
             from brain import provider_waterfall
@@ -465,6 +468,15 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
 _SDK_TERMINAL_ERROR = "sdk_terminal_error"
 
 
+class _SDKTerminalAfterToolUse(Exception):
+    """Carry an owned terminal outcome and its original iterator exception."""
+
+    def __init__(self, result: dict, original_exception: Exception):
+        super().__init__(_SDK_TERMINAL_ERROR)
+        self.result = result
+        self.original_exception = original_exception
+
+
 async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                   system: str | None = None, append_system: str | None = None,
                   allowed_tools: list[str] | None = None, add_dirs: list[str] | None = None,
@@ -487,6 +499,10 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
     _veto_kw = ({"before_provider_start": before_provider_start}
                 if before_provider_start is not None else {})
     selected_backend = _selected_backend(_backend_override)
+    if selected_backend not in {"waterfall", "codex", "cli", "sdk"}:
+        return {"ok": False, "text": None, "backend": selected_backend,
+                "error": "fabric_tools_unavailable" if selected_backend == "fabric"
+                else "backend_unsupported"}
     if selected_backend == "waterfall":
         from brain import provider_waterfall
         return await provider_waterfall.reason(
@@ -638,6 +654,9 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
     # candidate's reasoning trace; cleared per candidate so a failed-over key's
     # partial thinking is discarded with its result (same rule as the macro lanes).
     _think_box: list = []
+    # LOG/EVIDENCE side channel (see _via_sdk docstring): the failed candidate's
+    # typed provider-failure evidence; cleared per candidate like _think_box.
+    _failure_box: dict = {}
 
     for _candidate_ordinal, _cand in enumerate(_cands_to_try):
         _key_id: str | None = _cand["key_id"] if _cand is not None else None
@@ -645,6 +664,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
 
         _sdk_exc_repr: str | None = None
         _think_box.clear()
+        _failure_box.clear()
 
         if _SDK:
             _sdk_diagnostic = _new_sdk_diagnostic(_run_id, book, role, _candidate_ordinal)
@@ -654,6 +674,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
                     _HEADLESS_PERMISSION_MODE, mcp_servers, resume, arm,
                     run_id=_run_id, env_name=_env_name, thinking_out=_think_box,
+                    failure_out=_failure_box,
                     **({"_diagnostic": _sdk_diagnostic}
                        if _sdk_diagnostic is not None else {}),
                     **_veto_kw,
@@ -665,6 +686,8 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 # credential attempt, including when it resembles auth/quota text.
                 if result.get("error") == _SDK_TERMINAL_ERROR:
                     used_key_id = _key_id
+                    # Evidence-only attachment: never read by the break/failover logic.
+                    result["provider_failure_evidence"] = dict(_failure_box)
                     break
                 # THE CRUX: classify the result TEXT — org-disabled banners arrive as
                 # ok-looking results whose text contains the subscription-disabled message.
@@ -696,6 +719,24 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 used_key_id = _key_id
                 break
 
+            except _SDKTerminalAfterToolUse as _terminal:
+                # The handler already saw tool use and an error terminal before
+                # its iterator raised. Preserve that owned outcome; exception
+                # prose cannot authorize replay of the potentially applied turn.
+                result = _terminal.result
+                if not _sdk_call_finished:
+                    _sdk_call_finished = True
+                    try:
+                        _record_sdk_diagnostic(
+                            _sdk_diagnostic, _run_id, "raised", _terminal.original_exception,
+                        )
+                    except BaseException:
+                        # A diagnostic failure cannot replace the owned terminal.
+                        pass
+                used_key_id = _key_id
+                # Evidence-only attachment, not the condition for this fence.
+                result["provider_failure_evidence"] = dict(_failure_box)
+                break
             except ProviderStartRefused as _refusal:
                 _bind_provider_refusal_run(_refusal, _run_id, book, role)
                 if not _sdk_call_finished:
@@ -778,7 +819,9 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     if arm:
                         # Armed requires SDK; no subprocess fallback
                         result = {**base, "ok": False, "backend": "none", "text": None,
-                                  "error": _sdk_exc_repr or "armed research needs the Agent SDK + a subscription credential"}
+                                  "error": _sdk_exc_repr or "armed research needs the Agent SDK + a subscription credential",
+                                  # Evidence-only attachment from the handler's box.
+                                  "provider_failure_evidence": dict(_failure_box)}
                         used_key_id = _key_id
                         break
 
@@ -995,13 +1038,19 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
                    mcp_servers, resume, arm, run_id: str | None = None,
                    env_name: str | None = None,
                    thinking_out: list | None = None,
+                   failure_out: dict | None = None,
                    before_provider_start: Callable[[], None] | None = None,
                    _diagnostic: dict | None = None) -> dict:
     """thinking_out: optional side-channel list; when provided, the turn's reasoning
     trace (a list of `mastermind.response_log.v1` thinking segments) is appended as ONE
     element. LEAK LAW (mirrors macro brain_gateway): thinking is LOG-ONLY — it rides
     this side channel to brain/thinking_log and is NEVER placed in the returned result
-    dict, so no caller (decision paths included) can consume it."""
+    dict, so no caller (decision paths included) can consume it.
+    failure_out: optional side-channel dict, same LOG/EVIDENCE discipline as thinking_out:
+    the handler fills it INCREMENTALLY with the bounded evidence that types a provider
+    failure (brain/provider_failure.v1) while the SDK stream is still alive, so an
+    exception after the evidence still leaves the box filled.  Evidence-only — never a
+    retry/failover/cooling input — and it never carries response or prompt text."""
     # Claude Agent SDK intentionally loads no filesystem settings by default.  The regional PMs
     # may delegate only through this repository's reviewed, read-only `.claude/agents` profiles,
     # so opt into the project source explicitly (never user/local settings from the VPS account).
@@ -1033,8 +1082,29 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
     # Evaluate the source owner's veto AFTER SDK/MCP option preparation and
     # immediately BEFORE handing it to the original SDK owner.
     _require_provider_start(before_provider_start)
+    if failure_out is not None:
+        try:
+            failure_out["tool_activity_observed"] = False
+        except Exception:
+            pass
     _observe_sdk_diagnostic(_diagnostic, query_entered=True)
-    async for msg in _sdk_query(prompt=prompt, options=opts):
+    _sdk_stream = aiter(_sdk_query(prompt=prompt, options=opts))
+    _terminal_iterator_exception = None
+    while True:
+        try:
+            msg = await anext(_sdk_stream)
+        except StopAsyncIteration:
+            break
+        except ProviderStartRefused:
+            raise
+        except Exception as exc:
+            # These are existing handler-owned operational fields, independent
+            # of failure_out. No tool use or no failed terminal keeps the legacy
+            # exception path. Handler/observer errors are outside this catch.
+            if not (terminal_error and used):
+                raise
+            _terminal_iterator_exception = exc
+            break
         try:
             if hasattr(msg, "result"):                         # ResultMessage
                 # Preserve an explicit error even if a later terminal says success.
@@ -1044,8 +1114,29 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
                 cost = getattr(msg, "total_cost_usd", None)
                 sid = getattr(msg, "session_id", None)
                 usage = getattr(msg, "usage", None)
+                if failure_out is not None:
+                    try:
+                        _f_is_error = getattr(msg, "is_error", None)
+                        if isinstance(_f_is_error, bool):
+                            failure_out["result_is_error"] = _f_is_error
+                        _f_subtype = getattr(msg, "subtype", None)
+                        if isinstance(_f_subtype, str) and provider_failure._RESULT_SUBTYPE_RE.fullmatch(_f_subtype):
+                            failure_out["result_subtype"] = _f_subtype
+                        _f_status = getattr(msg, "api_error_status", None)
+                        if isinstance(_f_status, int) and not isinstance(_f_status, bool):
+                            failure_out["api_error_status"] = _f_status
+                    except Exception:
+                        pass
             elif hasattr(msg, "content"):                      # AssistantMessage: collect text + tool calls
                 _round += 1
+                if failure_out is not None:
+                    try:
+                        _f_lit = provider_failure.sdk_assistant_error_literal(
+                            getattr(msg, "error", None))
+                        if _f_lit:
+                            failure_out["assistant_error"] = _f_lit   # latest wins
+                    except Exception:
+                        pass
                 for b in (getattr(msg, "content", []) or []):
                     bt = _block_kind(b)
                     if bt == "thinking":
@@ -1073,6 +1164,11 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
                             except Exception:
                                 pass
                     elif bt == "tool_use":
+                        if failure_out is not None:
+                            try:
+                                failure_out["tool_activity_observed"] = True
+                            except Exception:
+                                pass
                         name = getattr(b, "name", "?")
                         used.append(name)
                         # log tool call
@@ -1086,6 +1182,11 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
                                 pass
             # ToolResult messages (some SDK versions)
             elif hasattr(msg, "tool_use_id") or (getattr(msg, "type", "") == "tool_result"):
+                if failure_out is not None:
+                    try:
+                        failure_out["tool_activity_observed"] = True
+                    except Exception:
+                        pass
                 if run_id and _log:
                     try:
                         content = getattr(msg, "content", "") or ""
@@ -1117,11 +1218,14 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
         thinking_out.append(_think)
     # LEAK LAW: `_think` must never be added to this result dict — callers feed
     # result["text"] into decision paths, and thinking is log-only by contract.
-    return {"ok": bool(text) and not terminal_error, "text": text,
-            "model": mdl, "role": role, "armed": arm,
-            "tools_used": used, "cost_usd": cost, "session_id": sid,
-            "usage": _as_dict(usage), "backend": "sdk",
-            **({"error": _SDK_TERMINAL_ERROR} if terminal_error else {})}
+    result = {"ok": bool(text) and not terminal_error, "text": text,
+              "model": mdl, "role": role, "armed": arm,
+              "tools_used": used, "cost_usd": cost, "session_id": sid,
+              "usage": _as_dict(usage), "backend": "sdk",
+              **({"error": _SDK_TERMINAL_ERROR} if terminal_error else {})}
+    if _terminal_iterator_exception is not None:
+        raise _SDKTerminalAfterToolUse(result, _terminal_iterator_exception) from _terminal_iterator_exception
+    return result
 
 
 async def _via_subprocess(prompt, mdl, role, system, append_system, tools, dirs, turns, workdir, perm, base,
@@ -1251,6 +1355,9 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
     ~600 chars of streamed text + any error event to detect key failure and mark_cooling
     so the NEXT chat turn rotates to a healthy key.
     """
+    if _selected_backend() not in {"waterfall", "cli", "sdk"}:
+        yield {"type": "error", "error": "backend_chat_unsupported"}
+        return
     if not _SDK:
         yield {"type": "error", "error": "reasoning needs the Claude Agent SDK + a subscription credential"}
         return

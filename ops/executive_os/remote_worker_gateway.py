@@ -18,12 +18,25 @@ from typing import Any, Mapping
 from control_plane.executive_worker_broker import WorkerBrokerClient
 from control_plane.remote_worker_transport import (
     REMOTE_BROKER_RESPONSE_SCHEMA,
+    REMOTE_HERMES_SECRETARY_REQUEST_SCHEMA, REMOTE_HERMES_META_REQUEST_SCHEMA,
+    MAX_SECRETARY_RESPONSE_BYTES,
+    build_secretary_response, decode_secretary_request, build_meta_response, decode_meta_request,
+    TransportEffect, TransportError,
     TransportValidationError,
     encode_frame,
     validate_request,
+    REMOTE_HOST_OBSERVATION_REQUEST_SCHEMA,
+    MAX_HOST_OBSERVATION_RESPONSE_BYTES,
+    build_host_observation_response,
+    decode_host_observation_request,
+    decode_request_document,
 )
+from common.hermes_role_status_contract import RoleStatusError
 from ops.executive_os.remote_worker_gateway_config import (
     FABRIC_BROKER_TARGET,
+    GatewayConfig,
+    HostObservationGatewayConfig,
+    HermesSecretaryGatewayConfig, HermesConversationGatewayConfig,
     RemoteWorkerGatewayConfig,
 )
 from ops.executive_os.remote_assignment_control import seal_original_assignment
@@ -32,8 +45,21 @@ from ops.executive_os.remote_assignment_control import seal_original_assignment
 class RemoteWorkerGateway:
     """One-request-per-connection authenticated gateway with no durable state."""
 
-    def __init__(self, config: RemoteWorkerGatewayConfig) -> None:
+    def __init__(self, config: GatewayConfig) -> None:
+        if type(config) not in (RemoteWorkerGatewayConfig, HostObservationGatewayConfig,
+                                HermesSecretaryGatewayConfig, HermesConversationGatewayConfig):
+            raise TypeError("config must be a closed gateway profile")
         self.config = config
+        self._host_observer = None
+        self._secretary_forwarder = None
+        self._secretary_host_binding_sha256 = None
+        self._meta_forwarder = None
+        self._meta_host_binding_sha256 = None
+        self._broker_client = None
+        self.broker_call = self._call_broker
+        self._ssl_context = self._build_server_ssl_context()
+        if type(config) is not RemoteWorkerGatewayConfig:
+            return
         client_arguments: dict[str, Any] = {}
         if config.broker_target == FABRIC_BROKER_TARGET:
             # Only the explicit Fabric target pins the broker peer uid; the
@@ -47,8 +73,6 @@ class RemoteWorkerGateway:
         )
         # Deliberate seam for hermetic tests; production uses the fixed AF_UNIX
         # WorkerBrokerClient above and never accepts a caller-supplied socket.
-        self.broker_call = self._call_broker
-        self._ssl_context = self._build_server_ssl_context()
 
     def _build_server_ssl_context(self) -> ssl.SSLContext:
         try:
@@ -78,6 +102,8 @@ class RemoteWorkerGateway:
         )
 
     async def _call_broker(self, operation: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if type(self.config) is not RemoteWorkerGatewayConfig or self._broker_client is None:
+            raise ValueError("host observation profile has no broker capability")
         return await self._broker_client.request(
             operation,
             payload,
@@ -85,6 +111,8 @@ class RemoteWorkerGateway:
         )
 
     async def _dispatch_authenticated(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        if type(self.config) is not RemoteWorkerGatewayConfig:
+            raise ValueError("host observation profile has no broker capability")
         if request["broker_operation"] == "assignment-seal":
             binding = self.config.assignment_control
             if binding is None:
@@ -99,12 +127,17 @@ class RemoteWorkerGateway:
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        host_read = False
+        host_response_sent = False
+        conversation_call = False
+        conversation_response_sent = False
+        started = asyncio.get_running_loop().time()
         try:
             if not self._peer_is_expected_control(writer):
                 return
             try:
                 raw = await self._read_frame(reader)
-                document = json.loads(raw.decode("utf-8", errors="strict"))
+                document = decode_request_document(raw)
             except (
                 asyncio.IncompleteReadError,
                 asyncio.TimeoutError,
@@ -114,6 +147,61 @@ class RemoteWorkerGateway:
             ):
                 return
             if not isinstance(document, dict):
+                return
+
+            if document.get("schema") in (REMOTE_HERMES_SECRETARY_REQUEST_SCHEMA,
+                                           REMOTE_HERMES_META_REQUEST_SCHEMA):
+                conversation_call = True
+                is_meta = document["schema"] == REMOTE_HERMES_META_REQUEST_SCHEMA
+                decode = decode_meta_request if is_meta else decode_secretary_request
+                dispatch = self._meta_request if is_meta else self._secretary_request
+                try:
+                    request = decode(raw)
+                    deadline = started + min(10.0, float(self.config.request_timeout_seconds))
+                    if asyncio.get_running_loop().time() >= deadline:
+                        return
+                    async with asyncio.timeout_at(deadline):
+                        response = await dispatch(request, deadline=deadline)
+                        encoded = self._canonical_response_bytes(response)
+                        if len(encoded) > min(MAX_SECRETARY_RESPONSE_BYTES, self.config.max_frame_bytes):
+                            return
+                        if asyncio.get_running_loop().time() >= deadline:
+                            return
+                        writer.write(encode_frame(encoded))
+                        await writer.drain()
+                        conversation_response_sent = True
+                except (asyncio.CancelledError, Exception):
+                    # No forged nonexecution receipt after any possible native
+                    # write. The original remote client owns reconciliation.
+                    return
+                return
+
+            if document.get("schema") == REMOTE_HOST_OBSERVATION_REQUEST_SCHEMA:
+                host_read = True
+                try:
+                    request = decode_host_observation_request(raw, expected_host_ref=self.config.host_ref)
+                    deadline = started + min(4.0, float(self.config.request_timeout_seconds))
+                    if asyncio.get_running_loop().time() >= deadline:
+                        return
+                    async with asyncio.timeout_at(deadline):
+                        response = await self._observe_host_request(request)
+                        encoded = self._canonical_response_bytes(response)
+                        if len(encoded) > min(MAX_HOST_OBSERVATION_RESPONSE_BYTES, self.config.max_frame_bytes):
+                            response = build_host_observation_response(request)
+                            encoded = self._canonical_response_bytes(response)
+                        writer.write(encode_frame(encoded))
+                        await writer.drain()
+                        host_response_sent = True
+                except (asyncio.TimeoutError, TransportValidationError, OSError):
+                    return
+                return
+
+            if type(self.config) is not RemoteWorkerGatewayConfig:
+                # Refuse before entering the Worker grammar or any broker
+                # callback, including authenticated status/collect requests.
+                refusal = self._bound_response(document, outcome="refused", broker_response=None)
+                if refusal is not None:
+                    await self._write_response(writer, refusal)
                 return
 
             try:
@@ -152,8 +240,74 @@ class RemoteWorkerGateway:
                 await self._write_response(writer, response)
         finally:
             writer.close()
-            with suppress(Exception):
-                await writer.wait_closed()
+            if ((host_read and not host_response_sent)
+                    or (conversation_call and not conversation_response_sent)):
+                with suppress(Exception):
+                    transport = getattr(writer, "transport", None)
+                    if transport is not None:
+                        transport.abort()
+            elif not host_read and not conversation_call:
+                with suppress(Exception):
+                    await writer.wait_closed()
+
+    async def _secretary_request(self, request: Mapping[str, Any], *,
+                                 deadline: float) -> dict[str, Any]:
+        return await self._conversation_request(request, role="mmsecretary", deadline=deadline)
+
+    async def _meta_request(self, request: Mapping[str, Any], *,
+                            deadline: float) -> dict[str, Any]:
+        return await self._conversation_request(request, role="mmmeta", deadline=deadline)
+
+    async def _conversation_request(self, request: Mapping[str, Any], *,
+                                    role: str, deadline: float) -> dict[str, Any]:
+        """One bound native call; no Worker grammar, retry, or synthetic receipt."""
+        if role == "mmsecretary":
+            build_response = build_secretary_response
+            allowed = type(self.config) in (HermesSecretaryGatewayConfig, HermesConversationGatewayConfig)
+            binding = self.config.hermes_secretary_conversation if allowed else None
+            forwarder, host_pin = self._secretary_forwarder, self._secretary_host_binding_sha256
+        elif role == "mmmeta":
+            build_response = build_meta_response
+            allowed = type(self.config) is HermesConversationGatewayConfig
+            binding = self.config.hermes_meta_conversation if allowed else None
+            forwarder, host_pin = self._meta_forwarder, self._meta_host_binding_sha256
+        else:
+            raise TransportValidationError("native conversation role is invalid")
+
+        def refused(code):
+            return build_response(request, outcome="refused", result={"code": code})
+
+        if not allowed:
+            return refused("PROFILE_UNAVAILABLE")
+        inner = request["request"]
+        target = inner.get("target") if inner["operation"] == "submit" else inner
+        if (request["host_ref"] != self.config.host_ref
+                or request["root_id"] != binding.root_id
+                or request["implementation_sha"] != binding.implementation_sha
+                or request["host_binding_sha256"] != host_pin
+                or target["session_id"] != binding.session_id):
+            return refused("BINDING_CHANGED")
+        if forwarder is None:
+            return refused("SERVICE_UNAVAILABLE")
+        try:
+            result = await forwarder.request(inner, deadline=deadline)
+        except TransportError as exc:
+            if exc.classification is TransportEffect.NO_EFFECT:
+                return refused("NATIVE_FORWARDING_UNAVAILABLE")
+            raise
+        return build_response(request, outcome="ok", result=result)
+
+    async def _observe_host_request(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        """One fixed host read; never enter the Worker Broker grammar."""
+        if self.config.hermes_role_metadata_read is None or self._host_observer is None:
+            return build_host_observation_response(request)
+        try:
+            observation = await self._host_observer.read_pair()
+            return build_host_observation_response(request, observation=observation)
+        except RoleStatusError as exc:
+            return build_host_observation_response(request, reason_code=exc.code)
+        except Exception:
+            return build_host_observation_response(request)
 
     def _peer_is_expected_control(self, writer: asyncio.StreamWriter) -> bool:
         ssl_object = writer.get_extra_info("ssl_object")

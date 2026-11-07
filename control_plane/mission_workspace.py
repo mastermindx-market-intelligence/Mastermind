@@ -757,6 +757,11 @@ def _qualified_current(
 ) -> bool:
     """Consume the real B5 envelope and its paired mapper metadata."""
 
+    if validity.get('schema') == 'mastermind.project_data_source_validity.v1':
+        from common.project_discovery_observation_contract import card_is_current
+        return autonomy_generated_at == control_generated_at and card_is_current(validity, cache, responsibility,
+            work_ref=responsibility_ref, root_job_id=root_job_id, generated_at=control_generated_at)
+
     publication_seq = validity.get("publication_seq")
     if (
         cache.get("state") != "fresh"
@@ -855,6 +860,14 @@ def _validate_owner_observation(
     if owner_observation is None:
         return invalid("owner observation is absent", missing=True)
     row = _mapping(owner_observation)
+    if row.get('schema') == 'mastermind.workspace_source_observation.v2':
+        from common.project_discovery_observation_contract import validate_observation
+        try:
+            validate_observation(dict(row), work_ref=selected_work_ref, root_job_id=selected_root_job_id,
+                document=control_room_doc, validity=source_validity_doc, currentness=cache_currentness_doc, fabric=fabric_view_doc)
+            return dict(row), []
+        except (ValueError, KeyError, TypeError, AttributeError):
+            return invalid('DATA owner observation is invalid')
     state = row.get("state")
     if (set(row) != OWNER_OBSERVATION_KEYS or row.get("schema") != OWNER_OBSERVATION_SCHEMA
             or not isinstance(state, str) or state not in OWNER_OBSERVATION_STATES

@@ -746,7 +746,7 @@ def test_3_inbox_never_opens_a_write_transaction(store, frozen_git, monkeypatch)
 # 4. import fence
 # ---------------------------------------------------------------------------
 
-def test_4_module_imports_only_the_runtime_and_the_boot_packet():
+def test_4_module_imports_only_runtime_boot_packet_and_pure_selection_law():
     source = Path(mod.__file__).read_text(encoding="utf-8")
     submodules: set[str] = set()
     for node in ast.walk(ast.parse(source)):
@@ -760,7 +760,7 @@ def test_4_module_imports_only_the_runtime_and_the_boot_packet():
             elif node.module.startswith("control_plane."):
                 submodules.add(node.module.split(".", 1)[1].split(".")[0])
 
-    assert submodules == {"executive_runtime", "ceo_boot_packet"}, sorted(submodules)
+    assert submodules == {"executive_runtime", "ceo_boot_packet", "frontier_selection"}, sorted(submodules)
 
     forbidden = (
         "executive_supervisor",

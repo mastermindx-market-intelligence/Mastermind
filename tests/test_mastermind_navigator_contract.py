@@ -1291,3 +1291,149 @@ def test_skill_emits_typed_negative_capability_receipt_fields() -> None:
         "schema-invalid unless the safe probe path is exhausted",
     ):
         assert phrase in skill
+
+
+def test_source_work_does_not_fall_through_to_generic_studio_shell() -> None:
+    routing = _load("references/owner-routing.json")
+    by_class = {route["capability_class"]: route for route in routing["routes"]}
+    project = by_class["selected_project_action"]
+    local = by_class["local_machine_process"]
+
+    assert project["generic_shell_fallback"] is False
+    assert project["platform_refusal_policy"] == "ACTION_SCOPED_NO_RETRY_NO_FAILOVER_WITH_DISPATCH_RECONCILIATION"
+    assert "already-authorized native builder or Executive Job/Attempt/Worker" in project["unsupported_effect_route"]
+    assert any("Studio Direct generic shell" in item for item in project["forbidden_substitutions"])
+    assert project["typed_git_publication_route"] == [
+        "studio_git_publish_status",
+        "studio_git_commit_current_changes",
+        "studio_git_push_current_branch",
+    ]
+    assert "same canonical mmx-workspace operation" in project["typed_git_route_conditions"]
+    assert project["typed_git_publication_owner"] == "Studio Direct typed Git publisher / canonical mmx-workspace"
+    assert project["typed_git_publication_tool_family"] == "studio-direct-typed-git"
+    assert project["platform_refusal_pre_dispatch_effect"] == "TOOL_DEGRADED / EFFECT_NONE"
+    assert project["platform_refusal_ambiguous_dispatch_effect"] == "EFFECT_UNKNOWN"
+    assert project["platform_refusal_retry_policy"] == "NO_RETRY_AFTER_SAFETY_OR_PERMISSION_DENIAL"
+    assert "missing build or test capability" in project["typed_git_forbidden_substitutions"]
+
+    assert local["generic_shell_scope"] == "GENUINE_BOUND_HOST_PROCESS_ONLY"
+    assert local["selected_project_source_fallback"] is False
+    assert local["platform_refusal_policy"] == "ACTION_SCOPED_NO_RETRY_NO_FAILOVER_WITH_DISPATCH_RECONCILIATION"
+    assert local["platform_refusal_pre_dispatch_effect"] == "TOOL_DEGRADED / EFFECT_NONE"
+    assert local["platform_refusal_ambiguous_dispatch_effect"] == "EFFECT_UNKNOWN"
+    assert local["platform_refusal_retry_policy"] == "NO_RETRY_AFTER_SAFETY_OR_PERMISSION_DENIAL"
+    assert any("selected-project source" in item for item in local["forbidden_substitutions"])
+
+    skill = (PACKAGE / "skills/navigate-mastermind-universe/SKILL.md").read_text(encoding="utf-8")
+    for phrase in (
+        "Least-privilege actuator routing",
+        "Do not synthesize the missing capability with Studio Direct",
+        "genuine bound host/process operations",
+        "freeze that logical operation on its carrier",
+        "`TOOL_DEGRADED / EFFECT_NONE`",
+        "it grants no retry",
+        "not generic Studio shell and not Workbench itself",
+        "Never rephrase the denied effect or change account, plugin, connector, worker, device, model, provider, or generic tool",
+        "prefer the gateway-owned `studio_git_publish_status`",
+    ):
+        assert phrase in skill
+
+
+def test_fresh_session_source_and_safety_refusal_cases_preserve_owner_boundaries() -> None:
+    fixture = _load("fixtures/fresh-session-routing-cases.json")
+    cases = {case["id"]: case for case in fixture["cases"]}
+
+    source = cases["selected-source-work-no-generic-shell-fallback"]
+    assert source["capability_class"] == "selected_project_action"
+    assert source["expected_owner"] == "Workbench"
+    assert "Studio Direct typed Git publisher" in source["owner_native_action"]
+    assert "do not relabel that typed publisher as Workbench or generic shell" in source["owner_native_action"]
+    assert source["expected_tool_family"] == "workbench"
+    assert source["requested_action_class"] == "WRITE"
+    assert source["expected_disposition"] == "NO_GENERIC_STUDIO_SHELL_FALLBACK"
+    assert "do not substitute Studio Direct start_process or interact_with_process" in source["owner_native_action"]
+    assert "studio_git_publish_status" in source["owner_native_action"]
+    assert "studio_git_commit_current_changes" in source["owner_native_action"]
+    assert "studio_git_push_current_branch" in source["owner_native_action"]
+
+    refused = cases["platform-safety-refusal-preserves-carrier"]
+    assert refused["capability_class"] == "selected_project_action"
+    assert refused["expected_disposition"] == "ACTION_SCOPED_REFUSAL_NO_RETRY_NO_FAILOVER"
+    assert "Freeze the original logical operation on its carrier" in refused["owner_native_action"]
+    assert "TOOL_DEGRADED / EFFECT_NONE" in refused["owner_native_action"]
+    assert "preserve EFFECT_UNKNOWN" in refused["owner_native_action"]
+    assert "do not retry" in refused["owner_native_action"].lower()
+    assert "Do not rephrase the denied effect or switch account, plugin, connector, worker, device, model, provider, or generic tool" in refused["owner_native_action"]
+
+
+def local_route():
+    return next(r for r in _load("references/owner-routing.json")["routes"]
+                if r["capability_class"] == "local_machine_process")
+
+def cases():
+    return {c["id"]: c for c in _load("fixtures/fresh-session-routing-cases.json")["cases"]}
+
+def test_pure_file_read_has_explicit_typed_initial_route():
+    route = local_route()
+    assert route.get("local_artifact_read_route") == ["read_file", "read_multiple_files"]
+    assert route.get("local_artifact_read_optional_preflight") == "get_file_info"
+    assert route.get("pure_read_generic_shell_fallback") is False
+    conditions = route.get("local_artifact_read_conditions", "")
+    for term in ("initial", "offset", "length", "authorization", "filesystem"):
+        assert term in conditions.lower(), term
+
+def test_distinct_output_objects_keep_their_incumbent_readers():
+    route = local_route()
+    assert route.get("retained_output_read_route") == "studio_output_page"
+    assert route.get("existing_process_output_read_route") == "read_process_output"
+    assert route["generic_shell_scope"] == "GENUINE_BOUND_HOST_PROCESS_ONLY"
+    assert "computation" in route.get("genuine_process_effects", "")
+    assert "transformation" in route.get("genuine_process_effects", "")
+
+def test_initial_read_fixture_is_read_only_and_not_a_replay():
+    case = cases().get("local-artifact-read-no-generic-shell")
+    assert case is not None, "Missing initial local-file READ fixture"
+    assert case["requested_action_class"] == "READ"
+    assert case["capability_class"] == "local_machine_process"
+    assert case["expected_tool_family"] == "studio-direct"
+    assert case["expected_schema_loads"] == ["studio-direct"]
+    assert case["does_not_claim_live_before_probe"] is True
+    action = case["owner_native_action"]
+    for phrase in ("Initial route only", "read_file", "read_multiple_files", "offset", "length",
+                   "get_file_info", "optional", "no prior safety or permission refusal"):
+        assert phrase in action, phrase
+    assert case["expected_disposition"] == "TYPED_PAGED_FILE_READ"
+
+def test_read_refusal_fixture_never_suggests_alternate_reader():
+    case = cases().get("local-read-safety-refusal-preserves-carrier")
+    assert case is not None, "Missing READ refusal fixture"
+    assert case["requested_action_class"] == "READ"
+    assert case["expected_disposition"] == "ACTION_SCOPED_REFUSAL_NO_RETRY_NO_FAILOVER"
+    action = case["owner_native_action"]
+    for phrase in ("do not retry", "do not reroute", "TOOL_DEGRADED / EFFECT_NONE",
+                   "EFFECT_UNKNOWN", "same carrier"):
+        assert phrase in action, phrase
+    for tool in ("read_file", "read_multiple_files", "start_process", "interact_with_process"):
+        assert tool not in action, "A denied-read fixture must not nominate a replacement reader"
+
+@pytest.mark.parametrize("relative", [
+    "skills/navigate-mastermind-universe/SKILL.md",
+    "references/navigator-boundary.md",
+])
+def test_refusal_language_covers_read_actions(relative):
+    text = (PACKAGE / relative).read_text(encoding="utf-8")
+    assert "including read-only" in text.lower()
+    assert "for a modifying action" not in text
+    assert "original modifying operation" not in text
+
+def test_read_route_cannot_relax_existing_refusal_or_binding_fences():
+    route = local_route()
+    assert route.get("platform_refusal_action_scope") == "ALL_ACTION_CLASSES_INCLUDING_READ"
+    assert route["platform_refusal_retry_policy"] == "NO_RETRY_AFTER_SAFETY_OR_PERMISSION_DENIAL"
+    assert route["platform_refusal_pre_dispatch_effect"] == "TOOL_DEGRADED / EFFECT_NONE"
+    assert route["platform_refusal_ambiguous_dispatch_effect"] == "EFFECT_UNKNOWN"
+    assert route["static_liveness_claim"] is False
+    assert route["selected_project_source_fallback"] is False
+    assert route["binding_requirements"] == [
+        "host identity", "process or workspace identity", "current host authorization"
+    ]

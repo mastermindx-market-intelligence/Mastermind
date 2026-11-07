@@ -6,8 +6,9 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from .contracts import (ENDPOINTS, SCHEMA, HttpObservation, count, finite, revision,
+from .contracts import (BODY_LIMITS, ENDPOINTS, SCHEMA, HttpObservation, count, finite, revision,
                         strict_json, symbols_checked, time_observation, utc_now)
+from .projections import macro_overlay, market_risk
 
 CHECKS = frozenset({"site", "overlay", "risk_state", "china_risk_state", "quotes", "basket_pulse",
                     "flow_pulse", "release_publications", "orchestrator", "breadth", "terminal_data", "prophet_live"})
@@ -230,10 +231,13 @@ class ProductReader:
         except Exception:
             response = HttpObservation(status=None, error="backend_unavailable")
         now = utc_now(self._now())
+        projection = endpoint in {"macro_overlay", "market_risk"}
         result: dict[str, Any] = {"endpoint": endpoint, "url": ENDPOINTS[endpoint],
-            "source_owner": "terminal-market-data" if endpoint == "market_pulse" else "macro-api",
+            "source_owner": "terminal-market-data" if endpoint in {"market_pulse", "market_risk"} else "macro-api",
             "environment": "production", "access_class": "public", "observed_at": now.isoformat(),
             "http_status": None, "sha256": None, "state": "unavailable", "data": None}
+        if projection:
+            result.update(representation="not_observed", body_bytes=None)
         if not isinstance(response, HttpObservation):
             result["state"] = "invalid"
             return result
@@ -241,16 +245,40 @@ class ProductReader:
         if response.status in (401, 403):
             result["state"] = "unauthorized"
             return result
-        if response.status == 404:
+        if response.status == 404 or (projection and response.status == 204):
             result["state"] = "missing"
             return result
         if response.error or response.status != 200:
+            if projection and response.error in {
+                "redirect_refused", "content_encoding_refused", "invalid_content_type",
+                "invalid_content_length", "response_too_large",
+            }:
+                result["state"] = "invalid"
             return result
+        if projection:
+            if type(response.body) is not bytes or len(response.body) > BODY_LIMITS[endpoint]:
+                result["state"] = "invalid"
+                return result
+            # Retain the digest only for the entire bounded body, including an
+            # empty invalid 200. A discarded oversized prefix is not evidence.
+            result.update(representation="complete", body_bytes=len(response.body),
+                          sha256=hashlib.sha256(response.body).hexdigest())
         try:
             if not isinstance(response.content_type, str) or response.content_type.split(";")[0].strip().lower() != "application/json":
                 raise ValueError("invalid_content_type")
-            value = strict_json(response.body)
-            data = _pulse(value, now, symbols) if endpoint == "market_pulse" else _health(value, now) if endpoint == "health" else _status(value, now)
+            value = strict_json(response.body, max_bytes=BODY_LIMITS[endpoint])
+            if endpoint == "market_pulse":
+                data = _pulse(value, now, symbols)
+            elif endpoint == "health":
+                data = _health(value, now)
+            elif endpoint == "status":
+                data = _status(value, now)
+            elif endpoint == "macro_overlay":
+                data = macro_overlay(value, now)
+            elif endpoint == "market_risk":
+                data = market_risk(value, now)
+            else:
+                raise ValueError("invalid_endpoint")
             result.update(data=data, state="observed", sha256=hashlib.sha256(response.body).hexdigest())
         except (ValueError, TypeError, KeyError, RecursionError, OverflowError):
             result["state"] = "invalid"
@@ -270,3 +298,9 @@ class ProductReader:
     async def market_pulse(self, symbols: object) -> dict:
         selected = symbols_checked(symbols)
         return self._envelope("product_market_pulse", [await self._observe("market_pulse", selected)])
+
+    async def macro_overlay(self) -> dict:
+        return self._envelope("product_macro_overlay", [await self._observe("macro_overlay")])
+
+    async def market_risk(self) -> dict:
+        return self._envelope("product_market_risk", [await self._observe("market_risk")])

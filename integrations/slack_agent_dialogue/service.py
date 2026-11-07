@@ -822,6 +822,27 @@ class AgentDialogueService:
             if not isinstance(result, dict) or set(result) != {"thread_ts", "parent"}:
                 raise DialogueServiceError("INTERNAL_ERROR")
             return {"attestation": RELAY_PARENT_ATTESTATION, **result}
+        if operation == "read_exact_canonical_thread":
+            values = _exact_mapping(
+                args, {"context", "thread_ts", "expected_parent_fingerprint"}
+            )
+            if (
+                type(values["thread_ts"]) is not str
+                or type(values["expected_parent_fingerprint"]) is not str
+            ):
+                raise DialogueServiceError("REQUEST_INVALID")
+            result = self.engine_result(
+                await engine.read_exact_canonical_thread(
+                    context=_context_v2(values["context"]),
+                    thread_ts=values["thread_ts"],
+                    expected_parent_fingerprint=values["expected_parent_fingerprint"],
+                )
+            )
+            if type(result) is not dict or set(result) != {
+                "thread_ts", "parent", "thread"
+            }:
+                raise DialogueServiceError("INTERNAL_ERROR")
+            return {"attestation": RELAY_PARENT_ATTESTATION, **result}
         if operation == "ensure_thread":
             values = _exact_mapping(args, {"context", "created_at"})
             if not isinstance(values["created_at"], str):
