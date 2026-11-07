@@ -66,6 +66,16 @@ def main():
             assert results['plan']['state']=='PREPARED_NOT_ADMITTED'
             assert results['recommend']['state']=='RECOMMENDED_NOT_ADMITTED'
             assert results['recommend']['omh_version']=='4.0.6'
+            from hermes_cli.plugin_command_dispatch import invoke_plugin_command
+            command=manager._plugin_commands['mmx-omh']['handler']
+            command_status=json.loads(invoke_plugin_command(command,'status',session_id='mmx-omh-canary-session',platform='cli'))
+            command_advice=json.loads(invoke_plugin_command(command,'quick Inspect a Python bug and write a regression test',session_id='mmx-omh-canary-session',platform='cli'))
+            assert command_status['state']=='LOCAL_BRIDGE_READY'
+            assert command_advice['state']=='RECOMMENDED_NOT_ADMITTED'
+            from hermes_cli.plugins_activation import activation_summaries
+            activations=[x for x in activation_summaries(manager) if x['name']=='mastermind-omh']
+            assert len(activations)==1 and 'mmx-omh' in activations[0]['activated_now']['gateway_commands']
+            assert 'mmx_omh' in activations[0]['deferred']['tools']
             os.environ['HERMES_HOME']=str(home/'foreign')
             denied=json.loads(entry.handler({'action':'status'},session_id='mmx-omh-canary-session'))
             assert denied['state']=='REFUSED' and denied['reason']=='NATIVE_PROFILE_MISMATCH'
@@ -74,7 +84,9 @@ def main():
             assert not blocked
             print(json.dumps({'schema':'mastermind.hermes_omh.native_canary/v1',
                 'source_commit':a.release_commit,'source_files_sha256':hashlib.sha256(json.dumps(descriptor['source_files'],sort_keys=True).encode()).hexdigest(),
-                'native_loader':'PluginManager.discover_and_load','native_dispatch':'ToolRegistry.dispatch',
+                'native_loader':'PluginManager.discover_and_load','native_dispatch':'ToolRegistry.dispatch','native_command_dispatch':'invoke_plugin_command',
+                'live_command':'mmx-omh','live_command_status':command_status['state'],
+                'live_command_advice':command_advice['state'],'tool_activation':'next_session_by_native_contract',
                 'status':results['status']['state'],'plan':results['plan']['state'],
                 'plan_sha256':results['plan']['plan_sha256'],'recommendation':results['recommend']['state'],
                 'model_candidates':results['recommend']['model_candidates'],'skills':results['recommend']['skills'],

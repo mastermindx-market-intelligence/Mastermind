@@ -131,3 +131,7 @@ The dependency-free `plugin/` payload registers `mmx_omh` through the real Herme
 `qualification/native_canary.py` exercises real installed Hermes plugin discovery and registry dispatch with a temporary profile, the actual OMH package, canonical parser and cross-profile negative. This is native integration qualification, not a production conversation, worker admission, entitlement or serving-model proof.
 
 Source publication alone does not install the descriptor or enable the tool. Install from the exact protected release using Hermes' existing plugin installer with `--no-enable`, populate the reviewed descriptor and immutable local source artifact, then enable through the native plugin control. Never overwrite an existing unrelated install or replace the selected OMH memory provider.
+
+### Existing conversations
+
+After native activation, use `/mmx-omh status` or `/mmx-omh quick Inspect the failing test`. These commands use the existing gateway command registry and the same read-only bridge, so they do not require resetting an ongoing conversation. The Python `mmx_omh` tool becomes available to the model in a fresh session according to Hermes' prompt-cache contract. An activated command is not a worker start or provider call; all outputs retain the proposal/advice boundary.

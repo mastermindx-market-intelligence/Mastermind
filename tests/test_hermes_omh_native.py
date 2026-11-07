@@ -46,7 +46,13 @@ def framework(monkeypatch,profile):
             disposed.append(key)
             if entries.get(key) is entry:entries.pop(key)
         return SimpleNamespace(dispose=dispose)
-    ctx=SimpleNamespace(_manager=SimpleNamespace(scope_key=profile),profile_name='custom',register_tool=register)
+    commands={}
+    def register_command(name,handler,**kw):
+        entry=dict(handler=handler,**kw);commands[name]=entry
+        def dispose():
+            if commands.get(name) is entry:commands.pop(name)
+        return SimpleNamespace(dispose=dispose)
+    ctx=SimpleNamespace(_manager=SimpleNamespace(scope_key=profile,_plugin_commands=commands),profile_name='custom',register_tool=register,register_command=register_command)
     return ctx,entries,calls,disposed,constants
 
 
@@ -145,3 +151,35 @@ def test_native_registration_exception_preserves_uncertainty(tmp_path,monkeypatc
     with pytest.raises(m.NativeBridgeError) as exc:m.register(ctx)
     assert str(exc.value)=='NATIVE_REGISTRATION_EFFECT_UNKNOWN'
     assert len(calls)==1 and not disposed
+
+
+def test_native_live_command_uses_original_tool_handler(tmp_path,monkeypatch):
+    m,d,_=load(tmp_path);ctx,entries,calls,disposed,_=framework(monkeypatch,d['profile_home'])
+    requests=[]
+    def run(*a,**k):
+        request=json.loads(k['input']);requests.append(request)
+        state='LOCAL_BRIDGE_READY' if request['action']=='status' else 'RECOMMENDED_NOT_ADMITTED'
+        return SimpleNamespace(returncode=0,stdout=json.dumps(dict(state=state,admitted=False,dispatched=False)).encode(),stderr=b'')
+    monkeypatch.setattr(m.subprocess,'run',run);m.register(ctx)
+    command=ctx._manager._plugin_commands.get('mmx-omh')
+    assert command is not None,'Live slash command not registered'
+    out=json.loads(command['handler']('quick Investigate the failing test',session_id='native-session'))
+    assert out['state']=='RECOMMENDED_NOT_ADMITTED'
+    assert requests==[dict(action='recommend',category='quick',message='Investigate the failing test')]
+    assert json.loads(command['handler']('status',session_id='native-session'))['state']=='LOCAL_BRIDGE_READY'
+
+
+def test_native_command_collision_preserves_original_and_registers_nothing(tmp_path,monkeypatch):
+    m,d,_=load(tmp_path);ctx,entries,calls,disposed,_=framework(monkeypatch,d['profile_home'])
+    previous=dict(handler=lambda *_:None);ctx._manager._plugin_commands['mmx-omh']=previous
+    with pytest.raises(m.NativeBridgeError):m.register(ctx)
+    assert not calls and ctx._manager._plugin_commands['mmx-omh'] is previous
+
+
+def test_native_command_refuses_missing_context_and_stale_command(tmp_path,monkeypatch):
+    m,d,_=load(tmp_path);ctx,entries,calls,disposed,_=framework(monkeypatch,d['profile_home'])
+    monkeypatch.setattr(m.subprocess,'run',lambda *a,**k:pytest.fail('Invalid command spawned process'))
+    m.register(ctx);command=ctx._manager._plugin_commands['mmx-omh']['handler']
+    assert json.loads(command('status'))['state']=='REFUSED'
+    ctx._manager._plugin_commands.clear()
+    assert json.loads(command('status',session_id='native-session'))['state']=='REFUSED'

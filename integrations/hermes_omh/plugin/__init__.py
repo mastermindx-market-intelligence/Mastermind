@@ -202,7 +202,30 @@ def register(ctx):
             return json.dumps(out,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False)
         except (ValueError,TypeError,RecursionError,UnicodeError):return _refusal('NATIVE_LOCAL_OUTPUT_INVALID')
 
+    commands=getattr(ctx._manager,'_plugin_commands',None)
+    if type(commands) is not dict or not callable(getattr(ctx,'register_command',None)):
+        raise NativeBridgeError('NATIVE_COMMAND_CONTRACT_UNAVAILABLE')
+
+    def command_handler(raw_args,*,session_id=None,session_key=None,source=None,platform=None):
+        current=commands.get('mmx-omh')
+        if type(current) is not dict or current.get('handler') is not command_handler:
+            return _refusal('NATIVE_COMMAND_STALE')
+        if type(raw_args) is not str or len(raw_args)>4200:
+            return _refusal('NATIVE_REQUEST_INVALID')
+        text=raw_args.strip()
+        if text in ('','status'):
+            request={'action':'status'}
+        else:
+            parts=text.split(None,1)
+            if len(parts)!=2:return _refusal('NATIVE_REQUEST_INVALID')
+            request={'action':'recommend','category':parts[0],'message':parts[1]}
+        # Both IDs are native command-context fields, never parsed from text.
+        # They remain correlation, not provider/execution authority.
+        native_session=session_id or session_key
+        return handler(request,session_id=native_session)
+
     with replacement_coordinator.transaction():
+        if 'mmx-omh' in commands:raise NativeBridgeError('NATIVE_COMMAND_COLLISION')
         if registry.get_entry(TOOL_NAME,scope=scope) is not None:raise NativeBridgeError('NATIVE_TOOL_COLLISION')
         try:
             handle=ctx.register_tool(name=TOOL_NAME,toolset=TOOLSET,schema=TOOL_SCHEMA,handler=handler,description=TOOL_SCHEMA['description'])
@@ -219,4 +242,20 @@ def register(ctx):
             try:handle.dispose()
             except Exception:raise NativeBridgeError('NATIVE_TOOL_ROLLBACK_UNKNOWN') from None
             raise NativeBridgeError('NATIVE_TOOL_READBACK_FAILED') from None
+        try:
+            command_handle=ctx.register_command('mmx-omh',command_handler,
+                description='Read-only Mastermind OMH status or model/effort/skill advice; never executes work.',
+                args_hint='status | <category> <task>',argument_mode='text')
+        except Exception:
+            raise NativeBridgeError('NATIVE_REGISTRATION_EFFECT_UNKNOWN') from None
+        try:
+            registered=commands.get('mmx-omh')
+            if command_handle is None or type(registered) is not dict or registered.get('handler') is not command_handler:
+                raise NativeBridgeError('NATIVE_COMMAND_READBACK_FAILED')
+        except Exception:
+            try:
+                if command_handle is not None:command_handle.dispose()
+                handle.dispose()
+            except Exception:raise NativeBridgeError('NATIVE_TOOL_ROLLBACK_UNKNOWN') from None
+            raise NativeBridgeError('NATIVE_COMMAND_READBACK_FAILED') from None
         return handle
