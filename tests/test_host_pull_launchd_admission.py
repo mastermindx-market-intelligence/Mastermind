@@ -22,7 +22,9 @@ MANIFEST_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-manife
 INVENTORY_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-source-inventory.json"
 HOST_PULL_SHA = "b58b4cf4932b801df45d4a70fdd99aaaee800e7e57cc06501aa5c21b20ea8a1c"
 HOST_PULL_PREIMAGE = "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad"
-MANIFEST_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+# Canonical107 successor: only the independently reviewed c5 Broker payload
+# changed; host-pull pair, preimage and inventory assertions remain exact.
+MANIFEST_SHA256 = "7b58e10efbf879ac6e2e3e4c6b89ddc2a79cba4f0b1b47f0131bbafc34bc1ce9"
 PROGRAM_ARGUMENTS = [
     "/usr/bin/lockf", "-t", "0", "__LOCK__", "/bin/bash", "__HOST_PULL__",
     "__COLLECTOR_OPTION__",
@@ -100,6 +102,16 @@ def test_template_program_arguments_are_immutable():
     assert text.count("/usr/bin/lockf") == 1
     assert "/bin/sh" not in text
     assert "ADMITTED_TEMPLATE_SHA256" not in text
+
+
+def test_manifest_pin_rejects_byte_drift(monkeypatch):
+    original = Path.read_bytes
+    def drift(path):
+        raw = original(path)
+        return raw + b"\n" if path == MANIFEST_PATH else raw
+    monkeypatch.setattr(Path, "read_bytes", drift)
+    with pytest.raises(AssertionError):
+        test_manifest_enrolls_the_pair_without_an_installed_preimage()
 
 
 def test_manifest_enrolls_the_pair_without_an_installed_preimage():
