@@ -185,5 +185,26 @@
     "sha256": "ed2555bf88d6b02488ad7507501f309229d8070bdc5084cb927710e0260ad493",
     "gzip_bytes": 25573,
     "gzip_sha256": "fbde6e699dfe570553fe0003df0fcd30ab8862120617bd9a0200b6a6ea94fc8e"
+  },
+  "followup_qualification": {
+    "state": "NOT_ACCEPTED_TWO_REMAINING_DEFECTS",
+    "at": "2026-11-07T11:26:51.033603+00:00",
+    "source_custody": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706085235",
+    "candidate_delivery": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706166477",
+    "findings": [
+      {
+        "path": "integrations/studio_direct_mcp/private_service.py",
+        "finding": "Retained Go context uses read_retained_successor_after_bootstrap_prune, whose current_bridges=True requires old live ingress after Go selection.",
+        "remedy": "Use existing retained-Go historical evidence with original_absent=True,current_bridges=False inside the closed retained-Go branch; preserve strict read_retained_go, lineage and phase checks. Do not weaken the public historical reader.",
+        "proof_owed": "Actual retained successor after live bridge changes; strict historical public reader still refuses the changed live bridge."
+      },
+      {
+        "path": "integrations/studio_direct_mcp/private_service_pin.py",
+        "finding": "Reconciliation first confirms retained intent directory durability after live pair replacements. A visible intent whose parent sync failed may therefore mutate the live pair without durable intent.",
+        "remedy": "Call existing confirm_forward_durability after content/custody/state checks and before either live replacement; retain later confirmations.",
+        "proof_owed": "Visible intent after parent-sync failure, then reconciliation while that failure persists must leave both live files unchanged."
+      }
+    ],
+    "production_candidate_applied": false
   }
 }
