@@ -85,6 +85,7 @@ def main():
         raise RuntimeError("Native host patch did not load from the immutable fixture")
     print(json.dumps({"candidate": args.candidate, "hermes": actual,
         "owner": "a577dbbf605474f97bbafa4ceeb0daf841292421", "owner_source_verified": True,
+        "owner_verification_scope": "client_bytes_only",
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
         "mode": "pinned-native-host-patch-loopback-fixture", "live_provider_acceptance": False}), flush=True)
     suite = unittest.TestSuite()

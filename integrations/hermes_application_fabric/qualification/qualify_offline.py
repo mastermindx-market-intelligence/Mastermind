@@ -59,6 +59,7 @@ def main():
         result = unittest.TextTestRunner(verbosity=2).run(suite)
         print(json.dumps({"mode": "offline-original-client-loopback-fixture",
             "owner": OWNER_COMMIT, "owner_client_sha256": OWNER_SHA256,
+            "owner_verification_scope": "client_bytes_only",
             "python": sys.version.split()[0], "jsonschema": validator,
             "tests_run": result.testsRun, "failures": len(result.failures),
             "errors": len(result.errors), "skips": len(result.skipped),

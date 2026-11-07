@@ -44,9 +44,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Acquire the original immutable corpus fixture anchor
+        uses: actions/checkout@v4
+        with:
+          ref: edd30b4686d3aaf358b4ca6ebd9485b04d15751d
+          fetch-depth: 1
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - name: Verify event source and original fixture anchor
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e 'edd30b4686d3aaf358b4ca6ebd9485b04d15751d^{commit}'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -55,44 +67,6 @@ jobs:
           node-version: '22.14.0'
       - name: Install original fixture dependencies
         run: python -m pip install --disable-pip-version-check -e '.[dev]'
-      - name: Acquire exact historical fleet fixture
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          python - <<'PY'
-          import base64
-          import hashlib
-          import json
-          import os
-          import subprocess
-          import urllib.request
-
-          expected_oid = "f87ac012339e82fe46bce5ddc70d1d04183d1b6e"
-          expected_sha256 = "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30"
-          expected_size = 101068
-          request = urllib.request.Request(
-              "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/git/blobs/" + expected_oid,
-              headers={
-                  "Accept": "application/vnd.github+json",
-                  "Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
-                  "User-Agent": "mastermind-studio-fixture",
-              },
-          )
-          with urllib.request.urlopen(request, timeout=45) as response:
-              record = json.load(response)
-          if record.get("encoding") != "base64" or record.get("sha") != expected_oid:
-              raise SystemExit("historical fixture envelope refused")
-          raw = base64.b64decode("".join(record["content"].splitlines()), validate=True)
-          actual_oid = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
-          if (record.get("size") != expected_size or len(raw) != expected_size
-                  or hashlib.sha256(raw).hexdigest() != expected_sha256 or actual_oid != expected_oid):
-              raise SystemExit("historical fixture identity refused")
-          stored = subprocess.check_output(["git", "hash-object", "-w", "--stdin"], input=raw).decode().strip()
-          if stored != expected_oid:
-              raise SystemExit("historical fixture storage refused")
-          subprocess.run(["git", "cat-file", "-e", expected_oid + "^{blob}"], check=True)
-          print("Historical fixture verified:", expected_oid, expected_size, "bytes")
-          PY
       - name: Compare unchanged baseline, observed case and original discovery context
         run: >-
           python -B integrations/hermes_application_fabric/qualification/diagnose_studio_fixture.py
@@ -265,6 +239,7 @@ jobs:
             engine
             lib
             config
+            tests
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
       - uses: actions/setup-python@v5
@@ -274,7 +249,22 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check 'uv==0.13.5'
           uv sync --project .ci-hermes-native --locked --no-default-groups --python 3.14
-          uv pip install --python .ci-hermes-native/.venv/bin/python 'jsonschema==4.26.0' 'PyYAML==6.0.3'
+          uv pip install --python .ci-hermes-native/.venv/bin/python 'jsonschema==4.26.0' 'PyYAML==6.0.3' 'pytest==9.2.0'
+      - name: Verify committed source fixture boundaries
+        run: >-
+          .ci-hermes-native/.venv/bin/python -B
+          integrations/hermes_application_fabric/qualification/verify_source_materialization.py
+      - name: Qualify the exact source-support proposal without overriding support flags
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-source-support-native-fixture
+          PYTHONPATH: .ci-hermes-native
+          HERMES_STARTUP_WARMUP_TIMEOUT: '0'
+        run: >-
+          .ci-hermes-native/.venv/bin/python -B
+          integrations/hermes_application_fabric/qualification/qualify_application_owner.py
+          --adapter-root . --macro-root .ci-hermes-application-owner
+          --native-owner-root . --hermes-root .ci-hermes-native
+          --source-support-proposal
       - name: Verify actual native tool history, owner limits and unknown effects
         env:
           HERMES_HOME: ${{ runner.temp }}/hermes-original-owner-fixture

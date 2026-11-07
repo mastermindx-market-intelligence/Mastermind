@@ -15,18 +15,14 @@ import socket
 import subprocess
 import sys
 import time
+import tempfile
 import unittest
 from unittest.mock import patch
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--adapter-root", required=True)
-    parser.add_argument("--macro-root", required=True)
-    parser.add_argument("--native-owner-root", required=True)
-    parser.add_argument("--hermes-root", required=True)
-    args = parser.parse_args()
-    roots = {name: Path(value).resolve() for name, value in vars(args).items()}
+def qualify(args):
+    roots = {name: Path(getattr(args, name)).resolve()
+             for name in ("adapter_root", "macro_root", "native_owner_root", "hermes_root")}
     candidate = subprocess.run(
         ["git", "-c", "gc.auto=0", "-C", str(roots["adapter_root"]), "rev-parse", "HEAD"],
         check=True, capture_output=True, text=True, timeout=10,
@@ -44,6 +40,12 @@ def main():
             raise RuntimeError("Qualification source differs: " + name)
         subprocess.run(["git", "-c", "gc.auto=0", "-C", str(roots[name]), "diff", "--exit-code", "HEAD", "--"],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
+    support = None
+    if args.source_support_proposal:
+        from owner_source_support import prepare, qualify_unit
+        support = prepare(roots["macro_root"], roots["adapter_root"], args.proposal_directory)
+        support["unit_qualification"] = qualify_unit(args.proposal_directory, sys.executable)
+        roots["macro_root"] = args.proposal_directory
     owner_tests = roots["native_owner_root"] / "ops/native_fabric/quota_continuity/tests"
     sys.path[:0] = [str(roots["adapter_root"]), str(roots["macro_root"]),
                    str(owner_tests), str(roots["hermes_root"])]
@@ -88,6 +90,7 @@ def main():
         credential_ref = "HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN"
         profile_id = "mmsecretary"
         fixed_transport = "native_go_hermes_secretary_v1"
+        automatic_transport = "native_fabric_hermes_secretary_auto_v1"
 
         def setUp(self):
             super().setUp()
@@ -136,11 +139,16 @@ def main():
                 (roots["macro_root"] / "config/provider_workloads.v1.json").read_bytes())
             document = json.loads((roots["macro_root"] / "config/provider_production_modes.v1.json").read_bytes())
             self.assertEqual(document["application_fabric_modes"], {})
-            transport_id = "native_fabric_hermes_secretary_auto_v1" if scoped else self.fixed_transport
+            transport_id = self.automatic_transport if scoped else self.fixed_transport
             original = factory_owner._APPLICATION_FABRIC_TRANSPORTS[transport_id]
-            self.assertFalse(original.qualified or original.application_allowed)
+            if support is None:
+                self.assertFalse(original.qualified or original.application_allowed)
+                fixture_support = {"qualified": True, "application_allowed": True}
+            else:
+                self.assertTrue(original.qualified and original.application_allowed)
+                fixture_support = {}  # Consume the candidate's real source flags.
             qualified = replace(original, base_url=f"http://127.0.0.1:{self.server.server_port}/v1",
-                model=None if scoped else "fixture-model", qualified=True, application_allowed=True)
+                model=None if scoped else "fixture-model", **fixture_support)
             held = patch.dict(factory_owner._APPLICATION_FABRIC_TRANSPORTS, {transport_id: qualified})
             held.start()
             self.addCleanup(held.stop)
@@ -353,9 +361,23 @@ def main():
     class ExactOwnerConversation(OriginalOwnerConversation):
         route_mode = "exact"
 
+    class MetaOwnerConversation(OriginalOwnerConversation):
+        service_lane = "hermes-meta-ceo"
+        service_mode = "hermes_meta_fabric"
+        credential_ref = "HERMES_META_FABRIC_APPLICATION_TOKEN"
+        profile_id = "mmmeta"
+        fixed_transport = "native_go_hermes_meta_v1"
+        automatic_transport = "native_fabric_hermes_meta_auto_v1"
+
+    class MetaAutoOwnerConversation(MetaOwnerConversation):
+        route_mode = "auto"
+
+    class MetaExactOwnerConversation(MetaOwnerConversation):
+        route_mode = "exact"
+
     class AttendedOwnerConversation(OriginalOwnerConversation):
         # Existing factory/handler/Broker with a distinct disposable service.
-        # Source-held production defaults remain unenrolled and unqualified.
+        # Runtime application data remains unenrolled in both source contexts.
         service_lane = "hermes-attended"
         service_mode = "hermes_attended_fabric"
         workload = "hermes_attended"
@@ -365,15 +387,31 @@ def main():
 
     suite = unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(cls)
         for cls in (OriginalOwnerConversation, AutoOwnerConversation, ExactOwnerConversation,
-                    AttendedOwnerConversation))
+                    AttendedOwnerConversation, MetaOwnerConversation,
+                    MetaAutoOwnerConversation, MetaExactOwnerConversation))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
-    print(json.dumps({"sources": expected, "tests_run": result.testsRun,
+    print(json.dumps({"sources": expected, "source_support_proposal": support,
+        "fixture_overrides_source_flags": support is None, "tests_run": result.testsRun,
+        "network_counter_scope": "native_conversation_process_after_source_preparation",
         "failures": len(result.failures), "errors": len(result.errors), "skips": len(result.skipped),
         "blocked_external_connections": len(blocked), "provider_sdk_constructions": len(constructed),
         "real_application_handler": True, "real_broker": True, "provider_is_fixture": True,
         "live_provider_acceptance": False, "monetary_acceptance": False}), flush=True)
-    return 0 if (result.wasSuccessful() and result.testsRun == 12 and not result.skipped
+    return 0 if (result.wasSuccessful() and result.testsRun == 21 and not result.skipped
                  and not blocked and not constructed) else 1
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--adapter-root", required=True)
+    parser.add_argument("--macro-root", required=True)
+    parser.add_argument("--native-owner-root", required=True)
+    parser.add_argument("--hermes-root", required=True)
+    parser.add_argument("--source-support-proposal", action="store_true")
+    args = parser.parse_args()
+    with tempfile.TemporaryDirectory(prefix="hermes-owner-support-") as temporary:
+        args.proposal_directory = Path(temporary) / "macro"
+        return qualify(args)
 
 
 if __name__ == "__main__":
