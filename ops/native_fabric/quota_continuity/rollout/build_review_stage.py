@@ -290,7 +290,13 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
     """
-    manifest = before_admission_integrity(manifest)
+    # Bind actual captured bytes independently of the historical parent proof.
+    # Both views start from this same exact-dict snapshot; normalization never
+    # substitutes predecessor bytes for the source captured by the Go component.
+    if type(manifest) is not dict:
+        raise ValueError("native admission integrity manifest invalid")
+    actual_manifest = dict(manifest)
+    manifest = before_admission_integrity(actual_manifest)
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -360,7 +366,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         for name in GO_POST_FAILURE_ADDITIONS:
             del historical["ext/" + name]
     for name, original in GO_BASE_DEPENDENCIES.items():
-        if manifest["ext/" + name] != dependency_hashes[name]:
+        if actual_manifest["ext/" + name] != dependency_hashes[name]:
             raise ValueError("native Go base differs from captured application dependency")
         historical["ext/" + name] = original
     if manifest["ext/pick.py"] not in {

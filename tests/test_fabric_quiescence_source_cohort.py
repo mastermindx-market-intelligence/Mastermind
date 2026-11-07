@@ -52,4 +52,41 @@ class Cohort(unittest.TestCase):
         builder.before_admission_integrity(parent)
 
 
+    def test_go_current_capture_and_exact_parent_are_independent_obligations(self):
+        original = dict(self.manifest)
+        captured = {name: original["ext/" + name]
+                    for name in builder.GO_APPLICATION_DEPENDENCIES}
+        builder.validate_go_base_manifest(original, captured)
+        self.assertEqual(original, self.manifest)
+        parent = builder.before_qualification_quiescence(original)
+        parent_capture = {name: parent["ext/" + name]
+                          for name in builder.GO_APPLICATION_DEPENDENCIES}
+        builder.validate_go_base_manifest(parent, parent_capture)
+        # Historical validation never substitutes bytes for the current capture.
+        for source, wrong_capture in [(original, parent_capture), (parent, captured)]:
+            with self.subTest(source=source["ext/lease_broker.py"]), self.assertRaises(ValueError):
+                builder.validate_go_base_manifest(source, wrong_capture)
+
+    def test_go_capture_drift_and_namespace_substitution_are_refused(self):
+        original = dict(self.manifest)
+        captured = {name: original["ext/" + name]
+                    for name in builder.GO_APPLICATION_DEPENDENCIES}
+        for member in captured:
+            changed = dict(captured)
+            changed[member] = "0" * 64
+            with self.subTest(captured=member), self.assertRaises(ValueError):
+                builder.validate_go_base_manifest(original, changed)
+        missing_capture = dict(captured)
+        missing_capture.pop("lease_broker.py")
+        for wrong_capture in [missing_capture, {**captured, "foreign.py": "0" * 64}]:
+            with self.assertRaises(ValueError):
+                builder.validate_go_base_manifest(original, wrong_capture)
+        missing = dict(original)
+        missing.pop("ext/remote_sub.sh")
+        for source in [missing, {**original, "ext/foreign.py": "0" * 64}]:
+            with self.assertRaises(ValueError):
+                builder.validate_go_base_manifest(source, captured)
+        self.assertEqual(original, self.manifest)
+
+
 if __name__=='__main__':unittest.main()
