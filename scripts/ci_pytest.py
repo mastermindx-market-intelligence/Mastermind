@@ -21,14 +21,21 @@ exactly ``test``; dynamic ``pytest shard N`` contexts alone cannot replace it.
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import hashlib
+import json
+import os
 import re
+import secrets
+import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tomllib
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -196,6 +203,7 @@ def format_plan(plan: Mapping[str, int], *, shards: Sequence[Sequence[str]] | No
 
 
 MAX_SHARD_WORKERS = 16
+MAX_PRECOLLECTION_PROCESSES = 4
 
 
 def pytest_argv(
@@ -420,7 +428,7 @@ _MEASURED_SIX_JOB_PLACEMENT = {
 
 
 def partition_modules(
-    included: Sequence[str], *, jobs: int
+    included: Sequence[str], *, jobs: int, inner: bool = False
 ) -> tuple[tuple[str, ...], ...]:
     """Split ``included`` into ``jobs`` shards that exactly re-cover it.
 
@@ -446,6 +454,8 @@ def partition_modules(
     three-digit constants outside tests/: the identity guard forbids them.)
     """
 
+    if type(inner) is not bool:
+        raise PolicyError("inner placement must be a boolean")
     if jobs < 1:
         raise PolicyError("jobs must be at least 1")
     if jobs > len(included):
@@ -455,10 +465,13 @@ def partition_modules(
         )
     buckets: list[list[str]] = [[] for _ in range(jobs)]
     for path in included:
-        digest = hashlib.sha256(path.encode("utf-8")).digest()
+        # Reusing the outer digest modulo four after modulo six fixes parity
+        # and reaches only two inner buckets. Keep outer pins/hash unchanged.
+        domain = b"mastermind-ci-pytest-children-v1\0" if inner else b""
+        digest = hashlib.sha256(domain + path.encode("utf-8")).digest()
         hashed = int.from_bytes(digest[:8], "big") % jobs
-        target = (_MEASURED_THREE_JOB_PLACEMENT.get(path, hashed) if jobs == 3
-                  else _MEASURED_SIX_JOB_PLACEMENT.get(path, hashed) if jobs == 6
+        target = (_MEASURED_THREE_JOB_PLACEMENT.get(path, hashed) if jobs == 3 and not inner
+                  else _MEASURED_SIX_JOB_PLACEMENT.get(path, hashed) if jobs == 6 and not inner
                   else hashed)
         buckets[target].append(path)
     shards = tuple(tuple(bucket) for bucket in buckets)
@@ -494,6 +507,8 @@ def run_shards(
     *,
     root: Path,
     python: str | None = None,
+    completion_proof: bool = False,
+    env: Mapping[str, str] | None = None,
 ) -> int:
     """Run every shard and return the lowest-indexed nonzero exit code, else 0.
 
@@ -505,49 +520,218 @@ def run_shards(
     timing plugin's module records stream immediately, under a shard label,
     so a job timeout leaves the unfinished module and prior module timings.
     These records are diagnostics only; every process exit still governs.
+    The opt-in canonical child mode additionally requires an exact-PID terminal
+    receipt and owns private outputs plus bounded process-group cancellation.
     """
 
     output_lock = threading.Lock()
+    running_lock = threading.Lock()
+    running: dict[int, Any] = {}
+    # A direct child can exit while its descendants retain this group. Keep
+    # group custody until the controller's cancellation grace has completed.
+    owned_groups: set[int] = set()
+    cancel_signal = 0
+    cancel_started = None
+    previous_handlers = {}
+    signalled_groups = {signal.SIGTERM: set(), signal.SIGKILL: set()}
+    child_env = dict(os.environ if env is None else env)
+    directories: list[Path] = []
+    token = secrets.token_hex(16) if completion_proof else None
+    guard = None
+
+    if completion_proof:
+        from scripts import ci_xdist_guard as guard
+        if (os.name != "posix" or threading.current_thread() is not threading.main_thread()
+                or not 0 < len(shards) <= MAX_PRECOLLECTION_PROCESSES):
+            raise PolicyError("canonical children require bounded main-thread POSIX custody")
+        flattened = [path for shard in shards for path in shard]
+        verify_partition(flattened, shards)
+        if len(flattened) != len(set(flattened)):
+            raise PolicyError("canonical children cannot repeat a selected module")
+        child_env.setdefault("PYTHONHASHSEED", "0")
+
+    def cancel(signum, frame):
+        nonlocal cancel_signal, cancel_started
+        if not cancel_signal:
+            cancel_signal = signum
+            cancel_started = time.monotonic()
+
+    def signal_owned(signum):
+        with running_lock:
+            groups = tuple(owned_groups)
+        for group in groups:
+            if group in signalled_groups[signum]:
+                continue
+            try:
+                os.killpg(group, signum)
+            except ProcessLookupError:
+                pass
+            signalled_groups[signum].add(group)
 
     def _run(index: int) -> tuple[int, int, str, float]:
         started = time.monotonic()
+        if completion_proof and cancel_signal:
+            return index, 128 + cancel_signal, "child cancelled before spawn\n", 0.0
         captured: list[str] = []
-        with subprocess.Popen(
-            pytest_argv(shards[index], python=python, progress=True),
-            cwd=root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        ) as process:
-            assert process.stdout is not None
-            for line in process.stdout:
-                if line.startswith("CI_MODULE "):
+        argv = pytest_argv(shards[index], python=python, progress=True)
+        options = dict(cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       text=True, bufsize=1)
+        if completion_proof:
+            directory = directories[index]
+            options.update(env={**child_env, "MMX_CI_FIXED_DIAGNOSTICS_DIR": str(directory)},
+                           start_new_session=True, errors="replace")
+            # Explicit argv, not inherited env, activates one serial receipt.
+            # Each controller owns a separate pytest cache. Pytest itself keeps
+            # its ordinary uniquely allocated temporary-session directory.
+            argv += ["-n", "0", "-p", "scripts.ci_xdist_guard",
+                     "--ci-child-receipt", str(directory / guard.CHILD_RECEIPT_NAME),
+                     "--ci-child-token", token,
+                     "-o", "cache_dir=" + str(directory / "pytest-cache")]
+        elif env is not None:
+            options["env"] = child_env
+        if completion_proof and cancel_signal:
+            return index, 128 + cancel_signal, "child cancelled before launch\n", 0.0
+        with subprocess.Popen(argv, **options) as process:
+            if completion_proof:
+                with running_lock:
+                    running[index] = process
+                    owned_groups.add(process.pid)
+                if cancel_signal:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL
+                            if time.monotonic() - cancel_started >= 5 else signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+            try:
+                assert process.stdout is not None
+                for line in process.stdout:
+                    if line.startswith("CI_MODULE "):
+                        with output_lock:
+                            # Preserve the existing machine-readable record;
+                            # whole-module ownership makes it unambiguous here.
+                            prefix = "" if completion_proof else f"--- shard {index + 1}/{len(shards)} progress --- "
+                            print(prefix + line.rstrip("\n"), flush=True)
+                    else:
+                        captured.append(line)
+                returncode = process.wait()
+                if completion_proof:
+                    valid = False
+                    try:
+                        value = guard.read_child_receipt(directory / guard.CHILD_RECEIPT_NAME)
+                        valid = guard.valid_child_receipt(value, pid=process.pid, token=token,
+                            assigned_digest=guard.item_digest(shards[index]), returncode=returncode)
+                    except (OSError, ValueError, TypeError, UnicodeError):
+                        pass
                     with output_lock:
-                        print(f"--- shard {index + 1}/{len(shards)} progress --- "
-                              + line.rstrip("\n"), flush=True)
-                else:
-                    captured.append(line)
-            returncode = process.wait()
+                        public_result = dict(index=index, pid=process.pid,
+                            process_exit=returncode, completion_valid=valid)
+                        if valid:
+                            public_result.update(collected=value["collected"], finished=value["finished"],
+                                assigned_modules_sha256=value["assigned_modules_sha256"],
+                                cases_sha256=value["finished_sha256"])
+                        print("CI_CHILD_RESULT " + json.dumps(public_result, sort_keys=True), flush=True)
+                    if not valid:
+                        captured.append("CI_CHILD_GUARD missing or invalid terminal completion\n")
+                        if returncode == 0:
+                            returncode = 1
+            except BaseException:
+                if completion_proof:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait()
+                raise
+            finally:
+                if completion_proof:
+                    with running_lock:
+                        running.pop(index, None)
         elapsed = max(0.0, time.monotonic() - started)
         return index, returncode, "".join(captured), elapsed
 
     codes: dict[int, int] = {}
-    with ThreadPoolExecutor(max_workers=len(shards)) as pool:
-        futures = [pool.submit(_run, index) for index in range(len(shards))]
-        for future in as_completed(futures):
-            index, returncode, output, elapsed = future.result()
-            codes[index] = returncode
-            with output_lock:
-                print(
-                    f"--- shard {index + 1}/{len(shards)} "
-                    f"({len(shards[index])} modules) exit={returncode} elapsed_s={elapsed:.2f} ---",
-                    flush=True,
-                )
-                print(output, end="" if output.endswith("\n") else "\n", flush=True)
+    with ExitStack() as resources:
+        if completion_proof:
+            configured = child_env.get("MMX_CI_FIXED_DIAGNOSTICS_DIR")
+            output_root = (Path(configured) if configured is not None else
+                Path(resources.enter_context(tempfile.TemporaryDirectory(prefix="ci-pytest-children-"))))
+            try:
+                parent = guard._private_directory(output_root)
+                try:
+                    for index in range(len(shards)):
+                        name = f"pytest-child-{index}"
+                        os.mkdir(name, mode=stat.S_IRWXU, dir_fd=parent)
+                        directory = output_root / name
+                        child = guard._private_directory(directory)
+                        os.close(child)
+                        directories.append(directory)
+                finally:
+                    os.close(parent)
+            except (OSError, ValueError) as exc:
+                raise PolicyError("child outputs require fresh private directories") from exc
+            print("CI_CHILD_PLAN " + json.dumps(dict(children=len(shards), token=token,
+                modules=[len(shard) for shard in shards],
+                assigned_modules_sha256=[guard.item_digest(shard) for shard in shards]),
+                sort_keys=True), flush=True)
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                previous_handlers[signum] = signal.signal(signum, cancel)
+        try:
+            with ThreadPoolExecutor(max_workers=len(shards)) as pool:
+                futures = {}
+                try:
+                    for index in range(len(shards)):
+                        if completion_proof and cancel_signal:
+                            break
+                        futures[pool.submit(_run, index)] = index
+                    pending = set(futures)
+                    while pending or (cancel_signal and time.monotonic() - cancel_started < 5):
+                        if completion_proof and cancel_signal:
+                            grace_expired = time.monotonic() - cancel_started >= 5
+                            signal_owned(signal.SIGKILL if grace_expired else signal.SIGTERM)
+                        if pending:
+                            completed, pending = wait(pending, timeout=0.1, return_when=FIRST_COMPLETED)
+                        else:
+                            # Group cleanup can outlive every direct child;
+                            # waiting on an empty future set would busy-spin.
+                            time.sleep(0.05)
+                            completed = set()
+                        for future in completed:
+                            try:
+                                index, returncode, output, elapsed = future.result()
+                            except Exception:
+                                index, returncode, output, elapsed = futures[future], 1, "CI child process failed to execute\n", 0.0
+                            codes[index] = returncode
+                            with output_lock:
+                                print(
+                                    f"--- shard {index + 1}/{len(shards)} "
+                                    f"({len(shards[index])} modules) exit={returncode} elapsed_s={elapsed:.2f} ---",
+                                    flush=True,
+                                )
+                                print(output, end="" if output.endswith("\n") else "\n", flush=True)
+                    if cancel_signal:
+                        # Includes a TERM-exited parent whose surviving descendant
+                        # redirected stdout, so EOF did not retain its reader task.
+                        signal_owned(signal.SIGKILL)
+                except BaseException:
+                    if completion_proof:
+                        # Drain before ThreadPoolExecutor's blocking __exit__.
+                        # This also handles a broken controller output stream.
+                        cancel(signal.SIGTERM, None)
+                        signal_owned(signal.SIGTERM)
+                        while time.monotonic() - cancel_started < 5:
+                            time.sleep(0.05)
+                        signal_owned(signal.SIGKILL)
+                    raise
+        finally:
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
 
     # Lowest shard index wins so the reported code is stable across runs
     # rather than depending on which shard happened to finish first.
+    if cancel_signal:
+        return 128 + cancel_signal
+    if len(codes) != len(shards):
+        return 1
     for index in sorted(codes):
         if codes[index] != 0:
             return codes[index]

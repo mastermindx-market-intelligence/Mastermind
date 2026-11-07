@@ -549,7 +549,7 @@ jobs:
         # for setup/cleanup opportunity, not a guaranteed future bound.
         # Slow setup or runner loss can still prevent artifact delivery.
         timeout-minutes: 45
-        run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --workers 4
+        run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --processes 4
 
       - name: Upload fixed test diagnostics
         if: always()
@@ -557,7 +557,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ci-fixed-diagnostics-${{ matrix.index }}
-          path: ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+          path: |
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/pytest-child-0/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/pytest-child-1/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/pytest-child-2/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/pytest-child-3/ci-fixed-diagnostics.json
           if-no-files-found: warn
           retention-days: 3
           compression-level: 0

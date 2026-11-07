@@ -412,10 +412,25 @@ def validate_parallel_workflow(text: str) -> None:
         or set(runner) != {"name", "if", "run", "timeout-minutes"}
         or type(runner.get("timeout-minutes")) is not int
         or runner.get("timeout-minutes") != 45
-        or runner.get("run") != "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --workers 4"
+        or runner.get("run") != "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --processes 4"
         or runner.get("if") != "${{ steps.previous_ci.outputs.reuse != 'true' }}"
     ):
         raise ci_pytest.PolicyError("prior merged CI proof must fail closed before every shard")
+    diagnostics = [step for step in shard_steps
+                   if step.get("name") == "Upload fixed test diagnostics"]
+    expected_paths = "\n".join(
+        "${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/pytest-child-" + str(index) + "/" + leaf
+        for leaf in ("ci-fixed-diagnostics.json",)
+        for index in range(ci_pytest.MAX_PRECOLLECTION_PROCESSES)
+    ) + "\n"
+    expected_diagnostics = dict(name="Upload fixed test diagnostics", **{
+        "if": "always()", "timeout-minutes": 2, "uses": "actions/upload-artifact@v4",
+        "with": {"name": "ci-fixed-diagnostics-${{ matrix.index }}",
+                 "path": expected_paths, "if-no-files-found": "warn", "retention-days": 3,
+                 "compression-level": 0},
+    })
+    if diagnostics != [expected_diagnostics]:
+        raise ci_pytest.PolicyError("child diagnostics must retain exactly the finite public leaves")
     for name in (
         "Verify Paper direct pinned MCP SDK",
         "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
@@ -539,6 +554,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=0,
         help="pytest-xdist workers inside this shard (0 = one serial interpreter)",
     )
+    parser.add_argument(
+        "--processes", type=int, default=0,
+        help="independent serial pytest children, partitioned before collection",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     root = Path(args.root).resolve() if args.root else ci_pytest.repo_root()
 
@@ -549,9 +568,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         gate, selected, digest = shard_plan(
             root, jobs=args.jobs, index=args.index
         )
-        shard_argv = ci_pytest.pytest_argv(
-            selected, progress=True, workers=args.workers
-        )
+        if args.processes and args.workers:
+            raise ci_pytest.PolicyError("independent processes and xdist workers are mutually exclusive")
+        if not 0 <= args.processes <= ci_pytest.MAX_PRECOLLECTION_PROCESSES:
+            raise ci_pytest.PolicyError("independent process count is outside the worker budget")
+        children = (ci_pytest.partition_modules(selected, jobs=args.processes, inner=True)
+                    if args.processes else None)
+        shard_argv = ci_pytest.pytest_argv(selected, progress=True, workers=args.workers)
     except ci_pytest.PolicyError as error:
         print(f"ci_parallel_shard policy error: {error}", file=sys.stderr)
         return 2
@@ -559,12 +582,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(ci_pytest.format_plan(gate["plan"]), flush=True)
     print(
         f"parallel_shard={args.index + 1}/{args.jobs} "
-        f"modules={len(selected)} included_sha256={digest} workers={args.workers}",
+        f"modules={len(selected)} included_sha256={digest} workers={args.workers}"
+        + (f" processes={args.processes}" if args.processes else ""),
         flush=True,
     )
     if args.plan_only:
+        if children is not None:
+            print("child_modules=" + ",".join(str(len(child)) for child in children), flush=True)
         return 0
     # No hand-written selectors, mutating retry, positive allowlist or shell.
+    if children is not None:
+        try:
+            return ci_pytest.run_shards(children, root=root, completion_proof=True)
+        except ci_pytest.PolicyError as error:
+            print(f"ci_parallel_shard policy error: {error}", file=sys.stderr)
+            return 2
     if args.workers:
         # Every xdist worker must collect the identical item list; a
         # parametrize over a set/dict iterates in hash order, which differs

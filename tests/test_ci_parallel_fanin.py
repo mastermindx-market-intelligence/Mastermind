@@ -159,8 +159,8 @@ def test_smoke_dependency_checkout_cannot_drift_or_bypass_its_boundary(mutation)
         ),
         ("exit 1\n            fi", "echo \"not stopping\"\n            fi\n            exit 1"),
         (
-            "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --workers 4",
-            "python -m scripts.ci_parallel_shard --jobs 6 --index 0 --workers 4",
+            "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --processes 4",
+            "python -m scripts.ci_parallel_shard --jobs 6 --index 0 --processes 4",
         ),
         ("      - name: Compile source\n        run:", "      - name: Compile source\n        if: matrix.index == 1\n        run:"),
         (
@@ -378,7 +378,7 @@ def test_same_sha_reuse_is_step_scoped_and_required_fanin_stays_unconditional() 
         "name": "Run repository test shard",
         "if": "${{ steps.previous_ci.outputs.reuse != 'true' }}",
         "timeout-minutes": 45,
-        "run": "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --workers 4",
+        "run": "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }} --processes 4",
     }
     assert "env" not in shard_step  # Do not expose the Actions token to pytest.
     assert data["jobs"]["test"]["if"] == "${{ always() }}"

@@ -237,7 +237,11 @@ def test_workflow_retains_job_limit_and_bounds_upload_opportunity():
     assert job['timeout-minutes']==60 and step['timeout-minutes']==45
     assert upload['if']=='always()' and upload['timeout-minutes']==2
     assert upload['uses']=='actions/upload-artifact@v4'
-    assert upload['with']['path']=='${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json'
+    assert upload['with']['path'].splitlines() == [
+        '${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/pytest-child-' + str(index) + '/' + leaf
+        for leaf in ('ci-fixed-diagnostics.json',)
+        for index in range(4)
+    ]
     assert upload['with']['name']=='ci-fixed-diagnostics-${{ matrix.index }}'
     assert upload['with']['if-no-files-found']=='warn'
     assert job['steps'].index(step)<job['steps'].index(upload)
