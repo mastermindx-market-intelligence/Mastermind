@@ -144,6 +144,29 @@ def test_typed_resources_reach_real_fixed_factory_without_start(fixed):
     assert set(fixed.owner.observe())=={'worker_id','control_uid','binding_id','profile_id','adapter_id','realm_config_sha256','realm_generation','catalog_digest'}
 
 
+@pytest.mark.parametrize('fault', [None, 'host', 'capability', 'generation', 'revoke'])
+def test_opted_in_owner_assembly_rechecks_source_enrollment_before_any_secret(fixed, monkeypatch, fault):
+    fixed.raw.update(native_capacity_enrollment={}, capacity_capability_id='cap.fixture')
+    reads = []
+    def native(self):
+        reads.append(1)
+        value = {'host_ref': fixed.physical.host_ref, 'capacity_capability_id': 'cap.fixture',
+                 'realm_generation': fixed.observation['realm_generation']}
+        if fault == 'host': value['host_ref'] = 'foreign'
+        if fault == 'capability': value['capacity_capability_id'] = 'foreign'
+        if fault == 'generation': value['realm_generation'] += 1
+        if fault == 'revoke' and len(reads) > 1:
+            raise realm.ProviderRealmError('revoked current source')
+        return value
+    monkeypatch.setattr(realm.SubscriptionRealmOwner, 'observe_capacity_enrollment', native)
+    if fault:
+        with pytest.raises((bridge.BridgeProtocolError, realm.ProviderRealmError)): compose(fixed)
+    else:
+        assert compose(fixed).credential_realm_owner is fixed.owner
+        assert len(reads) == 2
+    assert fixed.calls == []
+
+
 @pytest.mark.parametrize('change',[
     {'credential_loader':None},{'max_turns':True},{'max_turns':0},{'max_turns':65},
     {'nice':-1},{'nice':True},{'nice':20},{'routing_root_id':''},{'routing_parent_run_id':'bad parent'},

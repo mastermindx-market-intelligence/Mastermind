@@ -757,6 +757,11 @@ def _qualified_current(
 ) -> bool:
     """Consume the real B5 envelope and its paired mapper metadata."""
 
+    if validity.get('schema') == 'mastermind.project_data_source_validity.v1':
+        from common.project_discovery_observation_contract import card_is_current
+        return autonomy_generated_at == control_generated_at and card_is_current(validity, cache, responsibility,
+            work_ref=responsibility_ref, root_job_id=root_job_id, generated_at=control_generated_at)
+
     publication_seq = validity.get("publication_seq")
     if (
         cache.get("state") != "fresh"
@@ -855,6 +860,14 @@ def _validate_owner_observation(
     if owner_observation is None:
         return invalid("owner observation is absent", missing=True)
     row = _mapping(owner_observation)
+    if row.get('schema') == 'mastermind.workspace_source_observation.v2':
+        from common.project_discovery_observation_contract import validate_observation
+        try:
+            validate_observation(dict(row), work_ref=selected_work_ref, root_job_id=selected_root_job_id,
+                document=control_room_doc, validity=source_validity_doc, currentness=cache_currentness_doc, fabric=fabric_view_doc)
+            return dict(row), []
+        except (ValueError, KeyError, TypeError, AttributeError):
+            return invalid('DATA owner observation is invalid')
     state = row.get("state")
     if (set(row) != OWNER_OBSERVATION_KEYS or row.get("schema") != OWNER_OBSERVATION_SCHEMA
             or not isinstance(state, str) or state not in OWNER_OBSERVATION_STATES
@@ -2081,3 +2094,24 @@ def compose_mission_workspace_v3(
     for row in output["result_refs"]["refs"]:
         assert set(row) == FABRIC_V3_REF_KEYS
     return output
+
+
+def compose_mission_workspace_v4(*, control_room, fabric_view, selection,
+                                 source_validity, cache_currentness,
+                                 source_generation=None, owner_observation=None):
+    """A separate acceptance companion; all v1-v3 documents remain unchanged."""
+    from common import product_acceptance_read_contract as contract
+    selected = contract.selection(selection)
+    if (type(fabric_view) is not dict
+            or set(fabric_view) != {'schema', 'fabric_view', 'product_acceptance'}
+            or fabric_view['schema'] != contract.FABRIC_SCHEMA):
+        raise ValueError('invalid_fabric_companion')
+    accepted = contract.validate_view(fabric_view['product_acceptance'], selected=selected)
+    mission = compose_mission_workspace_v3(control_room=control_room,
+        fabric_view=fabric_view['fabric_view'], work_ref=selected['work_ref'],
+        root_job_id=selected['root_job_id'], source_validity=source_validity,
+        cache_currentness=cache_currentness, source_generation=source_generation,
+        owner_observation=owner_observation)
+    if mission['read_state']['state'] != 'CURRENT':
+        accepted = contract.unavailable(selected, 'SOURCE_UNAVAILABLE')
+    return {'schema': contract.MISSION_SCHEMA, 'mission': mission, 'product_acceptance': accepted}

@@ -42,7 +42,7 @@ _COMMIT = re.compile(r'[0-9a-f]{40}')
 _BINDING_FIELDS = frozenset({'root_id','job_id','attempt_id','effective_grant_digest','commission_sha256'})
 _ASSIGNMENT_OPERATIONS = frozenset({'assignment-seal', 'assignment-seal-prepare', 'assignment-seal-commit', 'assignment-seal-finalize'})
 _MODIFYING_OPERATIONS = frozenset({'start', 'cancel', 'validate'}) | _ASSIGNMENT_OPERATIONS
-_OPERATIONS = frozenset({'start','status','collect','cancel','validate','attended-secret-canary','service-readiness'}) | _ASSIGNMENT_OPERATIONS
+_OPERATIONS = frozenset({'start','status','collect','cancel','validate','attended-secret-canary','service-quiesce','service-readiness','native-capacity-observation'}) | _ASSIGNMENT_OPERATIONS
 _TRUSTED_CONFIG = object()
 _ERROR_CODES = frozenset({'BrokerProtocolError','PeerAuthorizationError','ConfigTrustError',
     'EFFECT_UNKNOWN','BridgeIdentityError','SocketBindingError','BackendNotConfiguredError',
@@ -621,6 +621,8 @@ class FabricBridgeBroker:
 
     async def execute(self,request,*,peer):
         self._authorize_peer(peer)
+        if self.config.adapter_id != ADAPTER_ID:
+            _refuse('ConfigTrustError','Paid profile requires its concrete paid owner composition')
         _object(request,{'schema_version','request_id','operation','payload'})
         if request['schema_version']!=BROKER_REQUEST_SCHEMA_VERSION:_refuse()
         _identifier(request['request_id'])
@@ -630,15 +632,32 @@ class FabricBridgeBroker:
         # Canonical JSON copy prevents trusted backend mutation from rewriting the
         # caller's binding/hash while a response is being checked.
         payload=_strict_json(_canonical(request['payload']))
-        if operation == 'service-readiness':
+        if operation in {'service-readiness', 'native-capacity-observation'}:
             # Authenticated by _authorize_peer above and before wire reads in
             # handle_connection. No Backend or Runtime/Attempt operation.
             _object(payload, {'nonce'})
             if type(payload['nonce']) is not str or re.fullmatch(r'[0-9a-f]{32}', payload['nonce']) is None:
                 _refuse()
             self.require_service_identity()
-            from ops.executive_os.finite_service_lifecycle import bridge_readiness
-            result = bridge_readiness(self.config)
+            if operation == 'service-readiness':
+                from ops.executive_os.finite_service_lifecycle import bridge_readiness
+                result = bridge_readiness(self.config)
+            else:
+                # Read-only fixed owner acquisition; no request-selected path,
+                # identity, generation, callback, run or provider probe.
+                from control_plane.codex_provider_realm import ProviderRealmError
+                from ops.executive_os.host_capacity_probe import HostCapacityProbeError
+                from ops.executive_os.capacity_source_contract import (
+                    CapacitySourceContractError, validate_native_identity_observation,
+                )
+                try:
+                    result = await self.backend.execute(operation, {})
+                    if type(result) is not dict or set(result) != {'observation'}:
+                        _refuse('BackendUnavailableError', 'Native observation owner is unavailable')
+                    result = {'observation': validate_native_identity_observation(result['observation'])}
+                except (ProviderRealmError, HostCapacityProbeError, CapacitySourceContractError) as exc:
+                    raise BridgeProtocolError('BackendUnavailableError',
+                        'Current native observation is unavailable') from exc
             response = dict(schema_version=BROKER_RESPONSE_SCHEMA_VERSION,
                 request_id=request['request_id'], operation=operation, ok=True,
                 result=dict(result, nonce=payload['nonce']))
@@ -759,7 +778,7 @@ class FabricBridgeBroker:
                 if response is not None:
                     writer.write(_canonical(response)+b'\n')
                     await writer.drain()
-                    if operation == 'service-readiness' and response.get('ok') is True:
+                    if operation in {'service-readiness','service-quiesce'} and response.get('ok') is True:
                         # Keep this authenticated connection alive while Control
                         # captures Darwin's peer audit token after our send.
                         # One fixed-size ACK, bounded wait, no backend dispatch.

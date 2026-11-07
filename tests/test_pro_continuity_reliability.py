@@ -44,33 +44,33 @@ def test_no_boundary_means_continue_not_checkpoint_as_excuse():
     active = section("ACTIVE_EXECUTION.md", "Step 8 — Final-response gate")
     assert "checkpoint is not itself a reason to stop" in active
     assert "If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize**" in active
-    assert "completed plan or arbitrary time target" in active
+    assert 'completed plan or time target' in active
 
 def test_checkpoint_precedes_risky_work_and_is_cumulative():
     raw = section("ACTIVE_EXECUTION.md", "Step 7A — Preserve operational continuity before interruption")
     for clause in ("before a long/risky action could lose the last known effect", "Do not defer all persistence",
-                   "last verified effect", "rejected approaches", "hypotheses and falsifiers",
-                   "working checkpoint", "immutable transfer capsule"):
+                   "last verified effect", "rejected approaches", 'hypotheses/falsifiers',
+                   "working checkpoint", 'immutable prepared Attempt capsule'):
         assert clause in raw
 
 def test_recovery_is_checkpoint_first_without_unconditional_history_replay():
-    raw = text("COLD_START.md")
-    for clause in ("latest verified cumulative checkpoint", "exact program/operation",
-                   "material invalidators", "no valid checkpoint", "bounded canonical recovery",
-                   "do not follow a handoff history chain"):
+    raw = " ".join(text("COLD_START.md").split())
+    for clause in ('Verify latest cumulative checkpoint owner/identity/revision', 'verified pin/exact operation',
+                   'material source/law/runtime/effect/custody/interface/return changes', 'Without a valid checkpoint', 'use Step 3 once and save before substantial effects',
+                   'no history chains, repeated accepted proof or unrelated scans'):
         assert clause in raw
 
 def test_handoff_does_not_claim_web_compaction_or_custody_transfer():
-    raw = text("COLD_START.md") + text("ACTIVE_EXECUTION.md")
-    for clause in ("does not prove host-side transcript compaction", "genuinely new chat",
-                   "does not transfer a lease", "Project history may still be supplied"):
+    raw = " ".join(text("COLD_START.md").split()) + text("ACTIVE_EXECUTION.md")
+    for clause in ('Ignoring messages proves no compaction', "genuinely new chat",
+                   'A new chat transfers no lease', 'Host Project history is advisory'):
         assert clause in raw
 
 def test_resource_evidence_is_observed_not_fabricated():
     raw = text("ACTIVE_EXECUTION.md")
     for clause in ("hidden reasoning budgets and unexposed deadlines remain UNKNOWN",
-                   "route-local observed payload", "not total ChatGPT context",
-                   "requested work profile", "observed model/mode", "no fixed 20-minute"):
+                   'route-local payload', 'not total context',
+                   "requested work profile", "observed model/mode", 'No fixed 20-minute'):
         assert clause in raw
 
 def test_closeout_rejects_chat_only_checkpoint_and_ambiguous_write_retry():
@@ -81,9 +81,9 @@ def test_closeout_rejects_chat_only_checkpoint_and_ambiguous_write_retry():
         assert clause in raw
 
 def test_research_profile_requires_decision_not_first_outline():
-    raw = text("WEB_CEO_DELEGATION.md")
-    for clause in ("decision-ready", "credible alternatives", "strongest counterargument",
-                   "discriminating acceptance", "not a minimum run length"):
+    raw = " ".join(text("WEB_CEO_DELEGATION.md").split())
+    for clause in ("decision-ready", 'alternatives', "strongest counterargument",
+                   "discriminating acceptance", 'Profiles grant no minimum runtime'):
         assert clause in raw
 
 def test_bootstrap_still_uses_protected_source_and_contains_no_live_operation():
@@ -92,7 +92,7 @@ def test_bootstrap_still_uses_protected_source_and_contains_no_live_operation():
     raw = text("BOOTSTRAP_KERNEL.md").split("```text\n", 1)[1].split("```", 1)[0]
     assert "docs/sol_skills/INDEX.md" in raw
     assert "protected master" in raw
-    assert "SAME repository + SHA" in raw
+    assert "at SAME SHA" in raw
     assert "pro-continuity-reliability-20260919-sol-001" not in raw
 
 @pytest.mark.parametrize("scenario_id", [f"PCR{i:02d}" for i in range(1,18)])
@@ -111,13 +111,13 @@ def test_negative_capability_claim_requires_current_action_family_evidence():
     step6 = section("ACTIVE_EXECUTION.md", "Step 6 — Discover exact action capability, then react to evidence")
     for clause in (
         "`UNKNOWN` / `UNPROBED` is never equivalent to `UNAVAILABLE`",
-        "successful READ does not prove that a WRITE/ADMIN action is unavailable",
-        "non-mutating permission/capability/binding preflight",
+        'successful READ does not prove WRITE/ADMIN absent',
+        'non-mutating permission/binding preflight',
         "Never perform a dummy mutation solely to prove capability",
-        "requested action family",
-        "discovery result",
-        "exact explicit refusal/error",
-        "technical tool/action exposure",
+        'exact action family',
+        'current-generation discovery',
+        'permission/binding result or explicit error/refusal',
+        'technical exposure',
         "authenticated resource permission/serviceability",
         "organizational/source-writer authority",
         "effect state",
@@ -127,16 +127,22 @@ def test_negative_capability_claim_requires_current_action_family_evidence():
 
 def test_terminal_capability_blockers_are_evidence_gated():
     gate = section("ACTIVE_EXECUTION.md", "Step 8 — Final-response gate")
+    capability = section("ACTIVE_EXECUTION.md", "Step 6 — Discover exact action capability, then react to evidence")
     for clause in (
         "capability-based `EXACT_HUMAN_GATE`",
         "`PLATFORM_FAILURE`",
         "`ALL_SCOPED_LANES_BLOCKED`",
-        "current discovery result",
-        "exhausted safe probes",
-        "exact human/admin ceremony",
         "truthful classification is `MORE_WORK_EXISTS`",
     ):
         assert clause in gate
+    assert "every relevant Step 6 negative-capability fact" in gate
+    for clause in (
+        "current-generation discovery",
+        "safe probes remaining/exhausted",
+        "actual human/admin ceremony",
+    ):
+        assert clause in capability
+
 
 
 def test_github_read_only_observation_cannot_settle_write_capability():
@@ -179,18 +185,18 @@ def test_index_enrolls_closeout_for_verified_incomplete_continuation():
     raw = text("INDEX.md")
     closeout = raw.split("### `CLOSEOUT.md`", 1)[1].split("\n### ", 1)[0]
     assert "verified `CHECKPOINTED_CONTINUATION`" in closeout
-    assert "exact mission-completion state" in closeout
+    assert 'persist exact state/next action to existing owners' in closeout
 
 
 def test_negative_worker_capability_blocker_is_not_self_authenticating_human_gate():
     step6 = section("ACTIVE_EXECUTION.md", "Step 6 — Discover exact action capability, then react to evidence")
     for clause in (
-        "worker/COO `BLOCKED` or `DECISION_REQUEST`",
-        "return evidence, not a self-authenticating Chairman/platform gate",
-        "action-authoritative Sol applies this Step 6",
-        "same-carrier `REQUEST_REPAIR` / `CONTINUE`",
-        'do not make the Chairman say "try again"',
-        "exact capability/authority/human ceremony is actually proven",
+        'worker/COO `BLOCKED`/`DECISION_REQUEST`',
+        'evidence, not a self-authenticating gate',
+        'current action owner verifies this record',
+        'same-carrier `REQUEST_REPAIR`/`CONTINUE`',
+        "not a Chairman 'try again'",
+        'Escalate only a proven boundary or decision reserved by source law',
     ):
         assert clause in step6
 

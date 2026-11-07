@@ -412,14 +412,12 @@ def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp
     nested = nested_fault is not None
     import dataclasses
     from control_plane.executive_runtime import Runtime
-    from control_plane import executive_runtime
     from ops.executive_os import autonomy_control as ac
     from tests.test_executive_acceptance_maintenance_v2 import _terminal_fixture
-    # Supersession deliberately accepts only an actual v5 predecessor.
-    # The v6 hierarchy candidate must not make this fixture v6 implicitly.
-    with monkeypatch.context() as predecessor_v5:
-        predecessor_v5.setattr(executive_runtime, "_MIGRATIONS", executive_runtime._MIGRATIONS[:5])
-        runtime, root, before, config, prior, material, proof, _, _ = _terminal_fixture(tmp_path, monkeypatch)
+    # This helper freezes the complete historical v5 contract for this test.
+    # Use one monkeypatch scope so teardown cannot restore a nested v5 vector
+    # over the current schema and leak it into later tests.
+    runtime, root, before, config, prior, material, proof, _, _ = _terminal_fixture(tmp_path, monkeypatch)
     accepted, selected_sha, successor = 'b'*40, 'e'*40, 'f'*40
     root = dataclasses.replace(root, constraints={**root.constraints, 'operator_harness_armed': False})
     prior['root_identity_sha256'] = m.root_identity(root)

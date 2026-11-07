@@ -46,7 +46,7 @@ from tests import test_principal_source_reader as relay
     "none", "foreign_work", "foreign_root", "generation", "profile", "revoked",
     "ceo_target", "missing", "resolved", "wrong_worker", "root_source_unavailable",
     "answered", "revoke_during_read", "resolve_during_read", "root_source_unavailable_during_read",
-    "host_rule", "host_resolved", "host_revoked", "host_ack", "host_request_revoked", "host_request_during_read", "host_framed_rule",
+    "host_rule", "host_resolved", "host_revoked", "host_ack", "host_request_revoked", "host_request_during_read", "host_framed_rule", "host_app_receiver", "host_app_receiver_local",
     "host_recovery_resolved", "host_recovery_paused", "host_recovery_empty",
     "host_recovery_unknown", "host_recovery_work", "host_recovery_root",
     "host_recovery_principal", "host_recovery_generation", "host_recovery_mission",
@@ -164,6 +164,24 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
         try:
             args = dict(runtime=runtime, authority=authority, caller=caller, obligation_id=oid,
                 socket_path=relay_path, observation_client=ExecutiveDialogueObservationClient(path))
+            if change == "host_app_receiver_local":
+                from control_plane.executive_service import ExecutiveControlService
+                from integrations.slack_agent_dialogue.host_local_observation import HostLocalDialogueObservationReader
+                from tests.test_executive_ceo_ingress import _config
+                owner = ExecutiveControlService(_config(tmp_path / "host", socket_root=tmp_path))
+                owner.runtime = runtime
+                owner._ceo_ingress_ready = True
+                owner._service_state = "READY"
+                facts_reader = owner._runtime_dialogue_observation_facts
+                def counted_facts(current_runtime, current_parent):
+                    assert current_runtime is runtime
+                    calls.append(current_parent)
+                    return facts_reader(current_runtime, current_parent)
+                monkeypatch.setattr(owner, "_runtime_dialogue_observation_facts", counted_facts)
+                async def no_observation_socket(*_, **__):
+                    raise AssertionError("Control cannot impersonate the Relay observation peer")
+                monkeypatch.setattr(ExecutiveDialogueObservationClient, "_exchange", no_observation_socket)
+                args["observation_client"] = HostLocalDialogueObservationReader(owner, runtime)
             if change.startswith("host_"):
                 from integrations.mastermind_company_principal_decision_host import build_acquired_principal_decision_host
                 from integrations.mastermind_company_principal_runtime_fence import PRINCIPAL_RUNTIME_AGGREGATE_TYPE
@@ -192,9 +210,28 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
                     assert runtime.events.list_events() == baseline[0]
                     assert slack.post_call_count == slack.parent_post_call_count == 0
                     return
-                host = await build_acquired_principal_decision_host(**args,
-                    receiving_request_guard=receiving_guard)
-                assert calls == [parent]
+                receiver_result = None
+                if change in {"host_app_receiver", "host_app_receiver_local"}:
+                    from integrations import mastermind_company_principal_app_receiver as receiver
+                    from integrations.company_dialogue_principal_app_contract import encode_app_request
+                    captured = []
+                    async def capture_host(**kwargs):
+                        acquired_host = await build_acquired_principal_decision_host(**kwargs)
+                        captured.append(acquired_host)
+                        return acquired_host
+                    monkeypatch.setattr(receiver, "build_acquired_principal_decision_host", capture_host)
+                    provider = receiver.PrincipalDialogueAppReceiver(runtime, authority, relay_path,
+                        args["observation_client"])
+                    receiver_result = await provider.ruling(encode_app_request(caller=caller,
+                        obligation_id=oid, tool="ruling",
+                        arguments={k: v for k, v in _body("RULING").items() if k != "canonical_ref"}),
+                        receiving_request_guard=receiving_guard)
+                    assert len(captured) == 1
+                    host = captured[0]
+                else:
+                    host = await build_acquired_principal_decision_host(**args,
+                        receiving_request_guard=receiving_guard)
+                    assert calls == [parent]
                 if change == "host_recovery_empty":
                     before = runtime.events.list_events()
                     async def no_relay(*_, **__):
@@ -218,17 +255,23 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
                 arguments = {k: v for k, v in _body("RULING").items() if k != "canonical_ref"}
                 if framed is not None:
                     arguments = framed.arguments
-                result = await host.gateway.call("ruling", arguments)
+                result = receiver_result if receiver_result is not None else await host.gateway.call("ruling", arguments)
                 events = runtime.events.list_events(aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE)
-                assert calls == [parent, parent]
-                if change in {"host_rule", "host_ack", "host_framed_rule"} or change.startswith("host_recovery_"):
+                # Revocation is now rejected by the current receiving/principal
+                # binding before a second source read or COMMIT is attempted.
+                assert calls == ([parent] if change in {
+                    "host_revoked", "host_request_revoked"
+                } else [parent, parent])
+                if change in {"host_rule", "host_ack", "host_framed_rule", "host_app_receiver", "host_app_receiver_local"} or change.startswith("host_recovery_"):
                     assert result["ok"] is True, result
                     assert len(events) == slack.post_call_count == 1
-                    binding = host.commit_owner.binding_resolver.resolve()
-                    worker_context = DialogueContextV2(work_ref=binding.work_ref,
-                        commission_ref=binding.commission_ref, session_ref=binding.session_ref,
-                        operation_key=binding.operation_key, watch_mode=binding.watch_mode,
-                        actor_ref=message["actor_ref"], applies_to=binding.applies_to)
+                    # The original worker consumes using its retained parent
+                    # context. A completed App request cannot lend its expired
+                    # foreground authority to this later worker read.
+                    worker_context = DialogueContextV2(work_ref=parent["work_ref"],
+                        commission_ref=parent["commission_ref"], session_ref=parent["session_ref"],
+                        operation_key=parent["operation_key"], watch_mode=parent["watch_mode"],
+                        actor_ref=message["actor_ref"], applies_to=message["applies_to"])
                     consumed = await service.engine_v2.wait_for_reply(thread_ts=relay.THREAD,
                         context=worker_context, request_message_key=message["message_key"],
                         expected_types=("RULING",), max_attempts=1)
@@ -304,7 +347,9 @@ def test_acquisition_derives_exact_inputs_and_refuses_drift(tmp_path, monkeypatc
                         assert slack.post_call_count == 1
                 else:
                     assert result["ok"] is False, result
-                    assert result["error"]["code"] == "EFFECT_FENCE_UNAVAILABLE"
+                    assert result["error"]["code"] == ("BINDING_UNAVAILABLE" if change in {
+                        "host_revoked", "host_request_revoked"
+                    } else "EFFECT_FENCE_UNAVAILABLE")
                     assert events == [] and slack.post_call_count == 0
                 assert slack.parent_post_call_count == 0
                 return

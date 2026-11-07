@@ -193,6 +193,8 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
                 {"attended_secret_canary"} if "attended_secret_canary" in value else set())
             if 'capacity_capability_id' in value:
                 expected_fields |= {'capacity_capability_id'}
+            if 'native_capacity_enrollment' in value:
+                expected_fields |= {'native_capacity_enrollment'}
     elif schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
         expected_fields = (_NATIVE_CLAUDE_CONFIG_FIELDS if value.get("native_provider") == "claude"
                            else _NATIVE_CONFIG_FIELDS)
@@ -211,6 +213,14 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
               and value.get("harness_binding_id") == _FINITE_ATTENDED_BINDING)
     provider = "claude" if value.get("native_provider") == "claude" or finite else "codex"
     if finite:
+        if 'native_capacity_enrollment' in value:
+            from ops.executive_os.capacity_source_contract import validate_native_subscription_capacity_enrollment
+            try:
+                validate_native_subscription_capacity_enrollment(value['native_capacity_enrollment'])
+            except ValueError:
+                raise WorkerConfigError('finite native capacity enrollment is invalid') from None
+            if 'capacity_capability_id' not in value:
+                raise WorkerConfigError('finite native enrollment requires its source identity')
         if ('capacity_capability_id' in value and (
                 type(value['capacity_capability_id']) is not str
                 or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', value['capacity_capability_id']) is None)):
@@ -726,6 +736,11 @@ def _build_subscription_realm_owner(
         or observed["realm_generation"] != enrollment["generation"]
     ):
         raise WorkerConfigError("subscription realm owner disagrees with enrollment")
+    if 'native_capacity_enrollment' in config:
+        native = owner.observe_capacity_enrollment()
+        if (native['capacity_capability_id'] != config.get('capacity_capability_id')
+                or native['realm_generation'] != enrollment['generation']):
+            raise WorkerConfigError('native capacity realm differs from current source')
     return owner
 
 

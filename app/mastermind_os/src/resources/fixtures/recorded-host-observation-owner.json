@@ -1,0 +1,92 @@
+{
+  "availability": "AVAILABLE",
+  "observation": {
+    "admission_state": "NOT_EVALUATED",
+    "age_ms": 2,
+    "attempt_id": "ATT-34911a61edd54f54bd39f289b89c10ea",
+    "begin_event_id": 27,
+    "begin_recorded_at_ms": 1793888403000,
+    "can_place_work": false,
+    "capability": "OBSERVATION_ONLY",
+    "capture_decision_at_ms": 1793888403440,
+    "claim_event_id": 28,
+    "claim_recorded_at_ms": 1793888403000,
+    "job_id": "JOB-003",
+    "observation_kind": "RETAINED_PHYSICAL_BEGIN",
+    "observed_host_role": "PHYSICAL_RESOURCE_HOST",
+    "oldest_observation_age_ms": 10,
+    "platform": "darwin",
+    "read_at_ms": 1793888403440,
+    "root_job_id": "JOB-001",
+    "schema": "mastermind.retained_host_observation.v1",
+    "snapshot": {
+      "boot_ref": "boot-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "capacity_pool_ref": "capacity-pool-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "host_ref": "host-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "hp0_observed_at_ms": 1793888403435,
+      "hp0_sample_window_ms": 5,
+      "hp0_sha256": "b3e8a237d1df7364615d7ffa3d22be88c7372f10614d50c81f442bf002744eb5",
+      "hp0_telemetry_status": "COMPLETE",
+      "load1_milli": 2500,
+      "load_ratio_milli": 250,
+      "logical_cpu_count": 10,
+      "observed_at_ms": 1793888403438,
+      "physical_memory_bytes": 68719476736,
+      "pool_free_bytes": 322122547200,
+      "pool_total_bytes": 536870912000,
+      "sample_window_ms": 3,
+      "schema": "mastermind.host_capacity_snapshot/v1",
+      "swap_total_bytes": 4294967296,
+      "swap_used_bytes": 1073741824,
+      "telemetry_status": "COMPLETE",
+      "total_observation_window_ms": 8,
+      "unknown_fields": [],
+      "vm_compressed_pages": 200000,
+      "vm_free_pages": 1000000,
+      "vm_inactive_pages": 500000,
+      "vm_page_size_bytes": 4096,
+      "vm_speculative_pages": 100000
+    },
+    "snapshot_sha256": "51a1392d158dbaf98fe9ffede74d29e3ca4d447c4a95ad5eaef7a83c801250cd",
+    "source": {
+      "commit_sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "helper_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "host_qualification_revision": "host-qualification-1",
+      "policy_revision": "finite-policy-1"
+    }
+  },
+  "reason_codes": [],
+  "schema": "mastermind.workspace_host_observation_result.v1",
+  "selection": {
+    "attempt_id": "ATT-34911a61edd54f54bd39f289b89c10ea",
+    "job_id": "JOB-003",
+    "root_job_id": "JOB-001",
+    "work_ref": "WS:ONE"
+  },
+  "source_observation": {
+    "control_room": {
+      "cache_currentness_digest": "c54e52e9d1976f565150e7cffb659a7bde3a73ac4079d1963a1bd72068adba6b",
+      "document_digest": "af62bba128587438e3aae57629da3b304d80b4da328654844896c3ceaa82f057",
+      "instance_after": "1678df1497b006a6ec8d11d66939e6cef0f33f146c3d1a495d7c40de65ee70b8",
+      "instance_before": "1678df1497b006a6ec8d11d66939e6cef0f33f146c3d1a495d7c40de65ee70b8",
+      "publication_after": 1,
+      "publication_before": 1,
+      "source_validity_digest": "c8668c551574029a8f7f2f08cba7fd510e378e9c485173f09aa9772c2d168069"
+    },
+    "runtime": {
+      "after": 2,
+      "before": 2,
+      "schema": "mastermind.runtime_read_observation.v1",
+      "source_identity": "a8b527fb2194311eae304073bed17716",
+      "state": "SAME"
+    },
+    "schema": "mastermind.workspace_host_observation_source.v1",
+    "selection": {
+      "attempt_id": "ATT-34911a61edd54f54bd39f289b89c10ea",
+      "job_id": "JOB-003",
+      "root_job_id": "JOB-001",
+      "work_ref": "WS:ONE"
+    },
+    "state": "SAME"
+  }
+}

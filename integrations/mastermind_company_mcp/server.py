@@ -205,6 +205,8 @@ __all__ = [
     "run_principal_stdio",
     "build_native_return_mcp_server",
     "run_native_return_stdio",
+    "build_product_acceptance_mcp_server",
+    "run_product_acceptance_stdio",
 ]
 
 
@@ -230,5 +232,31 @@ def build_native_return_mcp_server(gateway: Any) -> Server:
 
 async def run_native_return_stdio(gateway: Any) -> None:
     server = build_native_return_mcp_server(gateway)
+    async with stdio_server() as (reader, writer):
+        await server.run(reader, writer, initialization_options(server))
+
+
+def build_product_acceptance_mcp_server(gateway: Any) -> Server:
+    """One closed selector; SDK registration supplies no Runtime grant."""
+    import copy
+    from integrations.mastermind_company_mcp import product_acceptance as contract
+    server = Server(contract.SERVER_IDENTITY, version=contract.SERVER_VERSION)
+
+    @server.list_tools()
+    async def list_acceptance_tools():
+        return [mcp_types.Tool(name=contract.TOOL_NAME, description=contract.TOOL_DESCRIPTION,
+            inputSchema=copy.deepcopy(contract.INPUT_SCHEMA),
+            annotations=mcp_types.ToolAnnotations(**contract.ANNOTATIONS))]
+
+    @server.call_tool()
+    async def call_acceptance_tool(name, arguments):
+        result = await gateway.call(name, arguments or {})
+        return [mcp_types.TextContent(type="text", text=canonical_json(result).decode("utf-8"))]
+
+    return server
+
+
+async def run_product_acceptance_stdio(gateway: Any) -> None:
+    server = build_product_acceptance_mcp_server(gateway)
     async with stdio_server() as (reader, writer):
         await server.run(reader, writer, initialization_options(server))

@@ -28,9 +28,32 @@ Read `../../references/authority-boundaries.md` before interpreting any app, rec
 2. Obtain the complete changed-path census and exact diff. Detect overlapping open carriers before interpreting implementation.
 3. Trace every changed unit to the accepted mission and explicit non-goals.
 4. Review authority, identity, input and output schema, time, null, correction behavior, deterministic, statistical, and model-generated boundaries, failure states, effects, retries, credentials, logging, and no-duplicate-owner laws.
-5. Read RED and GREEN evidence, focused tests, full relevant tests, hosted checks, security analysis, adversarial review, and production proof.
+5. Apply `docs/SESSION_LOCAL_REVIEW_POLICY.md` from the verified pin. Inspect verification proportionate to the changed behavior and actual risk: focused tests, required hosted checks, and security/adversarial or real-path evidence where that behavior or declared outcome requires it. Reuse accepted evidence for unchanged source and semantic dependencies under `REVIEW_RETURN.md` Step 2A; rerun only affected coverage or a binding gate. RED/GREEN history, a full local suite, another reviewer and deployed-product proof are not blanket prerequisites for a source-only review.
 6. Falsify false completion: architecture is not implementation; implementation is not installed; installed is not production-proven.
 7. Return `PASS`, `REQUEST_CHANGES`, or `BLOCKED_BY_CURRENT_SOURCE` with file and line or exact evidence.
+
+## Review routing across Web, native sessions and Slack Dots
+
+Before commissioning independent review, read `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` at the same compatible protected source pin. Its decision table selects an actual admitted Fabric reviewer when eligible or a separately commissioned Dot review via the existing Slack carrier when lawful. Preserve reviewer independence, exact PR head, original operation/effects, no provider/account failover after denial and distinction between technical findings versus formal GitHub non-author review. It is not another GitHub webhook, provider selector or approval mechanism.
+
+## Independent review route: Cursor Cloud on the existing GitHub PR
+
+When a bounded independent security review is needed, first reconcile any existing
+Subagent Fabric reviewer/Attempt and its effect. For a genuinely new authorized review
+when Fabric is unavailable, the GitHub-native `@cursor` Cloud Agent is a **valid
+manual source-review route**: follow current protected `REVIEW_RETURN.md` Step 2B
+and `docs/CURSOR_CLOUD_INDEPENDENT_REVIEW.md`. Commission only one read-only
+exact-40-hex-SHA review on the original PR, prohibit edits/new PRs/merge/deploy,
+and verify the Cursor bot's unique agent identity **and terminal findings**.
+A `Taking a look!` acknowledgement is never a completed review.
+
+Count a completed, independently adjudicated Cursor result as technical source
+review evidence only. If GitHub posts it through the PR author's account,
+formal **non-author approval is NOT proven**; obtain an actual distinct GitHub
+reviewer `APPROVED` on that head when required. Never use this avenue to
+circumvent an explicit permission/safety denial, `retry_allowed=false`,
+`EFFECT_UNKNOWN`, an unresolved original execution, or a Fabric-specific
+real-path acceptance requirement.
 
 ## Output
 
@@ -45,4 +68,4 @@ verdict
 exact repair or release gate
 ```
 
-Do not merge from this skill. Merge and release remain a separate current-authority edge after a fresh exact-head and protected-source check.
+Do not merge from this skill alone: a review assignment grants no merge or deployment authority. When the current assignment separately authorizes release, continue through `docs/DELIVERY_WORKFLOW.md` and the repository's existing protected release owner after required exact-head checks and any genuinely required authenticated non-author approval. Do not add an approval round or end the mission merely because review completed. Preserve release holds, source custody and unresolved effects; never self-approve, self-merge, bypass a required approval or replay an uncertain operation.

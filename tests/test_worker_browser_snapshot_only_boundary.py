@@ -83,7 +83,7 @@ def test_snapshot_only_worker_transport_refuses_other_tools_and_unsigned_resourc
                 "browser_ref": "unsigned-not-an-admitted-resource",
                 "filename": str(destination),
             })
-            assert _error_code(refused_file) == "BROWSER_REF_INVALID"
+            assert _error_code(refused_file) == "BROWSER_ARTIFACT_NOT_GRANTED"
             assert not destination.exists()
             assert list(Path(config.action.artifact_directory).iterdir()) == []
         finally:

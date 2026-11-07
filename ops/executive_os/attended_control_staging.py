@@ -7,6 +7,7 @@ an already-published exact target and never replays the write.
 from __future__ import annotations
 
 import json
+import os
 import copy
 from pathlib import Path
 import pwd
@@ -18,13 +19,20 @@ from ops.executive_os.attended_worker_definition import build_finite_control_del
 from control_plane.executive_autonomy import validate_disarmed_interlock_document
 
 OPERATION = 'FINITE_CONTROL_STAGE'
-COMMANDS = frozenset({'finite-control-stage', 'finite-control-stage-reconcile'})
+COMMANDS = frozenset({'finite-control-stage', 'finite-control-stage-reconcile',
+                      'finite-control-retire', 'finite-control-retire-reconcile'})
 FIELDS = frozenset({'fabric_bridge_armed', 'fabric_bindings_path',
                     'fabric_bindings_sha256', 'fabric_attended_probe'})
+NATIVE_FIELDS = FIELDS | {'native_capacity_v2'}
+
+
+def _staged_delta(control):
+    fields = NATIVE_FIELDS if 'native_capacity_v2' in control else FIELDS
+    return {key: control[key] for key in fields}
 
 
 def candidate(prior, delta):
-    if (set(delta) != FIELDS or delta.get('fabric_bridge_armed') is not False
+    if (set(delta) not in (FIELDS, NATIVE_FIELDS) or delta.get('fabric_bridge_armed') is not False
             or any(prior.control.get(key, False) is not False for key in (
                 'coo_autonomy_armed', 'coo_operator_harness_armed',
                 'coo_foreground_only', 'ceo_submit_armed', 'fabric_bridge_armed'))
@@ -35,6 +43,8 @@ def candidate(prior, delta):
     if any(key in prior.control and prior.control[key] != value for key, value in delta.items()):
         raise ValueError('existing finite selection differs')
     value = dict(prior.control, **delta)
+    from scripts.executive_os_phase1c import _validate_fabric_bridge_config
+    _validate_fabric_bridge_config(value)
     raw = owner.encode_config(value)
     return owner.CandidateConfigs(value, prior.worker, raw, prior.worker_bytes,
         owner.sha256_bytes(raw), prior.worker_sha256)
@@ -45,7 +55,7 @@ def rebind_disarmed_receipt(tx, payload):
     if (payload.get('state') != 'DISARMED'
             or payload.get('control_config_sha256') != tx.prior_configs.control_sha256
             or payload.get('worker_config_sha256') != tx.prior_configs.worker_sha256
-            or candidate(tx.prior_configs, {k: tx.candidates.control[k] for k in FIELDS}) != tx.candidates):
+            or candidate(tx.prior_configs, _staged_delta(tx.candidates.control)) != tx.candidates):
         raise owner.TransactionEffectUnknown()
     value = copy.deepcopy(payload)
     value.update(control_config_sha256=tx.candidates.control_sha256,
@@ -54,7 +64,52 @@ def rebind_disarmed_receipt(tx, payload):
     return value
 
 
+def _native_source_pin(worker):
+    """Derive optional pins from the selected root definition and sealed source.
+
+    Registration is checked without requiring credential enrollment or claiming
+    provider readiness. No caller path, producer code execution or network read.
+    The transaction rereads this exact selection before and after publication.
+    """
+    if 'native_capacity_enrollment' not in worker:
+        return None
+    from control_plane.codex_provider_realm import _native_read_config, _native_open
+    from control_plane.native_capacity_acquisition import PRODUCER_RELATIVE
+    from ops.executive_os import capacity_source_contract as source
+    enrollment = source.validate_native_subscription_capacity_enrollment(
+        worker['native_capacity_enrollment'])
+    selected = enrollment['registration_source']
+    export_path = source.SYSTEM_ROOT/'config/capacity-source-components-native-v2'/(
+        selected['release_commit'] + '.json')
+    export = _native_read_config(export_path, selected['export_sha256'])
+    registration = source.validate_native_registration_document(worker, export)
+    if registration['provider'] != 'minimax':
+        raise ValueError('native finite source provider differs')
+    source_root = source.SYSTEM_ROOT/'capacity-sources/macro'/selected['release_commit']
+    producer = source_root/PRODUCER_RELATIVE
+    with _native_open(producer) as (fd, _):
+        content = os.read(fd, 65537)
+    if not content or len(content) > 65536:
+        raise ValueError('native capacity producer size is invalid')
+    # Custody alone cannot bless new code bytes. Use the existing complete Git
+    # source-closure owner, and require this producer in its qualified material.
+    # A source profile that does not yet include V2 must continue to refuse.
+    from ops.executive_os.capacity_host_artifacts import _verify_installed_repair_source
+    manifest, _ = _verify_installed_repair_source(source_root, selected['release_commit'])
+    rows = [row for row in manifest['material'] if row['path'] == str(PRODUCER_RELATIVE)]
+    if (len(rows) != 1 or rows[0]['sha256'] != owner.sha256_bytes(content)
+            or rows[0]['size'] != len(content)):
+        raise ValueError('native producer is outside the qualified source material')
+    if _native_read_config(export_path, selected['export_sha256']) != export:
+        raise ValueError('native registration changed during staging')
+    return {'macro_release': selected['release_commit'],
+            'producer_sha256': rows[0]['sha256']}
+
+
 class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
+    operation = OPERATION
+    receipt_transform = staticmethod(rebind_disarmed_receipt)
+
     @staticmethod
     def _current_receipt():
         try:
@@ -72,7 +127,7 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
     def _seal_generation(self, generation, tx, *, operation):
         # Finite staging is wholly disarmed and cannot use the armed CEO
         # coexistence transformer. Retain its receipt in the SAME global owner.
-        if operation != OPERATION:
+        if operation != self.operation:
             raise owner.TransactionEffectUnknown()
         raw = self._current_receipt()
         target = b''
@@ -83,7 +138,7 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
             validate_disarmed_interlock_document(payload, metadata=metadata,
                 control_config_sha256=tx.prior_configs.control_sha256,
                 worker_config_sha256=tx.prior_configs.worker_sha256)
-            target = owner._encoded_json(rebind_disarmed_receipt(tx, payload))
+            target = owner._encoded_json(self.receipt_transform(tx, payload))
         owner.ProductionTransactionHost._seal_generation(self, generation, tx, operation=operation)
         owner._atomic_file(generation/owner._FINITE_RECEIPT_ARCHIVE, raw,
             mode=0o400, uid=0, gid=0, replace=False)
@@ -101,7 +156,7 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
             raise owner.TransactionEffectUnknown()
         self._verify_published_inode(self._transaction_owner_fd)
         manifest = self._manifest()
-        if (manifest['operation'] != OPERATION or manifest['transaction_id'] != tx.transaction_id
+        if (manifest['operation'] != self.operation or manifest['transaction_id'] != tx.transaction_id
                 or manifest['expected_sha'] != tx.expected_sha
                 or not owner._FINITE_RECEIPT_FIELDS <= set(manifest)):
             raise owner.TransactionEffectUnknown()
@@ -110,7 +165,7 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
         if (owner.sha256_bytes(raw) != manifest['finite_prior_receipt_sha256']
                 or bool(raw) is not manifest['finite_prior_receipt_present']):
             raise owner.TransactionEffectUnknown()
-        target = owner._encoded_json(rebind_disarmed_receipt(tx, json.loads(raw))) if raw else b''
+        target = owner._encoded_json(self.receipt_transform(tx, json.loads(raw))) if raw else b''
         if owner.sha256_bytes(target) != manifest['finite_target_receipt_sha256']:
             raise owner.TransactionEffectUnknown()
         return raw, target
@@ -162,7 +217,8 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
         from control_plane.executive_worker_broker import _ps_pids_for_uid
         if _ps_pids_for_uid(470):
             raise ValueError('finite principal is not quiescent')
-        return build_finite_control_delta(definition_dir=str(directory), worker_artifacts=artifacts)
+        return build_finite_control_delta(definition_dir=str(directory), worker_artifacts=artifacts,
+            native_capacity_v2=_native_source_pin(worker))
 
     def checked_configs(self, expected_sha):
         if self.require_exact_install(expected_sha) != expected_sha:
@@ -214,6 +270,42 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
         return tx.transaction_id
 
 
+_WORKSPACE_KEYS = frozenset({'workspace_acquisition', 'workspace_resource_policy',
+    'workspace_control_room'})
+
+
+def control_boot_smoke(control):
+    """Static, inert refusal of a staged Control composition that cannot boot.
+
+    The real ``load_control_config`` still runs the candidate as the Control
+    user inside ``validate_candidates``; the boot itself is proven by
+    ``tests/test_attended_control_staging.py::test_staged_candidate_boots_with_zero_tcp_listeners``.
+    A legacy ``{"port": int}`` stanza here would otherwise only surface on the
+    Control user's next start; refusing it before the marker keeps TCP off the
+    workspace Control Room forever.
+    """
+    from scripts.executive_os_phase1c import (ServiceError,
+        _CEO_INGRESS_APP_CONFIG_KEYS, validate_workspace_control_room)
+    workspace = _WORKSPACE_KEYS
+    if (set(control) & workspace
+            and (not workspace <= set(control)
+                or not _CEO_INGRESS_APP_CONFIG_KEYS <= set(control))):
+        raise ValueError('staged Control composition cannot boot: '
+            'workspace acquisition requires its policy, Control Room and installed App peer')
+    if 'workspace_control_room' in control:
+        control_uid = control.get('control_uid')
+        if type(control_uid) is not int:
+            raise ValueError('staged Control composition cannot boot: '
+                'workspace Control Room requires an integer control_uid')
+        try:
+            validate_workspace_control_room(control['workspace_control_room'],
+                control_uid=control_uid)
+        except ServiceError as exc:
+            raise ValueError('staged Control composition cannot boot: '
+                + str(exc)) from None
+    return None
+
+
 def execute_staging(host, expected_sha, expected_control_sha256):
     owner.require_root_privilege(host.effective_uid())
     host.require_transaction_absent()
@@ -221,6 +313,7 @@ def execute_staging(host, expected_sha, expected_control_sha256):
     if prior.control_sha256 != expected_control_sha256:
         raise ValueError('exact current Control preimage required')
     proposed = candidate(prior, host.read_delta())
+    control_boot_smoke(proposed.control)
     if proposed.control_bytes == prior.control_bytes:
         return None
     tx = owner.TransactionContext(host.new_transaction_id(), expected_sha, prior, proposed, None)
@@ -246,6 +339,9 @@ def execute_staging(host, expected_sha, expected_control_sha256):
 
 
 def run_command(args, *, host=None):
+    if args.command in {'finite-control-retire', 'finite-control-retire-reconcile'}:
+        from ops.executive_os.attended_control_retirement import run_command as retire
+        return retire(args, host=host)
     host = ProductionFiniteStagingHost() if host is None else host
     try:
         if args.command == 'finite-control-stage':

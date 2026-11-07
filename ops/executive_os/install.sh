@@ -23,9 +23,12 @@ SOURCE_REPO=""
 EXPECTED_SHA=""
 PROTECTED_MASTER_SHA=""
 ALLOW_FROZEN_ACCEPTED_ANCESTOR="0"
+STAGE_RELEASE_ONLY="0"
+STAGE_ADMIN_CHECKOUT_ONLY="0"
 ARM_PRIVILEGED_BROKER="0"
 PRIVILEGED_BROKER_LIVE="0"
 CONTROL_CONFIG_SOURCE=""
+CONTROL_AEAD_BUNDLE=""
 OS_WEB_ASSETS=""
 OS_WEB_ASSETS_DIGEST=""
 OPERATOR_USER=""
@@ -380,7 +383,7 @@ MASTERMIND_NATIVE_ACL_RUBY
 # --- END native ACL guard ---
 
 usage() {
-  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--control-config PATH] [--os-web-assets PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
+  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--stage-release-only --os-web-assets PATH] [--stage-admin-checkout-only] [--control-config PATH] [--os-web-assets PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
   exit 64
 }
 
@@ -390,9 +393,12 @@ while [ "$#" -gt 0 ]; do
     --expected-sha) EXPECTED_SHA="${2:-}"; shift 2 ;;
     --protected-master-sha) PROTECTED_MASTER_SHA="${2:-}"; shift 2 ;;
     --allow-frozen-accepted-ancestor) ALLOW_FROZEN_ACCEPTED_ANCESTOR="1"; shift ;;
+    --stage-release-only) STAGE_RELEASE_ONLY="1"; shift ;;
+    --stage-admin-checkout-only) STAGE_ADMIN_CHECKOUT_ONLY="1"; shift ;;
     --arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
+    --control-aead-bundle) CONTROL_AEAD_BUNDLE="${2:-}"; shift 2 ;;
     --os-web-assets) OS_WEB_ASSETS="${2:-}"; shift 2 ;;
     --python-binary) PYTHON_BINARY="${2:-}"; shift 2 ;;
     --python-runtime-root) PYTHON_RUNTIME_ROOT="${2:-}"; shift 2 ;;
@@ -406,6 +412,33 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# --- BEGIN release staging option guard ---
+validate_release_staging_options() {
+  [ "$STAGE_RELEASE_ONLY" = "1" ] || return 0
+  [ "$ALLOW_FROZEN_ACCEPTED_ANCESTOR" = "0" ] \
+    && [ "$ARM_PRIVILEGED_BROKER" = "0" ] \
+    && [ -z "$CONTROL_CONFIG_SOURCE" ] && [ -n "$OS_WEB_ASSETS" ] || {
+      /bin/echo "stage-only requires complete OS assets and excludes frozen source, arming and config replacement" >&2
+      return 65
+    }
+}
+# --- END release staging option guard ---
+
+# --- BEGIN admin checkout staging option guard ---
+# The administrative checkout is the only artifact this staging-only option
+# prepares.  It changes no configuration, no receipt, no service and no
+# selection, so it excludes the frozen-source, arming and configuration
+# replacement options exactly like the release staging option does.
+validate_admin_checkout_staging_options() {
+  [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "1" ] || return 0
+  [ "$ALLOW_FROZEN_ACCEPTED_ANCESTOR" = "0" ] \
+    && [ "$ARM_PRIVILEGED_BROKER" = "0" ] \
+    && [ -z "$CONTROL_CONFIG_SOURCE" ] || {
+      /bin/echo "admin-checkout staging excludes frozen source, arming and config replacement" >&2
+      return 65
+    }
+}
+# --- END admin checkout staging option guard ---
 [ "$(/usr/bin/id -u)" -eq 0 ] || {
   /bin/echo "install.sh must run as root" >&2
   exit 77
@@ -414,6 +447,8 @@ done
   /bin/echo "install.sh supports macOS only" >&2
   exit 69
 }
+validate_release_staging_options || exit 65
+validate_admin_checkout_staging_options || exit 65
 [ -n "$SOURCE_REPO" ] && [ -n "$EXPECTED_SHA" ] && [ -n "$OPERATOR_USER" ] || usage
 case "$OPERATOR_USER" in
   [A-Za-z_]* ) ;;
@@ -445,6 +480,9 @@ if [ -n "$CONTROL_CONFIG_SOURCE" ]; then
 fi
 if [ -n "$OS_WEB_ASSETS" ]; then
   case "$OS_WEB_ASSETS" in /*) ;; *) /bin/echo "OS web asset path must be absolute" >&2; exit 65 ;; esac
+fi
+if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
+  case "$CONTROL_AEAD_BUNDLE" in /*) ;; *) /bin/echo "control AEAD bundle path must be absolute" >&2; exit 65 ;; esac
 fi
 [ -x "$PYTHON_BINARY" ] && [ ! -L "$PYTHON_BINARY" ] || {
   /bin/echo "Python binary must be a direct executable file" >&2
@@ -1184,6 +1222,14 @@ if ! /usr/bin/id -Gn "$OPERATOR_USER" | /usr/bin/tr ' ' '\n' | /usr/bin/grep -qx
 fi
 OPERATOR_UID="$(/usr/bin/id -u "$OPERATOR_USER")"
 
+# Ordinary installation also binds the early readback helper to the same
+# exact clean source checkout. Frozen mode separately qualifies the installer
+# checkout through install_source_policy.py below.
+if [ "$ALLOW_FROZEN_ACCEPTED_ANCESTOR" != "1" ] \
+  && [ "$SCRIPT_DIR" != "$SOURCE_REPO/ops/executive_os" ]; then
+  /bin/echo "ordinary installer helpers must belong to the selected source checkout" >&2
+  exit 65
+fi
 SOURCE_POLICY="$SCRIPT_DIR/install_source_policy.py"
 [ -f "$SOURCE_POLICY" ] && [ ! -L "$SOURCE_POLICY" ] || {
   /bin/echo "installer source policy helper is unavailable or unsafe" >&2
@@ -1219,6 +1265,16 @@ if [ -n "$OS_WEB_ASSETS" ]; then
     --source-repo "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" \
     --bundle "$OS_WEB_ASSETS" --release-root "$RELEASE_ROOT")" || {
       /bin/echo "OS web asset preflight refused before maintenance" >&2
+      exit 65
+    }
+fi
+# Optional event-only dependency artifact is qualified against committed lock
+# bytes before maintenance/service stop. It never reuses the MCP network runtime.
+if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/control_aead_profile.py" check-bundle \
+    --release-root "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" \
+    --bundle "$CONTROL_AEAD_BUNDLE" --operator-uid "$OPERATOR_UID" >/dev/null || {
+      /bin/echo "control AEAD bundle preflight refused before maintenance" >&2
       exit 65
     }
 fi
@@ -1317,169 +1373,168 @@ require_native_no_acl one "$AUTH_PATH" || {
   /bin/echo "dedicated worker auth has an unexpected filesystem ACL" >&2; exit 65
 }
 
-# Cross the mutation boundary only after the identity, runtime, source, auth,
-# and exact-SHA preflight above. From here to process exit the trap keeps all
-# install-owned daemons, including a separately prepared C1 Relay, disabled
-# and booted out across generation mutation and rollback.
-STAGING=""
-CODEX_CODE_MODE_HOST_TEMP=""
-wait_for_launchd_absent() {
-  local label="$1"
-  local description="$2"
-  local attempt
-  for attempt in 1 2 3 4 5; do
-    if ! /bin/launchctl print "system/$label" >/dev/null 2>&1; then
-      return 0
+# --- BEGIN shared sealed release staging ---
+# Both entry paths use this exact archive/import/seal/publication implementation.
+# Stage-only reaches it before installing any service trap or mutating helpers.
+verify_release_ancestry() {
+  local ancestor metadata
+  for ancestor in /Library "/Library/Application Support" "$SYSTEM_ROOT" "$SYSTEM_ROOT/releases"; do
+    [ -d "$ancestor" ] && [ ! -L "$ancestor" ] || return 65
+    metadata="$(/usr/bin/stat -f '%u:%g:%Lp' "$ancestor")" || return 65
+    if [ "$metadata" != "0:0:755" ]; then
+      [ "$ancestor" = "/Library/Application Support" ] && [ "$metadata" = "0:80:755" ] || return 65
     fi
-    if [ "$attempt" -lt 5 ]; then
-      /bin/sleep 1
-    fi
+    require_native_no_acl one "$ancestor" || return 65
   done
-  /bin/echo "$description LaunchDaemon remained loaded after bootout" >&2
-  return 1
 }
-leave_installed_services_stopped() {
-  if [ -n "${CODEX_CODE_MODE_HOST_TEMP:-}" ]; then
-    /bin/rm -f -- "$CODEX_CODE_MODE_HOST_TEMP"
-  fi
-  /bin/launchctl disable "system/$RELAY_LABEL" >/dev/null 2>&1 || true
-  /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
-  /bin/launchctl disable "system/$WORKER_LABEL" >/dev/null 2>&1 || true
-  /bin/launchctl disable "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
-  if [ "$PRIVILEGED_BROKER_LIVE" != "1" ]; then
-    /bin/launchctl disable "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
-    /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
-    if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
-      /bin/sleep 2
-      /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
-    fi
-    if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
-      /bin/echo "privileged LaunchDaemon remained loaded after cleanup" >&2
-      exit 65
-    fi
-  fi
-  /bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
-  /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
-  /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
-  /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
-  if [ -n "${STAGING:-}" ] && [ -d "$STAGING" ]; then
-    /bin/rm -rf -- "$STAGING"
-  fi
-}
-prepare_codex_code_mode_host || exit 65
-trap leave_installed_services_stopped EXIT
-/bin/launchctl disable "system/$RELAY_LABEL"
-/bin/launchctl disable "system/$CONTROL_LABEL"
-/bin/launchctl disable "system/$WORKER_LABEL"
-/bin/launchctl disable "system/$BACKUP_LABEL"
-/bin/launchctl disable "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
-/bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
-/bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
-/bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
-/bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
-/bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
-wait_for_launchd_absent "$RELAY_LABEL" relay || exit 65
-wait_for_launchd_absent "$CONTROL_LABEL" control || exit 65
-wait_for_launchd_absent "$WORKER_LABEL" worker || exit 65
-wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65
-wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
-if [ ! -d "$RELEASE_ROOT" ]; then
-  STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")"
-  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | (
-    archive_extract_status=0
-    /usr/bin/tar -xf - -C "$STAGING" || archive_extract_status=$?
-    # BSD tar can stop at its end marker before Git finishes trailing padding.
-    # Drain to EOF so Git can report its real status; pipefail still rejects a
-    # producer error, and the subshell preserves any extraction error.
-    /bin/cat >/dev/null
-    exit "$archive_extract_status"
-  )
-  /usr/sbin/chown -R root:wheel "$STAGING"
-  /bin/chmod -R go-w "$STAGING"
-  # mktemp creates the staging root as 0700. Both non-root service UIDs need
-  # read/traverse access to the immutable release, while only root may mutate.
-  /bin/chmod 0755 "$STAGING"
+stage_sealed_release() {
+  verify_release_ancestry || return 65
+  # A previous attempt's stage is unresolved even if a canonical release exists.
+  if [ "$STAGE_RELEASE_ONLY" = "1" ] && { [ -e "$SYSTEM_ROOT/releases/.stage.$EXPECTED_SHA" ] || [ -L "$SYSTEM_ROOT/releases/.stage.$EXPECTED_SHA" ]; }; then
+    /bin/echo "stage-only destination already occupied; preserve it for reconciliation" >&2
+    return 65
+  fi
+  if [ ! -e "$RELEASE_ROOT" ] && [ ! -L "$RELEASE_ROOT" ]; then
+    if [ "$STAGE_RELEASE_ONLY" = "1" ]; then
+      STAGING="$SYSTEM_ROOT/releases/.stage.$EXPECTED_SHA"
+      /bin/mkdir -m 0700 "$STAGING" || return 65
+    else
+      STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")" || return 65
+    fi
+    /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | (
+      archive_extract_status=0
+      /usr/bin/tar -xf - -C "$STAGING" || archive_extract_status=$?
+      # BSD tar can stop at its end marker before Git finishes trailing padding.
+      # Drain to EOF so Git can report its real status; pipefail still rejects a
+      # producer error, and the subshell preserves any extraction error.
+      /bin/cat >/dev/null
+      exit "$archive_extract_status"
+    ) || return 65
+    /usr/sbin/chown -R root:wheel "$STAGING" || return 65
+    /bin/chmod -R go-w "$STAGING" || return 65
+    # mktemp creates the staging root as 0700. Both non-root service UIDs need
+    # read/traverse access to the immutable release, while only root may mutate.
+    /bin/chmod 0755 "$STAGING" || return 65
+    if [ -n "$OS_WEB_ASSETS" ]; then
+      "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/os_release_assets.py" import \
+        --source-repo "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" \
+        --bundle "$OS_WEB_ASSETS" --expected-digest "$OS_WEB_ASSETS_DIGEST" \
+        --release-root "$STAGING" >/dev/null || return 65
+    fi
+    # The canonical paid owner consumes the existing native closure at this
+    # fixed release subtree. Git archives contain its reviewed inputs, not its
+    # generated stage. Materialize with the unchanged owner builder before the
+    # immutable release seal; recorded inventory bytes must remain identical.
+    "$PYTHON_BINARY" -I -S -B - "$STAGING" <<'MASTERMIND_RELEASE_NATIVE_STAGE' >/dev/null || return 65
+import json
+import pathlib
+import runpy
+import sys
+
+root = pathlib.Path(sys.argv[1])
+rollout = root / "ops/native_fabric/quota_continuity/rollout"
+builder = rollout / "build_review_stage.py"
+records = {name: (rollout / name).read_bytes()
+           for name in ("native-manifest.json", "native-source-inventory.json")}
+sys.argv = [str(builder), "--output", str(rollout)]
+runpy.run_path(str(builder), run_name="__main__")
+if any((rollout / name).read_bytes() != expected for name, expected in records.items()):
+    raise ValueError("native closure differs from the reviewed release inventory")
+# The installer uses umask077. These are public reviewed code bytes, not state;
+# both service UIDs must traverse/read them after the root-owned seal.
+stage = rollout / "native-code-stage"
+for directory in (stage, stage / "ext"):
+    directory.chmod(0o755)
+for relative in json.loads(records["native-manifest.json"]):
+    (stage / relative).chmod(0o644)
+MASTERMIND_RELEASE_NATIVE_STAGE
+    # Seal and verify while the directory is still operation-owned staging. A
+    # settled interruption must never expose a canonical release without a seal.
+    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" create \
+      --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" >/dev/null || return 65
+    /usr/sbin/chown root:wheel "$STAGING/.executive-release-manifest.json" || return 65
+    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" verify \
+      --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" >/dev/null || return 65
+    # Reuse the existing exclusive namespace move: plain mv can nest staging
+    # inside a directory created by another writer after the initial check.
+    rename_codex_path_exclusive "$STAGING" "$RELEASE_ROOT" || return 65
+    STAGING=""
+  else
+    [ -d "$RELEASE_ROOT" ] && [ ! -L "$RELEASE_ROOT" ] || return 65
+    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" verify \
+      --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" >/dev/null || return 65
+  fi
+  [ -x "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" ] \
+    && [ -f "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
+    && [ ! -L "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
+    && [ -f "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] \
+    && [ ! -L "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] || {
+    /bin/echo "installed autonomy control surface is unavailable or unsafe" >&2
+    return 65
+  }
+  if ! require_native_no_acl tree "$RELEASE_ROOT"; then
+    /bin/echo "installed release contains a filesystem ACL" >&2
+    return 65
+  fi
+
+  # A concurrent destination or changed bundle cannot be silently accepted.
   if [ -n "$OS_WEB_ASSETS" ]; then
-    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/os_release_assets.py" import \
+    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/os_release_assets.py" check \
       --source-repo "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" \
       --bundle "$OS_WEB_ASSETS" --expected-digest "$OS_WEB_ASSETS_DIGEST" \
-      --release-root "$STAGING" >/dev/null || exit 65
+      --release-root "$RELEASE_ROOT" >/dev/null || return 65
   fi
-  # Seal and verify while the directory is still operation-owned staging. A
-  # settled interruption must never expose a canonical release without a seal.
-  "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" create \
-    --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
-  /usr/sbin/chown root:wheel "$STAGING/.executive-release-manifest.json"
-  "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" verify \
-    --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
-  # Reuse the existing exclusive namespace move: plain mv can nest staging
-  # inside a directory created by another writer after the initial check.
-  rename_codex_path_exclusive "$STAGING" "$RELEASE_ROOT" || exit 65
-  STAGING=""
-else
-  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/release_manifest.py" verify \
-    --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
-fi
-[ -x "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" ] \
-  && [ -f "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
-  && [ ! -L "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
-  && [ -f "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] \
-  && [ ! -L "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] || {
-  /bin/echo "installed autonomy control surface is unavailable or unsafe" >&2
-  exit 65
 }
-if ! require_native_no_acl tree "$RELEASE_ROOT"; then
-  /bin/echo "installed release contains a filesystem ACL" >&2
-  exit 65
-fi
+# --- END shared sealed release staging ---
 
-INSTALLED_CODEX="$SYSTEM_ROOT/bin/codex-$CODEX_VERSION"
-if [ ! -f "$INSTALLED_CODEX" ]; then
-  CODEX_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.codex-$CODEX_VERSION.XXXXXX")"
-  /bin/rm -f -- "$CODEX_TEMP"
-  /usr/bin/ditto --noqtn "$CODEX_BINARY" "$CODEX_TEMP"
-  /usr/sbin/chown root:wheel "$CODEX_TEMP"
-  /bin/chmod 0555 "$CODEX_TEMP"
-  /bin/mv "$CODEX_TEMP" "$INSTALLED_CODEX"
-fi
-/usr/bin/codesign --verify --strict "$INSTALLED_CODEX" >/dev/null 2>&1 || {
-  /bin/echo "installed Codex signature is invalid" >&2
-  exit 65
-}
-INSTALLED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$INSTALLED_CODEX" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
-[ "$INSTALLED_TEAM" = "2DC432GLL2" ] || {
-  /bin/echo "installed Codex signer team is not OpenAI" >&2
-  exit 65
-}
-INSTALLED_VERSION="$("$INSTALLED_CODEX" --version 2>/dev/null | /usr/bin/awk '$1 == "codex-cli" {print $2}')"
-[ "$INSTALLED_VERSION" = "$CODEX_VERSION" ] || {
-  /bin/echo "installed Codex version does not match the explicit allowlist" >&2
-  exit 65
-}
-INSTALLED_HASH="$(/usr/bin/shasum -a 256 "$INSTALLED_CODEX" | /usr/bin/awk '{print $1}')"
-[ "$INSTALLED_HASH" = "$CODEX_SHA256" ] || {
-  /bin/echo "installed Codex bytes do not match the exact reviewed 0.159.2 allowlist" >&2
-  exit 65
-}
-[ "$(/usr/bin/stat -f '%u:%g:%Lp' "$INSTALLED_CODEX")" = "0:0:555" ] || {
-  /bin/echo "installed Codex is not root:wheel mode 0555" >&2
-  exit 65
-}
-[ ! -L "$INSTALLED_CODEX" ] && [ "$(/usr/bin/stat -f '%l' "$INSTALLED_CODEX")" -eq 1 ] || {
-  /bin/echo "installed Codex must be a direct single-link file" >&2
-  exit 65
-}
-require_native_no_acl one "$INSTALLED_CODEX" || {
-  /bin/echo "installed Codex has a filesystem ACL" >&2; exit 65
-}
-
+# --- BEGIN administrative checkout preparation ---
+# The installer-owned, credentialless source checkout that backs the Control
+# configuration's ``proof_source_repository`` coordinate.  The destination is
+# FIXED at /var/db/mastermind-executive/control/admin-checkout/<expected SHA>.
+#
+# An occupied target is accepted only when it already IS the exact expected
+# checkout owned by the control principal: a different commit, a different
+# owner or a non-checkout refuses here, untouched.  This preparation never
+# recursively repairs another owner's tree, and it never publishes, starts,
+# stops, reconfigures or selects anything.
+prepare_admin_checkout() {
 ADMIN_CHECKOUT="$RUNTIME_ROOT/control/admin-checkout/$EXPECTED_SHA"
-if [ ! -d "$ADMIN_CHECKOUT/.git" ]; then
+NEED_CLONE=1
+if [ -e "$ADMIN_CHECKOUT" ] || [ -L "$ADMIN_CHECKOUT" ]; then
+  [ -d "$ADMIN_CHECKOUT" ] && [ ! -L "$ADMIN_CHECKOUT" ] || {
+    /bin/echo "administrative checkout target is occupied by an unsafe path" >&2
+    exit 65
+  }
+  if [ -d "$ADMIN_CHECKOUT/.git" ] && [ ! -L "$ADMIN_CHECKOUT/.git" ]; then
+    # The occupied target is a checkout: it must already BE the exact
+    # expected one, owned by the control principal.  Anything else refuses
+    # here, untouched.
+    [ "$(/usr/bin/stat -f '%u' "$ADMIN_CHECKOUT")" = "$CONTROL_UID" ] || {
+      /bin/echo "administrative checkout target belongs to another owner" >&2
+      exit 65
+    }
+    [ "$(/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
+      PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
+      LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 \
+      /usr/bin/git -C "$ADMIN_CHECKOUT" rev-parse --verify 'HEAD^{commit}')" = "$EXPECTED_SHA" ] || {
+      /bin/echo "administrative checkout target holds a different commit" >&2
+      exit 65
+    }
+    NEED_CLONE=0
+  fi
+  # A destination that is not a checkout is left to Git itself: the clone
+  # refuses an occupied directory and never writes into another owner's tree.
+fi
+if [ "$NEED_CLONE" = "1" ]; then
   # Root reads the operator-owned source through Git transport; the local-copy
   # optimization has a distinct ownership boundary. Trust only the validated
   # source path for this command, never persist a host-wide exception.
-  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local "$SOURCE_REPO" "$ADMIN_CHECKOUT"
+  # Only the qualified source HEAD and its complete ancestry are needed.
+  # Unrelated development branches/tags must not enter this private checkout.
+  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local --single-branch --no-tags "$SOURCE_REPO" "$ADMIN_CHECKOUT"
   /usr/bin/git -C "$ADMIN_CHECKOUT" checkout --detach "$EXPECTED_SHA"
   /usr/bin/git -C "$ADMIN_CHECKOUT" remote remove origin
 fi
@@ -1555,7 +1610,201 @@ fi
   /bin/echo "administrative checkout still holds loose objects after repack" >&2
   exit 65
 }
+}
+# --- END administrative checkout preparation ---
 
+# --- BEGIN stage-only dispatch ---
+if [ "$STAGE_RELEASE_ONLY" = "1" ]; then
+  # No cleanup/service trap: an interrupted stage or publication is retained.
+  stage_sealed_release || exit 65
+  printf '{"staged_unselected":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false}\n' "$EXPECTED_SHA"
+  exit 0
+fi
+# --- END stage-only dispatch ---
+
+# --- BEGIN admin-checkout-only dispatch ---
+if [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "1" ]; then
+  # The target release is sealed and published first: the administrative
+  # checkout normalizer is that release's own reviewed helper.  Nothing else
+  # is touched -- no service, no configuration, no receipt, no selection --
+  # and this dispatch returns BEFORE the mutation boundary.
+  stage_sealed_release || exit 65
+  prepare_admin_checkout
+  printf '{"staged_admin_checkout":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false}\n' "$EXPECTED_SHA"
+  exit 0
+fi
+# --- END admin-checkout-only dispatch ---
+
+# --- BEGIN gateway audit parent provisioning ---
+provision_gateway_audit_parent() {
+  # The normal publisher owns the Studio-identity leaf, not this root-owned
+  # parent. Existing occupants are checked without changing their custody.
+  require_native_no_acl one "$SYSTEM_ROOT" || return 65
+  "$PYTHON_BINARY" -I -S -B - "$SYSTEM_ROOT" <<'MASTERMIND_GATEWAY_AUDIT_PARENT' || return 65
+import os
+import stat
+import sys
+
+flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+def require_directory(info):
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022):
+        raise SystemExit("gateway audit parent requires a direct root:wheel directory without group/other write")
+
+def identity(info):
+    return info.st_dev, info.st_ino
+
+base = os.open(sys.argv[1], flags)
+try:
+    base_info = os.fstat(base)
+    require_directory(base_info)
+    created = False
+    try:
+        before = os.stat("audit", dir_fd=base, follow_symlinks=False)
+    except FileNotFoundError:
+        # Exclusive creation under the held sealed parent; a racing occupant
+        # refuses, and no existing directory is chowned or chmodded.
+        os.mkdir("audit", 0o700, dir_fd=base)
+        created = True
+        before = os.stat("audit", dir_fd=base, follow_symlinks=False)
+    audit = os.open("audit", flags, dir_fd=base)
+    try:
+        if identity(os.fstat(audit)) != identity(before):
+            raise SystemExit("gateway audit parent changed during provisioning")
+        if created:
+            os.fchown(audit, 0, 0)
+            os.fchmod(audit, 0o755)
+            os.fsync(audit)
+            os.fsync(base)
+        require_directory(os.fstat(audit))
+        if identity(os.stat("audit", dir_fd=base, follow_symlinks=False)) != identity(before):
+            raise SystemExit("gateway audit parent changed during provisioning")
+    finally:
+        os.close(audit)
+    if identity(os.stat(sys.argv[1], follow_symlinks=False)) != identity(base_info):
+        raise SystemExit("gateway audit base changed during provisioning")
+finally:
+    os.close(base)
+MASTERMIND_GATEWAY_AUDIT_PARENT
+  require_native_no_acl one "$SYSTEM_ROOT/audit" || return 65
+}
+# --- END gateway audit parent provisioning ---
+
+# Cross the mutation boundary only after the identity, runtime, source, auth,
+# and exact-SHA preflight above. From here to process exit the trap keeps all
+# install-owned daemons, including a separately prepared C1 Relay, disabled
+# and booted out across generation mutation and rollback.
+STAGING=""
+CODEX_CODE_MODE_HOST_TEMP=""
+wait_for_launchd_absent() {
+  local label="$1"
+  local description="$2"
+  # This exact source is covered by the installer's prior source preflight.
+  # One canonical parser and one bounded readback budget; an arbitrary native
+  # error never becomes absence. This is not a recovery-origin receipt.
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/recovery_install_observation.py" "$label" || {
+    /bin/echo "$description LaunchDaemon absence was not proven after bootout" >&2
+    return 1
+  }
+}
+leave_installed_services_stopped() {
+  if [ -n "${CODEX_CODE_MODE_HOST_TEMP:-}" ]; then
+    /bin/rm -f -- "$CODEX_CODE_MODE_HOST_TEMP"
+  fi
+  /bin/launchctl disable "system/$RELAY_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl disable "system/$WORKER_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl disable "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
+  if [ "$PRIVILEGED_BROKER_LIVE" != "1" ]; then
+    /bin/launchctl disable "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+    /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+    if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
+      /bin/sleep 2
+      /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+    fi
+    if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
+      /bin/echo "privileged LaunchDaemon remained loaded after cleanup" >&2
+      exit 65
+    fi
+  fi
+  /bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
+  if [ -n "${STAGING:-}" ] && [ -d "$STAGING" ]; then
+    /bin/rm -rf -- "$STAGING"
+  fi
+}
+prepare_codex_code_mode_host || exit 65
+trap leave_installed_services_stopped EXIT
+/bin/launchctl disable "system/$RELAY_LABEL"
+/bin/launchctl disable "system/$CONTROL_LABEL"
+/bin/launchctl disable "system/$WORKER_LABEL"
+/bin/launchctl disable "system/$BACKUP_LABEL"
+/bin/launchctl disable "system/$PRIVILEGED_LABEL"
+/bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
+wait_for_launchd_absent "$RELAY_LABEL" relay || exit 65
+wait_for_launchd_absent "$CONTROL_LABEL" control || exit 65
+wait_for_launchd_absent "$WORKER_LABEL" worker || exit 65
+wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65
+wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
+
+stage_sealed_release || exit 65
+provision_gateway_audit_parent || exit 65
+
+# This remains a substep of the existing serialized installer publication.
+# Same-profile occupants verify exactly; missing/changed occupants are not reset.
+if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
+  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/control_aead_profile.py" materialize \
+    --release-root "$RELEASE_ROOT" --bundle "$CONTROL_AEAD_BUNDLE" \
+    --operator-uid "$OPERATOR_UID" >/dev/null || exit 65
+fi
+INSTALLED_CODEX="$SYSTEM_ROOT/bin/codex-$CODEX_VERSION"
+if [ ! -f "$INSTALLED_CODEX" ]; then
+  CODEX_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.codex-$CODEX_VERSION.XXXXXX")"
+  /bin/rm -f -- "$CODEX_TEMP"
+  /usr/bin/ditto --noqtn "$CODEX_BINARY" "$CODEX_TEMP"
+  /usr/sbin/chown root:wheel "$CODEX_TEMP"
+  /bin/chmod 0555 "$CODEX_TEMP"
+  /bin/mv "$CODEX_TEMP" "$INSTALLED_CODEX"
+fi
+/usr/bin/codesign --verify --strict "$INSTALLED_CODEX" >/dev/null 2>&1 || {
+  /bin/echo "installed Codex signature is invalid" >&2
+  exit 65
+}
+INSTALLED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$INSTALLED_CODEX" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
+[ "$INSTALLED_TEAM" = "2DC432GLL2" ] || {
+  /bin/echo "installed Codex signer team is not OpenAI" >&2
+  exit 65
+}
+INSTALLED_VERSION="$("$INSTALLED_CODEX" --version 2>/dev/null | /usr/bin/awk '$1 == "codex-cli" {print $2}')"
+[ "$INSTALLED_VERSION" = "$CODEX_VERSION" ] || {
+  /bin/echo "installed Codex version does not match the explicit allowlist" >&2
+  exit 65
+}
+INSTALLED_HASH="$(/usr/bin/shasum -a 256 "$INSTALLED_CODEX" | /usr/bin/awk '{print $1}')"
+[ "$INSTALLED_HASH" = "$CODEX_SHA256" ] || {
+  /bin/echo "installed Codex bytes do not match the exact reviewed 0.159.2 allowlist" >&2
+  exit 65
+}
+[ "$(/usr/bin/stat -f '%u:%g:%Lp' "$INSTALLED_CODEX")" = "0:0:555" ] || {
+  /bin/echo "installed Codex is not root:wheel mode 0555" >&2
+  exit 65
+}
+[ ! -L "$INSTALLED_CODEX" ] && [ "$(/usr/bin/stat -f '%l' "$INSTALLED_CODEX")" -eq 1 ] || {
+  /bin/echo "installed Codex must be a direct single-link file" >&2
+  exit 65
+}
+require_native_no_acl one "$INSTALLED_CODEX" || {
+  /bin/echo "installed Codex has a filesystem ACL" >&2; exit 65
+}
+
+prepare_admin_checkout
 (
   cd "$RELEASE_ROOT"
   PYTHONDONTWRITEBYTECODE=1 "$PYTHON_BINARY" -I -S -B - "$RELEASE_ROOT" "$CONTROL_CONFIG" "$CONTROL_CONFIG_SOURCE" \
@@ -1704,13 +1953,14 @@ else:
 # host value. Arming remains the existing controller's separate transaction.
 for key, default in {
     "ceo_submit_armed": False,
+    "coo_foreground_only": False,
     "exact_worker_claim_target": {"mode": "disabled"},
 }.items():
     if key in _CONFIG_OPTIONAL:
         value.setdefault(key, default)
 terminal_return_defaults = {
     "terminal_return_armed": False,
-    "terminal_return_socket_path": "/var/run/mastermind-agent-relay/agent-relay.sock",
+    "terminal_return_socket_path": "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
 }
 terminal_schema = set(terminal_return_defaults) & schema_keys
 if terminal_schema and terminal_schema != set(terminal_return_defaults):
@@ -1720,6 +1970,18 @@ if terminal_present and terminal_present != set(terminal_return_defaults):
     raise SystemExit("partial terminal-return control-config source")
 if terminal_schema and not terminal_present:
     value.update(terminal_return_defaults)
+if terminal_schema and terminal_present:
+    prior_socket = "/var/run/mastermind-agent-relay/agent-relay.sock"
+    target_socket = terminal_return_defaults["terminal_return_socket_path"]
+    if value["terminal_return_socket_path"] == prior_socket:
+        # An existing disarmed host may have the pre-fix socket in its
+        # preserved source config. Migrate only that exact historical value,
+        # never an armed live consumer or an arbitrary caller-supplied path.
+        if value["terminal_return_armed"] is not False:
+            raise SystemExit("armed terminal-return socket migration refused")
+        value["terminal_return_socket_path"] = target_socket
+    elif value["terminal_return_socket_path"] != target_socket:
+        raise SystemExit("unrecognized terminal-return socket path refused")
 
 for key, derived in readiness_expected.items():
     if key in value and (type(value[key]) is not type(derived) or value[key] != derived):
@@ -2112,6 +2374,29 @@ if entry is not None:
 with plist_path.open("wb") as stream:
     plistlib.dump(document, stream, sort_keys=False)
 PY
+# The optional workspace Control Room socket belongs to this same service and
+# Runtime. Configs without the stanza have no Control Room socket; a legacy
+# TCP stanza is refused here, loudly, by the shared validator.
+"$PYTHON_BINARY" -I -S -B - "$RELEASE_ROOT" "$CONTROL_CONFIG" "$CONTROL_PLIST" "$CONTROL_GID" <<'PY'
+import json, pathlib, plistlib, sys
+release, config_path, plist_path = map(pathlib.Path, sys.argv[1:4])
+control_gid = int(sys.argv[4])
+sys.path.insert(0, str(release))
+from scripts.executive_os_phase1c import (
+    _WORKSPACE_CONTROL_ROOM_SOCKET_NAME,
+    workspace_control_room_launchd_entry,
+)
+config = json.loads(config_path.read_text(encoding="utf-8"))
+entry = workspace_control_room_launchd_entry(config, control_gid=control_gid)
+with plist_path.open("rb") as stream:
+    document = plistlib.load(stream)
+sockets = document["Sockets"]
+sockets.pop(_WORKSPACE_CONTROL_ROOM_SOCKET_NAME, None)
+if entry is not None:
+    sockets[_WORKSPACE_CONTROL_ROOM_SOCKET_NAME] = entry
+with plist_path.open("wb") as stream:
+    plistlib.dump(document, stream, sort_keys=False)
+PY
 /usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/control/stdout.log "$CONTROL_PLIST"
 /usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/control/stderr.log "$CONTROL_PLIST"
 /usr/sbin/chown root:wheel "$CONTROL_PLIST"
@@ -2198,7 +2483,7 @@ done
     HOME="$CONTROL_HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
     LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     PYTHONDONTWRITEBYTECODE=1 "$PYTHON_BINARY" -I -S -B -c \
-      'import sys; sys.path.insert(0,sys.argv[1]); from scripts.executive_os_phase1c import load_control_config; load_control_config(sys.argv[2])' \
+      'import sys; sys.path.insert(0,sys.argv[1]); from scripts.executive_os_phase1c import load_control_config; from ops.executive_os.control_aead_profile import activate_if_enrolled; raw=load_control_config(sys.argv[2]); activate_if_enrolled(raw,sys.argv[1])' \
       "$RELEASE_ROOT" "$CONTROL_CONFIG"
 )
 

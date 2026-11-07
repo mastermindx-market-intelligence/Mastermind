@@ -46,7 +46,7 @@ def qualified_host(monkeypatch, tmp_path):
         socket_path=lifecycle.SOCKET,binary=binary,binary_receipt_path=str(receipt_path),
         binary_receipt_sha256=lifecycle.digest(receipt),realm_generation=1,
         release_root=str(lifecycle.SYSTEM/'releases'/SHA),release_commit=SHA,release_tree='b'*40,
-        release_manifest_sha256=mh,python_binary=lifecycle.PYTHON,host_ref='fixture-host',model_class='routine',
+        release_manifest_sha256=mh,python_binary=lifecycle.PYTHON,host_ref='host-'+'a'*64,model_class='routine',
         execution_profile_digest=ModelRouter.load().capability_registry.resolve('fabric.attended.claude.bounded.v1').profile_digest,
         routing_root_id=lifecycle.ROOT_ID,routing_parent_run_id=lifecycle.ROOT_ID,max_turns=2,
         capacity_capability_id='fixture-capacity')
@@ -141,6 +141,28 @@ def test_all_six_arm_fields_require_explicit_boolean_false_before_effect(qualifi
     monkeypatch.setattr(lifecycle,'protected_bytes',lambda *a,**kw:pytest.fail('must refuse before artifact reads'))
     with pytest.raises(lifecycle.LifecycleError,match='configs_not_wholly_disarmed'):host.qualify()
     assert 'runtime-idle' not in calls
+
+
+def test_fresh_install_control_passes_wholly_disarmed_until_foreground_key_is_removed(qualified_host, tmp_path):
+    from tests.test_c1_installer_control_config import _render_default_control_config
+    installed = _render_default_control_config(tmp_path)
+    host, prior, artifacts, calls = qualified_host
+    delta = render.build_finite_control_delta(
+        definition_dir=str(lifecycle.DEFINITION), worker_artifacts=artifacts)
+    assert 'coo_foreground_only' not in delta
+    assert installed['coo_foreground_only'] is False
+    assert 'fabric_bridge_armed' not in installed
+    prior.control = {**installed, **delta}
+    assert prior.control['fabric_bridge_armed'] is False
+    assert prior.worker['operator_harness_armed'] is False
+    host.qualify()
+    assert 'runtime-idle' in calls
+
+    prior.control.pop('coo_foreground_only')
+    before = len(calls)
+    with pytest.raises(lifecycle.LifecycleError, match='configs_not_wholly_disarmed'):
+        host.qualify()
+    assert calls[before:] == ['installed', 'no-transaction', 'stopped', 'primary-quiescent', 'credential-disarmed', 'disarmed']
 
 
 def test_production_qualifier_refuses_missing_configured_interpreter(qualified_host):
