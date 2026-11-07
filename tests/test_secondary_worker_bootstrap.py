@@ -35,6 +35,7 @@ OPS_GROUP=_mastermind_ops
 CONTROL_UID=450 CONTROL_GID=450 WORKER_UID=451 WORKER_GID=451 OPS_GID=453
 CONTROL_HOME=/var/db/mastermind-executive/control/home
 PERSONAL_PRO_SLOT_IDS=(codex-pro-01 codex-pro-02 codex-pro-03)
+SUBSCRIPTION_SLOT_IDS=(alibaba-token-01 minimax-token-01)
 SECONDARY_WORKER_ID=paid-test-01
 SECONDARY_WORKER_USER=_mastermind_paid_test
 SECONDARY_WORKER_GROUP=_mastermind_paid_test
@@ -44,6 +45,15 @@ slot_field() {
   case "$2" in
     worker_user|worker_group) echo "_mastermind_codex_${1##*-}" ;;
     worker_uid|worker_gid) echo "$((453 + 10#${1##*-}))" ;;
+    *) return 65 ;;
+  esac
+}
+subscription_slot_field() {
+  case "$1:$2" in
+    alibaba-token-01:worker_user|alibaba-token-01:worker_group) echo _mastermind_alibaba_01 ;;
+    minimax-token-01:worker_user|minimax-token-01:worker_group) echo _mastermind_minimax_01 ;;
+    alibaba-token-01:worker_uid|alibaba-token-01:worker_gid) echo 459 ;;
+    minimax-token-01:worker_uid|minimax-token-01:worker_gid) echo 460 ;;
     *) return 65 ;;
   esac
 }
@@ -88,6 +98,11 @@ def test_separately_named_identity_is_valid(changes):
     'SECONDARY_WORKER_ID=""', 'SECONDARY_WORKER_USER=""', 'SECONDARY_WORKER_GROUP=""',
     'SECONDARY_WORKER_UID=""', 'SECONDARY_WORKER_GID=""',
     'SECONDARY_WORKER_ID=codex-01', 'SECONDARY_WORKER_ID=codex-pro-02',
+    'SECONDARY_WORKER_ID=alibaba-token-01', 'SECONDARY_WORKER_ID=minimax-token-01',
+    'SECONDARY_WORKER_USER=_mastermind_alibaba_01', 'SECONDARY_WORKER_GROUP=_mastermind_alibaba_01',
+    'SECONDARY_WORKER_USER=_mastermind_minimax_01', 'SECONDARY_WORKER_GROUP=_mastermind_minimax_01',
+    'SECONDARY_WORKER_UID=459', 'SECONDARY_WORKER_GID=459',
+    'SECONDARY_WORKER_UID=460', 'SECONDARY_WORKER_GID=460',
     'SECONDARY_WORKER_USER=_mastermind_exec', 'SECONDARY_WORKER_GROUP=_mastermind_ops',
     'SECONDARY_WORKER_USER=_mastermind_codex_01', 'SECONDARY_WORKER_GROUP=_mastermind_codex_03',
     'SECONDARY_WORKER_UID=451', 'SECONDARY_WORKER_GID=450', 'SECONDARY_WORKER_UID=455',
@@ -133,7 +148,7 @@ require_secondary_directory {shlex.quote(str(target))} '470:471:700' {allow_miss
         assert target.read_text() == 'untouched'
 
 
-@pytest.mark.parametrize('failure', ['', 'new_identity', 'directory', 'user', 'group', 'membership', 'control_auth', 'orphan_primary_gid'])
+@pytest.mark.parametrize('failure', ['', 'new_identity', 'directory', 'user', 'group', 'membership', 'control_auth', 'orphan_primary_gid', 'subscription_reserved'])
 def test_secondary_effects_follow_all_preflights_and_touch_only_new_identity(failure):
     # Canonical path resolution is replaced with fixed values. No host paths are inspected.
     actual = function('bootstrap_secondary_worker')
@@ -141,6 +156,7 @@ def test_secondary_effects_follow_all_preflights_and_touch_only_new_identity(fai
     actual = actual.replace('$(cd -P /var/log/mastermind-executive && /bin/pwd -P)', '/private/var/log/mastermind-executive')
     actual = actual.replace('/usr/bin/dscl', 'fixture_dscl').replace('/usr/sbin/dseditgroup', 'fixture_dseditgroup')
     script = DEFAULTS + function('secondary_refuse') + function('validate_secondary_worker') + function('sorted_words') + actual + f'''
+if [ {shlex.quote(failure or 'none')} = subscription_reserved ]; then SECONDARY_WORKER_UID=459; fi
 require_secondary_directory() {{ [ {shlex.quote(failure or 'none')} != directory ] || secondary_refuse directory; }}
 secondary_record_exists() {{
   if [ "$2" = _mastermind_paid_test ]; then
@@ -213,3 +229,17 @@ def test_bootstrap_and_installer_use_identical_native_reader():
     def reader(text):
         return text.split("<<'MASTERMIND_NATIVE_ACL_RUBY'\n", 1)[1].split('\nMASTERMIND_NATIVE_ACL_RUBY\n', 1)[0]
     assert reader(source()) == reader(installer.read_text())
+
+
+@pytest.mark.parametrize("response", [
+    "return 65",
+    "printf ''",
+    """case "$2" in worker_uid|worker_gid) echo not_an_id ;; *) echo _mastermind_reserved_test ;; esac""",
+])
+def test_subscription_reservation_refuses_unavailable_catalog_before_effect(response):
+    script = (DEFAULTS + function("secondary_refuse") + function("validate_secondary_worker")
+              + "\nsubscription_slot_field() { " + response + "; }\n"
+              + "validate_secondary_worker\nprintf 'EFFECT\\n'\n")
+    result = run(script)
+    assert result.returncode == 65, result.stderr
+    assert "EFFECT" not in result.stdout
