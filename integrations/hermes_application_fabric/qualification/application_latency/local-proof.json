@@ -1,0 +1,39 @@
+{
+  "contract_sha256": "9395840a436586f3f8306e04f98fec32c31e2b73a2dc19e97efa5825a9a1608f",
+  "known_limits": [
+    "Go transport binding only; other latency-constrained pools remain unknown",
+    "Owner-qualified evidence required; no measured production latency claimed",
+    "No streaming/TTFT/deadline prediction; existing buffered APPLICATION protocol preserved"
+  ],
+  "live_provider_acceptance": false,
+  "monetary_acceptance": false,
+  "operational_enrollment": false,
+  "patch_roundtrip": "clean isolated preimage; git apply --check; exact postimages and unchanged inputs",
+  "patch_sha256": "bccdbeaafd5535f399b3c1c60ed6dee897ce31924f648d883009de3b61e16010",
+  "python": "3.12.14",
+  "qualification_boundary": "pure tests offline; real handler/Broker/Gateway with incumbent loopback-only fake provider",
+  "schema": "mastermind.hermes_application_latency_qualification.v1",
+  "source_commit": "bd119dfd25db6e9b5b48ab461407faf29cb0725d",
+  "source_materialization": {
+    "held_source_read": false,
+    "installed_source_used": false,
+    "method": "exact_public_github_blob_content",
+    "verified_blobs": 19
+  },
+  "suites": {
+    "latency-tests.log": {
+      "errors": 0,
+      "failures": 0,
+      "sha256": "92723494d2c4c44bb6b397b5843eeb77a56519a5d5a41aaf77eeebd056e9d2b8",
+      "skipped": 0,
+      "tests": 28
+    },
+    "owner-regressions.log": {
+      "errors": 0,
+      "failures": 0,
+      "sha256": "75c729cb158604aef74c626018c65ef38dbedf401869519bb8939f6fef6b5b44",
+      "skipped": 0,
+      "tests": 117
+    }
+  }
+}
