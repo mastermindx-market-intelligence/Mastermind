@@ -1376,3 +1376,54 @@ Do not miss current-context consumption gates: SourceOperationEvents.publication
 The current public project-source reader can open full DSC text only through a current issued project-record reference inside the bounded catalogue. It does not provide stable DSC selection, arbitrary omitted notes or historical original bytes. Native AgentOsMemoryProvider still exposes no independent memory tools. Preserve this gap explicitly; join any added original-note read to the existing Workspace source reader, rather than a new notes store or privileged memory path.
 
 Protected law pin remains `e37dc82f070fd391e29f0dbd0bf46b022166beea`; intervening accepted source has not changed the law set. Accepted work, held #398/#409, original effect fences and final installed account/provider/EVAL/fleet acceptance obligations remain unchanged. **More scoped work exists; proceed.**
+
+
+## 34. Canonical discovery correction — original source carrier and connected interface, 2026-11-07
+
+**Mission remains incomplete / BUILT_NOT_PROVEN.** Chairman's outer instruction is complete implementation. Continue the same authorized mission. The original denied C26 Ubuntu1/root action and local Control AF_UNIX action remain unretried; this source work does not replay either action on another host, account or transport.
+
+### Canonical Macro source and proof
+
+Original source carrier: [Macro PR 10831](https://github.com/mastermindx-market-intelligence/macro/pull/10831), branch `sol/project-discovery-correction-20261107-c3`, exact candidate `b4b08673508bb0aafe2aa729666f1aefab23911c`, tree `631de28341717747862edf8b903e051fbd29bc70`, parent `5c8d02f78ca2fe317e861d69169733e56237cbcc`. All five published blobs were read back against the owned postimages:
+
+| Path | Git blob |
+|---|---|
+| scripts/agentos.py | 0cb266fe3d4c44e1920bfd712b82954386a79497 |
+| scripts/project_knowledge_recipes.py | b7768423a47c3c81e0e6905022047bf4cf552b9d |
+| agentos/schema/discovery.schema.yml | dc30bea15a29a416085372a902f39278a925a391 |
+| tests/test_project_discovery_correction.py | aa2ff4c676abc6258f62253e228e4d60c890cbf9 |
+| .github/ci/legacy-jobs.yml | fb81a1bb11f1ec463283eee5eed4c20766e9659e |
+
+The source changes implement one closed correction recipe with exactly three postimages: preserved OLD DSC plus supersession, deterministic absent NEW DSC, selected WS retaining both citations. Explicit evidence, confidence, verification date and expiry are separate from the retained correction date. Original request identity, actor scope, request hash, old content hash, code identity and complete reference-closure receipt bind the operation. Repeated corrections form a bounded reciprocal history.
+
+The actual parser qualifies all four direct WS/DEC/DSC/HND record directories, rejects ambiguous or foreign references, duplicate mapping keys, structural cycles, replacement collisions, chain fan-in and repository-escaping artifact aliases. The installed source owner remains responsible for physical filesystem/materialization qualification; the pure predicate is not a host-symlink certificate. The complete reference capture uses the existing bounded runner and deadline with a correction-only 32 MiB allowance; original file/preference capture limits remain unchanged.
+
+**125 focused Macro tests passed.** These include the original recipe and inline knowledge-owner suites, repeated correction, scope/CAS/date/budget negatives and a real CLI journey. The actual unscoped validator accepts the three-record candidate. The current compiler includes the replacement, excludes the superseded predecessor and leaves its evidence bytes intact. A later foreign citation is rejected by the same unscoped validator and the malformed correction is excluded from current context. A prior complete-store regression attempt in the partial local mirror reported missing canonical dependencies; it is not counted as a full-store pass.
+
+The new suite is explicitly registered in the existing `agentos-knowledge-contracts` job. Its existing unscoped `python3 scripts/agentos.py validate` remains in place. Original CI run `42369828856`, fences `42369828847`, authority `42369828605` started on this carrier. The main authority context succeeded; the non-target pilot authority context reports `inactive_base_context` and is not the main authority result. At this checkpoint the PR is Draft, mergeable, and unarmed. No Macro merge-on-green effect has been issued.
+
+### Mastermind owner integration and current source-validation frontier
+
+The unpublished Mastermind candidate remains in `/workspace/scratch/1d075ac94a2c/hermes-discovery-correction`, based on the already qualified native-current b7 source. It extends the original ProjectKnowledge owner, fixed capture facade, private original-input custody, source Events, publisher Events, fixed Git publisher, canonical DATA observation and publication-candidate selection. It adds the distinct acquisition binding v6 correction grant and project-access observation v3; v4/v5 and the older action/lookup shapes stay exact.
+
+The integration fixture now contains the two actual read-back Macro code blobs at b4, explicitly marked PUBLISHED_SOURCE_CANDIDATE, with the original base and PR. **19 actual compiler/private-input/Event/temporary-Git-publisher integration cases passed against this published source fixture.** They exercise exactly three postimages, body-free original reconciliation, original-body restoration after DATA changes, current grant withdrawal, same-ID conflicts before second capture, and no duplicate dispatch after an uncertain publisher result. These are controlled fixture proofs, not installed enrollment or a live production correction.
+
+The OS interface now has a correction-specific eight-field read/reconcile lookup, seven-field v2 target in the same finite controller and existing IndexedDB slot, exact three-image preview and source receipt checks, current DATA provenance decoding, distinct v3/V6 access display, and the existing Rust transport extension. A correction begins only from a fully opened discovery whose original text hash, Git revision, DATA commit, source-read owner and CODE context were checked. Its issued read object is bound to the mounted Library owner; same coordinates do not revive a withdrawn read. The form explicitly asks for evidence and verification details and freezes the original body when handed to preparation.
+
+C3 source-validation workspace: `/Users/chriswong/hermes-discovery-correction-20261107-a52esz9q/source`. It is an isolated exact b7 sparse source clone with offline lockfile dependencies, not an installed runtime or an alternate execution lane for the denied actions. Nineteen frontend/native-bridge postimages were checked against their b7 preimages, applied and hash-read-back. Initial TypeScript checking found two type-narrowing issues; both are fixed in the local candidate and await the next exact overlay/check. The local Python and remote UI mirrors have separate source-validation receipts; neither is a release or runtime acceptance claim.
+
+### Native-current original release
+
+[Mastermind PR 2207](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2207) remains on exact head `b7de24d7fb238598af8638f183a9fc187e3070ee`. All six pytest shards, aggregate test job, original Workspace OAuth engine, candidate qualification, harness/runtime and code-scanning checks concluded successfully. The original exact-head protected queue action was issued once and reconciled to merge queue entry `MQE_lQDOTotz3c8AAAABNfXFds4ABAiKzgPNPKc`. Queue admission is not merge or installed proof. Do not re-arm or replace this carrier; reconcile its original queue state.
+
+Merged native-privacy #2195, vault #2200 and Agent OS continuity #10823 remain DO_NOT_REDO. #2204 tool-observation source still needs composition and its original release. Held #398/#409 are not reopened.
+
+### Next concrete work
+
+1. Apply the two fixed TypeScript postimages to the same owned C3 validation workspace, run focused interface/currentness/receipt/recovery tests, and complete light/dark EN/ZH source-interface checks. Preserve the original publication lookup on uncertain outcomes.
+2. Finish the connected Library correction journey, including source loss, exact original callback identity, separate permission, and post-publication current-source readback. A source receipt must match exactly OLD/derived NEW/WS at one publication commit before terminal acceptance; its commit need not equal a later DATA observation commit.
+3. Extend the original native Hermes consumer through a new explicit qualified consumer contract. Historical v2 and current-read v3 meanings must not widen silently. Reuse the existing paired OAuth credentials, COO gateway, audited Workspace verifier and the same source-operation owner for native discovery read/prepare/read/submit/reconcile.
+4. Add stable/omitted/historical original-discovery access through the incumbent source reader. Current bounded-catalogue references alone still do not cover that lifecycle.
+5. Publish and qualify the Mastermind source carrier, reconcile #10831's canonical CI and drive its original existing delivery controller; reconcile #2207's original queue. Then complete outstanding actual provider/model/EVAL identity, installed account, browser/vault/fleet and always-on return-path acceptance.
+
+Protected law pin remains `e37dc82f070fd391e29f0dbd0bf46b022166beea`. Principal native children supplied judgment only; no native delegated implementation or fabricated formal GitHub review occurred. No Slack/email message was sent. No newly enrolled grant, live vault credential, provider/model dispatch, fleet execution or daemon acceptance is claimed. **More useful authorized source work exists; proceed.**
