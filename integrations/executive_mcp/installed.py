@@ -2804,6 +2804,7 @@ class InstalledBootPacketCollector:
             "project_knowledge_catalogue": readers.AgentOsProjectKnowledgeCatalogueReader,
             "project_knowledge_memory": readers.AgentOsProjectKnowledgeMemoryReader,
             "project_knowledge_source": readers.AgentOsProjectKnowledgeSourceReader,
+            "project_discovery_source": readers.AgentOsProjectDiscoverySourceReader,
         }
         if (allowed.get(kind) is not reader_type or not root.is_absolute()
                 or type(self) is not InstalledBootPacketCollector
@@ -2832,6 +2833,11 @@ class InstalledBootPacketCollector:
         return self._project_knowledge_reader(macro_root=macro_root,
             reader_type=AgentOsProjectKnowledgeSourceReader, kind="project_knowledge_source")
 
+    def project_discovery_source_reader(self, *, macro_root):
+        from control_plane.installed_project_knowledge_readers import AgentOsProjectDiscoverySourceReader
+        return self._project_knowledge_reader(macro_root=macro_root,
+            reader_type=AgentOsProjectDiscoverySourceReader, kind="project_discovery_source")
+
     def _read_project_knowledge(self, *, operation, selected, timeout):
         import math
         from common.workspace_project_knowledge_read_contract import selection
@@ -2854,6 +2860,11 @@ class InstalledBootPacketCollector:
         return self._read_project_knowledge(operation="project_knowledge_source",
             selected={"work_ref": work_ref, "source_ref": source_ref,
                       "expected_revision": expected_revision}, timeout=timeout)
+
+    def read_project_discovery_source(self, *, work_ref, discovery_ref, expected_source_commit, timeout=15.0):
+        return self._read_project_knowledge(operation="project_discovery_source",
+            selected={"work_ref": work_ref, "discovery_ref": discovery_ref,
+                      "expected_source_commit": expected_source_commit}, timeout=timeout)
 
     def project_creation_source_reader(self, *, macro_root: Path):
         from control_plane.agentos_project_creation_source import AgentOsProjectCreationReader, _SOURCE_ROOT
@@ -3186,6 +3197,9 @@ class InstalledBootPacketCollector:
                 if operation == "project_knowledge_source":
                     argv.extend(["--source-ref", selected["source_ref"],
                                  "--expected-revision", selected["expected_revision"]])
+                elif operation == "project_discovery_source":
+                    argv.extend(["--discovery-ref", selected["discovery_ref"],
+                                 "--expected-source-commit", selected["expected_source_commit"]])
             if data_view is not None:
                 argv.extend(["--code-root", os.fspath(self._macro_root), "--code-commit", data_view.code_commit])
             output_limit = (131072 if project_archive_request is not None else
@@ -3316,7 +3330,7 @@ class InstalledBootPacketCollector:
                 except (ValueError, TypeError, KeyError, RecursionError):
                     raise GatewayError("backend_unavailable", "installed Direction source unavailable") from None
             elif project_knowledge_request is not None:
-                from common.workspace_project_knowledge_read_contract import validate_body
+                from common.workspace_project_knowledge_read_contract import validate_body, result_selection
                 operation, selected = project_knowledge_request
                 try:
                     def unique_knowledge_object(pairs):
@@ -3326,7 +3340,7 @@ class InstalledBootPacketCollector:
                             result[key] = item
                         return result
                     packet = validate_body(json.loads(stdout, object_pairs_hook=unique_knowledge_object), operation=operation)
-                    expected_selection = {key: item for key, item in selected.items() if key != "expected_revision"}
+                    expected_selection = result_selection(selected)
                     if packet["selection"] != expected_selection:
                         raise ValueError("knowledge selection changed")
                     if packet.get("source") is not None and packet["source"]["commit"] != expected_packet_macro_sha:
@@ -3334,6 +3348,9 @@ class InstalledBootPacketCollector:
                     if (operation == "project_knowledge_source" and packet["availability"] == "AVAILABLE"
                             and packet["source"]["revision"] != selected["expected_revision"]):
                         raise ValueError("knowledge revision changed")
+                    if (operation == "project_discovery_source" and packet["availability"] == "AVAILABLE"
+                            and packet["source"]["commit"] != selected["expected_source_commit"]):
+                        raise ValueError("discovery DATA changed")
                 except (ValueError, TypeError, KeyError, RecursionError):
                     raise GatewayError("backend_unavailable", "installed project knowledge source unavailable") from None
             elif project_instructions_request is not None:

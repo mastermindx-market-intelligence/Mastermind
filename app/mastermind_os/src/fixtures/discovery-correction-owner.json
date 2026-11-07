@@ -1,0 +1,468 @@
+{
+  "schema": "mastermind.discovery_correction_owner_fixture.v1",
+  "scope": "ACTUAL_OWNER_AND_TEMP_GIT_NATIVE_AUTH_AND_INSTALLED_CODE_ARE_EXPLICIT_UI_SEAMS",
+  "compiler_source": "b4b08673508bb0aafe2aa729666f1aefab23911c",
+  "request": {
+    "schema": "mastermind.project_discovery_correct_request.v1",
+    "request_id": "mmos-project-discovery-correct-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "work_ref": "WS:ALPHA",
+    "source_commit": "7ed1ebec6a7f8bce3404d67aa3ce328b594d5ba2",
+    "base_revision": "744ffb69e32df0a3350d9eadeb58189fe416923b4c2787beec42abd928f08479",
+    "discovery_ref": "DSC:ORIGINAL-FINDING",
+    "expected_discovery_revision": "af949ef2611f3974ca404a1b7b31fd64a5508f6e88dc200f7b7781e19929f8e3",
+    "correction_reason": "A retained observation contradicts the prior measured result.",
+    "replacement": {
+      "claim": "The corrected measured result.",
+      "falsifier": "pytest tests/new_finding.py disproves it",
+      "so_what": "Use the corrected measured path.",
+      "kind": "runtime",
+      "confidence": "probable",
+      "verified_at": "2026-11-05",
+      "verified_by": "pytest tests/new_finding.py",
+      "expires": null,
+      "body_utf8": "\nNew evidence. 中文\n",
+      "evidence": [
+        "tests/new_finding.py:12"
+      ]
+    }
+  },
+  "lookup": {
+    "action": "correct_project_discovery",
+    "request_id": "mmos-project-discovery-correct-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "work_ref": "WS:ALPHA",
+    "source_commit": "7ed1ebec6a7f8bce3404d67aa3ce328b594d5ba2",
+    "base_revision": "744ffb69e32df0a3350d9eadeb58189fe416923b4c2787beec42abd928f08479",
+    "discovery_ref": "DSC:ORIGINAL-FINDING",
+    "expected_discovery_revision": "af949ef2611f3974ca404a1b7b31fd64a5508f6e88dc200f7b7781e19929f8e3",
+    "request_sha256": "68f0a0c5450301a35f308e9667fa23042e89eb9ae9fc74f55a14cef79dd95d29"
+  },
+  "context": {
+    "schema": "mastermind.workspace_source_operation_context.v1",
+    "selection": {
+      "action": "correct_project_discovery",
+      "work_ref": "WS:ALPHA"
+    },
+    "owner_context": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "can_inspect": true
+  },
+  "preview": {
+    "schema": "mastermind.workspace_source_operation_preview.v1",
+    "selection": {
+      "action": "correct_project_discovery",
+      "request_id": "mmos-project-discovery-correct-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "work_ref": "WS:ALPHA"
+    },
+    "owner_context": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "request_sha256": "68f0a0c5450301a35f308e9667fa23042e89eb9ae9fc74f55a14cef79dd95d29",
+    "recipe_fingerprint_sha256": "f12f2873341718fb722a4f3ec71f8e05f603d0dd011f8b9cb58f0a25332ed37b",
+    "preview_witness": {
+      "original_input": {
+        "artifact_sha256": "c460200e66bd12a8012440d4751cd38ad8cf8ddc79043e222545ae4cb8ee1150",
+        "input_ref": "terminal-input:3ddf5d0e839c7b2dffb4c211fd48d2179a6853eb102eb94d373b0cc8dd258a9e",
+        "payload_sha256": "88cae243b358599503c0a0a1c347fa49f536717237de69893594d685184135c9",
+        "schema": "mastermind.terminal_original_input_reference.v1"
+      },
+      "recipe_fingerprint_sha256": "f12f2873341718fb722a4f3ec71f8e05f603d0dd011f8b9cb58f0a25332ed37b"
+    },
+    "preview": {
+      "schema": "mastermind.project_knowledge_preview.v1",
+      "state": "DRAFT_ONLY",
+      "action": "correct_project_discovery",
+      "work_ref": "WS:ALPHA",
+      "source_commit": "7ed1ebec6a7f8bce3404d67aa3ce328b594d5ba2",
+      "change": {
+        "kind": "DISCOVERY_CORRECTION",
+        "discovery_ref": "DSC:ORIGINAL-FINDING",
+        "replacement_ref": "DSC:PROJECT-CORRECTION-18EFAB4D8FE6AEC081EFBBD8319BD2E8CBBAE63B",
+        "correction_reason": "A retained observation contradicts the prior measured result.",
+        "replacement": {
+          "body_utf8": "\nNew evidence. 中文\n",
+          "claim": "The corrected measured result.",
+          "confidence": "probable",
+          "evidence": [
+            "tests/new_finding.py:12"
+          ],
+          "expires": null,
+          "falsifier": "pytest tests/new_finding.py disproves it",
+          "kind": "runtime",
+          "so_what": "Use the corrected measured path.",
+          "verified_at": "2026-11-05",
+          "verified_by": "pytest tests/new_finding.py"
+        }
+      },
+      "postimages": [
+        {
+          "path": "agentos/discoveries/DSC-ORIGINAL-FINDING.md",
+          "content_sha256": "8132af9738b6b7230841f4abee30c6701f4e05d98b491a99484d970f34c79c57",
+          "expected_preimage_sha256": "af949ef2611f3974ca404a1b7b31fd64a5508f6e88dc200f7b7781e19929f8e3"
+        },
+        {
+          "path": "agentos/discoveries/DSC-PROJECT-CORRECTION-18EFAB4D8FE6AEC081EFBBD8319BD2E8CBBAE63B.md",
+          "content_sha256": "4fff46b89a181e6282d1b9fafdf3a5cd35b37d63a92c63a3f7194983c6f7573f",
+          "expected_preimage_sha256": null
+        },
+        {
+          "path": "agentos/workstreams/WS-ALPHA.md",
+          "content_sha256": "0d725fa399a7e9d2fddca3720516db511dfe0ab61f1e29bcc717655f7311485a",
+          "expected_preimage_sha256": "744ffb69e32df0a3350d9eadeb58189fe416923b4c2787beec42abd928f08479"
+        }
+      ]
+    }
+  },
+  "prepared_status": {
+    "schema": "mastermind.workspace_source_operation_status.v1",
+    "selection": {
+      "action": "correct_project_discovery",
+      "request_id": "mmos-project-discovery-correct-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "work_ref": "WS:ALPHA"
+    },
+    "owner_context": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "disposition": "unknown",
+    "reason": "IN_PROGRESS",
+    "request_sha256": "68f0a0c5450301a35f308e9667fa23042e89eb9ae9fc74f55a14cef79dd95d29",
+    "recipe_fingerprint_sha256": "f12f2873341718fb722a4f3ec71f8e05f603d0dd011f8b9cb58f0a25332ed37b",
+    "phase": "PUBLICATION",
+    "receipt": {
+      "kind": "INTENT",
+      "event_id": 1,
+      "recorded_at_ms": 1794053344000,
+      "receipt_sha256": "c6b36797569dc91fadbdb70ab3f438f57772f81596fd74f6164d2da2b8aa9aec",
+      "sources": [],
+      "proposal": null
+    },
+    "advance": null
+  },
+  "proposal_status": {
+    "schema": "mastermind.workspace_source_operation_status.v1",
+    "selection": {
+      "action": "correct_project_discovery",
+      "request_id": "mmos-project-discovery-correct-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "work_ref": "WS:ALPHA"
+    },
+    "owner_context": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "disposition": "unknown",
+    "reason": "IN_PROGRESS",
+    "request_sha256": "68f0a0c5450301a35f308e9667fa23042e89eb9ae9fc74f55a14cef79dd95d29",
+    "recipe_fingerprint_sha256": "f12f2873341718fb722a4f3ec71f8e05f603d0dd011f8b9cb58f0a25332ed37b",
+    "phase": "PUBLICATION",
+    "receipt": {
+      "kind": "PROPOSAL_OBSERVED",
+      "event_id": 3,
+      "recorded_at_ms": 1794053344000,
+      "receipt_sha256": "498b6015cd57a29c236920c5c62f55597801ac621dedc30e015c94ee96909bda",
+      "sources": [],
+      "proposal": {
+        "number": 401,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/pull/401",
+        "head_commit": "857a103e9f82d6682a0ea10518c9e731f5319a81",
+        "head_branch": "mmos/knowledge-d685995a0873b53512e82e46b39ca35d56b1d556908f28b0580e88c16a5b1ee7"
+      }
+    },
+    "advance": null
+  },
+  "source_status": {
+    "schema": "mastermind.workspace_source_operation_status.v1",
+    "selection": {
+      "action": "correct_project_discovery",
+      "request_id": "mmos-project-discovery-correct-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "work_ref": "WS:ALPHA"
+    },
+    "owner_context": {
+      "principal_scope": "417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f"
+    },
+    "disposition": "accepted",
+    "reason": null,
+    "request_sha256": "68f0a0c5450301a35f308e9667fa23042e89eb9ae9fc74f55a14cef79dd95d29",
+    "recipe_fingerprint_sha256": "f12f2873341718fb722a4f3ec71f8e05f603d0dd011f8b9cb58f0a25332ed37b",
+    "phase": "PUBLICATION",
+    "receipt": {
+      "kind": "SOURCE_OBSERVED",
+      "event_id": 4,
+      "recorded_at_ms": 1794053345000,
+      "receipt_sha256": "5f2e045057fb8ab932120183076100c7359336f0aa99cd063cdb103f102ec85c",
+      "sources": [
+        {
+          "repository": "macro",
+          "commit": "0c5de8a9d954413e866f0f7f81c552ca0839d154",
+          "path": "agentos/discoveries/DSC-ORIGINAL-FINDING.md",
+          "content_sha256": "8132af9738b6b7230841f4abee30c6701f4e05d98b491a99484d970f34c79c57"
+        },
+        {
+          "repository": "macro",
+          "commit": "0c5de8a9d954413e866f0f7f81c552ca0839d154",
+          "path": "agentos/discoveries/DSC-PROJECT-CORRECTION-18EFAB4D8FE6AEC081EFBBD8319BD2E8CBBAE63B.md",
+          "content_sha256": "4fff46b89a181e6282d1b9fafdf3a5cd35b37d63a92c63a3f7194983c6f7573f"
+        },
+        {
+          "repository": "macro",
+          "commit": "0c5de8a9d954413e866f0f7f81c552ca0839d154",
+          "path": "agentos/workstreams/WS-ALPHA.md",
+          "content_sha256": "0d725fa399a7e9d2fddca3720516db511dfe0ab61f1e29bcc717655f7311485a"
+        }
+      ],
+      "proposal": null
+    },
+    "advance": null
+  },
+  "before_catalogue": {
+    "availability": "AVAILABLE",
+    "project": {
+      "coverage": {
+        "files": {
+          "declared": 1,
+          "listed": 1,
+          "omitted": 0,
+          "state": "COMPLETE"
+        },
+        "records": {
+          "invalid": 0,
+          "matched": 2,
+          "omitted": 0,
+          "scanned": 2,
+          "state": "BOUNDED_SAMPLE"
+        }
+      },
+      "files": [
+        {
+          "content_sha256": null,
+          "display_name": "notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": null,
+            "kind": "DECLARED_ARTIFACT",
+            "request_sha256": null
+          },
+          "path": "research/notes.md",
+          "repository": "macro",
+          "revision": null,
+          "source_ref": "project-file.v1.bb3b69a2ac3d9f4614d498b43efe1ad34751093fa145a27f58588fece7c529f7",
+          "state": "SOURCE_MISSING",
+          "viewer_relation": "UNKNOWN"
+        }
+      ],
+      "memory": {
+        "revision": null,
+        "source_ref": null,
+        "state": "EMPTY"
+      },
+      "records": [
+        {
+          "authored_at": null,
+          "committed_at": "2026-11-07T12:09:03Z",
+          "kind": "WORKSTREAM",
+          "path": "agentos/workstreams/WS-ALPHA.md",
+          "revision": "0eaa39045c8ed01ca7713ce1c6bc528ee0f196fa",
+          "source_ref": "project-record.v1.d13b4b93bab87ef3bc3ae30553a9efac209d1634e2f3f491e65dc1f8d7c5af9a",
+          "title": "Project knowledge capture"
+        },
+        {
+          "authored_at": "2026-10-01",
+          "committed_at": "2026-11-07T12:09:03Z",
+          "kind": "DISCOVERY",
+          "path": "agentos/discoveries/DSC-ORIGINAL-FINDING.md",
+          "revision": "12c5b90d44142edd869c4bba6d1cc7aa9930fa6f",
+          "source_ref": "project-record.v1.ee94e9dfd944b869cba0006bedaf7fabd880ac29c9408ad8979a6730c450d4e6",
+          "title": "The original measured result."
+        }
+      ],
+      "title": "Project knowledge capture"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_knowledge.v1",
+    "selection": {
+      "work_ref": "WS:ALPHA"
+    },
+    "source": {
+      "commit": "7ed1ebec6a7f8bce3404d67aa3ce328b594d5ba2",
+      "repository": "mastermindx-market-intelligence/macro",
+      "workstream_sha256": "744ffb69e32df0a3350d9eadeb58189fe416923b4c2787beec42abd928f08479"
+    }
+  },
+  "before_sources": {
+    "project-record.v1.ee94e9dfd944b869cba0006bedaf7fabd880ac29c9408ad8979a6730c450d4e6": {
+      "availability": "AVAILABLE",
+      "document": {
+        "content_sha256": "af949ef2611f3974ca404a1b7b31fd64a5508f6e88dc200f7b7781e19929f8e3",
+        "content_utf8": "---\nschema: agentos.discovery.v1\nkey: ORIGINAL-FINDING\nclaim: The original measured result.\nfalsifier: pytest tests/finding.py changes the result\nso_what: Use the measured path.\nkind: runtime\nverified_at: '2026-10-01'\nverified_by: pytest tests/finding.py\nscope: [WS:ALPHA]\nconfidence: probable\n---\n\nPreserve original evidence. 中文\n",
+        "media_type": "text/markdown",
+        "title": "The original measured result."
+      },
+      "reason_codes": [],
+      "schema": "mastermind.workspace_project_source.v1",
+      "selection": {
+        "source_ref": "project-record.v1.ee94e9dfd944b869cba0006bedaf7fabd880ac29c9408ad8979a6730c450d4e6",
+        "work_ref": "WS:ALPHA"
+      },
+      "source": {
+        "commit": "7ed1ebec6a7f8bce3404d67aa3ce328b594d5ba2",
+        "committed_at": "2026-11-07T12:09:03Z",
+        "content_sha256": "af949ef2611f3974ca404a1b7b31fd64a5508f6e88dc200f7b7781e19929f8e3",
+        "path": "agentos/discoveries/DSC-ORIGINAL-FINDING.md",
+        "repository": "mastermindx-market-intelligence/macro",
+        "revision": "12c5b90d44142edd869c4bba6d1cc7aa9930fa6f"
+      }
+    }
+  },
+  "original_source": {
+    "availability": "AVAILABLE",
+    "document": {
+      "content_sha256": "af949ef2611f3974ca404a1b7b31fd64a5508f6e88dc200f7b7781e19929f8e3",
+      "content_utf8": "---\nschema: agentos.discovery.v1\nkey: ORIGINAL-FINDING\nclaim: The original measured result.\nfalsifier: pytest tests/finding.py changes the result\nso_what: Use the measured path.\nkind: runtime\nverified_at: '2026-10-01'\nverified_by: pytest tests/finding.py\nscope: [WS:ALPHA]\nconfidence: probable\n---\n\nPreserve original evidence. 中文\n",
+      "media_type": "text/markdown",
+      "title": "The original measured result."
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_source.v1",
+    "selection": {
+      "source_ref": "project-record.v1.ee94e9dfd944b869cba0006bedaf7fabd880ac29c9408ad8979a6730c450d4e6",
+      "work_ref": "WS:ALPHA"
+    },
+    "source": {
+      "commit": "7ed1ebec6a7f8bce3404d67aa3ce328b594d5ba2",
+      "committed_at": "2026-11-07T12:09:03Z",
+      "content_sha256": "af949ef2611f3974ca404a1b7b31fd64a5508f6e88dc200f7b7781e19929f8e3",
+      "path": "agentos/discoveries/DSC-ORIGINAL-FINDING.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "12c5b90d44142edd869c4bba6d1cc7aa9930fa6f"
+    }
+  },
+  "after_catalogue": {
+    "availability": "AVAILABLE",
+    "project": {
+      "coverage": {
+        "files": {
+          "declared": 1,
+          "listed": 1,
+          "omitted": 0,
+          "state": "COMPLETE"
+        },
+        "records": {
+          "invalid": 0,
+          "matched": 3,
+          "omitted": 0,
+          "scanned": 3,
+          "state": "BOUNDED_SAMPLE"
+        }
+      },
+      "files": [
+        {
+          "content_sha256": null,
+          "display_name": "notes.md",
+          "media_type": "text/markdown",
+          "origin": {
+            "actor_ref": null,
+            "kind": "DECLARED_ARTIFACT",
+            "request_sha256": null
+          },
+          "path": "research/notes.md",
+          "repository": "macro",
+          "revision": null,
+          "source_ref": "project-file.v1.e7672ac8f13b3a816606effcd7612c284e9380635301db9bc18a02624ec02782",
+          "state": "SOURCE_MISSING",
+          "viewer_relation": "UNKNOWN"
+        }
+      ],
+      "memory": {
+        "revision": null,
+        "source_ref": null,
+        "state": "EMPTY"
+      },
+      "records": [
+        {
+          "authored_at": null,
+          "committed_at": "2026-11-07T12:09:04Z",
+          "kind": "WORKSTREAM",
+          "path": "agentos/workstreams/WS-ALPHA.md",
+          "revision": "de76107040041cf61da281364d25ba68a9703093",
+          "source_ref": "project-record.v1.44978e901d938ef07bddbad740e30cdb2d2ef3917520dc7269e36377ce6e709c",
+          "title": "Project knowledge capture"
+        },
+        {
+          "authored_at": "2026-10-01",
+          "committed_at": "2026-11-07T12:09:04Z",
+          "kind": "DISCOVERY",
+          "path": "agentos/discoveries/DSC-ORIGINAL-FINDING.md",
+          "revision": "c9b06ea31472f60ff15c78bae6ab40198aec37d8",
+          "source_ref": "project-record.v1.10b48b07393daab7decbfbf56b24ec1a45a6af5b9b97f32392cbf480f3efb9f6",
+          "title": "The original measured result."
+        },
+        {
+          "authored_at": "2026-11-05",
+          "committed_at": "2026-11-07T12:09:04Z",
+          "kind": "DISCOVERY",
+          "path": "agentos/discoveries/DSC-PROJECT-CORRECTION-18EFAB4D8FE6AEC081EFBBD8319BD2E8CBBAE63B.md",
+          "revision": "255f0c27989306312feb637a28561c233dba8aae",
+          "source_ref": "project-record.v1.fcd26426f994b8904308acdfa7ed49df24225c491ffee89c19c977e3f9c55686",
+          "title": "The corrected measured result."
+        }
+      ],
+      "title": "Project knowledge capture"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_project_knowledge.v1",
+    "selection": {
+      "work_ref": "WS:ALPHA"
+    },
+    "source": {
+      "commit": "0c5de8a9d954413e866f0f7f81c552ca0839d154",
+      "repository": "mastermindx-market-intelligence/macro",
+      "workstream_sha256": "0d725fa399a7e9d2fddca3720516db511dfe0ab61f1e29bcc717655f7311485a"
+    }
+  },
+  "after_sources": {
+    "project-record.v1.10b48b07393daab7decbfbf56b24ec1a45a6af5b9b97f32392cbf480f3efb9f6": {
+      "availability": "AVAILABLE",
+      "document": {
+        "content_sha256": "8132af9738b6b7230841f4abee30c6701f4e05d98b491a99484d970f34c79c57",
+        "content_utf8": "---\nschema: agentos.discovery.v1\nkey: ORIGINAL-FINDING\nclaim: The original measured result.\nfalsifier: pytest tests/finding.py changes the result\nso_what: Use the measured path.\nkind: runtime\nverified_at: '2026-10-01'\nverified_by: pytest tests/finding.py\nscope: [WS:ALPHA]\nconfidence: probable\nsuperseded_by: DSC:PROJECT-CORRECTION-18EFAB4D8FE6AEC081EFBBD8319BD2E8CBBAE63B\n---\n\nPreserve original evidence. 中文\n",
+        "media_type": "text/markdown",
+        "title": "The original measured result."
+      },
+      "reason_codes": [],
+      "schema": "mastermind.workspace_project_source.v1",
+      "selection": {
+        "source_ref": "project-record.v1.10b48b07393daab7decbfbf56b24ec1a45a6af5b9b97f32392cbf480f3efb9f6",
+        "work_ref": "WS:ALPHA"
+      },
+      "source": {
+        "commit": "0c5de8a9d954413e866f0f7f81c552ca0839d154",
+        "committed_at": "2026-11-07T12:09:04Z",
+        "content_sha256": "8132af9738b6b7230841f4abee30c6701f4e05d98b491a99484d970f34c79c57",
+        "path": "agentos/discoveries/DSC-ORIGINAL-FINDING.md",
+        "repository": "mastermindx-market-intelligence/macro",
+        "revision": "c9b06ea31472f60ff15c78bae6ab40198aec37d8"
+      }
+    },
+    "project-record.v1.fcd26426f994b8904308acdfa7ed49df24225c491ffee89c19c977e3f9c55686": {
+      "availability": "AVAILABLE",
+      "document": {
+        "content_sha256": "4fff46b89a181e6282d1b9fafdf3a5cd35b37d63a92c63a3f7194983c6f7573f",
+        "content_utf8": "---\nschema: agentos.discovery.v1\nkey: PROJECT-CORRECTION-18EFAB4D8FE6AEC081EFBBD8319BD2E8CBBAE63B\nclaim: The corrected measured result.\nfalsifier: pytest tests/new_finding.py disproves it\nso_what: Use the corrected measured path.\nkind: runtime\nconfidence: probable\nverified_by: pytest tests/new_finding.py\nverified_at: '2026-11-05'\nscope:\n- WS:ALPHA\nproject_correction:\n  schema: agentos.project_discovery_correction.v1\n  work_ref: WS:ALPHA\n  supersedes: DSC:ORIGINAL-FINDING\n  actor_ref: workspace:417ddeea77c2508740ecaa5f3fb54530e41964d15c80befc6a4060bbe86d0a6f\n  request_sha256: 68f0a0c5450301a35f308e9667fa23042e89eb9ae9fc74f55a14cef79dd95d29\n  corrected_on: '2026-11-07'\n  source_commit: 7ed1ebec6a7f8bce3404d67aa3ce328b594d5ba2\n  predecessor_sha256: af949ef2611f3974ca404a1b7b31fd64a5508f6e88dc200f7b7781e19929f8e3\n  reference_closure_sha256: 31571d343ee2cd5a528207524e1023b03ce923f83264fba3c90c069453af7b3c\n  correction_reason: A retained observation contradicts the prior measured result.\n  evidence:\n  - tests/new_finding.py:12\n---\n\nNew evidence. 中文\n",
+        "media_type": "text/markdown",
+        "title": "The corrected measured result."
+      },
+      "reason_codes": [],
+      "schema": "mastermind.workspace_project_source.v1",
+      "selection": {
+        "source_ref": "project-record.v1.fcd26426f994b8904308acdfa7ed49df24225c491ffee89c19c977e3f9c55686",
+        "work_ref": "WS:ALPHA"
+      },
+      "source": {
+        "commit": "0c5de8a9d954413e866f0f7f81c552ca0839d154",
+        "committed_at": "2026-11-07T12:09:04Z",
+        "content_sha256": "4fff46b89a181e6282d1b9fafdf3a5cd35b37d63a92c63a3f7194983c6f7573f",
+        "path": "agentos/discoveries/DSC-PROJECT-CORRECTION-18EFAB4D8FE6AEC081EFBBD8319BD2E8CBBAE63B.md",
+        "repository": "mastermindx-market-intelligence/macro",
+        "revision": "255f0c27989306312feb637a28561c233dba8aae"
+      }
+    }
+  }
+}

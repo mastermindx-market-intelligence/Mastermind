@@ -6388,13 +6388,21 @@ window.downloadPaperPdf = function() {
   var orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="l-en">Generating…</span><span class="l-zh">生成中…</span>'; }
   var ticker = ((E('mm-modal-title') || {}).textContent || 'research').split(' ')[0].replace(/[^A-Za-z0-9._-]/g, '');
+  var failureMessage = 'PDF generation failed';
   fetch('/research_paper.pdf?id=' + encodeURIComponent(_openPaperId))
     .then(function(r) {
       if (!r.ok) {
-        return r.text().then(function(body) {
-          var msg = 'HTTP ' + r.status;
-          try { var j = JSON.parse(body); if (j && j.error) msg = j.error; } catch (e) { if (body) msg = body; }
-          throw new Error(msg);
+        return r.json().catch(function(){ return null; }).then(function(j) {
+          failureMessage = r.status === 404 ? 'research paper not found' : 'PDF generation failed';
+          var allowedNotes = {
+            404: ['research paper not found'],
+            500: ['research paper unavailable', 'PDF generation failed'],
+            503: ['research store unavailable', 'PDF engine unavailable']
+          }[r.status] || [];
+          if (j && typeof j.note === 'string' && allowedNotes.indexOf(j.note) !== -1) {
+            failureMessage = j.note;
+          }
+          return Promise.reject();
         });
       }
       return r.blob();
@@ -6406,7 +6414,7 @@ window.downloadPaperPdf = function() {
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
     })
-    .catch(function(e) { alert('PDF generation failed: ' + (e && e.message ? e.message : e)); })
+    .catch(function() { alert(failureMessage); })
     .finally(function() { if (btn) { btn.disabled = false; btn.innerHTML = orig; } });
 };
 
