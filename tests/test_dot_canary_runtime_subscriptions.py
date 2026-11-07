@@ -31,7 +31,7 @@ def run(coroutine):
     return asyncio.run(coroutine)
 
 
-def setup(tmp_path, *, now=NOW):
+def make_case(tmp_path, *, now=NOW):
     state = Runtime.at(tmp_path)
     store = RuntimeCanarySubscriptionStore(state, ExecutiveReplyCipher("existing-key", b"k"*32), clock=lambda: now)
     record = CanaryRecord(
@@ -73,7 +73,7 @@ def test_sealed_subscription_survives_restart_and_hides_all_secrets(tmp_path):
 
 
 def test_conflicting_cas_and_idempotent_original_reconciliation(tmp_path):
-    runtime, store, record, auth=setup(tmp_path)
+    runtime, store, record, auth=make_case(tmp_path)
     assert commit(store,record,auth)==record
     before=runtime.store.list_events()
     assert commit(store,record,auth)==record
@@ -85,7 +85,7 @@ def test_conflicting_cas_and_idempotent_original_reconciliation(tmp_path):
 
 
 def test_cas_concurrent_writers_one_wins(tmp_path):
-    runtime, store, record, auth=setup(tmp_path)
+    runtime, store, record, auth=make_case(tmp_path)
     def write(extra):
         try:
             commit(store,dataclasses.replace(record,expires_at=NOW+extra),auth)
@@ -98,7 +98,7 @@ def test_cas_concurrent_writers_one_wins(tmp_path):
 
 
 def test_revocation_fences_delayed_commit_and_remains_idempotent(tmp_path):
-    runtime, store, record, auth=setup(tmp_path)
+    runtime, store, record, auth=make_case(tmp_path)
     run(store.remove(record.subscription_id,owner_key=OWNER,channel_id=CHANNEL,
         callback_url_digest=record.callback_url_digest,expected_version="empty"))
     snap=run(store.snapshot(record.subscription_id))
@@ -111,7 +111,7 @@ def test_revocation_fences_delayed_commit_and_remains_idempotent(tmp_path):
 
 
 def test_approved_key_rotation_has_grace_window(tmp_path):
-    runtime, store, record, auth=setup(tmp_path)
+    runtime, store, record, auth=make_case(tmp_path)
     commit(store,record,auth)
     first=run(store.snapshot(record.subscription_id))
     current=dataclasses.replace(record,
@@ -124,7 +124,7 @@ def test_approved_key_rotation_has_grace_window(tmp_path):
 
 
 def test_canary_audience_no_foreign_native_reply_and_expiry(tmp_path):
-    runtime, store, record, auth=setup(tmp_path)
+    runtime, store, record, auth=make_case(tmp_path)
     assert store.subscriptions_for_channel(CHANNEL)==()
     commit(store,record,auth)
     assert store.subscriptions_for_channel(CHANNEL)==(record.subscription_id,)
@@ -133,7 +133,7 @@ def test_canary_audience_no_foreign_native_reply_and_expiry(tmp_path):
 
 
 def test_delivery_exactly_once_even_after_restart_unknown_result(tmp_path):
-    runtime,store,record,auth=setup(tmp_path)
+    runtime,store,record,auth=make_case(tmp_path)
     commit(store,record,auth)
     ver=run(store.snapshot(record.subscription_id)).version
     kwargs=dict(ident=record.subscription_id,version=ver,
@@ -153,7 +153,7 @@ def test_delivery_exactly_once_even_after_restart_unknown_result(tmp_path):
 
 
 def test_revocation_after_reservation_blocks_later_new_event(tmp_path):
-    _,store,record,auth=setup(tmp_path)
+    _,store,record,auth=make_case(tmp_path)
     commit(store,record,auth)
     current=run(store.snapshot(record.subscription_id))
     first=run(store.reserve_delivery(
@@ -177,13 +177,13 @@ def test_revocation_after_reservation_blocks_later_new_event(tmp_path):
     {"signing_secret_digest":"c"*64},
 ])
 def test_invalid_or_forged_record_cannot_commit(tmp_path,changes):
-    _,store,record,auth=setup(tmp_path)
+    _,store,record,auth=make_case(tmp_path)
     with pytest.raises(ValueError):
         commit(store,dataclasses.replace(record,**changes),auth)
 
 
 def test_wrong_key_cannot_decrypt_existing_grant(tmp_path):
-    runtime,store,record,auth=setup(tmp_path)
+    runtime,store,record,auth=make_case(tmp_path)
     commit(store,record,auth)
     bad=RuntimeCanarySubscriptionStore(runtime,
         ExecutiveReplyCipher("wrong-key",b"z"*32),clock=lambda:NOW)
