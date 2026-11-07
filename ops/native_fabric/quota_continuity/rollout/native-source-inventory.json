@@ -168,9 +168,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 111035,
+      "bytes": 112142,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4",
+      "sha256": "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -228,9 +228,9 @@
       "source": "candidate/go_lease_capability.py"
     },
     "ext/go_lease_gateway.py": {
-      "bytes": 45333,
+      "bytes": 45716,
       "installed_preimage_sha256": "7b1e1d48933218135771c770a1d25c994aa0332bc6bc8461c5b9d625ef8a7658",
-      "sha256": "df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1",
+      "sha256": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
       "source": "candidate/go_lease_gateway.py"
     },
     "ext/go_remote_capsule.py": {
@@ -294,15 +294,15 @@
       "source": "candidate/host_pull_probe.template"
     },
     "ext/lane_runtime.py": {
-      "bytes": 92154,
+      "bytes": 92393,
       "installed_preimage_sha256": "966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937",
-      "sha256": "a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f",
+      "sha256": "b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b",
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 193976,
+      "bytes": 201422,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
+      "sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
       "source": "candidate/lease_broker.py"
     },
     "ext/linux_process_identity.py": {
@@ -648,9 +648,9 @@
       "source": "candidate/sub.sh"
     },
     "ext/support_bundle.py": {
-      "bytes": 19456,
+      "bytes": 39302,
       "installed_preimage_sha256": "e054b05fece124c6918f12dc1ce3962e6f20b5d74dea5e26630524be9b20295a",
-      "sha256": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
+      "sha256": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
       "source": "candidate/support_bundle.py"
     },
     "ext/yes": {

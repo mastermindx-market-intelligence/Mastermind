@@ -105,13 +105,27 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.modules.update(previous)
         sys.path[:] = path_before
 
+def before_admission_integrity(manifest):
+    # Historical-generation cases retain their exact parent, while the current
+    # build and the new successor tests below inspect the actual repaired bytes.
+    previous = builder.before_application_pool_composition(dict(manifest))
+    if any(previous.get(name) == digest
+           for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items()):
+        assert {name: previous[name] for name in builder.ADMISSION_INTEGRITY_DIGESTS} == builder.ADMISSION_INTEGRITY_DIGESTS
+        previous.update(builder.ADMISSION_INTEGRITY_PREIMAGES)
+        assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) in {
+            builder.ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256,
+            builder.ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256,
+        }
+    return previous
+
 
 
 
 def before_application_carrier(manifest):
     # The historical cohort tests exercise their original frozen source. The
     # current APPLICATION manifest is separately qualified below.
-    prior = dict(manifest)
+    prior = before_admission_integrity(manifest)
     prior.update({
         "ext/native_remote.py": "2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6",
         "ext/remote_sub.sh": "0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c",
@@ -135,7 +149,7 @@ def before_application_auto_dependencies(manifest):
     return prior
 
 def before_request_refusal_task(manifest):
-    prior = dict(manifest)
+    prior = before_admission_integrity(manifest)
     if prior["ext/fabric_task.py"] == builder.GO_REQUEST_REFUSAL_TASK_DIGEST:
         prior["ext/fabric_task.py"] = builder.GO_REMOTE_CWD_TASK_DIGEST
     return prior
@@ -191,7 +205,7 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     previous = before_original_artifact_recovery(default)
     captured = {name: g.digest((ROOT / "candidate" / name).read_bytes())
                 for name in builder.GO_APPLICATION_DEPENDENCIES}
-    builder.validate_go_base_manifest(default, captured)
+    builder.validate_go_base_manifest(default, {name: default["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES})
     builder.validate_go_base_manifest(actual_default, captured)
     assert default["ext/pick.py"] == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]
     historical = before_participant_cohort(default)
@@ -714,7 +728,6 @@ def test_refusal_diagnostics_preserve_exact_remote_cwd_107_and_raw_identity(buil
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     assert len(current) == 107
     assert current["ext/fabric_task.py"] == builder.GO_REQUEST_REFUSAL_TASK_DIGEST
-    assert current["ext/fabric_task.py"] == g.digest((ROOT / "candidate/fabric_task.py").read_bytes())
     previous = before_request_refusal_task(current)
     historical = before_application_auto_dependencies(previous)
     assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == "c7cf946bc1d8f13ef7b512d071d85097e1ddc58979af76bf367a7707aa90617d"
@@ -745,12 +758,14 @@ def test_refusal_task_requires_the_complete_raw_namespace(builds, missing):
     assert current == before
 
 
-def actual_application_carrier_manifest(builds):
-    return json.loads((builds.default / "native-manifest.json").read_bytes())
+def application_carrier_parent_manifest(builds):
+    # Preserve the original APPLICATION-cohort rejection cases at their exact
+    # parent; the combined repair has its own complete-parent cases below.
+    return before_admission_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
 
 
 def test_application_carrier_preserves_actual_and_historical_manifest_identity(builds):
-    current = actual_application_carrier_manifest(builds)
+    current = application_carrier_parent_manifest(builds)
     before = dict(current)
     captured = {name: current["ext/" + name]
                 for name in builder.GO_APPLICATION_DEPENDENCIES}
@@ -771,7 +786,7 @@ def test_application_carrier_preserves_actual_and_historical_manifest_identity(b
 ])
 @pytest.mark.parametrize("replacement", ["historical", "foreign"])
 def test_application_carrier_rejects_partial_or_foreign_member(builds, member, replacement):
-    current = actual_application_carrier_manifest(builds)
+    current = application_carrier_parent_manifest(builds)
     current["ext/" + member] = (
         before_application_carrier(current)["ext/" + member]
         if replacement == "historical" else "f" * 64)
@@ -785,7 +800,7 @@ def test_application_carrier_rejects_partial_or_foreign_member(builds, member, r
 
 @pytest.mark.parametrize("mutation", ["prior-namespace", "extra-member", "old-picker", "changed-pool"])
 def test_application_carrier_cannot_relabel_another_complete_base(builds, mutation):
-    current = actual_application_carrier_manifest(builds)
+    current = application_carrier_parent_manifest(builds)
     if mutation == "prior-namespace":
         del current["ext/original_advertised_artifact.py"]
     elif mutation == "extra-member":
@@ -804,8 +819,8 @@ def test_application_carrier_cannot_relabel_another_complete_base(builds, mutati
 
 def test_application_carrier_inventory_retains_actual_candidate_provenance(builds):
     inventory = json.loads((builds.default / "native-source-inventory.json").read_bytes())
-    current = actual_application_carrier_manifest(builds)
-    for name, expected in builder.APPLICATION_CARRIER_DIGESTS.items():
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    for name, expected in builder.application_carrier_candidate_digests(ROOT).items():
         row = inventory["files"]["ext/" + name]
         raw = (builds.default / "native-code-stage/ext" / name).read_bytes()
         assert row["source"] == "candidate/" + name
@@ -824,3 +839,275 @@ def test_application_carrier_source_requires_all_five_exact_members(builds, tmp_
     member.write_bytes(member.read_bytes() + b"\n# foreign\n")
     with pytest.raises(ValueError, match="candidate cohort is incomplete"):
         builder.application_carrier_candidate_cohort(tmp_path)
+
+
+def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent(builds):
+    current = builder.before_application_pool_composition(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    original = dict(current)
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    previous = before_admission_integrity(current)
+    assert previous != current
+    assert {name for name in current if current[name] != previous[name]} == set(builder.ADMISSION_INTEGRITY_DIGESTS)
+    assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256
+    for manifest in (current, previous):
+        unchanged = dict(manifest)
+        builder.validate_go_base_manifest(manifest, captured)
+        assert manifest == unchanged
+    for output in (builds.default, builds.application, builds.http):
+        manifest = json.loads((output / "native-manifest.json").read_bytes())
+        for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items():
+            assert manifest[name] == digest
+            assert g.digest((output / "native-code-stage" / name).read_bytes()) == digest
+            assert g.digest((ROOT / "candidate" / Path(name).name).read_bytes()) == digest
+    assert current == original
+
+
+@pytest.mark.parametrize("corruption", [
+    "old-task", "old-runtime", "foreign-task", "foreign-runtime", "missing-task",
+    "missing-runtime", "extra-member", "foreign-parent", "different-valid-parent",
+    "historical106", "historical104", "historical102",
+])
+def test_admission_integrity_rejects_partial_foreign_and_backdated_closures(builds, corruption):
+    current = builder.before_application_pool_composition(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    bad = dict(current)
+    if corruption in ("old-task", "old-runtime"):
+        name = "ext/fabric_task.py" if corruption == "old-task" else "ext/lane_runtime.py"
+        bad[name] = builder.ADMISSION_INTEGRITY_PREIMAGES[name]
+    elif corruption in ("foreign-task", "foreign-runtime"):
+        name = "ext/fabric_task.py" if corruption == "foreign-task" else "ext/lane_runtime.py"
+        bad[name] = "f" * 64
+    elif corruption in ("missing-task", "missing-runtime"):
+        del bad["ext/fabric_task.py" if corruption == "missing-task" else "ext/lane_runtime.py"]
+    elif corruption == "extra-member":
+        bad["ext/foreign.py"] = "f" * 64
+    elif corruption == "foreign-parent":
+        bad["pool"] = "f" * 64
+    elif corruption == "different-valid-parent":
+        bad["ext/pick.py"] = builder.GO_BASE_PICKER_SHA256
+    else:
+        historical_parent = before_application_carrier(current)
+        bad = (before_original_artifact_recovery(historical_parent)
+               if corruption == "historical106" else before_participant_cohort(historical_parent))
+        if corruption == "historical102":
+            for cohort in (builder.GO_UBUNTU4_PREIMAGES, builder.GO_COMPLETED_POLL_PREIMAGES,
+                           builder.GO_POST_FAILURE_PREIMAGES):
+                bad.update({"ext/" + name: digest for name, digest in cohort.items()})
+            for name in builder.GO_POST_FAILURE_ADDITIONS:
+                del bad["ext/" + name]
+        builder.validate_go_base_manifest(bad, captured)
+        bad.update(builder.ADMISSION_INTEGRITY_DIGESTS)
+    unchanged = dict(bad)
+    with pytest.raises(ValueError, match="admission integrity"):
+        builder.validate_go_base_manifest(bad, captured)
+    assert bad == unchanged
+
+
+def test_admission_integrity_forward_delta_is_reversible_and_source_exact(tmp_path):
+    import hashlib
+    import subprocess
+    patch_path = ROOT.parents[2] / "tests/fixtures/fabric-native-admission-integrity-20261107.patch"
+    assert hashlib.sha256(patch_path.read_bytes()).hexdigest() == "68c1abf049ee9e4c04fc749eebb9a4b99ba71a71c22945e0f5d02bc8fe107753"
+    current = {}
+    for relative, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items():
+        name = Path(relative).name
+        current[name] = (ROOT / "candidate" / name).read_bytes()
+        assert g.digest(current[name]) == digest
+        (tmp_path / name).write_bytes(current[name])
+    def apply(*options):
+        result = subprocess.run(
+            ["git", "apply", "--unidiff-zero", *options, str(patch_path)],
+            cwd=tmp_path, capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+    apply("--reverse", "--check")
+    apply("--reverse")
+    for relative, digest in builder.ADMISSION_INTEGRITY_PREIMAGES.items():
+        assert g.digest((tmp_path / Path(relative).name).read_bytes()) == digest
+    apply("--check")
+    apply()
+    for name, raw in current.items():
+        assert (tmp_path / name).read_bytes() == raw
+
+
+@pytest.mark.parametrize("lineage", ["worker", "application"])
+def test_both_exact_admission_repair_lineages_remain_distinct(builds, lineage):
+    # Immutable WORKER fixture is the exact manifest from repair source
+    # 3b2338d3946209b6f6ce6a0b694cf609015fb07f; it is not another runtime owner.
+    if lineage == "worker":
+        raw = (ROOT.parents[2] / "tests/fixtures/fabric-admission-integrity-worker107-3b2338d.json").read_bytes()
+        current_identity = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+        parent_identity = "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
+        historical_identity = parent_identity
+    else:
+        prior = builder.before_application_pool_composition(json.loads((builds.default / "native-manifest.json").read_bytes()))
+        raw = (json.dumps(prior, sort_keys=True, indent=2) + "\n").encode()
+        current_identity = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+        parent_identity = "3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9"
+        historical_identity = "e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4"
+    assert g.digest(raw) == current_identity
+    current = json.loads(raw)
+    original = dict(current)
+    parent = builder.before_admission_integrity(current)
+    assert g.digest((json.dumps(parent, sort_keys=True, indent=2) + "\n").encode()) == parent_identity
+    assert len(current) == len(parent) == 107
+    assert {name for name in current if current[name] != parent[name]} == {
+        "ext/fabric_task.py", "ext/lane_runtime.py",
+    }
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    for view in (current, parent):
+        before = dict(view)
+        builder.validate_go_base_manifest(view, captured)
+        assert view == before
+    historical = builder.normalize_application_carrier_base_manifest(current)
+    assert g.digest((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()) == historical_identity
+    assert current == original
+
+
+@pytest.mark.parametrize("member", [
+    "go_lease_capability.py", "go_lease_gateway.py", "lease_broker.py",
+    "native_remote.py", "remote_sub.sh", "remote_sub_exec.py",
+    "remote_sub_helpers.py", "support_bundle.py",
+])
+@pytest.mark.parametrize("replacement", ["worker", "foreign"])
+def test_repaired_application_rejects_change_to_any_preserved_member(builds, member, replacement):
+    current = builder.before_application_pool_composition(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    worker_raw = (ROOT.parents[2] / "tests/fixtures/fabric-admission-integrity-worker107-3b2338d.json").read_bytes()
+    assert g.digest(worker_raw) == "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+    worker = json.loads(worker_raw)
+    key = "ext/" + member
+    assert current[key] != worker[key]
+    current[key] = worker[key] if replacement == "worker" else "f" * 64
+    original = dict(current)
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    with pytest.raises(ValueError, match="admission integrity parent closure"):
+        builder.validate_go_base_manifest(current, captured)
+    assert current == original
+
+
+@pytest.mark.parametrize("extended", ["application", "http"])
+def test_repaired_base_cannot_relabel_an_extended_namespace(builds, extended):
+    manifest = json.loads((getattr(builds, extended) / "native-manifest.json").read_bytes())
+    original = dict(manifest)
+    captured = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    with pytest.raises(ValueError, match="application pool composition parent closure"):
+        builder.validate_go_base_manifest(manifest, captured)
+    assert manifest == original
+
+
+def test_application_pool_composition_has_one_exact_parent_and_actual_dependencies(builds):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    original = dict(current)
+    parent = builder.before_application_pool_composition(current)
+    assert g.digest((json.dumps(parent, sort_keys=True, indent=2) + "\n").encode()) == "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+    assert len(current) == len(parent) == 107
+    assert {key for key in current if current[key] != parent[key]} == set(builder.APPLICATION_POOL_COMPOSITION_DIGESTS)
+    installed = builder.before_admission_integrity(parent)
+    assert g.digest((json.dumps(installed, sort_keys=True, indent=2) + "\n").encode()) == "3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9"
+    assert {key for key in current if current[key] != installed[key]} == (
+        set(builder.APPLICATION_POOL_COMPOSITION_DIGESTS) | set(builder.ADMISSION_INTEGRITY_DIGESTS))
+    for view in (current, parent):
+        captured = {name: view["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+        before = dict(view)
+        builder.validate_go_base_manifest(view, captured)
+        assert view == before
+    stale = {name: parent["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    with pytest.raises(ValueError, match="differs from captured application dependency"):
+        builder.validate_go_base_manifest(current, stale)
+    assert current == original
+
+
+@pytest.mark.parametrize("member", tuple(builder.APPLICATION_POOL_COMPOSITION_DIGESTS))
+@pytest.mark.parametrize("mutation", ["missing", "foreign", "preimage"])
+def test_application_pool_composition_rejects_partial_or_mixed_members(builds, member, mutation):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    if mutation == "missing":
+        del current[member]
+    else:
+        current[member] = ("f" * 64 if mutation == "foreign"
+                           else builder.APPLICATION_POOL_COMPOSITION_PREIMAGES[member])
+    original = dict(current)
+    captured = {name: current.get("ext/" + name) for name in builder.GO_APPLICATION_DEPENDENCIES}
+    with pytest.raises(ValueError, match="application pool composition cohort"):
+        builder.validate_go_base_manifest(current, captured)
+    assert current == original
+
+
+@pytest.mark.parametrize("mutation", ["old-task", "old-runtime", "foreign-pool", "foreign-executor", "missing-member", "extra-member", "historical102", "historical104", "historical106"])
+def test_application_pool_composition_rejects_unqualified_whole_parents(builds, mutation):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    if mutation in ("old-task", "old-runtime"):
+        key = "ext/fabric_task.py" if mutation == "old-task" else "ext/lane_runtime.py"
+        current[key] = builder.ADMISSION_INTEGRITY_PREIMAGES[key]
+    elif mutation in ("foreign-pool", "foreign-executor"):
+        current["pool" if mutation == "foreign-pool" else "ext/remote_sub_exec.py"] = "f" * 64
+    elif mutation == "missing-member":
+        del current["ext/pick.py"]
+    elif mutation == "extra-member":
+        current["ext/unqualified.py"] = "f" * 64
+    else:
+        historical = before_application_carrier(current)
+        historical = (before_original_artifact_recovery(historical)
+                      if mutation == "historical106" else before_participant_cohort(historical))
+        if mutation == "historical102":
+            for cohort in (builder.GO_UBUNTU4_PREIMAGES, builder.GO_COMPLETED_POLL_PREIMAGES, builder.GO_POST_FAILURE_PREIMAGES):
+                historical.update({"ext/" + name: value for name, value in cohort.items()})
+            for name in builder.GO_POST_FAILURE_ADDITIONS:
+                del historical["ext/" + name]
+        current = historical
+        current.update(builder.APPLICATION_POOL_COMPOSITION_DIGESTS)
+    original = dict(current)
+    with pytest.raises(ValueError, match="application pool composition parent closure"):
+        builder.before_application_pool_composition(current)
+    assert current == original
+
+
+def test_publisher_only_source_is_not_an_application_precursor(builds):
+    raw = (ROOT.parents[2] / "tests/fixtures/fabric-publisher-only107-b617445.json").read_bytes()
+    assert g.digest(raw) == "c651b8e58d89c7d1968f1c95d2c1153a7077184d7a042deca9bb713d4b2f47f2"
+    publisher = json.loads(raw)
+    assert publisher["ext/support_bundle.py"] == "bd8058657f884ee4fb7fbad1d937c24041e6d4c204fb1e3dc00953f7482bf3b3"
+    for view in (publisher, {**publisher, **builder.APPLICATION_POOL_COMPOSITION_DIGESTS}):
+        original = dict(view)
+        dependencies = {name: view["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+        with pytest.raises(ValueError):
+            builder.validate_go_base_manifest(view, dependencies)
+        assert view == original
+
+
+@pytest.mark.parametrize("variant,members", [("default", 107), ("application", 109), ("http", 112)])
+def test_application_pool_composition_emits_actual_complete_provenance(builds, variant, members):
+    output = getattr(builds, variant)
+    manifest = json.loads((output / "native-manifest.json").read_bytes())
+    inventory = json.loads((output / "native-source-inventory.json").read_bytes())
+    assert len(manifest) == len(inventory["files"]) == members
+    for name, digest in manifest.items():
+        raw = (output / "native-code-stage" / name).read_bytes()
+        row = inventory["files"][name]
+        assert g.digest(raw) == row["sha256"] == digest
+        assert len(raw) == row["bytes"]
+    for key, digest in builder.APPLICATION_POOL_COMPOSITION_DIGESTS.items():
+        assert manifest[key] == digest
+        assert inventory["files"][key]["source"] == "candidate/" + Path(key).name
+        assert g.digest((ROOT / inventory["files"][key]["source"]).read_bytes()) == digest
+
+
+def test_application_pool_forward_delta_is_reversible_and_source_exact(tmp_path):
+    import subprocess
+    patch = ROOT.parents[2] / "tests/fixtures/fabric-application-pool-composition-20261107.patch"
+    assert g.digest(patch.read_bytes()) == "3fe89c2b49afc8b96352c339790d302806fb3d4516407c4476524168367b428c"
+    original = {}
+    for key, digest in builder.APPLICATION_POOL_COMPOSITION_DIGESTS.items():
+        name = Path(key).name
+        original[name] = (ROOT / "candidate" / name).read_bytes()
+        assert g.digest(original[name]) == digest
+        (tmp_path / name).write_bytes(original[name])
+    for options in (("--reverse", "--check"), ("--reverse",)):
+        subprocess.run(["git", "apply", *options, str(patch)], cwd=tmp_path, check=True,
+                       capture_output=True, timeout=10)
+    for key, digest in builder.APPLICATION_POOL_COMPOSITION_PREIMAGES.items():
+        assert g.digest((tmp_path / Path(key).name).read_bytes()) == digest
+    for options in (("--check",), ()):
+        subprocess.run(["git", "apply", *options, str(patch)], cwd=tmp_path, check=True,
+                       capture_output=True, timeout=10)
+    for name, raw in original.items():
+        assert (tmp_path / name).read_bytes() == raw

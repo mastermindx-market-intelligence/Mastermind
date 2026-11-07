@@ -87,6 +87,13 @@ class ChatCompositionTests(unittest.TestCase):
 
     def setUp(self):
         _text_fixture.FabricCompositionTests.setUp(self)
+        chat_transport_id = self.owner._SERVICE_FABRIC_RELATIONS["mastermind_chat_fabric"].transport_id
+        self.start(patch.dict(self.owner._APPLICATION_FABRIC_TRANSPORTS, {
+            chat_transport_id: self.owner._APPLICATION_FABRIC_TRANSPORTS[self.transport_id],
+        }))
+        self.document["application_fabric_modes"]["mastermind_chat_fabric"] = {
+            **self.mode, "transport_id": chat_transport_id,
+        }
         self.manifest["capabilities"][0]["allowed_lanes"].append("mastermind-chat")
         self.save()
         os.environ["MM_PROVIDER_WORKLOAD_PROFILE"] = "site_interactive"
