@@ -412,12 +412,14 @@ jobs:
             config
             tests
             research/earnings_intelligence/e3/gold
+            ops/launchd
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
       - name: Verify exact scoped Fabric model composition
         if: matrix.index == 0
         run: |
           set -euo pipefail
+          python -m pip install --disable-pip-version-check 'requests>=2.31'
           exact_composition_proof="$(mktemp -d "$RUNNER_TEMP/fabric-exact-composition.XXXXXX")"
           trap 'rm -rf "$exact_composition_proof"' EXIT
           (
