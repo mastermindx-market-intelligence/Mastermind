@@ -108,13 +108,16 @@ def test_mode_is_closed_not_arbitrary_arguments(workspace,mode):
     life.assert_not_executed(ctx)
 
 
-@pytest.mark.parametrize('outcome',['NO_EFFECT','RECOVERED','EFFECT_UNKNOWN'])
-def test_only_proven_clean_outcomes_release_original_install_marker(workspace,outcome):
+@pytest.mark.parametrize('fault,outcome',[
+    pytest.param(None,'NO_EFFECT',id='bootout-refusal'),
+    pytest.param('install-before-replace','EFFECT_UNKNOWN',id='install-before-replace'),
+    pytest.param('post-bootout-print','EFFECT_UNKNOWN',id='post-bootout-print'),
+])
+def test_only_proven_clean_outcomes_release_original_install_marker(workspace,fault,outcome):
     ctx=fixture_context(workspace);life.arm_running(ctx,workspace)
     options={}
-    if outcome=='NO_EFFECT':(ctx['stub']/'bootout-rc').write_text('1\n')
-    elif outcome=='RECOVERED':options['fault']='install-before-replace'
-    else:options['fault']='post-bootout-print'
+    if fault is None:(ctx['stub']/'bootout-rc').write_text('1\n')
+    else:options['fault']=fault
     first=run(ctx,**options)
     assert first.returncode==78
     assert life.receipt_body(ctx)['outcome']==outcome
