@@ -790,10 +790,10 @@ def test_explicit_adapter_boot_refuses_command_prepare_without_artifact_or_effec
 
 
 @pytest.mark.skipif(
-    sys.platform == "darwin",
-    reason="non-Darwin native child proves the real adapter boot refusal",
+    sys.platform not in {"darwin", "linux"},
+    reason="requires an OS-backed native boot identity",
 )
-def test_native_stdio_adapter_boot_refuses_command_without_claim_spawn_or_effect(
+def test_native_stdio_qualified_boot_prepares_without_claim_spawn_or_effect(
     tmp_path,
 ) -> None:
     document, project, _, _ = _command_document(tmp_path)
@@ -832,10 +832,17 @@ def test_native_stdio_adapter_boot_refuses_command_without_claim_spawn_or_effect
         response = process.receive()
         assert response["id"] == 20
         result = response["result"]
-        assert result["isError"] is True
-        assert json.loads(result["content"][0]["text"]) == {
-            "code": "ACTION_UNAVAILABLE"
-        }
+        # Linux now has a kernel boot UUID, just as Darwin has a native boot
+        # identity. Preparation may return a bound token without claiming or
+        # running a command. The explicit adapter-* negative above still
+        # proves that an unqualified process-local boot cannot prepare one.
+        assert result["isError"] is False
+        prepared = result["structuredContent"]
+        assert prepared["status"] == "PREPARED"
+        assert prepared["action_ref"]
+        assert prepared["preimage_sha256"] == hashlib.sha256(content).hexdigest()
+        assert prepared["boot_session_id"] == _NATIVE_PROCESS_INSPECTOR().boot_session_id()
+        assert not prepared["boot_session_id"].startswith("adapter-")
         process.assert_exit(0)
 
     assert tuple(artifact.iterdir()) == before

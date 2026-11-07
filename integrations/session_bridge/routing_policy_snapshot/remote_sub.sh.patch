@@ -1,0 +1,21 @@
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -667 +667 @@
+-  remote_sub_exec.py native_remote.py fabric_operator_client.py fabric_operator_stop.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py
++  pools.yaml fabric_policy_snapshot.py remote_sub_exec.py native_remote.py fabric_operator_client.py fabric_operator_stop.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py
+@@ -691 +691 @@
+-    show_args "<support-publication>" "same shared ext/active and ext/orch state; code=$SUPPORT_DIGEST; policy refresh requires idle host"
++    show_args "<support-publication>" "same shared ext/active and ext/orch state; code=$SUPPORT_DIGEST; immutable advisory snapshot; shared admission recheck"
+@@ -699 +699 @@
+-  for _f in "${SUPPORT_FILES[@]}"; do _src+=("$HERE/$_f"); done
++  for _f in "${SUPPORT_FILES[@]}"; do [ "$_f" = pools.yaml ] || _src+=("$HERE/$_f"); done
+@@ -703,3 +703,3 @@
+-  # Only policy changes need the old global idle condition, now checked under
+-  # the SAME admission lock used by old and versioned workers. Code publication
+-  # can coexist with an occupied host slot without changing that worker's bytes.
++  # New generation carries hash-bound advisory policy. Publication checks
++  # exact semantic compatibility without replacing policy under active workers.
++  # Physical admission rechecks under the original lock before marker creation.
+@@ -707 +707 @@
+-    "$RPATH; python3 \"\$HOME/lanes/tmp/${ID}.support-src/support_bundle.py\" --policy \"\$HOME/lanes/tmp/${ID}.support-src/pools.yaml\" \"\$HOME/lanes/ext\" '$POLICY_SHA' && python3 \"\$HOME/lanes/tmp/${ID}.support-src/support_bundle.py\" \"\$HOME/lanes/tmp/${ID}.support-src\" \"\$HOME/lanes/ext\" \"\$HOME/lanes/tmp/${ID}.support-src/manifest.json\" && test -f \"\$HOME/lanes/support-releases/${SUPPORT_DIGEST}/ext/remote_sub_exec.py\"" \
++    "$RPATH; python3 \"\$HOME/lanes/tmp/${ID}.support-src/support_bundle.py\" \"\$HOME/lanes/tmp/${ID}.support-src\" \"\$HOME/lanes/ext\" \"\$HOME/lanes/tmp/${ID}.support-src/manifest.json\" && test -f \"\$HOME/lanes/support-releases/${SUPPORT_DIGEST}/ext/remote_sub_exec.py\"" \

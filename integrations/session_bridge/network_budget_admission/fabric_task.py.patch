@@ -1,0 +1,22 @@
+--- a/ops/native_fabric/quota_continuity/candidate/fabric_task.py
++++ b/ops/native_fabric/quota_continuity/candidate/fabric_task.py
+@@ -816,11 +816,18 @@
+     import hashlib
+     import provider_outcome
+     state_dir = HERE / "state" / "remote_sub"
+-    state_dir.mkdir(parents=True, exist_ok=True)
+     request_file = state_dir / f"{rid}.request.json"
+     retained_packet = state_dir / f"{rid}.request.packet"
+     if any(p.exists() or p.is_symlink() for p in (*_paths(rid), request_file, retained_packet)):
+         raise FabricTaskError("REQUEST_RUN_ALREADY_EXISTS_RECONCILE_ORIGINAL")
++    # Negative-only policy containment for an honestly named Network request.
++    # Root labels here are transport metadata, not authenticated lineage: this
++    # cannot attribute an omitted/substituted label or authorize any spending.
++    # Existing operations above keep their original reconciliation path.
++    # macro#10483, comment 6579445312
++    if observed_root == "01a12a2a-d7e1-77b1-9262-ab593179dd13":
++        raise FabricTaskError("NETWORK_PAID_DISPATCH_BUDGET_UNQUALIFIED")
++    state_dir.mkdir(parents=True, exist_ok=True)
+     source = _bounded_regular(packet, MAX_RESULT_BYTES) if packet is not None else stdin_bytes or b""
+     if len(source) > MAX_RESULT_BYTES:
+         raise FabricTaskError("REQUEST_PACKET_TOO_LARGE")

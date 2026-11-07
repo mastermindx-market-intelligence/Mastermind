@@ -1,0 +1,5 @@
+--- a/remote_sub_helpers.py
++++ b/remote_sub_helpers.py
+@@ -14 +14 @@
+-        path = root / name
++        path = root.parent / "orch/fabric/pools.yaml" if name == "pools.yaml" else root / name

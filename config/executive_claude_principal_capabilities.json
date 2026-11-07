@@ -1,0 +1,207 @@
+{
+  "schema_version": "mastermind.executive_agent_capabilities/v3",
+  "policy_version": "2026-10-06.claude-principal-h1",
+  "lifecycle_authority": "executive_os",
+  "production_armed": false,
+  "mcp_servers": {
+    "mastermind-executive-coo-v1": {
+      "config_name": "mastermindExecutiveCoo",
+      "transport": "streamable-http",
+      "url": "https://mcp.mastermind-x.com/mcp/coo",
+      "required": true,
+      "auth_status": "oAuth",
+      "server_identity": "mastermind-executive-coo",
+      "server_version": "1.0.0",
+      "enabled_tools": [
+        "executive_mandate",
+        "executive_state",
+        "executive_inbox",
+        "executive_fabric",
+        "submit_principal_intent",
+        "principal_intent_status",
+        "mmx_delegate"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "5cf2a0de4a47686c545d1ee3d9c388ab4dc94c880cb0670140de2eca2e54f550"
+    },
+    "mastermind-executive-coo-context-v1": {
+      "config_name": "mastermindExecutiveCoo",
+      "transport": "streamable-http",
+      "url": "https://mcp.mastermind-x.com/mcp/coo",
+      "required": true,
+      "auth_status": "oAuth",
+      "server_identity": "mastermind-executive-coo",
+      "server_version": "1.0.0",
+      "enabled_tools": [
+        "executive_mandate",
+        "executive_state",
+        "executive_inbox",
+        "executive_fabric",
+        "submit_principal_intent",
+        "principal_intent_status",
+        "mmx_delegate",
+        "executive_agentos_context"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "5fa24aa1d907d66d0ca0a56168617f955e09d063f532cf527fe0d7b923fb50af"
+    },
+    "mastermind-executive-coo-current-context-v1": {
+      "config_name": "mastermindExecutiveCoo",
+      "transport": "streamable-http",
+      "url": "https://mcp.mastermind-x.com/mcp/coo",
+      "required": true,
+      "auth_status": "oAuth",
+      "server_identity": "mastermind-executive-coo",
+      "server_version": "1.0.0",
+      "enabled_tools": [
+        "executive_mandate",
+        "executive_state",
+        "executive_inbox",
+        "executive_fabric",
+        "submit_principal_intent",
+        "principal_intent_status",
+        "mmx_delegate",
+        "executive_agentos_current_context"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "41644c90bbd8b5927c5cc7f97f65fef144ba9f9ca6e0277d702d7a8a26fa0da0"
+    },
+    "mastermind-executive-coo-discovery-correction-v1": {
+      "config_name": "mastermindExecutiveCoo",
+      "transport": "streamable-http",
+      "url": "https://mcp.mastermind-x.com/mcp/coo",
+      "required": true,
+      "auth_status": "oAuth",
+      "server_identity": "mastermind-executive-coo",
+      "server_version": "1.0.0",
+      "enabled_tools": [
+        "executive_mandate",
+        "executive_state",
+        "executive_inbox",
+        "executive_fabric",
+        "submit_principal_intent",
+        "principal_intent_status",
+        "mmx_delegate",
+        "executive_agentos_current_context",
+        "executive_project_discovery_source",
+        "executive_project_discovery_correction"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "94db08906bd04c78565f6172d7a657c13bbe608f3b14dba5649cbedb23deed42"
+    }
+  },
+  "resources": {},
+  "plugins": {},
+  "profiles": {
+    "principal.claude-code.executive-coo.v1": {
+      "enabled": true,
+      "execution_surface": "claude-code-principal",
+      "auth_realm": "oauth-principal-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "mastermind-executive-coo-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [
+        "browser-control",
+        "filesystem-write",
+        "worker-launch"
+      ]
+    },
+    "principal.hermes-native.executive-coo.v1": {
+      "enabled": true,
+      "execution_surface": "hermes-native-principal",
+      "auth_realm": "oauth-principal-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "mastermind-executive-coo-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [
+        "browser-control",
+        "filesystem-write",
+        "worker-launch"
+      ]
+    },
+    "principal.hermes-native.executive-coo.context.v1": {
+      "enabled": false,
+      "execution_surface": "hermes-native-principal",
+      "auth_realm": "oauth-principal-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "mastermind-executive-coo-context-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [
+        "browser-control",
+        "filesystem-write",
+        "worker-launch"
+      ]
+    },
+    "principal.hermes-native.executive-coo.current-context.v1": {
+      "enabled": false,
+      "execution_surface": "hermes-native-principal",
+      "auth_realm": "oauth-principal-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "mastermind-executive-coo-current-context-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [
+        "browser-control",
+        "filesystem-write",
+        "worker-launch"
+      ]
+    },
+    "principal.hermes-native.executive-coo.discovery-correction.v1": {
+      "enabled": false,
+      "execution_surface": "hermes-native-principal",
+      "auth_realm": "oauth-principal-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "mastermind-executive-coo-discovery-correction-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [
+        "browser-control",
+        "filesystem-write",
+        "worker-launch"
+      ]
+    }
+  }
+}
