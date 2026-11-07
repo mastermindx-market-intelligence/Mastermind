@@ -22,6 +22,7 @@ from integrations.hermes_runtime.errors import RuntimeRefusal
 from integrations.hermes_runtime.tests.test_native_eval_inputs import (
     admission_db, compile_selected, marker, source_owner, trial,
     lifecycle, decoded_fixture, actual_result, engine, native, native_trial, execute_trial, actual_custom_effort, success,
+    current_result, signed, rsa_key, joined, owner, env, isolated_git_env, identity,
 )
 from integrations.hermes_runtime.tests.test_native_request_observation import module
 from scripts.agent_eval.canonical import canonical_json_bytes
@@ -104,6 +105,27 @@ def test_original_terminal_freezes_once_and_publishes_without_copying_answer(ori
     assert canonical_json_bytes(o.frozen()) == raw
     assert o.t.owner.store.resolve_run(o.marker["run_id"]) == run
     assert o.a.conn.execute("SELECT COUNT(*) FROM session_admissions").fetchone()[0] == 1
+
+
+def test_frozen_v2_publication_replays_without_current_schema_upgrade(original, monkeypatch):
+    from scripts.agent_eval.canonical import add_document_digest
+    o = original
+    builder = publication._build_run
+    def prior_builder(*args, **kwargs):
+        # Explicit prior-producer fixture. Original freeze/store/replay run;
+        # only the old schema selection is supplied at this historical edge.
+        run = builder(*args, **kwargs)
+        run["schema"] = inputs.contracts.RUN_SCHEMA_V2
+        return add_document_digest(run, "run_digest")
+    monkeypatch.setattr(publication, "_build_run", prior_builder)
+    o.finish()
+    assert o.publish()["status"] == "PUBLISHED"
+    before = canonical_json_bytes(o.frozen())
+    assert o.frozen()["run"]["schema"] == inputs.contracts.RUN_SCHEMA_V2
+    monkeypatch.setattr(publication, "_build_run", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no rebuilding")))
+    monkeypatch.setattr(publication, "_now", lambda: (_ for _ in ()).throw(AssertionError("no new clock")))
+    assert o.publish()["publication"]["disposition"] == "IDEMPOTENT"
+    assert canonical_json_bytes(o.frozen()) == before
 
 
 @pytest.mark.parametrize("retire_before", [False, True])
@@ -398,7 +420,21 @@ def test_actual_sdk_and_pinned_worker_observations_feed_conservative_native_rece
     assert run["execution"]["model_served"] is None
     assert run["observation_availability"]["coverage"]["provider_requests"]["status"] == "PARTIAL"
     assert run["observations"]["observed_network_destinations"] == []
+    assert run["schema"] == inputs.contracts.RUN_SCHEMA_V3
+    selected = w.projected["evaluation_inputs"]
+    expected_sources = inputs.observed_record_sources(selected)
+    assert run["observations"]["observed_sources"] == expected_sources and expected_sources
+    assert run["observation_availability"]["coverage"]["observed_sources"] == {
+        "status": "PARTIAL", "reason": "OBSERVATION_LIMIT"}
     assert run["validity"]["status"] != "VALID"
+
+
+def test_acquired_inventory_without_assembly_is_not_a_run_source(wire_projection):
+    value = copy.deepcopy(wire_projection.projected)
+    value["evaluation_inputs"]["assemblies"] = []
+    run = wire_projection.build(value)
+    assert run["observations"]["observed_sources"] == []
+    assert run["observation_availability"]["coverage"]["observed_sources"]["status"] == "UNOBSERVED"
 
 
 @pytest.mark.parametrize("change", ["unused_assembly", "retry_counter", "wire_content", "wire_fields", "missing_eval", "duplicate_event"])

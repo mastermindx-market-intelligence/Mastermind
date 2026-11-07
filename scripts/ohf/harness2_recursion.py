@@ -98,8 +98,11 @@ def _validate_trial(trial: Trial, files: dict[str, bytes]) -> None:
     v = trial.run["validity"]
     draft = {key: copy.deepcopy(value) for key, value in trial.run.items()
              if key not in ("validity", "run_digest", "created_at")}
-    draft["schema"] = (contracts.RUN_DRAFT_SCHEMA_V2 if trial.run["schema"] == contracts.RUN_SCHEMA_V2
-                       else contracts.RUN_DRAFT_SCHEMA)
+    draft["schema"] = {
+        contracts.RUN_SCHEMA: contracts.RUN_DRAFT_SCHEMA,
+        contracts.RUN_SCHEMA_V2: contracts.RUN_DRAFT_SCHEMA_V2,
+        contracts.RUN_SCHEMA_V3: contracts.RUN_DRAFT_SCHEMA_V3,
+    }[trial.run["schema"]]
     recomputed = validity.finalize_run_receipt(
         trial.scenario, trial.configuration, trial.experiment, draft,
         validator_id=v["validator_id"], validator_version=v["validator_version"],

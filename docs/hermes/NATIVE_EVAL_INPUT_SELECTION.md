@@ -3,7 +3,8 @@
 Status: source implementation and component qualification. This selection is not
 an installed fleet grant, complete EVAL producer, efficacy result or promotion.
 The original native control now also finalizes retained terminal attempts as
-honest, incomplete v2 run receipts; see the publication section below.
+honest, incomplete v3 run receipts; frozen v2 publications remain readable.
+See the publication and source-contribution sections below.
 The incumbent complete-producer contract remains
 `docs/hermes/NATIVE_EVAL_PRODUCER_CONTRACT.md`.
 
@@ -132,10 +133,75 @@ v1 EVAL intersection is `low` and `high`.
 Checks run at native prompt delivery, after request hooks, and at the incumbent
 nonstream dispatch boundary after execution middleware. They require the actual
 selected instructions, model, seed, effort and nonstream mode. Final `extra_body`
-cannot shadow those execution fields. Before dispatch the existing Agent OS
+must be absent, null or empty for the qualified named custom-provider route,
+whose profile emits no extra-body fields. Alternate top-level content carriers
+are rejected by presence, including null values. Before dispatch the existing Agent OS
 attachment/snapshot and durable native generation checks execute outside optional
 observation failure handling. Native request/HTTPX observers continue to own
 assembly and serialized-request evidence; no extra request/client is made.
+
+## Selected record sources on the original request
+
+The installed current-context owner contributes receipt v2 and its bounded
+selected-record inventory; see [the owner contract](CURRENT_CONTEXT_SOURCE_RECEIPTS.md).
+This release requires that version on marked EVAL execution. A historical v1
+context receipt remains readable in its original non-EVAL path, but cannot supply
+missing source evidence for a new marked request. Qualify the current-context
+producer and native consumer together before activation.
+
+At the actual native message builder, the existing memory claim identifies the
+current user row and the exact text piece containing its context block. Its
+private anchor records that row index, row count, role sequence and original
+text. New owned prefetch and builder invocations invalidate the preceding anchor
+before any early return or failure. An unscoped late prefetch cannot clear a newer
+admission's anchor. The raw anchored text stays transient in that claim;
+the retained EVAL contribution contains its digest and position only.
+
+The EVAL claim captures the private inventory from that exact provider snapshot,
+joining bundle, full receipt, rendered-context digest and native turn. Both the
+post-hook and post-middleware mandatory request gates require the same claim,
+instance, provider and immutable snapshot, plus the original anchored text at
+the same user position. Normal metadata sanitization and equivalent text-part
+representation may change the full message digest; a historical copy, removed
+block, changed user text, shifted rows or replacement snapshot cannot substitute.
+Builder and final-request digests are therefore retained separately.
+
+Before dispatch, the original EVAL policy helper examines every selected direct
+record reference against the frozen scenario's allowlist/digest, denylist and
+hidden-solution rules. Model-visible references are independently required. Refs
+use the actual `git:mastermindx-market-intelligence/macro@DATA_SHA#path`, with the
+record's exact SHA-256. The native release SHA is not the DATA identity. A later
+DATA revision cannot silently rewrite the scenario. An incomplete/overflowed
+inventory refuses this selected-source policy check before client construction.
+
+This policy covers the enumerated direct record contributions, not every input
+to the context compiler or entire model prompt. Inventory coverage remains
+`PARTIAL`; full-file digests do not mean whole files were delivered. Auxiliary
+inputs and pointer-only artifacts remain outside this evidence claim.
+
+`mastermind.hermes_native_eval_input_observation/v2` stores each inventory once
+inside the existing 16 KiB metadata budget. Each assembly joins the exact delivery
+sequence **and canonical delivery digest**, final message/content digests, physical
+session, turn, request ID, API-call count and retry count. Historical validation
+uses those original retained bindings and the context owner's retained-inventory
+validator; it never rereads today's context to reconstruct missing history.
+Duplicate request identities or substituted delivery pointers are rejected.
+
+Only successful retained delivery-to-assembly joins populate `observed_sources`.
+Acquisition alone contributes no run source. Metadata loss remains explicit;
+it does not turn missing evidence into an empty complete inventory. These are
+assembly-stage source observations, not provider-delivery attestations.
+
+Scenario schema v2 and run/draft schema v3 allow distinct immutable source refs
+to have identical content digests. Their source lists remain sorted and unique
+by reference, so an unauthorized alias cannot disappear through digest
+deduplication. Existing scenario v1, run/draft v1/v2, and unrelated evidence
+artifact lists retain their exact validation. Scenario construction opts in
+explicitly; the original store paths, IDs, resolver, finalizer and immutable-write
+rules are unchanged. Existing frozen run v2 publications are replayed unchanged.
+The original Harness2 consumer reconstructs the matching v1, v2 or v3 draft and
+still requires exact recomputation, original output bytes, `NO_EFFECT` and `VALID`.
+Incomplete or uncertain native attempts cannot become refinement trials.
 
 ## Evidence and its limits
 
@@ -262,7 +328,7 @@ the serving model. Explicit wire sampling digests remain in the trace and are no
 relabeled as complete effective sampling. Network-origin hashes are not EVAL
 destination-string digests. Unobserved provider/auth, effective environment,
 freshness, capability/source/network coverage, effects and cleanup stay missing or
-unknown. This first publisher therefore creates invalid v2 evidence of attempts,
+unknown. This publisher therefore creates invalid v3 evidence of attempts,
 never a valid Harness2 trial or learning promotion.
 
 Result absence at first publication is `NOT_RETAINED`, not an inferred expiry.
@@ -348,7 +414,7 @@ submit/publish; it cannot be reported as a preflight refusal. Read-only runner
 failure returns `UNAVAILABLE`. Exit 0 means an admitted/observed/published
 operation, 2 means unavailable/refused, and 3 preserves uncertain modification.
 
-This first connected slice still publishes **invalid v2 attempt evidence**.
+This connected slice still publishes **invalid v3 attempt evidence**.
 It does not provide valid held-out trials, complete source/auth/environment/
 effect/cleanup coverage, or learning promotion. Tests of the held archive,
 CLI, actual SQLite retirement/readback and create-only publisher remain source

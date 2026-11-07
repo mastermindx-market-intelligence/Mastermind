@@ -67,6 +67,81 @@ def _finalize(graph, draft=None, **overrides):
         **{**VALIDATOR, **overrides})
 
 
+def _source_pair_graph():
+    scenario, config, other, _, _ = _graph()
+    pairs = [{"artifact_ref": "git:fixture/sources@" + "c" * 40 + "#" + name,
+              "digest": "sha256:" + "e" * 64} for name in ("one.md", "two.md")]
+    fields = {key: copy.deepcopy(value) for key, value in scenario.items()
+              if key not in {"schema", "scenario_digest"}}
+    fields["source_policy"]["allowlist_artifacts"] = sorted(
+        fields["source_policy"]["allowlist_artifacts"] + pairs, key=lambda row: row["artifact_ref"])
+    fields["privacy"]["model_visible_artifact_refs"] = sorted(
+        set(fields["privacy"]["model_visible_artifact_refs"]) | {row["artifact_ref"] for row in pairs})
+    scenario = contracts.build_scenario(fields, schema=contracts.SCENARIO_SCHEMA_V2)
+    experiment = build_two_arm_experiment(scenario, config, other)
+    draft = _v2(build_run_draft(scenario, config, experiment, arm_id="arm_a", replicate_index=1))
+    draft["schema"] = contracts.RUN_DRAFT_SCHEMA_V3
+    draft["observations"]["observed_sources"] = copy.deepcopy(pairs)
+    return scenario, config, other, experiment, draft
+
+
+def test_source_pair_v3_uses_original_store_finalizer_and_immutable_paths(tmp_path):
+    graph = _source_pair_graph()
+    draft = graph[-1]
+    with pytest.raises(ContractError) as old:
+        contracts.validate_run_draft_shape({**draft, "schema": contracts.RUN_DRAFT_SCHEMA_V2})
+    assert "DUPLICATE_ARTIFACT_DIGEST" in {d.code for d in old.value.defects}
+    run = _finalize(graph)
+    assert run["schema"] == contracts.RUN_SCHEMA_V3
+    assert run["observations"]["observed_sources"] == draft["observations"]["observed_sources"]
+    assert run["validity"]["status"] == "VALID"
+    artifact_store = _store(tmp_path, graph)
+    assert artifact_store.create(run).disposition is store.WriteDisposition.CREATED
+    assert artifact_store.resolve_run(run["run_id"]) == run
+    assert artifact_store.create(run).disposition is store.WriteDisposition.IDEMPOTENT
+    assert artifact_store.resolve_scenario(graph[0]["scenario_id"], graph[0]["scenario_version"]) == graph[0]
+    assert contracts.validate_document_shape(run) == "SHAPE_VALID"
+    assert _score(run)["run_digest"] == run["run_digest"]
+
+
+@pytest.mark.parametrize("change,reason", [
+    ("alias", "UNAUTHORIZED_SOURCE"), ("digest", "SOURCE_DIGEST_MISMATCH"),
+    ("hidden", "HIDDEN_SOLUTION_SOURCE"), ("denied", "UNAUTHORIZED_SOURCE"),
+])
+def test_v3_source_policy_checks_each_ref_even_when_bytes_repeat(change, reason):
+    graph = _source_pair_graph()
+    scenario, config, other, experiment, draft = graph
+    pair = draft["observations"]["observed_sources"][1]
+    if change == "alias":
+        pair["artifact_ref"] += ".unlisted"
+    elif change == "digest":
+        pair["digest"] = "sha256:" + "f" * 64
+    else:
+        # Pure policy decision covers hidden/denied values even though an
+        # internally contradictory scenario would independently fail shape.
+        scenario = copy.deepcopy(scenario)
+        key = "solution_refs_hidden" if change == "hidden" else "denylist_refs"
+        scenario["source_policy"][key] = [pair["artifact_ref"]]
+        assert reason in validity.source_policy_reason_codes(scenario, draft["observations"]["observed_sources"])
+        return
+    run = _finalize(graph)
+    assert reason in run["validity"]["reason_codes"]
+    assert len(run["observations"]["observed_sources"]) == 2
+
+
+def test_v3_missing_observations_and_transient_draft_are_not_promoted():
+    graph = _source_pair_graph()
+    draft = graph[-1]
+    _missing(draft, "execution.model_served")
+    draft["observation_availability"]["coverage"]["observed_sources"] = {
+        "status": "PARTIAL", "reason": "OBSERVATION_LIMIT"}
+    run = _finalize(graph)
+    assert {"REQUIRED_OBSERVATION_UNAVAILABLE", "OBSERVATION_COVERAGE_INCOMPLETE"} <= set(run["validity"]["reason_codes"])
+    with pytest.raises(ContractError) as error:
+        contracts.validate_document_shape(draft)
+    assert "DRAFT_SCHEMA_REJECTED" in {d.code for d in error.value.defects}
+
+
 def _resolver(graph, *runs):
     scenario, configuration, other, experiment, _ = graph
     return MemoryArtifactResolver.build(scenarios=(scenario,), configurations=(configuration, other),
@@ -289,7 +364,8 @@ def test_mixed_versions_keep_incomplete_attempts_in_population_and_refuse_omissi
     passes = (_score(v1), _score(v2))
     for doc in (v1, v2, *passes):
         artifact_store.create(doc)
-    assert {r["schema"] for r in artifact_store.enumerate_runs()} == contracts.RUN_SCHEMAS
+    assert {r["schema"] for r in artifact_store.enumerate_runs()} == {
+        contracts.RUN_SCHEMA, contracts.RUN_SCHEMA_V2}
     evidence = _summary(graph, (v1, v2), passes, multi=multi)
     assert {r["run_id"] for r in evidence["run_entries"]} == {v1["run_id"], v2["run_id"]}
     entry = next(r for r in evidence["run_entries"] if r["run_id"] == v2["run_id"])
@@ -310,6 +386,29 @@ def test_scorer_never_invents_missing_evidence_or_positive_integrity():
     assert {r["status"] for r in scored["dimension_results"]} == {"FAIL", "UNKNOWN"}
     assert all(r["evidence_refs"] == [] for r in scored["dimension_results"])
     assert scoring.verify_scorer_pass_graph(scored, _resolver(graph, run)).scope == "EVALUATION_GRAPH_VERIFIED"
+
+
+@pytest.mark.parametrize("multi", [False, True])
+def test_v3_incomplete_attempt_remains_in_mixed_version_population(tmp_path, multi):
+    graph = _graph()
+    artifact_store = _store(tmp_path, graph)
+    drafts = [build_run_draft(graph[0], graph[1], graph[3], arm_id="arm_a", replicate_index=1),
+              copy.deepcopy(graph[-1]), copy.deepcopy(graph[-1])]
+    drafts[-1]["run_id"] = "run:" + str(uuid4())
+    drafts[-1]["schema"] = contracts.RUN_DRAFT_SCHEMA_V3
+    _missing(drafts[-1], "evidence.output", "execution.model_served")
+    drafts[-1]["execution"].update(completion_status="FAILED", termination_reason="PROVIDER_FAILURE")
+    runs = tuple(_finalize(graph, draft) for draft in drafts)
+    passes = tuple(_score(run) for run in runs)
+    for document in (*runs, *passes):
+        artifact_store.create(document)
+    assert {row["schema"] for row in artifact_store.enumerate_runs()} == contracts.RUN_SCHEMAS
+    evidence = _summary(graph, runs, passes, multi=multi)
+    assert {row["run_id"] for row in evidence["run_entries"]} == {run["run_id"] for run in runs}
+    artifact_store.create(evidence)
+    with pytest.raises(VerificationContextError) as error:
+        artifact_store.create(_summary(graph, runs[:-1], passes[:-1], multi=multi))
+    assert "EVIDENCE_POPULATION_INCOMPLETE" in {d.code for d in error.value.defects}
 
 
 @pytest.mark.parametrize("missing", [None, "evidence.output", "execution.model_served"])

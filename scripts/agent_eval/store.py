@@ -57,10 +57,12 @@ class WriteResult:
 
 _DIGEST_FIELD_BY_SCHEMA = {
     contracts.SCENARIO_SCHEMA: "scenario_digest",
+    contracts.SCENARIO_SCHEMA_V2: "scenario_digest",
     contracts.CONFIGURATION_SCHEMA: "configuration_digest",
     contracts.EXPERIMENT_SCHEMA: "experiment_digest",
     contracts.RUN_SCHEMA: "run_digest",
     contracts.RUN_SCHEMA_V2: "run_digest",
+    contracts.RUN_SCHEMA_V3: "run_digest",
     scoring.SCORER_PASS_SCHEMA: "scorer_pass_digest",
     scoring.EVIDENCE_REF_SCHEMA: "evidence_ref_digest",
     # EVAL-S1 (operation mastermind-agent-evaluation-s1-scorers-20260901-
@@ -142,7 +144,7 @@ def evidence_ref_path(evidence_ref_id: str) -> Path:
 
 def _artifact_path_for(document: dict) -> tuple[str, Path]:
     schema = document.get("schema")
-    if schema == contracts.SCENARIO_SCHEMA:
+    if schema in contracts.SCENARIO_SCHEMAS:
         return document["scenario_id"], scenario_path(document["scenario_id"], document["scenario_version"])
     if schema == contracts.CONFIGURATION_SCHEMA:
         return document["configuration_id"], configuration_path(document["configuration_id"])
@@ -161,7 +163,7 @@ def _artifact_path_for(document: dict) -> tuple[str, Path]:
 
 def _graph_verify_for(document: dict, resolver) -> VerificationResult:
     schema = document.get("schema")
-    if schema == contracts.SCENARIO_SCHEMA:
+    if schema in contracts.SCENARIO_SCHEMAS:
         return verify_scenario_graph(document, resolver)
     if schema == contracts.CONFIGURATION_SCHEMA:
         return verify_configuration_graph(document, resolver)

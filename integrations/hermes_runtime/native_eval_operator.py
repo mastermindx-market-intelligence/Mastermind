@@ -169,7 +169,7 @@ async def _capabilities(client, profile, home, implementation, native_launch):
     expected = {
         "producer": inputs.producer_descriptor(implementation, derivation["base_sha"], derivation["patch_sha256"]),
         "profile_id": str(home), "profile_digest": "sha256:" + profile_sha256(dump_profile(profile)),
-        "run_schema": contracts.RUN_SCHEMA_V2, "complete_evaluation": False,
+        "run_schema": contracts.RUN_SCHEMA_V3, "complete_evaluation": False,
     }
     value = await asyncio.to_thread(client.evaluation_capabilities)
     _envelope(value, {"schema", "status", "evaluation"})

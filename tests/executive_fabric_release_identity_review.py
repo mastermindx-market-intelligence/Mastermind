@@ -769,7 +769,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'd81df61
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "e9cb6e19a5bccd42a30366ddc2fddf8bfb8566f0d938fa70d05542b73dbf82c3",
+    "sha256": "c037a6e2d3359a853b520607836c31fa92f32144d7ba4575c956a607861a1ee2",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -777,8 +777,8 @@ REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
 # Exact historical root_identity["mode"] comparison, not a selected UID/GID.
 # Whole-source drift and any neighboring identity literal restore ordinary D8.
 REVIEWED_FILES["integrations/hermes_runtime/native_eval_inputs.py"] = {
-    "sha256": "b272e9c567dccbeefe5222df25216a89c4d3f999b92208ab6487ce8386380137",
-    "sites": ((90, 61, 66, "int", "0o700"),),
+    "sha256": "16351afb482bc0b2551a5e5ad0ac73898881d8a4192df9e4cf8ce3a92aa1ca67",
+    "sites": ((91, 61, 66, "int", "0o700"),),
 }
 
 # HTTPX 0.28.1 donor same-host HTTPS upgrade: standard HTTPS port only. No principal,
@@ -918,4 +918,14 @@ REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-jo
     "sha256": 'ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33',
     "sites": (),
     "utf8_sites": ((61, 13, 16, "int", "501"),),
+}
+
+# The unchanged optional observation owner limits a regular binding file to
+# 512 KiB. This sole multiplication operand is bytes, not a UID/GID, peer,
+# socket, principal or port. Exact whole-source and token coordinates only;
+# any changed path, operand, custody logic or other byte restores D8 scrutiny.
+# This test evidence grants no profile access, installation or runtime authority.
+REVIEWED_FILES["integrations/session_bridge/installed_web_observation.py"] = {
+    "sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
+    "sites": ((252, 46, 49, "int", "512"),),
 }

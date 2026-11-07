@@ -30,14 +30,19 @@ from scripts.agent_eval.errors import ContractDefect, ContractError
 # ---------------------------------------------------------------------------
 
 SCENARIO_SCHEMA = "mastermind.agent_evaluation_scenario.v1"
+SCENARIO_SCHEMA_V2 = "mastermind.agent_evaluation_scenario.v2"
+SCENARIO_SCHEMAS = frozenset({SCENARIO_SCHEMA, SCENARIO_SCHEMA_V2})
 CONFIGURATION_SCHEMA = "mastermind.agent_evaluation_configuration.v1"
 EXPERIMENT_SCHEMA = "mastermind.agent_evaluation_experiment.v1"
 RUN_SCHEMA = "mastermind.agent_evaluation_run.v1"
 RUN_DRAFT_SCHEMA = "mastermind.agent_evaluation_run_draft.v1"
 RUN_SCHEMA_V2 = "mastermind.agent_evaluation_run.v2"
 RUN_DRAFT_SCHEMA_V2 = "mastermind.agent_evaluation_run_draft.v2"
-RUN_SCHEMAS = frozenset({RUN_SCHEMA, RUN_SCHEMA_V2})
-RUN_DRAFT_SCHEMAS = frozenset({RUN_DRAFT_SCHEMA, RUN_DRAFT_SCHEMA_V2})
+RUN_SCHEMA_V3 = "mastermind.agent_evaluation_run.v3"
+RUN_DRAFT_SCHEMA_V3 = "mastermind.agent_evaluation_run_draft.v3"
+RUN_SCHEMAS = frozenset({RUN_SCHEMA, RUN_SCHEMA_V2, RUN_SCHEMA_V3})
+RUN_DRAFT_SCHEMAS = frozenset({RUN_DRAFT_SCHEMA, RUN_DRAFT_SCHEMA_V2, RUN_DRAFT_SCHEMA_V3})
+RUN_AVAILABILITY_SCHEMAS = frozenset({RUN_SCHEMA_V2, RUN_SCHEMA_V3, RUN_DRAFT_SCHEMA_V2, RUN_DRAFT_SCHEMA_V3})
 
 Validator = Callable[[Any, str], Any]
 
@@ -226,6 +231,24 @@ def v_artifact_list(value: Any, path: str) -> list[dict]:
     return items
 
 
+def v_source_artifact_list(value: Any, path: str) -> list[dict]:
+    """Versioned source identity: distinct immutable refs may have equal bytes.
+
+    This is deliberately separate from historical artifact-list semantics.
+    An authorized digest cannot erase an unauthorized alias of those bytes.
+    """
+    items = v_list_of(v_artifact_pair)(value, path)
+    refs = [item["artifact_ref"] for item in items]
+    defects: list[ContractDefect] = []
+    if refs != sorted(refs):
+        defects.append(ContractDefect(path, "LIST_NOT_SORTED", "source list must be sorted by artifact_ref"))
+    if len(set(refs)) != len(refs):
+        defects.append(ContractDefect(path, "DUPLICATE_ARTIFACT_REF", "source list has duplicate artifact_ref"))
+    if defects:
+        raise ContractError(defects)
+    return items
+
+
 # ---------------------------------------------------------------------------
 # ID grammar
 # ---------------------------------------------------------------------------
@@ -329,12 +352,12 @@ def _v_temporal(value: Any, path: str) -> dict:
     )
 
 
-def _v_source_policy(value: Any, path: str) -> dict:
+def _v_source_policy(value: Any, path: str, *, sources: Validator = v_artifact_list) -> dict:
     return validate_closed_object(
         value,
         path,
         {
-            "allowlist_artifacts": v_artifact_list,
+            "allowlist_artifacts": sources,
             "denylist_refs": v_sorted_unique_str_list,
             "solution_refs_hidden": v_sorted_unique_str_list,
         },
@@ -429,6 +452,11 @@ _SCENARIO_FIELDS: dict[str, Validator] = {
     "authorship": _v_authorship,
     "supersedes": v_optional(v_scenario_id),
     "scenario_digest": v_digest,
+}
+
+_SCENARIO_V2_FIELDS = {**_SCENARIO_FIELDS,
+    "schema": v_enum(frozenset({SCENARIO_SCHEMA_V2})),
+    "source_policy": lambda value, path: _v_source_policy(value, path, sources=v_source_artifact_list),
 }
 
 
@@ -567,7 +595,9 @@ def _scenario_cross_field_defects(document: dict) -> list[ContractDefect]:
 
 def _check_scenario_fields(document: Any, *, require_digest: bool) -> dict:
     optional = frozenset({"scenario_digest"}) if not require_digest else frozenset()
-    validated = validate_closed_object(document, "$", _SCENARIO_FIELDS, optional=optional)
+    fields = (_SCENARIO_V2_FIELDS if isinstance(document, dict)
+              and document.get("schema") == SCENARIO_SCHEMA_V2 else _SCENARIO_FIELDS)
+    validated = validate_closed_object(document, "$", fields, optional=optional)
     cross_defects = _scenario_cross_field_defects(document if isinstance(document, dict) else {})
     if cross_defects:
         raise ContractError(cross_defects)
@@ -582,7 +612,7 @@ def validate_scenario_shape(document: Any) -> str:
     return "SHAPE_VALID"
 
 
-def build_scenario(fields: dict) -> dict:
+def build_scenario(fields: dict, *, schema: str = SCENARIO_SCHEMA) -> dict:
     """Assemble, validate, and digest a scenario document from field values.
 
     ``fields`` must NOT include ``schema`` or ``scenario_digest``.
@@ -591,7 +621,8 @@ def build_scenario(fields: dict) -> dict:
         raise ContractError(
             [ContractDefect("$", "BUILD_FIELDS_MUST_EXCLUDE_SCHEMA_AND_DIGEST", "fields must omit schema and scenario_digest")]
         )
-    document = {"schema": SCENARIO_SCHEMA, **fields}
+    # Explicit opt-in; old authored scenarios are never silently upgraded.
+    document = {"schema": schema, **fields}
     _check_scenario_fields(document, require_digest=False)
     return add_document_digest(document, "scenario_digest")
 
@@ -1213,12 +1244,12 @@ def _v_run_context(value: Any, path: str) -> dict:
     return validate_closed_object(value, path, _RUN_CONTEXT_FIELDS)
 
 
-def _v_observations(value: Any, path: str) -> dict:
+def _v_observations(value: Any, path: str, *, sources: Validator = v_artifact_list) -> dict:
     return validate_closed_object(
         value,
         path,
         {
-            "observed_sources": v_artifact_list,
+            "observed_sources": sources,
             "observed_capability_ids": v_sorted_unique_str_list,
             "observed_tool_schema_digests": v_sorted_unique_digest_list,
             "observed_network_destinations": v_list_of(_v_observed_destination),
@@ -1418,6 +1449,11 @@ _RUN_V2_COMMON_FIELDS = {
 }
 _RUN_V2_DRAFT_FIELDS = {"schema": v_enum(frozenset({RUN_DRAFT_SCHEMA_V2})), **_RUN_V2_COMMON_FIELDS}
 _RUN_V2_FIELDS = {**_RUN_FIELDS, **_RUN_V2_COMMON_FIELDS, "schema": v_enum(frozenset({RUN_SCHEMA_V2}))}
+_RUN_V3_COMMON_FIELDS = {**_RUN_V2_COMMON_FIELDS,
+    "observations": lambda value, path: _v_observations(value, path, sources=v_source_artifact_list),
+}
+_RUN_V3_DRAFT_FIELDS = {"schema": v_enum(frozenset({RUN_DRAFT_SCHEMA_V3})), **_RUN_V3_COMMON_FIELDS}
+_RUN_V3_FIELDS = {**_RUN_FIELDS, **_RUN_V3_COMMON_FIELDS, "schema": v_enum(frozenset({RUN_SCHEMA_V3}))}
 
 
 def _run_v2_observation_defects(document: dict) -> list[ContractDefect]:
@@ -1537,13 +1573,16 @@ def _run_cross_field_defects(document: dict) -> list[ContractDefect]:
 
 def _check_run_fields(document: Any, *, is_draft: bool, require_digest: bool) -> dict:
     field_set = _RUN_DRAFT_FIELDS if is_draft else _RUN_FIELDS
-    is_v2 = isinstance(document, dict) and document.get("schema") == (RUN_DRAFT_SCHEMA_V2 if is_draft else RUN_SCHEMA_V2)
-    if is_v2:
+    schema = document.get("schema") if isinstance(document, dict) else None
+    has_availability = schema in RUN_AVAILABILITY_SCHEMAS
+    if schema == (RUN_DRAFT_SCHEMA_V3 if is_draft else RUN_SCHEMA_V3):
+        field_set = _RUN_V3_DRAFT_FIELDS if is_draft else _RUN_V3_FIELDS
+    elif schema == (RUN_DRAFT_SCHEMA_V2 if is_draft else RUN_SCHEMA_V2):
         field_set = _RUN_V2_DRAFT_FIELDS if is_draft else _RUN_V2_FIELDS
     optional = frozenset({"run_digest"}) if (not is_draft and not require_digest) else frozenset()
     validated = validate_closed_object(document, "$", field_set, optional=optional)
     cross_defects = _run_cross_field_defects(document if isinstance(document, dict) else {})
-    if is_v2:
+    if has_availability:
         cross_defects.extend(_run_v2_observation_defects(document))
     if cross_defects:
         raise ContractError(cross_defects)
@@ -1570,10 +1609,12 @@ def validate_run_shape(document: Any) -> str:
 
 _SHAPE_VALIDATORS: dict[str, Callable[[Any], str]] = {
     SCENARIO_SCHEMA: validate_scenario_shape,
+    SCENARIO_SCHEMA_V2: validate_scenario_shape,
     CONFIGURATION_SCHEMA: validate_configuration_shape,
     EXPERIMENT_SCHEMA: validate_experiment_shape,
     RUN_SCHEMA: validate_run_shape,
     RUN_SCHEMA_V2: validate_run_shape,
+    RUN_SCHEMA_V3: validate_run_shape,
 }
 
 

@@ -121,6 +121,7 @@ class _Claim:
         self.returned = None
         self.manager_return = None
         self.prompt = None
+        self.prompt_anchor = None  # Transient original current-user text, never retained output.
 
     def current(self, *, adopted=False):
         scope, factory = self.scope, self.factory
@@ -182,9 +183,14 @@ class _Instance:
 
     def prefetch(self, query, *, session_id=""):
         claim = self.claim
+        # A late worker may still hold this reusable provider after the next
+        # admission takes it over. It must not clear that new claim's anchor.
+        if observation._current.get() is not claim.scope:
+            return ""
+        claim.returned = claim.prompt = claim.prompt_anchor = None
+        claim.manager_return = None
         binding, epoch = self.provider._binding, self.provider._epoch
-        if (observation._current.get() is not claim.scope or binding is None
-                or not claim.current(adopted=True)):
+        if binding is None or not claim.current(adopted=True):
             return ""
         text = self.original_prefetch(query, session_id=session_id)
         if (not text or self.claim is not claim or observation._current.get() is not claim.scope
@@ -198,6 +204,7 @@ class _Instance:
             "receipt_sha256": snapshot["receipt_sha256"],
             "prefetch_context_sha256": snapshot["rendered_context_sha256"],
             "prefetch_context_bytes": snapshot["rendered_context_bytes"], "prompt": None}
+        claim.prompt = claim.prompt_anchor = None
         self.factory.last_delivery = dict(claim.returned)
         return text
 
@@ -379,6 +386,11 @@ class NativeAgentOsMemoryFactory:
     def note_prompt(self, claim, agent, messages, result, *, current_turn_user_idx, ext_prefetch_cache):
         """Observe the actual current user row, never a historical match."""
         returned = claim.returned
+        # A failed subsequent construction must not reuse an earlier turn's
+        # observation, even when the returned context bytes happen to match.
+        claim.prompt = claim.prompt_anchor = None
+        if returned is not None:
+            returned = claim.returned = {**returned, "prompt": None}
         if (returned is None or not claim.current(adopted=True) or claim.agent is not agent
                 or claim.manager_return != returned["prefetch_context_sha256"]
                 or type(ext_prefetch_cache) is not str or not ext_prefetch_cache
@@ -402,7 +414,8 @@ class NativeAgentOsMemoryFactory:
         content = api_messages[index].get("content")
         pieces = ([content] if type(content) is str else [item.get("text") for item in content
             if type(item) is dict and item.get("type") == "text"] if type(content) is list else [])
-        if not block or not any(type(piece) is str and block in piece for piece in pieces):
+        anchored = [piece for piece in pieces if type(piece) is str and block and block in piece]
+        if len(anchored) != 1:
             return
         # Bound digest work through the existing original-request observer.
         digest = observation._content_digest({"messages": api_messages})["content_sha256"]
@@ -412,6 +425,12 @@ class NativeAgentOsMemoryFactory:
         prompt = {"boundary": "build_api_messages", "turn_id": turn_id,
                   "context_block_sha256": _sha(block.encode("utf-8")), "api_messages_sha256": digest}
         claim.prompt = prompt
+        # Native request construction can sanitize metadata or strip images.
+        # Preserve the exact original text piece and its row, not a normalized
+        # copy or an unrestricted match in arbitrary historical messages.
+        claim.prompt_anchor = {"row_index": index, "row_count": len(api_messages),
+            "roles": tuple(row.get("role") for row in api_messages),
+            "text": anchored[0], "text_sha256": _sha(anchored[0].encode("utf-8"))}
         claim.returned = {**returned, "prompt": prompt}
         self.last_delivery = dict(claim.returned)
 
@@ -719,6 +738,9 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
         claim = factory.current_claim()
         if claim.agent is not agent or not claim.current(adopted=True) or not claim.barrier_entered:
             _refuse("NATIVE_AGENTOS_CLAIM_UNAVAILABLE")
+        claim.prompt = claim.prompt_anchor = None
+        if claim.returned is not None:
+            claim.returned = {**claim.returned, "prompt": None}
         factory.require_snapshot(claim, agent)
         result = build_messages(agent, messages, **kwargs)
         factory.require_snapshot(claim, agent)

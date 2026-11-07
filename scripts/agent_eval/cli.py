@@ -136,7 +136,7 @@ def _cmd_finalize_run(args: argparse.Namespace) -> int:
     artifact_store = store.ArtifactStore(args.root)
     draft = _load_json_file(Path(args.draft))
     if draft.get("schema") not in contracts.RUN_DRAFT_SCHEMAS:
-        raise CliUsageError("--draft must be a mastermind.agent_evaluation_run_draft.v1 or .v2 document")
+        raise CliUsageError("--draft must be a mastermind.agent_evaluation_run_draft.v1, .v2, or .v3 document")
 
     scenario_ref = draft.get("scenario") or {}
     scenario = artifact_store.resolve_scenario(scenario_ref.get("scenario_id"), scenario_ref.get("scenario_version"))
