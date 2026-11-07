@@ -404,13 +404,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: abab96df55f82cb5c26459a6f51b568d73a6a6f8
+          ref: 9eb5cb6b28b510ea9e2bf05ae9040528523339df
           path: .ci-production-macro
           sparse-checkout: |
             engine
             lib
             config
             tests
+            research/earnings_intelligence/e3/gold
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
       - name: Verify exact scoped Fabric model composition
@@ -424,7 +425,8 @@ jobs:
             PYTHONPATH="$PWD" MM_FABRIC_GATEWAY_SOURCE_ROOT="$GITHUB_WORKSPACE" \
               python -m pytest -q --noconftest -c /dev/null \
               --junitxml="$exact_composition_proof/exact-proof.xml" \
-              tests/test_fabric_exact_scoped_model_composition.py
+              tests/test_fabric_exact_scoped_model_composition.py \
+              tests/test_company_intelligence_event_compiler_e3a.py
           )
           python - "$exact_composition_proof/exact-proof.xml" <<'PROOF'
           import json, sys, xml.etree.ElementTree as ET
