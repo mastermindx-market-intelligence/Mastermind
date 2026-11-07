@@ -39,6 +39,33 @@ permissions:
   contents: read
 
 jobs:
+  studio-preflight-observation:
+    name: Disposable Studio preflight observation with original assertions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+      - name: Install original fixture dependencies
+        run: python -m pip install --disable-pip-version-check -e '.[dev]'
+      - name: Compare unchanged baseline, observed case and original discovery context
+        run: >-
+          python -B integrations/hermes_application_fabric/qualification/diagnose_studio_fixture.py
+          --mode all --output "$RUNNER_TEMP/hermes-studio-launch-observation"
+      - name: Retain bounded fixture-only observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-studio-launch-observation
+          path: ${{ runner.temp }}/hermes-studio-launch-observation/**/result.json
+          if-no-files-found: error
   paired-application-composition:
     name: Current paired APPLICATION text, AUTO and native tools
     runs-on: ubuntu-latest
