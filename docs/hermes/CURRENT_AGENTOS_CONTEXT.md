@@ -7,10 +7,10 @@ current canonical Macro DATA commit while retaining the installed executable
 CODE commit. This is an explicit additional capability. The adopted-snapshot
 wire, catalogue and native publication remain unchanged.
 
-This source slice supplies the actual collector, isolated compiler, original
-Control carrier, independently authenticated App and MCP path. It does not yet
-select the native companion OAuth carrier or a current-context native
-publication. The profile defaults to disabled. No enrollment, installation,
+This source slice supplies the collector, isolated compiler, original Control
+carrier, independently authenticated App/MCP path, current native publication
+and fixed companion OAuth implementation. The profile defaults to disabled.
+No enrollment, installation,
 model dispatch, account login, fleet activation or live acceptance is claimed.
 
 ## Existing owners
@@ -23,7 +23,7 @@ model dispatch, account login, fleet activation or live acceptance is claimed.
 | Executive identity | Original `CooApp`, audited MCP verifier, enrolled COO binding, mission and capability registry. |
 | Workspace identity | Original `AuditedWorkspaceApp`, audited verifier, JWT authenticator, membership authorizer and permission receipt. |
 | Private framing | Original `CooFactsClient` and `CeoIngressWorkspaceClient`, one bounded request and no retry. |
-| Native continuation | Existing adopted v2 remains available; current native consumption is the next explicitly qualified implementation. |
+| Native continuation | The original typed publication, plugin, memory factory and admission owner serve adopted v2 or explicitly selected current v3. |
 
 There is no new memory store, source registry, credential store, queue, runner,
 publication owner or authorization issuer in this slice.
@@ -156,18 +156,121 @@ D8 scan had no findings. The original Company method and three exact Fabric
 status operands remain unchanged; only their enclosing source/method pins were
 updated after bounded diff inspection.
 
-## Remaining product path
+## Native v3 and the original OAuth engine
 
-The next native step is one complete, fixed derivation of the existing Hermes
-OAuth manager and HTTP transport, retaining the accepted diagnostic-privacy
-postimages. It must authorize a second resource in the original profile store,
-exercise a real protected Workspace GET through the original HTTP client,
-attach only that authenticated bearer to the exact COO destination, and retain
-original refresh, redirect, cancellation, parking and interactive-login owners.
-A static header or a synthetic OAuth response is not sufficient.
+The source now includes `mastermind.hermes_native_executive_consumer/v3` and
+`mastermind.hermes_native_consumer_readback/v3`. They retain the original typed
+context publication, ConsumerSlot, memory factory, plugin, admission and private
+control owners. V2 remains strictly adopted; v3 requires current mode, the
+current catalogue and a distinct Workspace principal whose issuer, subject and
+client match the Executive principal. The six nonsecret Workspace fields derive
+the identity scope. No independent bearer, header template or credential is
+accepted in the publication.
+
+The existing release owner accepts one additional complete source derivation,
+`workspace_oauth_privacy`, from Hermes
+`1c0cd667746d3395fe9e1b6c74f8f85952486f18`. Its exact nine-file patch and complete
+postimages are retained in the original inventory/installer/receipt closure.
+The two accepted diagnostic-privacy postimages are byte-identical. Neither
+patch stacking nor a general dirty-vendor escape is introduced. The complete
+derivation identity is in
+`integrations/hermes_qualification/workspace_oauth_privacy/manifest.json`.
+
+| Owner/operand | Fixed current-context selection |
+|---|---|
+| Primary manager slot | `mastermind_coo` |
+| Primary OAuth resource | `https://mcp.mastermind-x.com/mcp` |
+| Primary protected endpoint | `https://mcp.mastermind-x.com/mcp/coo` |
+| Companion manager slot | `mastermind_coo_workspace` |
+| Companion resource | `https://mcp.mastermind-x.com/workspace/read` |
+| Companion protected identity GET | `https://mcp.mastermind-x.com/workspace/native-draft-identity/current` |
+| Companion scope | `mastermind.workspace.read` |
+
+One adapter drives both original provider generators on the original owned
+HTTPX2 client. It forwards actual responses bidirectionally, uses the existing
+PKCE/client/token/metadata stores and refresh fence, and borrows the companion
+bearer only from the completed identity GET. It checks the exact resource,
+scope, client, profile, provider incarnation, token stamp and verified expiry
+before the primary request. A concurrent token change during the identity
+request or primary consent refuses this invocation. It does not retry the
+primary request independently.
+
+The fixed variant requires modern Streamable HTTP, the strict redirect hook,
+TLS verification and the original client. It refuses SSE fallback, static
+credential headers, alternate endpoint files, client certificates and every
+redirect. It bounds all yielded requests using the original request timeout,
+does not consume successful primary event streams, and closes both generators
+under cancellation shielding. A per-flow lease on the incumbent refresh fence
+prevents a cancelled waiter from releasing another flow's descriptor. Selection
+revisions prevent eviction/restoration of an old provider from restoring an old
+invocation's authority.
+
+Explicit login still belongs to the original Hermes CLI. For this fixed pair it
+clears the two original slots and requires both completed authorizations plus
+the authenticated MCP probe. Token presence alone is insufficient. Missing
+unattended credentials do not open a consent UI. The existing server park watches
+both original credential stamps. Diagnostics retain closed errors and add the
+companion header to the existing redactor.
+
+This opt-in deployment deliberately requires explicit scope on an initial token
+response. OAuth issuers that omit an unchanged initial scope will be refused;
+the live Mastermind issuer must pass this interoperability check at activation.
+The incumbent refresh path may preserve an omitted scope from a previously
+validated grant. Clean HTTPS authorization/token endpoints prevent preexisting
+query or fragment operands from changing the SDK's intended consent/grant.
+
+MCP 2.3 changed its Python result/handshake attributes while retaining wire
+aliases. The native consumer now recognizes the two reviewed closed result
+shapes, requires a complete result, and preserves error/structured-content
+refusal. Handshake and selected-child parsing use the SDK's wire serialization;
+the existing tools-schema digest already does so. An error result cannot become
+selected-child success through the new attribute spelling.
+
+## Native source and cross-engine evidence
+
+- The pinned MCP 2.3.0 / HTTPX2 2.15.1 qualification environment passes 54
+  actual-engine cases. Seven installed SDK/type/client source blobs match their
+  upstream release identities. The test executes the real Hermes manager,
+  storage, atomic writer, provider/mixin, PKCE, file refresh fence, original
+  transport methods, body cap, HTTP client and SDK session.
+- The transport cases perform initialize, tools/list and tools/call. They also
+  deliver a recorded result from the real signed MCP 1.28.1 receiver/current
+  compiler fixture through the actual 2.3 client, native decoder, tool digest
+  and captured-connection guard. The complete original bundle digest survives.
+- The current native lifecycle tests run a fresh signed current read and actual
+  compiler acquisition for each admission, including reuse of a cached agent.
+  They verify provider readiness, exact context in current-turn API messages,
+  current readback, source-mode/receipt identity and strict v2/v3 separation.
+- All 80 incumbent vendor-derivation tests pass with the new third variant,
+  including real disposable Git, complete file membership, independent frozen
+  inventory, installer receipt equality, matching adoption and rollback refusal.
+- Four unchanged upstream fixture archives contain eight scanner-reported
+  HTTP/permission/default-port literals. Parent and independent principal source
+  inspection classified their exact sites. The existing finite review table
+  retains complete hashes and spans; byte/path/token drift and a newly injected
+  UID restore the ordinary scanner. No scanner rule or directory exemption was
+  added.
+
+The authorization server, protected HTTP resources, consent/callback UI, proxy
+selection, serving-loop lifecycle and registry binding in the engine suite are
+declared in-process fixture boundaries. The signed receiver fixture separately
+executes real JWT verification and the real current compiler with its declared
+source/PR/credential seams. These are controlled cross-engine proofs, not one
+installed live-account acceptance run. No TCP or Unix socket, model dispatch,
+production secret, live consent or fleet activation is credited. The frozen
+qualification dependency list is not a production installation inventory.
+
+## Remaining product path
 
 Canonical note and correction publication must then use the existing Project
 Knowledge source owner, recipe adapter, fixed Git publisher and original source
 Events. Fresh native delivery must consume that Event-backed context. The
 original C26 installed-host boundary remains unretried; no alternate host,
 account or carrier supplies acceptance for it.
+
+The current principal profile remains disabled. Installed source custody,
+same-profile live OAuth enrollment for both resources, real native capture,
+provider dispatch/model identity, held-out learning efficacy and fleet/browser/
+account journeys remain acceptance obligations. A complete current bundle also
+does not implement a stable historical-original-note reader: the existing source
+reader resolves only references present in its bounded current catalogue.

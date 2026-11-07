@@ -779,3 +779,9 @@ REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
 # Native Agent OS v2 adds private readback and projects an optional real child.
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
 # the same sole 512 operand remains at (23, 17, 20), with no new identity mask.
+
+# Test-owned frozen source data, merged into this same finite review table.
+from tests.test_hermes_workspace_oauth_identity_review import (
+    REVIEWED_FILES as HERMES_WORKSPACE_OAUTH_REVIEWED_FILES,
+)
+REVIEWED_FILES.update(HERMES_WORKSPACE_OAUTH_REVIEWED_FILES)

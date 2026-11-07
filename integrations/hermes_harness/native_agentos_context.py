@@ -14,7 +14,8 @@ from integrations.executive_mcp.schemas import MAX_RESPONSE_BYTES, RESULT_SCHEMA
 from integrations.hermes_runtime.errors import RuntimeRefusal
 from .agentos_memory_provider import AgentOsBinding, DEFAULT_BUDGET
 from .native_executive_consumer import (
-    CONTEXT_TOOLS_SCHEMA_DIGEST, ExecutiveContextConsumerPublication, _NativeMcpCaller)
+    CONTEXT_TOOLS_SCHEMA_DIGEST, CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST,
+    ExecutiveContextConsumerPublication, _NativeMcpCaller, workspace_principal_frame)
 
 MAX_MCP_RESULT_BYTES = MAX_RESPONSE_BYTES - 4096
 _E1_KEYS = frozenset({"schema", "tool", "ok", "server_version", "mode", "generated_at",
@@ -47,9 +48,25 @@ def decode_context_result(raw, publication, *, sdk_types=None):
     if sdk_types is None:
         from mcp import types as sdk_types
     try:
-        if (type(raw) is not sdk_types.CallToolResult or not _no_extras(raw)
-                or raw.isError is not False or raw.meta is not None
-                or raw.structuredContent is not None
+        if type(publication) is not ExecutiveContextConsumerPublication:
+            _refuse()
+        current = publication.workspace_principal is not None
+        tool = wire.CURRENT_TOOL if current else wire.TOOL
+        if type(raw) is not sdk_types.CallToolResult or not _no_extras(raw):
+            _refuse()
+        fields = set(sdk_types.CallToolResult.model_fields)
+        if fields == {"meta", "content", "isError", "structuredContent"}:
+            is_error, structured = raw.isError, raw.structuredContent
+        elif fields == {"meta", "content", "is_error", "structured_content", "result_type"}:
+            # MCP 2.3 moved the Python names while preserving wire aliases.
+            # Only a complete result qualifies; pending/input-required results
+            # cannot silently become a current context acquisition.
+            if raw.result_type != "complete":
+                _refuse()
+            is_error, structured = raw.is_error, raw.structured_content
+        else:
+            _refuse()
+        if (is_error is not False or raw.meta is not None or structured is not None
                 or type(raw.content) is not list or len(raw.content) != 1):
             _refuse()
         block = raw.content[0]
@@ -67,7 +84,7 @@ def decode_context_result(raw, publication, *, sdk_types=None):
         value = wire.decode(encoded, limit=MAX_MCP_RESULT_BYTES)
         if (type(value) is not dict or set(value) != _E1_KEYS
                 or value["schema"] != RESULT_SCHEMA
-                or value["tool"] != wire.TOOL or value["ok"] is not True
+                or value["tool"] != tool or value["ok"] is not True
                 or publication.mcp.server_version != "1.0.0"
                 or value["server_version"] != publication.mcp.server_version
                 or value["mode"] != "readonly" or type(value["grounding"]) is not dict
@@ -80,6 +97,10 @@ def decode_context_result(raw, publication, *, sdk_types=None):
         parsed = datetime.fromisoformat(generated.replace("Z", "+00:00"))
         if parsed.tzinfo is None or parsed.utcoffset().total_seconds() != 0:
             _refuse()
+        if current:
+            return wire.validate_current_result(value["data"], expected_context=expected_context(publication),
+                capability_profile_digest=publication.capability_profile_digest,
+                expected_workspace_principal=workspace_principal_frame(publication))
         return wire.validate_result(value["data"], expected_context=expected_context(publication),
                                     capability_profile_digest=publication.capability_profile_digest)
     except RuntimeRefusal:
@@ -100,7 +121,8 @@ class NativeAgentOsContextRead:
                  server: Any, session: Any, loop: Any, currentness: Callable[[], bool],
                  binding_current: Callable[[AgentOsBinding], bool] | None = None):
         if (type(publication) is not ExecutiveContextConsumerPublication
-                or publication.tools_schema_digest != CONTEXT_TOOLS_SCHEMA_DIGEST
+                or publication.tools_schema_digest != (CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST
+                    if publication.workspace_principal is not None else CONTEXT_TOOLS_SCHEMA_DIGEST)
                 or not callable(currentness)):
             _refuse()
         self.publication = publication
@@ -117,7 +139,8 @@ class NativeAgentOsContextRead:
             _refuse()
         options = {} if self.binding_current is None else {
             "currentness": lambda: self.binding_current(binding) is True}
-        raw = self.caller.call(wire.TOOL, {"work_ref": self.publication.work_ref}, **options)
+        tool = wire.CURRENT_TOOL if self.publication.workspace_principal is not None else wire.TOOL
+        raw = self.caller.call(tool, {"work_ref": self.publication.work_ref}, **options)
         result = decode_context_result(raw, self.publication)
         if (self.currentness() is not True
                 or (self.binding_current is not None and self.binding_current(binding) is not True)):
