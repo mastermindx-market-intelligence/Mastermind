@@ -117,10 +117,10 @@ Only one acquisition path is used; no original assertion or guard is changed.
 | --- | --- |
 | Primary runtime package | Eleven-file digest `c6b9a7ee27c69b545ddff4d5b509746bea1e96c9dc2b6ccf597e5df3af107454`, computed by the existing publication.py algorithm |
 | Original primary runtime predecessor | 08b8daf9 digest1ae0d896; its installed69-case proof is retained but does not qualify the two amended current runtime files |
-| APPLICATION factory/client | Contribution to original Macro#10740 at fff0025e10de394c6a297c7878518513f1dbe633, preserving current12efe and original dcb histories; client SHA2560817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e remains unchanged |
-| Attended owner declarations | Fixed and AUTO source descriptors are supported in fff0025; factory SHA25656996272225840ff7adefb95d8949c871cb91b1a578bbbf981ee8b8480454df8; original workload and service identity are preserved |
+| APPLICATION factory/client | Original Macro#10740 at 25ba92bb52120fae550b54c29f82929c0b77d37b, with attended AUTO contributionfff0025 and original protected delivery histories absorbed; client SHA2560817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e remains unchanged |
+| Attended owner declarations | Fixed and AUTO source descriptors are supported in current25ba92bb; factory SHA25656996272225840ff7adefb95d8949c871cb91b1a578bbbf981ee8b8480454df8; original workload and service identity are preserved |
 | Historical Hermes source proposal | Exact four-file a577 proposal in qualification/application_owner_support/; patch SHA2569ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d. Its postimages are incorporated through a43 into original12efe; historical383+21 proposal proof is retained |
-| Attended owner qualification | Currentfff source workflow245 passed, zero failures/errors/skips. Earlier12efe219 and historical#10832 hosted126/local197 retain their source identities and original CI-authority refusal |
+| Attended owner qualification | Historicalfff source workflow245 passed, zero failures/errors/skips; current25ba92bb retains the exact four support postimages and preserved input blobs. Earlier12efe219 and historical#10832 hosted126/local197 retain their source identities and original CI-authority refusal |
 | Native APPLICATION installer/entry | Original #2175 plus qualified v9 contribution in #2186; current Go ingress/account/service publishers remain authoritative |
 | Role Hermes ABI | Qualified upstream1c0cd667 and installed2bd378ed; existing held role installation and source closure |
 | Attended Hermes ABI | Exact upstream2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19 plus the reviewed core patch in hermes_core/ |
@@ -161,7 +161,7 @@ route fixture alone could not establish these properties.
 | Meta-CEO | hermes-meta-ceo / hermes_meta_fabric / site_interactive | Original mmmeta role/session/principal and HERMES_META_FABRIC_APPLICATION_TOKEN |
 | Ordinary attended | hermes-attended / hermes_attended_fabric / hermes_attended | Original attended native admission plus a separately qualified APPLICATION service relation |
 
-Macrofff0025 supplies the original attended relation, fixed and automatic
+Macrofff0025 introduced the original attended relation, retained by current25ba92bb, with fixed and automatic
 transport variants and inference workload. The source descriptors now have
 qualified=true and application_allowed=true, with metadata reads still false.
 The shipped application mode map remains empty. No enrolled attended capability,
@@ -268,3 +268,15 @@ The contribution joins published original `72ffa9b7cead0ac19da3d9aaf3f3c427a0c20
 The actual joined participant, primary/retained enrollment, fresh-family, anonymous-read guard and metadata suites passed **244 cases in one process**, with zero failures, errors or skips. Five focused exact-identity cases also passed; the historical shared-relay receipt remains byte-for-byte intact and its one observed host-identity token is qualified only through the existing exact source/site registry. Full source and token drift continue to refuse. Detailed source identities and retained failed iterations remain in `review_evidence/fabric_application/hermes-committed-owner-proof-20261107.json`.
 
 The earlier nine-job hosted inference success is bound to `559989d`; it is not relabeled as a successor hosted or installed result. The active protected-base/H6 source composition remains on original PR #2175. Runtime and provider acceptance boundaries above remain in force.
+
+## Current original Macro source projection
+
+The existing artifact owner rebuilt and checked the complete engine/lib/config
+projection from original Macro#10740 at 25ba92bb52120fae550b54c29f82929c0b77d37b,
+tree c2a4d629c87dec9381460560a31dffa4e2550917. It contains 2532 files and has
+archive SHA256 339d60f79025005f580decb69d81f47cfe49c8bf3aea48bb2c1ab1803042a08e
+(75,634,300 bytes), material-manifest SHA256
+0ba76aacfe1c86e524b883ca0a9465d74e2832a105760ea68c8f3b0ac15d87eb.
+The installed adapter must contain the new complete macro-source.json. Existing
+release and configuration owners retain staging, selection and renewal custody.
+Historical proof is not relabeled as installed or provider acceptance.

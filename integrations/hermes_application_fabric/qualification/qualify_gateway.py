@@ -90,7 +90,7 @@ def main():
     if yaml.__version__ != "6.0.3":
         raise RuntimeError("Use the qualified APPLICATION YAML dependency")
     print(json.dumps({"candidate": args.candidate, "hermes": actual,
-        "owner": "fff0025e10de394c6a297c7878518513f1dbe633", "owner_source_verified": True,
+        "owner": "25ba92bb52120fae550b54c29f82929c0b77d37b", "owner_source_verified": True,
         "owner_verification_scope": "client_and_factory_bytes",
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
         "pyyaml": yaml.__version__,
