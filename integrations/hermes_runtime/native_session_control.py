@@ -178,6 +178,113 @@ def _terminal_metadata(value: dict, answer: str | None) -> dict:
             "model_identity_verified": False}
 
 
+def _request_observation(value, *, receipt: dict, role: str) -> dict:
+    """Project one whole retained outer document after the original receipt join.
+
+    This validates bounded owner metadata, not the original content digest,
+    provider delivery, historical process attestation or model identity.
+    """
+    from .native_request_observation import (
+        SCHEMA as observation_schema, STAGE, CONTENT_FIELDS,
+        MAX_CONTENT_BYTES, MAX_EVENTS, MAX_METADATA_BYTES,
+    )
+
+    def refuse():
+        raise ValueError("INVALID_RETAINED_OBSERVATION")
+
+    def shape(item, required, optional=()):
+        if type(item) is not dict or not len(required) <= len(item) <= len(required) + len(optional):
+            refuse()
+        allowed = set(required) | set(optional)
+        if any(type(key) is not str or key not in allowed for key in item) or not set(required) <= item.keys():
+            refuse()
+
+    def text(item):
+        if (type(item) is not str or not 0 < len(item) <= 256
+                or any(ord(char) < 32 or ord(char) == 127 for char in item)):
+            refuse()
+        if len(item.encode("utf-8", "strict")) > 256:
+            refuse()
+        return item
+
+    def integer(item, minimum=0):
+        if type(item) is not int or not minimum <= item <= 2**53 - 1:
+            refuse()
+        return item
+
+    def literal(item, expected):
+        return type(item) is str and item == expected
+
+    fields = ("schema", "stage", "scope", "observations", "errors", "overflow", "coverage",
+              "provider_dispatch_proven", "model_identity_verified")
+    shape(value, fields)
+    if (not literal(value["schema"], observation_schema) or not literal(value["stage"], STAGE)
+            or value["provider_dispatch_proven"] is not False or value["model_identity_verified"] is not False
+            or type(value["overflow"]) is not bool):
+        refuse()
+    source_scope = value["scope"]
+    scope_fields = ("role", "session_id", "admission_id", "authority_epoch", "execution_generation", "instance_id")
+    shape(source_scope, scope_fields)
+    scope = {key: text(source_scope[key]) for key in ("role", "session_id", "admission_id", "instance_id")}
+    scope["authority_epoch"] = integer(source_scope["authority_epoch"], 1)
+    scope["execution_generation"] = integer(source_scope["execution_generation"])
+    if (scope["role"] != role or scope["session_id"] != receipt["ref"]["session_id"]
+            or scope["admission_id"] != receipt["admission_id"]
+            or scope["authority_epoch"] != receipt["authority_epoch"]
+            or scope["execution_generation"] != receipt["execution_generation"]):
+        refuse()
+    # instance_id describes the original producer. Never join it to today's
+    # process or replace it with the implementation serving this historical read.
+    source_events = value["observations"]
+    if type(source_events) is not list or len(source_events) > MAX_EVENTS:
+        refuse()
+    events = []
+    required = ("fields", "content_sha256", "content_bytes", "canonicalization")
+    identifiers = ("turn_id", "api_request_id", "agent_session_id")
+    counters = ("api_call_count", "retry_count")
+    optional = (*identifiers, *counters, "invalid_fields")
+    for source in source_events:
+        shape(source, required, optional)
+        selected = source["fields"]
+        if (type(selected) is not list or len(selected) > len(CONTENT_FIELDS)
+                or any(type(key) is not str or key not in CONTENT_FIELDS for key in selected)
+                or selected != [key for key in CONTENT_FIELDS if key in selected]):
+            refuse()
+        digest, size = source["content_sha256"], source["content_bytes"]
+        if (type(digest) is not str or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest)
+                or type(size) is not int or not 2 <= size <= MAX_CONTENT_BYTES
+                or not literal(source["canonicalization"], "json_sorted_keys_utf8_no_spaces_v1")):
+            refuse()
+        event = {"fields": list(selected), "content_sha256": digest, "content_bytes": size,
+                 "canonicalization": "json_sorted_keys_utf8_no_spaces_v1"}
+        for key in identifiers:
+            if key in source: event[key] = text(source[key])
+        for key in counters:
+            if key in source: event[key] = integer(source[key])
+        if "invalid_fields" in source:
+            invalid = source["invalid_fields"]
+            if (type(invalid) is not list or not 1 <= len(invalid) <= len(identifiers) + len(counters)
+                    or any(type(key) is not str or key not in (*identifiers, *counters) or key in source for key in invalid)
+                    or len(set(invalid)) != len(invalid)):
+                refuse()
+            event["invalid_fields"] = list(invalid)
+        events.append(event)
+    errors = value["errors"]
+    allowed_errors = ("unbound_or_stale_agent", "content_limit", "unsupported_content", "observation_failed")
+    if (type(errors) is not list or len(errors) > len(allowed_errors)
+            or any(type(error) is not str or error not in allowed_errors for error in errors)
+            or errors != sorted(set(errors))
+            or not literal(value["coverage"], "assembly_hooks_only" if events else "no_assembly_observation")
+            or value["overflow"] and len(events) != MAX_EVENTS):
+        refuse()
+    projected = {"schema": observation_schema, "stage": STAGE, "scope": scope,
+        "observations": events, "errors": list(errors), "overflow": value["overflow"],
+        "coverage": value["coverage"], "provider_dispatch_proven": False, "model_identity_verified": False}
+    if len(json.dumps(projected, ensure_ascii=False, allow_nan=False).encode("utf-8")) > MAX_METADATA_BYTES:
+        refuse()
+    return projected
+
+
 def _read_original(home: Path, params, principal: str, *, role: str = "mmsecretary"):
     from hermes_state_runtime import find_session_admission, get_session_admission
     from gateway.session_results import admission_result
@@ -195,6 +302,7 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
             # Active-row absence is not proof of nonexecution or permission to resend.
             return _result("EFFECT_UNKNOWN", role=role)
         if (row.get("principal_id") != principal or row.get("target_session_id") != sid
+                or (params["admission_id"] is not None and row.get("admission_id") != params["admission_id"])
                 or row.get("request_id") != submission or row.get("intent") != "queue"
                 or type(row.get("payload")) is not dict or set(row["payload"]) != {"text", "finite"}
                 or row["payload"].get("finite") is not True
@@ -218,6 +326,14 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
                 result["successful"] = not any(value.get(key) for key in ("failed", "error", "interrupted"))
             if type(value) is dict:
                 result["terminal_metadata"] = _terminal_metadata(value, answer if valid_answer else None)
+            if "mastermind_request_observation" in saved:
+                try:
+                    result["request_observation"] = _request_observation(
+                        saved["mastermind_request_observation"], receipt=receipt, role=role)
+                except (ValueError, TypeError, UnicodeError, RecursionError):
+                    # Close only the evidence projection. Preserve the original
+                    # answer, native outcome and existing terminal metadata.
+                    result["request_observation_error"] = "INVALID_RETAINED_OBSERVATION"
         return result
     finally:
         db.close()
@@ -416,7 +532,7 @@ def _consumer_extension(runner, home: Path) -> dict:
     from tools.registry import registry
     from integrations.hermes_harness.native_executive_consumer import (
         CONSUMER_SLOT_ATTRIBUTE, CONSUMER_PLUGIN_NAME, ConsumerSlot,
-        NativeConsumerCurrentness, schema_digest)
+        NativeConsumerCurrentness, schema_digest, selected_child_publication)
     from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
     descriptor = runner.session_runtime_descriptor
     if descriptor.get("state") != "ready" or runner._draining:
@@ -427,7 +543,7 @@ def _consumer_extension(runner, home: Path) -> dict:
         raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     with slot._lock:
         registration = slot.registration
-        binding = slot.startup.binding
+        binding = slot.delegate_binding
         loaded = getattr(manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME)
         if (slot.manager is not manager or slot.scope != manager.scope_key
                 or slot.owner != current_runtime_owner() or str(slot.scope) != str(home)
@@ -439,7 +555,9 @@ def _consumer_extension(runner, home: Path) -> dict:
                 or getattr(slot.registration_context, "_manager", None) is not manager):
             raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     guard = binding.currentness_guard
-    publication = slot.publication
+    publication = selected_child_publication(slot.publication)
+    if publication is None:
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     if (not isinstance(guard, NativeConsumerCurrentness) or guard() is not True
             or guard.session_id != binding.session_id
             or guard.instance_id != descriptor.get("instance_id")
@@ -462,7 +580,7 @@ def _consumer_extension(runner, home: Path) -> dict:
     if guard() is not True or registration.check_fn() is not True:
         raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     with slot._lock:
-        if (slot.registration is not registration or slot.startup.binding is not binding
+        if (slot.registration is not registration or slot.delegate_binding is not binding
                 or slot.load_outcome != "REGISTERED"
                 or getattr(manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME) is not loaded
                 or getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None) is not slot):
@@ -486,6 +604,46 @@ def _consumer_extension(runner, home: Path) -> dict:
         "mcp_tools_schema_sha256": publication.tools_schema_digest,
     }
 
+
+
+def _consumer_capabilities(runner, home: Path) -> dict:
+    """Read v2 capability stages from this same native process and enrollment."""
+    from hermes_cli.plugins import get_plugin_manager
+    from integrations.hermes_harness.native_executive_consumer import (
+        CONSUMER_SLOT_ATTRIBUTE, ConsumerSlot, ExecutiveContextConsumerPublication,
+        selected_child_publication)
+    from .native_agentos_memory import NativeAgentOsMemoryFactory, validate_consumer_readback
+    manager = get_plugin_manager()
+    slot = getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None)
+    descriptor = runner.session_runtime_descriptor
+    if (not isinstance(slot, ConsumerSlot) or type(slot.publication) is not ExecutiveContextConsumerPublication
+            or type(slot.memory_factory) is not NativeAgentOsMemoryFactory
+            or slot.manager is not manager or slot.owner != current_runtime_owner()
+            or str(slot.scope) != str(home) or descriptor.get("state") != "ready" or runner._draining):
+        raise RuntimeRefusal("NATIVE_AGENTOS_READBACK_UNAVAILABLE")
+    publication = slot.publication
+    def enrollment():
+        value = read_enrolled_session(runner, home, slot.owner, publication.session.request_id,
+                                      publication.session.principal_id, role=publication.session.role)
+        if value["status"] != "ENROLLED":
+            raise RuntimeRefusal("NATIVE_AGENTOS_READBACK_UNAVAILABLE")
+        return value["target"]
+    before = enrollment()
+    expected = {"implementation_sha": slot.owner,
+        "publication_sha256": slot.memory_factory.publication_sha256, "profile_id": str(home),
+        "instance_id": before["instance_id"], "authority_epoch": before["authority_epoch"],
+        "enrollment_request_id": publication.session.request_id,
+        "principal_id": publication.session.principal_id, "session_id": before["session_id"]}
+    if (expected["instance_id"] != descriptor.get("instance_id")
+            or expected["authority_epoch"] != descriptor.get("authority_epoch")):
+        raise RuntimeRefusal("NATIVE_AGENTOS_READBACK_UNAVAILABLE")
+    value = slot.memory_factory.readback()
+    if selected_child_publication(publication) is not None:
+        value["selected_child"] = _consumer_extension(runner, home)
+    if (enrollment() != before or getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None) is not slot
+            or not slot.memory_factory.registered_current()):
+        raise RuntimeRefusal("NATIVE_AGENTOS_READBACK_UNAVAILABLE")
+    return validate_consumer_readback(value, publication=publication, expected_binding=expected)
 
 
 def _implementation(value):
@@ -829,13 +987,15 @@ def install_private_control(runner, home: Path, role: str, *,
                 return role_result("TARGET", target=_target(runner, home, _id(params["session_id"]), peer_subject))
             if operation == "read_original":
                 return _read_original(home, params, peer_subject, role=role)
-            if operation == "consumer_extension":
+            if operation in {"consumer_extension", "consumer_capabilities"}:
                 # A finite read-only qualification of the serving process. The
                 # caller selects no target and no route: the profile is the
                 # one this private socket belongs to.
                 if set(params) != {"operation", "profile_id"} or params["profile_id"] != str(home):
                     raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_REQUEST_INVALID")
                 async def observe_extension():
+                    if operation == "consumer_capabilities":
+                        return role_result("OBSERVED", consumer=_consumer_capabilities(runner, home))
                     return role_result("OBSERVED", extension=_consumer_extension(runner, home))
                 coroutine = observe_extension()
                 try:
@@ -857,7 +1017,8 @@ def install_private_control(runner, home: Path, role: str, *,
             if type(params["ticket"]) is not str or not 1 <= len(params["ticket"]) <= 256:
                 raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
         except Exception:
-            return role_result("UNAVAILABLE" if operation in {"observe", "read_original", "consumer_extension"} else "REFUSED")
+            return role_result("UNAVAILABLE" if operation in {
+                "observe", "read_original", "consumer_extension", "consumer_capabilities"} else "REFUSED")
         # This is the native control server's existing executor. The native
         # loop owns the bounded coroutine; never create a new event loop.
         coroutine = _submit(runner, home, params, peer_subject, role=role)
@@ -1025,3 +1186,7 @@ class NativeSecretaryClient:
         owner, creates no session and mutates nothing.
         """
         return self._call({"operation": "consumer_extension", "profile_id": str(self.home)})
+
+    def consumer_capabilities(self):
+        """Private v2 capability observation; not a role HTTP dispatch verb."""
+        return self._call({"operation": "consumer_capabilities", "profile_id": str(self.home)})

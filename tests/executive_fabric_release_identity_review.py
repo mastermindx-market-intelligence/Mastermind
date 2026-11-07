@@ -740,7 +740,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "bc444a613891eb84a484f12a253b371d91dadfabeda71bfe9ef0959d2bf8a0ed",
+    "sha256": "13d174a066056bb2898f5c218bffdf5278c9ed83e7079c2c576502436622e1c8",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -772,6 +772,10 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
-    "sha256": "4a646f1fcbc11158fe5bb737fef4779dfbd36fb75c2ee0cced5b6ad16875f7f1",
-    "sites": ((48, 65, 68, "int", "500"), (216, 60, 63, "int", "500")),
+    "sha256": "85a0164e5a35c3a334a68c30d967f78096856227875915766a6033052d4cc6f9",
+    "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
 }
+
+# Native Agent OS v2 adds private readback and projects an optional real child.
+# Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
+# the same sole 512 operand remains at (23, 17, 20), with no new identity mask.
