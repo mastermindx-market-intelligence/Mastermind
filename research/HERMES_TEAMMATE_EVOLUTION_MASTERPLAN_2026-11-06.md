@@ -1606,3 +1606,18 @@ Use the original operation **meta-ceo-byok-followon-parent-20261106-c35-01**, or
 The qualified source/profile/contract and exact releases are concrete reviewable artifacts. Live same-resource grants, serving readback, original correction-to-context feedback, website account/browser journeys, actual provider/model dispatch, genuine held-out EVAL and restart/revocation/endurance/fleet proof still determine full completion. No profile activation, live-account success or always-running teammate is claimed.
 
 Next source actions are consumption of the existing protected effects and natural CI; repair actual failed gates on original carriers, and use Macro's existing controller only after all required checks and holds qualify. No duplicate observer, polling daemon, source release or speculative feature is needed while these gates run.
+
+
+### 37.5 Durable handoff readback and final source-gate snapshot
+
+The same Macro **PR10836** handoff amendment is now at **fadce75da41adcfaf4506a96bfe029f43158c95a**, blob **171b33befb8979c7c53264b3e9f29daccd7551d7**. The complete expected bytes were read back from the original branch and match exactly. Its PR description now names section37, the original release effects and the exact runtime access control. It remains an unadopted Ready candidate: fences42379301272 passed, while exact-head CI42379301359 and its authority event are pending. No merge-on-green request has been issued.
+
+A fresh canonical GitHub read, against protected Mastermind master **4fb0d3825b5b4b4439e65e7382660112b7c2ef8c**, observed:
+- **#2207 e5280ecd:** exact-head check rollup SUCCESS; the same queue ID remains AWAITING_CHECKS, position4. OPEN and unmerged.
+- **#2204 7df8f907:** exact-head check rollup SUCCESS, including required test and CodeQL. The original autoMergeRequest remains enabled at2026-11-07T13:51:31Z; no queue entry or merge receipt yet. OPEN and unmerged. Preserve the existing effect.
+- **#2217 bbbbe6a0:** four owning workflows passed and the six general-CI shards remain running. Its base is still the original #2207 branch; no release request.
+- **Macro #10831 a9906c9d:** packs1–11, planner and contract-delta passed; pack0 and the final semantic gate remain outstanding. A new authority event is queued.
+
+The Macro aggregate displayed a failed **ci-authority/codex/merge-queue-pilot** context. One bounded diagnostic read the actual original check128418474005: its own signed summary states base_ref=main, context_active=false and context_reason=inactive_base_context. The corresponding active **ci-authority/main** check128418476150 is SUCCESS and allowed=true. This is an inactive alternate-base context, not evidence of a new source failure or permission denial. It was not rerun, masked, deleted or overridden. The existing controller must still evaluate the binding main-branch contexts, natural full CI, freshness and holds before any ordinary Macro release admission.
+
+No source publication or deployment is represented as installed teammate acceptance. All recorded C26/local-Control/Fabric boundaries remain unchanged. Recovery should consume original release effects, then resume live work only after observed restoration of the original Ubuntu1/root connection and reconciliation of the original operation.
