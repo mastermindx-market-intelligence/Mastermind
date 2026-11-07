@@ -1,0 +1,161 @@
+{
+  "origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+  "warning": "All symbols/events are constructed. Batch completion and watermark semantics are explicitly supplied by this fixture, not inferred from any exchange data. No alpha or actual investment claim.",
+  "frames": [
+    {
+      "origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+      "kind": "START",
+      "observed_ns": "1152921504606846976",
+      "symbol": "SYN-FAST",
+      "session": "fixture-session-1"
+    },
+    {
+      "origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+      "kind": "START",
+      "observed_ns": "1152921504606846976",
+      "symbol": "SYN-SLOW",
+      "session": "fixture-session-1"
+    },
+    {
+      "origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+      "kind": "BATCH",
+      "observed_ns": "1152921504606846977",
+      "symbol": "SYN-FAST",
+      "session": "fixture-session-1",
+      "complete": true,
+      "events": [
+        {
+          "sequence": "1152921504606846977",
+          "received_ns": "1152921504606846977",
+          "kind": "ADD",
+          "order_id": "1152921504606846977",
+          "side": 1,
+          "price": 100,
+          "quantity": 100
+        }
+      ]
+    },
+    {
+      "origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+      "kind": "BATCH",
+      "observed_ns": "1152921504606846977",
+      "symbol": "SYN-SLOW",
+      "session": "fixture-session-1",
+      "complete": true,
+      "events": [
+        {
+          "sequence": "1152921504606846977",
+          "received_ns": "1152921504606846977",
+          "kind": "ADD",
+          "order_id": "1152921504606846977",
+          "side": 1,
+          "price": 100,
+          "quantity": 100
+        }
+      ]
+    },
+    {
+      "origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+      "kind": "BATCH",
+      "observed_ns": "1152921504606846978",
+      "symbol": "SYN-FAST",
+      "session": "fixture-session-1",
+      "complete": true,
+      "events": [
+        {
+          "sequence": "1152921504606846978",
+          "received_ns": "1152921504606846978",
+          "kind": "EXECUTE",
+          "order_id": "1152921504606846977",
+          "side": 1,
+          "price": 100,
+          "quantity": 60
+        }
+      ]
+    },
+    {
+      "origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+      "kind": "BATCH",
+      "observed_ns": "1152921504606846978",
+      "symbol": "SYN-SLOW",
+      "session": "fixture-session-1",
+      "complete": true,
+      "events": [
+        {
+          "sequence": "1152921504606846978",
+          "received_ns": "1152921504606846978",
+          "kind": "EXECUTE",
+          "order_id": "1152921504606846977",
+          "side": 1,
+          "price": 100,
+          "quantity": 60
+        }
+      ]
+    },
+    {
+      "origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+      "kind": "WATERMARK",
+      "observed_ns": "1152921504606846980",
+      "symbol": "SYN-FAST",
+      "session": "fixture-session-1",
+      "complete_through_ns": "1152921504606846980",
+      "last_sequence": "1152921504606846978"
+    },
+    {
+      "origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+      "kind": "WATERMARK",
+      "observed_ns": "1152921504606846980",
+      "symbol": "SYN-SLOW",
+      "session": "fixture-session-1",
+      "complete_through_ns": "1152921504606846980",
+      "last_sequence": "1152921504606846978"
+    },
+    {
+      "origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+      "kind": "BATCH",
+      "observed_ns": "1152921504606846982",
+      "symbol": "SYN-FAST",
+      "session": "fixture-session-1",
+      "complete": true,
+      "events": [
+        {
+          "sequence": "1152921504606846979",
+          "received_ns": "1152921504606846981",
+          "kind": "DELETE",
+          "order_id": "1152921504606846977",
+          "side": 1,
+          "price": 100,
+          "quantity": 0
+        },
+        {
+          "sequence": "1152921504606846980",
+          "received_ns": "1152921504606846981",
+          "kind": "ADD",
+          "order_id": "1152921504606846978",
+          "side": 1,
+          "price": 100,
+          "quantity": 100
+        }
+      ]
+    },
+    {
+      "origin": "SYNTHETIC_NORMALIZED_FIXTURE",
+      "kind": "BATCH",
+      "observed_ns": "1152921504606846982",
+      "symbol": "SYN-SLOW",
+      "session": "fixture-session-1",
+      "complete": true,
+      "events": [
+        {
+          "sequence": "1152921504606846979",
+          "received_ns": "1152921504606846981",
+          "kind": "DELETE",
+          "order_id": "1152921504606846977",
+          "side": 1,
+          "price": 100,
+          "quantity": 0
+        }
+      ]
+    }
+  ]
+}

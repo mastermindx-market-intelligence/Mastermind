@@ -1,0 +1,40 @@
+{
+  "request": {
+    "schema": "agentos.project_proposal_request.v1",
+    "request_id": "synthetic-project-source-001",
+    "expected_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "record": {
+      "key": "SYNTHETIC-PROJECT",
+      "title": "Synthetic project source fixture",
+      "objective": "Preserve this literal goal.\n目标原文。",
+      "status": "proposed",
+      "program": "project-active-build-control",
+      "repos": [
+        "macro"
+      ],
+      "owner": "synthetic-author",
+      "class": "build",
+      "blast_radius": "reversible",
+      "ambiguity": "specified",
+      "waves": [
+        {
+          "id": "W1",
+          "title": "Inspect the source fixture",
+          "status": "todo"
+        }
+      ],
+      "next_action": "Inspect the actual authored proposal."
+    }
+  },
+  "proposal": {
+    "schema": "agentos.project_proposal.v1",
+    "state": "DRAFT_ONLY",
+    "request_id": "synthetic-project-source-001",
+    "request_sha256": "60c9152ba0f386ae99c51e06e0c625b72fe93733b1bc7dfa400e27cf96cb9842",
+    "expected_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "work_ref": "WS:SYNTHETIC-PROJECT",
+    "path": "agentos/workstreams/WS-SYNTHETIC-PROJECT.md",
+    "content_utf8": "---\nkey: SYNTHETIC-PROJECT\ntitle: Synthetic project source fixture\nobjective: 'Preserve this literal goal.\n\n  目标原文。'\nstatus: proposed\nprogram: project-active-build-control\nrepos:\n- macro\nowner: synthetic-author\nclass: build\nblast_radius: reversible\nambiguity: specified\nwaves:\n- id: W1\n  title: Inspect the source fixture\n  status: todo\nnext_action: Inspect the actual authored proposal.\n---\n\n## What this file is\n\nA DRAFT_ONLY workstream record compiled from an authored project-proposal\nrequest. Compilation happened entirely in memory: no store path was read or\nwritten, no Git operation ran, and no authority was granted by producing this\ntext. The draft reaches the store only if a separate publication step — which\nthis compiler can neither perform nor prove — carries it into\n`agentos/workstreams/` under the commit the request pinned as\n`expected_commit`. That commit value is an obligation recorded for that later\npublisher, not a fact this file asserts.\n\n## What this file does not say\n\nIt carries no `created`/`updated` field (those are derived from git history by\nthe store tooling, never authored), no `claim`, no `runtime_ref`, and no\nsession or conversation identity. Status is `proposed` and every wave is\n`todo`: nothing here asserts that the work started, merged, shipped, or was\nreviewed.\n\n## How to read the frontmatter\n\nThe YAML block above is the whole authored record: exactly the twelve\nworkstream fields, in the compiler's fixed key order, serialized with\n`yaml.safe_dump` so caller text (including YAML-looking text, CJK, LF and TAB)\nsurvives byte-exact through `FRONTMATTER_RE` -> `yaml.safe_load`. Membership\nrules inside it were checked by the canonical `scripts.agentos` checker, not\nre-declared here.\n\n<!--\nagentos-project-proposal provenance (DRAFT_ONLY):\nrequest_id: synthetic-project-source-001\nrequest_sha256: 60c9152ba0f386ae99c51e06e0c625b72fe93733b1bc7dfa400e27cf96cb9842\nexpected_commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n-->\n",
+    "content_sha256": "d1923a4ae4a352ca81b5d9c027663c08322ddfc18f4a646dd8154f7ce1d7dc21"
+  }
+}
