@@ -1,0 +1,642 @@
+--- a/host_pull.sh
++++ b/host_pull.sh
+@@ -48,6 +48,8 @@
+ # @@WR@@ is worktree_root; @@LR@@ is the shell-quoted canonical runtime path.
+ PROBE_FILE="$HERE/host_pull_probe.template"
+ BACKEND_FILE="$HERE/host_pull_backend.py"
++GLM_PROBE_FILE="$HERE/glm_host_account_probe.py"
++ACCOUNTS_POLICY="${POOL_ACCOUNTS_YAML:-$HERE/../orch/fabric/accounts.yaml}"
+ # These are code/data for the existing collector, never credential stores.
+ # Missing/symlinked dependencies fail closed before any fleet probe.
+ if [ ! -f "$PROBE_FILE" ] || [ -L "$PROBE_FILE" ] ||
+@@ -61,25 +63,33 @@
+ 
+ # host|is_local|ssh_alias|worktree_root — one line per probeable host.
+ read_hosts() {
+-  python3 -B "$BACKEND_FILE" read-hosts "$HOSTS_JSON" "$SELECTED" "$ONCE"
++  python3 -B "$BACKEND_FILE" read-hosts "$HOSTS_JSON" "$SELECTED" "$ONCE" --glm-readiness
+ }
+ 
+ write_state() { # $1 host, $2 probe rc, $3 probe stdout
+-  python3 -B "$BACKEND_FILE" write-state "$STATE_DIR" "$1" "$2" "$3"
++  python3 -B "$BACKEND_FILE" write-state "$STATE_DIR" "$1" "$2" "$3" "$4"
+ }
+ 
+ pass_once() {
+-  local host is_local alias wr probe rc t0 summary runtime local_runtime rows
++  local host is_local alias wr probe rc t0 summary runtime local_runtime rows glm_probe glm_admitted
+   rows=$(read_hosts) || return $?
+   mkdir -p "$STATE_DIR" || return $?
+   local_runtime=$(python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$HERE/lane_runtime.py")
+-  while IFS='|' read -r host is_local alias wr; do
++  while IFS='|' read -r host is_local alias wr glm_admitted; do
+     [ -n "$host" ] || continue
+     t0=$(date +%s)
+     probe="${PROBE_TEMPLATE//@@WR@@/$wr}"
+     runtime='"$HOME/lanes/ext/lane_runtime.py"'
+     [ "$is_local" = "1" ] && runtime="$local_runtime"
+     probe="${probe//@@LR@@/$runtime}"
++    # Same existing transport. Nonsecret validator source and policy aliases only.
++    # A failed projection stays absent; the eventual GLM join fails closed.
++    glm_probe=":"
++    if [ "$glm_admitted" = "1" ]; then
++      glm_probe=$(python3 -B "$GLM_PROBE_FILE" "$host" "$alias" "$ACCOUNTS_POLICY" 2>/dev/null) || glm_probe=":"
++    fi
++    probe="$probe
++$glm_probe"
+     if [ "$is_local" = "1" ]; then
+       OUT=$(sh -c "$probe" 2>/dev/null)
+       rc=$?
+@@ -90,7 +100,7 @@
+       OUT=$(perl -e 'alarm 25; exec @ARGV' ssh -o BatchMode=yes -o ConnectTimeout=8 "$alias" "$probe" 2>/dev/null </dev/null)
+       rc=$?
+     fi
+-    summary=$(write_state "$host" "$rc" "$OUT") || return $?
++    summary=$(write_state "$host" "$rc" "$OUT" "$alias") || return $?
+     echo "$(date -u +%Y-%m-%dT%H:%MZ) [pull] host=$host rc=$rc secs=$(( $(date +%s) - t0 )) $summary"
+   done <<< "$rows"
+ }
+--- a/host_pull_probe.template
++++ b/host_pull_probe.template
+@@ -1,3 +1,4 @@
++GLM_LAUNCH_BASE_PATH="$PATH"
+ PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # R34: claude/codex are installed under ~/.local/bin on mb/m1; non-login ssh does not source .zprofile
+ ts=$(date +%s)
+ load1=""; load5=""; ncpu=""; mem=""; disk=""; on_ac="unknown"; active="0"; tools=""; thermals=""
+--- a/host_pull_backend.py
++++ b/host_pull_backend.py
+@@ -35,11 +35,28 @@
+         alias = e.get("ssh_alias")
+         if not isinstance(alias, str):
+             alias = ""
+-        print("|".join([name, "1" if e.get("local") else "0", alias, wr]))
++        modes = e.get("allowed_modes")
++        # Match incumbent host_pick structural mode and qualification rules.
++        from host_pick import MODE_TOOLS
++        modes_valid = modes is None or (isinstance(modes, list)
++            and all(isinstance(v, str) and v in MODE_TOOLS for v in modes)
++            and len(set(modes)) == len(modes))
++        qualification = e.get("qualification_only_modes", [])
++        qualification_valid = (isinstance(qualification, list)
++            and all(isinstance(v, str) and v in MODE_TOOLS for v in qualification)
++            and len(set(qualification)) == len(qualification))
++        glm = ("lanes" in e.get("roles", []) and modes_valid
++            and (modes is None or "glm" in modes)
++            and qualification_valid and "glm" not in qualification)
++        fields = [name, "1" if e.get("local") else "0", alias, wr]
++        if len(sys.argv) > 4 and sys.argv[4] == "--glm-readiness":
++            fields.append("1" if glm else "0")
++        print("|".join(fields))
+ 
+ def write_state():
+     import json, os, sys, time, tempfile, stat, math, re
+     state_dir, host, rc, out = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
++    transport_alias = sys.argv[5] if len(sys.argv) > 5 else None
+     doc = {"host": host, "ts": int(time.time()), "reachable": False, "error": None}
+ 
+     def num(s):
+@@ -49,6 +66,7 @@
+             return None
+ 
+     kv = {}
++    duplicate = set()
+     if rc == 0:
+         for line in out.splitlines():
+             line = line.strip()
+@@ -57,12 +75,36 @@
+             k, v = line.split("=", 1)
+             k = k.strip()
+             if k and all(c.isalnum() or c == "_" for c in k):
++                if k in kv: duplicate.add(k)
+                 kv[k] = v.strip()
+     if rc == 0 and kv.get("load1") not in (None, "") and kv.get("ncpu") not in (None, ""):
+         doc["reachable"] = True
+         ts = num(kv.get("ts"))
+         if ts and ts > 0:
+             doc["ts"] = int(ts)
++        # No readiness may be stamped from missing/duplicate/foreign envelopes.
++        try:
++            from pathlib import Path
++            from glm_host_account_source import owned_bytes
++            import hashlib
++            value = kv.get("glm_local_account_readiness", "")
++            if len(value.encode()) > 16384 or "glm_local_account_readiness" in duplicate:
++                raise ValueError("readiness envelope")
++            observation = json.loads(value)
++            digest = hashlib.sha256(owned_bytes(Path(__file__).parent / "glm_keys.py")).hexdigest()
++            if (observation.get("schema") != "mastermind.glm_local_account_readiness.v1"
++                    or observation.get("host") != host
++                    or not transport_alias or observation.get("transport_alias") != transport_alias
++                    or observation.get("mode") != "glm"
++                    or observation.get("config_scope") != "launcher_glm_config.v1"
++                    or observation.get("validator_sha256") != digest
++                    or observation.get("status") not in ("known", "unknown")
++                    or not isinstance(observation.get("accounts"), dict)
++                    or len(observation["accounts"]) > 64):
++                raise ValueError("readiness identity")
++            doc["glm_local_account_readiness"] = observation
++        except (OSError, ValueError, TypeError, AttributeError):
++            pass
+         doc["load1"] = num(kv.get("load1"))
+         doc["load5"] = num(kv.get("load5"))
+         doc["ncpu"] = int(num(kv.get("ncpu")) or 0)
+@@ -189,14 +231,28 @@
+         doc["error"] = "probe_exit_%d" % rc
+         summary = "reachable=false error=probe_exit_%d" % rc
+     path = os.path.join(state_dir, host + ".json")
++    directory = os.stat(state_dir, follow_symlinks=False)
++    if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.geteuid()
++            or directory.st_mode & 0o022):
++        raise SystemExit("host_pull: observation directory custody unavailable")
+     fd, tmp = tempfile.mkstemp(prefix=host + ".", suffix=".tmp", dir=state_dir)
+     try:
+         with os.fdopen(fd, "w", encoding="utf-8") as fh:
+             json.dump(doc, fh, indent=2, sort_keys=True)
+             fh.write("\n")
+-        mode = stat.S_IMODE(os.stat(path).st_mode) if os.path.exists(path) else 0o644
+-        os.chmod(tmp, mode)
++            fh.flush()
++            os.fsync(fh.fileno())
++        # Preserve readable telemetry without inheriting an unsafe write mode.
++        os.chmod(tmp, 0o644)
++        current = os.stat(state_dir, follow_symlinks=False)
++        if (current.st_dev, current.st_ino) != (directory.st_dev, directory.st_ino):
++            raise SystemExit("host_pull: observation directory changed")
+         os.replace(tmp, path)
++        directory_fd = os.open(state_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++        try:
++            os.fsync(directory_fd)
++        finally:
++            os.close(directory_fd)
+     finally:
+         if os.path.exists(tmp):
+             os.unlink(tmp)
+--- a/pick.py
++++ b/pick.py
+@@ -1730,7 +1730,8 @@
+ 
+ def _eligible_host_routes(host: str, route_key: Optional[str] = None,
+                           required_modes: Optional[List[str]] = None,
+-                          required_platforms: Optional[List[str]] = None) -> Dict[str, Tuple[str, str]]:
++                          required_platforms: Optional[List[str]] = None,
++                          glm_model: Optional[str] = None) -> Dict[str, Tuple[str, str]]:
+     # Lazy imports keep unconstrained picks and launch-policy independent of hosts.
+     import host_pick
+     import placement_view
+@@ -1755,9 +1756,32 @@
+         for mode in adapters:
+             if required_modes is not None and mode not in required_modes:
+                 continue
++            mode_excluded = set(pool_excluded)
++            if mode == "glm":
++                # Room is advisory; the broker rechecks this same join at acquire.
++                from lease_broker import default_broker
++                from glm_host_account_source import filter_observed_accounts
++                br = default_broker()
++                conn = br._conn()
++                try:
++                    candidates = []
++                    for account in br.grantable_accounts("glm"):
++                        name = account["name"]
++                        cap = br.account_model_cap("glm", account, glm_model or "")
++                        if (br._account_held(conn, "glm", name) < int(account["_eff_cap"])
++                                and (cap is None or br._account_model_held(conn, "glm", name, glm_model or "") < cap)):
++                            candidates.append(account)
++                    for name in registry:
++                        ready, _ = filter_observed_accounts(candidates, host=name, model=glm_model,
++                            now=now.timestamp(), hosts_path=br.hosts_path,
++                            state_dir=host_pick.HOSTS_STATE_DIR)
++                        if not ready:
++                            mode_excluded.add(name)
++                finally:
++                    conn.close()
+             view = placement_view.build_placement_view(
+                 registry, host_pick.HOSTS_STATE_DIR, mode, now=now,
+-                excluded=pool_excluded, plan_path=None, state_reader=reader,
++                excluded=mode_excluded, plan_path=None, state_reader=reader,
+                 **({"selection_key": route_key} if host == "auto" and route_key is not None else {}),
+             )
+             chosen = view.get("host_choice")
+@@ -1811,10 +1835,14 @@
+                 or any(type(value) is not str or value not in {"linux", "darwin"} for value in required_platforms)):
+             return "NONE reason=invalid required_platforms or host"
+     modes = None
++    glm_candidate_model = None
+     if host is not None:
+         try:
++            glm_candidate_model = _selection_model("glm", task_class, load_pools(), needs,
++                model=requested_model)[0]
+             routes = _eligible_host_routes(
+-                host, **({"route_key": route_key} if route_key is not None else {}),
++                host, glm_model=glm_candidate_model,
++                **({"route_key": route_key} if route_key is not None else {}),
+                 **({"required_modes": required_modes} if required_modes is not None else {}),
+                 **({"required_platforms": required_platforms} if required_platforms is not None else {}),
+             )
+@@ -1839,6 +1867,11 @@
+         if selected not in modes:
+             return "NONE reason=selected pool has no eligible mode on requested host"
+         chosen_host, chosen_mode = routes[selected]
++        if chosen_mode == "glm":
++            emitted = re.search(r"(?:^| )MODEL=([^ ]+)", line)
++            expected = glm_candidate_model
++            if emitted is None or emitted.group(1) != expected:
++                return "NONE reason=glm model changed after host account observation"
+         if required_modes is not None and chosen_mode not in required_modes:
+             return "NONE reason=selected mode does not satisfy required_modes"
+         line += f" HOST={chosen_host} MODE={chosen_mode}"
+--- a/lease_broker.py
++++ b/lease_broker.py
+@@ -634,7 +634,7 @@
+                     model,
+                     operator_child_id,
+                 )
+-                if result.ok or last_reason == "operator_authorization_refused":
++                if result.ok or last_reason in ("operator_authorization_refused", "host_account_unavailable"):
+                     return result
+             finally:
+                 fcntl.flock(lock, fcntl.LOCK_UN)
+@@ -763,8 +763,9 @@
+         pool: str,
+         preferred: Optional[str],
+         model: str = "",
++        grantable_override: Optional[List[Dict[str, Any]]] = None,
+     ) -> Optional[str]:
+-        grantable = self.grantable_accounts(pool)
++        grantable = self.grantable_accounts(pool) if grantable_override is None else grantable_override
+         if not grantable:
+             return None
+ 
+@@ -841,6 +842,17 @@
+                 waiter_id,
+                 "grok_exhausted",
+             )
++        compatible_accounts = None
++        if pool == "glm" and task_class == "remote-glm":
++            # Pairing precedes capacity demand; no new waiter for an unavailable
++            # host/account configuration. Model/held room stays inside selection.
++            from glm_host_account_source import filter_observed_accounts
++            compatible_accounts, _ = filter_observed_accounts(self.grantable_accounts(pool),
++                host=host, model=model, now=self.now(), preferred=account,
++                hosts_path=self.hosts_path)
++            if not compatible_accounts:
++                return (AcquireResult(ok=False, reason="host_account_unavailable", pool=pool,
++                                      orchestrator_id=orch), waiter_id, "host_account_unavailable")
+         cap = self.pool_cap(pool)
+         conn = self._conn()
+         try:
+@@ -899,7 +911,8 @@
+                     "priority_wait",
+                 )
+ 
+-            picked = self._pick_account(conn, pool, account, model=model)
++            picked = self._pick_account(conn, pool, account, model=model,
++                                        grantable_override=compatible_accounts)
+             if not picked:
+                 reason = "account_unavailable" if account else "accounts_at_cap"
+                 if account and any(self._parked(a, self.now()) for a in (spec.get("accounts") or []) if a.get("name") == account):
+--- /dev/null
++++ b/glm_host_account_readiness.py
+@@ -0,0 +1,198 @@
++"""Pure GLM host/account readiness predicate: telemetry filter, no effects.
++
++Filters incumbent broker policy candidate rows against per-host telemetry
++(``document["glm_local_account_readiness"]``). Every input is caller data,
++including the clock; this module never prints and never reads config, env,
++files, clocks, network, credentials or installed runtime state, and never
++computes capacity, picks a host or grants a lease. ``source_verified`` must
++be literally True from actual incumbent bounded owned/no-follow stable-file
++provenance checks already performed by the caller; it is never derived from
++``document`` fields and is not authentication or custody evidence produced
++here. ``config_scope`` is a mechanical schema/version label; matching it does
++not prove the readiness producer exists, was adopted, or resolves the same
++launch config. Key readiness is model-independent; ``candidate_model`` only
++binds the caller's exact model-policy projection.
++"""
++
++import math
++
++__all__ = ["filter_glm_host_accounts"]
++
++SCHEMA = "mastermind.glm_local_account_readiness.v1"
++CONFIG_SCOPE = "launcher_glm_config.v1"
++STATUS_KNOWN = "known"
++SUPPORTED_MODE = "glm"
++SUPPORTED_MODELS = ("glm-5.3", "glm-5.3-flash")
++
++MAX_ENTRIES = 64
++MAX_NAME_LEN = 128
++BAD_NAME_CHARS = "\r\n\0"
++FUTURE_SLACK = 1  # timestamps may lead the passed clock by at most this many seconds
++DEFAULT_MAX_AGE = 600
++
++# Static reasons are fixed literals: they never echo account, host or any
++# other worker-controlled or credential-bearing value.
++REASON_OK = "ok"
++REASON_MODE = "mode out of scope"
++REASON_MODEL = "model out of scope"
++REASON_CANDIDATE_MODEL = "candidate model mismatch"
++REASON_SOURCE_UNVERIFIED = "source not verified"
++REASON_CLOCK_INVALID = "clock arguments invalid"
++REASON_PREFERENCE_INVALID = "preference argument invalid"
++REASON_ROWS_INVALID = "candidate rows invalid"
++REASON_DOCUMENT_INVALID = "telemetry document invalid"
++REASON_DOCUMENT_STALE = "telemetry stale or timestamp invalid"
++REASON_ENVELOPE_INVALID = "readiness envelope invalid"
++REASON_ENVELOPE_STALE = "readiness observation stale"
++REASON_NO_READY = "no ready accounts"
++REASON_PREFERRED_UNAVAILABLE = "preferred account unavailable"
++
++
++def _is_number(value):
++    """Finite int/float but never bool."""
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        return False
++    try:
++        return math.isfinite(value)
++    except OverflowError:
++        return False
++
++
++def _fresh(value, now, max_age):
++    """Exact, unfloored freshness: value > 0, future slack, within max_age."""
++    if not _is_number(value) or value <= 0:
++        return False
++    if value > now + FUTURE_SLACK:
++        return False
++    return now - value <= max_age
++
++
++def _valid_name(name):
++    """Nonempty str <= MAX_NAME_LEN without CR/LF/NUL; other characters allowed."""
++    if not isinstance(name, str) or not name or len(name) > MAX_NAME_LEN:
++        return False
++    return not any(ch in name for ch in BAD_NAME_CHARS)
++
++
++def _valid_sha256(value):
++    return (
++        isinstance(value, str)
++        and len(value) == 64
++        and all(ch in "0123456789abcdef" for ch in value)
++    )
++
++
++def _exact_str(value, expected):
++    """Exact string equality with no coercion; refuses None/None matches."""
++    return isinstance(value, str) and value == expected
++
++
++def _candidate_rows(accounts):
++    """Original row objects in input order, or None when rows are malformed."""
++    if not isinstance(accounts, (list, tuple)) or len(accounts) > MAX_ENTRIES:
++        return None
++    rows = []
++    seen = set()
++    for row in accounts:
++        if not isinstance(row, dict):
++            return None
++        name = row.get("name")
++        if not _valid_name(name) or name in seen:
++            return None
++        seen.add(name)
++        rows.append(row)
++    return rows
++
++
++def _readiness_flags(envelope):
++    """Exact alias -> literal True/False/None mapping within bounds, else None."""
++    flags = envelope.get("accounts")
++    if not isinstance(flags, dict) or len(flags) > MAX_ENTRIES:
++        return None
++    for alias, flag in flags.items():
++        if not _valid_name(alias):
++            return None
++        if flag is not True and flag is not False and flag is not None:
++            return None
++    return flags
++
++
++def filter_glm_host_accounts(
++    accounts,
++    document,
++    *,
++    host,
++    transport_alias,
++    mode,
++    model,
++    candidate_model,
++    validator_sha256,
++    now,
++    max_age=DEFAULT_MAX_AGE,
++    preferred=None,
++    source_verified=False,
++):
++    """Return (ready original candidate rows in input order, static reason).
++
++    Malformed envelope/entry/row input, unknown or missing readiness and stale
++    or invalid timestamps can never qualify an account; a preference never
++    silently falls back.
++    """
++    if mode != SUPPORTED_MODE:
++        return [], REASON_MODE
++    if model not in SUPPORTED_MODELS:
++        return [], REASON_MODEL
++    if candidate_model != model:
++        return [], REASON_CANDIDATE_MODEL
++    if source_verified is not True:
++        return [], REASON_SOURCE_UNVERIFIED
++    if not _is_number(now) or not _is_number(max_age) or max_age < 0:
++        return [], REASON_CLOCK_INVALID
++    preference = None
++    if preferred is not None:
++        if not isinstance(preferred, str):
++            return [], REASON_PREFERENCE_INVALID
++        preference = preferred or None  # "" follows incumbent no-preference truthiness
++    rows = _candidate_rows(accounts)
++    if rows is None:
++        return [], REASON_ROWS_INVALID
++    if not isinstance(document, dict):
++        return [], REASON_DOCUMENT_INVALID
++    if not _exact_str(document.get("host"), host):
++        return [], REASON_DOCUMENT_INVALID
++    if document.get("reachable") is not True:
++        return [], REASON_DOCUMENT_INVALID
++    if not _fresh(document.get("ts"), now, max_age):
++        return [], REASON_DOCUMENT_STALE
++    envelope = document.get("glm_local_account_readiness")
++    if not isinstance(envelope, dict):
++        return [], REASON_ENVELOPE_INVALID
++    if (
++        envelope.get("schema") != SCHEMA
++        or not _exact_str(envelope.get("host"), host)
++        or not _exact_str(envelope.get("transport_alias"), transport_alias)
++        or envelope.get("mode") != SUPPORTED_MODE
++        or envelope.get("config_scope") != CONFIG_SCOPE
++        or envelope.get("status") != STATUS_KNOWN
++    ):
++        return [], REASON_ENVELOPE_INVALID
++    sha = envelope.get("validator_sha256")
++    if not _valid_sha256(sha) or sha != validator_sha256:
++        return [], REASON_ENVELOPE_INVALID
++    flags = _readiness_flags(envelope)
++    if flags is None:
++        return [], REASON_ENVELOPE_INVALID
++    if not _fresh(envelope.get("observed_at"), now, max_age):
++        return [], REASON_ENVELOPE_STALE
++    ready = {alias for alias, flag in flags.items() if flag is True}
++    if preference is not None:
++        for row in rows:
++            if row.get("name") == preference:
++                if preference in ready:
++                    return [row], REASON_OK
++                break
++        return [], REASON_PREFERRED_UNAVAILABLE
++    selected = [row for row in rows if row.get("name") in ready]
++    if not selected:
++        return [], REASON_NO_READY
++    return selected, REASON_OK
+--- /dev/null
++++ b/glm_host_account_source.py
+@@ -0,0 +1,68 @@
++"""Local observation reader for the existing picker/broker; no transport or grant."""
++from __future__ import annotations
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import stat
++
++HERE = Path(__file__).resolve().parent
++MAX_BYTES = 1024 * 1024
++
++
++def owned_bytes(path, *, maximum=MAX_BYTES):
++    """Bounded stable file + immediate-directory custody, never authentication."""
++    path = Path(path)
++    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
++    dfd = os.open(path.parent, flags | os.O_DIRECTORY)
++    try:
++        directory = os.fstat(dfd)
++        if directory.st_uid != os.geteuid() or directory.st_mode & 0o022:
++            raise ValueError('observation directory custody')
++        fd = os.open(path.name, flags, dir_fd=dfd)
++        try:
++            before = os.fstat(fd)
++            def identity(st):
++                return (st.st_dev, st.st_ino, st.st_uid, st.st_mode, st.st_size,
++                        st.st_mtime_ns, st.st_ctime_ns)
++            if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
++                    or before.st_mode & 0o022 or before.st_size > maximum):
++                raise ValueError('observation file custody')
++            data = bytearray()
++            while len(data) <= maximum:
++                chunk = os.read(fd, min(65536, maximum + 1 - len(data)))
++                if not chunk:
++                    break
++                data.extend(chunk)
++            if (len(data) > maximum or identity(before) != identity(os.fstat(fd))
++                    or identity(before) != identity(os.stat(path.name, dir_fd=dfd, follow_symlinks=False))):
++                raise ValueError('observation file changed')
++            current = os.stat(path.parent, follow_symlinks=False)
++            if (current.st_dev, current.st_ino) != (directory.st_dev, directory.st_ino):
++                raise ValueError('observation directory changed')
++            return bytes(data)
++        finally:
++            os.close(fd)
++    finally:
++        os.close(dfd)
++
++
++def filter_observed_accounts(accounts, *, host, model, now, preferred=None,
++                             hosts_path=None, state_dir=None, validator_path=None):
++    """Intersect existing candidates only. Failure never grants/falls back."""
++    from glm_host_account_readiness import filter_glm_host_accounts
++    if not isinstance(host, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}', host):
++        return [], 'glm_host_account_source_invalid'
++    try:
++        registry = json.loads(owned_bytes(hosts_path or HERE/'hosts.json'))
++        entry = registry[host]
++        if not isinstance(entry, dict) or not isinstance(entry.get('ssh_alias'), str) or not entry.get('ssh_alias'):
++            raise ValueError('host transport missing')
++        document = json.loads(owned_bytes(Path(state_dir or HERE/'state/hosts')/(host+'.json')))
++        digest = hashlib.sha256(owned_bytes(validator_path or HERE/'glm_keys.py')).hexdigest()
++        return filter_glm_host_accounts(accounts, document, host=host,
++            transport_alias=entry['ssh_alias'], mode='glm', model=model, candidate_model=model,
++            validator_sha256=digest, now=now, preferred=preferred, source_verified=True)
++    except (OSError, ValueError, KeyError, TypeError, OverflowError):
++        return [], 'glm_host_account_source_unavailable'
+--- /dev/null
++++ b/glm_host_account_probe.py
+@@ -0,0 +1,70 @@
++"""Build nonsecret code for the incumbent host_pull transport, never probe here."""
++from __future__ import annotations
++import base64
++import hashlib
++import json
++from pathlib import Path
++import shlex
++import sys
++
++from glm_host_account_source import owned_bytes
++
++
++def build_probe(host, transport_alias, names, validator_bytes):
++    if (not isinstance(names, list) or not 1 <= len(names) <= 64
++            or len(set(names)) != len(names)
++            or any(not isinstance(n, str) or not 1 <= len(n) <= 128
++                   or any(c in n for c in '\r\n\0') for n in names)):
++        raise ValueError('invalid policy account aliases')
++    digest = hashlib.sha256(validator_bytes).hexdigest()
++    envelope = dict(host=host, transport_alias=transport_alias, accounts=names,
++                    validator_sha256=digest, validator=base64.b64encode(validator_bytes).decode())
++    # Execute only the exact reviewed validator bytes. Config stays on its host;
++    # no credential values, config paths, exception text or inventory is emitted.
++    program = '''import base64,hashlib,json,sys,time,types
++p=json.loads(base64.b64decode(sys.argv[1]))
++r={'schema':'mastermind.glm_local_account_readiness.v1','host':p['host'],
++ 'transport_alias':p['transport_alias'],'mode':'glm','config_scope':'launcher_glm_config.v1',
++ 'validator_sha256':p['validator_sha256'],'observed_at':time.time(),'status':'unknown',
++ 'accounts':{}}
++try:
++ source=base64.b64decode(p['validator'],validate=True)
++ if hashlib.sha256(source).hexdigest()!=p['validator_sha256']: raise ValueError()
++ module=types.ModuleType('glm_probe_validator')
++ exec(compile(source,'glm_keys.py','exec'),module.__dict__)
++ raw=module._load_raw()
++ if not isinstance(raw,dict) or not raw: raise ValueError()
++ module._load_raw=lambda: raw
++ account_map=module.accounts(quiet=True)
++ for name in p['accounts']:
++  try: module.selected_account_key(name,account_map); ready=True
++  except (ValueError,TypeError): ready=False
++  r['accounts'][name]=ready
++ r['status']='known'
++except Exception:
++ r['accounts']={}
++print('glm_local_account_readiness='+json.dumps(r,separators=(',',':'),allow_nan=False))
++'''
++    encoded = base64.b64encode(json.dumps(envelope, separators=(',', ':')).encode()).decode()
++    # Match the original launcher sequence; HOST_ENV status is not an admission gate.
++    inner = ('export PATH=$HOME/lanes/venv/bin:$HOME/.local/bin:/opt/homebrew/bin:$PATH; '
++             'source ~/lanes/ext/HOST_ENV.sh >/dev/null 2>&1; '
++             'python3 -c '+shlex.quote(program)+' '+shlex.quote(encoded))
++    return 'PATH="${GLM_LAUNCH_BASE_PATH:-$PATH}" /bin/bash -c '+shlex.quote(inner)
++
++
++def main(argv):
++    import yaml
++    here = Path(__file__).resolve().parent
++    host, alias, policy_path = argv
++    policy = yaml.safe_load(owned_bytes(policy_path))
++    names = [a['name'] for a in policy['providers']['glm']['accounts']]
++    print(build_probe(host, alias, names, owned_bytes(here/'glm_keys.py')))
++
++
++if __name__ == '__main__':
++    try:
++        main(sys.argv[1:])
++    except (OSError, ValueError, KeyError, TypeError):
++        # Caller records no readiness on failure. Never probe via another path.
++        raise SystemExit(78)

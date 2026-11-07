@@ -1,0 +1,97 @@
+{
+  "base_sha": "7b1c7736d49ef399ec74e91e8e251c84bc7d2bb6",
+  "broader_macOS_run": {
+    "delegate": {
+      "passed": 28,
+      "total": 28
+    },
+    "failure_observations": [
+      "Darwin lacks /proc/net/tcp and Linux RSS interfaces",
+      "Darwin 127.0.0.2/.3 bind failures",
+      "Existing native-turn fixture refused NATIVE_CANARY_ENV_UNQUALIFIED",
+      "Existing /tmp versus /private/tmp path expectations"
+    ],
+    "harness": {
+      "errors": 5,
+      "failures": 2,
+      "total": 90
+    },
+    "models": {
+      "passed": 22,
+      "total": 22
+    },
+    "qualification": "NOT_GREEN; run preceded final AF_UNIX journal-descriptor refinement; focused suite qualifies final refinement",
+    "runtime": {
+      "errors": 3,
+      "failures": 4,
+      "skipped": 1,
+      "total": 86
+    },
+    "secretary": {
+      "passed": 70,
+      "total": 70
+    },
+    "steward": {
+      "passed": 45,
+      "total": 45
+    },
+    "unchanged_failure_paths": [
+      "integrations/hermes_harness/native_turn_runner.py",
+      "integrations/hermes_harness/tests/test_native_turn_runner.py",
+      "integrations/hermes_runtime/tests/test_gateway_supervisor.py",
+      "integrations/hermes_runtime/tests/test_install_lifecycle.py"
+    ]
+  },
+  "effects": {
+    "accounts_created": false,
+    "credentials_accessed": false,
+    "grok_cutover": false,
+    "provider_called": false,
+    "services_installed": false,
+    "source_only": true
+  },
+  "focused": {
+    "command": "python3.12 -m unittest integrations.hermes_runtime.tests.test_root_system_service integrations.hermes_runtime.tests.test_operator_canary_reload integrations.hermes_runtime.tests.test_native_egress integrations.hermes_runtime.tests.test_role_isolation integrations.hermes_runtime.tests.test_tcp_sandbox integrations.hermes_runtime.tests.test_tcp_sandbox_linux -v",
+    "failed": 0,
+    "linux_kernel_case": "SKIPPED_NON_LINUX_NOT_ACCEPTED",
+    "log_sha256": "fb7cbcad6741092a5056f5a9a42bcb3625aede063eadf4fefbbe5538ada3724c",
+    "passed": 51,
+    "platform": "macOS",
+    "python": "3.12.13",
+    "skipped": 1,
+    "total": 52
+  },
+  "independent_review": "NOT_PROVEN",
+  "installed_host": "NOT_PROVEN",
+  "limitations": [
+    "Landlock policy restricts TCP only; not UDP or AF_UNIX IPC",
+    "Cgroup address filtering and listener ownership require actual host proof",
+    "No full-suite Linux acceptance yet",
+    "Original #1917 CodeQL repair remains separate and untouched"
+  ],
+  "linux_kernel_enforcement": "NOT_PROVEN",
+  "operation": "hermes-1966-isolation-repair-20261103-sol-001",
+  "parent_program": "meta-ceo-open-harness-convergence-20261024-sol-001",
+  "procedure_sha": "910803421beca53ca25145392725ab2d84c7a8e9",
+  "protected_release": "NOT_PROVEN",
+  "provider_authentication": false,
+  "recorded_at": "2026-11-04T00:56:31.549606+00:00",
+  "schema": "mastermind.hermes_role_isolation_source_evidence.v1",
+  "slack_roundtrip": false,
+  "source_sha256": {
+    "docs/hermes/DEPLOY_UBUNTU1.md": "c90cadc2b78ebf33a0d632674ff8bdc3fbcd857e9b235d17fe08d88fa341399d",
+    "docs/hermes/OPERATOR_CANARY_RELOAD.md": "f4924f11bae9cdf2d8862beda13e3c1f08fd9beb60318e58553c6fa0f2135635",
+    "docs/hermes/ROLE_ISOLATION_REPAIR.md": "dcd6a49c38a5d699cff31822601e19b1efeb0cf5b1bc91b23910cc9d86880cc5",
+    "docs/hermes/ROOT_CONFINED_SYSTEM_UNIT.md": "1b820af5e93b50bc8660977186db1f5b0fff8967687aea84865aaaf8eeba3996",
+    "integrations/hermes_runtime/cli.py": "babd871a897e69b1530b84a7d341e95ea5dcbb6892b6c17a9a922930b4856f44",
+    "integrations/hermes_runtime/egress.py": "3d8c6b96c8e63b428d581541c436ae1b762d7012232623375f322226ef2c0ce8",
+    "integrations/hermes_runtime/role_isolation.py": "23a42f2e9c02aaa2ecd71f37bd85a07d9d93b8f4263984d87d57979938531171",
+    "integrations/hermes_runtime/system_service.py": "f811ddc56635696ccf861c13c81d0e0ddc13e713347921b9e4abd1d13c4f7d91",
+    "integrations/hermes_runtime/tcp_sandbox.py": "225e3c7fabc4d505d39556f7578a1bbcb4f50d20092f2309ea6b6212bf372f53",
+    "integrations/hermes_runtime/tests/test_operator_canary_reload.py": "14fc47af85c12a5321fb4a45e9d7ec855c77d95fd8a4ea8237f0a38b9074e1e6",
+    "integrations/hermes_runtime/tests/test_role_isolation.py": "061284922d2a188f14b8d51a2a47ebdce8e91d83b2d462a08c9da2f8503b8060",
+    "integrations/hermes_runtime/tests/test_root_system_service.py": "3bf1c21cbf48c48c7bed0c5b20993f1b81319120588fa98759fa60867bcb2b7f",
+    "integrations/hermes_runtime/tests/test_tcp_sandbox.py": "cbf5c652e1c1c462ee52cc68ddbbb8a4e355412123696f4c255af91c7fdbf85a",
+    "integrations/hermes_runtime/tests/test_tcp_sandbox_linux.py": "f017230ee45a8fb0bbd872ed6ebc816cb9bf78de44d91625f88a30fdd893e17d"
+  }
+}

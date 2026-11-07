@@ -1,0 +1,65 @@
+{
+  "schema": "mastermind.fabric_discovery_evidence.v1",
+  "source_base": "54e8659730141fc130ebbeb214dbb50f3edb04a7",
+  "procedure_pin": "d837e04bf60a9fb60b7c530d287115a298fc1af0",
+  "accepted_predecessor": {
+    "pr": 1411,
+    "merge_commit": "98d00027cf5e228be9bd584684ad0284769cdf74",
+    "merged_at": "2026-10-13T12:36:45Z"
+  },
+  "source_sha256": {
+    "app/mastermind_os/src/fabric/AttendedFabricInspector.tsx": "1ec09be4a5668cf7aec08c6bb182355390c676dd61cdbd031bcd0faf45f55f19",
+    "app/mastermind_os/src/fabric/AttendedFabricWorkspace.tsx": "6d27c17ce68918919ba7af481f1c888e36384430c45a62a4d4d5659e9db185a6",
+    "app/mastermind_os/src/fabric/FabricMissionInspector.test.tsx": "8548d61a796d5a902edc0a6b8f669a27211723b6a645f72cf23841c4787226a3",
+    "app/mastermind_os/src/fabric/FabricMissionInspector.tsx": "4f9a7f32eeec2d4f9e849f0c0202c98a6645dcc4be8cacfe1b08f21eb42e9154",
+    "app/mastermind_os/src/fabric/FabricRunCatalog.test.tsx": "07fc335a1b31b5195f3c96112f6845f7073f549b9bce013f4db328201dd3f31d",
+    "app/mastermind_os/src/fabric/FabricRunCatalog.tsx": "8693153287381f420d717fd44615d931ed349cf894f1c0301589d9ec70d5be93",
+    "app/mastermind_os/src/fabric/attended-status.test.tsx": "a5ece5df2365fbf53c1722d355227e48a303d660c771a83ef15ecd135e31543c",
+    "app/mastermind_os/src/fabric/attended-status.ts": "d07497408dd283aa529c46deb13ffd59d3bfe7b0d700e712bf78d90785c51dd0",
+    "app/mastermind_os/src/fabric/catalog-contract.ts": "417021f39a1960806ff93c21dbff942b901017e4322e836ede1f2d21d135cbd8",
+    "app/mastermind_os/src/fabric/fabric-catalog.css": "e74fd633f7fb2b3f6e2efeb67c35dc2aa1d4483e439e59347e7df4922edef79d",
+    "app/mastermind_os/src/fabric/fabric-inspector.css": "de491ca36dca20d958876515071faf8861ccf0c3ccc5eed8db6cd67b9759f6a6",
+    "app/mastermind_os/src/fabric/mission-interiors.ts": "28afb5d7f4a32e05093ac570aed8f5f14490c5057dbe484822ed7d7a7eefc7e8",
+    "app/mastermind_os/src/host.ts": "db55f68e555db6469be3e46394d135ead2d5ad31ed804d1d56dfb4b964437184",
+    "app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx": "ca0df53025c59b4f6a73544d4106a8a44bf3cf045bc8d76d19851a2a6e56f682"
+  },
+  "tests": {
+    "passed": 1468,
+    "skipped": 1,
+    "failed": 0,
+    "files_passed": 63,
+    "new_catalog_cases": 20
+  },
+  "build": {
+    "exit_code": 0,
+    "warnings": [
+      "chunk >500kB",
+      "mixed static/dynamic Tauri import"
+    ]
+  },
+  "browser": {
+    "executed": false,
+    "reason": "Platform blocked bounded Playwright qualification before dispatch. No retry or alternate carrier."
+  },
+  "source_producer": {
+    "implemented": false,
+    "reason": "Platform blocked creation of common/attended_fabric_contract.py before dispatch; file absence confirmed; no retry or displaced implementation."
+  },
+  "catalog_ui_child": {
+    "id": "mmos-fabric-catalog-ui-20261013-c4-01",
+    "result": "NONE reason=no_pool_available",
+    "started": false,
+    "root": "mmos-fabric-interiors-20261013-c4",
+    "replayed": false
+  },
+  "logs": {
+    "full-tests.log": {
+      "sha256": "b632933bc1e15eeae297001bd748510cb42c866511ef9645ccbb4ebb5be20319",
+      "tail": " \u2713 src/App.presentation.test.tsx (3 tests) 254ms\n \u2713 src/programs-observation.test.ts (8 tests) 5ms\n \u2713 src/meta-ceo/preview.test.ts (7 tests) 4ms\n \u2713 src/conversations/useObservedConversation.test.tsx (6 tests) 16ms\n \u2713 src/launch-config.test.ts (10 tests) 3ms\n \u2713 src/research/main-entry.test.tsx (2 tests) 46ms\n \u2713 src/research/ResearchEvidenceEntry.test.tsx (1 test) 134ms\n\n Test Files  63 passed (63)\n      Tests  1468 passed | 1 skipped (1469)\n   Start at  13:41:32\n   Duration  38.08s (tests 61%, environment 26%, import 8%, transform 4%)\n\n    Isolate  63 workers spawned \u00b7 ~383ms startup each (spawn + environment, per file)\n             at least ~11.67s faster with isolate: false \u2014 reuses workers across files instead of one per file\n"
+    },
+    "build.log": {
+      "sha256": "12c3adc6fb8fbdb1335988eaeb8527f481cffe1489a723a4c6c0d429582bfe73",
+      "tail": "computing gzip size...\ndist/index.html                              0.36 kB \u2502 gzip:   0.26 kB\ndist/assets/atelier-office-poIrp4_y.jpg     27.30 kB\ndist/assets/Manrope-Variable-FzEoaBTQ.ttf  165.42 kB\ndist/assets/Inter-Variable-DiVDrmQJ.woff2  352.24 kB\ndist/assets/index-BCcvSR-k.css              60.08 kB \u2502 gzip:  10.83 kB\ndist/assets/index-IdvztiFh.js              542.27 kB \u2502 gzip: 154.78 kB\n\n[INEFFECTIVE_DYNAMIC_IMPORT] node_modules/@tauri-apps/api/core.js is dynamically imported by src/App.tsx but also statically imported by node_modules/@tauri-apps/api/event.js, src/main.tsx, dynamic import will not move module into another chunk.\n\n[plugin builtin:vite-reporter] \n(!) Some chunks are larger than 500 kB after minification. Consider:\n- Using dynamic import() to code-split the application\n- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting\n- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.\n\u2713 built in 713ms"
+    }
+  }
+}

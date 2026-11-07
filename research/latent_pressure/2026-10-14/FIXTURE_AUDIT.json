@@ -1,0 +1,36 @@
+{
+  "classification": "LATER_VINTAGE_REPLAY_NOT_ORIGINAL_DECISION_TIME_PROOF",
+  "source_pin": "78388ac29f7e54c9dfe7799a8e4769fb46d4aed6",
+  "direction_flip_reproduced": "2026-06-24",
+  "old_704bps_magnitude_reproduced": false,
+  "unit_check": "0.093 dimensionless log-return = 930 bps, not 9.3 bps",
+  "bloc_20day_spread_bps": {
+    "2026-06-23": -133.3696910256781,
+    "2026-06-24": 273.51324224924895,
+    "2026-07-01": 726.7392513542126,
+    "2026-07-02": 1174.0567989720428
+  },
+  "endpoint_replays": [
+    {
+      "start": "2026-06-23",
+      "end": "2026-07-01",
+      "XLV_pct": 4.836378452305756,
+      "SMH_pct": -0.2556009728339803,
+      "pair_log_relative_bps": 497.899302004252
+    },
+    {
+      "start": "2026-06-24",
+      "end": "2026-07-02",
+      "XLV_pct": 6.775350267638736,
+      "SMH_pct": -4.30265714763296,
+      "pair_log_relative_bps": 1095.365644641498
+    },
+    {
+      "start": "2026-06-23",
+      "end": "2026-07-02",
+      "XLV_pct": 7.596280473836381,
+      "SMH_pct": -4.784182999699659,
+      "pair_log_relative_bps": 1222.4000608525928
+    }
+  ]
+}

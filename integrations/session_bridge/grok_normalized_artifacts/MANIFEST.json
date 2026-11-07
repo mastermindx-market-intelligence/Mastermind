@@ -1,0 +1,35 @@
+{
+  "schema": "fabric.grok_normalized_artifacts.v1",
+  "files": {
+    "lane_runtime.py": {
+      "preimage": "271791dfd240da18fc93e38184cc502ab1213c525fa87cb0bc82398113609b3a",
+      "postimage": "17409b8459ff3576e557490a2402f5c6df86738f9a3a81151db9f054773c6216"
+    },
+    "remote_sub_exec.py": {
+      "preimage": "edb9780fdd71e462d5187176740ceb402f5f0e98368290a3fb2eb95c275e313f",
+      "postimage": "bf7722c0dc14c9790ab22aa05b3fb3054a367883e36162463c38a680396b8b1a"
+    },
+    "native_remote.py": {
+      "preimage": "18bf26c27e496f43deaedfbf8f89af4e7d93831f379d23e0207311b58f61448d",
+      "postimage": "df6c8b9b4d128deaff7e16810c6f21a97de60d3973f467a3630e8c11b72a23c4"
+    },
+    "artifact_delivery.py": {
+      "preimage": "8783be22ff1c565c0092db78315485313529b12d608531c6972202d6206a3bd7",
+      "postimage": "a2ed5494fbc724e18d7b25623a34e3c49106755b5877f13d5f0a2e51c3415289"
+    },
+    "artifact_production.py": {
+      "preimage": "422130aa062eb45ff53430b5e0edbd0334fec96baea411a5d61800c05a28ee5f",
+      "postimage": "c0f17c3e489c83bdb369d6c1ea9adc2757f4732f515cbc76e230fe154a61f67e"
+    },
+    "pick.py": {
+      "preimage": "8b957b59201f865d5f82a610807d8dd034d997b708fdfd0a5a5ebc2015d94635",
+      "postimage": "43fe863bd2207e55ca6d619aa92a55750f9468e05dd6b3567811eca96c288b4c"
+    }
+  },
+  "qualification": "28 normalization PASS;20prior routingPASS plus5changedscoredPASS",
+  "review": "independent coordinator APPROVE_SCOPED after correctedpolicy presence andqualityfallthrough",
+  "historical_backfill": false,
+  "capacity_change": false,
+  "installed": false,
+  "live_acceptance": false
+}

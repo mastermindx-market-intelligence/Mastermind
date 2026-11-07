@@ -1,0 +1,64 @@
+{
+  "approved_patch_reapplied_exactly": "tests/test_ceo_submit_armed_composition.py",
+  "assertion_preservation": "All test method/assertion ASTs from both parents retained; no lost assertions. Fixture construction only adapted.",
+  "base": "0d182495cd3e2a64be41ac7fee458b4b392cf26e",
+  "composed_head_ci": "NOT_PROVEN_YET",
+  "conflict_resolution_sha256": {
+    "integrations/hermes_harness/tests/test_native_doctor_private_credential.py": "58198b32c8c3c11e042decb01198d51ba060666bde1211afc662bc3e413132d8",
+    "integrations/hermes_harness/tests/test_native_model_credentials.py": "da7f16d582866458fe58388e076617b77497eb9bd30cadceeccc88809e163c4b"
+  },
+  "d8_original_exception_test": {
+    "command": "python3.12 -m pytest -q tests/test_ceo_submit_armed_composition.py -k fixed_vendor_tls_port_is_not_an_os_identity",
+    "failed": 0,
+    "log_sha256": "423b1d0e014eb1eab96f4420f7b344c2615be505dd574b756ac884826ca74f2d",
+    "passed": 1
+  },
+  "effects": {
+    "credentials_read": false,
+    "host_modified": false,
+    "merge_or_queue": false,
+    "provider_called": false,
+    "source_only": true
+  },
+  "feature_diff_check": "PASS",
+  "focused": {
+    "failed": 0,
+    "log_sha256": "a02923b5e6eebb49bca2c61c8e1fadd63fe5c08a74ffc432db0213c2aca54d34",
+    "passed": 59,
+    "skipped": 0
+  },
+  "independent_review": "NOT_PROVEN_FOR_NEW_COMPOSITION",
+  "inherited_upstream_whitespace": "Not repaired; original-parent full diff includes unrelated pre-existing patch whitespace.",
+  "manual_resolution_paths": [
+    "integrations/hermes_harness/tests/test_native_doctor_private_credential.py",
+    "integrations/hermes_harness/tests/test_native_model_credentials.py"
+  ],
+  "next": "Non-force original #1963 branch publication; exact new-head CodeQL/Linux CI and independent review, followed by original #1966 descendant integration.",
+  "old_head": "7a924093a27aff4cc2506021cc27c06f8991d377",
+  "operation": "hermes-1963-codeql-integration-20261103-sol-001",
+  "original_owned_paths": 29,
+  "outside_original_owned": [],
+  "parent_program": "meta-ceo-open-harness-convergence-20261024-sol-001",
+  "procedure_pin": "910803421beca53ca25145392725ab2d84c7a8e9",
+  "production": "NOT_PROVEN",
+  "recorded_at": "2026-11-04T01:16:00.756688+00:00",
+  "schema": "mastermind.hermes_composition_proof.v1",
+  "squid_subtree_unchanged": true,
+  "tree": "dab7db83943ded80937c643728d2f0fc3572a3b4",
+  "unchanged_owned_paths": 26,
+  "upstream": "63d184218e8d6a2b7da48f98045a2e67f504f5aa",
+  "upstream_codeql": {
+    "dismissed": false,
+    "head": "63d184218e8d6a2b7da48f98045a2e67f504f5aa",
+    "original_alerts_fixed": [
+      203,
+      204,
+      205,
+      206,
+      207
+    ],
+    "python_analysis": 2091096079,
+    "results_count": 0,
+    "rules_count": 43
+  }
+}
