@@ -151,6 +151,58 @@ A generic error, stalled spinner, missing selector, slow generation, or single f
 
 The product need not always know why a conversation stopped. It must know whether the exact bound reasoning surface can continue safely.
 
+## 6.1 Tool-context pressure, bounded mode recovery, and transcript hygiene
+
+`REPEATED_TERMINAL_GENERATION_FAILURE` means two consecutive terminal generation failures in the
+exact conversation with no successful intervening turn. One resume failure immediately following an
+unresolved tool timeout, connector taint, or `EFFECT_UNKNOWN` also establishes `ROTATION_REQUIRED`
+because the exact surface cannot safely reconcile its prior boundary. `ROTATION_REQUIRED` also applies
+when the exact surface cannot safely continue or the Chairman explicitly retires the conversation.
+These thresholds classify the surface; they do not prove a private provider context limit.
+
+A single failure preserves the truth rule: **Thinking failed != context exhausted**. With low context
+pressure and reconciled effects, classify it `ROTATION_SUSPECTED` and permit at most one bounded
+recovery. That recovery may use a different user-visible reasoning mode such as Extra High when the
+mode is available/authorized and current task fit warrants it. This is a capability recovery experiment,
+not proof of cause, carrier failover, or context rotation. It never bypasses a safety/permission denial
+or clears `EFFECT_UNKNOWN`. If the single failure occurs in an already heavy/unstable conversation,
+`ROTATION_REQUIRED` may instead follow from the exact determination that the bound surface cannot
+safely continue; the error itself still does not prove context exhaustion.
+
+A mode switch and a fresh chat are not lifecycle states. Interactive mode recommendation stays separate
+from automated Executive/ModelRouter admission, provider placement, source custody, RuntimeBinding, and
+effect authority. A fresh mode/session is a material capability invalidator only for the exact actions
+that must be re-proven; one prior READ/WRITE success does not generalize across action families or time.
+
+### 6.2 Stream attachment uncertainty is not session death
+
+The rule is: **client stream detachment is not session death**. A red exclamation, unavailable resume
+stream, "Stopped thinking" label, browser disconnect, or other client/UI symptom without canonical
+termination evidence is `STREAM_ATTACHMENT_UNCERTAIN`; it does not establish `ROTATION_REQUIRED`.
+First reacquire the exact conversation/request state and reconcile any exact PID, process, or modifying
+effect that may still be alive. Do not duplicate `Continue` or any modifying effect merely because the
+client lost its stream. Escalate to terminal-turn/session recovery only when observable evidence shows
+the turn ended, the bound surface is unsafe, or the existing repeated-failure rule is actually met.
+
+A tainted connector generation is unusable for further work. The next connector generation must
+reconcile the exact original PID/action/effect before any replacement or repeat. A timeout, taint, or
+lost response never authorizes carrier failover or a blind retry.
+
+The rule is: **raw tool history is not a continuation manifest**. Never replay full logs, process dumps,
+metrics, source files, schemas, or private reasoning into the successor. Continue from durable
+conclusions, exact identities, unresolved effects, DO_NOT_REDO boundaries, and the minimum fresh
+canonical state.
+
+Planned retirement requires an already-durable continuation before the predecessor is abandoned. If
+canonical persistence itself is unavailable, emit only a copyable `NOT_CANONICALLY_PERSISTED` frontier;
+it is not a durable checkpoint. Classify the boundary through current protected ACTIVE_EXECUTION Step 8
+from observed cause: `EFFECT_UNKNOWN` only for an ambiguous checkpoint write, `EXACT_HUMAN_GATE` only
+for a real human/admin ceremony, and a confirmed pre-dispatch persistence/platform outage as
+`ALL_SCOPED_LANES_BLOCKED` only when every useful lane is blocked. If safe independent work remains,
+the truthful state is `MORE_WORK_EXISTS`. A successor must reconcile and persist the frontier before
+treating it as durable. This law creates no chat registry, transcript store, retry ledger, or second
+memory plane.
+
 ## 7. Closed Web-Sol action surface
 
 The existing public v1 surface remains:

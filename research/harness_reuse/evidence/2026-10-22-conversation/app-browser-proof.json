@@ -1,0 +1,58 @@
+{
+  "schema": "mastermind.conversation_app.browser_fixture.v1",
+  "proof_scope": "SOURCE_FIXTURE_ONLY",
+  "production_authentication": false,
+  "real_send": false,
+  "provider_calls": 0,
+  "parent_consumption": false,
+  "results": [
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1100,
+      "actual_app_shell": true,
+      "reader_and_draft_navigation": true,
+      "office_and_conversation_drafts_separate": true,
+      "evidence_return_focus": true,
+      "source_withdrawal_hides_reader": true,
+      "document_horizontal_overflow": false,
+      "transcript_horizontal_overflow": false,
+      "synthetic_command_counts": {
+        "executive_auth_status": 1,
+        "auth_status": 1,
+        "read_programs": 1,
+        "read_work": 1,
+        "read_mission_v3": 4,
+        "read_current_window": 3
+      },
+      "page_errors": [],
+      "external_requests": []
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "actual_app_shell": true,
+      "reader_and_draft_navigation": true,
+      "office_and_conversation_drafts_separate": true,
+      "evidence_return_focus": true,
+      "source_withdrawal_hides_reader": true,
+      "document_horizontal_overflow": false,
+      "transcript_horizontal_overflow": false,
+      "synthetic_command_counts": {
+        "executive_auth_status": 1,
+        "auth_status": 1,
+        "read_programs": 1,
+        "read_work": 1,
+        "read_mission_v3": 4,
+        "read_current_window": 3
+      },
+      "page_errors": [],
+      "external_requests": []
+    }
+  ],
+  "screenshot_sha256": {
+    "app-desktop.png": "6783bbff113c661163d6c26797d5de8b604f71c0ce8b3cf3f4881c615a518006",
+    "app-mobile.png": "809c0b4943c8db7a286905219c3a42c5f67f18ba386ab334132b24201d3535d4"
+  }
+}
