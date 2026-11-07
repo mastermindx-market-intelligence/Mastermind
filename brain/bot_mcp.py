@@ -318,9 +318,34 @@ def _stock_price(t: str):
 # ---------------- READ tools ----------------
 @tool("get_regime", "Current US macro regime read (quad, growth/inflation scores, liquidity).", {})
 async def get_regime(args):
-    d = _read_json(_V / "data" / "regime" / "latest.json") or {}
     keys = ["date", "quad", "quad_name", "growth_score", "inflation_score", "liquidity_overlay", "cycle_tag"]
-    out = {k: d.get(k) for k in keys} | {"sector_rs_top": (d.get("sector_rs") or [])[:6]}
+    d, core_failed = _read_first_nonempty_mapping_checked((
+        _V / "data" / "regime" / "latest.json",
+    ))
+    if d is None:
+        out = {k: None for k in keys} | {
+            "sector_rs_top": None,
+            "read_status": "unavailable",
+            "regime_status": "unavailable" if core_failed else "absent",
+            "error": "regime_core_unavailable" if core_failed else "regime_core_absent",
+        }
+        if core_failed:
+            out["failed_sources"] = ["regime"]
+        return _json(out)
+
+    sector_rs = d.get("sector_rs")
+    if sector_rs is not None and not isinstance(sector_rs, list):
+        return _json({
+            **{k: None for k in keys},
+            "sector_rs_top": None,
+            "read_status": "unavailable",
+            "regime_status": "unavailable",
+            "error": "regime_core_unavailable",
+            "failed_sources": ["regime"],
+        })
+
+    out = {k: d.get(k) for k in keys} | {"sector_rs_top": (sector_rs or [])[:6]}
+    failed_sources = []
     # E1.1 — append the market_view brief + label_vs_planes line (ADDITIVE; absent view → keys absent).
     # This replaces the ad-hoc 7-key slice so the autonomous Brain reads the same perception layer as
     # the judgment seats — the incident's root cause was the Brain seeing ONLY the label.
@@ -328,35 +353,52 @@ async def get_regime(args):
         from brain.pm_conviction import _read_market_view, _market_view_enrichment
         mv = _read_market_view()
         enrichment = _market_view_enrichment(mv)
+        if enrichment is not None and not isinstance(enrichment, dict):
+            raise TypeError("market-view enrichment is not a mapping")
         if enrichment:
-            compact_mv = dict(enrichment)
-            compact_mv["plane_summaries"] = [
-                {
+            planes = enrichment.get("plane_summaries")
+            if planes is None:
+                planes = []
+            if not isinstance(planes, list):
+                raise TypeError("market-view planes are not a list")
+            compact_planes = []
+            for row in planes:
+                if not isinstance(row, dict):
+                    raise TypeError("market-view plane is not a mapping")
+                freshness, freshness_failed = _mapping_field_checked(row, "freshness")
+                if freshness_failed:
+                    raise TypeError("market-view plane freshness is not a mapping")
+                compact_planes.append({
                     "name": row.get("name"),
                     "direction": row.get("direction"),
                     "status": row.get("status"),
-                    "asof": (row.get("freshness") or {}).get("asof"),
-                    "stale": (row.get("freshness") or {}).get("stale"),
-                    "age_sessions": (row.get("freshness") or {}).get("age_sessions"),
-                }
-                for row in (enrichment.get("plane_summaries") or [])
-            ]
+                    "asof": freshness.get("asof"),
+                    "stale": freshness.get("stale"),
+                    "age_sessions": freshness.get("age_sessions"),
+                })
+            compact_mv = dict(enrichment)
+            compact_mv["plane_summaries"] = compact_planes
+            json.dumps(compact_mv, default=str, ensure_ascii=False)
             out["market_view"] = compact_mv
-    except Exception:  # noqa: BLE001 — additive; never break the tool
-        pass
+    except Exception:  # noqa: BLE001 - preserve the healthy core and other context
+        failed_sources.append("market_view")
     try:
         from brain import decision_context as _dc
 
         dc = _dc.prompt_summary(
             expected_publication=(out.get("market_view") or {}).get("publication")
         )
+        if dc is not None and not isinstance(dc, dict):
+            raise TypeError("decision context is not a mapping")
         if dc:
-            liquidity = dc.get("liquidity") or {}
-            quality = liquidity.get("quality") or {}
-            driver = dc.get("market_driver") or {}
+            liquidity, liquidity_failed = _mapping_field_checked(dc, "liquidity")
+            quality, quality_failed = _mapping_field_checked(liquidity, "quality")
+            driver, driver_failed = _mapping_field_checked(dc, "market_driver")
+            if liquidity_failed or quality_failed or driver_failed:
+                raise TypeError("decision context contains an invalid mapping field")
             # Keep this tool's JSON safely below its transport cap. Rich fresh-lobe context remains
             # available to the strategist/PM; get_regime carries the precise regime core.
-            out["decision_context"] = {
+            compact_dc = {
                 "schema_version": dc.get("schema_version"),
                 "market_asof": dc.get("market_asof"),
                 "hard_label": dc.get("hard_label"),
@@ -383,8 +425,14 @@ async def get_regime(args):
                 "publication": dc.get("publication"),
                 "serving_freshness": dc.get("serving_freshness"),
             }
-    except Exception:  # noqa: BLE001
-        pass
+            json.dumps(compact_dc, default=str, ensure_ascii=False)
+            out["decision_context"] = compact_dc
+    except Exception:  # noqa: BLE001 - preserve the healthy core and other context
+        failed_sources.append("decision_context")
+    if failed_sources:
+        out["read_status"] = "partial"
+        out["failed_sources"] = failed_sources
+        out["note"] = "Regime core is available; named context sources did not complete."
     return _json(out)
 
 
@@ -1136,28 +1184,138 @@ async def get_intake_candidates(args):
       "Context-only — informs conviction, never sizes alone.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_ticker_package(args):
-    t = (args.get("ticker") or "").upper()
-    uni = (_read_json(_V / "site" / "intelligence" / "by_ticker.json")
-           or _read_json(_V / "data" / "intelligence" / "by_ticker.json") or {})
-    intel = (uni.get("tickers") or {}).get(t)
-    pkg = {"ticker": t, "intelligence": intel}
     try:
+        t = _single_name_ticker(args)
+    except Exception:  # noqa: BLE001 - reject invalid arguments before any source access
+        t = None
+    if t is None:
+        return _json({
+            "ticker": None,
+            "read_status": "unavailable",
+            "error": "ticker_package_unavailable",
+        })
+
+    pkg = {"ticker": t, "intelligence": None, "intake": None}
+    failed_sources = []
+    degraded_sources = []
+    intelligence_available = False
+    try:
+        uni, intel, intelligence_failed, _ = _read_ticker_feed_checked(t, (
+            "site/intelligence/by_ticker.json",
+            "data/intelligence/by_ticker.json",
+        ))
+        pkg["intelligence"] = intel
+        intelligence_available = uni is not None
+    except Exception:  # noqa: BLE001 - retain independent sources
+        intelligence_failed = True
+    if intelligence_failed:
+        failed_sources.append("intelligence")
+
+    lenses_available = False
+    meaningful_lenses = False
+    try:
+        import math
         from portfolio import lenses
-        s = lenses.synthesize(lenses.decision_matrix(t, "name"))
-        pkg["lenses"] = {"divergences": s.get("divergences"), "confluence": s.get("confluence"),
-                         "vetoes": s.get("vetoes")}
-    except Exception as e:  # noqa: BLE001
-        pkg["lenses"] = {"error": f"decision matrix unavailable ({e})"}
+
+        synthesis = lenses.synthesize(lenses.decision_matrix(t, "name"))
+        if not isinstance(synthesis, dict):
+            raise TypeError("lens synthesis is not a mapping")
+        confluence = synthesis.get("confluence")
+        if (isinstance(confluence, bool) or not isinstance(confluence, (int, float))
+                or not math.isfinite(confluence)):
+            raise TypeError("lens confluence is not finite numeric evidence")
+        if not isinstance(synthesis.get("divergences"), list) or not isinstance(synthesis.get("vetoes"), list):
+            raise TypeError("lens evidence rows are not lists")
+        qualification_keys = ("data_degraded", "stockdata_present", "n_scored", "thin_evidence", "size_authority")
+        for key in ("data_degraded", "stockdata_present", "thin_evidence"):
+            if key in synthesis and not isinstance(synthesis[key], bool):
+                raise TypeError("lens qualification is not boolean")
+        if "n_scored" in synthesis and (
+            isinstance(synthesis["n_scored"], bool)
+            or not isinstance(synthesis["n_scored"], int)
+            or synthesis["n_scored"] < 0
+        ):
+            raise TypeError("lens vote count is invalid")
+        if "size_authority" in synthesis and (
+            not isinstance(synthesis["size_authority"], str)
+            or not synthesis["size_authority"].strip()
+        ):
+            raise TypeError("lens authority is not a label")
+        projected = {
+            "divergences": synthesis["divergences"],
+            "confluence": confluence,
+            "vetoes": synthesis["vetoes"],
+        }
+        projected.update({key: synthesis[key] for key in qualification_keys if key in synthesis})
+        json.dumps(projected, default=str, ensure_ascii=False)
+        pkg["lenses"] = projected
+        lenses_available = True
+        meaningful_lenses = bool(
+            confluence or projected["divergences"] or projected["vetoes"]
+            or any(key in projected for key in qualification_keys)
+        )
+        if synthesis.get("data_degraded") is True:
+            degraded_sources.append("lenses")
+    except Exception:  # noqa: BLE001 - no exception text reaches the model
+        failed_sources.append("lenses")
+        pkg["lenses"] = {
+            "read_status": "unavailable",
+            "error": "ticker_package_lenses_unavailable",
+        }
+
+    intake_available = False
+    intake_failed = False
     try:
         from brain import intake
-        prov = next((c for c in intake.queue(60) if c["ticker"] == t), None)
-        pkg["intake"] = prov
-    except Exception:  # noqa: BLE001
-        pkg["intake"] = None
-    if intel is None and pkg.get("intake") is None:
-        return _ok(f"no per-ticker intelligence for {t} — not flagged by any dashboard engine.")
-    pkg["note"] = ("Full per-name picture: intelligence facets + lens divergences + intake provenance. "
-                   "The divergence between demand-tape and supply-smart-money is the read; never sizes alone.")
+
+        rows = intake.queue(60)
+        if not isinstance(rows, list):
+            raise TypeError("intake queue is not a list")
+        matching = None
+        valid_rows = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                intake_failed = True
+                continue
+            row_ticker = _feed_ticker_checked(row.get("ticker"))
+            if row_ticker is None:
+                intake_failed = True
+                continue
+            valid_rows += 1
+            if matching is None and row_ticker == t:
+                matching = row
+        json.dumps(matching, default=str, ensure_ascii=False)
+        pkg["intake"] = matching
+        intake_available = not intake_failed or valid_rows > 0
+    except Exception:  # noqa: BLE001 - preserve selected intelligence and lenses
+        intake_failed = True
+    if intake_failed:
+        failed_sources.append("intake")
+
+    if failed_sources or degraded_sources:
+        if failed_sources:
+            pkg["failed_sources"] = failed_sources
+        if degraded_sources:
+            pkg["degraded_sources"] = degraded_sources
+        pkg["read_status"] = (
+            "partial" if intelligence_available or lenses_available or intake_available else "unavailable"
+        )
+        if pkg["read_status"] == "unavailable":
+            pkg["error"] = "ticker_package_unavailable"
+        pkg["note"] = (
+            "Ticker-package evidence is incomplete; missing fields are unknown, not negative evidence."
+        )
+        return _json(pkg)
+
+    if pkg["intelligence"] is None and pkg["intake"] is None and not meaningful_lenses:
+        return _ok(
+            f"no per-ticker intelligence for {t} in the inspected artifacts or first 60 intake candidates."
+        )
+    pkg["note"] = (
+        "Per-name picture: selected intelligence facets, available lens synthesis and intake provenance. "
+        "The intake search covers its first 60 candidates and does not establish complete upstream coverage; "
+        "this package never sizes alone."
+    )
     return _json(pkg)
 
 

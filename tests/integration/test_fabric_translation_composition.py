@@ -145,6 +145,21 @@ class FabricTranslationCompositionTests(unittest.TestCase):
         self.addCleanup(guard.stop)
         return guard.start()
 
+    def test_reviewed_broker_byte_drift_stops_before_native_fixture_import(self):
+        source = Path(__file__).resolve().parents[2] / "ops/native_fabric/quota_continuity/candidate/lease_broker.py"
+        original = Path.read_bytes
+        def drift(path):
+            raw = original(path)
+            return raw + b"\n" if path == source else raw
+        class DriftFixture(FabricTranslationCompositionTests):
+            pass
+        with patch.dict(os.environ, {"MM_REQUIRE_FABRIC_COMPOSITION": "1",
+                                     "MM_FABRIC_FIXTURE_ROOT": str(self.macro_root)}), \
+                patch.object(Path, "read_bytes", drift), \
+                patch.object(importlib.util, "spec_from_file_location", side_effect=AssertionError("native import after drift")):
+            with self.assertRaisesRegex(AssertionError, "Native source mismatch: candidate/lease_broker.py"):
+                DriftFixture.setUpClass()
+
     def setUp(self):
         from engine import fabric_inference_client
         self.transport = fabric_inference_client

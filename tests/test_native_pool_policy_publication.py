@@ -421,7 +421,7 @@ def _publisher_source_manifest():
     from ops.native_fabric.quota_continuity.rollout import build_review_stage as builder
     native = Path(builder.__file__).resolve().parent.parent
     raw_manifest = (native / "rollout/native-manifest.json").read_bytes()
-    assert digest(raw_manifest) == "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a"
+    assert digest(raw_manifest) == "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada"
     manifest = json.loads(raw_manifest)
     current = (native / "candidate/support_bundle.py").read_bytes()
     assert digest(current) == builder.APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]
@@ -436,11 +436,16 @@ def _publisher_host_predecessor(builder, manifest):
     predecessor = builder.before_host_pull_integrity(manifest)
     assert predecessor is not manifest and manifest == before
     assert set(predecessor) == set(manifest)
-    assert {name for name in manifest if manifest[name] != predecessor[name]} == {
-        "ext/host_pull.sh", "ext/host_pull_backend.py", "ext/host_pull_daemon.sh",
-    }
-    assert digest((json.dumps(predecessor, sort_keys=True, indent=2) + "\n").encode()) == (
-        "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e")
+    # The host-pull inverse may also project the composed quiescence-broker
+    # successor back to its frozen preimage when the projected view is an
+    # accepted parent, so accept the composed http parent endpoint (and its
+    # four-member delta) alongside the historical trio-only parent.
+    changed = {name for name in manifest if manifest[name] != predecessor[name]}
+    host_trio = {"ext/host_pull.sh", "ext/host_pull_backend.py", "ext/host_pull_daemon.sh"}
+    assert changed in (host_trio, host_trio | {"ext/lease_broker.py"})
+    assert digest((json.dumps(predecessor, sort_keys=True, indent=2) + "\n").encode()) in (
+        "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+        builder.HOST_PULL_INTEGRITY_COMPOSED_HTTP_PARENT_MANIFEST_SHA256)
     return predecessor
 
 

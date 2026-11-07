@@ -1,6 +1,10 @@
 --- a/ext/lease_broker.py
 +++ b/ext/lease_broker.py
-@@ -914,8 +914,8 @@
+@@ -1837,16 +1837,16 @@
+         base = int(base)
+         name = str(acct.get("name") or "")
+         if pname == "grok" and self._grok_exhausted():
+             return None
          if pname == "bailian":
              return self._bailian_effective_cap(name, base)
          if pname == "glm" and self.external_gates:
@@ -11,7 +15,15 @@
                  return None
          return base
  
-@@ -1641,6 +1641,15 @@
+     def account_model_cap(
+         self, pool: str, acct: Dict[str, Any], model: str
+     ) -> Optional[int]:
+         """Per-model account cap when the provider declares one."""
+@@ -2564,14 +2564,23 @@
+             )
+ 
+         state = "rented" if want_surplus else "held"
+         use_ttl = int(ttl if ttl is not None else (RENT_TTL if state == "rented" else DEFAULT_TTL))
          if purpose == "APPLICATION" and state == "rented":
              use_ttl = min(use_ttl, RENT_TTL)
          lid = uuid.uuid4().hex[:12]
@@ -27,7 +39,15 @@
          now = self.now()
          original_deadline = _ACQUIRE_DEADLINE_NS.get()
          if original_deadline is not None:
-@@ -1659,10 +1668,12 @@
+             require_remaining(original_deadline)
+         if operator_child_id is not None:
+             try:
+                 from fabric_operator_owner import validate_child_admission
+@@ -2582,18 +2591,20 @@
+                         waiter_id, "operator_authorization_refused")
+         if not_before is not None:
+             from commission_deadline import require_not_before
+             require_not_before(not_before)
          conn.execute(
              "INSERT INTO leases "
              "(id, orchestrator_id, pool, account, task_class, model, host, pid, "
@@ -43,3 +63,7 @@
          )
          if operator_child_id is not None:
              conn.execute("UPDATE operator_child_authorizations SET admitted_lease_id=? WHERE run_id=? AND root=? AND admitted_lease_id IS NULL",
+                          (lid, operator_child_id, orch))
+         conn.execute(
+             "DELETE FROM waiters WHERE orchestrator_id=? AND pool=?",
+             (orch, pool),

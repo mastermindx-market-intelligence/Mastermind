@@ -46,8 +46,8 @@
       "source": "candidate/native_plan_worker.py"
     }
   },
-  "application_manifest_sha256": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
-  "manifest_sha256": "f256ac145cbf66c5b325d8f8d1cbe5d5e096646b2796bbe05efb45d6fb21dfd4",
+  "application_manifest_sha256": "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada",
+  "manifest_sha256": "98e8e868c9528ad07f86a74e930fcda15108bbae5ad054ee0577f3dd3d1610b6",
   "provider_manifest_sha256": "f4b5cc916d12c26cc5eb81ccb8df6a84404ee3693dd126bcb4d2046b8d1f959f",
   "provider_profile_sha256": "ea1f44245a6e01b2aae4873fcc0d89d9a650dfd567fd38bbc81e352e4d1ae3cd",
   "provider_profile_source": "../provider_plans/profile.json",
@@ -60,10 +60,10 @@
       "source": "rollout/provider_application/fabric_task.py.patch"
     },
     "ext/lease_broker.py": {
-      "bytes": 202319,
-      "patch_sha256": "62bd1a7adea02a8a53d05d7b46125a3b128210fdf0e464264adcc61b0c4a5316",
-      "preimage_sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
-      "sha256": "05880dc3e6f0849ff1f39094e2dbfe778797ebaddc04acd3b7474598888ca4cd",
+      "bytes": 212133,
+      "patch_sha256": "1b412ede2621442f1a85f9e3033a4132a4f3bc47c19afe498345d7fb1b69878b",
+      "preimage_sha256": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+      "sha256": "77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b",
       "source": "rollout/provider_application/lease_broker.py.patch"
     },
     "ext/pick.py": {

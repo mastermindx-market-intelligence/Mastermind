@@ -1,6 +1,10 @@
 --- a/ext/lease_broker.py
 +++ b/ext/lease_broker.py
-@@ -1645,6 +1645,23 @@
+@@ -1804,14 +1804,31 @@
+     def _base_account_cap(self, pool: str, acct: Dict[str, Any]) -> Optional[int]:
+         """Effective cap, or None if the account must not be granted."""
+         now = self.now()
+         if self._parked(acct, now):
              return None
          base = acct.get("per_account_cap")
          pname = self.provider_name(pool)
@@ -24,3 +28,7 @@
          if self.provider(pool).get("capacity_policy") == "host_admitted":
              # No provider seat count. Configuring both forms fails closed.
              if pname not in ("grok", "cursor") or base is not None:
+                 return None
+             if pname == "grok" and self._grok_exhausted():
+                 return None
+             return self._host_lane_capacity(pname) or None

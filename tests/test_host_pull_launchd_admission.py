@@ -22,7 +22,7 @@ MANIFEST_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-manife
 INVENTORY_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-source-inventory.json"
 HOST_PULL_SHA = "464d9a5522a61311d5e8c2b7495a6297c86300d611903ad56524d4aa2e574e72"
 HOST_PULL_PREIMAGE = "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad"
-MANIFEST_SHA256 = "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a"
+MANIFEST_SHA256 = "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada"
 PROGRAM_ARGUMENTS = [
     "/usr/bin/lockf", "-t", "0", "__LOCK__", "/bin/bash", "__HOST_PULL__",
     "__COLLECTOR_OPTION__",
@@ -102,6 +102,16 @@ def test_template_program_arguments_are_immutable():
     assert "ADMITTED_TEMPLATE_SHA256" not in text
 
 
+def test_manifest_pin_rejects_byte_drift(monkeypatch):
+    original = Path.read_bytes
+    def drift(path):
+        raw = original(path)
+        return raw + b"\n" if path == MANIFEST_PATH else raw
+    monkeypatch.setattr(Path, "read_bytes", drift)
+    with pytest.raises(AssertionError):
+        test_manifest_enrolls_the_pair_without_an_installed_preimage()
+
+
 def test_manifest_enrolls_the_pair_without_an_installed_preimage():
     assert hashlib.sha256(MANIFEST_PATH.read_bytes()).hexdigest() == MANIFEST_SHA256
     manifest = json.loads(MANIFEST_PATH.read_text())
@@ -163,9 +173,15 @@ def _host_pull_cohort(lineage="application"):
         predecessor = dict(successor)
         predecessor.update(BUILDER.HOST_PULL_INTEGRITY_PREIMAGES)
         expected_successor = MANIFEST_SHA256
-        expected_predecessor = "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
+        # Historical host-pull parent stays accepted; the composed f57b085 x
+        # d0c543 endpoint projects the same trio (plus the broker inverse)
+        # onto its composed http parent. Foreign parents still fail below.
+        expected_predecessor = (
+            "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+            BUILDER.HOST_PULL_INTEGRITY_COMPOSED_HTTP_PARENT_MANIFEST_SHA256)
     for manifest, expected in ((predecessor, expected_predecessor), (successor, expected_successor)):
-        assert hashlib.sha256((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()).hexdigest() == expected
+        digest_hex = hashlib.sha256((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()).hexdigest()
+        assert digest_hex in (expected if isinstance(expected, tuple) else (expected,))
     return predecessor, successor
 
 
@@ -192,7 +208,14 @@ def test_host_pull_successor_reaches_existing_validation_without_relabeling(line
     with pytest.raises(ValueError, match="admission integrity parent closure differs"):
         BUILDER.before_admission_integrity(successor)
     normalized = BUILDER.before_host_pull_integrity(successor)
-    assert normalized == predecessor
+    # The composed f57b085 x d0c543 carrier also projects the quiescence
+    # broker successor back to its frozen preimage when the projected view
+    # is an accepted parent; both endpoints normalize to the same cohort.
+    composed_broker_preimage_view = {
+        **predecessor,
+        "ext/lease_broker.py": BUILDER.COMPOSED_JOIN_QUIESCENCE_BROKER_PREIMAGE,
+    }
+    assert normalized in (predecessor, composed_broker_preimage_view)
     assert normalized is not successor
     if lineage == "worker":
         historical = BUILDER.before_admission_integrity(normalized)

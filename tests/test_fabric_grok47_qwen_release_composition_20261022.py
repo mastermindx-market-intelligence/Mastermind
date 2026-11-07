@@ -61,7 +61,7 @@ PROTECTED_QWEN_SOURCE_DIGESTS = {
 # join and the composed application-turn/fair-share broker each have one exact
 # forward digest; remaining Qwen payloads retain their original bytes.
 REVIEWED_QWEN_FORWARD_DIGESTS = {
-    "lease_broker.py": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
+    "lease_broker.py": "5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a",
     "glm_host_account_source.py": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
 }
 
@@ -82,7 +82,7 @@ def current_source_closure():
     """Bind current candidates separately from immutable historical overlays."""
     raw = (NATIVE / "rollout/native-manifest.json").read_bytes()
     # Current host-pull successor; historical overlay pins remain independent.
-    assert digest(raw) == "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a"
+    assert digest(raw) == "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada"
     manifest = json.loads(raw)
     inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_bytes())
     assert len(manifest) == len(inventory["files"]) == 107
@@ -353,9 +353,19 @@ def test_forward_map_retains_original_four_and_adds_three_long_horizon_bounds():
         # is never overwritten with the staged successor digest.
         carrier = builder.application_carrier_candidate_digests(NATIVE).get(name)
         current = digest(candidate.read_bytes())
-        assert current == (carrier if carrier is not None else value)
+        # The composed f57b085 x d0c543 carrier stages the sparse-index-advice
+        # executor preimage endpoint; the historical forward pin stays valid.
+        accepted = (carrier,) if carrier is not None else (
+            (value,) if name != "remote_sub_exec.py"
+            else (value, builder.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE))
+        assert current in accepted
         if carrier is not None:
-            assert builder.APPLICATION_CARRIER_PREIMAGES[name] == value
+            # Composed endpoint: the carrier preimage map may carry the
+            # sparse-index-advice executor endpoint alongside the historical
+            # forward pin for the same member.
+            assert builder.APPLICATION_CARRIER_PREIMAGES[name] in (
+                (value,) if name != "remote_sub_exec.py"
+                else (value, builder.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE))
 
 
 def test_protected_qwen_files_and_exact_context_reader_forward():

@@ -1017,3 +1017,29 @@ cache ownership on repeated inspection. Source qualification and regenerated
 artifact identities are recorded under review_evidence/fabric_application/
 h6-recovery-20261107-c2. No live installation, selection or account admission is
 implied by this optional artifact. H3 optimization remains excluded.
+
+## Composed f57b085 x d0c543 qualification-quiescence join (2026-11-07)
+
+The protected qualification-quiescence repair (f57b08549634a5d3ab75f1dbdca6926d9cc8d6b3)
+joins the d0c543124b47372becd8ee632a1c29b32ffc3ef0 native staging head. The merged
+candidate/lease_broker.py (disjoint edits on both sides) is the only manifest-member
+change: ext/lease_broker.py moves from
+a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360 to
+0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807 (211236 bytes), and
+the recomposed manifest digest becomes
+22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada.
+
+The builder qualifies this endpoint additively: the host-pull integrity parent
+closure accepts the composed parent
+b590442c3e4099a708bf0f34e1a5623669e984bccb90a60f805a68873c5f4c75 (the composed
+provider-application closure with the three host-pull members at their preimage
+identities) and the composed go-application + application-http parent
+b5ceff4116f5407810bfe755151de69ca0ce4fe3276b3e76a10a93e13909a68c beside the frozen
+bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e; the application
+pool composition cohort accepts the quiescence broker successor for
+ext/lease_broker.py only via the exact-or-composed pair; and the admission integrity
+closure accepts the composed parent
+06c6822a18e92c45519711a40be9cdac5baf4bfb6ddedcbe116922d9f6640741 when the raw view
+still carries the exact sparse-preflight executor successor and the exact-or-composed
+pool cohort. Every earlier parent constant, historical fixture and preimage remains
+frozen; no prior endpoint is replaced or relabelled.

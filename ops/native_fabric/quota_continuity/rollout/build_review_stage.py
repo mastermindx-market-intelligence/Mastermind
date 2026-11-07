@@ -71,7 +71,7 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 # closed composed candidate bytes; neither source may silently replace the other.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'artifact_delivery.py': '6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d',
-    'remote_sub_exec.py': '710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db',
+    'remote_sub_exec.py': '4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281',
     'pick.py': '5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892',
     'remote_sub.sh': '0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c',
     'remote_sub_helpers.py': 'f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93',
@@ -236,6 +236,12 @@ ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256 = "3ad8c6993609b17378c2c2
 # original-collection successor member. The protected WORKER closure above is
 # a frozen historical fixture and keeps its own exact parent.
 ADMISSION_INTEGRITY_APPLICATION_SUCCESSOR_PARENT_MANIFEST_SHA256 = "6d8adb18ece5b01dadb8ea60aa868e490f78d4371898934d63ea2e30b66eab82"
+# The composed f57b085 x d0c543 endpoint: the APPLICATION closure above with
+# the protected qualification-quiescence broker successor (merged
+# ext/lease_broker.py 0bbf1ca0...) carried in the same namespace. Both
+# historical parents above stay accepted; the carrier cohort is still
+# required, exactly as for the historical APPLICATION parents.
+ADMISSION_INTEGRITY_COMPOSED_PARENT_MANIFEST_SHA256 = "06c6822a18e92c45519711a40be9cdac5baf4bfb6ddedcbe116922d9f6640741"
 ADMISSION_INTEGRITY_PREIMAGES = {
     "ext/fabric_task.py": GO_REQUEST_REFUSAL_TASK_DIGEST,
     "ext/lane_runtime.py": GO_CENSUS_EXIT_RUNTIME_DIGEST,
@@ -246,10 +252,30 @@ ADMISSION_INTEGRITY_DIGESTS = {
 }
 
 
+# Reviewed current-quiescence read/guard changes only Broker in exact raw107.
+# Validate the whole parent; never normalize a mixed or unrelated source set.
+QUALIFICATION_QUIESCENCE_PARENT_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE = "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a"
+QUALIFICATION_QUIESCENCE_BROKER_SHA256 = "5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a"
+
+
+def before_qualification_quiescence(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("qualification quiescence manifest invalid")
+    previous = dict(manifest)
+    if previous.get("ext/lease_broker.py") != QUALIFICATION_QUIESCENCE_BROKER_SHA256:
+        return previous
+    previous["ext/lease_broker.py"] = QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
+    if sha((json.dumps(_source_integrity_parent(previous), sort_keys=True, indent=2) + "\n").encode()) != QUALIFICATION_QUIESCENCE_PARENT_SHA256:
+        raise ValueError("qualification quiescence parent closure differs")
+    return previous
+
+
 def before_admission_integrity(manifest):
     """Validate one exact forward cohort without mutating caller identity."""
     if type(manifest) is not dict:
         raise ValueError("native admission integrity manifest invalid")
+    manifest = before_qualification_quiescence(manifest)
     if not any(manifest.get(name) == digest
                for name, digest in ADMISSION_INTEGRITY_DIGESTS.items()):
         return dict(manifest)
@@ -266,6 +292,28 @@ def before_admission_integrity(manifest):
             and all(previous.get("ext/" + name) == digest
                     for name, digest in APPLICATION_CARRIER_DIGESTS.items())):
         return previous
+    # The composed f57b085 x d0c543 endpoint arrives with the raw current view:
+    # the exact sparse-preflight executor successor plus the application-pool
+    # cohort with the quiescence broker successor, each already qualified by
+    # its own inverse. Their exact presence proves the same complete namespace
+    # the carrier cohort proves for the historical APPLICATION parents.
+    if (parent_identity == ADMISSION_INTEGRITY_COMPOSED_PARENT_MANIFEST_SHA256
+            and previous.get("ext/remote_sub_exec.py") == SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST
+            and _application_pool_cohort_exact_or_composed(previous)):
+        return previous
+    # Validation view only: before_host_pull_integrity may hand this gate the
+    # historical projection of the composed view (composed broker preimage
+    # restored). Map that single member back to its composed successor and
+    # accept only when the forward view reproduces the composed endpoint
+    # byte-for-byte; the composed view is returned so emitted manifests keep
+    # composed identities. No prior endpoint is replaced.
+    if (previous.get("ext/lease_broker.py") == COMPOSED_JOIN_QUIESCENCE_BROKER_PREIMAGE
+            and _application_pool_cohort_exact_or_composed(previous)):
+        forward = dict(previous)
+        forward["ext/lease_broker.py"] = COMPOSED_JOIN_QUIESCENCE_BROKER_SHA256
+        forward_identity = sha((json.dumps(forward, sort_keys=True, indent=2) + "\n").encode())
+        if forward_identity == ADMISSION_INTEGRITY_COMPOSED_PARENT_MANIFEST_SHA256:
+            return forward
     raise ValueError("native admission integrity parent closure differs")
 
 
@@ -283,6 +331,45 @@ HOST_PULL_INTEGRITY_DIGESTS = {
     "ext/host_pull_backend.py": "822226666c479137afe8f357d43032a805066a71a5b90d38f2051b40230c2ae9",
     "ext/host_pull_daemon.sh": "842c12036b7bcd1a7101747a522efa272a893474342d57817fb06ecee3e73f0b",
 }
+# Composed f57b085 x d0c543 endpoints. Two distinct composed parents arise
+# from the same join depending on how far the APPLICATION composition runs:
+# the go-application + application-http variant (107 members) yields
+# b5ceff41...; the provider-plan-application + quota-reset-recovery variant
+# (116 members: native-manifest.json base + provider_application composition
+# replacements/additions + PROVIDER_ROUTING_DIGESTS + the four quota-reset ext
+# members) yields b590442c... with the three host-pull members at their
+# PREIMAGE identities (b58b4cf4.../d00ff264.../826aed96...), i.e. the parent
+# as it stands immediately before the host-pull successor patch is applied.
+# Both historical owners stay accepted; no prior endpoint is replaced.
+HOST_PULL_INTEGRITY_COMPOSED_HTTP_PARENT_MANIFEST_SHA256 = "b5ceff4116f5407810bfe755151de69ca0ce4fe3276b3e76a10a93e13909a68c"
+HOST_PULL_INTEGRITY_COMPOSED_PARENT_MANIFEST_SHA256 = "b590442c3e4099a708bf0f34e1a5623669e984bccb90a60f805a68873c5f4c75"
+# The composed f57b085 x d0c543 join advances the quiescence broker manifest
+# member to its composed successor preimage; every other member is unchanged.
+# Historical parents captured the frozen preimage, so the host-pull inverse
+# below projects only that exact successor back to the frozen preimage when
+# the projected view is itself an accepted historical parent. Both endpoints
+# stay accepted and no prior endpoint is replaced; the projection is a
+# validation view only -- emitted manifests keep the composed identities.
+COMPOSED_JOIN_QUIESCENCE_BROKER_SHA256 = "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807"
+COMPOSED_JOIN_QUIESCENCE_BROKER_PREIMAGE = "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360"
+
+
+def _source_integrity_parent(manifest):
+    """Prove the same complete parent for either or both exact source deltas.
+
+    This private proof view never replaces emitted or captured current bytes.
+    Each public inverse still returns only its own declared inverse.
+    """
+    previous = dict(manifest)
+    if previous.get("ext/lease_broker.py") == QUALIFICATION_QUIESCENCE_BROKER_SHA256:
+        previous["ext/lease_broker.py"] = QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
+    if any(previous.get(name) == digest
+           for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        if any(previous.get(name) != digest
+               for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+            raise ValueError("native host-pull integrity cohort is incomplete or foreign")
+        previous.update(HOST_PULL_INTEGRITY_PREIMAGES)
+    return previous
 
 
 def before_host_pull_integrity(manifest):
@@ -297,14 +384,33 @@ def before_host_pull_integrity(manifest):
         raise ValueError("native host-pull integrity cohort is incomplete or foreign")
     previous = dict(manifest)
     previous.update(HOST_PULL_INTEGRITY_PREIMAGES)
-    if sha((json.dumps(previous, sort_keys=True, indent=2) + '\n').encode()) not in {HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256, 'bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e'}:
+    # Composed-join projection: the broker successor maps back to the frozen
+    # preimage for validation only. Accepted only when the projected whole
+    # parent is itself an accepted historical endpoint; the raw closure is
+    # checked next and keeps its own acceptance. No prior endpoint is replaced.
+    projected = dict(previous)
+    if projected.get("ext/lease_broker.py") == COMPOSED_JOIN_QUIESCENCE_BROKER_SHA256:
+        projected["ext/lease_broker.py"] = COMPOSED_JOIN_QUIESCENCE_BROKER_PREIMAGE
+        projected_identity = sha((json.dumps(projected, sort_keys=True, indent=2) + "\n").encode())
+        if projected_identity in {HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256,
+                                  HOST_PULL_INTEGRITY_COMPOSED_PARENT_MANIFEST_SHA256,
+                                  HOST_PULL_INTEGRITY_COMPOSED_HTTP_PARENT_MANIFEST_SHA256,
+                                  'bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e'}:
+            return projected
+    parent_identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if parent_identity in {HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256,
+                           HOST_PULL_INTEGRITY_COMPOSED_PARENT_MANIFEST_SHA256,
+                           HOST_PULL_INTEGRITY_COMPOSED_HTTP_PARENT_MANIFEST_SHA256,
+                           'bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e'}:
+        return previous
+    if sha((json.dumps(_source_integrity_parent(previous), sort_keys=True, indent=2) + "\n").encode()) != HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256:
         raise ValueError("native host-pull integrity parent closure differs")
     return previous
 
 
 # An explicit forward composition of the selected provider plan and the exact
 # current APPLICATION107 source. The historical provider composer stays frozen.
-PROVIDER_APPLICATION_RECORD_SHA256 = "04d6983e43eaaadeccaf847662a5b9b80b30af88e0e2c0a865f455522031e7f4"
+PROVIDER_APPLICATION_RECORD_SHA256 = "ace37675f37671ab569dd9d55279eaade814ae6b76f5791790f48b67e584a00a"
 PROVIDER_APPLICATION_MEMBERS = frozenset("ext/" + name for name in (
     "byteplus_coding_plan.py", "codex_provider_realm.py", "experiential_bridge.py",
     "experiential_host_context.py", "experiential_pin.py", "experiential_plan_policy.py",
@@ -465,6 +571,25 @@ def compose_provider_application_stage(root, output, manifest, files):
     manifest.update(composed)
 
 
+# One exact command-scoped advice setting extends the complete accepted72
+# closure. This inverse is used only for historical validation, never capture.
+SPARSE_INDEX_ADVICE_PARENT_SHA256 = "45a90565e189bca551cb79f579296689aa00674778d3917a6af75a720ff71c18"
+SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE = "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db"
+SPARSE_INDEX_ADVICE_EXECUTOR_SHA256 = "4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281"
+
+
+def before_sparse_index_advice(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("native sparse-index advice manifest invalid")
+    previous = dict(manifest)
+    if previous.get("ext/remote_sub_exec.py") != SPARSE_INDEX_ADVICE_EXECUTOR_SHA256:
+        return previous
+    previous["ext/remote_sub_exec.py"] = SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE
+    if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != SPARSE_INDEX_ADVICE_PARENT_SHA256:
+        raise ValueError("native sparse-index advice parent closure differs")
+    return previous
+
+
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/previous106/current107 compositions.
 
@@ -489,9 +614,14 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     prior published generation keeps validating and no historical namespace can
     be relabeled with either forward collector.
     """
-    actual_manifest = manifest
+    # Bind actual captured bytes independently of the historical parent proof.
+    # Both views start from this same exact-dict snapshot; normalization never
+    # substitutes predecessor bytes for the source captured by the Go component.
+    if type(manifest) is not dict:
+        raise ValueError("native admission integrity manifest invalid")
+    actual_manifest = dict(manifest)
     manifest = normalize_application_carrier_base_manifest(
-        before_provider_application(before_quota_reset_recovery(manifest)))
+        before_provider_application(before_quota_reset_recovery(actual_manifest)))
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -568,8 +698,10 @@ def validate_go_base_manifest(manifest, dependency_hashes):
             GO_BASE_PICKER_SHA256, GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]}:
         raise ValueError("native Go base picker is not the exact composed source")
     historical["ext/pick.py"] = GO_BASE_PICKER_SHA256
+    # The new advice epoch was already qualified against its full107 parent.
+    # Historical validation still recognizes exactly its original710 endpoint.
     if manifest["ext/remote_sub_exec.py"] not in {
-            GO_BASE_EXECUTOR_SHA256, GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]}:
+            GO_BASE_EXECUTOR_SHA256, SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE}:
         raise ValueError("native Go executor is not the exact composed source")
     historical["ext/remote_sub_exec.py"] = GO_BASE_EXECUTOR_SHA256
     for name, original in GO_SELECTION_SUPPORT_PREIMAGES.items():
@@ -664,6 +796,15 @@ def compose_application_http_stage(root, output, manifest, files):
 QUOTA_RESET_PARENT_SHA256 = '59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a'
 # The former whole parent remains a historical inverse, never a new build base.
 QUOTA_RESET_REVIEWED_PARENT_SHA256S = frozenset({'c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459', QUOTA_RESET_PARENT_SHA256, 'bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e', '59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a'})
+# Composed f57b085 x d0c543 join parent: identical to the historical
+# APPLICATION parent above except the quiescence broker sits at its composed
+# successor preimage. Accepted as a reviewed inverse so the composed join can
+# stage the H2 successor over it; the historical endpoints above stay
+# authoritative and no prior endpoint is replaced.
+QUOTA_RESET_COMPOSED_PARENT_SHA256 = '22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada'
+QUOTA_RESET_COMPOSED_PREIMAGES = {
+    "lease_broker.py": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+}
 QUOTA_RESET_PREIMAGES = {
     "quota_remote.py": "3c1484864848b5cdf4daeecde092f7c407ab313a9f0d94a7f0fd204dbcf813b8",
     "quota_circuit.py": "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303",
@@ -677,23 +818,42 @@ QUOTA_RESET_DIGESTS = {
     "pick.py": "38b843380913be38839fc7f604d5f490c8914dc773f7a4556368db80bb1d6f8a",
 }
 QUOTA_RESET_PATCHES = {
-    "lease_broker.py": "1ec36d5b9da4af0e54980eab8608260ad2bff60d981d59ae7e351cbe2c7b775f",
+    "lease_broker.py": "b4ef4980f85ef0cce64c6843c9c5d0d16abf0459fda8a438b474789d86c6f421",
     "pick.py": "dc8f3a48b32972a82067ee20b646a195ae6fa143a715adfed07bac7c6114c590",
 }
 
 
 # Exact H2 successor of the provider-preserving116 source. This is distinct
 # from the historical H2-only107 family; neither can impersonate the other.
-PROVIDER_QUOTA_RESET_PARENT_SHA256 = "f256ac145cbf66c5b325d8f8d1cbe5d5e096646b2796bbe05efb45d6fb21dfd4"
-PROVIDER_QUOTA_RESET_MANIFEST_SHA256 = "b49e1350b83afd4f2c439e7b13b2b7079a4db88dd7d9d6b0cf9801c423f29547"
+PROVIDER_QUOTA_RESET_PARENT_SHA256 = "98e8e868c9528ad07f86a74e930fcda15108bbae5ad054ee0577f3dd3d1610b6"
+PROVIDER_QUOTA_RESET_MANIFEST_SHA256 = "a54944076b65af94c047b9300f7c6f8ca0643b5d7e8870e9b189b7809aec66d7"
 PROVIDER_QUOTA_RESET_PREIMAGES = dict(QUOTA_RESET_PREIMAGES, **{
-    "lease_broker.py": "05880dc3e6f0849ff1f39094e2dbfe778797ebaddc04acd3b7474598888ca4cd",
+    "lease_broker.py": "77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b",
     "pick.py": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
 })
 PROVIDER_QUOTA_RESET_DIGESTS = dict(QUOTA_RESET_DIGESTS, **{
-    "lease_broker.py": "3a210b259681460ec1e8ded91c45f84f6807e6ba4da1704b1ce587693d6531ed",
+    "lease_broker.py": "831fadce3c723d011c0b164d791efcbbe5eac286e9008f7a25394136a1632173",
     "pick.py": "a61e4bd966cb3ce94cb00c262170453840edea02c4eb4d42b1521d097476a1dc",
 })
+# Composed provider-preserving candidate: the broker swap moves the candidate
+# preimage for the provider-preserving quota reset path only. The historical
+# H2-only107 preimage above stays authoritative when provider members are absent.
+PROVIDER_QUOTA_RESET_COMPOSED_PREIMAGES = {
+    "lease_broker.py": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+}
+# Only the broker member of the composed-join cohort advances to the pinned
+# H2 successor computed over the composed broker preimage; remote/circuit/pick
+# keep the reviewed H2 successors pinned above. The same pinned H2 broker
+# patch applies to the composed broker preimage.
+QUOTA_RESET_COMPOSED_DIGESTS = dict(QUOTA_RESET_DIGESTS, **{
+    "lease_broker.py": "79103739c4c46cae3988187aea591aa06209ac1bd38046f49b8699fd93c205d0",
+})
+# The composed-join parent joins the reviewed inverse set above: the broker
+# projection back to the frozen preimage is accepted as a whole historical
+# parent, so the composed parent itself is equally reviewable. Historical
+# endpoints stay accepted; no prior endpoint is replaced.
+QUOTA_RESET_REVIEWED_PARENT_SHA256S = frozenset(
+    set(QUOTA_RESET_REVIEWED_PARENT_SHA256S) | {QUOTA_RESET_COMPOSED_PARENT_SHA256})
 
 
 def _quota_reset_file(path, expected):
@@ -748,14 +908,22 @@ def _quota_reset_patch(original, patch, name):
     return b"".join(output)
 
 
-def quota_reset_sources(root, *, preserve_provider=False):
+def quota_reset_sources(root, *, preserve_provider=False, composed_parent=False):
     """Capture all four reviewed successors and their exact source provenance."""
     root = Path(root)
     overlay = root.parent / "grok47/quota_billing"
     captured = {}
     provider_record = provider_application_record(root)[0] if preserve_provider else None
     expected = PROVIDER_QUOTA_RESET_DIGESTS if preserve_provider else QUOTA_RESET_DIGESTS
+    if composed_parent and not preserve_provider:
+        # Composed-join cohort: only the broker member validates against its
+        # composed successor preimage; the pinned H2 patch applies unchanged.
+        expected = dict(expected, **QUOTA_RESET_COMPOSED_DIGESTS)
     for name, preimage in QUOTA_RESET_PREIMAGES.items():
+        if preserve_provider and name in PROVIDER_QUOTA_RESET_COMPOSED_PREIMAGES:
+            preimage = PROVIDER_QUOTA_RESET_COMPOSED_PREIMAGES[name]
+        elif composed_parent and not preserve_provider and name in QUOTA_RESET_COMPOSED_PREIMAGES:
+            preimage = QUOTA_RESET_COMPOSED_PREIMAGES[name]
         original = _quota_reset_file(root / "candidate" / name, preimage)
         provider_preimage = None
         if preserve_provider and name in QUOTA_RESET_PATCHES:
@@ -814,11 +982,20 @@ def before_quota_reset_recovery(manifest):
     if not any(manifest.get("ext/" + name) == digest
                for name, digest in QUOTA_RESET_DIGESTS.items()):
         return dict(manifest)
+    # Composed-join cohort: the broker member carries its composed successor
+    # digest while remote/circuit/pick keep the reviewed H2 successors; the
+    # inverse projects the broker back to the composed join parent, which is
+    # itself a reviewed whole parent. Historical cohort stays authoritative.
+    composed = (manifest.get("ext/lease_broker.py")
+                == QUOTA_RESET_COMPOSED_DIGESTS["lease_broker.py"])
+    digests = QUOTA_RESET_COMPOSED_DIGESTS if composed else QUOTA_RESET_DIGESTS
+    preimages = (dict(QUOTA_RESET_PREIMAGES, **QUOTA_RESET_COMPOSED_PREIMAGES)
+                 if composed else QUOTA_RESET_PREIMAGES)
     if any(manifest.get("ext/" + name) != digest
-           for name, digest in QUOTA_RESET_DIGESTS.items()):
+           for name, digest in digests.items()):
         raise ValueError("quota reset cohort incomplete or foreign")
     previous = dict(manifest)
-    previous.update({"ext/" + name: digest for name, digest in QUOTA_RESET_PREIMAGES.items()})
+    previous.update({"ext/" + name: digest for name, digest in preimages.items()})
     if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) not in QUOTA_RESET_REVIEWED_PARENT_SHA256S:
         raise ValueError("quota reset parent closure differs")
     return previous
@@ -839,7 +1016,11 @@ def go_application_dependencies(root, *, staged_manifest=None):
             del base[name]
         parent = before_quota_reset_recovery(base)
         if parent != base:
-            quota = quota_reset_sources(root, preserve_provider=_has_provider_members(parent))
+            quota = quota_reset_sources(
+                root, preserve_provider=_has_provider_members(parent),
+                composed_parent=(not _has_provider_members(parent)
+                                 and parent.get("ext/lease_broker.py")
+                                 == QUOTA_RESET_COMPOSED_PREIMAGES["lease_broker.py"]))
     dependencies = {}
     for name in GO_APPLICATION_DEPENDENCIES:
         if quota is not None and name in quota:
@@ -859,10 +1040,25 @@ def compose_quota_reset_stage(root, output, manifest, files):
     """Replace four existing members only after authenticating their whole parent."""
     identity = _manifest_digest(manifest)
     preserve_provider = identity == PROVIDER_QUOTA_RESET_PARENT_SHA256
+    composed_parent = False
     if identity not in (QUOTA_RESET_PARENT_SHA256, PROVIDER_QUOTA_RESET_PARENT_SHA256):
+        # Composed f57b085 x d0c543 join parent: identical to the historical
+        # APPLICATION parent except the quiescence broker sits at its composed
+        # successor preimage. Accepted only when the broker projection back to
+        # the frozen preimage reproduces the historical whole parent
+        # byte-for-byte; no prior endpoint is replaced.
+        mapped = dict(manifest)
+        if mapped.get("ext/lease_broker.py") == QUOTA_RESET_COMPOSED_PREIMAGES["lease_broker.py"]:
+            mapped["ext/lease_broker.py"] = QUOTA_RESET_PREIMAGES["lease_broker.py"]
+            composed_parent = _manifest_digest(mapped) == QUOTA_RESET_PARENT_SHA256
+    if (identity not in (QUOTA_RESET_PARENT_SHA256, PROVIDER_QUOTA_RESET_PARENT_SHA256)
+            and not composed_parent):
         raise ValueError("quota reset requires exact complete APPLICATION parent")
-    captured = quota_reset_sources(root, preserve_provider=preserve_provider)
+    captured = quota_reset_sources(root, preserve_provider=preserve_provider,
+                                   composed_parent=composed_parent)
     preimages = PROVIDER_QUOTA_RESET_PREIMAGES if preserve_provider else QUOTA_RESET_PREIMAGES
+    if composed_parent and not preserve_provider:
+        preimages = dict(preimages, **QUOTA_RESET_COMPOSED_PREIMAGES)
     targets = {}
     for name, preimage in preimages.items():
         relative = "ext/" + name
@@ -1025,6 +1221,31 @@ APPLICATION_POOL_COMPOSITION_DIGESTS = {
     "ext/go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
     "ext/lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
 }
+# Composed f57b085 x d0c543 qualification-quiescence broker successor: the
+# exact pool successor cohort with ext/lease_broker.py advanced from
+# a84752dc... to 0bbf1ca0... only. The parent view below still maps the
+# broker to the same frozen preimage, so every historical parent identity
+# above stays unchanged.
+APPLICATION_POOL_COMPOSITION_COMPOSED_BROKER_SHA256 = "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807"
+# The same composed broker-successor parent as seen through the admission
+# integrity inverse inside validate_go_base_manifest: that inverse returns
+# its private backdated view (ext/fabric_task.py and ext/lane_runtime.py at
+# the frozen refusal/census preimages) before this pool inverse runs. The
+# identity below is exactly that view with the same pool preimage mapping;
+# every historical parent identity above is unchanged.
+APPLICATION_POOL_COMPOSITION_COMPOSED_ADMISSION_PARENT_SHA256 = "5d96edc64c8e5fc35b04a556a4dabceb7b9f1ec15b340d794f23193e02b37f0f"
+
+
+def _application_pool_cohort_exact_or_composed(manifest):
+    for name, digest in APPLICATION_POOL_COMPOSITION_DIGESTS.items():
+        actual = manifest.get(name)
+        if actual == digest:
+            continue
+        if (name == "ext/lease_broker.py"
+                and actual == APPLICATION_POOL_COMPOSITION_COMPOSED_BROKER_SHA256):
+            continue
+        return False
+    return True
 
 
 def before_application_pool_composition(manifest):
@@ -1034,8 +1255,7 @@ def before_application_pool_composition(manifest):
     if not any(manifest.get(name) == digest
                for name, digest in APPLICATION_POOL_COMPOSITION_DIGESTS.items()):
         return dict(manifest)
-    if any(manifest.get(name) != digest
-           for name, digest in APPLICATION_POOL_COMPOSITION_DIGESTS.items()):
+    if not _application_pool_cohort_exact_or_composed(manifest):
         raise ValueError("application pool composition cohort is incomplete or foreign")
     previous = dict(manifest)
     previous.update(APPLICATION_POOL_COMPOSITION_PREIMAGES)
@@ -1044,6 +1264,14 @@ def before_application_pool_composition(manifest):
                         APPLICATION_POOL_COMPOSITION_SPARSE_PARENT_SHA256,
                         APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256,
                         APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256):
+        # Composed f57b085 x d0c543 endpoint as backdated by the admission
+        # integrity inverse (frozen refusal/census preimages on the two
+        # admission members); only that exact pair may precede the composed
+        # broker successor here.
+        if (identity == APPLICATION_POOL_COMPOSITION_COMPOSED_ADMISSION_PARENT_SHA256
+                and previous.get("ext/fabric_task.py") == GO_REQUEST_REFUSAL_TASK_DIGEST
+                and previous.get("ext/lane_runtime.py") == GO_CENSUS_EXIT_RUNTIME_DIGEST):
+            return previous
         raise ValueError("application pool composition parent closure differs")
     return previous
 
@@ -1100,6 +1328,15 @@ def before_sparse_commit_preflight(manifest):
     identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
     if identity not in (SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256,
                         SPARSE_COMMIT_PREFLIGHT_SUCCESSOR_PARENT_MANIFEST_SHA256):
+        # Composed f57b085 admission wrap feeding d0c543's normalize chain:
+        # the admission integrity inverse returns its private backdated view
+        # (frozen refusal/census preimages) before this preflight runs. That
+        # exact view's parent identity is the historical admission successor
+        # parent; only the two admission preimage markers may carry it here.
+        if (identity == ADMISSION_INTEGRITY_APPLICATION_SUCCESSOR_PARENT_MANIFEST_SHA256
+                and manifest.get("ext/fabric_task.py") == GO_REQUEST_REFUSAL_TASK_DIGEST
+                and manifest.get("ext/lane_runtime.py") == GO_CENSUS_EXIT_RUNTIME_DIGEST):
+            return previous
         raise ValueError("native sparse commit preflight parent closure differs")
     return previous
 
@@ -1285,6 +1522,14 @@ def main():
         compose_quota_reset_stage(root, output, manifest, files)
     normalize_application_carrier_base_manifest(
         before_provider_application(before_quota_reset_recovery(manifest)))
+    # Qualify the complete repair cohort even when no APPLICATION pair is added.
+    # Provider-plan and quota-reset variants arrive here as the composed
+    # 116-member endpoint; the same historical inversions the adjacent
+    # normalize call applies expose the 107-member admission view (exact
+    # fabric_task/lane_runtime digests, sparse-preflight executor successor,
+    # quiescence broker successor) that the composed parent closure accepts.
+    before_admission_integrity(before_host_pull_integrity(before_sparse_index_advice(
+        before_provider_application(before_quota_reset_recovery(manifest)))))
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)

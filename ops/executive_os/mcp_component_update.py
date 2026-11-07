@@ -409,6 +409,31 @@ def _validate_capability_profile_map(
     return {key: digests[key] for key in sorted(digests)}
 
 
+def derive_sealed_capability_profile_digests(
+    release_sha: str, profile_ids: tuple[str, ...], budget: Any,
+) -> dict[str, str]:
+    """Reuse the sealed target registry proof for component and gateway owners."""
+    from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+    root = Path(installed._SERVICE_RELEASES) / release_sha
+    policy = root / "config" / "executive_claude_principal_capabilities.json"
+    try:
+        before = installed._observe_ancestors(str(policy), budget)
+        registry = ExecutionCapabilityRegistry.load(policy, source_root=root)
+        after = installed._observe_ancestors(str(policy), budget)
+    except Exception as error:
+        raise UpdateRefused(
+            "CAPABILITY_PROFILE_UNAVAILABLE:" + type(error).__name__.upper()) from None
+    if before != after:
+        raise UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE:ANCESTORS_CHANGED")
+    digests: dict[str, str] = {}
+    for profile_id in profile_ids:
+        profile = registry.profiles.get(profile_id)
+        if profile is None or not profile.enabled:
+            raise UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE")
+        digests[profile_id] = profile.profile_digest
+    return digests
+
+
 def _apply_capability_profile_digests(
     prior: dict[str, Any], proposed: dict[str, Any],
     digests: dict[str, str] | None,
@@ -918,26 +943,12 @@ class ProductionHost:
         or a hardcoded tool-schema digest is never accepted, and no new
         principal realm or permission is created here.
         """
-        from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
-        root = Path(installed._SERVICE_RELEASES) / release_sha
-        policy = root / "config" / "executive_claude_principal_capabilities.json"
         try:
             budget = self._budget()
-            before = installed._observe_ancestors(str(policy), budget)
-            registry = ExecutionCapabilityRegistry.load(policy, source_root=root)
-            after = installed._observe_ancestors(str(policy), budget)
         except Exception as error:
             raise UpdateRefused(
                 "CAPABILITY_PROFILE_UNAVAILABLE:" + type(error).__name__.upper()) from None
-        if before != after:
-            raise UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE:ANCESTORS_CHANGED")
-        digests: dict[str, str] = {}
-        for profile_id in profile_ids:
-            profile = registry.profiles.get(profile_id)
-            if profile is None or not profile.enabled:
-                raise UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE")
-            digests[profile_id] = profile.profile_digest
-        return digests
+        return derive_sealed_capability_profile_digests(release_sha, profile_ids, budget)
 
     def verify_closure(self) -> str:
         try:

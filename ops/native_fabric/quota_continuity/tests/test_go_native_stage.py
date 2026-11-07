@@ -133,6 +133,14 @@ def before_extended_host_pull_epoch(manifest):
         "bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af": "8443024b1ad7982ea66747f409b27b0e69abec20af15d662854862a679a781ec",
         "f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2": "acf6fdcc2df38eb2865c83f114e4bfec5c05f7ebfb66c4677ad6cfe87f5aa8c8",
         "38368f3a7d2438a191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44": "7d814132900a7f4bb11ef10c566a4b5d18bb85a3a0b19c2be260cac3270efd61",
+        # Composed f57b085 x d0c543 endpoints: the emitted APPLICATION and
+        # HTTP manifests carry the composed broker successor, so their
+        # host-pull-epoch previous views are the composed previous parents.
+        # Foreign manifest digests still fail the KeyError guard below.
+        "64c69b360409c1918307ca279b6e741e7e890adb01af6aa931ce50f406dce0c2":
+            "c830ad60c191394c5aec80d6678801a1939a85dd08665fda20d16b096e95f818",
+        "e917b89cf49a9bcc3a4d14e4fb264bb9459dd95d2d86dfbcece70b8e6a644467":
+            "cacfba749a6ef6f5a8f905243aa7ef4f5423f7b1ebb1beb0e61c22f1b6d05e48",
     }
     actual = g.digest((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode())
     assert actual in historical_by_current
@@ -206,6 +214,11 @@ def before_sparse_commit_preflight(manifest):
         previous["ext/remote_sub_exec.py"] = builder.SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE
         assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256
     return previous
+
+
+def before_source_successors(manifest):
+    return builder.before_qualification_quiescence(
+        builder.before_host_pull_integrity(builder.before_sparse_index_advice(manifest)))
 
 
 def before_admission_integrity(manifest):
@@ -322,7 +335,11 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     historical = before_participant_cohort(default)
     historical.update({"ext/" + name: value for name, value in builder.GO_BASE_DEPENDENCIES.items()})
     historical["ext/pick.py"] = builder.GO_BASE_PICKER_SHA256
-    assert default["ext/remote_sub_exec.py"] == builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]
+    # Composed d0c543 carrier keeps the executor at the sparse-index-advice
+    # preimage endpoint; the historical GROK47 successor stays accepted too.
+    assert default["ext/remote_sub_exec.py"] in (
+        builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"],
+        builder.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE)
     historical["ext/remote_sub_exec.py"] = builder.GO_BASE_EXECUTOR_SHA256
     historical.update({"ext/" + name: value for name, value in builder.GO_SELECTION_SUPPORT_PREIMAGES.items()})
     assert default["ext/provider_outcome.py"] == builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256
@@ -580,8 +597,10 @@ def test_sparse_config_executor_successor_is_exact_and_does_not_mutate_manifest(
     previous = dict(current)
     previous.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
     for cohort in (previous, current):
+        # This historical sparse-config fixture retains its exact710 endpoint.
+        # The new advice epoch requires the complete current107 parent separately.
         for digest in (builder.GO_BASE_EXECUTOR_SHA256,
-                       builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]):
+                       builder.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE):
             exact = dict(cohort)
             exact["ext/remote_sub_exec.py"] = digest
             before = dict(exact)
@@ -1347,7 +1366,12 @@ def test_scoped_model_successor_binds_actual_dependencies_and_preserves_parent(b
             staged = (output / "native-code-stage" / name).read_bytes()
             source = (ROOT / "candidate" / Path(name).name).read_bytes()
             assert staged == source
-            assert g.digest(staged) == manifest[name] == inventory["files"][name]["sha256"] == expected
+            # The composed pool successor advances the staged broker to the
+            # quiescence endpoint; the historical endpoint stays accepted.
+            accepted = (expected,) if name != "ext/lease_broker.py" else (
+                expected, builder.APPLICATION_POOL_COMPOSITION_COMPOSED_BROKER_SHA256)
+            assert g.digest(staged) == manifest[name] == inventory["files"][name]["sha256"]
+            assert g.digest(staged) in accepted
             assert inventory["files"][name]["source"] == "candidate/" + Path(name).name
 
 
@@ -1483,28 +1507,51 @@ def test_application_pool_composition_emits_actual_complete_provenance(builds, v
         assert g.digest(raw) == row["sha256"] == digest
         assert len(raw) == row["bytes"]
     for key, digest in builder.APPLICATION_POOL_COMPOSITION_DIGESTS.items():
-        assert manifest[key] == digest
+        # The composed pool successor stages the quiescence broker endpoint
+        # (candidate bytes) while the historical endpoint stays accepted.
+        accepted = (digest,) if key != "ext/lease_broker.py" else (
+            digest, builder.APPLICATION_POOL_COMPOSITION_COMPOSED_BROKER_SHA256)
+        assert manifest[key] in accepted
         assert inventory["files"][key]["source"] == "candidate/" + Path(key).name
-        assert g.digest((ROOT / inventory["files"][key]["source"]).read_bytes()) == digest
+        assert g.digest((ROOT / inventory["files"][key]["source"]).read_bytes()) in accepted
 
 
 def test_application_pool_forward_delta_is_reversible_and_source_exact(tmp_path):
     import subprocess
     patch = ROOT.parents[2] / "tests/fixtures/fabric-application-pool-composition-20261107.patch"
     assert g.digest(patch.read_bytes()) == "3fe89c2b49afc8b96352c339790d302806fb3d4516407c4476524168367b428c"
+    # Recomposed provider application advances the staged broker from the
+    # composed pool endpoint to the provider endpoint and must stay reversible.
+    provider_patch = ROOT / "rollout/provider_application/lease_broker.py.patch"
+    assert g.digest(provider_patch.read_bytes()) == "1b412ede2621442f1a85f9e3033a4132a4f3bc47c19afe498345d7fb1b69878b"
     original = {}
     for key, digest in builder.APPLICATION_POOL_COMPOSITION_DIGESTS.items():
         name = Path(key).name
         original[name] = (ROOT / "candidate" / name).read_bytes()
-        assert g.digest(original[name]) == digest
+        accepted = (digest,) if key != "ext/lease_broker.py" else (
+            digest, builder.APPLICATION_POOL_COMPOSITION_COMPOSED_BROKER_SHA256)
+        assert g.digest(original[name]) in accepted
         (tmp_path / name).write_bytes(original[name])
     for options in (("--reverse", "--check"), ("--reverse",)):
         subprocess.run(["git", "apply", *options, str(patch)], cwd=tmp_path, check=True,
                        capture_output=True, timeout=10)
     for key, digest in builder.APPLICATION_POOL_COMPOSITION_PREIMAGES.items():
-        assert g.digest((tmp_path / Path(key).name).read_bytes()) == digest
+        # Composed fixture delta reverses the composed broker to its own
+        # preimage; the historical preimage stays accepted alongside it.
+        accepted = (digest,) if key != "ext/lease_broker.py" else (
+            digest, "c70012a8865760667545cd5f6a5c5c80bacce60088ea033c28dae282aa802ce0")
+        assert g.digest((tmp_path / Path(key).name).read_bytes()) in accepted
     for options in (("--check",), ()):
         subprocess.run(["git", "apply", *options, str(patch)], cwd=tmp_path, check=True,
+                       capture_output=True, timeout=10)
+    # The provider-application delta starts exactly at the staged pool
+    # endpoint and must reproduce the composed provider endpoint byte-exact.
+    for options in (("--check", "-p2"), ("-p2",)):
+        subprocess.run(["git", "apply", *options, str(provider_patch)], cwd=tmp_path, check=True,
+                       capture_output=True, timeout=10)
+    assert g.digest((tmp_path / "lease_broker.py").read_bytes()) == "77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b"
+    for options in (("--reverse", "--check", "-p2"), ("--reverse", "-p2",)):
+        subprocess.run(["git", "apply", *options, str(provider_patch)], cwd=tmp_path, check=True,
                        capture_output=True, timeout=10)
     for name, raw in original.items():
         assert (tmp_path / name).read_bytes() == raw
