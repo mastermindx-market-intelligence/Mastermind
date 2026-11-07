@@ -15,6 +15,7 @@ from common import memory_native_wire as w
 from control_plane import protected_memory_evaluation_source as source
 
 INGRESS = 'mastermind.ceo_ingress.memory_evaluation_assessment_frame.v1'
+ASSIGN = 'mastermind.memory_evaluation_assignment_request.v1'
 _AUTH = weakref.WeakKeyDictionary()
 _PREPARED = weakref.WeakKeyDictionary()
 _BOUND = weakref.WeakKeyDictionary()
@@ -47,7 +48,7 @@ def _exact_cap(table, value, cls):
 def ingress_frame(value):
     w.exact(value, 'schema principal verified_expires_at assessment')
     if value['schema'] != INGRESS: c.fail()
-    c.assessment(value['assessment'])
+    purpose_document(value['assessment'])
     w.integer(value['verified_expires_at'], 100_000_000_000)
     import time
     if time.time() >= value['verified_expires_at']: c.fail()
@@ -55,6 +56,14 @@ def ingress_frame(value):
     validate_facts_frame(dict(schema=FACT_SCHEMA, operation='authority',
         work_ref=value['assessment']['work_ref'], principal=value['principal']))
     return value
+
+def purpose_document(value):
+    if type(value) is dict and value.get('schema')==ASSIGN:
+        w.exact(value,'schema command_id work_ref job_id original_attempt_id participant_principal_ref reason')
+        for k in ('command_id','job_id','original_attempt_id'):w.token(value[k])
+        c.text(value['work_ref'],256);c.refs(value['participant_principal_ref']);c.text(value['reason'])
+        return json.loads(w.canonical(value))
+    return c.assessment(value)
 
 def _authenticate_gateway(connection):
     from control_plane.executive_peer_identity import capture_peer_identity, require_installed_service_peer
@@ -70,6 +79,21 @@ def _gateway_snapshot(context):
     # real API, then compare these original connection facts (not a DTO grant).
     return tuple(getattr(context,k) for k in ('real_boot_id','audit_identity_digest','service_label',
         'installed_release','config_digest','connection_instance'))
+
+def assess_from_installed_app(connection, frame, provider, supervisor):
+    """One fixed ingress implementation, shared by the actual socket branch.
+
+    No caller-authored context/Boolean or callback can issue the assessment.
+    A possible Event commit is UNKNOWN, not a pre-effect denial or retry grant.
+    """
+    try:
+        cap=capture_authenticated_assessment(connection,frame,provider,supervisor)
+        result=admit_registered_evaluator(cap)
+        return {'ok':True,'result':result}
+    except AssessmentCommitUnknown:
+        return {'ok':False,'error':{'code':'effect_unknown','message':'reconcile original assessment command'}}
+    except Exception:
+        return {'ok':False,'error':{'code':'source_unavailable','message':'evaluation unavailable'}}
 
 def capture_authenticated_assessment(connection, frame, provider, supervisor):
     """Only the real CeoIngress App branch calls this with its accepted socket.
@@ -181,6 +205,8 @@ def _evidence(basis, assessment, study_id):
 
 def admit_registered_evaluator(authenticated):
     state, frame = _current_authenticated(authenticated)
+    if frame['assessment']['schema']==ASSIGN:
+        return assign_registered_evaluation(authenticated)
     runtime = state['runtime']; grant = state['context'][2]; decision = c.assessment(frame['assessment'])
     if decision['decision'] == 'REFUSE':
         _current_authenticated(authenticated)
@@ -228,6 +254,109 @@ def current_admission(runtime, role):
     return dict(event_id=row['event_id'], payload=payload, slot=slot, mapping=mapping,
         actor_key=payload['actor_key'], context=context)
 
+def _registered_task_plan(basis,grant,task_id):
+    """Use the unchanged accepted declaration codec; it issues NO authority.
+
+    Its condition slot is solely a parser placeholder here and its returned
+    scope is discarded. The actual private case is bound by the original owner
+    reference/case digest, never a fabricated condition or exposed method tag.
+    """
+    from ops.native_fabric.quota_continuity.candidate import participant_binding as codec
+    raw=w.canonical(c.evidence_body(basis,grant['reviewer_plan_ref']))
+    scope=dict(schema=codec.PREFIX+'review_metadata_scope.v2',authority='display_only',
+        owner_contract=codec.PREFIX+'review_metadata_owner.v2',action='read_registered_reviewer_metadata.v2',
+        study_id=grant['study_id'],task_id=task_id,slot=0,reviewer_plan_ref=grant['reviewer_plan_ref'])
+    validated=codec.derive(scope,raw)
+    for slot in basis['slots']:
+        for key in ('principal_ref','qualification_ref','independence_ref'):
+            rows=[r for r in validated['reads'] if r['participant_role']==slot['role'] and r['evidence_role']==key]
+            if len(rows)!=1 or rows[0]['reference']!=slot[key]:c.fail()
+    return json.loads(raw)
+
+def _job_binding(job):
+    return dict(job_id=job.job_id,root_job_id=job.root_job_id,parent_job_id=job.parent_job_id,current_attempt_id=job.current_attempt_id,
+        constraints=job.constraints,requested_authorities=list(job.requested_authorities),allowed_write_paths=list(job.allowed_write_paths))
+
+def _assignment_command(job_id):return 'memory-evaluation-job:'+job_id+':assignment'
+
+def assign_registered_evaluation(authenticated):
+    """Real authenticated assessor assigns an EXISTING admitted native Job.
+
+    A normalized Job selector remains untrusted correlation. Only this retained
+    decision, original registered plan/task and current admission bind its role.
+    No Job, paid reservation, source snapshot or provider is created here.
+    """
+    state,frame=_current_authenticated(authenticated)
+    runtime=state['runtime'];request=purpose_document(frame['assessment']);grant=state['context'][2]
+    slots=source.exchange(runtime,source.make_request(grant))['basis']['slots']
+    selected=[r for r in slots if r['principal_ref']==request['participant_principal_ref']]
+    if len(selected)!=1:c.fail()
+    admitted=current_admission(runtime,selected[0]['role'])
+    from control_plane import protected_memory_original as originals
+    from control_plane.executive_runtime import JobStatus,AttemptStatus
+    reference=originals.completed_original_reference(runtime,request['original_attempt_id'])
+    subject=originals.current_reference(reference);original=originals._REFERENCES[reference]
+    job=runtime.jobs.get_job(request['job_id'])
+    if (job is None or job.root_job_id!=grant['root_job_id'] or subject['root_job_id']!=grant['root_job_id']
+            or job.status not in (JobStatus.QUEUED,JobStatus.RUNNING) or job.allowed_write_paths
+            or not set(job.requested_authorities)<={'READ','RESEARCH'} or 'READ' not in job.requested_authorities):c.fail()
+    # Bind the already-admitted original Attempt, never permission for a later
+    # caller-created replacement on this Job. No provider has been started.
+    attempt=runtime.attempts.get_attempt(job.current_attempt_id) if job.current_attempt_id is not None else None
+    if attempt is None or attempt.status is not AttemptStatus.CLAIMED or attempt.pid is not None:c.fail()
+    selector=c.evaluation_intent(job.constraints.get('native_memory_evaluation'))
+    if selector['subject_attempt_id']!=subject['attempt_id'] or selector['participant_slot']!=selected[0]['role']:c.fail()
+    from common.native_memory_intent_contract import normalize_memory_runtime_intent
+    native=normalize_memory_runtime_intent(job.constraints.get('native_memory'))
+    if native['intent']['study_id']!=grant['study_id'] or native['intent']['root_id']!=grant['study_root']:c.fail()
+    for key in ('registration_ref','reviewer_plan_ref','guide_ref'):
+        if selector[key]!=grant[key]:c.fail()
+    proposed=dict(schema='mastermind.registered_memory_evaluation_assignment.v1',delegation=grant,
+        role=selected[0]['role'],principal_ref=selected[0]['principal_ref'],admission_event_id=admitted['event_id'],
+        admission_sha256=c.digest(admitted['payload']),actor_key=admitted['actor_key'],subject=subject,
+        original_case_sha256=hashlib.sha256(original.case).hexdigest(),job_binding=_job_binding(job),
+        decision=request,assessor=frame['principal'])
+    from control_plane import protected_memory_annotations as annotations
+    permission=source.make_request(grant,'authorize_evaluation_subject_read',
+        subject=annotations.subject_selector(subject),assignment=c.digest(proposed))
+    source.exchange(runtime,permission)
+    from control_plane.protected_memory_execution import _private_directory
+    from control_plane.paid_fabric_backend import _private_read
+    from common.memory_participant_view import _json,selected_descriptors
+    directory=runtime.store.root/'data/control_plane/runs'/subject['attempt_id'];_private_directory(directory)
+    raw=_private_read(directory/'memory-original-input',65536)
+    if hashlib.sha256(raw).hexdigest()!=subject['input_sha256'] or len(raw)!=subject['input_bytes']:c.fail()
+    selected_descriptors(raw)
+    task_id=_json(raw[:-len(w.SUFFIX)],canonical=True)['task']['task_id']
+    _registered_task_plan(admitted['payload']['basis'],grant,task_id)
+    proposed['task_id']=task_id
+    if (originals.current_reference(reference)!=subject or _private_read(directory/'memory-original-input',65536)!=raw
+            or _job_binding(runtime.jobs.get_job(job.job_id))!=proposed['job_binding']):c.fail()
+    source.exchange(runtime,permission);_current_authenticated(authenticated)
+    try:
+        event_id=retain_event(runtime,'MEMORY_EVALUATION_ASSIGNED',_assignment_command(job.job_id),proposed,root=job.job_id)
+        reread=current_registered_assignment(runtime,job.job_id)
+        if reread['event_id']!=event_id:c.fail()
+    except Exception:raise AssessmentCommitUnknown() from None
+    return dict(schema='mastermind.memory_evaluation_assignment_receipt.v1',event_id=event_id,
+        assignment_sha256=c.digest(proposed),verification=dict(w.FLAGS),scientific_admission=False)
+
+def current_registered_assignment(runtime,job_id):
+    context=source.installed(runtime);_current_mission(runtime,context)
+    row,payload=event(runtime,'MEMORY_EVALUATION_ASSIGNED',_assignment_command(job_id))
+    job=runtime.jobs.get_job(job_id)
+    if (job is None or payload['delegation']!=context[2] or row['job_id']!=job_id
+            or payload['job_binding']!=_job_binding(job)):c.fail()
+    admitted=current_admission(runtime,payload['role'])
+    if (admitted['event_id']!=payload['admission_event_id'] or c.digest(admitted['payload'])!=payload['admission_sha256']
+            or admitted['actor_key']!=payload['actor_key']):c.fail()
+    _registered_task_plan(admitted['payload']['basis'],context[2],payload['task_id'])
+    from control_plane import protected_memory_original as originals
+    reference=originals.completed_original_reference(runtime,payload['subject']['attempt_id'])
+    if (originals.current_reference(reference)!=payload['subject']
+            or hashlib.sha256(originals._REFERENCES[reference].case).hexdigest()!=payload['original_case_sha256']):c.fail()
+    return dict(event_id=row['event_id'],payload=payload)
+
 def prepare_registered_evaluation(supervisor, *, original_reference, original_attempt_lease):
     """No paid reservation/dispatch here. Existing admitted original only."""
     from control_plane.executive_supervisor import ExecutiveSupervisor
@@ -247,7 +376,9 @@ def prepare_registered_evaluation(supervisor, *, original_reference, original_at
             or job.root_job_id != context[2]['root_job_id']): c.fail()
     for k in ('registration_ref', 'reviewer_plan_ref', 'guide_ref'):
         if selector[k] != context[2][k]: c.fail()
-    admitted = current_admission(runtime, selector['participant_slot'])
+    registered=current_registered_assignment(runtime,job.job_id)
+    if registered['payload']['subject']!=subject or selector['participant_slot']!=registered['payload']['role']:c.fail()
+    admitted = current_admission(runtime, registered['payload']['role'])
     # Reject alias/rotated-credential collisions BEFORE another private input.
     with runtime.store.read() as con:
         prior = con.execute("SELECT payload_json FROM events WHERE event_type='MEMORY_EVALUATION_EXPOSED' AND job_id IN (SELECT job_id FROM jobs WHERE root_job_id=?)", (job.root_job_id,)).fetchall()
@@ -262,7 +393,9 @@ def prepare_registered_evaluation(supervisor, *, original_reference, original_at
     quota = runtime.workers.get_quota_class(actual.worker_id, actual.quota_class)
     if (worker is None or quota is None or actual.worker_id != selected['worker_id']
             or actual.quota_class != selected['quota_class']
-            or worker.account_label != selected['account_ref'] or quota.model != selected['model']): c.fail()
+            or worker.account_label != selected['account_ref'] or quota.model != selected['model']
+            or job.constraints.get('execution_profile_digest') != c.digest(selected)
+            or quota.metadata.get('execution_profile_digest') != c.digest(selected)): c.fail()
     binding = dict(credential_binding_ref=observed['credential_binding_ref'],
         credential_document_sha256=observed['credential_document_sha256'])
     if binding not in admitted['mapping']['credential_bindings']: c.fail()
@@ -275,7 +408,7 @@ def prepare_registered_evaluation(supervisor, *, original_reference, original_at
                 and other['actor_key'] != admitted['actor_key']): c.fail()
     state = dict(pid=os.getpid(), supervisor=supervisor, runtime=runtime, lease=original_attempt_lease,
         claim=claim, reference=original_reference, subject=subject, admission=admitted,
-        role=selector['participant_slot'], observed=observed, context=context)
+        role=registered['payload']['role'], observed=observed, context=context,registered=registered)
     cap = object.__new__(PreparedEvaluationAssignment); _PREPARED[cap] = state
     current_prepared(cap)
     return cap
@@ -287,6 +420,7 @@ def current_prepared(cap):
     native.require_memory_runtime_claim(state['claim'])
     source.same(state['runtime'], state['context'])
     if (originals.current_reference(state['reference']) != state['subject']
+            or current_registered_assignment(state['runtime'],state['lease'].attempt.job_id)!=state['registered']
             or current_admission(state['runtime'], state['role'])['payload'] != state['admission']['payload']
             or source.model_observation(state['runtime'], state['admission']['slot']['execution_profile_id']) != state['observed']): c.fail()
     return state
@@ -317,8 +451,14 @@ def bind_evaluation_execution(prepared, *, process):
 def current_assignment(cap):
     bound = _exact_cap(_BOUND, cap, EvaluationAssignmentCapability)
     state = current_prepared(bound['prepared'])
-    from control_plane.codex_worker import ProcessInspector
-    inspector = ProcessInspector(); actual = inspector.inspect(bound['process'].pid)
-    if (actual.start_identity != bound['process'].process_start_identity
-            or inspector.boot_session_id() != bound['process'].boot_session_id): c.fail()
+    require_owned_process(cap)
     return state, bound
+
+def require_owned_process(cap):
+    bound = _exact_cap(_BOUND, cap, EvaluationAssignmentCapability)
+    from control_plane.codex_worker import ProcessInspector
+    inspector = ProcessInspector(); process = bound['process']; actual = inspector.inspect(process.pid)
+    if (actual.start_identity != process.process_start_identity or actual.pgid != process.pgid
+            or actual.session_id != process.session_id or actual.effective_uid != 450 or actual.real_uid != 450
+            or actual.effective_gid != process.effective_gid or actual.real_gid != process.real_gid
+            or inspector.boot_session_id() != process.boot_session_id): c.fail()

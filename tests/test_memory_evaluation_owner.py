@@ -48,6 +48,7 @@ from tests import test_mastermind_executive_app_asgi as jwt_fixture
 from tests.test_protected_memory_economic import OperatorOwner, Broker, ProtectedMemoryEconomicOwner, pool_ledger
 rsa_key=jwt_fixture.rsa_key
 REAL_POPEN=subprocess.Popen
+from integrations.executive_mcp.server import _LiteralCooRoute
 from control_plane import paid_fabric_backend as paid_module
 REAL_PRIVATE_READ=paid_module._private_read
 
@@ -109,13 +110,6 @@ def economy(tmp_path,monkeypatch,request):
         try:return economics.root_helper_invocation(sock,scope)
         finally:monkeypatch.setattr(os,'geteuid',previous_uid)
     engine._fixture_root_authority=authority
-    from control_plane import protected_memory_economic_owner as root_economic
-    execute_real=root_economic.execute
-    def trace_execute(*args,**kwargs):
-        try:return execute_real(*args,**kwargs)
-        except Exception as exc:
-            __import__('traceback').print_exc();raise
-    monkeypatch.setattr(root_economic,'execute',trace_execute)
     return owner,broker,engine,token,grant,selector,route,clock,ledger
 
 
@@ -151,20 +145,20 @@ def evaluation(joined,economy,rsa_key,tmp_path,monkeypatch,request):
     (source_dir/'config/executive_claude_principal_capabilities.json').write_bytes((ROOT/'config/executive_claude_principal_capabilities.json').read_bytes())
     coo_path=tmp_path/'executive-mcp.json';coo_path.write_text(json.dumps(raw_install))
     monkeypatch.setattr(entry,'require_sealed_path',lambda *args,**kwargs:None) # INERT ownership premise only
-    installed_source=CooInstalledSource.from_path(coo_path,source_dir,expected_uid=450)
     workspace=WorkspaceReadService(cache=None,runtime=runtime,authorize=None,armed={},runtime_identity={})
     mission=mandate._real_owner_mission();mission=json.loads(json.dumps(mission).replace(json.dumps(mission['mission']['root_job_id']),json.dumps(parent.job_id)));current['mission']=mission
     monkeypatch.setattr(workspace,'read_mission_for_work_ref',lambda work:copy.deepcopy(mission)) # actual cached acquisition premise
-    provider=CooHostProvider(installed_source,workspace)
     config=json.loads(legacy['config']['raw']);profiles=[];documents=[];slots=[];maps={};known_creds={}
     accounts=['configured-fixture-account','fixture-b','fixture-c']
+    shared_actor=getattr(request,'param',None)=='same-owned-actor'
+    if shared_actor:accounts[1]=accounts[0]
     for i,role in enumerate(c.ROLES):
         selected=dict(config['protected_memory_execution'],worker_id='evaluation-'+str(i),account_ref=accounts[i],credential_slot='memory-model-'+str(i+1).zfill(2))
         credential=w.canonical(dict(schema='mastermind.protected_memory_model_credential.v1',account_ref=accounts[i],api_key='INERT_ONLY_CREDENTIAL_'+str(i)))
         credential_path=tmp_path/(selected['credential_slot']+'.json');credential_path.write_bytes(credential);credential_path.chmod(0o440)
         known_creds[selected['credential_slot']]=(credential_path,credential)
         credential_ref=ref('installed-credential-'+str(i))
-        mapping=dict(schema='mastermind.native_model_actor_mapping.v1',actor_kind='NATIVE_MODEL',canonical_actor_ref=ref('assessor-admitted-actor-'+str(i)),credential_bindings=[dict(credential_binding_ref=credential_ref,credential_document_sha256=hashlib.sha256(credential).hexdigest())],assessment_basis='Explicit inert reasoned canonical mapping from current retained assessment evidence, including aliases/rotation',limitations=list(c.LIMITS))
+        mapping=dict(schema='mastermind.native_model_actor_mapping.v1',actor_kind='NATIVE_MODEL',canonical_actor_ref=ref('assessor-admitted-actor-'+str(0 if shared_actor and i==1 else i)),credential_bindings=[dict(credential_binding_ref=credential_ref,credential_document_sha256=hashlib.sha256(credential).hexdigest())],assessment_basis='Explicit inert reasoned canonical mapping from current retained assessment evidence, including aliases/rotation',limitations=list(c.LIMITS))
         fields={}
         for kind in ('principal_ref','qualification_ref','independence_ref','identity_mapping_ref'):
             body=mapping if kind=='identity_mapping_ref' else dict(schema='research_factory.market_memory_e0_reviewer_'+kind.removesuffix('_ref')+'_metadata.v2',object_id=role+'-'+kind,authority='display_only',study_id='study',participant_id=role+'-principal_ref',verification=dict(w.FLAGS))
@@ -176,6 +170,22 @@ def evaluation(joined,economy,rsa_key,tmp_path,monkeypatch,request):
         profiles.append(dict(id='model-'+str(i),profile=selected,credential_binding_ref=credential_ref,credential_document_sha256=hashlib.sha256(credential).hexdigest()))
         meta=dict(adapter_id='protected-memory-model',execution_profile_id=profile.PROFILE,execution_profile_digest=c.digest(selected),capability_policy_version='memory-fixture-v1',capability_policy_digest=selected['policy_sha256'])
         runtime.workers.register_worker(selected['worker_id'],provider='glm',account_label=accounts[i],worker_type='protected-memory-model',capabilities=['research'],quota_classes={'memory-read':{'provider':'glm','model':selected['model'],'capabilities':['research'],'metadata':meta}})
+    # The source-owned registered plan is retained evidence, not a caller slot.
+    from common.memory_participant_view import _json
+    case=(runtime.store.root/'data/control_plane/runs'/lease.attempt.attempt_id/'memory-original-input').read_bytes()
+    task_id=_json(case[:-len(w.SUFFIX)],canonical=True)['task']['task_id']
+    plan_schema=json.loads((ROOT/'tests/fixtures/market-memory-owner-contract/contracts/market_memory/e0_reviewer_plan.v1.schema.json').read_bytes())
+    people=[{k:s[k] for k in ('principal_ref','qualification_ref','independence_ref')} for s in slots]
+    plan=dict(schema='research_factory.market_memory_e0_reviewer_plan.v1',object_id='registered-plan',authority='display_only',study_id='study',preregistered_at='2026-11-01T00:00:00Z',
+        **{k:plan_schema['properties'][k]['const'] for k in ('protocol_sha256','annotation_guide_sha256','membership_sha256')},
+        tasks_ref=dict(schema='research_factory.market_memory_e0_tasks.v1',object_id='registered-tasks',sha256='c'*64,bytes=20),
+        reviewers=people[:2],adjudicator=people[2],assignments=[dict(task_id=task_id,reviewer_principal_ids=[v['principal_ref']['object_id'] for v in people[:2]],adjudicator_principal_id=people[2]['principal_ref']['object_id'])],
+        blinding={k:v['const'] for k,v in plan_schema['$defs']['blinding']['properties'].items()})
+    grant['reviewer_plan_ref']=dict(ref('registered-plan',plan),schema=plan['schema'])
+    documents.append(dict(reference=grant['reviewer_plan_ref'],body=plan))
+    coo_path.write_text(json.dumps(raw_install))
+    installed_source=CooInstalledSource.from_path(coo_path,source_dir,expected_uid=450)
+    provider=CooHostProvider(installed_source,workspace)
     basis=dict(schema='research_factory.memory_evaluation_basis.v1',**{k:grant[k] for k in ('registration_ref','reviewer_plan_ref','guide_ref','source_purpose_ref')},required_criteria=['identity','independence','qualification'],independence_rules=['distinct_canonical_actor','assessed_conflicts'],slots=slots,evidence=documents)
     config['memory_evaluation']=dict(schema=source.CONFIG_SCHEMA,armed=True,coo_config=str(coo_path),coo_source=str(source_dir),work_ref='WS:ONE',profiles=profiles,source_protocol='memory.e0.evaluation_issuer.v1')
     legacy['config']['raw']=w.canonical(config);legacy['config']['owner']['configuration_sha256']=hashlib.sha256(legacy['config']['raw']).hexdigest()
@@ -220,8 +230,11 @@ def evaluation(joined,economy,rsa_key,tmp_path,monkeypatch,request):
         q=w._unframe(raw,262144)
         if q['schema']!=c.REQUEST:return previous_exchange(raw)
         c.request(q);source_actions.append(q['action'])
-        if faults.get('source'):raise ValueError('inert source revoked/unknown')
+        if faults.get('source'):raise root.IssuerExchangeUnknown()
+        if faults.get('change_owned_process_on_exposure') and q['action']=='authorize_annotation_exposure':faults['process_changed']=True
         r=dict(schema=c.RESPONSE,state='CURRENT',request_sha256=c.digest(q),source_purpose_ref=grant['source_purpose_ref'],source_owner=dict(installation_id='inert-linux',installation_epoch='1',service_key_fingerprint=grant['source_audience']['service_key_fingerprint']),generation='access-1',not_before_ms=now-1000,expires_at_ms=now+3600000,basis=basis if q['action']=='read_evaluation_basis' else None,verification=dict(w.FLAGS),scientific_admission=False)
+        if faults.get('expired'):r.update(not_before_ms=now-5000,expires_at_ms=now-1)
+        if faults.get('access_advance'):r['generation']='access-2'
         b=w.canonical(r);return len(b).to_bytes(4,'big')+b
     monkeypatch.setattr(root,'_exchange',exchange)
     # Kernel identity/source qualification fixture on THIS accepted App socket.
@@ -239,24 +252,11 @@ def evaluation(joined,economy,rsa_key,tmp_path,monkeypatch,request):
     from integrations.mastermind_executive_app.gateway import CeoIngressResponse,TRANSPORT_SENT_OK
     async def send(path,frame):
         assert path==settings.executive.ceo_ingress_socket_path
-        try:
-            cap=a.capture_authenticated_assessment(gateway,frame,provider,supervisor)
-            receipt=a.admit_registered_evaluator(cap)
-        except Exception:
-            __import__('traceback').print_exc();raise
-        return CeoIngressResponse(transport=TRANSPORT_SENT_OK,ok=True,result=receipt)
+        answer=a.assess_from_installed_app(gateway,frame,provider,supervisor)
+        return CeoIngressResponse(transport=TRANSPORT_SENT_OK,ok=answer['ok'],result=answer.get('result'),error=answer.get('error'))
     monkeypatch.setattr(app._client,'send_frame',send) # only local App transport; actual issuer remains REAL
     settings=dataclasses.replace(settings,authority_provider=lambda principal,work:installed_source.snapshot(work)[2])
     app.settings=settings
-    for name in ('_authority','_mandate','_auth'):
-        real_method=getattr(app,name)
-        async def trace(*args,_method=real_method,**kwargs):
-            try:
-                value=await _method(*args,**kwargs)
-                print('INERT_APP_STAGE',_method.__name__,value.get('new_effect_gate') if isinstance(value,dict) else getattr(value,'status_code',type(value).__name__))
-                return value
-            except Exception:__import__('traceback').print_exc();raise
-        monkeypatch.setattr(app,name,trace)
     # Fixed public guide read primitive + installed binary primitive only.
     from control_plane import paid_fabric_backend as paid
     monkeypatch.setattr(paid,'_root_source',lambda path:path.read_bytes() if path in (ROOT/'common/memory_evaluation_guide.md',coo_path) else (_ for _ in ()).throw(AssertionError('unexpected source')))
@@ -265,7 +265,7 @@ def evaluation(joined,economy,rsa_key,tmp_path,monkeypatch,request):
     class Inspector:
         def inspect(self,pid):
             assert pid in launches
-            return SimpleNamespace(pgid=pid,start_identity='inert-owned-'+str(pid),session_id=pid,effective_uid=450,effective_gid=450,real_uid=450,real_gid=450)
+            return SimpleNamespace(pgid=pid,start_identity='inert-owned-'+str(pid),session_id=pid,effective_uid=501 if faults.get('process_changed') else 450,effective_gid=450,real_uid=450,real_gid=450)
         def boot_session_id(self):return 'inert-boot'
     monkeypatch.setattr(exe,'ProcessInspector',Inspector)
     monkeypatch.setattr(__import__('control_plane.codex_worker',fromlist=['ProcessInspector']),'ProcessInspector',Inspector)
@@ -278,14 +278,15 @@ while True:
  raw+=p
 assert int.from_bytes(raw[:4],'big')==len(raw)-4
 env=json.loads(raw[4:]);packet=base64.b64decode(env['input_base64']);body=json.loads(base64.b64decode(env['body_base64']));assert body['input'].encode()==packet
-p=json.loads(packet[:packet.rfind(b'}')+1])
+p=json.loads(packet[:packet.rfind(b'}')+1]);assert p['result_contract']['result_schema'].startswith('mastermind.memory_evaluation_')
+original=json.loads(p['original_packet'][:p['original_packet'].rfind('}')+1]);descriptors=[{k:card[k] for k in ('context_id','capture_id','packet_sha256')}|{'field':fact['field'],'citation':fact['citation']} for card in original['source_view']['source_cards'] for fact in card['facts']]
 if p['stage']=='independent_annotation':
  assert p['comparison'] is None
  ans=p['answer'].encode();j=int(sys.argv[2]);quote=ans[:7]
- value={'schema':'mastermind.memory_evaluation_annotation.v1','answer_assessment':'incorrect' if j==1 else 'correct','facets':[{'facet_id':f,'assessment':'incorrect' if j==1 else 'correct','reason':'inert original reason '+str(j)} for f in p['task']['required_facet_ids']], 'claims':[{'claim_id':'local-'+str(j),'span':{'start_byte':0,'end_byte_exclusive':7,'quoted_utf8':quote.decode(),'span_sha256':hashlib.sha256(quote).hexdigest()},'verdict':'unsupported' if j==1 else 'supported','material':True,'critical':j==1,'source_support':[],'reason':'Retained inert original claim judgment'}], 'relevance':[{'context_id':card['context_id'],'relevance':2,'facet_ids':p['task']['required_facet_ids'],'reason':'Inert registered facet'} for card in json.loads(p['original_packet'][:p['original_packet'].rfind('}')+1])['source_view']['source_cards']]}
+ value={'schema':'mastermind.memory_evaluation_annotation.v1','answer_assessment':'incorrect' if j==1 else 'correct','facets':[{'facet_id':f,'assessment':'incorrect' if j==1 else 'correct','reason':'inert original reason '+str(j)} for f in p['task']['required_facet_ids']], 'claims':[{'claim_id':'local-'+str(j),'span':{'start_byte':0,'end_byte_exclusive':7,'quoted_utf8':quote.decode(),'span_sha256':hashlib.sha256(quote).hexdigest()},'verdict':'unsupported' if j==1 else 'supported','material':True,'critical':j==1,'source_support':[] if j==1 else [descriptors[0]],'reason':'Retained inert original claim judgment'}], 'relevance':[{'context_id':card['context_id'],'relevance':2,'facet_ids':p['task']['required_facet_ids'],'reason':'Inert registered facet'} for card in json.loads(p['original_packet'][:p['original_packet'].rfind('}')+1])['source_view']['source_cards']]}
 else:
  assert 'actor_keys' not in p['comparison']
- value={'schema':'mastermind.memory_evaluation_resolution.v1','resolutions':[{'item_key':item['item_key'],'judgment':{'assessment':'correct'} if item['item_key']=='answer' or item['item_key'].startswith('facet:') else {'verdict':'supported','critical':False},'reason':'Original harsher provisional finding resolved with retained reason'} for item in p['comparison']['comparison_items']], 'overall_reason':'Explicit inert distinct-adjudicator original resolution'}
+ value={'schema':'mastermind.memory_evaluation_resolution.v1','resolutions':[{'item_key':item['item_key'],'judgment':{'assessment':'correct'} if item['item_key']=='answer' or item['item_key'].startswith('facet:') else {'verdict':'supported','material':True,'critical':False,'source_support':[descriptors[0]]},'reason':'Original harsher provisional finding resolved with retained reason'} for item in p['comparison']['comparison_items']], 'overall_reason':'Explicit inert distinct-adjudicator original resolution'}
 os.write(1,json.dumps(value,sort_keys=True,separators=(',',':')).encode());s.close()
 '''
     def popen(argv,**kwargs):
@@ -298,17 +299,28 @@ os.write(1,json.dumps(value,sort_keys=True,separators=(',',':')).encode());s.clo
         job=runtime.jobs.create_job('Inert registered evaluation '+role,parent_job_id=parent.job_id,requested_authorities=['READ'],constraints={**meta,'eligible_quota_classes':['memory-read'],'native_memory':{'schema':'mastermind.native_memory_runtime_intent.v1','operation_id':'eval-'+role,'intent':{'study_id':'study','root_id':'native-root','operator_run_id':'native-parent','child_run_id':'eval-'+role}},'native_memory_evaluation':dict(schema='mastermind.native_memory_evaluation_intent.v1',subject_attempt_id=lease.attempt.attempt_id,participant_slot=role,**{k:grant[k] for k in ('registration_ref','reviewer_plan_ref','guide_ref')})})
         result=runtime.attempts.claim_job(job.job_id,worker_id=p['worker_id'],quota_class='memory-read',lease_owner='fixture');assert result
         directory=runtime.store.root/'data/control_plane/runs'/result.attempt.attempt_id;directory.mkdir(mode=0o700);return result
-    async def admit(role,token_override=None):
+    from starlette.applications import Starlette
+    actual_route=_LiteralCooRoute(Starlette(),evaluation_core=app)
+    async def admit(role,token_override=None,decision_override=None):
         slot=next(s for s in slots if s['role']==role);m=c.evidence_body(basis,slot['identity_mapping_ref'])
         decision=dict(schema=c.FRAME,command_id='inert-assess-'+role,work_ref='WS:ONE',participant_slot=role,decision='ADMIT',criteria=[dict(criterion_id=k,evidence_ref=slot[{'identity':'principal_ref','independence':'independence_ref','qualification':'qualification_ref'}[k]],finding='SATISFIED',reason='Actual inert authorized assessor reason for '+k) for k in basis['required_criteria']],canonical_actor_ref=m['canonical_actor_ref'],identity_mapping_ref=slot['identity_mapping_ref'],limitations=list(c.LIMITS))
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://inert') as client:
-            return await client.post('/v1/memory/evaluation-assessment',headers={'authorization':'Bearer '+(token_override or token)},json=decision)
-    return SimpleNamespace(runtime=runtime,supervisor=supervisor,reference=original_ref,subject=subject,subject_lease=lease,grant=grant,basis=basis,profiles=profiles,maps=maps,config=config,coo=raw_install,coo_path=coo_path,state=legacy['config'],create_lease=create_lease,admit=admit,launches=launches,source_actions=source_actions,faults=faults,economy=economy,app=app,token=token,provider=provider,gateway=gateway)
+        if decision_override:decision.update(decision_override)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=actual_route),base_url='http://inert') as client:
+            return await client.post('/mcp/coo/evaluation-assessment',headers={'authorization':'Bearer '+(token_override or token)},json=decision)
+    async def assign(role,lease,**changes):
+        slot=next(s for s in slots if s['role']==role)
+        decision=dict(schema=a.ASSIGN,command_id='assign-'+lease.attempt.attempt_id,work_ref='WS:ONE',job_id=lease.attempt.job_id,
+            original_attempt_id=original_ref and original.current_reference(original_ref)['attempt_id'],participant_principal_ref=slot['principal_ref'],reason='Explicit inert authenticated assessor assignment of registered participant to actual original result')
+        decision.update(changes)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=actual_route),base_url='http://inert') as client:
+            return await client.post('/mcp/coo/evaluation-assessment',headers={'authorization':'Bearer '+token},json=decision)
+    return SimpleNamespace(runtime=runtime,supervisor=supervisor,reference=original_ref,subject=subject,subject_lease=lease,grant=grant,basis=basis,profiles=profiles,maps=maps,config=config,coo=raw_install,coo_path=coo_path,state=legacy['config'],create_lease=create_lease,admit=admit,assign=assign,launches=launches,source_actions=source_actions,faults=faults,economy=economy,app=app,route=actual_route,token=token,provider=provider,gateway=gateway)
 
 
 def complete(e,role,pair=None):
     response=asyncio.run(e.admit(role));assert response.status_code==200,response.text
     lease=e.create_lease(role)
+    assigned=asyncio.run(e.assign(role,lease));assert assigned.status_code==200,assigned.text
     prepared=a.prepare_registered_evaluation(e.supervisor,original_reference=e.reference,original_attempt_lease=lease)
     exe.retain_evaluation_economic_delegation(prepared,e.economy[3],task_class='extract',task_complexity='C1_ROUTINE_BOUNDED')
     exe.start_registered_evaluation(prepared,pair=pair)
@@ -331,5 +343,189 @@ def test_real_issuer_actor_fd_collector_pair_and_distinct_resolution(evaluation)
     assert len(e.launches)==3 and all(not v for v in final['verification'].values())
     assert 'Original harsher provisional finding' in final['original_resolution']
     events=e.runtime.events.list_events();assert sum(x.event_type=='MEMORY_EVALUATOR_ADMITTED' for x in events)==3
+    assert sum(x.event_type=='MEMORY_EVALUATION_ASSIGNED' for x in events)==3
     assert sum(x.event_type=='MEMORY_EVALUATION_EXPOSED' for x in events)==3
     assert sum(x.event_type=='MEMORY_EVALUATION_COMPLETED' for x in events)==3
+    # Final rereads remain real source/recipient checks, not cached permissions.
+    before=economic_count(e);path=e.runtime.store.root/'data/control_plane/runs'/judge.attempt.attempt_id/'memory-evaluation-result'
+    raw=path.read_bytes();path.write_bytes(raw.replace(b'Original harsher',b'Xriginal harsher',1))
+    with pytest.raises(ValueError):ann.read_retained_resolution(e.supervisor,adjudication_attempt_id=judge.attempt.attempt_id,pair=pair)
+    path.write_bytes(raw)
+    reader=paid_module._private_read;changed=[]
+    def revoke_during_read(selected,limit):
+        body=reader(selected,limit)
+        if selected==path and not changed:changed.append(True);e.faults['source']=True
+        return body
+    # The underlying private FD reader stays unchanged; the source permission
+    # withdraws during one body read, so the entire new view must be withheld.
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(paid_module,'_private_read',revoke_during_read)
+        with pytest.raises(ValueError):ann.read_retained_resolution(e.supervisor,adjudication_attempt_id=judge.attempt.attempt_id,pair=pair)
+    assert changed and path.read_bytes()==raw
+    e.faults['source']=False;e.faults['access_advance']=True
+    assert ann.read_retained_resolution(e.supervisor,adjudication_attempt_id=judge.attempt.attempt_id,pair=pair)['original_resolution']==final['original_resolution']
+    assert economic_count(e)==before and len(e.launches)==3
+
+
+def economic_count(e):
+    with e.economy[0].transaction() as con:
+        return con.execute('SELECT count(*) FROM operator_child_authorizations').fetchone()[0]
+
+
+@pytest.mark.parametrize('evaluation',['same-owned-actor'],indirect=True)
+def test_owned_actor_alias_falsifier_refuses_before_b_fd_and_pair(evaluation):
+    e=evaluation
+    first,_,_=complete(e,'reviewer_1')
+    assert asyncio.run(e.admit('reviewer_2')).status_code==200
+    before=economic_count(e)
+    other=e.create_lease('reviewer_2')
+    assigned=asyncio.run(e.assign('reviewer_2',other));assert assigned.status_code==200,assigned.text
+    assert other.attempt.attempt_id!=first.attempt.attempt_id
+    left=a.current_admission(e.runtime,'reviewer_1');right=a.current_admission(e.runtime,'reviewer_2')
+    assert left['slot']['principal_ref']!=right['slot']['principal_ref']
+    assert left['actor_key']==right['actor_key']
+    assert e.profiles[0]['profile']['account_ref']==e.profiles[1]['profile']['account_ref']
+    assert e.profiles[0]['profile']['credential_slot']!=e.profiles[1]['profile']['credential_slot']
+    with pytest.raises(ValueError):
+        a.prepare_registered_evaluation(e.supervisor,original_reference=e.reference,original_attempt_lease=other)
+    with pytest.raises(ValueError):
+        ann.capture_retained_annotation_pair(e.supervisor,original_attempt_id=e.subject_lease.attempt.attempt_id,
+            reviewer_attempt_ids=[first.attempt.attempt_id,other.attempt.attempt_id])
+    assert len(e.launches)==1 and economic_count(e)==before
+    assert not any(x.event_type=='MEMORY_EVALUATION_EXPOSURE_ATTEMPT' and x.attempt_id==other.attempt.attempt_id for x in e.runtime.events.list_events())
+    assert not (e.runtime.store.root/'data/control_plane/runs'/other.attempt.attempt_id/'memory-evaluation-input').exists()
+
+
+@pytest.mark.parametrize('fault',['bad-signature','read-only','foreign-client','expired'])
+def test_actual_jwt_ingress_refuses_before_assignment_and_source(evaluation,rsa_key,fault):
+    e=evaluation
+    if fault=='bad-signature':token='not.a.signature'
+    else:
+        changes={'scope':' '.join(coo_app.COO_SCOPES)}
+        if fault=='read-only':changes['scope']='mastermind.executive.read'
+        elif fault=='foreign-client':changes['client_id']='unbound-inert-client'
+        else:changes.update(iat=jwt_fixture.NOW-600,nbf=jwt_fixture.NOW-600,exp=jwt_fixture.NOW-60)
+        token=jwt_fixture._token(rsa_key,**changes)
+    before=economic_count(e);answer=asyncio.run(e.admit('reviewer_1',token))
+    assert answer.status_code in (401,403)
+    assert e.source_actions==[] and e.launches==[] and economic_count(e)==before
+    assert not any(x.event_type=='MEMORY_EVALUATOR_ADMITTED' for x in e.runtime.events.list_events())
+
+
+@pytest.mark.parametrize('fault',['missing-purpose','revoked-delegation','source-unknown','expired-source','unsupported-independence','unsupported-actor'])
+def test_real_installed_or_source_authority_failure_never_issues_admission(evaluation,fault):
+    e=evaluation
+    if fault in ('missing-purpose','revoked-delegation'):
+        raw=json.loads(e.coo_path.read_bytes())
+        if fault=='missing-purpose':
+            raw['coo']['missions'][0].pop('memory_evaluation_delegation');raw['coo']['missions'][0]['authority_version']=2
+        else:raw['coo']['missions'][0]['memory_evaluation_delegation']['enabled']=False
+        e.coo_path.write_text(json.dumps(raw))
+    elif fault=='source-unknown':e.faults['source']=True
+    elif fault=='expired-source':e.faults['expired']=True
+    elif fault=='unsupported-independence':e.basis['independence_rules']=['three_providers']
+    else:
+        slot=e.basis['slots'][0];item=next(i for i in e.basis['evidence'] if i['reference']==slot['identity_mapping_ref'])
+        item['body']['actor_kind']='HUMAN';r=ref(item['reference']['object_id'],item['body']);r['schema']=item['body']['schema']
+        slot['identity_mapping_ref']=r;item['reference']=r
+    before=economic_count(e)
+    answer=asyncio.run(e.admit('reviewer_1'))
+    assert answer.status_code!=200
+    assert not any(x.event_type=='MEMORY_EVALUATOR_ADMITTED' for x in e.runtime.events.list_events())
+    assert e.launches==[] and economic_count(e)==before
+
+
+def test_authenticated_revocation_reread_withholds_existing_assignment(evaluation):
+    e=evaluation
+    assert asyncio.run(e.admit('reviewer_1')).status_code==200
+    original_admission=a.current_admission(e.runtime,'reviewer_1')['event_id']
+    lease=e.create_lease('reviewer_1');before=economic_count(e)
+    assigned=asyncio.run(e.assign('reviewer_1',lease));assert assigned.status_code==200,assigned.text
+    assert asyncio.run(e.admit('reviewer_1',decision_override={'decision':'REFUSE'})).status_code==200
+    with pytest.raises(ValueError):a.current_admission(e.runtime,'reviewer_1')
+    with pytest.raises(ValueError):a.prepare_registered_evaluation(e.supervisor,original_reference=e.reference,original_attempt_lease=lease)
+    assert any(x.event_type=='MEMORY_EVALUATOR_ADMITTED' and x.event_id==original_admission for x in e.runtime.events.list_events())
+    assert e.launches==[] and economic_count(e)==before
+
+
+@pytest.mark.parametrize('kind',['dict','clone','subclass'])
+def test_capability_shape_cannot_release_fd_or_read_private_pair(kind):
+    if kind=='dict':value={'registered':True,'actor_key':'anything'}
+    elif kind=='clone':value=object.__new__(a.EvaluationAssignmentCapability)
+    else:
+        class Borrowed(a.EvaluationAssignmentCapability):pass
+        value=object.__new__(Borrowed)
+    with pytest.raises(ValueError):a.current_assignment(value)
+    with pytest.raises(ValueError):ann.current_pair(value)
+
+
+def test_process_actor_change_during_source_authorization_withholds_fd(evaluation):
+    e=evaluation
+    assert asyncio.run(e.admit('reviewer_1')).status_code==200
+    lease=e.create_lease('reviewer_1')
+    assigned=asyncio.run(e.assign('reviewer_1',lease));assert assigned.status_code==200,assigned.text
+    prepared=a.prepare_registered_evaluation(e.supervisor,original_reference=e.reference,original_attempt_lease=lease)
+    exe.retain_evaluation_economic_delegation(prepared,e.economy[3],task_class='extract',task_complexity='C1_ROUTINE_BOUNDED')
+    e.faults['change_owned_process_on_exposure']=True
+    with pytest.raises(old.MemoryExecutionUnknown):exe.start_registered_evaluation(prepared)
+    run=exe._RUNS[prepared];assert run['proc'].wait(timeout=5)!=0
+    assert len(e.launches)==1
+    assert not any(x.event_type=='MEMORY_EVALUATION_EXPOSED' and x.attempt_id==lease.attempt.attempt_id for x in e.runtime.events.list_events())
+    # Original attempt/paid rows remain, not a refund/replacement/retry grant.
+    with pytest.raises(ValueError):exe.start_registered_evaluation(prepared)
+    assert len(e.launches)==1
+
+
+def test_public_facet_is_literal_and_never_exposes_or_accepts_other_paths(evaluation):
+    e=evaluation
+    async def requests():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=e.route),base_url='http://inert') as client:
+            for path,method in [('/mcp/coo/evaluation-assessment?role=adjudicator','POST'),
+                    ('/mcp/coo/evaluation-assessment/extra','POST'),('/mcp/coo/evaluation-assessment','GET')]:
+                r=await client.request(method,path,headers={'authorization':'Bearer '+e.token},content=b'INERT_PRIVATE_CANARY')
+                assert r.status_code==404 and b'INERT_PRIVATE_CANARY' not in r.content
+    asyncio.run(requests())
+    assert not e.source_actions and not e.launches
+
+
+def test_admission_and_caller_role_do_not_assign_or_expose_private_input(evaluation):
+    e=evaluation
+    assert asyncio.run(e.admit('reviewer_1')).status_code==200
+    lease=e.create_lease('reviewer_1');before=economic_count(e)
+    with pytest.raises(ValueError):a.prepare_registered_evaluation(e.supervisor,original_reference=e.reference,original_attempt_lease=lease)
+    assert len(e.launches)==0 and economic_count(e)==before
+    assert not any(x.event_type=='MEMORY_EVALUATION_ASSIGNED' for x in e.runtime.events.list_events())
+    # A real authenticated request for the wrong registered participant still
+    # cannot relabel the already-created Job's role and expose it.
+    r=asyncio.run(e.assign('reviewer_2',lease));assert r.status_code!=200
+    assert len(e.launches)==0 and economic_count(e)==before
+
+
+def test_assignment_source_withdrawal_during_retained_subject_read_never_commits(evaluation,monkeypatch):
+    e=evaluation
+    assert asyncio.run(e.admit('reviewer_1')).status_code==200
+    lease=e.create_lease('reviewer_1');before=economic_count(e)
+    path=e.runtime.store.root/'data/control_plane/runs'/e.subject_lease.attempt.attempt_id/'memory-original-input'
+    previous=paid_module._private_read;reads=[]
+    def withdraw(selected,limit):
+        result=previous(selected,limit)
+        if selected==path:reads.append(True);e.faults['source']=True
+        return result
+    monkeypatch.setattr(paid_module,'_private_read',withdraw)
+    result=asyncio.run(e.assign('reviewer_1',lease))
+    assert result.status_code!=200 and reads
+    assert not any(x.event_type=='MEMORY_EVALUATION_ASSIGNED' for x in e.runtime.events.list_events())
+    assert e.launches==[] and economic_count(e)==before
+
+
+def test_post_commit_auth_withdrawal_retains_original_and_returns_unknown(evaluation,monkeypatch):
+    e=evaluation;previous=e.app._same_auth
+    async def current(request,authenticated):
+        live=await previous(request,authenticated)
+        if any(x.event_type=='MEMORY_EVALUATOR_ADMITTED' for x in e.runtime.events.list_events()):return False
+        return live
+    monkeypatch.setattr(e.app,'_same_auth',current)
+    response=asyncio.run(e.admit('reviewer_1'))
+    assert response.status_code!=200 and response.json()['error']['code']=='effect_unknown'
+    assert sum(x.event_type=='MEMORY_EVALUATOR_ADMITTED' for x in e.runtime.events.list_events())==1
+    assert e.launches==[] and not any(x.event_type=='MEMORY_EVALUATION_ASSIGNED' for x in e.runtime.events.list_events())

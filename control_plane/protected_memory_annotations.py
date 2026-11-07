@@ -29,6 +29,8 @@ def subject_selector(subject):
 
 def assignment_material(state):
     return dict(schema='mastermind.memory_evaluation_assignment.v1', subject=state['subject'], role=state['role'],
+        registered_assignment_event_id=state['registered']['event_id'],registered_assignment_sha256=c.digest(state['registered']['payload']),
+        task_id=state['registered']['payload']['task_id'],original_case_sha256=state['registered']['payload']['original_case_sha256'],
         admission_event_id=state['admission']['event_id'], admission_sha256=c.digest(state['admission']['payload']),
         actor_key=state['admission']['actor_key'], attempt_id=state['lease'].attempt.attempt_id,
         job_id=state['lease'].attempt.job_id, fence=state['lease'].attempt.fence_generation,
@@ -72,12 +74,13 @@ def input_packet(prepared, *, pair=None):
     body = dict(schema='mastermind.memory_evaluation_input.v1', task=task, guide=_guide(),
         original_packet=packet.decode('utf-8'), answer=view['answer'], answer_text_basis='original_result.answer_utf8_decoded_no_normalization.v1',
         answer_text_sha256=hashlib.sha256(view['answer'].encode()).hexdigest(), stage='independent_annotation',
-        comparison=None, limitations=['provider_and_method_identity_withheld', *c.LIMITS])
+        comparison=None, result_contract=ratings.result_contract(), limitations=['provider_and_method_identity_withheld', *c.LIMITS])
     if state['role'] == 'adjudicator':
         material = current_pair(pair)
         if material['subject'] != state['subject'] or not material['comparison_items']: c.fail()
         if state['admission']['actor_key'] in material['actor_keys']: c.fail()
         body.update(stage='retained_disagreement_adjudication', comparison={k:material[k] for k in ('original_annotations','comparison_items')})
+        body['result_contract']=ratings.result_contract(adjudication=True)
     elif pair is not None:
         c.fail()
     # No participant role/account/method/condition/peer rating in reviewer input.
@@ -117,9 +120,29 @@ def begin_exposure(bound, packet, *, pair=None):
     return payload
 
 def confirm_exposure(bound, payload):
-    state, _ = assignment.current_assignment(bound)
+    # Retain the ACTUAL successful channel operation even when the child has
+    # already exited or authority subsequently withdraws. It is an observation,
+    # not a new disclosure grant. Later collectors repeat current authorization.
+    identity=assignment._exact_cap(assignment._BOUND,bound,assignment.EvaluationAssignmentCapability)
+    state=assignment._exact_cap(assignment._PREPARED,identity['prepared'],assignment.PreparedEvaluationAssignment)
+    _,attempt=assignment.event(state['runtime'],'MEMORY_EVALUATION_EXPOSURE_ATTEMPT',_command(state['lease'].attempt.attempt_id,'exposure-attempt'))
+    if attempt!=payload:c.fail()
     assignment.retain_event(state['runtime'], 'MEMORY_EVALUATION_EXPOSED',
         _command(state['lease'].attempt.attempt_id, 'exposed'), payload, attempt=state['lease'].attempt)
+
+def final_fd_window(bound, payload, packet, *, pair=None):
+    """After all blocking input reads, immediately before the sole write."""
+    state,_=assignment.current_assignment(bound)
+    if hashlib.sha256(packet).hexdigest()!=payload['input_sha256'] or len(packet)!=payload['input_bytes']:c.fail()
+    authorization=_authorize(state,'authorize_adjudication_exposure' if state['role']=='adjudicator' else 'authorize_annotation_exposure',
+        payload['input_sha256'],c.digest(current_pair(pair)) if pair is not None else None)
+    from control_plane import native_memory_admission as native
+    native.require_memory_runtime_claim(state['claim'])
+    assignment.require_owned_process(bound)
+    # The authenticated source response is a bounded currentness window, not
+    # echoed caller authority. No blocking operation follows this final clock.
+    now=state['runtime'].store.now_ms();grant=state['context'][2]
+    if not max(grant['not_before_ms'],authorization['not_before_ms'])<=now<min(grant['expires_at_ms'],authorization['expires_at_ms']):c.fail()
 
 def collect_annotation(prepared, *, pair=None):
     """Called only by the fixed original process collector AFTER exit zero."""
@@ -139,7 +162,7 @@ def collect_annotation(prepared, *, pair=None):
     original_packet, original_result = subject_bytes(state)
     if state['role']=='adjudicator':
         pair_material = current_pair(pair)
-        value = ratings.resolution(result_raw, pair_material['comparison_items'])
+        value = ratings.resolution(result_raw, pair_material['comparison_items'],packet=original_packet)
     else:
         pair_material = None
         value = ratings.annotation(result_raw, original_packet, original_result)
@@ -166,6 +189,8 @@ def _completed(supervisor, attempt_id):
     row, receipt = assignment.event(runtime,'MEMORY_EVALUATION_COMPLETED',_command(attempt_id,'completed'))
     _, exposure = assignment.event(runtime,'MEMORY_EVALUATION_EXPOSED',_command(attempt_id,'exposed'))
     material = receipt['assignment']; admitted = assignment.current_admission(runtime, material['role'])
+    registered=assignment.current_registered_assignment(runtime,job.job_id)
+    if registered['event_id']!=material['registered_assignment_event_id'] or c.digest(registered['payload'])!=material['registered_assignment_sha256']:c.fail()
     if (receipt['exposure_event_id']>=row['event_id'] or receipt['assignment']['attempt_id']!=attempt_id
             or receipt['assignment']['job_id']!=job.job_id or material['admission_sha256']!=c.digest(admitted['payload'])
             or material['actor_key']!=admitted['actor_key'] or job.root_job_id!=admitted['context'][2]['root_job_id']): c.fail()
@@ -190,7 +215,8 @@ def _completed(supervisor, attempt_id):
         if hashlib.sha256(body).hexdigest()!=material['subject'][key+'_sha256'] or len(body)!=material['subject'][key+'_bytes']: c.fail()
     if _private_read(directory/'memory-evaluation-result',65536)!=raw: c.fail()
     source.exchange(runtime,req)
-    if assignment.current_admission(runtime,material['role'])['payload']!=admitted['payload']: c.fail()
+    if (assignment.current_admission(runtime,material['role'])['payload']!=admitted['payload']
+            or assignment.current_registered_assignment(runtime,job.job_id)!=registered): c.fail()
     if originals.current_reference(reference)!=material['subject']:c.fail()
     return row,receipt,raw,packet,answer
 
@@ -235,10 +261,10 @@ def prepare_retained_adjudication(supervisor, *, pair, adjudicator_attempt_lease
 
 def read_retained_resolution(supervisor, *, adjudication_attempt_id, pair):
     material=current_pair(pair)
-    _,receipt,raw,_,_=_completed(supervisor,adjudication_attempt_id)
+    _,receipt,raw,packet,_=_completed(supervisor,adjudication_attempt_id)
     if receipt['assignment']['role']!='adjudicator' or receipt['pair_sha256']!=c.digest(material):c.fail()
     if receipt['assignment']['actor_key'] in material['actor_keys']:c.fail()
-    resolved=ratings.resolution(raw,material['comparison_items'])
+    resolved=ratings.resolution(raw,material['comparison_items'],packet=packet)
     # Detached protected recipient view, never a generic CLI/HTTP result route.
     current_pair(pair)
     return dict(schema='mastermind.retained_memory_resolution_view.v1', pair=material,

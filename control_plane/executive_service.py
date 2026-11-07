@@ -6117,12 +6117,14 @@ class ExecutiveControlService:
                     if self._closing or self._service_state not in {'READY', 'AWAITING_CANARY'}:
                         raise ValueError('evaluation unavailable')
                     provider = app_binding.principal_facts_factory(self._require_runtime())
-                    cap = evaluation.capture_authenticated_assessment(connection, parsed, provider, self._require_supervisor())
+                    supervisor = self._require_supervisor()
                     from control_plane.workspace_owned_task import await_owned
-                    result = await await_owned(asyncio.create_task(asyncio.to_thread(evaluation.admit_registered_evaluator, cap)))
+                    result = await await_owned(asyncio.create_task(asyncio.to_thread(
+                        evaluation.assess_from_installed_app, connection, parsed, provider, supervisor)))
                     if self._closing or self._ceo_ingress_app_binding is not app_binding:
-                        raise ValueError('evaluation unavailable')
-                    await self._send_ceo_ingress_response(writer, {'ok':True, 'result':result})
+                        await self._send_ceo_ingress_error(writer, 'effect_unknown', 'reconcile original assessment command')
+                        return
+                    await self._send_ceo_ingress_response(writer, result)
                 except evaluation.AssessmentCommitUnknown:
                     await self._send_ceo_ingress_error(writer, 'effect_unknown', 'reconcile original assessment command')
                 except Exception:

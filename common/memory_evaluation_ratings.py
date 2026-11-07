@@ -9,6 +9,28 @@ from common.memory_participant_view import selected_descriptors, project_origina
 CORRECT = ('correct', 'incorrect', 'unresolved', 'not_applicable')
 VERDICTS = ('supported', 'contradicted', 'unsupported', 'attributed_inference', 'unresolved')
 
+def result_contract(*, adjudication=False):
+    """Fixed model-facing grammar; judgments remain the actual actor's text."""
+    return dict(schema='mastermind.memory_evaluation_output_contract.v1',
+        encoding='one UTF8 canonical JSON object; sorted keys, no whitespace outside strings, no markdown',
+        result_schema='mastermind.memory_evaluation_resolution.v1' if adjudication else 'mastermind.memory_evaluation_annotation.v1',
+        annotation=dict(fields=['schema','answer_assessment','facets','claims','relevance'],
+            answer_assessment=list(CORRECT),facet_fields=['facet_id','assessment','reason'],
+            claim_fields=['claim_id','span','verdict','material','critical','source_support','reason'],
+            span_fields=['start_byte','end_byte_exclusive','quoted_utf8','span_sha256'],
+            span_basis='decoded original answer UTF8 bytes; no normalization',verdict=list(VERDICTS),
+            material_and_critical='boolean original reviewer judgments, not citation-derived facts',
+            source_support='complete byte-identical descriptors from ONLY original packet source cards',
+            supported_or_contradicted='requires at least one exact descriptor; membership is not entailment',
+            relevance_fields=['context_id','relevance','facet_ids','reason'],relevance=[0,1,2],
+            coverage='every registered required facet and every original source context exactly once'),
+        resolution=dict(fields=['schema','resolutions','overall_reason'],item_fields=['item_key','judgment','reason'],
+            coverage='every ordered comparison item exactly once; nonempty original reason for every item',
+            answer_and_facet_judgment_fields=['assessment'],relevance_judgment_fields=['relevance','facet_ids'],
+            span_judgment_fields=['verdict','material','critical','source_support'],
+            unmatched_span_additional_field='alignment: resolved or unresolved; preserve both original spans'),
+        limitations=['syntax and source membership do not prove truth or expertise','no automatic severity precedence or scientific admission'])
+
 def annotation(raw, packet, result):
     value = w.parse(raw, 65536)
     w.exact(value, 'schema answer_assessment facets claims relevance')
@@ -37,6 +59,7 @@ def annotation(raw, packet, result):
         spans.append((start, end))
         supports = claim['source_support']
         if type(supports) is not list or len(supports) > 45 or any(w.canonical(d) not in allowed for d in supports): c.fail()
+        if claim['verdict'] in ('supported','contradicted') and not supports:c.fail()
         if len({w.canonical(d) for d in supports}) != len(supports): c.fail()
     if len(spans) != len(set(spans)): c.fail()
     rel = value['relevance']; seen = []
@@ -77,19 +100,34 @@ def align(first, second):
                 'UNRESOLVED' if unresolved else 'DISAGREEMENT', reviewer_1=a, reviewer_2=b))
     return comparisons
 
-def resolution(raw, comparisons):
+def resolution(raw, comparisons, *, packet):
     value = w.parse(raw, 65536)
     w.exact(value, 'schema resolutions overall_reason')
     if value['schema'] != 'mastermind.memory_evaluation_resolution.v1': c.fail()
     c.text(value['overall_reason'])
     rows = value['resolutions']
     if type(rows) is not list or [r.get('item_key') for r in rows] != [r['item_key'] for r in comparisons]: c.fail()
-    for row in rows:
+    allowed={w.canonical(d) for d in selected_descriptors(packet)}
+    facets=set(_json(packet[:-len(w.SUFFIX)],canonical=True)['task']['required_facet_ids'])
+    for row,item in zip(rows,comparisons):
         w.exact(row, 'item_key judgment reason')
         c.text(row['reason'])
         # Do not force maximum severity, agreement or a scientific disposition.
         if type(row['judgment']) is not dict or not row['judgment']: c.fail()
-        if not set(row['judgment']) <= {'assessment', 'verdict', 'material', 'critical', 'relevance', 'alignment'}: c.fail()
+        key=item['item_key'];judgment=row['judgment']
+        if key=='answer' or key.startswith('facet:'):
+            if set(judgment)!={'assessment'}:c.fail()
+        elif key.startswith('relevance:'):
+            if set(judgment)!={'relevance','facet_ids'}:c.fail()
+            if type(judgment['facet_ids']) is not list or judgment['facet_ids']!=sorted(set(judgment['facet_ids'])) or not set(judgment['facet_ids'])<=facets:c.fail()
+        elif key.startswith('span:'):
+            required={'verdict','material','critical','source_support'}
+            if item['state']=='UNRESOLVED_ALIGNMENT':required.add('alignment')
+            if set(judgment)!=required or type(judgment['source_support']) is not list:c.fail()
+            if len(judgment['source_support'])>45 or any(w.canonical(d) not in allowed for d in judgment['source_support']):c.fail()
+            if len({w.canonical(d) for d in judgment['source_support']})!=len(judgment['source_support']):c.fail()
+            if judgment['verdict'] in ('supported','contradicted') and not judgment['source_support']:c.fail()
+        else:c.fail()
         for k, v in row['judgment'].items():
             if k == 'assessment' and v not in CORRECT: c.fail()
             if k == 'verdict' and v not in VERDICTS: c.fail()

@@ -187,7 +187,7 @@ class CooApp:
         explicit sealed study delegation and current mission on Control.
         """
         from common import memory_evaluation_contract as evaluation
-        from control_plane.protected_memory_evaluation_assignment import INGRESS
+        from control_plane.protected_memory_evaluation_assignment import INGRESS, ASSIGN, purpose_document
         from integrations.mastermind_executive_app.coo_binding import principal_frame
         authenticated = await self._auth(request)
         if isinstance(authenticated, JSONResponse): return authenticated
@@ -197,7 +197,7 @@ class CooApp:
             raw = await request.body()
             if not 1 <= len(raw) <= 32768: return refused('invalid_input', 400)
             from common.memory_participant_view import _json
-            decision = evaluation.assessment(_json(raw))
+            decision = purpose_document(_json(raw))
             principal, stamp = authenticated
             authority, _ = await self._authority(principal, decision['work_ref'], stamp)
             mandate = await self._mandate(principal, stamp, authority)
@@ -207,13 +207,14 @@ class CooApp:
             result = await self._client.send_frame(self.settings.executive.ceo_ingress_socket_path, frame)
             if result.transport == TRANSPORT_NOT_SENT: return refused('ingress_unavailable', 503)
             if result.transport != TRANSPORT_SENT_OK: return unknown(decision['command_id'])
-            if not await self._same_auth(request, authenticated): return refused()
+            if not await self._same_auth(request, authenticated): return unknown(decision['command_id'])
             if result.ok is not True:
                 return unknown(decision['command_id']) if (result.error or {}).get('code') == 'effect_unknown' else refused()
             receipt = result.result
-            evaluation.w.exact(receipt, 'schema event_id admission_sha256 verification scientific_admission')
-            if (receipt['schema'] != 'mastermind.memory_evaluator_admission_receipt.v1'
-                    or receipt['verification'] != evaluation.w.FLAGS or receipt['scientific_admission'] is not False): return refused()
+            assignment=decision['schema']==ASSIGN
+            evaluation.w.exact(receipt, 'schema event_id '+('assignment_sha256' if assignment else 'admission_sha256')+' verification scientific_admission')
+            if (receipt['schema'] != ('mastermind.memory_evaluation_assignment_receipt.v1' if assignment else 'mastermind.memory_evaluator_admission_receipt.v1')
+                    or receipt['verification'] != evaluation.w.FLAGS or receipt['scientific_admission'] is not False): return unknown(decision['command_id'])
             return JSONResponse({'ok':True, 'result':receipt}, headers={'Cache-Control':'no-store'})
         except Exception:
             return unknown(decision['command_id']) if sent else refused()

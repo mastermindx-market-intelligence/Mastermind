@@ -86,14 +86,15 @@ def start_registered_evaluation(prepared, *, pair=None):
     directory=runtime.store.root/'data/control_plane/runs'/attempt.attempt_id
     incumbent._private_directory(directory)
     intent=peer.capture_control_memory_intent(state['claim'],state['context'][4])
-    # This is the real existing broker/helper admission, not a caller callback.
-    paid=economic.acquire_evaluation(prepared,intent)
-    economic.require(paid,intent)
     packet=annotations.input_packet(prepared,pair=pair)
     selected=state['observed']['profile']
     body=compile_memory_model_input(packet,model=selected['model'])
-    _retain(directory/'memory-evaluation-input',packet)
     binary=_source_binary()
+    # Qualify exact input size/grammar and installed executable before any new
+    # economic reservation. Existing retained subject reads have their own grant.
+    paid=economic.acquire_evaluation(prepared,intent)
+    economic.require(paid,intent)
+    _retain(directory/'memory-evaluation-input',packet)
     seal=dict(schema='mastermind.protected_memory_evaluation_start.v1',assignment=annotations.assignment_material(state),
         input_sha256=hashlib.sha256(packet).hexdigest(),input_bytes=len(packet),profile_sha256=c.digest(selected),body_sha256=hashlib.sha256(body).hexdigest())
     economic.require(paid,intent,'bind_input',{k:seal[k] for k in ('input_sha256','input_bytes','body_sha256')})
@@ -132,7 +133,9 @@ def start_registered_evaluation(prepared, *, pair=None):
         envelope=dict(schema='mastermind.protected_memory_evaluation_model_request.v1',profile_id=state['observed']['profile_id'],
             profile_sha256=seal['profile_sha256'],input_sha256=seal['input_sha256'],input_base64=base64.b64encode(packet).decode(),
             body_base64=base64.b64encode(body).decode())
-        raw=w.canonical(envelope);parent.sendall(len(raw).to_bytes(4,'big')+raw);parent.shutdown(socket.SHUT_WR)
+        raw=w.canonical(envelope)
+        annotations.final_fd_window(bound,exposure,packet,pair=pair)
+        parent.sendall(len(raw).to_bytes(4,'big')+raw);parent.shutdown(socket.SHUT_WR)
         annotations.confirm_exposure(bound,exposure)
         return ref
     except Exception:
