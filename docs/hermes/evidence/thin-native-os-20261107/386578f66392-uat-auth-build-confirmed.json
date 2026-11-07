@@ -1,0 +1,152 @@
+{
+  "observedAt": "2026-11-07T08:11:20.081Z",
+  "pid": 31049,
+  "source": "386578f66392ae79a1759a0d216c102509277fba",
+  "build": "hermes-thin-native-386578f66392-20261107-pro-04",
+  "nativeClient": "native-client:v1:47cabc2a4fe992f317c895bb619d0fcf64b49f1e03d9992781d1dca7c77cb423",
+  "auth": "Signed in",
+  "organization": "Organization and goal lineage",
+  "hermes": {
+    "role": "AXGroup",
+    "name": "Native Hermes",
+    "enabled": true,
+    "children": [
+      {
+        "role": "AXGroup",
+        "name": null,
+        "enabled": true,
+        "children": [
+          {
+            "role": "AXGroup",
+            "name": null,
+            "enabled": true,
+            "children": [
+              {
+                "role": "AXStaticText",
+                "name": "LOCAL NATIVE RUNTIME",
+                "enabled": true
+              }
+            ]
+          },
+          {
+            "role": "AXHeading",
+            "name": "Hermes v0.23.0",
+            "enabled": true,
+            "children": [
+              {
+                "role": "AXStaticText",
+                "name": "Hermes ",
+                "enabled": true
+              },
+              {
+                "role": "AXStaticText",
+                "name": "v0.23.0",
+                "enabled": true
+              }
+            ]
+          },
+          {
+            "role": "AXButton",
+            "name": "Connect local Hermes",
+            "enabled": true,
+            "children": []
+          }
+        ]
+      },
+      {
+        "role": "AXGroup",
+        "name": null,
+        "enabled": true,
+        "children": [
+          {
+            "role": "AXStaticText",
+            "name": "Your existing local conversations, one native runtime. Worker dispatch is not enabled by this connection.",
+            "enabled": true,
+            "children": []
+          }
+        ]
+      },
+      {
+        "role": "AXGroup",
+        "name": null,
+        "enabled": true,
+        "children": [
+          {
+            "role": "AXStaticText",
+            "name": "Conversation purpose",
+            "enabled": true,
+            "children": []
+          },
+          {
+            "role": "AXPopUpButton",
+            "name": "Conversation purpose",
+            "enabled": false,
+            "children": []
+          }
+        ]
+      },
+      {
+        "role": "AXButton",
+        "name": "New conversation",
+        "enabled": false,
+        "children": []
+      },
+      {
+        "role": "AXButton",
+        "name": "Local history",
+        "enabled": true,
+        "children": []
+      },
+      {
+        "role": "AXButton",
+        "name": "Check previous request",
+        "enabled": true,
+        "children": []
+      },
+      {
+        "role": "AXGroup",
+        "name": null,
+        "enabled": true,
+        "children": [
+          {
+            "role": "AXStaticText",
+            "name": "Outcome unknown. Check the previous request before sending again.",
+            "enabled": true,
+            "children": []
+          }
+        ]
+      },
+      {
+        "role": "AXGroup",
+        "name": null,
+        "enabled": true,
+        "children": [
+          {
+            "role": "AXStaticText",
+            "name": "Original request",
+            "enabled": true,
+            "children": []
+          },
+          {
+            "role": "AXStaticText",
+            "name": ": ",
+            "enabled": true,
+            "children": []
+          },
+          {
+            "role": "AXGroup",
+            "name": null,
+            "enabled": true,
+            "children": [
+              {
+                "role": "AXStaticText",
+                "name": "9fbc8f4abb944ab1a170b4990e59f729",
+                "enabled": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -32,6 +32,11 @@ from integrations.business_mcp_auth.metadata import (
     www_authenticate,
 )
 from integrations.mastermind_secretary_mcp.server import SecretaryGroundingContractServer
+from integrations.mastermind_steward_app.live_window import (
+    LiveWindowConfig,
+    LiveWindowDispatch,
+    live_window_reader,
+)
 from integrations.mastermind_steward_app.server import REQUIRED_SCOPE, build_mcp_server
 
 __all__ = ["build_authenticated_app"]
@@ -406,6 +411,8 @@ def build_authenticated_app(
     policy: ResourcePolicy,
     token_verifier: MastermindTokenVerifier,
     allowed_origins: Sequence[str] = ("https://chatgpt.com",),
+    live_window: LiveWindowConfig | None = None,
+    app_generation: str = "secretary-v2",
 ) -> Starlette:
     """Build one stateless A1-authenticated, read-only Steward MCP app."""
 
@@ -420,7 +427,18 @@ def build_authenticated_app(
     if verifier_policy != policy:
         raise ValueError("token_verifier policy must match Steward policy")
 
-    mcp_server = build_mcp_server(contract)
+    if app_generation == "secretary-v2":
+        mcp_server = build_mcp_server(contract)
+    elif app_generation == "research-v3":
+        # Delayed import keeps the protected v2 module graph independent of the
+        # optional later generation while admitting only this reviewed builder.
+        from integrations.mastermind_steward_app.research_server import (
+            build_research_mcp_server,
+        )
+
+        mcp_server = build_research_mcp_server(contract)
+    else:
+        raise ValueError("unsupported Steward app generation")
     hosts = _allowed_hosts(policy)
     origins = tuple(str(value) for value in allowed_origins)
     security = TransportSecuritySettings(
@@ -477,7 +495,24 @@ def build_authenticated_app(
             methods=["POST"],
         ),
     ]
-    middleware = [
+    middleware = []
+    if live_window is not None:
+        # One optional exact-path mount on the existing host; any refusal here
+        # happens before the Steward stack is assembled.
+        window_reader, window_path = live_window_reader(
+            live_window,
+            steward_resource=policy.resource,
+            reserved_paths=(resource_path, metadata_path, "/healthz", "/readyz"),
+        )
+        middleware.append(
+            Middleware(
+                LiveWindowDispatch,
+                reader=window_reader,
+                path=window_path,
+                canonical_raw_path=_canonical_raw_path,
+            )
+        )
+    middleware += [
         Middleware(_StewardTransportGuard,
             resource_path=resource_path,
             metadata_path=metadata_path,

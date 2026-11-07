@@ -1,0 +1,66 @@
+{
+  "at": "2026-10-14T11:40:26.012715+00:00",
+  "scope": "PRIVATE_SOURCE_ONLY_THREE_GENERATION_ADOPTION",
+  "source": {
+    "artifact_delivery.base.py": {
+      "bytes": 72411,
+      "sha256": "1cc1c953767320ebc3b30f16d61f7239001ecfa37607fee3e10e6acdd1278dd5"
+    },
+    "proposal/artifact_delivery.py": {
+      "bytes": 73249,
+      "sha256": "de4ab879aa71772ccac834672ca5c5e5f6f443422c387c23ce3d35b7ba5422b6"
+    },
+    "proposal/artifact_production.py": {
+      "bytes": 20746,
+      "sha256": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409"
+    },
+    "pre_adoption/artifact_production.py": {
+      "bytes": 20239,
+      "sha256": "e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf"
+    },
+    "test_three_generations.py": {
+      "bytes": 7391,
+      "sha256": "5e0fdb08cf88599fb0e23ae3efccd7d18d3e205e6f670739bd9cee78f70b5eb0"
+    },
+    "artifact_delivery.py.patch": {
+      "bytes": 4691,
+      "sha256": "0945ea80059e968242bab750fa22998c951ad0c36c6d99396ab10153996b03b1"
+    },
+    "RED.log": {
+      "bytes": 10607,
+      "sha256": "491b20a32638b9ac6fc0e3c671caa07adbc7b7b6bb0d1558ed74bcd2adec7b6c"
+    },
+    "GREEN.log": {
+      "bytes": 2196,
+      "sha256": "696e86cc46b5daea5b32687aaec51687b5fab703ba2b565984a49bf84e67a0c6"
+    },
+    "LEGACY.log": {
+      "bytes": 3054,
+      "sha256": "23d47cb3000cd41be4d3d9227d1b0e7e71c1d21b3d8fefb9e563338186b55438"
+    }
+  },
+  "test_results": {
+    "before": {
+      "passed": 6,
+      "error_reproductions": 6,
+      "cases": 12
+    },
+    "after_new_cases": {
+      "passed": 12,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "legacy_collector": {
+      "passed": 16,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    }
+  },
+  "published_head_1460": "19a5bc5f27e67275e0f4533f4138a87fee53838f",
+  "published_head_mutated": false,
+  "installed_mutated": false,
+  "worker_or_transport_called": false,
+  "receipt": "Existing reviewer must qualify exact patch before same-carrier publication and coupled adoption. Required e126 snapshot is NOT installed yet. Preserve exact old c0 snapshot, new current-read helper651 and delivery branch."
+}

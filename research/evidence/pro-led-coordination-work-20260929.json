@@ -1,0 +1,1172 @@
+{
+  "capability": "BUILT_NOT_PROVEN",
+  "checks": [
+    {
+      "errors": 0,
+      "failures": 26,
+      "log_sha256": "355f1026351d5788a18baaa97c6176cef91dd19500684767decafe7ab28e5548",
+      "name": "coordination-work-red",
+      "skipped": 0,
+      "tests": 26,
+      "xml_sha256": "764ee5077ca83fe05ca9772a019f1cf10b2f39959bda2de6760b8548f3e7a8b2"
+    },
+    {
+      "errors": 0,
+      "failures": 6,
+      "log_sha256": "ee241dace8e8c94022fd7f3a7d7ca68896cf951e20baa01e86f12688efb11ba4",
+      "name": "coordination-work-acquisition-red",
+      "skipped": 0,
+      "tests": 6,
+      "xml_sha256": "265a0c7847b65e20564a2c74b27773609fb52c0e0492c9bfe010dbd61303a963"
+    },
+    {
+      "errors": 0,
+      "failures": 0,
+      "log_sha256": "8e0dd3e259f68c193f05e3e04acef6407a9ed36e5124438d9f9a04fbd0db33db",
+      "name": "coordination-work-roundtrip",
+      "skipped": 0,
+      "tests": 38,
+      "xml_sha256": "970debe21c95a50e62ebd643e805ee60aa3c77f4f86654f33485330ee4597a7a"
+    },
+    {
+      "errors": 0,
+      "failures": 1,
+      "log_sha256": "81ead558892eae199e43a5562b106dd32f805c2611b04c25334cd771267dd73e",
+      "name": "coordination-identity-regression-red",
+      "skipped": 0,
+      "tests": 1,
+      "xml_sha256": "e0e9519c943422b174fc86c648032a2f92a82c705eca4dae7a05a0a26deb3e92"
+    },
+    {
+      "errors": 0,
+      "failures": 0,
+      "log_sha256": "54f85648e37189ef0418ed286658b074e539ffd096756e320b2b99593dc5b4be",
+      "name": "coordination-work-final",
+      "skipped": 0,
+      "tests": 450,
+      "xml_sha256": "420eca3c271a2f63f8d2dc7a415a2da463fa3ad78298fd482aeec3bb246c27db"
+    }
+  ],
+  "environment_diagnostic": {
+    "errors": 0,
+    "failed": 187,
+    "failed_cases": [
+      {
+        "message": "assert 384 in {420, 493}",
+        "name": "test_cap_s1_fake_child_bytecode_binding_prevents_owned_source_residue"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_complete_transport_v2_binds_nonmaterial_closure_and_exact_archive"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_complete_transport_v2_semantic_inventory_survives_different_pack_layouts"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_complete_transport_v2_does_not_full_buffer_pack_or_archive"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'OBJECT_NAMESPACE'\n  Actual message: 'SOURCE_METADATA_INVALID'",
+        "name": "test_complete_repository_refuses_dangling_loose_object_before_git"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'SOURCE_VIEW_DRIFT'\n  Actual message: 'SOURCE_METADATA_INVALID'",
+        "name": "test_complete_repository_refuses_transient_restored_index_swap_across_git"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_complete_transport_v3_is_canonical_zip64_and_materializes"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_threads_exact_v3_capacity_bound_to_closed_copy"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_parent_graph_detects_synchronized_system_root_swap"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_traversal_ancestor_accepts_observed_platform_flags[root-var-folders-library]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_traversal_ancestor_accepts_observed_platform_flags[var]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_traversal_ancestor_accepts_observed_platform_flags[private]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-flags]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-uid]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-gid]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-mode]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-device]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-link-count]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-acl]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-xattr]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_traversal_ancestor_tolerates_positive_link_count_churn"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_fixed_system_root_freezes_exact_link_count"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_fixed_parent_freezes_exact_approved_xattr_name_set"
+      },
+      {
+        "message": "assert False",
+        "name": "test_inert_release_revalidates_basename_relation_after_root_is_retained"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_inert_release_refuses_unrelated_retained_view_injection"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_retained_semantic_read_refuses_approved_xattr_name_set_drift"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_retained_parent_proves_optional_absence_without_path_reopen"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_preserved_semantic_reads_use_retained_descriptors_during_restored_path_swap[runtime]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_preserved_semantic_reads_use_retained_descriptors_during_restored_path_swap[generation]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_preserved_semantic_reads_use_retained_descriptors_during_restored_path_swap[topology]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_preserved_semantic_reads_use_retained_descriptors_during_restored_path_swap[rollback]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_preserved_semantic_reads_use_retained_descriptors_during_restored_path_swap[legacy]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_absolute_evidence_view_opens_every_component_from_retained_root"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_repository_view_full_revalidation_walks_retained_parent_capability_once"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_repository_role_directory_freezes_each_admitted_positive_link_count"
+      },
+      {
+        "message": "AssertionError: Traceback (most recent call last):\n    File \"<string>\", line 17, in <module>\n    File \"/Volumes/Mastermind/agent-workspaces/web/mastermind-pro-led-project-delivery-20260929-sol-001/ops/executive_os/capacity_host_artifacts.py\", line 7466, in __init__\n      self._retain_guard(\n    File \"/Volumes/Mastermind/agent-workspaces/web/mastermind-pro-led-project-delivery-20260929-sol-001/ops/executive_os/capacity_host_artifacts.py\", line 7566, in _retain_guard\n      _require_source_repair_ancestor(\n    File \"/Volumes/Mastermind/agent-workspaces/web/mastermind-pro-led-project-delivery-2026",
+        "name": "test_preserved_fd_budget_uplifts_soft_limit_in_subprocess"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_retained_prior_generation_authenticates_fixed_inventory_and_hashes"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_retained_prior_generation_swap_refuses_before_external_topology_open"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_real_mode_visible_prior_generation_receives_retained_generation_parent"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_real_mode_archived_and_verify_only_receive_same_retained_archive_parent[repair]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_real_mode_archived_and_verify_only_receive_same_retained_archive_parent[verify-only]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_retained_topology_accepts_exact_per_row_producer_metadata_and_rejects_gid_swap"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_retained_rollback_accepts_exact_moved_artifact_metadata_and_rejects_substitution"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_METADATA_INVALID",
+        "name": "test_retained_legacy_accepts_each_canonical_producer_metadata_and_rejects_union"
+      },
+      {
+        "message": "AssertionError: assert 'SOURCE_REPAIR_PARENT_INVALID' == 'SOURCE_REPAI...DENCE_INVALID'\n  \n  - SOURCE_REPAIR_PRESERVED_EVIDENCE_INVALID\n  ?                  ------------ ^^\n  + SOURCE_REPAIR_PARENT_INVALID\n  ?                +   ^",
+        "name": "test_precommit_subprocess_timeout_uses_authorized_recovery"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_receipt_durable_precommit_observer_subprocess_failure_restores_exact_state[source-timeout]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_receipt_durable_precommit_observer_subprocess_failure_restores_exact_state[source-generic]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_receipt_durable_precommit_observer_subprocess_failure_restores_exact_state[archived-generation-timeout]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_receipt_durable_precommit_observer_subprocess_failure_restores_exact_state[archived-generation-generic]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_before_final_rename_crash_preserves_candidate_and_replays_forward"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_final_observer_failure_revokes_generation_parent_rollback_grant[hidden-candidate]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_final_observer_failure_revokes_generation_parent_rollback_grant[hidden-candidate-plus-visible-child]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_postcommit_subprocess_timeout_requires_same_carrier_reconciliation"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: REPAIR_CARRIER_INVALID",
+        "name": "test_root_created_carrier_is_immune_to_preopened_operator_write_descriptor"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: REPAIR_CARRIER_INVALID",
+        "name": "test_repair_carrier_uses_retained_repository_after_basename_swap"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_verify_only_refuses_every_incomplete_position_without_mutation[after_intent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_verify_only_refuses_every_incomplete_position_without_mutation[after_old_source_move]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_verify_only_refuses_every_incomplete_position_without_mutation[after_candidate_install]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_verify_only_refuses_every_incomplete_position_without_mutation[after_old_generation_move]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_verify_only_refuses_every_incomplete_position_without_mutation[after_repair_receipt_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_verify_only_refuses_every_incomplete_position_without_mutation[after_generation_file_1_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[after_archive_create_intent]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[fail_archive_parent_fsync_intent]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_create_intent]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_partial_write_intent]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_file_fsync_intent]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_rename_intent]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[before_parent_fsync_intent]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[after_parent_fsync_intent]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_create_receipt]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_partial_write_receipt]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_file_fsync_receipt]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_rename_receipt]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[before_parent_fsync_receipt]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_publication_prefix_crashes_replay_to_one_exact_commit[after_parent_fsync_receipt]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback[fail_old_source_source_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback[fail_old_source_destination_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback[fail_candidate_install_source_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback[fail_candidate_install_destination_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback[fail_old_generation_source_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback[fail_old_generation_destination_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_visible_commit_normalizes_structural_refusal_to_incomplete"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_committed_replay_early_observation_failure_never_rolls_back[_observe_source_repair_source]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_committed_replay_early_observation_failure_never_rolls_back[_observe_source_repair_archived_generation]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_committed_replay_early_observation_failure_never_rolls_back[_expected_source_repair_receipt]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_committed_replay_early_observation_failure_never_rolls_back[_generation_values]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_committed_replay_structural_fault_before_recovery_authorization_is_effect_unknown[transition_reconcile]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_committed_replay_structural_fault_before_recovery_authorization_is_effect_unknown[initial_classification]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_committed_replay_structural_fault_before_recovery_authorization_is_effect_unknown[classification_entry_observation]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_committed_replay_structural_fault_before_recovery_authorization_is_effect_unknown[generation_parent_inventory]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_RECEIPT_REFUSAL'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_exact_precommit_classification_pre_authorizes_table_recovery"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_direct_recovery_consumes_grant_before_single_restore_attempt"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_direct_recovery_typed_incomplete_is_single_attempt_and_replays"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_direct_recovery_durability_uncertain_is_single_attempt_and_replays"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_visible_commit_normalizes_cleanup_failure_to_incomplete"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_forward_rename_uses_the_retained_parent_descriptors"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_archive_attachment_closes_new_descriptor_when_fstat_fails"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_repair_transition_table_is_the_executable_authority_before_mutation[removed]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_repair_transition_table_is_the_executable_authority_before_mutation[refused]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_transition_permitted_next_states_refuse_forward_mutation"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_transition_permitted_next_states_refuse_rollback_mutation"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_repair_transition_table_refusal_controls_each_forward_position[after_intent_fsync-intent_durable]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_repair_transition_table_refusal_controls_each_forward_position[after_old_source_move-source_archived]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_repair_transition_table_refusal_controls_each_forward_position[after_candidate_install-source_installed]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_repair_transition_table_refusal_controls_each_forward_position[after_old_generation_move-generation_archived]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_repair_transition_table_refusal_controls_each_forward_position[after_repair_receipt_fsync-receipt_durable]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_repair_transition_table_refusal_controls_each_forward_position[before_final_rename-generation_prefix]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_repair_transition_table_refusal_controls_each_forward_position[None-committed]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_host_commits_generation_last_and_verify_is_zero_mutation"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_verify_only_native_read_atime_advance_is_observed_separately"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_verify_only_has_no_reachable_program_mutation_api"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_replays_forward_after_visible_final_rename_without_rollback"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_source_repair_replay_after_success_stdout_is_exactly_idempotent"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_transport_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_candidate_verify]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_intent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_old_source_move]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_candidate_install]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_old_generation_move]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_repair_receipt_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_generation_file_1_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_generation_file_2_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_generation_file_3_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_generation_file_4_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_generation_file_5_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_generation_file_6_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_hidden_generation_directory_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[before_final_rename]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_final_rename_before_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_repair_crash_position_replays_to_one_verified_commit[after_parent_fsync_before_stdout]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_RECEIPT_REFUSAL'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_definite_precommit_failure_restores_only_digest_bound_old_state"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[type-installed-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[type-staged-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[symlink-installed-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[symlink-staged-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[mode-installed-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[mode-staged-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[ownership-installed-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[ownership-staged-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[device_identity-installed-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[device_identity-staged-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[hard_link-installed-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[hard_link-staged-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[unexpected_descendant-installed-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[unexpected_descendant-staged-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[content_digest-installed-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_layouts_refuse_every_semantic_mutation[content_digest-staged-source]"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'INJECTED_'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_failure_evidence_binds_exact_intent_source_tree_identity"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_empty_failure_namespace_is_an_explicit_recovery_child_state"
+      },
+      {
+        "message": "AssertionError: Regex pattern did not match.\n  Expected regex: 'SOURCE_REPAIR_FAILURE_EVIDENCE_INVALID'\n  Actual message: 'SOURCE_REPAIR_PARENT_INVALID'",
+        "name": "test_terminal_recovery_revalidates_preserved_failure_evidence"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_failure_namespace_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_installed_rename]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_installed_source_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_installed_destination_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_generation_rename]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_generation_source_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_generation_destination_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_source_rename]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_source_source_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_source_destination_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_rollback_staged_every_durability_boundary_replays_exactly[after_rollback_staged_rename]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_rollback_staged_every_durability_boundary_replays_exactly[fail_rollback_staged_source_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_rollback_staged_every_durability_boundary_replays_exactly[after_rollback_staged_source_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_rollback_staged_every_durability_boundary_replays_exactly[fail_rollback_staged_destination_parent_fsync]"
+      },
+      {
+        "message": "ops.executive_os.capacity_host_artifacts.CapacityHostArtifactError: SOURCE_REPAIR_PARENT_INVALID",
+        "name": "test_rollback_staged_every_durability_boundary_replays_exactly[after_rollback_staged_destination_parent_fsync]"
+      },
+      {
+        "message": "AssertionError: Traceback (most recent call last):\n    File \"/private/tmp/pytest-of-chriswong/pytest-17869/test_python39_runs_v3_manifest0/python39-capacity-probe.py\", line 68, in <module>\n      evidence = artifacts.verify_complete_repository(installed, manifest)\n    File \"/Volumes/Mastermind/agent-workspaces/web/mastermind-pro-led-project-delivery-20260929-sol-001/ops/executive_os/capacity_host_artifacts.py\", line 8608, in verify_complete_repository\n      view = retained_view if retained_view is not None else _RepositoryView(source_root)\n    File \"/Volumes/Mastermind/agent-workspaces/web/mast",
+        "name": "test_python39_runs_v3_manifest_inventory_closure_intent_receipt_and_recovery"
+      },
+      {
+        "message": "AssertionError: assert (65, 'H0_SOUR...EFUSED\\n', '') == (0, 'H0_SOURC...CEPTED\\n', '')\n  \n  At index 0 diff: 65 != 0\n  Use -v to get more diff",
+        "name": "test_exact_bundle_runs_three_passes_and_removes_root_namespace"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_gate_release_failure_reaps_gated_group_before_refusal_cleanup"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ('')",
+        "name": "test_post_spawn_terminal_receipt_waits_for_termination_proof[signal-expected0]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ('')",
+        "name": "test_post_spawn_terminal_receipt_waits_for_termination_proof[unexpected-exit-expected1]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ('')",
+        "name": "test_direct_carrier_return_retains_group_until_terminal_proof[65-H0_SOURCE_CLOSURE_REPAIR_REFUSED-expected0-1]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ('')",
+        "name": "test_direct_carrier_return_retains_group_until_terminal_proof[0-H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED-expected1-3]"
+      },
+      {
+        "message": "AssertionError: assert (65, 'H0_SOUR...EFUSED\\n', '') == (70, 'H0_SOUR...ARRIER\\n', '')\n  \n  At index 0 diff: 65 != 70\n  Use -v to get more diff",
+        "name": "test_bootstrap_preserves_authenticated_carrier_primary_failure[70-H0_SOURCE_CLOSURE_REPAIR_INCOMPLETE_RECONCILE_SAME_CARRIER]"
+      },
+      {
+        "message": "AssertionError: assert (65, 'H0_SOUR...EFUSED\\n', '') == (75, 'H0_LOCK_HELD\\n', '')\n  \n  At index 0 diff: 65 != 75\n  Use -v to get more diff",
+        "name": "test_bootstrap_preserves_authenticated_carrier_primary_failure[75-H0_LOCK_HELD]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_signal_to_bootstrap_pid_terminates_active_carrier_tree_before_cleanup[1]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_signal_to_bootstrap_pid_terminates_active_carrier_tree_before_cleanup[2]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_signal_to_bootstrap_pid_terminates_active_carrier_tree_before_cleanup[15]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_signal_registration_window_never_releases_untracked_carrier[1-after-spawn-before-pid]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_signal_registration_window_never_releases_untracked_carrier[1-after-pid-before-pgid]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_signal_registration_window_never_releases_untracked_carrier[1-steady-state]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_signal_registration_window_never_releases_untracked_carrier[2-after-spawn-before-pid]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_signal_registration_window_never_releases_untracked_carrier[2-after-pid-before-pgid]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_signal_registration_window_never_releases_untracked_carrier[2-steady-state]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_signal_registration_window_never_releases_untracked_carrier[15-after-spawn-before-pid]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_signal_registration_window_never_releases_untracked_carrier[15-after-pid-before-pgid]"
+      },
+      {
+        "message": "AssertionError: ('H0_SOURCE_CLOSURE_REPAIR_REFUSED\n  ', '')\nassert ''",
+        "name": "test_signal_registration_window_never_releases_untracked_carrier[15-steady-state]"
+      },
+      {
+        "message": "control_plane.codex_provider_realm.ProviderRealmError: provider credential is unavailable",
+        "name": "test_provider_credential_uses_existing_private_provider_home"
+      }
+    ],
+    "log_sha256": "b1919f887a4197108e668792de8659bdfd43c137f0d83d8d9da96180766e811c",
+    "passed": 28,
+    "scope": "Rerun of prior failed cases only, excluding HEAD-dependent identity test; not a replacement full gate",
+    "tests": 215
+  },
+  "environments": {
+    "base_builder_environment_changed": false,
+    "ci_macro_pin": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
+    "global_configuration_changed": false,
+    "hermetic_venv": ".pytest_cache/coordination-python312-hermetic",
+    "node": "22.14.0",
+    "per_child_umask": "022",
+    "python": "3.12.13"
+  },
+  "full_native_gate": {
+    "command": [
+      "/Volumes/Mastermind/agent-workspaces/web/mastermind-pro-led-project-delivery-20260929-sol-001/.pytest_cache/coordination-python312/bin/python",
+      "scripts/ci_pytest.py",
+      "--jobs",
+      "3"
+    ],
+    "discovered_modules": 787,
+    "excluded_modules": 0,
+    "exit_code": 1,
+    "failed_test_ids": [
+      "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults",
+      "tests/test_executive_workspace.py::test_terminal_assignment_seal_fails_closed_for_unowned_or_world_boundary",
+      "tests/test_operator_materialization_receipt.py::test_persistence_refuses_directory_mode_drift",
+      "tests/test_cap_s1_mastermind_operator_canary.py::test_cap_s1_actual_pytest_bootstrap_binds_owned_source_and_ignores_ambient",
+      "tests/test_cap_s1_mastermind_operator_canary.py::test_cap_s1_actual_pytest_bootstrap_refuses_digest_drift_with_non_test_exit",
+      "tests/test_cap_s1_mastermind_operator_canary.py::test_cap_s1_fake_child_bytecode_binding_prevents_owned_source_residue",
+      "tests/test_chairman_control_room_remote.py::test_collector_routes_agent_os_through_bounded_runner_and_injects_fixed_artifact",
+      "tests/test_chairman_control_room_remote.py::test_reader_accepts_canonical_macro_builder_utc_shape",
+      "tests/test_chairman_control_room_remote.py::test_malformed_active_build_artifact_is_typed_unavailable_not_generation_fatal[not-json-active_builds_invalid_json]",
+      "tests/test_chairman_control_room_remote.py::test_malformed_active_build_artifact_is_typed_unavailable_not_generation_fatal[{\"schema\":\"project_active_builds.v1\",\"schema\":\"duplicate\"}-active_builds_duplicate_json_key]",
+      "tests/test_chairman_control_room_remote.py::test_malformed_active_build_artifact_is_typed_unavailable_not_generation_fatal[{\"schema\":\"project_active_builds.v1\",\"collected_at\":\"2026-08-28T20:00:00Z\",\"n\":NaN}-active_builds_non_finite_number]",
+      "tests/test_chairman_control_room_remote.py::test_malformed_active_build_artifact_is_typed_unavailable_not_generation_fatal[{\"schema\":\"wrong\",\"collected_at\":\"2026-08-28T20:00:00Z\"}-active_builds_schema_mismatch]",
+      "tests/test_chairman_control_room_remote.py::test_unavailable_source_clocks_omit_only_their_documents_from_composition",
+      "tests/test_chairman_control_room_remote.py::test_active_build_artifact_file_boundary_fails_closed[missing-active_builds_not_found]",
+      "tests/test_chairman_control_room_remote.py::test_active_build_artifact_file_boundary_fails_closed[hardlink-active_builds_hardlink_forbidden]",
+      "tests/test_chairman_control_room_remote.py::test_active_build_artifact_file_boundary_fails_closed[writable-active_builds_mode_unsafe]",
+      "tests/test_chairman_control_room_remote.py::test_active_build_artifact_file_boundary_fails_closed[owner-active_builds_owner_mismatch]",
+      "tests/test_chairman_control_room_remote.py::test_active_build_artifact_file_boundary_fails_closed[group-active_builds_group_mismatch]",
+      "tests/test_chairman_control_room_remote.py::test_active_build_artifact_file_boundary_fails_closed[too_large-active_builds_too_large]",
+      "tests/test_chairman_control_room_remote.py::test_active_build_artifact_file_boundary_fails_closed[wrong_mode-active_builds_mode_unsafe]",
+      "tests/test_chairman_control_room_remote.py::test_active_build_artifact_age_and_future_control_document_admission",
+      "tests/test_chairman_control_room_remote.py::test_active_build_artifact_refuses_platform_without_nofollow",
+      "tests/test_chairman_control_room_remote.py::test_active_build_artifact_inode_swap_between_lstat_and_open_is_refused",
+      "tests/test_chairman_control_room_remote.py::test_post_success_active_build_failure_publishes_current_other_sources",
+      "tests/test_mas115_setup.py::test_documented_direct_status_command_bootstraps_repository_imports",
+      "tests/test_bounded_sync_executor.py::test_timeout_retains_capacity_until_physical_completion",
+      "tests/test_capacity_host_artifacts.py::test_complete_transport_v2_binds_nonmaterial_closure_and_exact_archive",
+      "tests/test_capacity_host_artifacts.py::test_complete_transport_v2_semantic_inventory_survives_different_pack_layouts",
+      "tests/test_capacity_host_artifacts.py::test_complete_transport_v2_does_not_full_buffer_pack_or_archive",
+      "tests/test_capacity_host_artifacts.py::test_complete_repository_refuses_dangling_loose_object_before_git",
+      "tests/test_capacity_host_artifacts.py::test_complete_repository_refuses_transient_restored_index_swap_across_git",
+      "tests/test_capacity_host_artifacts.py::test_complete_transport_v3_is_canonical_zip64_and_materializes",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_threads_exact_v3_capacity_bound_to_closed_copy",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_parent_graph_detects_synchronized_system_root_swap",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_traversal_ancestor_accepts_observed_platform_flags[root-var-folders-library]",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_traversal_ancestor_accepts_observed_platform_flags[var]",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_traversal_ancestor_accepts_observed_platform_flags[private]",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-flags]",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-uid]",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-gid]",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-mode]",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-device]",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-link-count]",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-acl]",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_true_traversal_ancestor_obeys_complete_security_law[revalidation-xattr]",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_traversal_ancestor_tolerates_positive_link_count_churn",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_fixed_system_root_freezes_exact_link_count",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_fixed_parent_freezes_exact_approved_xattr_name_set",
+      "tests/test_capacity_host_artifacts.py::test_inert_release_revalidates_basename_relation_after_root_is_retained",
+      "tests/test_capacity_host_artifacts.py::test_inert_release_refuses_unrelated_retained_view_injection",
+      "tests/test_capacity_host_artifacts.py::test_retained_semantic_read_refuses_approved_xattr_name_set_drift",
+      "tests/test_capacity_host_artifacts.py::test_retained_parent_proves_optional_absence_without_path_reopen",
+      "tests/test_capacity_host_artifacts.py::test_preserved_semantic_reads_use_retained_descriptors_during_restored_path_swap[runtime]",
+      "tests/test_capacity_host_artifacts.py::test_preserved_semantic_reads_use_retained_descriptors_during_restored_path_swap[generation]",
+      "tests/test_capacity_host_artifacts.py::test_preserved_semantic_reads_use_retained_descriptors_during_restored_path_swap[topology]",
+      "tests/test_capacity_host_artifacts.py::test_preserved_semantic_reads_use_retained_descriptors_during_restored_path_swap[rollback]",
+      "tests/test_capacity_host_artifacts.py::test_preserved_semantic_reads_use_retained_descriptors_during_restored_path_swap[legacy]",
+      "tests/test_capacity_host_artifacts.py::test_absolute_evidence_view_opens_every_component_from_retained_root",
+      "tests/test_capacity_host_artifacts.py::test_repository_view_full_revalidation_walks_retained_parent_capability_once",
+      "tests/test_capacity_host_artifacts.py::test_repository_role_directory_freezes_each_admitted_positive_link_count",
+      "tests/test_capacity_host_artifacts.py::test_preserved_fd_budget_uplifts_soft_limit_in_subprocess",
+      "tests/test_capacity_host_artifacts.py::test_retained_prior_generation_authenticates_fixed_inventory_and_hashes",
+      "tests/test_capacity_host_artifacts.py::test_retained_prior_generation_swap_refuses_before_external_topology_open",
+      "tests/test_capacity_host_artifacts.py::test_real_mode_visible_prior_generation_receives_retained_generation_parent",
+      "tests/test_capacity_host_artifacts.py::test_real_mode_archived_and_verify_only_receive_same_retained_archive_parent[repair]",
+      "tests/test_capacity_host_artifacts.py::test_real_mode_archived_and_verify_only_receive_same_retained_archive_parent[verify-only]",
+      "tests/test_capacity_host_artifacts.py::test_retained_topology_accepts_exact_per_row_producer_metadata_and_rejects_gid_swap",
+      "tests/test_capacity_host_artifacts.py::test_retained_rollback_accepts_exact_moved_artifact_metadata_and_rejects_substitution",
+      "tests/test_capacity_host_artifacts.py::test_retained_legacy_accepts_each_canonical_producer_metadata_and_rejects_union",
+      "tests/test_capacity_host_artifacts.py::test_precommit_subprocess_timeout_uses_authorized_recovery",
+      "tests/test_capacity_host_artifacts.py::test_receipt_durable_precommit_observer_subprocess_failure_restores_exact_state[source-timeout]",
+      "tests/test_capacity_host_artifacts.py::test_receipt_durable_precommit_observer_subprocess_failure_restores_exact_state[source-generic]",
+      "tests/test_capacity_host_artifacts.py::test_receipt_durable_precommit_observer_subprocess_failure_restores_exact_state[archived-generation-timeout]",
+      "tests/test_capacity_host_artifacts.py::test_receipt_durable_precommit_observer_subprocess_failure_restores_exact_state[archived-generation-generic]",
+      "tests/test_capacity_host_artifacts.py::test_before_final_rename_crash_preserves_candidate_and_replays_forward",
+      "tests/test_capacity_host_artifacts.py::test_final_observer_failure_revokes_generation_parent_rollback_grant[hidden-candidate]",
+      "tests/test_capacity_host_artifacts.py::test_final_observer_failure_revokes_generation_parent_rollback_grant[hidden-candidate-plus-visible-child]",
+      "tests/test_capacity_host_artifacts.py::test_postcommit_subprocess_timeout_requires_same_carrier_reconciliation",
+      "tests/test_capacity_host_artifacts.py::test_root_created_carrier_is_immune_to_preopened_operator_write_descriptor",
+      "tests/test_capacity_host_artifacts.py::test_repair_carrier_uses_retained_repository_after_basename_swap",
+      "tests/test_capacity_host_artifacts.py::test_verify_only_refuses_every_incomplete_position_without_mutation[after_intent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_verify_only_refuses_every_incomplete_position_without_mutation[after_old_source_move]",
+      "tests/test_capacity_host_artifacts.py::test_verify_only_refuses_every_incomplete_position_without_mutation[after_candidate_install]",
+      "tests/test_capacity_host_artifacts.py::test_verify_only_refuses_every_incomplete_position_without_mutation[after_old_generation_move]",
+      "tests/test_capacity_host_artifacts.py::test_verify_only_refuses_every_incomplete_position_without_mutation[after_repair_receipt_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_verify_only_refuses_every_incomplete_position_without_mutation[after_generation_file_1_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[after_archive_create_intent]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[fail_archive_parent_fsync_intent]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_create_intent]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_partial_write_intent]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_file_fsync_intent]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_rename_intent]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[before_parent_fsync_intent]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[after_parent_fsync_intent]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_create_receipt]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_partial_write_receipt]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_file_fsync_receipt]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[after_candidate_rename_receipt]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[before_parent_fsync_receipt]",
+      "tests/test_capacity_host_artifacts.py::test_publication_prefix_crashes_replay_to_one_exact_commit[after_parent_fsync_receipt]",
+      "tests/test_capacity_host_artifacts.py::test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback[fail_old_source_source_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback[fail_old_source_destination_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback[fail_candidate_install_source_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback[fail_candidate_install_destination_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback[fail_old_generation_source_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_visible_move_parent_fsync_failure_reconciles_forward_without_rollback[fail_old_generation_destination_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_visible_commit_normalizes_structural_refusal_to_incomplete",
+      "tests/test_capacity_host_artifacts.py::test_committed_replay_early_observation_failure_never_rolls_back[_observe_source_repair_source]",
+      "tests/test_capacity_host_artifacts.py::test_committed_replay_early_observation_failure_never_rolls_back[_observe_source_repair_archived_generation]",
+      "tests/test_capacity_host_artifacts.py::test_committed_replay_early_observation_failure_never_rolls_back[_expected_source_repair_receipt]",
+      "tests/test_capacity_host_artifacts.py::test_committed_replay_early_observation_failure_never_rolls_back[_generation_values]",
+      "tests/test_capacity_host_artifacts.py::test_committed_replay_structural_fault_before_recovery_authorization_is_effect_unknown[transition_reconcile]",
+      "tests/test_capacity_host_artifacts.py::test_committed_replay_structural_fault_before_recovery_authorization_is_effect_unknown[initial_classification]",
+      "tests/test_capacity_host_artifacts.py::test_committed_replay_structural_fault_before_recovery_authorization_is_effect_unknown[classification_entry_observation]",
+      "tests/test_capacity_host_artifacts.py::test_committed_replay_structural_fault_before_recovery_authorization_is_effect_unknown[generation_parent_inventory]",
+      "tests/test_capacity_host_artifacts.py::test_exact_precommit_classification_pre_authorizes_table_recovery",
+      "tests/test_capacity_host_artifacts.py::test_direct_recovery_consumes_grant_before_single_restore_attempt",
+      "tests/test_capacity_host_artifacts.py::test_direct_recovery_typed_incomplete_is_single_attempt_and_replays",
+      "tests/test_capacity_host_artifacts.py::test_direct_recovery_durability_uncertain_is_single_attempt_and_replays",
+      "tests/test_capacity_host_artifacts.py::test_visible_commit_normalizes_cleanup_failure_to_incomplete",
+      "tests/test_capacity_host_artifacts.py::test_every_forward_rename_uses_the_retained_parent_descriptors",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_archive_attachment_closes_new_descriptor_when_fstat_fails",
+      "tests/test_capacity_host_artifacts.py::test_repair_transition_table_is_the_executable_authority_before_mutation[removed]",
+      "tests/test_capacity_host_artifacts.py::test_repair_transition_table_is_the_executable_authority_before_mutation[refused]",
+      "tests/test_capacity_host_artifacts.py::test_transition_permitted_next_states_refuse_forward_mutation",
+      "tests/test_capacity_host_artifacts.py::test_transition_permitted_next_states_refuse_rollback_mutation",
+      "tests/test_capacity_host_artifacts.py::test_repair_transition_table_refusal_controls_each_forward_position[after_intent_fsync-intent_durable]",
+      "tests/test_capacity_host_artifacts.py::test_repair_transition_table_refusal_controls_each_forward_position[after_old_source_move-source_archived]",
+      "tests/test_capacity_host_artifacts.py::test_repair_transition_table_refusal_controls_each_forward_position[after_candidate_install-source_installed]",
+      "tests/test_capacity_host_artifacts.py::test_repair_transition_table_refusal_controls_each_forward_position[after_old_generation_move-generation_archived]",
+      "tests/test_capacity_host_artifacts.py::test_repair_transition_table_refusal_controls_each_forward_position[after_repair_receipt_fsync-receipt_durable]",
+      "tests/test_capacity_host_artifacts.py::test_repair_transition_table_refusal_controls_each_forward_position[before_final_rename-generation_prefix]",
+      "tests/test_capacity_host_artifacts.py::test_repair_transition_table_refusal_controls_each_forward_position[None-committed]",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_host_commits_generation_last_and_verify_is_zero_mutation",
+      "tests/test_capacity_host_artifacts.py::test_verify_only_native_read_atime_advance_is_observed_separately",
+      "tests/test_capacity_host_artifacts.py::test_verify_only_has_no_reachable_program_mutation_api",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_replays_forward_after_visible_final_rename_without_rollback",
+      "tests/test_capacity_host_artifacts.py::test_source_repair_replay_after_success_stdout_is_exactly_idempotent",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_transport_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_candidate_verify]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_intent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_old_source_move]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_candidate_install]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_old_generation_move]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_repair_receipt_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_generation_file_1_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_generation_file_2_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_generation_file_3_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_generation_file_4_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_generation_file_5_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_generation_file_6_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_hidden_generation_directory_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[before_final_rename]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_final_rename_before_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_repair_crash_position_replays_to_one_verified_commit[after_parent_fsync_before_stdout]",
+      "tests/test_capacity_host_artifacts.py::test_definite_precommit_failure_restores_only_digest_bound_old_state",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[type-installed-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[type-staged-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[symlink-installed-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[symlink-staged-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[mode-installed-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[mode-staged-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[ownership-installed-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[ownership-staged-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[device_identity-installed-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[device_identity-staged-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[hard_link-installed-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[hard_link-staged-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[unexpected_descendant-installed-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[unexpected_descendant-staged-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[content_digest-installed-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_layouts_refuse_every_semantic_mutation[content_digest-staged-source]",
+      "tests/test_capacity_host_artifacts.py::test_failure_evidence_binds_exact_intent_source_tree_identity",
+      "tests/test_capacity_host_artifacts.py::test_empty_failure_namespace_is_an_explicit_recovery_child_state",
+      "tests/test_capacity_host_artifacts.py::test_terminal_recovery_revalidates_preserved_failure_evidence",
+      "tests/test_capacity_host_artifacts.py::test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_failure_namespace_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_installed_rename]",
+      "tests/test_capacity_host_artifacts.py::test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_installed_source_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_installed_destination_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_generation_rename]",
+      "tests/test_capacity_host_artifacts.py::test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_generation_source_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_generation_destination_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_source_rename]",
+      "tests/test_capacity_host_artifacts.py::test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_source_source_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_every_rollback_prefix_is_unique_and_replays_to_digest_bound_prior_state[after_rollback_source_destination_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_rollback_staged_every_durability_boundary_replays_exactly[after_rollback_staged_rename]",
+      "tests/test_capacity_host_artifacts.py::test_rollback_staged_every_durability_boundary_replays_exactly[fail_rollback_staged_source_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_rollback_staged_every_durability_boundary_replays_exactly[after_rollback_staged_source_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_rollback_staged_every_durability_boundary_replays_exactly[fail_rollback_staged_destination_parent_fsync]",
+      "tests/test_capacity_host_artifacts.py::test_rollback_staged_every_durability_boundary_replays_exactly[after_rollback_staged_destination_parent_fsync]",
+      "tests/test_control_room_remote_install.py::test_exact_extracted_release_composes_degraded_remote_state_without_git_metadata",
+      "tests/test_executive_capacity_python39_compatibility.py::test_python39_runs_v3_manifest_inventory_closure_intent_receipt_and_recovery",
+      "tests/test_executive_capacity_source_closure_repair.py::test_runbook_materializes_exact_protected_tree_and_preserves_carrier_blobs",
+      "tests/test_executive_capacity_source_closure_repair.py::test_exact_bundle_runs_three_passes_and_removes_root_namespace",
+      "tests/test_executive_capacity_source_closure_repair.py::test_gate_release_failure_reaps_gated_group_before_refusal_cleanup",
+      "tests/test_executive_capacity_source_closure_repair.py::test_post_spawn_terminal_receipt_waits_for_termination_proof[signal-expected0]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_post_spawn_terminal_receipt_waits_for_termination_proof[unexpected-exit-expected1]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_direct_carrier_return_retains_group_until_terminal_proof[65-H0_SOURCE_CLOSURE_REPAIR_REFUSED-expected0-1]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_direct_carrier_return_retains_group_until_terminal_proof[0-H0_SOURCE_CLOSURE_REPAIR_PASS_NOT_P0_ACCEPTED-expected1-3]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_bootstrap_preserves_authenticated_carrier_primary_failure[70-H0_SOURCE_CLOSURE_REPAIR_INCOMPLETE_RECONCILE_SAME_CARRIER]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_bootstrap_preserves_authenticated_carrier_primary_failure[75-H0_LOCK_HELD]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_signal_to_bootstrap_pid_terminates_active_carrier_tree_before_cleanup[1]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_signal_to_bootstrap_pid_terminates_active_carrier_tree_before_cleanup[2]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_signal_to_bootstrap_pid_terminates_active_carrier_tree_before_cleanup[15]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_signal_registration_window_never_releases_untracked_carrier[1-after-spawn-before-pid]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_signal_registration_window_never_releases_untracked_carrier[1-after-pid-before-pgid]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_signal_registration_window_never_releases_untracked_carrier[1-steady-state]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_signal_registration_window_never_releases_untracked_carrier[2-after-spawn-before-pid]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_signal_registration_window_never_releases_untracked_carrier[2-after-pid-before-pgid]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_signal_registration_window_never_releases_untracked_carrier[2-steady-state]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_signal_registration_window_never_releases_untracked_carrier[15-after-spawn-before-pid]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_signal_registration_window_never_releases_untracked_carrier[15-after-pid-before-pgid]",
+      "tests/test_executive_capacity_source_closure_repair.py::test_signal_registration_window_never_releases_untracked_carrier[15-steady-state]",
+      "tests/test_executive_launchd_config.py::test_acceptance_rejects_existing_receipt_container_metadata_drift",
+      "tests/test_subscription_worker_config.py::SubscriptionWorkerConfigTest::test_provider_credential_uses_existing_private_provider_home",
+      "tests/workbench_read_mcp/test_service_process.py::test_direct_launcher_imports_owned_source_without_pythonpath"
+    ],
+    "failure_count": 216,
+    "log_sha256": "c41d0c474e4c499f035391c5f3c1ecfb3a1ef6aefc953f7d6ed763bacc319e0d",
+    "scope": "Complete discovered test-module set attempted. Failed; no full-repository acceptance.",
+    "source_unchanged_during_run": true,
+    "status": "COMPLETED"
+  },
+  "generated_source_cleanup": {
+    "original_test_group": "Historical intermediate PRESENT; see final test_cleanup ABSENT",
+    "restored": [
+      {
+        "path": "data/census/CENSUS.md",
+        "restored_head_sha256": "19f5242ded7a99220f13c0789e8cf4ba6e82d4966bfc9111f86b0f7592dcdb98",
+        "saved_generated_sha256": "d81bf9c193a5222c4c85cb05ebc0c9498bb69529c3cb6a4c3a7d711126eb0976"
+      },
+      {
+        "path": "data/census/latest.json",
+        "restored_head_sha256": "e0aeb78a1b3aede8e21349d042d86dcc00b1da4b582c956b69f159f1959cd0f9",
+        "saved_generated_sha256": "b9a14f64da7e6783fcd730e99adeeda79c46378dc3076d21acd0e7030ced8e04"
+      }
+    ]
+  },
+  "host_constraints": {
+    "ancestor_probe": "Default temporary directory is world-writable; a private fixture directory still traverses an ACL-bearing ancestor. Existing capacity-source guards refuse both. No shared permissions or ACLs changed.",
+    "directory_mode_probe": [
+      {
+        "errors": "0",
+        "exit_code": 1,
+        "failures": "2",
+        "label": "restricted",
+        "subprocess_umask": "0o77",
+        "tests": "2"
+      },
+      {
+        "errors": "0",
+        "exit_code": 0,
+        "failures": "0",
+        "label": "ci_default",
+        "subprocess_umask": "0o22",
+        "tests": "2"
+      }
+    ],
+    "full_native_qualification": "HELD",
+    "guard_waiver": false
+  },
+  "hosted_old_head": {
+    "code_scanning": "PASSED",
+    "conclusion": "FAILURE",
+    "head": "1020e43f1fa94a6e1e49dada59ef0445754828db",
+    "job_id": 109295164608,
+    "run_id": 36534410576,
+    "specific_root_cause": "UNKNOWN: structured annotation only exit1; raw log read refused due terminal escape protection, not retried or bypassed"
+  },
+  "limitations": [
+    "No independent review or merge/deployment acceptance",
+    "No actual native model, Web Pro input or automatic continuation proof",
+    "Trusted artifact acquisition and current effect admission remain existing-owner duties",
+    "Existing fixed plan/profile roles were not widened",
+    "Full native repository test gate remains failed; affected source suites are independently green"
+  ],
+  "new_identity_guard_regressions": 1,
+  "new_integration_cases": 38,
+  "operation": "mastermind-pro-led-project-delivery-20260929-sol-001",
+  "owned_bug_repair": {
+    "actual_head_guard": {
+      "failed": 0,
+      "log_sha256": "ea00a3bc20061f3e1451afe7a511de601c578a7c8543a3ac101e0884a38051e5",
+      "passed": 142,
+      "scope": "Full existing tests/test_ceo_submit_armed_composition.py, including committed-HEAD topology guard; no guard modified",
+      "skipped": 0,
+      "verified_head": "47e2f418ae354e023ac5f0061ce34b947d8f4bbc",
+      "xml_sha256": "77ce8fec5c097353921c550fc8dc761f4cd870cf568eedc5bfc73a35e044559d"
+    },
+    "change": "Declare _MAX_BRIEF_BYTES and use it in the bound check.",
+    "identity_guard_modified": false,
+    "limit_after": 524288,
+    "limit_before": 524288,
+    "original_finding": "Inline byte-bound literal was classified as an identity through tainted prose aliases.",
+    "test": "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults",
+    "virtual_guard_regression": "RED before correction, GREEN in final owning suite"
+  },
+  "owning_suite": {
+    "failed": 0,
+    "files": 11,
+    "passed": 450,
+    "skipped": 0
+  },
+  "procedure_pin": "9b01b708551196b1f144aa2f98b48bf37f513e26",
+  "recorded_at": "2026-09-29T09:05:22.935360+00:00",
+  "roundtrip": {
+    "acceptance_granted": false,
+    "bounded_reader_and_existing_projector": true,
+    "exact_granted_artifact": true,
+    "execution_authority_granted": false,
+    "existing_intent_plan_work_admission": true,
+    "live_model_run": false,
+    "model_reasoning": "explicit fixture",
+    "native_provider_observations": "explicit fixtures",
+    "production_runtime_changed": false,
+    "real_temporary_runtime": true,
+    "unchanged_work_result_envelope": true
+  },
+  "source": [
+    {
+      "path": "control_plane/chairman_coordination.py",
+      "sha256": "e6b38dd213e100f5510b7ef269a5819ecb966355e305348cdb5d4461ae686544"
+    },
+    {
+      "path": "control_plane/chairman_coordination_work.py",
+      "sha256": "ae0496e7a581b16f2c66b4b7fce1f00c8e336a44919f4e4bb5f827ceb421b2da"
+    },
+    {
+      "path": "tests/test_chairman_coordination.py",
+      "sha256": "a4906db5474960d8b0eeca38b20ab2a1d411d968f5e5b2caf05086e883212b7e"
+    },
+    {
+      "path": "tests/test_chairman_coordination_work.py",
+      "sha256": "c8235a0adadaa92a29c253cb96c252c6fd48f68caabacb4cc84e9c0935766c96"
+    }
+  ],
+  "source_base": "1020e43f1fa94a6e1e49dada59ef0445754828db",
+  "test_cleanup": {
+    "action": "No signal needed at final check; remaining test descendants exited before reconciliation",
+    "observation": "ps returned no members and killpg(0) returned ProcessLookupError",
+    "observed_at": "2026-09-29T09:05:22.919935+00:00",
+    "observed_state": "ABSENT",
+    "original_test_pgid": 44695
+  }
+}
