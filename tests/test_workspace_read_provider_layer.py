@@ -109,6 +109,7 @@ class StubCollector:
         self._allow_synthetic_fixture = True
         self.read_project_plan = lambda **kwargs: None
         self.read_project_discovery = lambda **kwargs: None
+        self.read_project_discovery_source = lambda **kwargs: None
         self.read_project_knowledge_catalogue = lambda **kwargs: None
         self.read_project_knowledge_memory = lambda **kwargs: None
         self.read_project_knowledge_source = lambda **kwargs: None
