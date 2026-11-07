@@ -64,6 +64,25 @@ def _entries(fd):
     return result
 
 
+
+_CUSTODY_COMPONENTS = frozenset({
+    'HOME', 'LANES', 'EXT', 'ACTIVE', 'STATE', 'ORCH', 'POLICY_DIRECTORY',
+    'POLICY_FILE', 'PRIOR_INSTALL_RECORD',
+})
+
+
+def _custody_call(component, operation, *args):
+    """Label the original first failure; never perform another observation."""
+    try:
+        return operation(*args)
+    except storage.InstallHeld as exc:
+        if (type(exc) is storage.InstallHeld and exc.args == ('owner_or_mode',)
+                and type(component) is str and component in _CUSTODY_COMPONENTS
+                and getattr(exc, '_custody_component', None) is None):
+            exc._custody_component = component
+        raise
+
+
 def operate(*, kind, payload=None, expected_after=None, expected_before=None,
             operation_id=None, original_settled=False, home=None, uid=None,
             platform=None, account=None, hostname=None):
@@ -82,13 +101,14 @@ def operate(*, kind, payload=None, expected_after=None, expected_before=None,
     # Every directory must already exist. No broad bootstrap/mkdir or source copy.
     paths = [home, home/'lanes', home/'lanes/ext', home/'lanes/ext/active',
              home/'lanes/ext/state', home/'lanes/orch', home/'lanes/orch/fabric']
+    components = dict(zip(paths, ('HOME', 'LANES', 'EXT', 'ACTIVE', 'STATE', 'ORCH', 'POLICY_DIRECTORY')))
     held = []
     lock = None
     staged = None
     record_created = False
     try:
         for path in paths:
-            fd = storage._directory(path, uid)
+            fd = _custody_call(components[path], storage._directory, path, uid)
             held.append((path, fd, os.fstat(fd)))
         active, state, target = held[3][1], held[4][1], held[6][1]
         lock = os.open('.admission.lock', os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
@@ -111,7 +131,7 @@ def operate(*, kind, payload=None, expected_after=None, expected_before=None,
                 except FileNotFoundError:
                     return 'ABSENT'
             before_identity = identity()
-            raw = storage._read(target, 'pools.yaml', uid)
+            raw = _custody_call('POLICY_FILE', storage._read, target, 'pools.yaml', uid)
             after_identity = identity()
             if before_identity != after_identity:
                 raise storage.InstallHeld('policy_changed')
@@ -126,7 +146,7 @@ def operate(*, kind, payload=None, expected_after=None, expected_before=None,
                 if named != policy_identity[0]:
                     raise storage.InstallHeld('policy_changed')
             for path, fd, original in held:
-                reopened = storage._directory(path, uid)
+                reopened = _custody_call(components[path], storage._directory, path, uid)
                 try:
                     named = os.fstat(reopened)
                     now = os.fstat(fd)
@@ -144,7 +164,7 @@ def operate(*, kind, payload=None, expected_after=None, expected_before=None,
         current()
         before, policy_identity[0] = policy_snapshot()
         preimage = 'ABSENT' if before is None else _sha(before)
-        prior = storage._read(state, RECORD, uid)
+        prior = _custody_call('PRIOR_INSTALL_RECORD', storage._read, state, RECORD, uid)
         current()
         if kind == 'inspect':
             return {'schema': SCHEMA, 'kind': kind, 'preimage': preimage,
@@ -226,6 +246,24 @@ def public_reason(exc):
                 errno.EBUSY: 'OWNER_BUSY', errno.EAGAIN: 'OWNER_BUSY'}.get(exc.errno, 'OS_ERROR_UNCLASSIFIED')
     return 'UNCLASSIFIED'
 
+
+def public_refusal(exc):
+    """No historical reconstruction or raw UID/path/mode/error disclosure."""
+    result = {'reason': public_reason(exc)}
+    if type(exc) is not storage.InstallHeld or exc.args != ('owner_or_mode',):
+        return result
+    component = getattr(exc, '_custody_component', None)
+    facts = getattr(exc, '_custody_predicates', None)
+    if (type(component) is not str or component not in _CUSTODY_COMPONENTS
+            or type(facts) is not tuple or len(facts) != 3
+            or any(type(value) is not bool for value in facts)
+            or (facts[0] and not facts[1] and not facts[2])):
+        return result
+    result['custody'] = {'component': component, 'owner_matches': facts[0],
+                         'group_writable': facts[1], 'other_writable': facts[2]}
+    return result
+
+
 def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
                    expected_module_sha, expected_storage_sha, payload=None,
                    expected_before=None, operation_id=None, original_settled=False,
@@ -272,7 +310,7 @@ def transport_plan(driver, registry_bytes, ssh_config_bytes, *, kind,
             'r=json.loads(' + repr(json.dumps(request)) + ')\n'
             'if "payload" in r:r["payload"]=base64.b64decode(r["payload"])\n'
             'try: print(json.dumps(p["operate"](**r),sort_keys=True))\n'
-            'except (OSError,ValueError) as e: print(json.dumps({"state":"HELD_OR_UNKNOWN","replay":False,"reason":p["public_reason"](e)}));raise SystemExit(78)\n')
+            'except (OSError,ValueError) as e: print(json.dumps(dict({"state":"HELD_OR_UNKNOWN","replay":False},**p["public_refusal"](e))));raise SystemExit(78)\n')
     command = shlex.join(['python3', '-c', code])
     return {'kind': kind, 'target': binding, 'argv': driver.SSH + [binding['alias'], command],
             'timeout': 20, 'dispatch_authorized': False,
