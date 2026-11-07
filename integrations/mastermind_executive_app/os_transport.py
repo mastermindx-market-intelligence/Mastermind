@@ -362,6 +362,7 @@ class OsExecutiveTransportApp:
 
     ROUTES: tuple[str, ...] = (
         "/os/executive/context",
+        "/os/executive/company-priorities",
         "/os/executive/submit",
         "/os/executive/status",
         "/os/executive/direct-native/result",
@@ -388,6 +389,7 @@ class OsExecutiveTransportApp:
         direct_result_client: Any | None = None,
         foreground_submissions: bool = False,
         workspace_app: Any | None = None,
+        company_read_pair: tuple | None = None,
     ) -> None:
         verifiers = submit_verifier if isinstance(submit_verifier, tuple) else (submit_verifier,)
         if not verifiers or any(type(v) is not MastermindTokenVerifier for v in verifiers):
@@ -409,6 +411,13 @@ class OsExecutiveTransportApp:
         self._submit_verifiers = verifiers
         self._submit_authenticators = authenticators
         self._clock = clock
+        self._company_read = None
+        if company_read_pair is not None:
+            from integrations.mastermind_executive_app.company_priorities_transport import CompanyPrioritiesTransport
+            if len(verifiers) != 1:
+                raise ValueError("one current company-read resource required")
+            self._company_read = CompanyPrioritiesTransport(inner_app,
+                read_pair=company_read_pair, submit_pair=(verifiers[0], authenticators[0]), clock=clock)
         from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient
         if commission_preparer is not None and type(commission_preparer) is not StudioCommissionClient:
             raise TypeError("installed Studio commission client required")
@@ -452,6 +461,12 @@ class OsExecutiveTransportApp:
             await Response(status_code=HTTPStatus.NOT_FOUND, headers=_OS_HTTP_HEADERS)(scope, receive, send)
             return
 
+        if path == "/os/executive/company-priorities":
+            if self._company_read is None:
+                await Response(status_code=503, headers=_OS_HTTP_HEADERS)(scope, receive, send)
+            else:
+                await self._company_read(scope, receive, send)
+            return
         headers = scope.get("headers") or ()
         from integrations.mastermind_executive_app.project_planning_transport import HEADER,ROUTES
         from integrations.mastermind_executive_app.project_execution_transport import ROUTES as EXECUTION_ROUTES
