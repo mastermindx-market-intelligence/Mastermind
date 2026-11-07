@@ -2023,11 +2023,24 @@ def api_posture(book: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
     try:
         from brain import posture as _posture
         return JSONResponse(_posture.posture(book))
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
-        return JSONResponse({"book": book, "available": False, "posture_label": "—",
-                             "posture_label_zh": "—", "posture_tone": "muted", "sub_strategy": None,
-                             "favored": [], "avoided": [], "driver": None, "detail": None,
-                             "cash_pct": None, "invested_pct": None, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001 — preserve unavailable truth
+        _log.warning("posture read failed for %s: %s", book, type(exc).__name__)
+        return JSONResponse({
+            "book": book,
+            "available": False,
+            "read_status": "unavailable",
+            "posture_label": "—",
+            "posture_label_zh": "—",
+            "posture_tone": "muted",
+            "sub_strategy": None,
+            "favored": [],
+            "avoided": [],
+            "driver": None,
+            "detail": None,
+            "cash_pct": None,
+            "invested_pct": None,
+            "error": "posture_unavailable",
+        })
 
 
 @router.get("/api/market_view")
@@ -2039,25 +2052,45 @@ def api_market_view() -> JSONResponse:
     Read-only: reassesses freshness on a copy of data/market_view/latest.json. Publication
     clocks and historical evidence stay unchanged; expired inferences become unavailable.
     This is a display consumer, not a producer or sizing path. Degrades to ``available:false``
-    stub when the artifact is absent/unreadable (the organ built-but-not-running protects nothing
-    but breaks nothing) rather than raising."""
+    response when no publication exists. Read, parse or projection failures return an
+    unavailable response; they never masquerade as an artifact that has not been built."""
     path = _data() / "market_view" / "latest.json"
     freshness_headers = {"Cache-Control": "no-store"}
     try:
-        if not path.exists():
-            return JSONResponse(
-                {"available": False, "note": "market_view artifact not built yet "
-                 "(brain.market_view.build has not run)"},
-                status_code=404, headers=_NOCACHE)
-        view = json.loads(path.read_text())
+        try:
+            raw = path.read_text()
+        except FileNotFoundError as missing:
+            # Only observed absence below a real directory is "not built".
+            # Dangling links and paths that appeared after the failed read stay unavailable.
+            import stat
+
+            candidate = path
+            while True:
+                try:
+                    info = candidate.lstat()
+                except FileNotFoundError:
+                    if candidate.parent == candidate:
+                        raise missing
+                    candidate = candidate.parent
+                    continue
+                if candidate != path and stat.S_ISDIR(info.st_mode):
+                    return JSONResponse(
+                        {"available": False, "note": "market_view artifact not built yet "
+                         "(brain.market_view.build has not run)"},
+                        status_code=404, headers=_NOCACHE)
+                raise missing
+        view = json.loads(raw)
         if not isinstance(view, dict):
             raise ValueError("artifact is not a JSON object")
         from brain import market_view
         view = market_view.serving_view(view)
         return JSONResponse(view, headers=freshness_headers)
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
+    except Exception as exc:  # noqa: BLE001 — preserve unavailable truth
+        _log.warning("market view read failed: %s", type(exc).__name__)
         return JSONResponse(
-            {"available": False, "error": str(exc)}, status_code=500, headers=_NOCACHE)
+            {"available": False, "read_status": "unavailable",
+             "error": "market_view_unavailable", "note": "market view unavailable"},
+            status_code=500, headers=_NOCACHE)
 
 
 @router.get("/api/agenda")
@@ -2074,16 +2107,19 @@ def api_agenda() -> JSONResponse:
     weekly CIO job writes it) rather than raising."""
     try:
         from brain import improvement_agenda
-        agenda = improvement_agenda.latest()
+        agenda = improvement_agenda.latest(strict=True)
         if not agenda:
             return JSONResponse(
                 {"available": False, "note": "no agenda built yet "
                  "(brain.improvement_agenda.write runs in the weekly CIO job)"},
                 status_code=404, headers=_NOCACHE)
         return JSONResponse(agenda, headers=_NOCACHE)
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
+    except Exception as exc:  # noqa: BLE001 — preserve unavailable truth
+        _log.warning("agenda read failed: %s", type(exc).__name__)
         return JSONResponse(
-            {"available": False, "error": str(exc)}, status_code=500, headers=_NOCACHE)
+            {"available": False, "read_status": "unavailable",
+             "error": "agenda_unavailable", "note": "agenda unavailable"},
+            status_code=500, headers=_NOCACHE)
 
 
 @router.get("/api/etf/outcomes")
