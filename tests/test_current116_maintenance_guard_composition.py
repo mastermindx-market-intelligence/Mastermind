@@ -82,7 +82,15 @@ def test_actual116_composition_preserves_every_incumbent_definition_and114_paylo
     assert not old_guards and set(new_guards) == GUARDS
     assert old_ast == new_ast  # Includes all module code/main, defaults, SQL and native application methods.
     provenance = json.loads((compose.HERE / "maintenance_guard/provenance.json").read_text())
-    assert {name: sha(dump(node).encode()) for name, node in new_guards.items()} == provenance["guard_method_ast_sha256"]
+    # ast.dump representation changes across supported Python versions; compare
+    # both real sources with this interpreter, retaining exact reviewed patch SHA.
+    patch = (compose.HERE / "maintenance_guard/lease_broker.py.patch").read_bytes()
+    assert sha(patch) == profile["patches"]["ext/lease_broker.py"]["patch_sha256"]
+    added = "class Broker:\n" + "".join(line[1:] for line in patch.decode().splitlines(True)
+                                         if line.startswith("+") and not line.startswith("+++"))
+    expected = ast.parse(added).body[0]
+    assert {n.name: dump(n) for n in expected.body} == {n: dump(v) for n, v in new_guards.items()}
+    assert set(provenance["guard_method_ast_sha256"]) == GUARDS
     compile((target / "ext/lease_broker.py").read_bytes(), "source-only-guarded-broker", "exec")
     old_pick, new_pick = ast.parse((base / "ext/pick.py").read_bytes()), ast.parse((target / "ext/pick.py").read_bytes())
     changed = "_eligible_host_routes"
