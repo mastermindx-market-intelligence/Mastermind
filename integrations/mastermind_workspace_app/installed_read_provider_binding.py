@@ -63,7 +63,7 @@ def _capture(binding,factory,runtime,*,expected=None):
         collector._runner,permissions._now,binding.read_function,binding.owner_function,
         identity._configuration,identity.qualify,collector.read_project_plan,collector.read_project_discovery,
         collector.read_project_knowledge_catalogue,collector.read_project_knowledge_memory,
-        collector.read_project_knowledge_source,collector.canonical_project_data_scope,
+        collector.read_project_knowledge_source,collector.read_project_discovery_source,collector.canonical_project_data_scope,
         collector.canonical_project_compilation_scope,collector._collect_packet,
         collector._capture_canonical_code,collector._bind_canonical_code_capture)
     source_fields=tuple(sorted(vars(source).items()))

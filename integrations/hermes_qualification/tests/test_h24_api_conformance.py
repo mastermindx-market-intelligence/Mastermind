@@ -57,7 +57,7 @@ from integrations.hermes_qualification.api_conformance import (
 from integrations.mastermind_executive_app.app import AppSettings
 from integrations.mastermind_executive_app.coo import CooAppSettings, create_coo_app
 from integrations.mastermind_executive_app.coo_binding import (
-    BINDING_SCHEMA, COO_SCOPES, _digest, principal_frame as coo_frame,
+    BINDING_SCHEMA, COO_BINDING_SCHEMA_V2, COO_SCOPES, _digest, principal_frame as coo_frame,
     validate_coo_binding,
 )
 from integrations.mastermind_executive_app.gateway import AppPolicies, CeoIngressClient, CeoIngressResponse
@@ -374,7 +374,7 @@ def test_coo_authentication_failure_precedes_owner_read(identities, tmp_path, cl
     asyncio.run(run())
 
 
-def test_two_coo_principals_need_separate_v1_bindings_at_this_pin(identities, tmp_path):
+def test_coo_v1_isolation_and_canonical_v2_binding_compatibility(identities, tmp_path):
     async def run():
         async with coo_surface(tmp_path, identities, member=0) as a, coo_surface(
             tmp_path, identities, member=1
@@ -388,10 +388,16 @@ def test_two_coo_principals_need_separate_v1_bindings_at_this_pin(identities, tm
             a[3]["binding"]["enabled"] = False
             assert (await coo_call(a[0], a[2], "executive_mandate", {"work_ref": "WS:ONE"})).status_code == 403
             assert (await coo_call(b[0], b[2], "executive_mandate", {"work_ref": "WS:ONE"})).status_code == 200
-            with pytest.raises(ValueError):
-                validate_coo_binding({"schema": "mastermind.executive_coo_principal_binding.v2",
-                                      "enabled": True, "bindings": [a[3]["binding"]["binding"],
-                                                                   b[3]["binding"]["binding"]]}, a[1].policy)
+            records = sorted(
+                [a[3]["binding"]["binding"], b[3]["binding"]["binding"]], key=_digest,
+            )
+            document = {"schema": COO_BINDING_SCHEMA_V2, "enabled": True,
+                        "bindings": records}
+            assert validate_coo_binding(document, a[1].policy) == document
+            # Reject the deliberately wrong order, not the supported v2 schema.
+            with pytest.raises(ValueError, match="access_denied"):
+                validate_coo_binding({**document, "bindings": list(reversed(records))},
+                                     a[1].policy)
     asyncio.run(run())
 
 

@@ -12,13 +12,15 @@ def test_byok_read_has_one_exact_get_and_no_post_or_source_branch():
     assert edge.GET_ROUTES == edge.PRE_BYOK_ROLES_GET_ROUTES + (ROUTE,)
     assert edge.PRE_PROJECT_EXECUTION_POST_ROUTES == edge.PRE_BYOK_ROLES_POST_ROUTES
     assert edge.PRE_DIRECT_NATIVE_POST_ROUTES == edge.PRE_PROJECT_EXECUTION_POST_ROUTES + edge.PROJECT_EXECUTION_POST_ROUTES
-    assert edge.POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (
+    assert edge.PRE_COMPANY_PRIORITIES_POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (
         "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
         "/os/executive/direct-native/correction",
     )
+    assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + ("/os/executive/company-priorities",)
+    assert (edge.GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
     assert ROUTE not in edge.POST_ROUTES + edge.SOURCE_POST_ROUTES
     assert (edge.PRE_BYOK_ROLES_GET_ROUTES, edge.PRE_BYOK_ROLES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
-    assert len(edge.TRANSITION_ROUTE_PROFILES) == 32
+    assert len(edge.TRANSITION_ROUTE_PROFILES) == 33
     text = edge.render(manifest(),49152)
     get = text.split('    @get {',1)[1].split('    }',1)[0]
     assert 'method GET' in get and get.count(ROUTE) == 1
@@ -35,6 +37,11 @@ def test_byok_get_transition_retains_complete_predecessor_and_other_sites(maker)
     expected = copy.deepcopy(live)
     method_routes(expected)[0]['match'][0]['path'] = sorted(set(edge.GET_ROUTES)|set(edge.asset_routes(manifest())))
     method_routes(expected)[1]['match'][0]['path'] = list(edge.POST_ROUTES)
+    for route in method_routes(expected)[3:5]:
+        route["match"][0]["path"] = (
+            list(edge.COMPLETE_MCP_METADATA_ROUTES)
+            if route["match"][0]["method"] == ["GET"]
+            else list(edge.COMPLETE_MCP_ROUTES))
     result = maker(fullconfig=live,current_manifest=manifest(),candidate_manifest=manifest(),relay_port=49152)
     assert result == expected and live == before
     for bad in (ROUTE+'/',ROUTE+'-other','/workspace/byok/*'):

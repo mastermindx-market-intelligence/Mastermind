@@ -204,6 +204,38 @@ class NativeCredentialTests(unittest.TestCase):
                     rt._model_child_env()
                 self.assertEqual(exc.exception.code, "NATIVE_SLACK_BOT_AUTH_ALIAS_REFUSED")
 
+    def test_the_consumer_client_ref_cannot_borrow_the_model_identity(self) -> None:
+        """The Executive connection keeps its own OAuth client reference.
+
+        It never borrows the model's provider, its credential name or its
+        served model: the two identities stay disjoint.
+        """
+        from integrations.hermes_models.contract import native_provider
+        from integrations.hermes_harness.tests.test_native_executive_consumer import (
+            publication_document,
+        )
+
+        rt = self._runtime(extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n")
+        spec = native_provider(rt.profile.role, rt.profile.native_provider_id)
+        for label, borrowed in (
+            ("credential_env", spec.credential_env),
+            ("provider_id", spec.provider_id),
+            ("hermes_name", spec.hermes_name),
+            ("served_model", spec.served_model),
+        ):
+            with self.subTest(alias=label):
+                document = publication_document()
+                document["mcp"] = dict(document["mcp"], client_id=borrowed)
+                with self.assertRaises(RuntimeRefusal) as exc:
+                    primary_model_env(rt.profile, rt.secrets.values, document)
+                self.assertEqual(exc.exception.code,
+                                 "NATIVE_CONSUMER_MODEL_CREDENTIAL_ALIAS_REFUSED")
+
+    def test_no_consumer_keeps_the_model_credential_unchanged(self) -> None:
+        rt = self._runtime(extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n")
+        env = primary_model_env(rt.profile, rt.secrets.values)
+        self.assertEqual(env, {"BYTEPLUS_MODELARK_API_KEY": FAKE_BYTEPLUS})
+
     def test_model_key_must_not_alias_slack_bot_token_for_either_role(self) -> None:
         for role, env_name, value in (
             ("mmsecretary", "BYTEPLUS_MODELARK_API_KEY", FAKE_BYTEPLUS),

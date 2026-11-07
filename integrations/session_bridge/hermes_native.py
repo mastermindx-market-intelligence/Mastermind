@@ -15,9 +15,15 @@ from control_plane.remote_worker_transport import (
     validate_secretary_native_id, validate_secretary_native_target,
 )
 from .schemas import BridgeError
+from control_plane.native_continuation import (
+    HERMES_KIND, HERMES_RESULT_SCHEMAS, hermes_family, hermes_family_for_schema,
+    hermes_family_for_target, _hermes_operation_key,
+)
 
 BINDING_SCHEMA = "mastermind.session_bridge.hermes_secretary_binding.v1"
 RESULT_SCHEMA = "mastermind.session_bridge.hermes_secretary_result.v1"
+RESULT_SCHEMAS = HERMES_RESULT_SCHEMAS
+META_RESULT_SCHEMA = hermes_family("hermes_meta").result_schema
 NATIVE_SCHEMA = "mastermind.hermes_secretary_native_control/v1"
 # Fits the incumbent 32 KiB private frame and 24 KiB public tool wrapper.
 MAX_PUBLIC_RESULT_BYTES = 23 * 1024
@@ -81,17 +87,14 @@ def validate_public_result(value):
     """Closed public evidence; original IDs join without claiming consumption."""
     from control_plane.native_continuation import _digest, _request_key
 
-    if (type(value) is not dict or set(value) != _RESULT_FIELDS
-            or value["schema"] != RESULT_SCHEMA
-            or type(value["target_ref"]) is not str
-            or re.fullmatch(r"hermes_secretary:[0-9a-f]{64}", value["target_ref"]) is None
+    if type(value) is not dict or set(value) != _RESULT_FIELDS:
+        raise ValueError("invalid native conversation result")
+    family = hermes_family_for_schema(value["schema"], component="result")
+    if (hermes_family_for_target(value["target_ref"]) != family
             or type(value["operation_key"]) is not str
             or re.fullmatch(r"session-continue-[0-9a-f]{64}", value["operation_key"]) is None):
-        raise ValueError("invalid Secretary result")
-    expected_operation = "session-continue-" + _digest({
-        "schema": "mastermind.session_bridge.hermes_secretary_operation.v1",
-        "target_ref": value["target_ref"],
-    })
+        raise ValueError("invalid native conversation result")
+    expected_operation = _hermes_operation_key(value["target_ref"])
     if value["operation_key"] != expected_operation:
         raise ValueError("original operation differs from target")
     key = _request_key(value["operation_key"])
@@ -129,9 +132,12 @@ def public_result(request_event, request, *, commit_started, native_result=None)
     """Project only actual native evidence joined to the stored original request."""
     from control_plane.native_continuation import _digest
 
+    family = hermes_family_for_schema(request["schema"], component="request")
+    if request["binding"]["schema"] != family.binding_schema:
+        raise ValueError("native conversation result binding family changed")
     status = admission = answer = successful = None
     if native_result is not None:
-        if (type(native_result) is not dict or native_result.get("schema") != NATIVE_SCHEMA
+        if (type(native_result) is not dict or native_result.get("schema") != family.native_schema
                 or native_result.get("status") not in _NATIVE_STATUSES):
             raise ValueError("invalid native result")
         status = native_result["status"]
@@ -155,7 +161,7 @@ def public_result(request_event, request, *, commit_started, native_result=None)
                     or re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", native_result["reason"]) is None):
                 raise ValueError("invalid native refusal")
     return validate_public_result({
-        "schema": RESULT_SCHEMA, "target_ref": request["target_ref"],
+        "schema": family.result_schema, "target_ref": request["target_ref"],
         "operation_key": request["operation_key"], "read_ref": request["read_ref"],
         "request_ref": request_event.command_id,
         "request_revision": _digest(request_event.to_dict()),
@@ -192,13 +198,15 @@ class HermesNativeSession:
         """Fresh ingress/custody admission independent of route availability."""
         self._guard(self._read_guard)
 
-    def selected_binding(self):
+    def selected_binding(self, *, kind=HERMES_KIND):
+        family = hermes_family(kind)
         self.require_read()
-        selected = self._source.hermes_secretary_selection()
+        selected = (self._source.hermes_secretary_selection() if family.kind == HERMES_KIND
+                    else self._source.hermes_meta_selection())
         if selected is None:
             return None
         return {
-            "schema": BINDING_SCHEMA,
+            "schema": family.binding_schema,
             "composition_sha256": self._source.expected_sha256,
             **{key: getattr(selected, key) for key in (
                 "host_ref", "root_id", "root_job_id", "work_ref", "session_id",
@@ -208,8 +216,14 @@ class HermesNativeSession:
         }
 
     def require_binding(self, binding):
-        if type(binding) is not dict or self.selected_binding() != binding:
-            raise BridgeError("binding_unavailable", "original Secretary binding is unavailable")
+        try:
+            if type(binding) is not dict:
+                raise ValueError
+            family = hermes_family_for_schema(binding.get("schema"), component="binding")
+        except ValueError:
+            raise BridgeError("binding_unavailable", "original native binding is unavailable") from None
+        if self.selected_binding(kind=family.kind) != binding:
+            raise BridgeError("binding_unavailable", "original native binding is unavailable")
 
     def require_submit(self, binding):
         self._guard(self._submit_guard)
@@ -217,20 +231,26 @@ class HermesNativeSession:
 
     async def request(self, binding, native_request, *, before_write=None):
         self.require_binding(binding)
-        client = self._source.hermes_secretary_client(
-            root_id=binding["root_id"], session_id=binding["session_id"])
+        family = hermes_family_for_schema(binding["schema"], component="binding")
+        factory = (self._source.hermes_secretary_client if family.kind == HERMES_KIND
+                   else self._source.hermes_meta_client)
+        client = factory(root_id=binding["root_id"], session_id=binding["session_id"])
         if client is None:
             raise BridgeError("backend_unavailable", "installed Secretary owner is unavailable")
-        result = await client.request_secretary(native_request, before_write=before_write)
+        send = client.request_secretary if family.kind == HERMES_KIND else client.request_meta
+        result = await send(native_request, before_write=before_write)
         self.require_binding(binding)
+        if binding["schema"] != family.binding_schema:
+            raise BridgeError("binding_unavailable", "original native family changed")
         return result
 
     async def observe(self, binding):
+        family = hermes_family_for_schema(binding["schema"], component="binding")
         result = await self.request(binding, {
             "operation": "observe", "session_id": binding["session_id"],
         })
         if (type(result) is not dict or set(result) != {"schema", "status", "target"}
-                or result["schema"] != NATIVE_SCHEMA or result["status"] != "TARGET"):
+                or result["schema"] != family.native_schema or result["status"] != "TARGET"):
             raise BridgeError("binding_unavailable", "native Secretary session is unavailable")
         target = validate_secretary_native_target(result["target"])
         if any(target[key] != binding[key] for key in ("profile_id", "session_id", "principal_id")):

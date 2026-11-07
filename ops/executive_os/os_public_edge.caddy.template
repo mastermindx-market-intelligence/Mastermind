@@ -20,7 +20,7 @@ mcp.mastermind-x.com {
     }
     @post {
       method POST
-      path /os/executive/context /os/executive/submit /os/executive/status /os/executive/session/context /os/executive/session/reply /os/executive/session/references /workspace/control-room/open /workspace/control-room/bind /workspace/control-room/unbind /workspace/control-room/refresh-builds /workspace/project-admission/pause /workspace/project-admission/resume /workspace/instruction-admission/pause /os/executive/project-planning/submit /os/executive/project-planning/status /os/executive/project-planning/result /os/executive/project-planning/consume /os/executive/project-planning/prepare_proposal /os/executive/session/history-context /os/executive/session/conversations /os/executive/session/conversation-read /os/executive/session/fresh-conversations /os/executive/session/fresh-conversation-read /os/executive/conversation/preview /os/executive/conversation/create /os/executive/conversation/status /os/executive/conversation/read /os/executive/conversation/consume /os/executive/conversation/turn /os/executive/conversation/turn/status /os/executive/conversation/turn/read /os/executive/conversation/consume/status /os/executive/conversation/turn/preview /os/executive/session/send /os/executive/project-execution/preview /os/executive/project-execution/submit /os/executive/project-execution/status /os/executive/session/project-executions /os/executive/session/project-execution-read /os/executive/direct-native/result /os/executive/direct-native/consume /os/executive/direct-native/correction
+      path /os/executive/context /os/executive/submit /os/executive/status /os/executive/session/context /os/executive/session/reply /os/executive/session/references /workspace/control-room/open /workspace/control-room/bind /workspace/control-room/unbind /workspace/control-room/refresh-builds /workspace/project-admission/pause /workspace/project-admission/resume /workspace/instruction-admission/pause /os/executive/project-planning/submit /os/executive/project-planning/status /os/executive/project-planning/result /os/executive/project-planning/consume /os/executive/project-planning/prepare_proposal /os/executive/session/history-context /os/executive/session/conversations /os/executive/session/conversation-read /os/executive/session/fresh-conversations /os/executive/session/fresh-conversation-read /os/executive/conversation/preview /os/executive/conversation/create /os/executive/conversation/status /os/executive/conversation/read /os/executive/conversation/consume /os/executive/conversation/turn /os/executive/conversation/turn/status /os/executive/conversation/turn/read /os/executive/conversation/consume/status /os/executive/conversation/turn/preview /os/executive/session/send /os/executive/project-execution/preview /os/executive/project-execution/submit /os/executive/project-execution/status /os/executive/session/project-executions /os/executive/session/project-execution-read /os/executive/direct-native/result /os/executive/direct-native/consume /os/executive/direct-native/correction /os/executive/company-priorities
     }
     handle @post {
       request_body {
@@ -62,7 +62,7 @@ mcp.mastermind-x.com {
     }
     @mcpmeta {
       method GET
-      path /.well-known/oauth-protected-resource/mcp
+      path /.well-known/oauth-protected-resource/mcp /.well-known/oauth-protected-resource/mcp/coo
     }
     handle @mcpmeta {
       reverse_proxy 127.0.0.1:__RELAY_PORT__ {
@@ -80,7 +80,7 @@ mcp.mastermind-x.com {
     }
     @mcp {
       method POST
-      path /mcp
+      path /mcp /mcp/coo
     }
     handle @mcp {
       request_body {

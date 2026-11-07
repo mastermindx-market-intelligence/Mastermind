@@ -28,10 +28,12 @@ def test_session_send_is_one_fixed_post_in_the_complete_composed_profile():
     assert edge.GET_ROUTES == edge.PRE_BYOK_ROLES_GET_ROUTES + ("/workspace/byok/roles/current",)
     assert edge.PRE_BYOK_ROLES_POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + (ROUTE,)
     assert edge.PRE_DIRECT_NATIVE_POST_ROUTES == edge.PRE_BYOK_ROLES_POST_ROUTES + edge.PROJECT_EXECUTION_POST_ROUTES
-    assert edge.POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (
+    assert edge.PRE_COMPANY_PRIORITIES_POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (
         "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
         "/os/executive/direct-native/correction",
     )
+    assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + ("/os/executive/company-priorities",)
+    assert (edge.GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
     assert ROUTE not in edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES
     assert (edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES,
             edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
@@ -59,6 +61,11 @@ def test_real_transition_preserves_predecessor_and_changes_only_fixed_route_path
     expected = copy.deepcopy(old)
     method_routes(expected)[0]["match"][0]["path"] = sorted(set(edge.GET_ROUTES) | set(edge.asset_routes(manifest())))
     method_routes(expected)[1]["match"][0]["path"] = list(edge.POST_ROUTES)
+    for route in method_routes(expected)[3:5]:
+        route["match"][0]["path"] = (
+            list(edge.COMPLETE_MCP_METADATA_ROUTES)
+            if route["match"][0]["method"] == ["GET"]
+            else list(edge.COMPLETE_MCP_ROUTES))
     assert result == expected and old == before
     for suffix in ("/", "-other", "/*"):
         malformed = copy.deepcopy(old)
@@ -156,10 +163,12 @@ def test_composed_profile_preserves_parent_native_and_project_predecessors():
     assert edge.PRE_PROJECT_EXECUTION_GET_ROUTES == edge.PRE_BYOK_ROLES_GET_ROUTES + edge.BYOK_READ_ROUTES
     assert edge.PRE_PROJECT_EXECUTION_POST_ROUTES == edge.PRE_BYOK_ROLES_POST_ROUTES
     assert edge.PRE_DIRECT_NATIVE_POST_ROUTES == edge.PRE_PROJECT_EXECUTION_POST_ROUTES + edge.PROJECT_EXECUTION_POST_ROUTES
-    assert edge.POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (
+    assert edge.PRE_COMPANY_PRIORITIES_POST_ROUTES == edge.PRE_DIRECT_NATIVE_POST_ROUTES + (
         "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
         "/os/executive/direct-native/correction",
     )
+    assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + ("/os/executive/company-priorities",)
+    assert (edge.GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
     assert edge.PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES == edge.PRE_NATIVE_SESSION_SEND_GET_ROUTES
     assert edge.PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES == edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES + edge.PROJECT_EXECUTION_POST_ROUTES
     assert "/workspace/byok/roles/current" in _WORKSPACE_ADDITIONAL_GET_ROUTES

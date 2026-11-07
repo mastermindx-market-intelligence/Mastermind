@@ -474,8 +474,8 @@ def _check_deadline(deadline: float) -> None:
         raise RoleStatusError()
 
 
-async def qualify_secretary_listener(held: _HeldRoleQualification, *,
-                                      gateway_port: int, deadline: float) -> dict:
+async def _qualify_role_listener(held: _HeldRoleQualification, *, role: str,
+                                 gateway_port: int, deadline: float) -> dict:
     """Join the main-only socket witness to its unique current kernel listener.
 
     Reuses the release/unit/process owner and the bounded kernel-row parser.
@@ -484,20 +484,22 @@ async def qualify_secretary_listener(held: _HeldRoleQualification, *,
     """
     from integrations.hermes_runtime.isolation_probe import _kernel_listeners
 
+    if type(role) is not str or role not in {"mmsecretary", "mmmeta"}:
+        raise RoleStatusError()
     _check_deadline(deadline)
     held.check()
     boot = _boot_id()
-    rows = await _query_fixed_pid1()
-    row = next(item for item in rows if item["role"] == "mmsecretary")
+    rows = await _query_fixed_pid1(role=role)
+    row = next(item for item in rows if item["role"] == role)
     status = row["status"]
     if (row["notify_access"] != "main" or row["active_state"] != "active"
             or row["sub_state"] != "running" or status["schema"] != STATUS_SCHEMA_V3):
         raise RoleStatusError()
-    listener = validate_gateway_listener(status["gateway_listener"])
+    listener = validate_gateway_listener(status["gateway_listener"], role=role)
     if (listener["port"] != gateway_port
             or status["observed_monotonic_ms"] * 1000 < row["main_start_monotonic_us"]):
         raise RoleStatusError()
-    facts = held.role_facts("mmsecretary", row["unit_properties"], boot)
+    facts = held.role_facts(role, row["unit_properties"], boot)
     monotonic_age = time.monotonic_ns() // 1_000_000 - status["observed_monotonic_ms"]
     wall_age = time.time_ns() // 1_000_000 - status["observed_at_ms"]
     if not 0 <= monotonic_age <= 30_000 or wall_age < 0 or abs(wall_age - monotonic_age) > 5_000:
@@ -511,6 +513,18 @@ async def qualify_secretary_listener(held: _HeldRoleQualification, *,
         raise RoleStatusError("SOURCE_CHANGED")
     _check_deadline(deadline)
     return {"facts": facts, "listener": listener}
+
+
+async def qualify_secretary_listener(held: _HeldRoleQualification, *,
+                                      gateway_port: int, deadline: float) -> dict:
+    return await _qualify_role_listener(
+        held, role="mmsecretary", gateway_port=gateway_port, deadline=deadline)
+
+
+async def qualify_meta_listener(held: _HeldRoleQualification, *,
+                                gateway_port: int, deadline: float) -> dict:
+    return await _qualify_role_listener(
+        held, role="mmmeta", gateway_port=gateway_port, deadline=deadline)
 
 
 class HermesRoleMetadataObserver:

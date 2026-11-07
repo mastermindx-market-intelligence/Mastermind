@@ -15,7 +15,7 @@ principal into ASGI state, or takes a caller-selected private route.
   principal and expiry to one project without target enumeration or a root.
 * ``/os/executive/session/send`` commits one continuation with precisely the
   four validated existing arguments, passed once to ``bridge.send``.  A
-  ``hermes_secretary`` target answers with the closed native public result
+  ``hermes_secretary`` or ``hermes_meta`` target answers with the closed native public result
   this transport validates against the producer's own validator.
 * ``/os/executive/session/references`` discovers bounded original-request
   references through the same read-only bridge; never commits or acknowledges.
@@ -61,6 +61,10 @@ from typing import Any
 
 from starlette.responses import Response
 
+from control_plane.native_continuation import (
+    HERMES_KINDS, HERMES_RESULT_SCHEMAS, hermes_family_for_target,
+)
+
 from integrations.business_mcp_auth.contracts import (
     AuthErrorCode,
     VerifiedPrincipal,
@@ -100,8 +104,6 @@ _OPERATIONS: dict[str, str] = {
 _RESULT_SCHEMA = "mastermind.os.executive.session_result.v1"
 _CONTEXT_SCHEMA = "mastermind.os.executive.session_context.v1"
 _NATIVE_REPLY_SCHEMA = "mastermind.native_reply_read.v1"
-#: The closed native public result of the Hermes Secretary producer.
-_HERMES_RESULT_SCHEMA = "mastermind.session_bridge.hermes_secretary_result.v1"
 _REFERENCE_SCHEMA = "mastermind.session_reply_references.v1"
 
 #: The existing exact read policy and the existing exact read+intent.submit
@@ -115,12 +117,9 @@ _SUBMIT_POLICY_SCOPES = frozenset((
 _WORK_REF_RE = re.compile(r"^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ROOT_JOB_RE = re.compile(r"^JOB-[A-Za-z0-9][A-Za-z0-9._:-]{0,250}$")
 _FABRIC_REF_RE = re.compile(r"^fabric_attempt:[0-9a-f]{64}$")
-_HERMES_REF_RE = re.compile(r"^hermes_secretary:[0-9a-f]{64}$")
-#: The closed canonical target-kind union. There is no third kind and no
-#: caller-selected prefix; an absent kind keeps the incumbent fabric target.
-_TARGET_KINDS = ("fabric_attempt", "hermes_secretary")
-#: The closed native continuation-key schema of the Hermes Secretary producer.
-_HERMES_OPERATION_SCHEMA = "mastermind.session_bridge.hermes_secretary_operation.v1"
+_HERMES_REF_RE = re.compile(r"^(?:hermes_secretary|hermes_meta):[0-9a-f]{64}$")
+#: The closed canonical target-kind union; an absent kind keeps Fabric.
+_TARGET_KINDS = ("fabric_attempt", *HERMES_KINDS)
 _CONTINUE_KEY_RE = re.compile(r"^session-continue-[0-9a-f]{64}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _GENERATION_RE = re.compile(r"^[0-9a-f]{24}$")
@@ -188,7 +187,7 @@ def _target_kind(target_ref: Any) -> str | None:
     if _FABRIC_REF_RE.fullmatch(target_ref) is not None:
         return "fabric_attempt"
     if _HERMES_REF_RE.fullmatch(target_ref) is not None:
-        return "hermes_secretary"
+        return hermes_family_for_target(target_ref).kind
     return None
 
 
@@ -201,7 +200,7 @@ def _hermes_operation_key(target_ref: str) -> str:
     """
 
     material = json.dumps(
-        {"schema": _HERMES_OPERATION_SCHEMA, "target_ref": target_ref},
+        {"schema": hermes_family_for_target(target_ref).operation_schema, "target_ref": target_ref},
         sort_keys=True, separators=(",", ":"), ensure_ascii=True,
     ).encode("ascii")
     return "session-continue-" + hashlib.sha256(material).hexdigest()
@@ -300,7 +299,7 @@ def _failure_response(
 def _validated_targets(rows: Any) -> list[dict[str, Any]]:
     """Validate every projected row; any defect fails the projection closed.
 
-    The closed kind union is fabric_attempt and hermes_secretary.  The row
+    The closed kind union is Fabric and the two explicit native families.  The row
     kind, the target prefix, the target generation and the projected
     continuation key must all agree with one another before the row can be
     joined to a selection.
@@ -333,7 +332,7 @@ def _validated_targets(rows: Any) -> list[dict[str, Any]]:
             or _ROOT_JOB_RE.fullmatch(row["root_job_id"]) is None
         ):
             raise _ProjectionRefusal("canonical target row is malformed")
-        if kind == "hermes_secretary" and continuation_key != _hermes_operation_key(target_ref):
+        if kind in HERMES_KINDS and continuation_key != _hermes_operation_key(target_ref):
             raise _ProjectionRefusal("canonical target row is malformed")
         if target_ref in seen_refs or continuation_key in seen_keys:
             raise _ProjectionRefusal("duplicate canonical target")
@@ -901,7 +900,7 @@ class OsSessionTransportApp:
             return _failure_response(
                 "send", "effect_unknown", effect="UNKNOWN", operation_key=operation_key
             )
-        if target_kind == "hermes_secretary":
+        if target_kind in HERMES_KINDS:
             return self._native_send_response(operation_key, validated["target_ref"], receipt)
         try:
             data = _validated_send_receipt(validated, receipt)
@@ -1083,7 +1082,7 @@ class OsSessionTransportApp:
                 operation_key=operation_key,
             )
         try:
-            if isinstance(native, Mapping) and native.get("schema") == _HERMES_RESULT_SCHEMA:
+            if isinstance(native, Mapping) and native.get("schema") in HERMES_RESULT_SCHEMAS:
                 return self._native_reply_response(operation_key, native)
             data = _validated_native_reply(operation_key, native)
         except _ForeignReceipt:

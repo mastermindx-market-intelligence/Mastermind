@@ -63,7 +63,12 @@ def joined(owner,identity,tmp_path,monkeypatch):
     source_root=factory.service.config.proof_source_repository
     profile_path=source_root/'config/workspace_project_authoring_profiles.json'
     profile_path.write_bytes((Path(__file__).parents[1]/'config/workspace_project_authoring_profiles.json').read_bytes())
-    git(source_root,'add',str(profile_path.relative_to(source_root)));git(source_root,'commit','-m','Actual authored profile catalogue')
+    from control_plane.project_execution_admission import COMMISSION_PATH
+    commission_path=source_root/COMMISSION_PATH
+    commission_path.parent.mkdir(parents=True,exist_ok=True)
+    commission_path.write_bytes((Path(__file__).parents[1]/COMMISSION_PATH).read_bytes())
+    git(source_root,'add',str(profile_path.relative_to(source_root)),COMMISSION_PATH)
+    git(source_root,'commit','-m','Actual authored profile catalogue and project commission')
     factory.service.config=dataclasses.replace(factory.service.config,proof_base_sha=rev_parse(source_root,'HEAD'))
     # Actual installed factory, separate immutable code clone and writer.
     code_root=tmp_path/'configured-code';git(tmp_path,'clone',str(o['env'].origin),str(code_root));git(code_root,'checkout','--detach',code)
@@ -337,3 +342,98 @@ def test_pure_original_read_capture_discards_on_revocation_expiry_and_default_dr
     assert retained[-1].active is False and _CAPTURE.get() is None
     assert j['runtime'].jobs.list_jobs()==[] and j['runtime'].attempts.list_attempts()==[]
     assert len(j['runtime'].store.list_events())==before
+
+
+def test_actual_canonical_plan_is_bound_to_one_original_execution_input(joined, monkeypatch):
+    """Real canonical producer/consumer join; only physical execution is inert."""
+    from common import project_execution_private_contract as execution_wire
+    from control_plane import project_execution_admission as execution_source
+    from control_plane.executive_ceo_ingress import BOOT_PACKET_SCHEMA
+    from integrations.mastermind_executive_app.project_execution_factory import ProjectExecutionAppFactory
+    from common.executive_principal_namespace import principal_scope_from_identity
+    from tests.test_project_execution_factory import invoke
+    from tests.test_executive_os_phase1fc import _v3_execution_binding
+    import subprocess
+
+    j = joined
+    planning, service = j["factory"], j["factory"].service
+    principal, work_ref = j["args"]["principal"], j["args"]["work_ref"]
+    service._service_state = "READY"
+    service.config = dataclasses.replace(service.config, coo_foreground_only=False)
+    base = service.config.proof_base_sha
+    monkeypatch.setattr(service._ceo_ingress_app_binding.grounding_provider, "observe",
+        lambda: dict(mastermind_sha=base, macro_sha=j["current"], boot_packet_schema=BOOT_PACKET_SCHEMA))
+    binding = {**_v3_execution_binding(), "base_sha": base}
+    monkeypatch.setattr(service, "_require_project_execution_binding",
+        lambda execution_profile="research_only": copy.deepcopy(binding))
+    monkeypatch.setattr(service, "_coo_binding_for_root", lambda root: copy.deepcopy(binding))
+    factory = ProjectExecutionAppFactory(planning)
+    prepared = []
+
+    async def prepare(root, operation):
+        operation.require_root(root.job_id)
+        assert service._require_project_execution_root(root)
+        prepared.append(root.job_id)
+
+    monkeypatch.setattr(factory, "_prepare_workspace", prepare)
+    plan = j["data"].view(j["workspace"], work_ref=work_ref).read_plan(work_ref=work_ref)
+    context = execution_wire.context_from_plan(plan)
+    assert context["record_source"]["commit"] == j["current"]
+    assert context["adoption"] == {"state": "UNAVAILABLE", "reason": "NOT_DECLARED"}
+    stale = copy.deepcopy(context)
+    stale["record_source"]["commit"] = j["code"]
+    preview_args = dict(operation_key="mmos-project-preview-" + "1" * 40,
+        work_ref=work_ref, expected_context=stale)
+    refused = asyncio.run(invoke(factory, principal, preview_args, operation="preview"))
+    assert not refused["ok"] and refused["error"]["code"] == "context_changed", refused
+    assert service.runtime.jobs.list_jobs() == []
+    assert service.runtime.attempts.list_attempts() == [] and prepared == []
+
+    preview_args["expected_context"] = context
+    preview = asyncio.run(invoke(factory, principal, preview_args, operation="preview"))
+    assert preview["ok"], preview
+    preview = preview["data"]
+    assert preview["execution_state"] == "WORK_CAPABLE"
+    assert preview["continuation_mode"] == "DURABLE"
+    args = dict(work_ref=work_ref, expected_context=context,
+        context_sha256=preview["context_sha256"],
+        execution_binding_sha256=preview["execution_binding_sha256"],
+        execution_profile="research_only", objective="Qualify the authored project",
+        handoff_text="Retain the exact authored project and its absent-adoption fact.",
+        continuation_mode="DURABLE")
+    scope = principal_scope_from_identity(issuer_digest=principal.issuer_digest,
+        subject_digest=principal.subject_digest, client_ref=principal.client_ref, resource=principal.resource)
+    args["operation_key"] = execution_wire.operation_key(scope, args)
+    first = asyncio.run(invoke(factory, principal, args))
+    assert first["ok"], first
+    root = service.runtime.jobs.get_job(first["data"]["receipt"]["job_id"])
+    material = execution_source.read_source(service.runtime, root)
+    original_bytes = execution_source.read_original_input(factory._supervisor(), material)
+    original = json.loads(original_bytes)
+    captured = original["project"]
+    assert captured["expected_context"] == context
+    assert execution_wire.digest(captured) == args["context_sha256"]
+    authored = captured["plan"]["authored_record"]
+    assert authored["source"] == context["record_source"]
+    expected_bytes = subprocess.check_output(["git", "-C", str(j["integrator"]), "show",
+        j["current"] + ":" + authored["source"]["path"]])
+    assert authored["content"].encode("utf-8") == expected_bytes
+    assert captured["plan"]["adoption"] is None and captured["plan"]["adopted_plan"] is None
+    assert original["request"] == args
+
+    # Original reads and submit reconciliation retain those exact bytes even
+    # when a fresh selected plan can no longer be obtained.
+    def no_fresh_capture(*_args, **_kwargs):
+        raise AssertionError("original reconciliation must not capture a new plan")
+
+    monkeypatch.setattr(factory, "_capture", no_fresh_capture)
+    lookup = {key: args[key] for key in ("operation_key", "work_ref")}
+    status = asyncio.run(invoke(factory, principal, lookup, operation="status"))
+    replay = asyncio.run(invoke(factory, principal, args))
+    assert status["ok"] and replay["ok"]
+    assert status["data"]["receipt"]["job_id"] == replay["data"]["receipt"]["job_id"] == root.job_id
+    # resolve_intent is an original read, not a second acceptance.
+    assert replay["data"]["receipt"]["duplicate"] is False
+    assert execution_source.read_original_input(factory._supervisor(), material) == original_bytes
+    assert len(service.runtime.jobs.list_jobs()) == 1
+    assert service.runtime.attempts.list_attempts() == [] and prepared == [root.job_id]

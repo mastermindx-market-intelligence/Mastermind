@@ -128,7 +128,7 @@ NATIVE_TOOL_SCHEMA: dict[str, Any] = {
 class NativeToolRegistrationError(RuntimeError):
     """One closed refusal code for the native registration."""
 
-    def __init__(self, code: str, *, context=None, binding=None, scope=None, handle=None) -> None:
+    def __init__(self, code: str, *, context=None, binding=None, scope=None, handle=None, tool_name=TOOL_NAME) -> None:
         super().__init__(code)
         self.code = code
         # Private original-owner references for an uncertain registration or
@@ -137,7 +137,7 @@ class NativeToolRegistrationError(RuntimeError):
         self.original_binding = binding
         self.original_scope = scope
         self.original_handle = handle
-        self.original_tool_name = TOOL_NAME if context is not None else None
+        self.original_tool_name = tool_name if context is not None else None
 
 
 @runtime_checkable
@@ -358,6 +358,13 @@ def _validate_envelope(raw: Any, binding: NativeDelegateBinding) -> dict[str, An
         if value is not None and (not isinstance(value, str) or len(value) > 256):
             return None
         projected[field] = value
+    if "result_capsule" in body:
+        from control_plane.executive_terminal_return import validate_selected_child_result_capsule
+        try:
+            projected["result_capsule"] = validate_selected_child_result_capsule(
+                body["result_capsule"], observation=dict(body))
+        except (ValueError, TypeError, KeyError):
+            return None
     return projected
 
 
@@ -437,6 +444,15 @@ def native_delegate_handler(binding: NativeDelegateBinding) -> Callable[..., str
 
         envelope = _validate_envelope(raw, binding)
         if envelope is None:
+            if action == "selected_child_submit":
+                return _dump(_uncertain(
+                    "EFFECT_UNKNOWN", "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN", binding))
+            return _dump(_uncertain(
+                "UNAVAILABLE", "EXECUTIVE_SELECTED_CHILD_UNAVAILABLE", binding))
+        # A synchronous RPC can still cross a native connection/authority change.
+        # Re-prove the original caller before exposing any result text.
+        if (_caller_lineage_refusal(binding, session_id, task_id) is not None
+                or not _binding_is_current(binding)):
             if action == "selected_child_submit":
                 return _dump(_uncertain(
                     "EFFECT_UNKNOWN", "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN", binding))

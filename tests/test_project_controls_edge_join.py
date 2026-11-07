@@ -56,6 +56,11 @@ def test_real_2055_caddy_predecessor_preserves_all_non_route_configuration(maker
     expected_routes[0]["match"][0]["path"] = sorted(set(edge.GET_ROUTES) | set(edge.asset_routes(candidate)) |
         (set(edge.asset_routes(current)) if maker is prepare_config else set()))
     expected_routes[1]["match"][0]["path"] = list(edge.POST_ROUTES)
+    for route in method_routes(expected)[3:5]:
+        route["match"][0]["path"] = (
+            list(edge.COMPLETE_MCP_METADATA_ROUTES)
+            if route["match"][0]["method"] == ["GET"]
+            else list(edge.COMPLETE_MCP_ROUTES))
     actual = maker(fullconfig=old, current_manifest=current, candidate_manifest=candidate, relay_port=49152)
     assert actual == expected
     assert old == predecessor()

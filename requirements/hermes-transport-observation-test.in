@@ -1,0 +1,4 @@
+# Actual SDK + HTTPX fixture pair for the selected native nonstream transport.
+# Test inputs only; this is not the installed Linux runtime hash lock.
+openai==2.54.0
+httpx==0.28.1

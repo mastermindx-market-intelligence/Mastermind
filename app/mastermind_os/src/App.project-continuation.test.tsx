@@ -39,7 +39,7 @@ async function openFollowUp(){
 it("continues an exact completed run with a new message despite multiple historical roots",async()=>{
   const f=await setup(),message=await openFollowUp();
   expect(message.value).toBe("");
-  expect(document.activeElement).toBe(message);
+  await waitFor(() => expect(document.activeElement).toBe(message));
   expect(f.requests.filter(x=>x.operation==="preview")[0].arguments.previous_run).toEqual(f.witness);
   fireEvent.change(message,{target:{value:"Add a final comparison to the accepted project result."}});
   const launch=screen.getByRole("button",{name:"Launch"});

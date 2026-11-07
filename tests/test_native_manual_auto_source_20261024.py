@@ -27,7 +27,8 @@ PRE_POLL255_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008
 PRE_POLL255_WITH_UBUNTU4_TASK_SHA = "36fbd16469befa0f4ade8d75fe15b3384a042b726668879c59ae03c82d194058"
 PRE_REMOTE_CWD_TASK_SHA = "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
 PRE_REFUSAL_DIAGNOSTICS_TASK_SHA = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
-CURRENT_TASK_SHA = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
+PRE_ADMISSION_TASK_SHA = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
+CURRENT_TASK_SHA = "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -56,7 +57,7 @@ def _preobserver_picker():
 
 def _pre_refusal_diagnostics_task(value: bytes) -> bytes:
     """Undo only the exact diagnostic successor inside the disposable F1 stage."""
-    assert hashlib.sha256(value).hexdigest() == CURRENT_TASK_SHA
+    assert hashlib.sha256(value).hexdigest() == PRE_ADMISSION_TASK_SHA
     pairs = (
         (
             b"# Closed diagnostics only: these labels grant no routing, retry or acceptance.\n"
@@ -219,9 +220,18 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
             current = _inverse_judgment(_preobserver_picker())
         elif relative == "ext/fabric_task.py":
             assert sha(source) == CURRENT_TASK_SHA
-            # Restore the exact pre-poll-qualifier epoch first. The historical
-            # manual-auto fixture and every subsequent inverse stay immutable.
-            latest = _pre_refusal_diagnostics_task(source.read_bytes())
+            # Undo only the exact forward repair in this private stage, then
+            # retain every historical inverse and fixture at its original hash.
+            admission_patch = ROOT / "tests/fixtures/fabric-native-admission-integrity-20261107.patch"
+            assert sha(admission_patch) == "68c1abf049ee9e4c04fc749eebb9a4b99ba71a71c22945e0f5d02bc8fe107753"
+            reversed_repair = subprocess.run(
+                ["git", "apply", "--reverse", "--unidiff-zero", "--include=fabric_task.py", str(admission_patch)],
+                cwd=stage / "ext", capture_output=True, text=True, timeout=18,
+            )
+            assert reversed_repair.returncode == 0, reversed_repair.stderr[-1800:]
+            predecessor = (stage / relative).read_bytes()
+            assert hashlib.sha256(predecessor).hexdigest() == PRE_ADMISSION_TASK_SHA
+            latest = _pre_refusal_diagnostics_task(predecessor)
             # Undo only the remote cwd default before the exact older epochs.
             remote_cwd = (
                 b'    # Resolve an implicit working directory on the receiving host.\n'

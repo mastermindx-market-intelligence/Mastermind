@@ -71,6 +71,16 @@ class NativeDoctorCredentialTests(unittest.TestCase):
             "HERMES_GATEWAY_TOKEN=" + gateway + "\n"
             "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=" + dashboard + "\n" + extra)
 
+    def _write_relay(self) -> None:
+        """Satisfy the collapsed single-identity transport roster row."""
+        self._private_fixture(
+            self.directory / "mmrelay.secrets.env",
+            "HERMES_GATEWAY_TOKEN=test-relay-gateway-token-123456\n"
+            "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=test-relay-dashboard-123456\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMERELAY01\n"
+            "HERMES_SLACK_BOT_TOKEN=test-relay-slack-token-123456\n",
+        )
+
     def _key_file(self, fixture: str) -> Path:
         if fixture == "modelark":
             path, data = self.directory / "modelark.key", FAKE_MODELARK
@@ -115,6 +125,7 @@ class NativeDoctorCredentialTests(unittest.TestCase):
         zai = self._key_file('zai')
         self._write_role('mmsecretary', 'core_ready')
         self._write_role('mmmeta', 'core_ready')
+        self._write_relay()
         report = self._doctor()
         self.assertEqual(report['core_text_missing'], [])
         self.assertEqual(report['core_text_status'], 'CONFIG_READY_NOT_LIVE_PROVEN')

@@ -5,17 +5,23 @@ Does not select a Fabric pool, model, account, worker or execution root.
 import os
 from openai import OpenAI
 
+from control_plane.experiential_plan_policy import plan_policy_digest
+
 
 def new_client(*, request_id: str | None = None) -> OpenAI:
     # A client bound to an idempotency key is for ONE logical request only.
     # Supply a new request_id (or extra_headers override) for each distinct call.
     stable_id = (request_id if request_id is not None else os.environ.get("FABRIC_REQUEST_ID", "")).strip()
+    headers = {"Idempotency-Key": stable_id} if stable_id else {}
+    mode = os.environ.get("EXPLABS_PLAN_POLICY", "legacy").strip()
+    if mode != "legacy":
+        headers["X-Fabric-Plan-Policy"] = plan_policy_digest(mode)
     return OpenAI(
         base_url=os.environ.get("FABRIC_OPENAI_BASE_URL", "http://127.0.0.1:8311/v1"),
         api_key=os.environ["FABRIC_PROXY_TOKEN"],
         timeout=900.0,  # long enough for 600s queued time plus inference; tune per job SLA
         max_retries=0,  # transport failures must not cause untracked replay
-        default_headers={"Idempotency-Key": stable_id} if stable_id else None,
+        default_headers=headers or None,
     )
 
 

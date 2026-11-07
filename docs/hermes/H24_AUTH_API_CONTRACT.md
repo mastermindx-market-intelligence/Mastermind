@@ -1,16 +1,58 @@
 # H24-04 — Authenticated API and original-effect conformance
 
-## Current outcome
+## Current source compatibility — November 7, 2026
 
-The authorized runtime repair closes all five previously recorded JSON rejection
-defects. The H24 suite now contains **118 passing cases with no xfail markers**.
-The combined H24 and affected incumbent-owner run reports **437 passed**.
+The packet is composed with protected source
+`f4f8ddc552866d2ab4bb2c7f229b0f2be283485c`. The strict parser changes stay in
+their existing owners. The current COO builder retains its private/public
+composition and selected-child implementation.
+
+The v1 fixture still proves cross-principal isolation and independent revocation.
+Its trailing check now accepts a valid v2 document in the binding owner's canonical
+digest order and deliberately reverses that order for the negative case. It does
+not change the validator, enrolled identity, receipt, authority or selection policy.
+
+Current protected source includes the seven-tool legacy catalogue with
+`mmx_delegate` and opt-in v2 multi-client bindings. Their presence does not prove
+real enrollment or every selected-child acceptance path. H24's resource-sharing
+fixture exercises the legacy default, not the explicit public v3 composer.
+
+Current focused qualification passed **531 cases across 13 complete modules**,
+including all **118 H24 cases**, with zero failures, errors or skips. The pytest
+summary is `531 passed in 56.68s`; the complete native invocation returned exit0.
+The selection retains the ten original H24/affected-owner modules and adds the
+current public COO composition, discovery and public-audience owner suites.
+
+This run used an isolated environment on Darwin with CPython3.12.13,
+pytest9.2.0, MCP1.28.1, PyJWT2.14.0, FastAPI0.162.2 and Starlette1.10.0.
+The environment installed the repository's declared development dependencies;
+`pip check` passed. It did not change global packages or install a service.
+Its profile is distinct from hosted Linux/CPython3.12.16.
+
+The exercised working tree was `91662aac9eb7e21d0656f85b4bebb7e56cf6a966`.
+Only this report changed afterward; the five executable postimages stayed
+identical. Complete log:661 bytes, SHA256
+`a395c3197b188dae7c4a0a99117e4d140d2646a1095e7bd14efd493f184b383e`.
+[The original PR's qualification record](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2138#issuecomment-6714329386)
+retains the exact invocation, module totals and source identities.
+
+The original hosted six-shard run did not execute this pytest-only H24 module.
+Fresh hosted qualification of the final published composition remains required.
+The historical118/437 evidence below is not relabeled as this531-case run.
+
+## November 6 qualification at the b0a-based source
+
+At that earlier source the author reported all five previously recorded JSON
+rejection defects repaired, **118 passing H24 cases with no xfails**, and
+**437 passing cases** in the combined affected-owner run. The reproduction
+commands, measurements and executable hashes below retain that historical scope.
 
 The source supplies independently signed fixture principals, actual
 ASGI/Unix/Workspace/COO entrypoints, principal continuity and immutable original
 request tests, plus strict HTTP and COO MCP parsing in the existing runtime owners.
-The planned C29 selected-child API, C32 shared multi-principal COO binding and C34
-distinct COO resource composition remain separate integration requirements.
+At that earlier pin, C29 selected-child, C32 multi-principal binding and C34
+distinct-resource composition were recorded as separate integration requirements.
+The current source and the remaining acceptance boundaries are distinguished below.
 Successful fixture signatures do not prove real OAuth enrollment.
 
 | Identity | Exact value |
@@ -20,7 +62,7 @@ Successful fixture signatures do not prove real OAuth enrollment.
 | Existing PR | [#2138](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2138) |
 | Original packet base | `b54cb10e4abdd3766c62d4088f6a576ecfe80437` |
 | Last pre-rebase published head | `8ac20b38dc8a24e766c6734b01100db8587934c8` |
-| Authorized rebase / procedure pin | `b0a280be474ae67e7681f68dc0dfe3af2aea1626` |
+| Earlier authorized rebase / procedure pin | `b0a280be474ae67e7681f68dc0dfe3af2aea1626` |
 | Scope expansion | Chairman explicitly authorized the bounded parser repair and rebase on November 6, 2026 |
 | Current source scope | Three original H24 additions plus three existing parser/composition files |
 | Capability boundary | Source implemented and fixture-qualified; no installed or production-serving proof |
@@ -45,7 +87,7 @@ credential or production authorization follows from it.
 There is no new endpoint, issuer, authentication owner, permission registry,
 principal selector, queue, retry loop, request-identity namespace or lifecycle.
 C32 binding files, C34 proxy/resource configuration and C30 installed source
-remain untouched. No package installation, real client registration, provider
+remain untouched. No production package installation, real client registration, provider
 request, live worker dispatch, Slack message, self-approval or merge is part of
 this source change.
 
@@ -83,8 +125,10 @@ that direct HTTP syntax rejection precedes JWT verification.
 ### COO MCP boundary
 
 The existing `PreAuthMcpBodyApp` now accepts compiled path and strictness options.
-Its defaults remain `/mcp` with legacy decoding behavior. Only
-`build_coo_mcp_app` selects `/mcp/coo` and strict JSON.
+Its defaults remain `/mcp` with legacy decoding behavior. The incumbent
+`_build_coo_mcp_app` selects `/mcp/coo` and strict JSON for its existing legacy
+and explicit public callers. Their separate configuration and authority gates
+remain unchanged.
 
 Validation happens on the original bytes before the MCP SDK normalizes the RPC
 object. Invalid bytes are not reserialized into a synthetic valid request.
@@ -158,8 +202,10 @@ verifiers, permission reducers, request identity or effect reconciliation.
 
 GB1 and Secretary fixtures have different RSA keys, key IDs, subjects and client
 IDs. Both enter the real verifier. Workspace authorizes both concurrently for one
-Mission. COO's current v1 binding is a singleton, so its two clients use separate
-application instances. Those instances also share one real disposable Unix owner
+Mission. This COO fixture intentionally uses singleton v1 bindings, so its two
+clients use separate application instances. The current owner separately supports
+opt-in v2; the packet now validates that contract without changing its v1 fixtures.
+Those instances also share one real disposable Unix owner
 for original-operation collision and ownership tests.
 
 The fixture never swaps one shared COO binding between concurrent requests to
@@ -185,22 +231,25 @@ also exposed by `route_resource_matrix()` in the adapter.
 | --- | --- | --- | --- |
 | `/workspace/mission/v3/current` | GET | WORKSPACE | Workspace read scope; independent member/receipt; explicit work/root; continuity |
 | `/mcp` | POST | CEO | Exact CEO read policy; COO-scoped token refused |
-| `/mcp/coo` | POST | Shared CEO resource | COO-SCOPES; singleton binding; six tools; strict original JSON before SDK |
+| `/mcp/coo` | POST | Shared CEO resource | COO-SCOPES; v1 fixture; current seven-tool catalogue; strict original JSON before SDK |
 | `/v1/tools/executive_mandate` | POST | Shared CEO resource | Read-only mandate; current authority/Mission; post-read continuity |
 | `/v1/tools/submit_principal_intent` | POST | Shared CEO resource | Bounded original submit; host-derived principal context; strict HTTP arguments |
 | `/v1/tools/principal_intent_status` | POST | Shared CEO resource | Current authentication and original context; available when fresh admission closes |
 | `/mcp/principal-ruling` | POST | CEO in ruling fixture | Fixed host work/root/obligation; separate ruling; existing strict JSON |
 | Existing private Unix ingress | Local frame | Existing peer/context contract | Immutable original submit/status identity; no replacement request or retry |
 
-The six COO tools remain `executive_mandate`, `executive_state`,
-`executive_inbox`, `executive_fabric`, `submit_principal_intent` and
-`principal_intent_status`. The harness consumes their actual schemas.
+The current legacy COO tools are `executive_mandate`, `executive_state`,
+`executive_inbox`, `executive_fabric`, `submit_principal_intent`,
+`principal_intent_status` and `mmx_delegate`. The harness compares the actual
+catalogue and schemas; it does not hard-code an obsolete six-tool count.
 
 Legacy resource sharing remains explicit. `CooAppSettings.__post_init__` requires
 shared resource metadata and the same `_jwks_cache_contract`, which includes
-`policy.resource`. A dedicated COO resource therefore cannot yet be composed.
+`policy.resource`, in this legacy/default fixture. Its distinct-resource negative
+still exercises that boundary. Current source has a separate explicit public v3
+composition; H24 does not exercise or claim its enrollment/serving acceptance.
 The actual verifier separately accepts a correctly scoped COO-DESIRED token and
-rejects the CEO audience; that composition gap remains.
+rejects the CEO audience.
 
 Exact scopes still isolate the legacy routes: the CEO read token is refused at
 `/mcp/coo` and the COO token is refused at `/mcp`. Shared metadata does not itself
@@ -249,23 +298,23 @@ exactly-once remote actions. Admission, dispatch, completion and acceptance rema
 distinct. Exact synthetic fixture restoration is not a production revocation-
 reversal procedure.
 
-## C29 / C32 / C34 remaining source joins
+## C29 / C32 / C34 source and acceptance boundaries
 
-Strict parsing is repaired in this change. The following planned integrations
-remain absent from the qualified foundation and unchanged by this bounded repair:
+Strict parsing remains this packet's runtime change. The table distinguishes
+current source from acceptance that this fixture does not establish:
 
-| Commission | Remaining gap | Integration evidence still required |
+| Commission | Current source / fixture boundary | Acceptance not established by H24 |
 | --- | --- | --- |
-| [C29 ingress / selected child](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2120#issuecomment-6680534154) | Six-tool COO MCP lacks `mmx_delegate` carrying frozen selected-child command and private target digest/context | Submit/status retain original command and target/context/capability digests; wrong digest refused before send; uncertainty preserved |
-| [C32 Hermes OAuth principal](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2120#issuecomment-6681329609) | Workspace supports members; COO still has one v1 binding | One composed app with enrolled principals, bounded per-principal Mission rows, concurrent access and independent revocation |
-| [C34 exact COO resource](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2120#issuecomment-6681341295) | Shared CEO/COO resource/cache metadata is required | Distinct COO resource and `/.well-known/oauth-protected-resource/mcp/coo`; audience/scope isolation and authorized edge composition |
+| [C29 ingress / selected child](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2120#issuecomment-6680534154) | Current legacy COO MCP includes `mmx_delegate` and the protected selected-child implementation; H24 catalogue coverage is not the complete selected-child path | Submit/status retain original command and target/context/capability digests; wrong digest refused before send; uncertainty preserved |
+| [C32 Hermes OAuth principal](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2120#issuecomment-6681329609) | Workspace supports members; COO supports preserved v1 plus opt-in bounded, canonically ordered v2 bindings; H24 keeps separate v1 app fixtures | One composed app with enrolled principals, bounded per-principal Mission rows, concurrent access and independent revocation |
+| [C34 exact COO resource](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2120#issuecomment-6681341295) | Legacy H24 defaults require shared metadata; the explicit public v3 composer is separate | Distinct COO resource and `/.well-known/oauth-protected-resource/mcp/coo`; audience/scope isolation and authorized edge composition |
 
-The commission links establish planned contracts, not current live workers or
-serving proof. Other selected-child code in the merged foundation does not prove
-this specific COO MCP integration. No new issuer, registry, typed approval token
-or public target selector is invented to fill these gaps.
+The commission links identify the original contracts, not current live workers
+or serving proof. Protected source presence and this packet's fixture checks do
+not establish installed enrollment, activation or every original acceptance path.
+No issuer, registry, approval token or public target selector is added here.
 
-## Reproduction and current receipts
+## Historical reproduction and receipts — November 6, 2026
 
 Managed authoring/test directory:
 
@@ -369,7 +418,7 @@ hashed document to avoid self-reference. The cumulative authorized diff is:
 
 ```bash
 git diff --binary --full-index \
-  b0a280be474ae67e7681f68dc0dfe3af2aea1626 HEAD -- \
+  f4f8ddc552866d2ab4bb2c7f229b0f2be283485c HEAD -- \
   integrations/hermes_qualification/api_conformance.py \
   integrations/hermes_qualification/tests/test_h24_api_conformance.py \
   docs/hermes/H24_AUTH_API_CONTRACT.md \
@@ -386,8 +435,9 @@ the historical pre-rebase receipt.
 all five strict-JSON corrections, affected-owner regressions and authorized
 foundation reconciliation.
 
-**Remaining product work:** the specific C29/C32/C34 joins above, then any
-separately authorized enrollment/install/activation and real-path acceptance.
+**Acceptance outside this packet:** current C29/C32/C34 source is distinguished
+above from any separately authorized enrollment, installation, activation and
+original real-path acceptance.
 This result does not activate a service or claim production qualification.
 
 **Do not redo:** accepted fixture identity, current Mission, continuity,

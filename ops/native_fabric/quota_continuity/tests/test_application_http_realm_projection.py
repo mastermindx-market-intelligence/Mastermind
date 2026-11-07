@@ -49,10 +49,13 @@ def tearDownModule():
 
 
 def _pinned_inputs():
-    # This inert exact1fc snapshot is compiler evidence, not current H code.
+    # These inert exact1fc snapshots are compiler evidence, not runtime code.
     # Archive/shallow checkouts need no historical Git object acquisition.
-    return {entry["path"]: ((ROOT / "source/application_http_transports.py.preimage")
-            if entry["path"] == projection.TRANSPORT_SOURCE_PATH else (REPO / entry["path"])).read_bytes()
+    evidence = {
+        projection.REALM_SOURCE_PATH: ROOT / "source/codex_provider_realm.py.preimage",
+        projection.TRANSPORT_SOURCE_PATH: ROOT / "source/application_http_transports.py.preimage",
+    }
+    return {entry["path"]: evidence.get(entry["path"], REPO / entry["path"]).read_bytes()
             for entry in INPUT_SOURCES}
 
 

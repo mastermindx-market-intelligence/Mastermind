@@ -21,6 +21,15 @@ SELECTED_CHILD_ACTIONS = frozenset({"selected_child_submit", "selected_child_sta
 SELECTED_CHILD_FIELDS = frozenset({"action", "command"})
 # Independent review and original-parent consumption are host-owned operations.
 # Never offer those actions to a model, even before a live review port exists.
+#: The closed private App-to-Control selected-child discriminator and shape.
+#: The Control plane owns the same literal in ``control_plane.executive_service``
+#: because the core never imports this package; the two are held identical by
+#: ``tests/test_hermes_selected_child_ingress.py``.
+SELECTED_CHILD_FRAME_SCHEMA = "mastermind.ceo_ingress.selected_child.v1"
+SELECTED_CHILD_FRAME_KEYS = frozenset({
+    "schema", "request", "target_digest", "principal", "principal_context",
+    "capability_profile_digest",
+})
 KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]{7,127}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -127,7 +136,9 @@ def parse_selected_child(raw: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise SubmissionError("ARGUMENTS_NOT_OBJECT")
     action = raw.get("action")
-    if action not in SELECTED_CHILD_ACTIONS:
+    # The scalar type is checked before set membership: an unhashable model
+    # value must refuse normally instead of raising.
+    if not isinstance(action, str) or action not in SELECTED_CHILD_ACTIONS:
         raise SubmissionError("UNKNOWN_ACTION")
     unknown = set(raw) - SELECTED_CHILD_FIELDS
     if unknown:

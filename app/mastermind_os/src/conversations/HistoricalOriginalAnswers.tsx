@@ -3,7 +3,7 @@ import type { MissionSelection } from "../mission";
 import type { OperationPointer } from "../orchestration/operation-controller";
 import {
   qualifiedAnswerVariant,
-  type HermesSecretaryPublicResult,
+  type HermesNativePublicResult,
   type QualifiedSessionAnswerValue,
 } from "../orchestration/executive-session-command-port";
 import type { MountedExecutiveSessionBinding } from "../orchestration/os-executive-session-host";
@@ -17,7 +17,7 @@ type Row = Readonly<{
 const SHA = /^[0-9a-f]{64}$/;
 const KEY = /^session-continue-[0-9a-f]{64}$/;
 /** The closed canonical target-prefix union: a mixed page stays readable. */
-const TARGET = /^(?:fabric_attempt|hermes_secretary):[0-9a-f]{64}$/;
+const TARGET = /^(?:fabric_attempt|hermes_secretary|hermes_meta):[0-9a-f]{64}$/;
 const READ = /^session-reply-[0-9a-f]{64}$/;
 const CURSOR = /^[A-Za-z0-9_=-]{1,2048}$/;
 // Each Runtime page reads at most 256 event metadata rows. Never let an
@@ -145,7 +145,7 @@ export function HistoricalOriginalAnswers({
   const [cursor, setCursor] = useState<string | null>(null);
   const [watermark, setWatermark] = useState<number | null>(null);
   const [selected, setSelected] = useState<{
-    row: Row; answer: QualifiedSessionAnswerValue; nativeResult: HermesSecretaryPublicResult | null;
+    row: Row; answer: QualifiedSessionAnswerValue; nativeResult: HermesNativePublicResult | null;
   } | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "unavailable">("idle");
   const epoch = useRef(0);
@@ -240,7 +240,7 @@ export function HistoricalOriginalAnswers({
     }).catch(() => { if (!c.signal.aborted && epoch.current === e) setState("unavailable"); });
   };
 
-  const selectedNative = selected && qualifiedAnswerVariant(selected.answer) === "hermes_secretary";
+  const selectedNative = selected && qualifiedAnswerVariant(selected.answer) !== "fabric_attempt";
   const selectedNextStep = selected && !selectedNative
     ? (selected.answer as { readonly nextStep: string }).nextStep
     : null;

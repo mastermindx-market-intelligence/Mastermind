@@ -473,7 +473,11 @@ async def test_gateway_restart_has_no_history_or_state(tmp_path: Path) -> None:
             "_host_observer",
             "_secretary_forwarder",
             "_secretary_host_binding_sha256",
+            "_meta_forwarder",
+            "_meta_host_binding_sha256",
         }
+        assert replacement._meta_forwarder is None
+        assert replacement._meta_host_binding_sha256 is None
         assert replacement._secretary_forwarder is None
         assert replacement._secretary_host_binding_sha256 is None
         assert replacement._host_observer is None

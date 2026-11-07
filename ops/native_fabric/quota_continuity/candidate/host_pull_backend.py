@@ -46,10 +46,10 @@ def probe_diagnostic(output, returncode):
                               "exit_status": code}
         index += 1
     result["framing"] = "COMPLETE" if index == 4 else "INCOMPLETE" if index else "MISSING"
-    # A zero transport result must agree with the final command's status.
-    # A transport failure can happen after complete remote output; it remains
-    # unavailable regardless of framing and is never converted into success.
-    if index == 4 and returncode == 0 and result["optional_readiness"]["exit_status"] != 0:
+    # A zero transport result must agree with the mandatory physical probe.
+    # Optional-readiness exit status is retained as DATA, never physical reachability.
+    # Nonzero transport still fails closed even when framed output looks complete.
+    if index == 4 and returncode == 0 and result["physical"]["exit_status"] != 0:
         result["framing"] = "INVALID"
     return result
 
@@ -483,6 +483,8 @@ def _write_state_unlocked(*, physical_only=False, publication_directory=None):
         # The legacy --glm-readiness column means any supported account readiness.
         for provider, mode, validator in (() if physical_only else (("glm", "glm", "glm_keys.py"),
                                            ("bailian", "qwen", "bailian_keys.py"))):
+            if diagnostic["optional_readiness"]["state"] != "RETURNED_ZERO":
+                continue
             try:
                 from pathlib import Path
                 from glm_host_account_source import owned_bytes

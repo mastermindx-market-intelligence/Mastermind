@@ -76,6 +76,15 @@ _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 
  {'uses': 'actions/setup-python@v5',
   'if': "${{ needs.pr_scope.outputs.mode == 'smoke' }}",
   'with': {'python-version': '3.12', 'cache': 'pip'}},
+ {'name': 'Checkout pinned Macro engine for source-proximate tests',
+  'if': "${{ needs.pr_scope.outputs.mode == 'smoke' }}",
+  'uses': 'actions/checkout@v4',
+  'with': {'repository': 'mastermindx-market-intelligence/macro',
+           'ref': '256c757b3c4f0ec759571c29a30a71387d0a18f8',
+           'path': 'vendor/macro_src',
+           'sparse-checkout': 'engine\nlib\n',
+           'persist-credentials': False,
+           'token': '${{ secrets.MACRO_CI_READ_TOKEN || github.token }}'}},
  {'name': 'Install focused Python test dependencies',
   'if': "${{ needs.pr_scope.outputs.mode == 'smoke' }}",
   'run': 'python -m pip install --disable-pip-version-check -e ".[dev]"'},
@@ -123,7 +132,7 @@ def _validate_pr_fast_lane(jobs: dict) -> None:
     ):
         raise ci_pytest.PolicyError("PR scope must be trusted and PR fast lane must be bounded")
     scope_steps, fast_steps = scope.get("steps"), fast.get("steps")
-    if not isinstance(scope_steps, list) or len(scope_steps) != 2 or not isinstance(fast_steps, list) or len(fast_steps) != 7:
+    if not isinstance(scope_steps, list) or len(scope_steps) != 2 or not isinstance(fast_steps, list) or len(fast_steps) != 8:
         raise ci_pytest.PolicyError("PR scope/fast steps missing or duplicated")
     if scope_steps != _EXPECTED_SCOPE_STEPS or fast_steps != _EXPECTED_FAST_STEPS:
         raise ci_pytest.PolicyError("PR fast lane source or commands drifted")
@@ -156,29 +165,33 @@ def _validate_pr_fast_lane(jobs: dict) -> None:
     names = [step.get("name") for step in fast_steps]
     if names != [
         None, "Verify exact changed source without executing untrusted PR text",
-        None, "Install focused Python test dependencies",
+        None, "Checkout pinned Macro engine for source-proximate tests",
+        "Install focused Python test dependencies",
         "Bounded source-proximate PR tests", None,
         "Typecheck affected web application",
     ]:
         raise ci_pytest.PolicyError("PR fast steps must preserve exact bounded checks")
-    for i in (0, 2, 5):
+    for i in (0, 2, 3, 6):
         if fast_steps[i].get("uses") != [
             "actions/checkout@v4", "actions/setup-python@v5",
-            "actions/setup-node@v4",
-        ][(0, 2, 5).index(i)]:
+            "actions/checkout@v4", "actions/setup-node@v4",
+        ][(0, 2, 3, 6).index(i)]:
             raise ci_pytest.PolicyError("PR fast check toolchain is invalid")
     if fast_steps[0].get("with") != {"fetch-depth": 0, "persist-credentials": False}:
         raise ci_pytest.PolicyError("PR fast checkout must not persist credentials")
+    if fast_steps[3]["with"].get("persist-credentials") is not False:
+        raise ci_pytest.PolicyError("PR smoke fixture checkout must not persist credentials")
     if (
         fast_steps[2].get("if") != "${{ needs.pr_scope.outputs.mode == 'smoke' }}"
         or fast_steps[3].get("if") != fast_steps[2].get("if")
         or fast_steps[4].get("if") != fast_steps[2].get("if")
-        or fast_steps[5].get("if") != "${{ needs.pr_scope.outputs.needs_node == 'true' }}"
-        or fast_steps[6].get("if") != fast_steps[5].get("if")
+        or fast_steps[5].get("if") != fast_steps[2].get("if")
+        or fast_steps[6].get("if") != "${{ needs.pr_scope.outputs.needs_node == 'true' }}"
+        or fast_steps[7].get("if") != fast_steps[6].get("if")
         or "git diff --check" not in str(fast_steps[1].get("run"))
-        or fast_steps[3].get("run") != 'python -m pip install --disable-pip-version-check -e ".[dev]"'
-        or "python -m scripts.ci_pr_smoke" not in str(fast_steps[4].get("run"))
-        or "npm --prefix app/mastermind_os run typecheck" not in str(fast_steps[6].get("run"))
+        or fast_steps[4].get("run") != 'python -m pip install --disable-pip-version-check -e ".[dev]"'
+        or "python -m scripts.ci_pr_smoke" not in str(fast_steps[5].get("run"))
+        or "npm --prefix app/mastermind_os run typecheck" not in str(fast_steps[7].get("run"))
     ):
         raise ci_pytest.PolicyError("PR fast lane must retain source, Python, and web checks")
 

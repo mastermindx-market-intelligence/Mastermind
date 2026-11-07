@@ -32,6 +32,12 @@ def _observe(events,lookup,scope,guard):
  paths={i['path'] for i in images}
  if lookup['action']=='add_project_file':
   if len(paths)!=2 or ws not in paths or any(path!=ws and re.fullmatch(r'agentos/project-files/WS-'+re.escape(work)+r'/[a-f0-9]{64}\.(?:md|txt)',path) is None for path in paths):_fail()
+ elif lookup['action']=='correct_project_discovery':
+  from common import workspace_discovery_correction_contract as correction
+  identity=correction.validate_lookup(original['lookup_binding'])
+  if any(identity[k]!=lookup[k] for k in ('action','request_id','work_ref')):_fail()
+  expected=correction.expected_preimages(identity,scope)
+  if len(images)!=3 or {i['path']:i['expected_preimage_sha256'] for i in images}!=expected:_fail()
  elif lookup['action']=='set_project_communication_preference':
   if paths!={ws,'agentos/decisions/DEC-PROJECT-COMMUNICATION-PREFERENCE-'+work+'.md'}:_fail()
  elif lookup['action'] in {'publish_project_proposal','publish_project_plan_proposal'}:

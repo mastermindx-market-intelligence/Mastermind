@@ -25,7 +25,7 @@ def build_tools() -> list[Any]:
     return [
         mcp_types.Tool(
             name="session_targets",
-            description="List exact addressable targets from canonical projections. Select kind hermes_secretary for the native Secretary conversation.",
+            description="List exact addressable targets from canonical projections. Select kind hermes_secretary or hermes_meta for the corresponding enrolled native conversation.",
             inputSchema={
                 "type": "object",
                 "properties": {"kind": {"type": "string", "enum": list(TARGET_KINDS)}},

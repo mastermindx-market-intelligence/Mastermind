@@ -131,6 +131,10 @@ run_probe() {
   # array has no elements; Bash 4.4 stopped treating that expansion as unset.
   # The normal telemetry path therefore starts with the incumbent BatchMode
   # and ConnectTimeout flags. Diagnostics only append key policy.
+  # macOS /bin/bash is 3.2. With set -u, "${name[@]}" is unbound when the
+  # array has no elements; Bash 4.4 stopped treating that expansion as unset.
+  # The normal telemetry path therefore starts with the incumbent BatchMode
+  # and ConnectTimeout flags. Diagnostics only append key policy.
   local key_options=(-o BatchMode=yes -o ConnectTimeout=8)
   if [ "$key_guard" = "fixed-hook-inspection" ] || [ "$key_guard" = "fixed-physical-diagnostic" ] || [ "$key_guard" = "fixed-paid-qualification" ] || [ "$key_guard" = "fixed-qualified-readiness" ]; then
     # Fixed inspection/qualification must never enroll/update a host key. Normal
@@ -252,7 +256,7 @@ pass_once() {
       glm_probe=$(python3 -B "$GLM_PROBE_FILE" "$host" "$alias" "$ACCOUNTS_POLICY" 2>/dev/null) || glm_probe=":"
     fi
     # Diagnostics are closed DATA, not admission. Keep the original shell
-    # context and final readiness-block status; never salvage a failed probe.
+    # context; optional readiness is DATA and never masks physical reachability.
     probe="printf '%s\n' 'HOST_PULL_STAGE_V1 PHYSICAL_BEGIN'
 $probe
 HOST_PULL_DIAG_PHYSICAL_RC=\$?
@@ -261,7 +265,7 @@ printf '%s\n' 'HOST_PULL_STAGE_V1 READINESS_BEGIN'
 $glm_probe
 HOST_PULL_DIAG_READINESS_RC=\$?
 printf 'HOST_PULL_STAGE_V1 READINESS_EXIT %s\n' \"\$HOST_PULL_DIAG_READINESS_RC\"
-exit \"\$HOST_PULL_DIAG_READINESS_RC\""
+exit \"\$HOST_PULL_DIAG_PHYSICAL_RC\""
     OUT=$(run_probe "$is_local" "$alias" "$probe")
     rc=$?
     summary=$(write_state "$host" "$rc" "$OUT" "$alias") || return $?

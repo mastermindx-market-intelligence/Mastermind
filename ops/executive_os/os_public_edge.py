@@ -163,6 +163,8 @@ DIRECT_NATIVE_POST_ROUTES = (
     "/os/executive/direct-native/correction",
 )
 POST_ROUTES = PRE_DIRECT_NATIVE_POST_ROUTES + DIRECT_NATIVE_POST_ROUTES
+PRE_COMPANY_PRIORITIES_POST_ROUTES = POST_ROUTES
+POST_ROUTES += ("/os/executive/company-priorities",)
 
 # Preserve exactly the profiles admitted by the predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
@@ -201,6 +203,7 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_PROJECT_EXECUTION_GET_ROUTES, PRE_PROJECT_EXECUTION_POST_ROUTES),
     (PROJECT_EXECUTION_PRE_MERGE_GET_ROUTES, PROJECT_EXECUTION_PRE_MERGE_POST_ROUTES),
     (PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES),
+    (GET_ROUTES, PRE_COMPANY_PRIORITIES_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 
@@ -214,6 +217,21 @@ INCUMBENT_POST_ROUTES = READER_POST_ROUTES
 # admits only loopback hosts; Caddy still performs no authentication.
 MCP_METADATA_ROUTE = "/.well-known/oauth-protected-resource/mcp"
 MCP_ROUTES = ("/mcp",)
+# One exact COO route pair (#2120). The COO metadata document is a distinct
+# RFC 9728 protected resource at its own fixed path, and the COO transport is a
+# distinct query-free Streamable HTTP POST. Both extend the same two existing
+# exact method branches: the metadata branch keeps the public Host and the
+# transport branch keeps the gateway's loopback Host and its 64000-byte cap.
+# The public edge serves the paths only; the receiving owner still has to
+# publish the real COO resource/issuer/scopes at the metadata path and to keep
+# rejecting the public CEO audience there. Nothing here asserts enrollment.
+MCP_COO_METADATA_ROUTE = "/.well-known/oauth-protected-resource/mcp/coo"
+MCP_COO_ROUTE = "/mcp/coo"
+# The two coherent public-MCP profiles. The CEO-only pair is the exact legacy
+# transition input; the complete CEO+COO pair is what the renderer emits.
+MCP_METADATA_ROUTES = (MCP_METADATA_ROUTE,)
+COMPLETE_MCP_METADATA_ROUTES = MCP_METADATA_ROUTES + (MCP_COO_METADATA_ROUTE,)
+COMPLETE_MCP_ROUTES = MCP_ROUTES + (MCP_COO_ROUTE,)
 MCP_MAX_BODY = 64000
 _TEMPLATE = Path(__file__).with_name("os_public_edge.caddy.template")
 
@@ -246,11 +264,17 @@ def render(manifest: object, relay_port: int) -> str:
     # The fixed GET matcher must list exactly GET_ROUTES in order, so a route
     # admitted in metadata but missing from the template cannot pass render
     # (the previously missing source-operation context read is corrected here).
+    # The two public-MCP matchers are checked as complete intended path lists,
+    # not as placeholder counts: the metadata list and the transport list must
+    # each appear exactly once, in full, so a template that still carries only
+    # the CEO-only pair, or that widens either list, cannot be rendered.
     if (template.count("__ASSET_PATHS__") != 1
             or template.count("__RELAY_PORT__") != 5
             or template.count("path " + " ".join(GET_ROUTES) + " __ASSET_PATHS__\n") != 1
             or template.count("path " + " ".join(POST_ROUTES) + "\n") != 1
             or template.count("path " + " ".join(SOURCE_POST_ROUTES) + "\n") != 1
+            or template.count("path " + " ".join(COMPLETE_MCP_METADATA_ROUTES) + "\n") != 1
+            or template.count("path " + " ".join(COMPLETE_MCP_ROUTES) + "\n") != 1
             or template.count("max_size 98304") != 1
             or template.count("max_size 64KB") != 2):
         raise ValueError("OS edge template differs")
@@ -282,7 +306,8 @@ def stage(*, manifest: object, relay_port: int, output: Path) -> dict:
         "routes": {"get": sorted(set(GET_ROUTES) | set(asset_routes(manifest))),
                    "post": list(POST_ROUTES),
                    "source_post": list(SOURCE_POST_ROUTES)},
-        "mcp": {"get": [MCP_METADATA_ROUTE], "post": list(MCP_ROUTES)},
+        "mcp": {"get": list(COMPLETE_MCP_METADATA_ROUTES),
+                "post": list(COMPLETE_MCP_ROUTES)},
         "installed": False,
     }
 

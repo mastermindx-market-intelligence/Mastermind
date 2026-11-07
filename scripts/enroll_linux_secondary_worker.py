@@ -72,7 +72,7 @@ RELEASE_PATHS = (
     "scripts/ohf/fixtures/__init__.py",
     # First-party runtime/native-BYOK source and role data only. This does not
     # install third-party dependencies, enroll credentials, attest a running
-    # interpreter/unit, or package the broader hermesctl delegation CLI.
+    # interpreter/unit, or install a delegation CLI entrypoint.
     "common",
     "integrations/__init__.py",
     "integrations/hermes_runtime",
@@ -85,9 +85,21 @@ RELEASE_PATHS = (
     "ops/native_fabric/quota_continuity/candidate/paid_initializer.py",
     "ops/native_fabric/quota_continuity/candidate/linux_process_identity.py",
     "integrations/hermes_harness",
+    # Native consumer imports include this package and its eager bridge/tool closure.
+    "integrations/hermes_delegate",
     "integrations/hermes_models",
     "integrations/hermes_steward",
     "integrations/hermes_qualification",
+    # Original finite COO descriptors and their eager first-party import closure.
+    "integrations/executive_mcp/__init__.py",
+    "integrations/executive_mcp/schemas.py",
+    "integrations/executive_mcp/coo.py",
+    "integrations/executive_mcp/web_ceo.py",
+    "integrations/executive_mcp/adapter.py",
+    "integrations/executive_mcp/installed.py",
+    # Native context uses the incumbent Agent OS capture helpers.
+    "ops/fabric_launch/agentos.py",
+    "ops/fabric_launch/context.py",
     "integrations/business_mcp_auth/__init__.py",
     "integrations/business_mcp_auth/claims.py",
     "integrations/business_mcp_auth/contracts.py",

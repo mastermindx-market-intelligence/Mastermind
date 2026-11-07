@@ -197,8 +197,8 @@ export function ProjectJournalReader({
       </div>
       {phase.tag === "idle" && (
         <p className="muted">
-          {t("The project journal has not been read in this session. Reading fetches a bounded sample of recorded changes from the AgentOS source; nothing is fetched until you choose it.",
-            "本会话尚未读取项目日志。读取会从 AgentOS 来源获取一个有界样本的记录变更；在你选择之前不会获取任何内容。")}
+          {t("The journal has not been read yet. Choose “Read project journal” to see recorded updates.",
+            "尚未读取日志。选择“读取项目日志”以查看已记录的更新。")}
         </p>
       )}
       {blockedMessage !== null && <p className="muted" role="status">{blockedMessage}</p>}
@@ -271,9 +271,8 @@ function JournalAvailable({ doc, t, selectedId, onSelect }: {
   const names = { DECISION: t("Decision", "决策"), DISCOVERY: t("Discovery", "发现"), HANDOFF: t("Handoff", "交接") };
   return <div className="mm-work-journey">
     <div>
-      <h3>{t("Recent source records", "近期来源记录")}</h3>
-      <p>{t("Source records shown", "显示的来源记录")}: <strong>{entries.length}</strong> ({t("from this bounded record sample", "来自本次有界记录样本")})</p>
-      <p className="muted">{t("Recorded source snapshots; current applicability is not established here.", "已记录的来源快照；此处不确立其当前适用性。")}</p>
+      <h3>{t("Recorded updates", "已记录的更新")}</h3>
+      <p>{t("Records in this view", "此视图中的记录")}: <strong>{entries.length}</strong>. {t("Other history may not be included.", "可能未包含其他历史记录。")}</p>
     </div>
     <div className="mm-work-journey__columns">
       <div className="mm-work-journey__main">
@@ -292,7 +291,7 @@ function JournalAvailable({ doc, t, selectedId, onSelect }: {
       </div>
       <aside className="mm-work-journey__side">
         {selected ? <JournalEntryDetail entry={selected} workRef={doc.selection.work_ref} t={t} onClose={() => onSelect(null)} /> :
-          <section className="card mm-work-journey__card"><h3>{t("Source record detail", "来源记录详情")}</h3><p className="muted">{t("Select a source record to inspect its reason and provenance.", "选择来源记录，查看其原因和来源凭证。")}</p></section>}
+          <section className="card mm-work-journey__card"><h3>{t("Update details", "更新详情")}</h3><p className="muted">{t("Choose an update to read its details.", "选择一条更新以查看详情。")}</p></section>}
       </aside>
     </div>
     <details className="mm-work-journey__details">
@@ -300,8 +299,9 @@ function JournalAvailable({ doc, t, selectedId, onSelect }: {
       <p className="muted">{t("Source", "来源")}: <code>{source.repository}</code> @ <code>{source.commit}</code></p>
       <dl><dt>{t("Scanned", "已扫描")}</dt><dd>{journal.coverage.scanned}</dd><dt>{t("Matched", "已匹配")}</dt><dd>{journal.coverage.matched}</dd><dt>{t("Omitted", "已省略")}</dt><dd>{journal.coverage.omitted}</dd><dt>{t("Invalid", "无效")}</dt><dd>{journal.coverage.invalid}</dd></dl>
       <p>{t("Coverage is a bounded source-record sample; dates retain their own labelled meanings.", "覆盖范围仅为有界来源记录样本；各日期保留其已标注的含义。")}</p>
+      <p className="muted">{t("Recorded source snapshots; current applicability is not established here.", "已记录的来源快照；此处不确立其当前适用性。")}</p>
+      <p className="muted">{t("Reading these records is data observation only and never implies execution, review, acceptance or release.", "读取这些记录仅是数据观察，绝不意味着执行、评审、验收或发布。")}</p>
     </details>
-    <p className="muted">{t("Reading these records is data observation only and never implies execution, review, acceptance or release.", "读取这些记录仅是数据观察，绝不意味着执行、评审、验收或发布。")}</p>
   </div>;
 }
 

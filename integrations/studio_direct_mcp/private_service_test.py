@@ -2292,11 +2292,23 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
             "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
             "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
         })
+        # This generic generation is immutable. C4's later adapter is a
+        # distinct two-module successor, so retain real reviewed old bytes.
+        source_dir = Path(svc.__file__).parent
+        frozen_adapter = source_dir / "fixtures/workspace-access.fleet-v10-merge.mjs"
+        frozen_publisher = source_dir / "fixtures/git-publish.fleet-v10-merge.mjs"
+        self.assertEqual(svc._sha256_file(frozen_publisher),
+                         "abc3b4dc6f3c9574ebb116e28a44f42136f8d8df3f2b0ec1504668daaf46b6bc")
+        self.assertEqual(svc._sha256_file(frozen_adapter),
+                         "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5")
+        self.assertEqual(svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256["workspace-access.mjs"],
+                         "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5")
         for name in expected_names:
+            payload = frozen_adapter if name == "workspace-access.mjs" else frozen_publisher
             self.assertEqual(
-                svc._sha256_file(Path(svc.__file__).parent / name),
+                svc._sha256_file(payload),
                 svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256[name],
-                "real incoming module must match the installed-owner target pin")
+                "real reviewed cohort bytes must match the immutable owner target pin")
             self.assertNotEqual(
                 svc.FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256[name],
                 svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256[name])

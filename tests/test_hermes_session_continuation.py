@@ -708,3 +708,69 @@ def test_native_root_is_actual_first_job_event_without_worker_carriers(mutation)
         nc.build_hermes_continuation_target(
             binding=BINDING, root_event=replace(root_event(), **mutation),
             native_target=NATIVE_TARGET)
+
+@pytest.mark.parametrize("kind", nc.HERMES_KINDS)
+def test_each_role_round_trips_on_the_same_original_event_owner(kind):
+    family = nc.hermes_family(kind)
+    binding = dict(BINDING, schema=family.binding_schema)
+    payload = build_request(binding=binding)
+    assert payload["schema"] == family.request_schema
+    assert payload["target_ref"].startswith(family.target_prefix)
+    assert payload["native_request"]["submission_id"].startswith(family.submission_prefix)
+    assert nc.validate_hermes_continuation_request(payload) == payload
+    event = request_event(payload)
+    commit = nc.build_hermes_continuation_commit(
+        event, operation_name="submit", native_request=payload["native_request"])
+    assert commit["schema"] == family.commit_schema
+    assert nc.validate_hermes_continuation_commit(commit, request_event=event) == commit
+    assert nc.hermes_continuation_read_request(payload)["submission_id"] == payload["native_request"]["submission_id"]
+
+
+def test_meta_domain_is_distinct_even_when_native_labels_and_input_match():
+    secretary = build_request()
+    meta = build_request(binding=dict(BINDING, schema=nc.hermes_family("hermes_meta").binding_schema))
+    for field in ("schema", "target_ref", "target_generation", "operation_key", "binding_sha256",
+                  "native_request_sha256", "read_ref"):
+        assert secretary[field] != meta[field]
+    assert secretary["native_input_sha256"] == meta["native_input_sha256"]
+    assert secretary["native_request"]["submission_id"] != meta["native_request"]["submission_id"]
+
+
+@pytest.mark.parametrize("kind", nc.HERMES_KINDS)
+@pytest.mark.parametrize("fault", ["request-schema", "binding-schema", "target-prefix",
+                                  "submission-prefix", "operation-domain", "commit-schema"])
+def test_recomputed_cross_role_swaps_never_validate(kind, fault):
+    family = nc.hermes_family(kind)
+    other = nc.hermes_family("hermes_meta" if kind == "hermes_secretary" else "hermes_secretary")
+    payload = build_request(binding=dict(BINDING, schema=family.binding_schema))
+    event = request_event(copy.deepcopy(payload))
+    if fault == "commit-schema":
+        commit = nc.build_hermes_continuation_commit(
+            event, operation_name="submit", native_request=payload["native_request"])
+        commit["schema"] = other.commit_schema
+        with pytest.raises(ValueError):
+            nc.validate_hermes_continuation_commit(commit, request_event=event)
+        return
+    if fault == "request-schema":
+        payload["schema"] = other.request_schema
+    elif fault == "binding-schema":
+        payload["binding"]["schema"] = other.binding_schema
+        payload["binding_sha256"] = nc._digest(payload["binding"])
+    elif fault == "target-prefix":
+        payload["target_ref"] = other.target_prefix + payload["target_ref"].split(":", 1)[1]
+    elif fault == "submission-prefix":
+        payload["native_request"]["submission_id"] = other.submission_prefix + nc._request_key(payload["operation_key"])
+        payload["native_request_sha256"] = nc._digest(payload["native_request"])
+    else:
+        payload["operation_key"] = "session-continue-" + nc._digest(
+            {"schema": other.operation_schema, "target_ref": payload["target_ref"]})
+    with pytest.raises(ValueError):
+        nc.validate_hermes_continuation_request(payload)
+
+
+@pytest.mark.parametrize("schema", [None, True, [], "mastermind.session_bridge.hermes_meta_request.v2"])
+def test_unknown_stored_schema_has_no_secretary_default(schema):
+    payload = build_request()
+    payload["schema"] = schema
+    with pytest.raises(ValueError):
+        nc.validate_hermes_continuation_request(payload)

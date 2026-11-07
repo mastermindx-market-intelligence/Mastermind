@@ -32,9 +32,15 @@ from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.executive_mcp.coo import COO_READ_NAMES, COO_SERVER_VERSION, COO_TOOL_NAMES, validate_coo_tool_arguments
 from integrations.executive_mcp.schemas import RESULT_SCHEMA, GatewayError, canonical_json
 from integrations.executive_mcp.e1_http import BoundedE1App, MAX_RESPONSE_BYTES
+from integrations.hermes_delegate.executive import (
+    ExecutiveSelectedChildTarget, SELECTED_CHILD_FRAME_SCHEMA,
+    selected_child_response, validate_selected_child_ingress_envelope,
+    validate_selected_child_frame,
+)
+from integrations.hermes_delegate.schema import SubmissionError
 from integrations.mastermind_executive_app.app import AppSettings, _authenticate, _outcome_response, _read_body_arguments
 from integrations.mastermind_executive_app.admission import AdmissionOutcome, _classify_send_response
-from integrations.mastermind_executive_app.coo_binding import COO_SCOPES, coo_authorizer
+from integrations.mastermind_executive_app.coo_binding import COO_SCOPES, coo_authorizer, principal_frame
 from integrations.mastermind_executive_app.gateway import (
     CeoIngressClient, CeoIngressResponse, WebCeoV2CeoIngressReadGateway,
     TRANSPORT_SENT_OK, TRANSPORT_NOT_SENT, _default_jwks_cache, _jwks_cache_contract,
@@ -49,19 +55,40 @@ class CooAppSettings:
     load_binding: Callable[[], object]
     authority_provider: Callable[[VerifiedPrincipal, str], AuthorityFact]
     mission_provider: Callable[[VerifiedPrincipal, str], Mapping[str, Any]]
+    # The trusted host's frozen selected-child target. It defaults to unbound:
+    # this App never selects, creates or derives a child on its own.
+    selected_child_target: ExecutiveSelectedChildTarget | None = None
+    # Explicit installed Web-CEO v3 host composition, never a request field.
+    public_mcp: bool = False
+    # Optional same-owner projections; absence preserves the v1 constructor.
+    catalogue_provider: Callable[..., str] | None = None
+    agentos_context_provider: Callable[..., Mapping[str, Any]] | None = None
+    agentos_current_context_provider: Callable[..., Mapping[str, Any]] | None = None
+    agentos_discovery_context_provider: Callable[..., Mapping[str, Any]] | None = None
 
     def __post_init__(self):
         policy = validate_resource_policy(self.policy)
         base = self.executive
         if not isinstance(base, AppSettings) or not base.read_from_ceo_ingress or base.read_only:
             raise ValueError("COO requires the existing installed ingress readers")
+        if type(self.public_mcp) is not bool:
+            raise ValueError("COO public MCP composition must be explicit")
+        pair = base.public_policies if self.public_mcp else base.policies
+        if pair is None:
+            raise ValueError("public COO requires the installed public policy pair")
         if (policy.required_scopes != COO_SCOPES
                 or policy.policy_id in {base.policies.read.policy_id, base.policies.submit.policy_id}
-                or policy.resource_metadata_url != base.policies.read.resource_metadata_url
-                or _jwks_cache_contract(policy) != _jwks_cache_contract(base.policies.read)):
+                or policy.resource_metadata_url != pair.read.resource_metadata_url
+                or _jwks_cache_contract(policy) != _jwks_cache_contract(pair.read)):
             raise ValueError("COO must share the Executive resource and JWKS, with distinct exact scopes")
         if not all(callable(x) for x in (self.load_binding, self.authority_provider, self.mission_provider)):
             raise ValueError("COO requires explicit installed binding and canonical fact providers")
+        if any(value is not None and not callable(value) for value in
+               (self.catalogue_provider, self.agentos_context_provider, self.agentos_current_context_provider, self.agentos_discovery_context_provider)):
+            raise ValueError("COO context requires explicit installed providers")
+        if (self.selected_child_target is not None
+                and type(self.selected_child_target) is not ExecutiveSelectedChildTarget):
+            raise ValueError("COO requires the exact frozen selected-child target")
         object.__setattr__(self, "policy", policy)
 
 
@@ -101,14 +128,34 @@ async def _owner_call(provider, *args):
 
 
 class CooApp:
-    def __init__(self, settings: CooAppSettings, audit_sink):
+    def __init__(self, settings: CooAppSettings, audit_sink, *, workspace_app=None):
         if type(settings) is not CooAppSettings or not callable(getattr(audit_sink, "emit", None)):
             raise ValueError("exact COO settings and existing audit sink required")
         self.settings = settings
+        self._context_settings = settings
+        self._context_callbacks = (settings.load_binding, settings.authority_provider,
+                                   settings.catalogue_provider, settings.agentos_context_provider,
+                                   settings.agentos_current_context_provider, settings.agentos_discovery_context_provider)
+        if workspace_app is not None:
+            from integrations.executive_mcp.server import AuditedWorkspaceApp
+            if type(workspace_app) is not AuditedWorkspaceApp:
+                raise TypeError("the original audited Workspace App is required")
+        self._context_workspace_app = workspace_app
         self._policy = validate_resource_policy(settings.policy)
-        self.authenticator = JwtAuthenticator(policy=self._policy,
-            jwks_cache=settings.executive.jwks_cache or _default_jwks_cache(self._policy))
+        # The injected Executive cache belongs only to its primary resource.
+        # Public COO gets the existing public pair's bounded cache factory;
+        # sharing keys never widens the exact role scopes or enrolled identity.
+        if settings.public_mcp:
+            from integrations.mastermind_executive_app.gateway import make_shared_jwks_cache
+            cache = make_shared_jwks_cache(settings.executive.public_policies)
+            if cache is None:
+                raise ValueError("public COO requires one qualified JWKS authority")
+        else:
+            cache = settings.executive.jwks_cache or _default_jwks_cache(self._policy)
+        self.authenticator = JwtAuthenticator(policy=self._policy, jwks_cache=cache)
         self.authorizer = coo_authorizer(policy=self._policy, load_binding=settings.load_binding)
+        self._context_auth_owners = (self.authenticator, self.authorizer, settings.executive.clock,
+                                    self.authorizer.binding_digest, workspace_app)
         self._audit_sink = audit_sink
         self._client = CeoIngressClient(connect_timeout=settings.executive.connect_timeout,
                                        read_timeout=settings.executive.read_timeout)
@@ -178,6 +225,150 @@ class CooApp:
     async def _same_auth(self, request, expected):
         observed = await self._auth(request)
         return not isinstance(observed, JSONResponse) and observed == expected
+
+    def require_context_current(self):
+        settings = self._context_settings
+        if (self.settings is not settings or any(a is not b for a, b in zip(
+                self._context_callbacks, (settings.load_binding, settings.authority_provider,
+                                         settings.catalogue_provider, settings.agentos_context_provider,
+                                         settings.agentos_current_context_provider, settings.agentos_discovery_context_provider)))):
+            raise ValueError("authority_refused")
+
+    async def catalogue(self, principal, stamp, *, work_ref=None):
+        from common import coo_agentos_context_contract as wire
+        self.require_context_current()
+        settings = self.settings
+        provider = settings.catalogue_provider
+        if provider is None:
+            return wire.LEGACY_CATALOGUE
+        value = await _owner_call(provider, principal, *(() if work_ref is None else (work_ref,)))
+        self.require_context_current()
+        if (type(value) is not str or value not in {wire.LEGACY_CATALOGUE, wire.CATALOGUE, wire.CURRENT_CATALOGUE, wire.DISCOVERY_CATALOGUE}
+                or self.settings is not settings or settings.catalogue_provider is not provider
+                or not self._policy_current() or self.authorizer.binding_digest(principal) != stamp):
+            raise ValueError("authority_refused")
+        return value
+
+    def require_current_context_auth(self, authenticated, workspace_authenticated):
+        self.require_context_current()
+        held = self._context_auth_owners
+        live = (self.authenticator, self.authorizer, self.settings.executive.clock,
+                self.authorizer.binding_digest, self._context_workspace_app)
+        if any(a is not b for a, b in zip(held, live)) or live[-1] is None or not self._policy_current():
+            raise ValueError("authority_refused")
+        principal, stamp = authenticated
+        now = self.settings.executive.clock()
+        if (type(now) is not int or not principal.issued_at <= now < principal.expires_at
+                or self.authorizer.binding_digest(principal) != stamp):
+            raise ValueError("authority_refused")
+        live[-1].require_context_principal(*workspace_authenticated)
+
+    async def current_context_auth(self, request):
+        """Authenticate the original pair for a single HTTP/MCP read boundary."""
+        from common import coo_agentos_context_contract as wire
+        from integrations.mastermind_workspace_app.contract import principal_frame as workspace_frame
+        from integrations.mastermind_executive_app.fresh_conversation_transport import FreshConversationTransportApp
+        token = FreshConversationTransportApp._token(request.scope, b"x-mastermind-workspace-authorization")
+        workspace_owner = self._context_workspace_app
+        if workspace_owner is None or workspace_owner is not self._context_auth_owners[-1]:
+            raise ValueError("authority_refused")
+        authenticated = await self._auth(request)
+        if isinstance(authenticated, JSONResponse):
+            raise ValueError("authority_refused")
+        workspace_authenticated = await workspace_owner.agentos_context_principal(token)
+        if workspace_authenticated is None:
+            raise ValueError("authority_refused")
+        wire.workspace_principal(workspace_frame(workspace_authenticated[0]), executive=principal_frame(authenticated[0]))
+        self.require_current_context_auth(authenticated, workspace_authenticated)
+        return authenticated, workspace_authenticated
+
+    async def _agentos_context(self, request, authenticated, validated, *, current_data=False, discovery=False):
+        from common import coo_agentos_context_contract as wire
+        from integrations.mastermind_workspace_app.contract import principal_frame as workspace_frame
+        settings = self.settings
+        callbacks = (settings.load_binding, settings.authority_provider,
+                     settings.catalogue_provider, settings.agentos_context_provider,
+                     settings.agentos_current_context_provider, settings.agentos_discovery_context_provider)
+        principal, stamp = authenticated
+        workspace_owner = self._context_workspace_app
+        provider = settings.agentos_discovery_context_provider if discovery else settings.agentos_current_context_provider if current_data else settings.agentos_context_provider
+        catalogue = wire.DISCOVERY_CATALOGUE if discovery else wire.CURRENT_CATALOGUE if current_data else wire.CATALOGUE
+        action = wire.CURRENT_ACTION if current_data else wire.ACTION
+        tool = wire.CURRENT_TOOL if current_data else wire.TOOL
+        def current():
+            self.require_context_current()
+            if (self.settings is not settings or any(a is not b for a, b in zip(callbacks,
+                    (settings.load_binding, settings.authority_provider,
+                     settings.catalogue_provider, settings.agentos_context_provider,
+                     settings.agentos_current_context_provider, settings.agentos_discovery_context_provider)))):
+                raise ValueError("authority_refused")
+            if current_data:
+                now = settings.executive.clock()
+                if (self._context_workspace_app is not workspace_owner or any(a is not b for a, b in zip(
+                        self._context_auth_owners, (self.authenticator, self.authorizer, settings.executive.clock,
+                            self.authorizer.binding_digest, workspace_owner)))
+                        or type(now) is not int or not principal.issued_at <= now < principal.expires_at):
+                    raise ValueError("authority_refused")
+        try:
+            current()
+            if provider is None:
+                return refused()
+            workspace_authenticated = None
+            if current_data:
+                # One fixed companion bearer; it is never a tool argument or a
+                # relabeled COO credential. The original audited owner verifies it.
+                pair = await self.current_context_auth(request)
+                current()
+                if pair[0] != authenticated:
+                    return refused()
+                workspace_authenticated = pair[1]
+                workspace, _ = workspace_authenticated
+                workspace_projection = workspace_frame(workspace)
+                wire.workspace_principal(workspace_projection, executive=principal_frame(principal))
+            selected_catalogue = await self.catalogue(principal, stamp, work_ref=validated["work_ref"])
+            current()
+            if selected_catalogue != catalogue:
+                return refused()
+            authority, context = await self._authority(principal, validated["work_ref"], stamp)
+            current()
+            if action not in authority.principal_actions:
+                return refused()
+            current()
+            if not await self._same_auth(request, authenticated):
+                return refused()
+            current()
+            if current_data:
+                if await self.current_context_auth(request) != (authenticated, workspace_authenticated):
+                    return refused()
+                current()
+                data = await _owner_call(provider, principal, workspace, context, authority.capability_profile_digest)
+            else:
+                data = await _owner_call(provider, principal, context, authority.capability_profile_digest)
+            current()
+            validator = wire.validate_discovery_result if discovery else wire.validate_current_result if current_data else wire.validate_result
+            validator(data, expected_context=dataclasses.asdict(context),
+                capability_profile_digest=authority.capability_profile_digest,
+                **({"expected_workspace_principal": workspace_projection} if current_data else {}))
+            observed_authority = await self._authority(principal, validated["work_ref"], stamp)
+            current()
+            observed_catalogue = await self.catalogue(principal, stamp, work_ref=validated["work_ref"])
+            current()
+            same_auth = await self._same_auth(request, authenticated)
+            current()
+            if (observed_authority != (authority, context)
+                    or observed_catalogue != catalogue or not same_auth):
+                return refused()
+            if current_data and await self.current_context_auth(request) != (authenticated, workspace_authenticated):
+                return refused()
+            current()
+            if current_data:
+                self.require_current_context_auth(authenticated, workspace_authenticated)
+            response = JSONResponse(self._read_result(tool, data), headers={"Cache-Control": "no-store"})
+            if len(response.body) > MAX_RESPONSE_BYTES:
+                return refused("output_too_large", 503)
+            return response
+        except Exception:
+            return refused("source_unavailable", 503)
 
     async def resolve_principal_dialogue_caller(self, request: Request, *,
                                                 work_ref: str, reasoning_surface: str):
@@ -267,9 +458,129 @@ class CooApp:
             # An unrecognized post-send failure never proves no effect.
             return unknown(request_ref)
 
+    async def _selected_child(self, request, authenticated, validated):
+        """Submit or observe exactly one host-frozen child.
+
+        The model names a canonical command the trusted host already froze.
+        Every authority field in the private frame comes from this App's own
+        authenticated providers; the model supplies none of them. The frame
+        is sent once. There is no retry, no resubmit, no cancellation, no
+        alternative carrier and no recomputed ordinal.
+        """
+
+        principal, stamp = authenticated
+        command = validated["command"]
+        action = validated["action"]
+        is_submit = action == "selected_child_submit"
+
+        def answer(state, reason, *, job_id=None):
+            return JSONResponse(selected_child_response(
+                state, reason, command_id=command, job_id=job_id,
+                live_submit=None if state in {"EFFECT_UNKNOWN", "UNAVAILABLE"} else False,
+            ), status_code=200)
+
+        def uncertain(reason):
+            # A possible submit stays unknown; a failed status observation is
+            # unavailable. Both retain the original command.
+            state = "EFFECT_UNKNOWN" if is_submit else "UNAVAILABLE"
+            return answer(state, reason)
+
+        target = self.settings.selected_child_target
+        if type(target) is not ExecutiveSelectedChildTarget:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_NOT_BOUND")
+        try:
+            target.require_current()
+            child = target.child_for(command)
+        except Exception:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_TARGET_UNAVAILABLE")
+        if child is None:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_UNKNOWN_COMMAND")
+        job_id = child.selection.job_id
+        work_ref = target.work_ref
+        try:
+            authority, context = await self._authority(principal, work_ref, stamp)
+        except Exception:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_AUTHORITY_REFUSED", job_id=job_id)
+        try:
+            target.require_current()
+        except Exception:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_TARGET_UNAVAILABLE", job_id=job_id)
+        if not await self._same_auth(request, authenticated):
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_AUTHORITY_REFUSED", job_id=job_id)
+        target_digest = target.material_digest()
+        if self.settings.selected_child_target is not target:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_TARGET_UNAVAILABLE", job_id=job_id)
+        frame = {
+            "schema": SELECTED_CHILD_FRAME_SCHEMA,
+            "request": {"action": action, "command": command},
+            "target_digest": target_digest,
+            "principal": principal_frame(principal),
+            "principal_context": dataclasses.asdict(context),
+            "capability_profile_digest": authority.capability_profile_digest,
+        }
+        try:
+            validate_selected_child_frame(frame)
+        except SubmissionError:
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_FRAME_INVALID", job_id=job_id)
+        try:
+            response = await self._client.send_frame(
+                self.settings.executive.ceo_ingress_socket_path, frame)
+        except Exception:
+            # The frame may already have reached the Control. Never prove a
+            # no-effect outcome from an unrecognized post-send failure.
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        if type(response) is not CeoIngressResponse:
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        if response.transport == TRANSPORT_NOT_SENT:
+            # Provably never delivered: a preflight refusal, not an effect.
+            return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_NOT_SENT", job_id=job_id)
+        if response.transport != TRANSPORT_SENT_OK:
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        if response.ok is not True:
+            # A generic ingress error does not establish where an effect
+            # stopped. Only NOT_SENT or a qualified canonical envelope can
+            # establish a negative result after this transport boundary.
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        try:
+            envelope = validate_selected_child_ingress_envelope(
+                response.result, command_id=command, job_id=job_id,
+                target_digest=target_digest)
+        except (TypeError, ValueError):
+            # A malformed return after a possible submit is not a no-effect
+            # receipt. Retain the original command.
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        # Recheck this same principal's source facts and held target after
+        # the transport await. A closed fresh mandate alone does not deny
+        # observation of an already claimed original command.
+        try:
+            current_authority, current_context = await self._authority(principal, work_ref, stamp)
+            if (current_context != context
+                    or current_authority.capability_profile_digest
+                    != authority.capability_profile_digest
+                    or not await self._same_auth(request, authenticated)):
+                raise ValueError("selected child principal changed")
+            target.require_current()
+            if (self.settings.selected_child_target is not target
+                    or target.material_digest() != target_digest):
+                raise ValueError("selected child target changed")
+        except Exception:
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        try:
+            body = canonical_json(envelope)
+        except (TypeError, ValueError):
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        if len(body) > MAX_RESPONSE_BYTES:
+            return uncertain("EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN")
+        return JSONResponse(envelope, status_code=200)
+
     async def call(self, request: Request):
         name = request.path_params["tool"]
-        if name not in COO_TOOL_NAMES:
+        from common import coo_agentos_context_contract as context_wire
+        from integrations.executive_mcp.coo import validate_coo_context_tool_arguments
+        from common import coo_discovery_contract as discovery_wire
+        context_tools = (context_wire.TOOL, context_wire.CURRENT_TOOL)
+        extended_tools = (*context_tools, *discovery_wire.TOOLS)
+        if name not in (*COO_TOOL_NAMES, *extended_tools):
             return refused("invalid_input", 404)
         authenticated = await self._auth(request)
         if isinstance(authenticated, JSONResponse):
@@ -279,9 +590,21 @@ class CooApp:
         if isinstance(arguments, JSONResponse):
             return arguments
         try:
-            validated = validate_coo_tool_arguments(name, arguments)
+            validated = (validate_coo_context_tool_arguments(name, arguments) if name in extended_tools
+                         else validate_coo_tool_arguments(name, arguments))
         except GatewayError as exc:
             return refused(exc.code, 400)
+        if name in discovery_wire.TOOLS:
+            from .coo_discovery import forward_discovery
+            return await forward_discovery(self, request, authenticated, name, validated)
+        if name in context_tools:
+            try:
+                catalogue = await self.catalogue(principal, stamp, work_ref=validated["work_ref"])
+            except Exception:
+                return refused()
+            return await self._agentos_context(request, authenticated, validated,
+                current_data=name == context_wire.CURRENT_TOOL,
+                discovery=name == context_wire.CURRENT_TOOL and catalogue == context_wire.DISCOVERY_CATALOGUE)
         if name in COO_READ_NAMES:
             try:
                 result = await self._read_gateway.call(name, validated)
@@ -292,6 +615,11 @@ class CooApp:
                 return JSONResponse(result)
             except Exception:
                 return refused("backend_unavailable", 503)
+        if name == "mmx_delegate":
+            # The closed selected-child branch runs before the generic
+            # work_ref/principal-intent logic: it has no work_ref, no
+            # request reference and no principal intent.
+            return await self._selected_child(request, authenticated, validated)
         work_ref = validated.get("work_ref", validated.get("workstream"))
         try:
             authority, context = await self._authority(principal, work_ref, stamp)
@@ -332,15 +660,17 @@ class CooApp:
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http":
+            from common.coo_agentos_context_contract import TOOL as context_tool, CURRENT_TOOL as current_context_tool
+            from common.coo_discovery_contract import TOOLS as discovery_tools
             path = scope.get("path", "")
             if (not path.isascii() or scope.get("raw_path") != path.encode("ascii")
                     or scope.get("query_string") or scope.get("method") != "POST"
-                    or path not in {"/v1/tools/" + name for name in COO_TOOL_NAMES}):
+                    or path not in {"/v1/tools/" + name for name in (*COO_TOOL_NAMES, context_tool, current_context_tool, *discovery_tools)}):
                 await refused("invalid_input", 404)(scope, receive, send)
                 return
         await self._bounded(scope, receive, send)
 
 
-def create_coo_app(settings: CooAppSettings, *, audit_sink):
+def create_coo_app(settings: CooAppSettings, *, audit_sink, workspace_app=None):
     """Build a same-process adapter, not a listener or an installed authority."""
-    return CooApp(settings, audit_sink)
+    return CooApp(settings, audit_sink, workspace_app=workspace_app)

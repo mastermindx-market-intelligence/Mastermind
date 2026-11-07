@@ -22,7 +22,9 @@ from ops.executive_os import os_release_assets as assets
 from ops.executive_os import release_manifest as seals
 from ops.executive_os.os_public_edge import (HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES,
     GET_ROUTES, POST_ROUTES, SOURCE_POST_ROUTES, MCP_METADATA_ROUTE, MCP_ROUTES,
-    PRE_DIRECT_NATIVE_POST_ROUTES, DIRECT_NATIVE_POST_ROUTES, asset_routes, render)
+    COMPLETE_MCP_METADATA_ROUTES, COMPLETE_MCP_ROUTES,
+    PRE_DIRECT_NATIVE_POST_ROUTES, DIRECT_NATIVE_POST_ROUTES,
+    PRE_COMPANY_PRIORITIES_POST_ROUTES, asset_routes, render)
 
 
 def git(repo, *args):
@@ -133,6 +135,9 @@ def inputs(tmp_path, monkeypatch, request):
     qualified = assets.qualify(bundle, expected_sha=sha, tree_sha=tree, source_repo=repo)
     old = tmp_path / "old"
     make_dist(old / "app/mastermind_os", "old", noir_notices=old_notices)
+    # Model the installed release root even under a restrictive host umask.
+    # Keep the real service-UID traversal check active.
+    old.chmod(0o755)
     manifest = entry.build_os_asset_manifest(old)
     (old / assets.DIST / "asset-manifest.json").write_bytes(m.canonical(manifest))
     seals.create(old, "a" * 40, "b" * 40)
@@ -149,6 +154,9 @@ def inputs(tmp_path, monkeypatch, request):
     elif retired_edge_profile == "pre-native":
         branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
         branches[1]["match"][0]["path"] = list(PRE_DIRECT_NATIVE_POST_ROUTES)
+        # Isolate the native POST upgrade from the already accepted COO upgrade.
+        branches[3]["match"][0]["path"] = list(COMPLETE_MCP_METADATA_ROUTES)
+        branches[4]["match"][0]["path"] = list(COMPLETE_MCP_ROUTES)
     live.write_bytes(m.canonical(config))
     return dict(old_root=old, old_sha="a" * 40, old_tree="b" * 40,
                 new_bundle=bundle, source_repo=repo, new_sha=sha, new_tree=tree,
@@ -314,16 +322,19 @@ def test_native_post_contract_survives_real_stage_prepare_and_finalize(staged):
     )
     assert PRE_DIRECT_NATIVE_POST_ROUTES == historical
     assert DIRECT_NATIVE_POST_ROUTES == native
-    assert POST_ROUTES == historical + native
+    company = ("/os/executive/company-priorities",)
+    assert PRE_COMPANY_PRIORITIES_POST_ROUTES == historical + native
+    current_posts = historical + native + company
+    assert POST_ROUTES == current_posts
     branches = lambda config: config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
     before = copy.deepcopy(relay.current)
     original = branches(before)
     assert original[1]["match"][0]["path"] == list(historical)
     rendered = render(entry.build_os_asset_manifest(i["new_bundle"]), i["relay_port"])
     post_matcher = rendered.split("    @post {", 1)[1].split("    handle @post {", 1)[0]
-    assert post_matcher.split("      path ", 1)[1].splitlines()[0].split() == list(historical + native)
+    assert post_matcher.split("      path ", 1)[1].splitlines()[0].split() == list(current_posts)
     assert "method POST" in post_matcher
-    assert all(path not in rendered.split("    handle @get {", 1)[0] for path in native)
+    assert all(path not in rendered.split("    handle @get {", 1)[0] for path in native + company)
 
     for phase, expected_state in (("prepare", "PREPARED"), ("finalize", "FINAL")):
         if phase == "finalize":
@@ -332,7 +343,7 @@ def test_native_post_contract_survives_real_stage_prepare_and_finalize(staged):
             relay.selected = "new"  # The explicit test-host switch, never the publisher.
         assert publish(staged, phase)["state"] == expected_state
         current = branches(relay.current)
-        assert current[1]["match"][0] == {"method": ["POST"], "path": list(historical + native)}
+        assert current[1]["match"][0] == {"method": ["POST"], "path": list(current_posts)}
         # Body bounds, proxy/header identity and terminal refusal remain exact.
         assert current[1]["handle"] == original[1]["handle"]
         assert current[1]["handle"][0] == {"handler": "request_body", "max_size": 64000}
@@ -348,7 +359,7 @@ def test_native_post_contract_survives_real_stage_prepare_and_finalize(staged):
             return [branch for branch in current[:-1]
                     if any(method in match["method"] and path in match["path"]
                            for match in branch["match"])]
-        for path in native:
+        for path in native + company:
             assert matching("POST", path) == [current[1]]
             for method in ("GET", "PUT", "DELETE", "OPTIONS"):
                 assert matching(method, path) == []
@@ -753,6 +764,7 @@ def test_original_publication_9_or_11_to_13_closes_the_entire_two_phase_path(inp
     """Must fail on an obsolete 4/10 index gate, not just pass earlier staging."""
     old = tmp_path / ("old-licensed" if old_licensed else "old-noir")
     make_dist(old / "app/mastermind_os", "oldnoir")
+    old.chmod(0o755)  # Preserve the real dual-service traversal requirement.
     _expand_noir_dist(old / "app/mastermind_os", notices=old_licensed)
     old_manifest = entry.build_os_asset_manifest(old)
     assert len(old_manifest["files"]) == (11 if old_licensed else 9)
@@ -801,3 +813,91 @@ def test_original_publication_9_or_11_to_13_closes_the_entire_two_phase_path(inp
     assert "/os/assets/SourceMarkdown-fixture.js" in paths
     assert "/os/assets/SourceMarkdown-fixture.css" in paths
     assert "/os/assets/index-oldnoir.js" not in paths
+
+
+# --- Public COO route pair (#2120) ------------------------------------------------
+# The publisher is the existing owner of the whole-configuration capture. It
+# must stage the complete CEO+COO public-MCP pair and refuse a staged
+# configuration that no longer binds it.
+
+
+def public_mcp_branches(config):
+    """The two public-MCP matcher branches of a captured configuration."""
+    branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    metadata = [b for b in branches if b.get("match")
+                and b["match"][0]["method"] == ["GET"]
+                and b["match"][0]["path"][0].startswith("/.well-known/")]
+    transport = [b for b in branches if b.get("match")
+                 and b["match"][0]["method"] == ["POST"]
+                 and b["match"][0]["path"][0] == "/mcp"]
+    assert len(metadata) == 1 and len(transport) == 1
+    return metadata[0], transport[0]
+
+
+@pytest.mark.parametrize("inputs", [(False, False)], indirect=True)
+def test_publisher_stage_binds_the_complete_public_coo_route_pair(inputs):
+    result = m.stage_host(**inputs)
+    with m.private(inputs["out"]) as stage:
+        live = json.loads(stage.read("live.json"))
+        prepared = json.loads(stage.read("prepare.json"))
+        final = json.loads(stage.read("final.json"))
+    # The observed live configuration carries the CEO-only pair.
+    meta, transport = public_mcp_branches(live)
+    assert meta["match"][0]["path"] == [MCP_METADATA_ROUTE]
+    assert transport["match"][0]["path"] == list(MCP_ROUTES)
+    # Both staged configurations carry the complete CEO+COO pair, with the
+    # metadata branch on the public Host and the transport branch on the
+    # gateway's loopback Host under its 64000-byte cap.
+    for config in (prepared, final):
+        meta, transport = public_mcp_branches(config)
+        assert meta["match"][0]["path"] == list(COMPLETE_MCP_METADATA_ROUTES)
+        assert transport["match"][0]["path"] == list(COMPLETE_MCP_ROUTES)
+        assert meta["handle"][-1]["headers"]["request"]["set"]["Host"] == [HOST]
+        assert transport["handle"][-1]["headers"]["request"]["set"]["Host"] == ["127.0.0.1"]
+        assert transport["handle"][0] == {"handler": "request_body", "max_size": 64000}
+        assert meta["handle"][-1]["headers"]["request"]["delete"] == [
+            "Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+            "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP"]
+    assert result["published"] is False
+
+
+@pytest.mark.parametrize("inputs", [(False, False)], indirect=True)
+def test_publisher_stage_accepts_an_already_complete_public_coo_pair(inputs):
+    # An observed edge that already carries the complete pair is staged with
+    # exactly the same bytes: the transition is idempotent, not a widening.
+    live = json.loads(inputs["live_config"].read_bytes())
+    meta, transport = public_mcp_branches(live)
+    meta["match"][0]["path"] = list(COMPLETE_MCP_METADATA_ROUTES)
+    transport["match"][0]["path"] = list(COMPLETE_MCP_ROUTES)
+    inputs["live_config"].write_bytes(m.canonical(live))
+    m.stage_host(**inputs)
+    with m.private(inputs["out"]) as stage:
+        prepared = json.loads(stage.read("prepare.json"))
+        final = json.loads(stage.read("final.json"))
+    for config in (prepared, final):
+        meta, transport = public_mcp_branches(config)
+        assert meta["match"][0]["path"] == list(COMPLETE_MCP_METADATA_ROUTES)
+        assert transport["match"][0]["path"] == list(COMPLETE_MCP_ROUTES)
+
+
+@pytest.mark.parametrize("inputs", [(False, False)], indirect=True)
+def test_staged_prepare_without_the_coo_route_pair_is_refused(staged):
+    i, r, relay = staged
+    stage_path = i["out"]
+    # Drop the COO path pair from the staged prepare configuration and repair
+    # the descriptor's own recorded digest, so only the publisher's independent
+    # recomputation can detect the stale binding.
+    with m.private(stage_path) as stage:
+        prepared = json.loads(stage.read("prepare.json"))
+        meta, transport = public_mcp_branches(prepared)
+        meta["match"][0]["path"] = [MCP_METADATA_ROUTE]
+        transport["match"][0]["path"] = list(MCP_ROUTES)
+        raw = m.canonical(prepared)
+        descriptor = json.loads(stage.read(m.DESCRIPTOR))
+        descriptor["files"]["prepare.json"] = {"sha256": m.digest(raw), "bytes": len(raw)}
+        descriptor_raw = m.canonical(descriptor)
+    (stage_path / "prepare.json").write_bytes(raw)
+    (stage_path / m.DESCRIPTOR).write_bytes(descriptor_raw)
+    with pytest.raises(ValueError, match="transition bindings differ"):
+        publish(staged, stage_digest=m.digest(descriptor_raw))
+    assert ("POST", "config") not in relay.events

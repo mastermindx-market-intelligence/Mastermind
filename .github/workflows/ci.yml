@@ -102,6 +102,21 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      # Source-proximate web tests import app.deps through the real application.
+      # Supply the same immutable engine/lib source as the full-shard job;
+      # no runtime data, new credential policy or alternate dependency owner.
+      - name: Checkout pinned Macro engine for source-proximate tests
+        if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 256c757b3c4f0ec759571c29a30a71387d0a18f8
+          path: vendor/macro_src
+          sparse-checkout: |
+            engine
+            lib
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
       - name: Install focused Python test dependencies
         if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
         run: python -m pip install --disable-pip-version-check -e ".[dev]"

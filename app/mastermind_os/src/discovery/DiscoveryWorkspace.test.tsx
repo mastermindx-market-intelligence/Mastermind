@@ -793,6 +793,7 @@ describe("DiscoveryWorkspace", () => {
     await click("Open return review");
     expect(onOpenKnowledge).toHaveBeenCalledTimes(1);
     await click("Placement");
+    expect(container.textContent).toContain("Preview only — sending is separate and unavailable here");
     expect(button("Open placement").disabled).toBe(true);
     expect(container.textContent).toContain("never accepts or releases");
     await click("Release");

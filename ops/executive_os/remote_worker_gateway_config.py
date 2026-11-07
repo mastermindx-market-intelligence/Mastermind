@@ -29,6 +29,10 @@ SECRETARY_GATEWAY_CONFIG_SCHEMA = "mastermind.remote_worker_gateway_config/v3"
 SECRETARY_GATEWAY_PROFILE = "hermes-secretary-conversation"
 HERMES_SECRETARY_CONVERSATION_SCHEMA = "mastermind.hermes_secretary_conversation_binding/v1"
 SECRETARY_CREDENTIAL_PATH = Path("/etc/mastermind-executive/remote-worker-gateway/secretary-conversation.token")
+CONVERSATION_GATEWAY_CONFIG_SCHEMA = "mastermind.remote_worker_gateway_config/v4"
+CONVERSATION_GATEWAY_PROFILE = "hermes-role-conversations"
+HERMES_META_CONVERSATION_SCHEMA = "mastermind.hermes_meta_conversation_binding/v1"
+META_CREDENTIAL_PATH = Path("/etc/mastermind-executive/remote-worker-gateway/meta-conversation.token")
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
@@ -149,30 +153,47 @@ class HermesSecretaryConversationBinding:
     gateway_port: int
     credential_path: Path
 
+    @classmethod
+    def _wire_identity(cls):
+        if cls is HermesSecretaryConversationBinding:
+            return HERMES_SECRETARY_CONVERSATION_SCHEMA, SECRETARY_CREDENTIAL_PATH
+        if cls is HermesMetaConversationBinding:
+            return HERMES_META_CONVERSATION_SCHEMA, META_CREDENTIAL_PATH
+        raise ValueError("Hermes conversation binding type is invalid")
+
     def __post_init__(self) -> None:
+        _, credential_path = type(self)._wire_identity()
         if (type(self.implementation_sha) is not str or _SHA_RE.fullmatch(self.implementation_sha) is None
                 or type(self.root_id) is not str or _ID_RE.fullmatch(self.root_id) is None
                 or type(self.session_id) is not str or not self.session_id or len(self.session_id) > 1024
                 or any(ord(c) < 32 or ord(c) == 127 for c in self.session_id)
                 or type(self.gateway_port) is not int or not 1024 <= self.gateway_port <= 65535
-                or self.credential_path != SECRETARY_CREDENTIAL_PATH):
+                or self.credential_path != credential_path):
             raise ValueError("Hermes Secretary conversation binding is invalid")
 
     @classmethod
     def from_wire(cls, value) -> HermesSecretaryConversationBinding:
+        schema, credential_path = cls._wire_identity()
         fields = {"schema", "implementation_sha", "root_id", "session_id", "gateway_port", "credential_path"}
         if (type(value) is not dict or set(value) != fields
-                or value["schema"] != HERMES_SECRETARY_CONVERSATION_SCHEMA
-                or value["credential_path"] != str(SECRETARY_CREDENTIAL_PATH)):
+                or value["schema"] != schema
+                or value["credential_path"] != str(credential_path)):
             raise ValueError("Hermes Secretary conversation binding is invalid")
         return cls(value["implementation_sha"], value["root_id"], value["session_id"],
-                   value["gateway_port"], SECRETARY_CREDENTIAL_PATH)
+                   value["gateway_port"], credential_path)
 
     def to_wire(self) -> dict:
-        return {"schema": HERMES_SECRETARY_CONVERSATION_SCHEMA,
+        schema, _ = type(self)._wire_identity()
+        return {"schema": schema,
                 "implementation_sha": self.implementation_sha, "root_id": self.root_id,
                 "session_id": self.session_id, "gateway_port": self.gateway_port,
                 "credential_path": str(self.credential_path)}
+
+
+
+@dataclasses.dataclass(frozen=True)
+class HermesMetaConversationBinding(HermesSecretaryConversationBinding):
+    """The explicit Meta peer; inherited validation selects only its own contract."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -197,6 +218,42 @@ class HermesSecretaryGatewayConfig:
         if (self.schema != SECRETARY_GATEWAY_CONFIG_SCHEMA or self.profile != SECRETARY_GATEWAY_PROFILE
                 or type(self.hermes_role_metadata_read) is not HermesRoleMetadataReadBinding
                 or type(self.hermes_secretary_conversation) is not HermesSecretaryConversationBinding
+                or self.hermes_role_metadata_read.implementation_sha
+                   != self.hermes_secretary_conversation.implementation_sha
+                or type(self.listen_host) is not str
+                or type(self.expected_control_fingerprint) is not str
+                or type(self.request_timeout_seconds) not in (int, float)):
+            raise ValueError("Hermes Secretary gateway profile is invalid")
+        _validate_tls_listener(self)
+        _validate_request_limits(self)
+
+
+@dataclasses.dataclass(frozen=True)
+class HermesConversationGatewayConfig:
+    """One incumbent listener with metadata and two distinct role capabilities."""
+
+    schema: str
+    profile: str
+    host_ref: str
+    listen_host: str
+    listen_port: int
+    certificate_path: Path
+    key_path: Path
+    ca_path: Path
+    expected_control_fingerprint: str
+    hermes_role_metadata_read: HermesRoleMetadataReadBinding
+    hermes_secretary_conversation: HermesSecretaryConversationBinding
+    hermes_meta_conversation: HermesMetaConversationBinding
+    request_timeout_seconds: float = 4.0
+    max_frame_bytes: int = MAX_FRAME_BYTES
+
+    def __post_init__(self) -> None:
+        if (self.schema != CONVERSATION_GATEWAY_CONFIG_SCHEMA or self.profile != CONVERSATION_GATEWAY_PROFILE
+                or type(self.hermes_role_metadata_read) is not HermesRoleMetadataReadBinding
+                or type(self.hermes_secretary_conversation) is not HermesSecretaryConversationBinding
+                or type(self.hermes_meta_conversation) is not HermesMetaConversationBinding
+                or self.hermes_role_metadata_read.implementation_sha
+                   != self.hermes_meta_conversation.implementation_sha
                 or self.hermes_role_metadata_read.implementation_sha
                    != self.hermes_secretary_conversation.implementation_sha
                 or type(self.listen_host) is not str
@@ -301,4 +358,5 @@ class RemoteWorkerGatewayConfig:
         _validate_request_limits(self)
 
 
-GatewayConfig = RemoteWorkerGatewayConfig | HostObservationGatewayConfig | HermesSecretaryGatewayConfig
+GatewayConfig = (RemoteWorkerGatewayConfig | HostObservationGatewayConfig
+                 | HermesSecretaryGatewayConfig | HermesConversationGatewayConfig)
