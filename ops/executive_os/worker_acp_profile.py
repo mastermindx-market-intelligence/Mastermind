@@ -34,6 +34,7 @@ from ops.executive_os.worker_acp_contract import (
 SYSTEM_ROOT = Path("/Library/Application Support/MastermindExecutive")
 LOCK_RELATIVE = "requirements/executive-worker-acp-macos-arm64-py312.lock"
 MANIFEST = ".worker-acp-closure.json"
+LOCK_FILE_MODE = 0o644
 _METADATA_NAMES = {
     "agent-client-protocol": "agent-client-protocol", "annotated-types": "annotated-types",
     "pydantic": "pydantic", "pydantic-core": "pydantic_core",
@@ -187,7 +188,7 @@ def _lock(release_root, *, check=None):
     release_root = Path(release_root)
     custody.sealed_directory(release_root, check=check)
     custody.sealed_directory((release_root / LOCK_RELATIVE).parent, check=check)
-    data = custody.secure_data(release_root / LOCK_RELATIVE, mode=0o644, maximum=32768, check=check)
+    data = custody.secure_data(release_root / LOCK_RELATIVE, mode=LOCK_FILE_MODE, maximum=32768, check=check)
     parse_lock(data)
     return data
 

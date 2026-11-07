@@ -724,3 +724,10 @@ source/release identity and real signed-in packaged DeepSeek journey remain owed
 The existing backend-unavailable observation and previously denied live/Fabric
 lanes were not retried. Hermes #2180 and accepted native canaries remain accepted
 and were not rerun. The mission remains active beyond this dependency milestone.
+
+C26 committed-source diagnostic found the inline 0644 lock-file mode ambiguous
+to the protected identity scanner. It is now named LOCK_FILE_MODE with the exact
+same literal value; no guard or custody check changed. The final focused
+profile/factory tests and the actual current-source scanner pass. Their exact
+receipts and the diagnostic are preserved in the C26 evidence. The 154-test run
+and PSF compatibility proof precede only this semantic constant naming.
