@@ -22,8 +22,14 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def compose(base, output):
-    profile = json.loads((HERE / "profile.json").read_text())
+def compose(base, output, *, profile_name="provider-plans"):
+    if profile_name == "provider-plans":
+        profile_root = HERE
+    elif profile_name == "current116-maintenance-guard":
+        profile_root = HERE / "maintenance_guard"
+    else:
+        raise ValueError("unknown native source profile")
+    profile = json.loads((profile_root / "profile.json").read_text())
     release = json.loads((base / "RELEASE.json").read_text())
     if (release.get("digest") != profile["base_selection"]["generation"]
             or release.get("files") != profile["base_files"]):
@@ -37,7 +43,7 @@ def compose(base, output):
         if (row["before"] != profile["base_files"].get(name)
                 or row["after"] != profile["files"].get(name)):
             raise ValueError("patch metadata differs from verified file closure")
-        if digest(HERE / row["patch"]) != row["patch_sha256"]:
+        if digest(profile_root / row["patch"]) != row["patch_sha256"]:
             raise ValueError("source patch changed")
     for relative, source in profile["source_map"].items():
         if digest(REPO / source) != profile["files"][relative]:
@@ -47,7 +53,7 @@ def compose(base, output):
     for relative in profile["base_files"]:
         shutil.copyfile(base / relative, output / relative)
     for row in profile["patches"].values():
-        patch = str(HERE / row["patch"])
+        patch = str(profile_root / row["patch"])
         subprocess.run(["git", "apply", "--check", patch], cwd=output, check=True,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         subprocess.run(["git", "apply", patch], cwd=output, check=True,
@@ -67,8 +73,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--profile", choices=("provider-plans", "current116-maintenance-guard"),
+                        default="provider-plans")
     args = parser.parse_args()
-    print(json.dumps(compose(args.base, args.output), sort_keys=True))
+    print(json.dumps(compose(args.base, args.output, profile_name=args.profile), sort_keys=True))
 
 
 if __name__ == "__main__":
