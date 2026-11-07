@@ -809,8 +809,8 @@ REVIEWED_FILES["integrations/hermes_application_fabric/codec.py"] = {
 REVIEWED_FILES[
     "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
 ] = {
-    "sha256": "78bde48fefedd95f7cec923d83dac6886424913887b683061877db4c2f0ed612",
-    "sites": ((335, 37, 40, "int", "409"),),
+    "sha256": "09b3d29643aefc783e4d531dbaf679061f918fec5b72ba2e1b6398efddf12473",
+    "sites": ((341, 37, 40, "int", "409"),),
 }
 
 # Exact HTTPS port excluded by the disposable Chisel fixture.

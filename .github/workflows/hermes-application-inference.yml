@@ -116,7 +116,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 9eb5cb6b28b510ea9e2bf05ae9040528523339df
+          ref: c1647bf55ad5faf07e682f7055e3791280d6d41f
           path: .ci-hermes-application-owner
           sparse-checkout-cone-mode: false
           sparse-checkout: |
@@ -192,7 +192,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 9eb5cb6b28b510ea9e2bf05ae9040528523339df
+          ref: c1647bf55ad5faf07e682f7055e3791280d6d41f
           path: .ci-hermes-application-owner
           sparse-checkout: |
             engine
@@ -261,7 +261,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 9eb5cb6b28b510ea9e2bf05ae9040528523339df
+          ref: c1647bf55ad5faf07e682f7055e3791280d6d41f
           path: .ci-hermes-application-owner
           sparse-checkout-cone-mode: false
           sparse-checkout: |
@@ -332,7 +332,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 9eb5cb6b28b510ea9e2bf05ae9040528523339df
+          ref: c1647bf55ad5faf07e682f7055e3791280d6d41f
           path: .ci-hermes-application-owner
           sparse-checkout-cone-mode: false
           sparse-checkout: |

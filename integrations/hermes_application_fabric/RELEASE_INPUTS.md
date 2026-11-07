@@ -6,25 +6,37 @@ credential, routing registry or permission to replay an original effect.
 
 ## Composed source
 
-The baseline is Mastermind eaf1b55f157942d8b59b99f0c316304fcc646e3b,
-which joins primary c5406817, native v9 cf393b0a and original APPLICATION
-39bd39aaa8c5fa1f6112fc34c593815323428b2f. Its exact tested merge
-a6b35e0889e86609bd861533ed2894d9d6880b14 passed all six focused suites
-and 385 enrollment cases with zero failures, errors or skips.
+The complete primary/native/attended contribution is #2186. Its published
+fbf1d57e892b17350dd8600e5f62fb5a8967c79b test merge
+d845c89934da3338fd3e821601e7d7cd5de8a4b7 into original APPLICATION
+84ef19e38c2dcb5d4ba3017812e9c13cd1f9ae2c passed all eight focused jobs
+and 385 enrollment cases with zero failures, errors or skips. The shared
+original paired gate passed 222 cases, including 30 AUTO text/chat cases.
+Combined general CI separately retained one original Studio helper-preflight
+failure; focused success is not general-CI or release acceptance.
 
-The current source additionally consumes the published attended contribution
-a664a288a3791bda3ea2b43af08278f1d8fb0d9b from #2166. Its retained
-81-case receipt describes the older candidate83f78197 and owner2ef828e5;
-it is not current composed-source proof. Current offline composition passed66
-cases against exact owner client9eb5cb6, with zero external connections.
-The existing inference workflow qualifies the current patched native gateway
-and original unpatched role ABI separately.
+The attended contribution a664a288a3791bda3ea2b43af08278f1d8fb0d9b
+from #2166 is incorporated. Its older 81-case receipt remains historical.
+The current runtime has 100 patched-gateway, 85 unpatched-native and 66 offline
+contract cases. Their fbf execution used Macro9eb; the workflow now binds
+the exact current owner c164 below, with the same verified client bytes.
+Current-head executed results must be read from the corresponding workflow.
+
+The original APPLICATION handler/Broker qualification preserves all nine
+secretary fixed/AUTO/exact conversation, limit and unknown-effect cases and
+adds those same three cases for the distinct attended service. This uses the
+original Macro factory/workload declarations and a disposable attended grant;
+it does not qualify a real account, install a service or authenticate a live
+attended host. The separate patched-gateway suite covers native route/admission
+projection. The shared paired gate still consumes its original CI-owned pin.
 
 | Input | Exact identity / owner |
 | --- | --- |
 | Primary runtime package | Eleven-file digest `c8bb8e02f42dd41d31e36fa255f87df619216d5e55a7f55194016ed6ce2bc5aa`, computed by the existing publication.py algorithm |
 | Original primary runtime predecessor | 08b8daf9 digest1ae0d896; its installed69-case proof is retained but does not qualify the two amended current runtime files |
-| APPLICATION factory/client | Original Macro#10740; fixture client9eb5cb6b28b510ea9e2bf05ae9040528523339df, SHA2560817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e |
+| APPLICATION factory/client | Original Macro#10740 at c1647bf55ad5faf07e682f7055e3791280d6d41f; client SHA2560817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e is unchanged from9eb |
+| Attended owner declarations | Original c164 factory blob4dfa5a9ccb9fbcf2e5717d40039eb62af1c8322b and workload blobf9f0bd26af3f543aaee8d05fb465a4ea53219660; source-held transport remains unqualified |
+| Attended owner qualification | Macro#10832 at83aa7e16bfe0bd1f07d373e2e42aca69e5e8da20, parentc164; three-file test/workflow/evidence contribution, no production/configuration change; hosted126 and local197 cases passed |
 | Native APPLICATION installer/entry | Original #2175 plus qualified v9 contribution in #2186; current Go ingress/account/service publishers remain authoritative |
 | Role Hermes ABI | Qualified upstream1c0cd667 and installed2bd378ed; existing held role installation and source closure |
 | Attended Hermes ABI | Exact upstream2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19 plus the reviewed core patch in hermes_core/ |
@@ -65,13 +77,19 @@ route fixture alone could not establish these properties.
 | Meta-CEO | hermes-meta-ceo / hermes_meta_fabric / site_interactive | Original mmmeta role/session/principal and HERMES_META_FABRIC_APPLICATION_TOKEN |
 | Ordinary attended | hermes-attended / hermes_attended_fabric / hermes_attended | Original attended native admission plus a separately qualified APPLICATION service relation |
 
-The current Macro fixture has secretary/meta relations. It does **not** contain
-the attended relation, workload, capability and service enrollment required by
-the original #2166 contract. The attended factory remains closed until its
-original APPLICATION owner supplies that exact relation; it cannot borrow a
-Brain, secretary, meta-CEO or worker credential. This composition creates no
-runtime mode record and mints no token. Attended remains fixed-model; the role
-publication retains its existing fixed, AUTO and exact contracts.
+Original Macro c164 supplies the attended relation, fixed transport and
+inference workload. The shipped application mode map remains empty; the
+transport remains qualified=false, application_allowed=false and
+client_session_metadata_accepted=false. A configuration-only edit cannot
+override those source qualification flags. No enrolled attended capability,
+runtime service record, principal/grant or credential is created here.
+
+The attended factory therefore remains closed until its original owners
+qualify and enroll the actual service. It cannot borrow a Brain, secretary,
+meta-CEO or worker credential. Attended remains fixed-model; the role
+publication retains its existing fixed, AUTO and exact contracts. The new
+attended owner conversation tests use only synthetic in-memory credentials
+and temporary mode/capability/grant inputs, with external access blocked.
 
 The initial role canary can use one eligible account/model under the current
 Chairman contract. The original attended GLM-specific contract is a separate
