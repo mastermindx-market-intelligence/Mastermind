@@ -9,10 +9,10 @@ label and journals while adding the two Hermes role addresses. The OS relay entr
 constants, its defaults and its main semantics are unchanged; this module only
 adds one separately named APPLICATION purpose on the same incumbent server.
 
-The Chisel authfile is a ``map[user:pass][]remote-regex``. The only server ACL
-added here is the anchored remote ``^R:127\\.0\\.0\\.1:50142$`` for the dedicated
-``mastermind-fabric-app`` identity. Every incumbent user and every incumbent
-ACL value is preserved rather than rewritten.
+The Chisel authfile is a ``map[user:pass][]remote-regex``. V1 adds the anchored
+127.0.0.1:50142 reverse for the dedicated ``mastermind-fabric-app`` identity.
+Its closed v2 successor adds only 127.0.0.2/.3 on that same port and identity.
+Unrelated incumbent users and ACL values are preserved.
 
 Public receipts carry nonsecret metadata and digests only. Credential and
 authfile material never reach stdout, stderr, a receipt, a log or an error.
@@ -254,7 +254,9 @@ def _role_predecessor(paths, *, system=None, receipt_path=None, expected=None, l
             require(grant["state"] == "GRANT_FILE_APPLIED"
                     and grant["receipt"].get("identity_sha256") == value["credential_sha256"],
                     "role predecessor server identity differs")
-            value["server_receipt_digest"] = digest(raw)
+            # The existing CLI prints a newline; transport formatting is not
+            # a different receipt. Commit its strict parsed canonical value.
+            value["server_receipt_digest"] = digest(canonical(decode(raw)))
         _predecessor_record(value)
         require(_capture_preimage(paths.credential) == value["credential_identity"],
                 "role predecessor credential identity changed")
@@ -954,7 +956,7 @@ def stage(*, source_repo, source_sha, release_root, release_commit_sha, release_
                 else:
                     require(predecessor_server_receipt is not None, "retained predecessor receipt required")
                     predecessor_raw = _read_root_private(Path(predecessor_server_receipt), MAX_BYTES)
-                require(digest(predecessor_raw) == predecessor["server_receipt_digest"],
+                require(digest(canonical(decode(predecessor_raw))) == predecessor["server_receipt_digest"],
                         "role predecessor server receipt changed")
             if "credential.auth" in names:
                 staged_credential = _normalise_credential(stage_area.read("credential.auth"))
@@ -1170,7 +1172,7 @@ def _load_stage(stage_area, paths):
         original, predecessor = _role_predecessor(paths, expected=intent["predecessor"])
         require(intent["role_remotes"] == list(_remotes(True)[0])
                 and bundle["predecessor"] == predecessor and credential == original["credential"]
-                and digest(contents["predecessor-server-receipt.json"]) == predecessor["server_receipt_digest"],
+                and digest(canonical(decode(contents["predecessor-server-receipt.json"]))) == predecessor["server_receipt_digest"],
                 "role predecessor publication differs")
         grant = _server_grant(stage_area.path / "predecessor-server-receipt.json", original, paths)
         require(grant["state"] == "GRANT_FILE_APPLIED"
@@ -1299,7 +1301,7 @@ def _server_role_predecessor(bundle, paths):
         intent = decode(original.read("server-intent.json"))
         receipt_raw = original.read("server-receipt.json")
         receipt = decode(receipt_raw)
-        require(digest(receipt_raw) == expected["server_receipt_digest"]
+        require(digest(canonical(receipt)) == expected["server_receipt_digest"]
                 and intent.get("operation_id") == operation_identity()
                 and intent.get("bundle_digest") == digest(raw)
                 and intent.get("schema") == SCHEMA and intent.get("phase") == "apply-server"

@@ -117,6 +117,20 @@ def test_role_client_stage_requires_no_server_filesystem(harness):
         "config": "NOT_APPLIED", "credential": "NOT_APPLIED", "plist": "NOT_APPLIED"}
 
 
+def test_role_successor_accepts_actual_predecessor_cli_receipt(harness, capsys):
+    _, system = original(harness)
+    bundle = control._stage_directory(harness.paths) / "server-bundle.json"
+    assert control.main(["reconcile-server", "--bundle", str(bundle), "--expected-digest",
+        control.digest(bundle.read_bytes())], paths=harness.paths, system=system) == 0
+    carried = capsys.readouterr().out
+    assert carried.endswith("\n")
+    receipt = harness.root / "carried-original-cli-receipt.json"
+    receipt.write_text(carried)
+    _own(receipt, 0o600)
+    role_stage(harness, receipt, system)
+    assert json.loads(role_server(harness, system).read_bytes())["state"] == "GRANT_FILE_APPLIED"
+
+
 def test_unknown_original_start_never_authorizes_role_successor(harness):
     receipt, system = original(harness)
     system.autoload = False
