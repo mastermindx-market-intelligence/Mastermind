@@ -45,7 +45,7 @@ PINS = {
     "tests/test_application_turn_admission.py": "efe876eec40dc8885dbc0059915f2401146be969",
 }
 REALM_PINS = {
-    "control_plane/codex_provider_realm.py": "eeea4c0fafc7e6df5c534c731cb6046bbe4d3f37",
+    "control_plane/codex_provider_realm.py": "a51e2bce8d9bb312107f975d503abd6541bd5000",
     "control_plane/provider_protocols.py": "92452237ac3956e8104e45ab9ee386c2fa016b76",
     "control_plane/fs_security.py": "16617789dc115b5748a3e72cc0d9a53fbc368918",
 }

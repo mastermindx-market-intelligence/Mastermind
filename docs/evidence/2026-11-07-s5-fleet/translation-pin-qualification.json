@@ -1,0 +1,29 @@
+{
+  "source_head": "d30c651b411cb92213c0c3dac52601cce130cf16",
+  "patch": "one exact test identity only",
+  "fixture_sha256": "58a1cff98f954f6b583c29dcce804573d432d49af8b0e526257710e51255a493",
+  "fixture_git_blob": "604b9c1b2e1d7e9b53d2aa178eb1de3fdb41577d",
+  "paired_macro": "f0375acf4ba076718e7cb420ed28ab61fb0a4f26",
+  "positive": {
+    "phase": "corrected",
+    "rc": 0,
+    "elapsed_seconds": 4.393,
+    "unittest_summary": [
+      "23",
+      "4.105"
+    ],
+    "identity_rejected": false
+  },
+  "negative": {
+    "phase": "one-byte-drift",
+    "rc": 1,
+    "elapsed_seconds": 0.239,
+    "unittest_summary": [
+      "3",
+      "0.083"
+    ],
+    "identity_rejected": true
+  },
+  "realm_restored_exactly": true,
+  "installed_effects": false
+}

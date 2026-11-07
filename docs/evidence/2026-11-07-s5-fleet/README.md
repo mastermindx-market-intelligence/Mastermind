@@ -214,3 +214,47 @@ Returned paid proposals, with parent source and focused-test verification:
 These changes are source qualification only. No collector or native release
 was installed, no host was newly admitted and the original service, storage,
 publication and permission holds remain.
+
+## Exact paired translation binding and final coverage return
+
+[Host capability and acceptance map](host-capability-and-acceptance.md) enumerates
+all 13 producer labels, seven retained sensor snapshots, observed installed
+fingerprints, operation classes, named fault fixtures and original exclusions.
+It uses existing evidence and performs no new host inspection.
+
+The d30 hosted native/application gates passed before the paired translation
+fixture failed its exact realm identity. All 18 pins were compared: only
+`control_plane/codex_provider_realm.py` was stale. The implementation, fixture
+and workflow were byte-identical to protected 5f8. Protected commit
+`1e5f77a4e7aa5131ecbaef9bb00487882dec4d79` (#1824) had added a spec-only
+commercial ModelArk realm while preserving the reviewed realm set; the
+translation fixture still named the predecessor blob.
+
+Only that one test identity changes, from
+`eeea4c0fafc7e6df5c534c731cb6046bbe4d3f37` to actual protected/current
+`a51e2bce8d9bb312107f975d503abd6541bd5000`.
+No production realm, provider policy, Macro pin, workflow or exact identity
+guard was changed. The same disposable actual paired Macro owner
+`f0375acf4ba076718e7cb420ed28ab61fb0a4f26` was used for all controls.
+
+The parent reproduced the baseline mismatch, then passed all **23 paired
+translation tests** in 4.105 seconds with the correction. Appending one byte
+to the disposable realm source again triggered the exact identity failure
+before the paired class could run. The original realm bytes were restored
+and verified. [Qualification receipt](translation-pin-qualification.json)
+records the corrected fixture SHA256, Git blob and elapsed times.
+
+Paid run `s5-fleet-translation-pin-20261107-c1-01` returned terminal rc75:
+the existing Ubuntu0 admission guard refused
+`host_temperature_at_or_above_limit`. It returned no code proposal and was
+not accepted as source work. [Original refusal evidence](thermal-admission-refusal.json)
+retains the root/run/response digest and missing temperature values. No retry
+or alternate worker route was issued. Under the Chairman's permitted
+parent-workspace fallback when Fabric is blocked, the assigned session
+performed this one-file source correction and focused qualification directly.
+The thermal refusal remains binding for that original action.
+
+The completed committed-source identity gate at d30 passed **637 tests**
+in 49.60 seconds. Its hosted Mastermind OS workflow also succeeded. Hosted
+Python CI and any resulting final-head publication status remain recorded
+on the original #1425 PR; fixture evidence is not installed acceptance.
