@@ -18,10 +18,13 @@ from integrations.slack_agent_dialogue.dot_canary_event import (
 from integrations.session_bridge.web_reply_subscription_owner import owner_key
 from .web_reply_event_rpc import (
     VERSION, _MODERN_META, _SUB, _delivery, _err, _ok, _ttl,
-    _validated_principal, CallbackVerificationError,
+    _validated_principal, CallbackVerificationError, READ_SCOPE,
 )
 
-CANARY_SCOPE = "mastermind.dot.slack_canary"
+# The existing Executive read OAuth grant is the only accepted ChatGPT scope.
+# Chris-only access is additionally fenced by the sealed subject digest and
+# exact channel policy; do not invent a new OAuth scope or widen AppPolicies.
+CANARY_SCOPE = READ_SCOPE
 
 
 @dataclasses.dataclass(frozen=True)
