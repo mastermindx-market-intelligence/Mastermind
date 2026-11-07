@@ -68,7 +68,7 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 # closed composed candidate bytes; neither source may silently replace the other.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'artifact_delivery.py': '6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d',
-    'remote_sub_exec.py': '710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db',
+    'remote_sub_exec.py': '4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281',
     'pick.py': '5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892',
     'remote_sub.sh': '0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c',
     'remote_sub_helpers.py': 'f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93',
@@ -238,10 +238,36 @@ ADMISSION_INTEGRITY_DIGESTS = {
 }
 
 
+# Reviewed current-quiescence read/guard changes only Broker in exact raw107.
+# Validate the whole parent; never normalize a mixed or unrelated source set.
+QUALIFICATION_QUIESCENCE_PARENT_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+QUALIFICATION_QUIESCENCE_OBSERVER_PARENT_SHA256 = "eb74b020c76c70081562d7be69bf8e154d5d7ad50b03381de0bd15ba24b634b7"
+QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE = "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a"
+QUALIFICATION_QUIESCENCE_BROKER_SHA256 = "5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a"
+
+
+def before_qualification_quiescence(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("qualification quiescence manifest invalid")
+    previous = dict(manifest)
+    if previous.get("ext/lease_broker.py") != QUALIFICATION_QUIESCENCE_BROKER_SHA256:
+        return previous
+    previous["ext/lease_broker.py"] = QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
+    expected_parent = {
+        GO_OBSERVER_PREIMAGE_SHA256: QUALIFICATION_QUIESCENCE_PARENT_SHA256,
+        GO_OBSERVER_SUCCESSOR_SHA256: QUALIFICATION_QUIESCENCE_OBSERVER_PARENT_SHA256,
+    }.get(previous.get("ext/current_source_observation.py"))
+    if (expected_parent is None or
+            sha((json.dumps(_source_integrity_parent(previous), sort_keys=True, indent=2) + "\n").encode()) != expected_parent):
+        raise ValueError("qualification quiescence parent closure differs")
+    return previous
+
+
 def before_admission_integrity(manifest):
     """Validate the exact admission pair over either bound observer history."""
     if type(manifest) is not dict:
         raise ValueError("native admission integrity manifest invalid")
+    manifest = before_qualification_quiescence(manifest)
     if not any(manifest.get(name) == digest
                for name, digest in ADMISSION_INTEGRITY_DIGESTS.items()):
         return dict(manifest)
@@ -278,6 +304,24 @@ HOST_PULL_INTEGRITY_DIGESTS = {
 }
 
 
+def _source_integrity_parent(manifest):
+    """Prove the same complete parent for either or both exact source deltas.
+
+    This private proof view never replaces emitted or captured current bytes.
+    Each public inverse still returns only its own declared inverse.
+    """
+    previous = dict(manifest)
+    if previous.get("ext/lease_broker.py") == QUALIFICATION_QUIESCENCE_BROKER_SHA256:
+        previous["ext/lease_broker.py"] = QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
+    if any(previous.get(name) == digest
+           for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        if any(previous.get(name) != digest
+               for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+            raise ValueError("native host-pull integrity cohort is incomplete or foreign")
+        previous.update(HOST_PULL_INTEGRITY_PREIMAGES)
+    return previous
+
+
 def before_host_pull_integrity(manifest):
     """Validate the complete host-pull successor without changing its identity."""
     if type(manifest) is not dict:
@@ -295,8 +339,33 @@ def before_host_pull_integrity(manifest):
         GO_OBSERVER_SUCCESSOR_SHA256: HOST_PULL_INTEGRITY_OBSERVER_PARENT_MANIFEST_SHA256,
     }.get(previous.get("ext/current_source_observation.py"))
     if (expected_parent is None or
-            sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != expected_parent):
+            sha((json.dumps(_source_integrity_parent(previous), sort_keys=True, indent=2) + "\n").encode()) != expected_parent):
         raise ValueError("native host-pull integrity parent closure differs")
+    return previous
+
+
+# One exact command-scoped advice setting extends the complete accepted72
+# closure. This inverse is used only for historical validation, never capture.
+SPARSE_INDEX_ADVICE_PARENT_SHA256 = "45a90565e189bca551cb79f579296689aa00674778d3917a6af75a720ff71c18"
+SPARSE_INDEX_ADVICE_OBSERVER_PARENT_SHA256 = "2c395c2a259e1027b5fe9243667ee0cd2dfc66c1cdc055dc19897950e91371a3"
+SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE = "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db"
+SPARSE_INDEX_ADVICE_EXECUTOR_SHA256 = "4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281"
+
+
+def before_sparse_index_advice(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("native sparse-index advice manifest invalid")
+    previous = dict(manifest)
+    if previous.get("ext/remote_sub_exec.py") != SPARSE_INDEX_ADVICE_EXECUTOR_SHA256:
+        return previous
+    previous["ext/remote_sub_exec.py"] = SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE
+    expected_parent = {
+        GO_OBSERVER_PREIMAGE_SHA256: SPARSE_INDEX_ADVICE_PARENT_SHA256,
+        GO_OBSERVER_SUCCESSOR_SHA256: SPARSE_INDEX_ADVICE_OBSERVER_PARENT_SHA256,
+    }.get(previous.get("ext/current_source_observation.py"))
+    if (expected_parent is None or
+            sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != expected_parent):
+        raise ValueError("native sparse-index advice parent closure differs")
     return previous
 
 
@@ -321,7 +390,13 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
     """
-    manifest = before_admission_integrity(before_host_pull_integrity(manifest))
+    # Bind actual captured bytes independently of the historical parent proof.
+    # Both views start from this same exact-dict snapshot; normalization never
+    # substitutes predecessor bytes for the source captured by the Go component.
+    if type(manifest) is not dict:
+        raise ValueError("native admission integrity manifest invalid")
+    actual_manifest = dict(manifest)
+    manifest = before_admission_integrity(before_host_pull_integrity(before_sparse_index_advice(actual_manifest)))
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -391,15 +466,17 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         for name in GO_POST_FAILURE_ADDITIONS:
             del historical["ext/" + name]
     for name, original in GO_BASE_DEPENDENCIES.items():
-        if manifest["ext/" + name] != dependency_hashes[name]:
+        if actual_manifest["ext/" + name] != dependency_hashes[name]:
             raise ValueError("native Go base differs from captured application dependency")
         historical["ext/" + name] = original
     if manifest["ext/pick.py"] not in {
             GO_BASE_PICKER_SHA256, GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]}:
         raise ValueError("native Go base picker is not the exact composed source")
     historical["ext/pick.py"] = GO_BASE_PICKER_SHA256
+    # The new advice epoch was already qualified against its full107 parent.
+    # Historical validation still recognizes exactly its original710 endpoint.
     if manifest["ext/remote_sub_exec.py"] not in {
-            GO_BASE_EXECUTOR_SHA256, GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]}:
+            GO_BASE_EXECUTOR_SHA256, SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE}:
         raise ValueError("native Go executor is not the exact composed source")
     historical["ext/remote_sub_exec.py"] = GO_BASE_EXECUTOR_SHA256
     for name, original in GO_SELECTION_SUPPORT_PREIMAGES.items():
@@ -682,7 +759,7 @@ def main():
                     or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
                 raise ValueError('qualified pure YAML member differs')
     # Qualify the complete repair cohort even when no APPLICATION pair is added.
-    before_admission_integrity(before_host_pull_integrity(manifest))
+    before_admission_integrity(before_host_pull_integrity(before_sparse_index_advice(manifest)))
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)

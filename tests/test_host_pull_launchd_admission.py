@@ -22,7 +22,7 @@ MANIFEST_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-manife
 INVENTORY_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-source-inventory.json"
 HOST_PULL_SHA = "464d9a5522a61311d5e8c2b7495a6297c86300d611903ad56524d4aa2e574e72"
 HOST_PULL_PREIMAGE = "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad"
-MANIFEST_SHA256 = "d8e17896581fcf5568157cae6dfb71b502cd5029364586f123240b5f05b8b7f1"
+MANIFEST_SHA256 = "28e4c5049a99f28cbb43459ad07e9b2b5bad8a28a3ff0228c15a84360fc16d1f"
 PROGRAM_ARGUMENTS = [
     "/usr/bin/lockf", "-t", "0", "__LOCK__", "/bin/bash", "__HOST_PULL__",
     "__COLLECTOR_OPTION__",
@@ -102,6 +102,16 @@ def test_template_program_arguments_are_immutable():
     assert "ADMITTED_TEMPLATE_SHA256" not in text
 
 
+def test_manifest_pin_rejects_byte_drift(monkeypatch):
+    original = Path.read_bytes
+    def drift(path):
+        raw = original(path)
+        return raw + b"\n" if path == MANIFEST_PATH else raw
+    monkeypatch.setattr(Path, "read_bytes", drift)
+    with pytest.raises(AssertionError):
+        test_manifest_enrolls_the_pair_without_an_installed_preimage()
+
+
 def test_manifest_enrolls_the_pair_without_an_installed_preimage():
     assert hashlib.sha256(MANIFEST_PATH.read_bytes()).hexdigest() == MANIFEST_SHA256
     manifest = json.loads(MANIFEST_PATH.read_text())
@@ -160,7 +170,9 @@ def host_pull_history(request):
 
 
 def _host_pull_cohort(history):
-    successor = json.loads(MANIFEST_PATH.read_text())
+    # Authenticate advice/Broker inverses before selecting either exact history.
+    successor = BUILDER.before_qualification_quiescence(
+        BUILDER.before_sparse_index_advice(json.loads(MANIFEST_PATH.read_text())))
     successor["ext/current_source_observation.py"] = history[0]
     predecessor = dict(successor)
     predecessor.update(BUILDER.HOST_PULL_INTEGRITY_PREIMAGES)
@@ -194,7 +206,12 @@ def test_host_pull_successor_reaches_existing_validation_without_relabeling(host
     assert hashlib.sha256(
         (json.dumps(historical, sort_keys=True, indent=2) + "\n").encode()
     ).hexdigest() == host_pull_history[2]
-    BUILDER.validate_go_base_manifest(successor, _go_dependency_bytes())
+    historical_capture = {name: successor['ext/' + name]
+                          for name in BUILDER.GO_APPLICATION_DEPENDENCIES}
+    BUILDER.validate_go_base_manifest(successor, historical_capture)
+    # Current Broker bytes cannot be relabelled as this historical capture.
+    with pytest.raises(ValueError, match="differs from captured application dependency"):
+        BUILDER.validate_go_base_manifest(successor, _go_dependency_bytes())
     assert successor == original
 
 
@@ -204,7 +221,12 @@ def test_host_pull_predecessor_keeps_its_existing_validation_path(host_pull_hist
     normalized = BUILDER.before_host_pull_integrity(predecessor)
     assert normalized == predecessor
     assert normalized is not predecessor
-    BUILDER.validate_go_base_manifest(predecessor, _go_dependency_bytes())
+    historical_capture = {name: predecessor['ext/' + name]
+                          for name in BUILDER.GO_APPLICATION_DEPENDENCIES}
+    BUILDER.validate_go_base_manifest(predecessor, historical_capture)
+    # Current Broker bytes cannot be relabelled as this historical capture.
+    with pytest.raises(ValueError, match="differs from captured application dependency"):
+        BUILDER.validate_go_base_manifest(predecessor, _go_dependency_bytes())
     assert predecessor == original
 
 
