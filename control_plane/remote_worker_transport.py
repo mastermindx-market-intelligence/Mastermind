@@ -89,6 +89,11 @@ _SECRETARY_NATIVE_TARGET_KEYS = frozenset({
 })
 
 
+REMOTE_HERMES_META_REQUEST_SCHEMA = "mastermind.remote_hermes_meta_request/v1"
+REMOTE_HERMES_META_RESPONSE_SCHEMA = "mastermind.remote_hermes_meta_response/v1"
+_META_NATIVE_RESULT_SCHEMA = "mastermind.hermes_meta_native_control/v1"
+
+
 class TransportValidationError(ValueError):
     """A closed transport contract or local binding was invalid."""
 
@@ -555,10 +560,22 @@ def _validate_secretary_pins(host_binding_sha256: Any, implementation_sha: Any) 
         raise TransportValidationError("secretary source pins are invalid") from None
 
 
-def validate_secretary_request(value: Any) -> dict[str, Any]:
+def _conversation_schemas(role: str) -> tuple[str, str, str]:
+    # Selected by an installed constructor, never by an optional request field.
+    if type(role) is str and role == "mmsecretary":
+        return (REMOTE_HERMES_SECRETARY_REQUEST_SCHEMA,
+                REMOTE_HERMES_SECRETARY_RESPONSE_SCHEMA, _SECRETARY_NATIVE_RESULT_SCHEMA)
+    if type(role) is str and role == "mmmeta":
+        return (REMOTE_HERMES_META_REQUEST_SCHEMA,
+                REMOTE_HERMES_META_RESPONSE_SCHEMA, _META_NATIVE_RESULT_SCHEMA)
+    raise TransportValidationError("native conversation role is invalid")
+
+
+def _validate_conversation_request(value: Any, *, role: str) -> dict[str, Any]:
+    request_schema, _, _ = _conversation_schemas(role)
     if type(value) is not dict or set(value) != _SECRETARY_REQUEST_KEYS:
         raise TransportValidationError("secretary request shape is invalid")
-    if value["schema"] != REMOTE_HERMES_SECRETARY_REQUEST_SCHEMA:
+    if value["schema"] != request_schema:
         raise TransportValidationError("secretary request schema is invalid")
     validate_host_ref(value["host_ref"])
     validate_secretary_root_id(value["root_id"])
@@ -574,16 +591,17 @@ def validate_secretary_request(value: Any) -> dict[str, Any]:
     return dict(value)
 
 
-def build_secretary_request(
+def _build_conversation_request(
     host_ref: str,
     root_id: str,
     host_binding_sha256: str,
     implementation_sha: str,
-    request: Mapping[str, Any],
+    request: Mapping[str, Any], *, role: str,
 ) -> dict[str, Any]:
-    """Bind one closed native Secretary request to its authenticated host."""
+    """Bind one closed native conversation to its authenticated host."""
+    request_schema, _, _ = _conversation_schemas(role)
     value: dict[str, Any] = {
-        "schema": REMOTE_HERMES_SECRETARY_REQUEST_SCHEMA,
+        "schema": request_schema,
         "host_ref": validate_host_ref(host_ref),
         "root_id": validate_secretary_root_id(root_id),
         "host_binding_sha256": host_binding_sha256,
@@ -592,10 +610,10 @@ def build_secretary_request(
     }
     _validate_secretary_pins(value["host_binding_sha256"], value["implementation_sha"])
     value["request_sha256"] = request_sha256(value)
-    return validate_secretary_request(value)
+    return _validate_conversation_request(value, role=role)
 
 
-def decode_secretary_request(raw: bytes) -> dict[str, Any]:
+def _decode_conversation_request(raw: bytes, *, role: str) -> dict[str, Any]:
     """Strictly decode a bounded Secretary request frame."""
     if type(raw) is not bytes or len(raw) > MAX_SECRETARY_REQUEST_BYTES:
         raise TransportValidationError("secretary request exceeds transport ceiling")
@@ -605,11 +623,12 @@ def decode_secretary_request(raw: bytes) -> dict[str, Any]:
         raise TransportValidationError("secretary request JSON is invalid") from None
     if type(value) is not dict:
         raise TransportValidationError("secretary request JSON is invalid")
-    return validate_secretary_request(value)
+    return _validate_conversation_request(value, role=role)
 
 
-def validate_secretary_result(value: Any, *, outcome: str) -> dict[str, Any]:
-    """Validate the strict bounded result carried by one Secretary response."""
+def _validate_conversation_result(value: Any, *, outcome: str, role: str) -> dict[str, Any]:
+    """Validate the strict bounded result from the selected native owner."""
+    _, _, native_schema = _conversation_schemas(role)
     if type(value) is not dict:
         raise TransportValidationError("secretary result is invalid")
     if outcome == "refused":
@@ -625,18 +644,19 @@ def validate_secretary_result(value: Any, *, outcome: str) -> dict[str, Any]:
         raise TransportValidationError("secretary response outcome is invalid")
     # The actual native-control result, including its own refusal and unknown
     # states, is preserved exactly as the native owner produced it.
-    if value.get("schema") != _SECRETARY_NATIVE_RESULT_SCHEMA:
+    if value.get("schema") != native_schema:
         raise TransportValidationError("secretary result is invalid")
     if value.get("status") not in _SECRETARY_NATIVE_RESULT_STATUSES:
         raise TransportValidationError("secretary result is invalid")
     return dict(value)
 
 
-def validate_secretary_response(value: Any, request: Mapping[str, Any]) -> dict[str, Any]:
-    bound = validate_secretary_request(request)
+def _validate_conversation_response(value: Any, request: Mapping[str, Any], *, role: str) -> dict[str, Any]:
+    _, response_schema, _ = _conversation_schemas(role)
+    bound = _validate_conversation_request(request, role=role)
     if type(value) is not dict or set(value) != _SECRETARY_RESPONSE_KEYS:
         raise TransportValidationError("secretary response shape is invalid")
-    if value["schema"] != REMOTE_HERMES_SECRETARY_RESPONSE_SCHEMA:
+    if value["schema"] != response_schema:
         raise TransportValidationError("secretary response schema is invalid")
     for key in (
         "host_ref", "root_id", "host_binding_sha256",
@@ -648,33 +668,34 @@ def validate_secretary_response(value: Any, request: Mapping[str, Any]) -> dict[
             )
     if value["outcome"] not in _SECRETARY_OUTCOMES:
         raise TransportValidationError("secretary response outcome is invalid")
-    validate_secretary_result(value["result"], outcome=value["outcome"])
+    _validate_conversation_result(value["result"], outcome=value["outcome"], role=role)
     if len(_canonical_bytes(value)) > MAX_SECRETARY_RESPONSE_BYTES:
         raise TransportValidationError("secretary response exceeds transport ceiling")
     return dict(value)
 
 
-def build_secretary_response(
-    request: Mapping[str, Any], *, outcome: str, result: Mapping[str, Any]
+def _build_conversation_response(
+    request: Mapping[str, Any], *, outcome: str, result: Mapping[str, Any], role: str
 ) -> dict[str, Any]:
     """Echo one request's bound identity with its closed result."""
-    bound = validate_secretary_request(request)
+    _, response_schema, _ = _conversation_schemas(role)
+    bound = _validate_conversation_request(request, role=role)
     if outcome not in _SECRETARY_OUTCOMES:
         raise TransportValidationError("secretary response outcome is invalid")
     value: dict[str, Any] = {
-        "schema": REMOTE_HERMES_SECRETARY_RESPONSE_SCHEMA,
+        "schema": response_schema,
         "host_ref": bound["host_ref"],
         "root_id": bound["root_id"],
         "host_binding_sha256": bound["host_binding_sha256"],
         "implementation_sha": bound["implementation_sha"],
         "request_sha256": bound["request_sha256"],
         "outcome": outcome,
-        "result": validate_secretary_result(result, outcome=outcome),
+        "result": _validate_conversation_result(result, outcome=outcome, role=role),
     }
-    return validate_secretary_response(value, bound)
+    return _validate_conversation_response(value, bound, role=role)
 
 
-def decode_secretary_response(raw: bytes, request: Mapping[str, Any]) -> dict[str, Any]:
+def _decode_conversation_response(raw: bytes, request: Mapping[str, Any], *, role: str) -> dict[str, Any]:
     """Strictly decode a bounded Secretary response frame against its request."""
     if type(raw) is not bytes or len(raw) > MAX_SECRETARY_RESPONSE_BYTES:
         raise TransportValidationError("secretary response exceeds transport ceiling")
@@ -684,4 +705,74 @@ def decode_secretary_response(raw: bytes, request: Mapping[str, Any]) -> dict[st
         raise TransportValidationError("secretary response JSON is invalid") from None
     if type(value) is not dict:
         raise TransportValidationError("secretary response JSON is invalid")
-    return validate_secretary_response(value, request)
+    return _validate_conversation_response(value, request, role=role)
+
+
+
+def validate_secretary_request(value: Any) -> dict[str, Any]:
+    return _validate_conversation_request(value, role="mmsecretary")
+
+
+def build_secretary_request(
+    host_ref: str, root_id: str, host_binding_sha256: str,
+    implementation_sha: str, request: Mapping[str, Any],
+) -> dict[str, Any]:
+    return _build_conversation_request(
+        host_ref, root_id, host_binding_sha256, implementation_sha, request, role="mmsecretary")
+
+
+def decode_secretary_request(raw: bytes) -> dict[str, Any]:
+    return _decode_conversation_request(raw, role="mmsecretary")
+
+
+def validate_secretary_result(value: Any, *, outcome: str) -> dict[str, Any]:
+    return _validate_conversation_result(value, outcome=outcome, role="mmsecretary")
+
+
+def validate_secretary_response(value: Any, request: Mapping[str, Any]) -> dict[str, Any]:
+    return _validate_conversation_response(value, request, role="mmsecretary")
+
+
+def build_secretary_response(
+    request: Mapping[str, Any], *, outcome: str, result: Mapping[str, Any],
+) -> dict[str, Any]:
+    return _build_conversation_response(request, outcome=outcome, result=result, role="mmsecretary")
+
+
+def decode_secretary_response(raw: bytes, request: Mapping[str, Any]) -> dict[str, Any]:
+    return _decode_conversation_response(raw, request, role="mmsecretary")
+
+
+
+def validate_meta_request(value: Any) -> dict[str, Any]:
+    return _validate_conversation_request(value, role="mmmeta")
+
+
+def build_meta_request(
+    host_ref: str, root_id: str, host_binding_sha256: str,
+    implementation_sha: str, request: Mapping[str, Any],
+) -> dict[str, Any]:
+    return _build_conversation_request(
+        host_ref, root_id, host_binding_sha256, implementation_sha, request, role="mmmeta")
+
+
+def decode_meta_request(raw: bytes) -> dict[str, Any]:
+    return _decode_conversation_request(raw, role="mmmeta")
+
+
+def validate_meta_result(value: Any, *, outcome: str) -> dict[str, Any]:
+    return _validate_conversation_result(value, outcome=outcome, role="mmmeta")
+
+
+def validate_meta_response(value: Any, request: Mapping[str, Any]) -> dict[str, Any]:
+    return _validate_conversation_response(value, request, role="mmmeta")
+
+
+def build_meta_response(
+    request: Mapping[str, Any], *, outcome: str, result: Mapping[str, Any],
+) -> dict[str, Any]:
+    return _build_conversation_response(request, outcome=outcome, result=result, role="mmmeta")
+
+
+def decode_meta_response(raw: bytes, request: Mapping[str, Any]) -> dict[str, Any]:
+    return _decode_conversation_response(raw, request, role="mmmeta")

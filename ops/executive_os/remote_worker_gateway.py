@@ -18,8 +18,9 @@ from typing import Any, Mapping
 from control_plane.executive_worker_broker import WorkerBrokerClient
 from control_plane.remote_worker_transport import (
     REMOTE_BROKER_RESPONSE_SCHEMA,
-    REMOTE_HERMES_SECRETARY_REQUEST_SCHEMA, MAX_SECRETARY_RESPONSE_BYTES,
-    build_secretary_response, decode_secretary_request,
+    REMOTE_HERMES_SECRETARY_REQUEST_SCHEMA, REMOTE_HERMES_META_REQUEST_SCHEMA,
+    MAX_SECRETARY_RESPONSE_BYTES,
+    build_secretary_response, decode_secretary_request, build_meta_response, decode_meta_request,
     TransportEffect, TransportError,
     TransportValidationError,
     encode_frame,
@@ -35,7 +36,7 @@ from ops.executive_os.remote_worker_gateway_config import (
     FABRIC_BROKER_TARGET,
     GatewayConfig,
     HostObservationGatewayConfig,
-    HermesSecretaryGatewayConfig,
+    HermesSecretaryGatewayConfig, HermesConversationGatewayConfig,
     RemoteWorkerGatewayConfig,
 )
 from ops.executive_os.remote_assignment_control import seal_original_assignment
@@ -46,12 +47,14 @@ class RemoteWorkerGateway:
 
     def __init__(self, config: GatewayConfig) -> None:
         if type(config) not in (RemoteWorkerGatewayConfig, HostObservationGatewayConfig,
-                                HermesSecretaryGatewayConfig):
+                                HermesSecretaryGatewayConfig, HermesConversationGatewayConfig):
             raise TypeError("config must be a closed gateway profile")
         self.config = config
         self._host_observer = None
         self._secretary_forwarder = None
         self._secretary_host_binding_sha256 = None
+        self._meta_forwarder = None
+        self._meta_host_binding_sha256 = None
         self._broker_client = None
         self.broker_call = self._call_broker
         self._ssl_context = self._build_server_ssl_context()
@@ -126,8 +129,8 @@ class RemoteWorkerGateway:
     ) -> None:
         host_read = False
         host_response_sent = False
-        secretary_call = False
-        secretary_response_sent = False
+        conversation_call = False
+        conversation_response_sent = False
         started = asyncio.get_running_loop().time()
         try:
             if not self._peer_is_expected_control(writer):
@@ -146,15 +149,19 @@ class RemoteWorkerGateway:
             if not isinstance(document, dict):
                 return
 
-            if document.get("schema") == REMOTE_HERMES_SECRETARY_REQUEST_SCHEMA:
-                secretary_call = True
+            if document.get("schema") in (REMOTE_HERMES_SECRETARY_REQUEST_SCHEMA,
+                                           REMOTE_HERMES_META_REQUEST_SCHEMA):
+                conversation_call = True
+                is_meta = document["schema"] == REMOTE_HERMES_META_REQUEST_SCHEMA
+                decode = decode_meta_request if is_meta else decode_secretary_request
+                dispatch = self._meta_request if is_meta else self._secretary_request
                 try:
-                    request = decode_secretary_request(raw)
+                    request = decode(raw)
                     deadline = started + min(10.0, float(self.config.request_timeout_seconds))
                     if asyncio.get_running_loop().time() >= deadline:
                         return
                     async with asyncio.timeout_at(deadline):
-                        response = await self._secretary_request(request, deadline=deadline)
+                        response = await dispatch(request, deadline=deadline)
                         encoded = self._canonical_response_bytes(response)
                         if len(encoded) > min(MAX_SECRETARY_RESPONSE_BYTES, self.config.max_frame_bytes):
                             return
@@ -162,7 +169,7 @@ class RemoteWorkerGateway:
                             return
                         writer.write(encode_frame(encoded))
                         await writer.drain()
-                        secretary_response_sent = True
+                        conversation_response_sent = True
                 except (asyncio.CancelledError, Exception):
                     # No forged nonexecution receipt after any possible native
                     # write. The original remote client owns reconciliation.
@@ -234,41 +241,61 @@ class RemoteWorkerGateway:
         finally:
             writer.close()
             if ((host_read and not host_response_sent)
-                    or (secretary_call and not secretary_response_sent)):
+                    or (conversation_call and not conversation_response_sent)):
                 with suppress(Exception):
                     transport = getattr(writer, "transport", None)
                     if transport is not None:
                         transport.abort()
-            elif not host_read and not secretary_call:
+            elif not host_read and not conversation_call:
                 with suppress(Exception):
                     await writer.wait_closed()
 
     async def _secretary_request(self, request: Mapping[str, Any], *,
                                  deadline: float) -> dict[str, Any]:
-        """One bound native call; no Worker grammar, retry, or synthetic receipt."""
-        def refused(code):
-            return build_secretary_response(request, outcome="refused", result={"code": code})
+        return await self._conversation_request(request, role="mmsecretary", deadline=deadline)
 
-        if type(self.config) is not HermesSecretaryGatewayConfig:
+    async def _meta_request(self, request: Mapping[str, Any], *,
+                            deadline: float) -> dict[str, Any]:
+        return await self._conversation_request(request, role="mmmeta", deadline=deadline)
+
+    async def _conversation_request(self, request: Mapping[str, Any], *,
+                                    role: str, deadline: float) -> dict[str, Any]:
+        """One bound native call; no Worker grammar, retry, or synthetic receipt."""
+        if role == "mmsecretary":
+            build_response = build_secretary_response
+            allowed = type(self.config) in (HermesSecretaryGatewayConfig, HermesConversationGatewayConfig)
+            binding = self.config.hermes_secretary_conversation if allowed else None
+            forwarder, host_pin = self._secretary_forwarder, self._secretary_host_binding_sha256
+        elif role == "mmmeta":
+            build_response = build_meta_response
+            allowed = type(self.config) is HermesConversationGatewayConfig
+            binding = self.config.hermes_meta_conversation if allowed else None
+            forwarder, host_pin = self._meta_forwarder, self._meta_host_binding_sha256
+        else:
+            raise TransportValidationError("native conversation role is invalid")
+
+        def refused(code):
+            return build_response(request, outcome="refused", result={"code": code})
+
+        if not allowed:
             return refused("PROFILE_UNAVAILABLE")
-        binding = self.config.hermes_secretary_conversation
         inner = request["request"]
         target = inner.get("target") if inner["operation"] == "submit" else inner
         if (request["host_ref"] != self.config.host_ref
                 or request["root_id"] != binding.root_id
                 or request["implementation_sha"] != binding.implementation_sha
-                or request["host_binding_sha256"] != self._secretary_host_binding_sha256
+                or request["host_binding_sha256"] != host_pin
                 or target["session_id"] != binding.session_id):
             return refused("BINDING_CHANGED")
-        if self._secretary_forwarder is None:
+        if forwarder is None:
             return refused("SERVICE_UNAVAILABLE")
         try:
-            result = await self._secretary_forwarder.request(inner, deadline=deadline)
+            result = await forwarder.request(inner, deadline=deadline)
         except TransportError as exc:
             if exc.classification is TransportEffect.NO_EFFECT:
                 return refused("NATIVE_FORWARDING_UNAVAILABLE")
             raise
-        return build_secretary_response(request, outcome="ok", result=result)
+        return build_response(request, outcome="ok", result=result)
 
     async def _observe_host_request(self, request: Mapping[str, Any]) -> dict[str, Any]:
         """One fixed host read; never enter the Worker Broker grammar."""

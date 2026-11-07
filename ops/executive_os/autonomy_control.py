@@ -9105,6 +9105,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         )
         prior_bindings: tuple[Mapping[str, Any], ...] = ()
         prior_transports: tuple[Mapping[str, Any], ...] = ()
+        prior_secretary_conversation = None
+        prior_meta_conversation = None
         prior_raw = b""
         prior_binding_sha256 = ""
         if selector_present:
@@ -9130,7 +9132,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                 prior_raw, _prior_identity = composition._read_pinned(
                     composition._absolute_path(prior_path), prior_digest
                 )
-                # The incumbent v1/v2/v3 parser qualifies the prior binding.
+                # The incumbent closed parser qualifies the complete prior binding.
                 composition._composition(prior_raw)
                 prior_document = composition._document(prior_raw)
             except (composition.FabricCompositionError, OSError, ValueError) as exc:
@@ -9139,6 +9141,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                 ) from exc
             prior_bindings = tuple(prior_document.get("bindings") or ())
             prior_transports = tuple(prior_document.get("remote_transports") or ())
+            prior_secretary_conversation = prior_document.get("hermes_secretary_conversation")
+            prior_meta_conversation = prior_document.get("hermes_meta_conversation")
             prior_binding_sha256 = sha256_bytes(prior_raw)
             if "canonical_paid_fabric" in control and (
                 prior_bindings or prior_transports
@@ -9154,6 +9158,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             input_document=input_document,
             prior_bindings=prior_bindings,
             prior_remote_transports=prior_transports,
+            prior_secretary_conversation=prior_secretary_conversation,
+            prior_meta_conversation=prior_meta_conversation,
         )
         try:
             # Use the actual consumer's byte ceiling before the transaction
@@ -9163,7 +9169,7 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                 raise composition.FabricCompositionError(
                     "Composed Fabric binding exceeds the consumer byte limit"
                 )
-            # The composed document is proved loadable by the incumbent v3
+            # The composed document is proved loadable by the incumbent
             # parser: the Control's own loader will read exactly these bytes.
             composition._composition(composed)
         except composition.FabricCompositionError as exc:
@@ -9189,6 +9195,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             "input_sha256": input_sha256,
             "prior_bindings": prior_bindings,
             "prior_remote_transports": prior_transports,
+            "prior_secretary_conversation": prior_secretary_conversation,
+            "prior_meta_conversation": prior_meta_conversation,
             "prior_raw": prior_raw,
             "prior_binding_sha256": prior_binding_sha256,
             "prior_selector_present": selector_present,
@@ -9332,6 +9340,8 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
                     input_document=binding["input_document"],
                     prior_bindings=binding["prior_bindings"],
                     prior_remote_transports=binding["prior_remote_transports"],
+                    prior_secretary_conversation=binding["prior_secretary_conversation"],
+                    prior_meta_conversation=binding["prior_meta_conversation"],
                     input_sha256=binding["input_sha256"],
                     prior_binding_sha256=binding["prior_binding_sha256"],
                     prior_selector_present=binding["prior_selector_present"],
@@ -10633,11 +10643,15 @@ def _reconcile_control_component_update(
                 or sha256_bytes(candidate_raw) != member["candidate_sha256"]
             ):
                 raise TransactionEffectUnknown()
+            candidate_document = composition._document(candidate_raw)
+            if type(candidate_document) is not dict:
+                raise TransactionEffectUnknown()
             input_document = composition._document(input_raw)
             if type(input_document) is not dict:
                 raise composition.FabricCompositionError(
                     "Hermes host observation differs from its closed schema"
                 )
+            prior_document = {}
             if member["prior_selector_present"]:
                 if not prior_raw or sha256_bytes(prior_raw) != member["prior_binding_sha256"]:
                     raise TransactionEffectUnknown()
@@ -10653,10 +10667,35 @@ def _reconcile_control_component_update(
                     raise TransactionEffectUnknown()
                 prior_bindings = ()
                 prior_transports = ()
+            # The original sealed candidate identifies its composition policy.
+            # Historical v3 transactions retain their original bytes even when
+            # an older writer omitted a prior conversation. New v4/v5 candidates
+            # preserve the complete matching prior family; never reinterpret a
+            # claimed transaction from fresh installed selections.
+            prior_secretary_conversation = None
+            prior_meta_conversation = None
+            candidate_schema = candidate_document.get("schema_version")
+            if candidate_schema in (
+                composition.SECRETARY_CONFIG_SCHEMA_VERSION,
+                composition.CONVERSATION_CONFIG_SCHEMA_VERSION,
+            ):
+                if prior_document.get("schema_version") != candidate_schema:
+                    raise TransactionEffectUnknown()
+                prior_secretary_conversation = prior_document.get("hermes_secretary_conversation")
+                if type(prior_secretary_conversation) is not dict:
+                    raise TransactionEffectUnknown()
+                if candidate_schema == composition.CONVERSATION_CONFIG_SCHEMA_VERSION:
+                    prior_meta_conversation = prior_document.get("hermes_meta_conversation")
+                    if type(prior_meta_conversation) is not dict:
+                        raise TransactionEffectUnknown()
+            elif candidate_schema != composition.HOST_READ_CONFIG_SCHEMA_VERSION:
+                raise TransactionEffectUnknown()
             binding_payload = compiler.compose_binding_candidate(
                 input_document=input_document,
                 prior_bindings=prior_bindings,
                 prior_remote_transports=prior_transports,
+                prior_secretary_conversation=prior_secretary_conversation,
+                prior_meta_conversation=prior_meta_conversation,
             )
         except (composition.FabricCompositionError, KeyError, OSError, ValueError) as exc:
             raise TransactionEffectUnknown() from exc
@@ -10673,6 +10712,8 @@ def _reconcile_control_component_update(
             input_document=input_document,
             prior_bindings=prior_bindings,
             prior_remote_transports=prior_transports,
+            prior_secretary_conversation=prior_secretary_conversation,
+            prior_meta_conversation=prior_meta_conversation,
             input_sha256=str(member["input_sha256"]),
             prior_binding_sha256=str(member["prior_binding_sha256"]),
             prior_selector_present=bool(member["prior_selector_present"]),

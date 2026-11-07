@@ -365,8 +365,9 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
         return CanonicalReplyCoordinator(reply_writer=writer, attention_waker=attention)
 
     async def targets(principal, kind):
-        if kind == "hermes_secretary":
-            return await returns.hermes_targets(principal)
+        from control_plane.native_continuation import HERMES_KINDS
+        if kind in HERMES_KINDS:
+            return await returns.hermes_targets(principal, kind=kind)
         # The omitted kind preserves the existing legacy inventory. Native
         # Secretary discovery requires the caller's explicit closed selection.
         values = await _maybe(reader(kind))
@@ -375,7 +376,8 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
         return values
 
     async def send(principal, arguments):
-        if arguments["target_ref"].startswith("hermes_secretary:"):
+        from control_plane.native_continuation import HERMES_TARGET_PREFIXES
+        if arguments["target_ref"].startswith(HERMES_TARGET_PREFIXES):
             return await returns.send_hermes(principal, arguments)
         committed = await returns.reconcile_existing_send(principal, arguments)
         read_ref = returns.bind_request(principal, arguments)
@@ -394,13 +396,13 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
         return {**result, "read_ref": read_ref}
 
     async def read_reply(principal, arguments):
-        from control_plane.native_continuation import HERMES_REQUEST_SCHEMA
+        from control_plane.native_continuation import HERMES_REQUEST_SCHEMAS
         read_ref = arguments.get("read_ref")
         if read_ref is None:
             read_ref = returns.resolve_operation_read_ref(
                 principal=principal, operation_key=arguments["operation_key"])
         if returns.original_request_schema(
-                principal=principal, read_ref=read_ref) == HERMES_REQUEST_SCHEMA:
+                principal=principal, read_ref=read_ref) in HERMES_REQUEST_SCHEMAS:
             return await returns.read_hermes(principal, read_ref)
         return await reply_reader(principal, arguments)
 

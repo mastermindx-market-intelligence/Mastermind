@@ -8,6 +8,23 @@ from tests.executive_identity_review import reviewed_literal_spans
 from tests.test_executive_a2_identity_review import scan
 
 
+def test_preview_block_unit_pin_exposes_even_nonidentity_byte_drift():
+    from tests.test_ceo_submit_armed_composition import (
+        _d8_frozen_source_diff, _scan_added_identity_diff,
+    )
+    path = 'ops/fleet_storage_cleanup/linux_cache_preview.py'
+    text = (Path(__file__).parents[1] / path).read_text()
+    assert reviewed_literal_spans(path, text) == ((204, 43, 46, 'int'),)
+    assert _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, text), source_postimages={path: text},
+    ) == []
+    changed = text + '\n# unrelated byte drift\n'
+    assert reviewed_literal_spans(path, changed) == ()
+    assert _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, changed), source_postimages={path: changed},
+    ) == ['512']
+
+
 @pytest.mark.parametrize('path', tuple(REVIEWED_FILES))
 def test_only_exact_reviewed_file_and_spelling_qualifies(path):
     text = (Path(__file__).parents[1]/path).read_text()

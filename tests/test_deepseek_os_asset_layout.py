@@ -105,9 +105,10 @@ def test_actual_manifest_and_public_edge_accept_exact_layouts(tmp_path, names):
     assert "path /os/executive/context /os/executive/submit /os/executive/status" in config
     assert ("path /workspace/source-operation/prepare /workspace/source-operation/submit"
             " /workspace/source-operation/reconcile /workspace/source-operation/advance\n") in config
-    assert "path /.well-known/oauth-protected-resource/mcp\n" in config
-    assert "path /mcp\n" in config
-    assert config.count("/mcp") == 2
+    assert ("path /.well-known/oauth-protected-resource/mcp"
+            " /.well-known/oauth-protected-resource/mcp/coo\n") in config
+    assert "path /mcp /mcp/coo\n" in config
+    assert config.count("/mcp") == 4
     assert config.count("max_size 98304") == 1
     assert config.count("max_size 64KB") == 2
     assert config.count("header_up Host mcp.mastermind-x.com") == 4

@@ -358,6 +358,13 @@ def _validate_envelope(raw: Any, binding: NativeDelegateBinding) -> dict[str, An
         if value is not None and (not isinstance(value, str) or len(value) > 256):
             return None
         projected[field] = value
+    if "result_capsule" in body:
+        from control_plane.executive_terminal_return import validate_selected_child_result_capsule
+        try:
+            projected["result_capsule"] = validate_selected_child_result_capsule(
+                body["result_capsule"], observation=dict(body))
+        except (ValueError, TypeError, KeyError):
+            return None
     return projected
 
 
@@ -437,6 +444,15 @@ def native_delegate_handler(binding: NativeDelegateBinding) -> Callable[..., str
 
         envelope = _validate_envelope(raw, binding)
         if envelope is None:
+            if action == "selected_child_submit":
+                return _dump(_uncertain(
+                    "EFFECT_UNKNOWN", "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN", binding))
+            return _dump(_uncertain(
+                "UNAVAILABLE", "EXECUTIVE_SELECTED_CHILD_UNAVAILABLE", binding))
+        # A synchronous RPC can still cross a native connection/authority change.
+        # Re-prove the original caller before exposing any result text.
+        if (_caller_lineage_refusal(binding, session_id, task_id) is not None
+                or not _binding_is_current(binding)):
             if action == "selected_child_submit":
                 return _dump(_uncertain(
                     "EFFECT_UNKNOWN", "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN", binding))

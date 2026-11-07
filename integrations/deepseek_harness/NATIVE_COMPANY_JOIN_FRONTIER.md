@@ -141,6 +141,23 @@ reclassified as human gates. No production deployment, provider reply or final
 acceptance is claimed here.
 
 PR #2175 retains its `os_assets.py` writer. PR #1870 retains its separate smoke
-handoff. This source slice does not write either lane. The0f01 attended-build
-record continues to describe its exact old staged bytes until an actual new
-package earns its own matching qualification.
+handoff. This source slice does not write either lane.
+
+## Qualified attended package
+
+The new isolated package was built from published source
+`6d40c628678ebb086d67677511eb8c4ee4588f3c`. Process 65046 exited 0 after all seven
+native build gates and 325 client artifacts. Its 116,148 file/link entries passed
+the complete original launcher `--check-only` in process 89520, exit 0. A separate
+import of the packaged executive-read-port succeeded using the original native
+scope dependency; no app, service or provider was started.
+
+- Package manifest: `1e2248382dcd64e5c7b19eae709d0be8ee57e7525d3cd208290b52146b4357b5`.
+- Build log: `72d3bdb2ff25960aa481fb88c650b8d6342fc8dc0d33f480b51d691058f84bdf`.
+- Complete check log: `c5737b3e340f6f58a74492b79f9b93387c2cb40c26fa043d45d1c78cd9f6e314`.
+- Host import log: `b2ecd7b89e37af84a35976611a6cf772e42c6e6a621ef7f20c103cade5a71593`.
+
+`attended-build.json` now records these actual new staged bytes and both host
+exports. The older package remains its original snapshot. Protected-source
+acceptance, publication export, installation and the production journeys above
+remain distinct gates.

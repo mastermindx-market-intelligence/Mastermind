@@ -123,7 +123,7 @@ import {
 import {
   EXECUTIVE_SESSION_TARGET_KINDS,
   type ExecutiveSessionTargetKind,
-  type HermesSecretaryPublicResult,
+  type HermesNativePublicResult,
   type QualifiedSessionAnswerValue,
 } from "./orchestration/executive-session-command-port";
 import {
@@ -1732,7 +1732,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     generation: string;
     selectionSeq: number;
     targetKind: ExecutiveSessionTargetKind;
-    result: HermesSecretaryPublicResult;
+    result: HermesNativePublicResult;
   } | null>(null);
   // The session selection the host is asked to qualify. The closed target
   // kind travels with it; a kind change is a different selection.
@@ -1998,17 +1998,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     // The validated native public result is captured as ephemeral presentation
     // state under the existing owner, auth and selection fences. It is never
     // a durable answer, a pointer or a consumption record.
-    const captureNative = (result: HermesSecretaryPublicResult | null) => {
-      if (!result) return;
-      const live = completeExecutiveSessionBinding(
-        window.MastermindMissionHost?.sessionCommandBinding,
-      );
-      const liveCtx = live ? readSessionOwnerContext(live) : null;
-      if (!live || !liveCtx) return;
-      if (!ownsSession(live, liveCtx, selectionSeq.current)) return;
+    const captureNative = (result: HermesNativePublicResult | null) => {
+      if (!result || !ownsSession(binding, ctx, sequence) ||
+          !answerView.isCurrent(identity)) return;
+      // A late phase belongs only to the controller that requested it.
+      // Replacing the live host must not retag an old result to its new owner.
       setSessionNative({
-        binding: live, principalScope: liveCtx.principalScope,
-        generation: liveCtx.generation, selectionSeq: selectionSeq.current,
+        binding, principalScope: ctx.principalScope,
+        generation: ctx.generation, selectionSeq: sequence,
         targetKind: sessionTargetKind, result,
       });
     };
