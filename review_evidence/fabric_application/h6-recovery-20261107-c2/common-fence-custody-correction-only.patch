@@ -1,0 +1,133 @@
+--- a/ext/quota_remote.py
++++ b/ext/quota_remote.py
+@@ -1181,6 +1181,8 @@
+     """One bounded, read-only H2 observation from the incumbent cache owner.
+ 
+     This function never refreshes, resolves credentials or accepts a caller path.
++    The caller holds the existing physical admission scope. Reuse its source
++    owner read-only; never retain an import-time resolved cache target.
+     A digest binds the retained bytes; it is not a grant or provider attestation.
+     """
+     import hashlib
+@@ -1198,7 +1200,9 @@
+     def invalid_constant(value):
+         raise ValueError("invalid_capacity_number")
+ 
+-    fd = os.open(CACHE_PATH, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
++    import support_bundle
++    cache_path = support_bundle._source_state_owner(Path(HERE)) / "quota_cache.json"
++    fd = os.open(cache_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+     with os.fdopen(fd, "rb") as source:
+         before = os.fstat(source.fileno())
+         if not stat.S_ISREG(before.st_mode) or before.st_size > 4 * 1024 * 1024:
+--- a/rollout/native_install.py
++++ b/rollout/native_install.py
+@@ -2265,7 +2265,7 @@
+     raise ValueError("service target preimage or original effect differs")
+ 
+ 
+-def _publish_service_target(entry, path, raw, before, progress, prepared, plan_digest, mode):
++def _publish_service_target(entry, path, raw, before, progress, prepared, plan_digest, mode, *, admission_check):
+     """Prepare/commit inode custody before one same-directory atomic rename."""
+     stage = path.parent / (".application-service-" + plan_digest + "." + path.name)
+     if os.path.lexists(prepared):
+@@ -2276,10 +2276,12 @@
+     else:
+         if os.path.lexists(stage):
+             raise ValueError("service publication stage lacks its original commitment")
++        admission_check()
+         generation.atomic_bytes(stage, raw, mode)
+         observed, identity = _service_snapshot(entry, stage, mode=mode)
+         if observed != raw:
+             raise ValueError("service publication stage readback differs")
++        admission_check()
+         _record_once(prepared, {"plan_digest": plan_digest, "target": str(path),
+             "stage": str(stage), "sha256": generation.digest(raw), "identity": identity})
+     state, _ = _service_target(entry, path, raw, before, progress, prepared, plan_digest)
+@@ -2287,6 +2289,7 @@
+         raise ValueError("service target changed before original rename")
+     if _service_snapshot(entry, stage, mode=mode) != (raw, identity):
+         raise ValueError("service publication stage changed before original rename")
++    admission_check()
+     os.replace(stage, path)
+     generation.fsync_directory(path.parent)
+     state, identity = _service_target(entry, path, raw, before, progress, prepared, plan_digest)
+@@ -2439,6 +2442,7 @@
+                 return raw, identity
+ 
+             def custody(raw, identity, *, intent_started):
++                require_admission()
+                 if (_read_service_plan(bundle) != (bundle, plan, specification, before, after)
+                         or _completed_go_for_service(plan["go_ingress_bundle"])[1] != selection
+                         or _service_owner_identities(entry, startup, profile) != plan["owner_identities"]
+@@ -2456,12 +2460,13 @@
+                     if not publish:
+                         return state, identity
+                     identity = _publish_service_target(entry, path, data, old, progress[name],
+-                        prepared[name], plan["digest"], mode)
++                        prepared[name], plan["digest"], mode, admission_check=require_admission)
+                 elif state == "committed_receipt_missing":
+                     generation.fsync_directory(path.parent)
+                     if _service_target(entry, path, data, old, progress[name], prepared[name],
+                             plan["digest"]) != (state, identity):
+                         raise ValueError("service-set recovered target changed before receipt")
++                require_admission()
+                 _record_once(progress[name], {"sha256": generation.digest(data), "identity": identity})
+                 return "committed", identity
+ 
+@@ -2505,8 +2510,10 @@
+                         entry.validate_application_service_document(startup, payload)
+                         # Commit private custody before replacing working Admin
+                         # enrollment. An uncommitted private write is never adopted.
++                        require_admission()
+                         generation.atomic_bytes(private, generation.canonical(payload) + b"\n", 0o600)
+                         raw, identity = _service_snapshot(entry, private, mode=0o600)
++                        require_admission()
+                         _record_once(private_receipt, {"sha256": generation.digest(raw), "identity": identity})
+                     raw, private_identity = original_private()
+                     if reconcile_only:
+@@ -2649,6 +2656,7 @@
+                         return dict(public, disposition="prepared")
+                     if _service_grant_expiry(specification) <= time.time():
+                         raise ValueError("service grant expired before its original intent")
++                    require_admission()
+                     _record_once(paths["intent"], intent)
+                     # The first intent owns the only credential generation. Any
+                     # interrupted intent without this payload requires reconciliation.
+@@ -2657,8 +2665,10 @@
+                         "ingress_digest": plan["ingress_digest"], "scope": plan["scope"],
+                         "owners": plan["owners"], "credential": secrets.token_urlsafe(48), **projection}
+                     entry.validate_application_service_document(startup, payload)
++                    require_admission()
+                     generation.atomic_bytes(private, generation.canonical(payload) + b"\n", 0o600)
+                     private_raw, private_identity = _service_snapshot(entry, private, mode=0o600)
++                    require_admission()
+                     _record_once(private_receipt, {"sha256": generation.digest(private_raw), "identity": private_identity})
+                 raw, private_identity = _service_snapshot(entry, private, mode=0o600)
+                 if (not os.path.lexists(private_receipt)
+@@ -2698,7 +2708,8 @@
+                         if reconcile_only:
+                             raise ValueError("service target changed during reconciliation")
+                         identity = _publish_service_target(entry, path, data, old, progress[name],
+-                                                           prepared[name], plan["digest"], mode)
++                                                           prepared[name], plan["digest"], mode,
++                                                           admission_check=require_admission)
+                     elif state == "committed_receipt_missing":
+                         # The original rename may have completed before its parent
+                         # fsync. Make that target durable before a bootstrap receipt
+@@ -2707,6 +2718,7 @@
+                         if _service_target(entry, path, data, old, progress[name], prepared[name],
+                                            plan["digest"]) != (state, identity):
+                             raise ValueError("service recovered target changed before receipt")
++                    require_admission()
+                     _record_once(progress[name], {"sha256": generation.digest(data), "identity": identity})
+                 final = {name: _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])[1]
+                          for name, path, data, old, _ in targets}
+@@ -2723,6 +2735,7 @@
+                     receipt.update(application_recipe_digest=specification["grant"]["recipe_digest"],
+                         source_projection_sha256=specification["application_recipe"]["source_projection_sha256"],
+                         provider_profile_identity=plan["owner_identities"]["provider_profile"])
++                require_admission()
+                 _record_once(paths["receipt"], receipt)
+                 return receipt
+ 

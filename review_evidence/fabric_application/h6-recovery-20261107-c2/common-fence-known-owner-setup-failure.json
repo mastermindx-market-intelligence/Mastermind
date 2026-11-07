@@ -1,0 +1,75 @@
+{
+  "root": "/private/tmp/h6-known-owner-proof-lfz__yh4",
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py",
+    "--basetemp",
+    "/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures",
+    "--junitxml",
+    "/private/tmp/h6-known-owner-proof-lfz__yh4/result.xml"
+  ],
+  "rc": 1,
+  "seconds": 2.486,
+  "testcases": 8,
+  "failures": 0,
+  "errors": 8,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_real_claim_blocks_selection_and_quota_until_sqlite_commit",
+      "failure": false,
+      "error": true,
+      "skipped": false
+    },
+    {
+      "name": "test_publication_first_refuses_stale_claim_and_allows_current_source",
+      "failure": false,
+      "error": true,
+      "skipped": false
+    },
+    {
+      "name": "test_worker_and_application_share_last_capacity_across_processes",
+      "failure": false,
+      "error": true,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_owner_document_with_same_mtime_is_read_under_claim_scope",
+      "failure": false,
+      "error": true,
+      "skipped": false
+    },
+    {
+      "name": "test_advisory_status_refresh_releases_broker_before_quota_publication",
+      "failure": false,
+      "error": true,
+      "skipped": false
+    },
+    {
+      "name": "test_original_snapshot_boundary_reproduces_broker_to_admission_inversion",
+      "failure": false,
+      "error": true,
+      "skipped": false
+    },
+    {
+      "name": "test_original_pending_unknown_terminal_and_close_survive_selection_change",
+      "failure": false,
+      "error": true,
+      "skipped": false
+    },
+    {
+      "name": "test_native_owned_loader_refuses_foreign_helper_before_claim",
+      "failure": false,
+      "error": true,
+      "skipped": false
+    }
+  ],
+  "files": {
+    "result.log": "809c0d1a02ab9137d6d2be6e7f3647c93bead603f850be0dc1fb4693f646692f",
+    "result.xml": "070bb1fc03896bda53c668c97a8d5f04b0b7f9b9cb3f155b90bfff28e8d9e325"
+  }
+}

@@ -1,0 +1,537 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="8" failures="0" skipped="0" tests="8" time="2.230" timestamp="2026-11-07T11:50:16.107626-07:00" hostname="m2studio"><testcase classname="test_fenced_native_owners" name="test_real_claim_blocks_selection_and_quota_until_sqlite_commit" time="0.265"><error message="failed on setup with &quot;AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}&#10;  &#10;  Differing items:&#10;  {'phase': 'error'} != {'phase': 'ready'}&#10;  Left contains 2 more items:&#10;  {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}&#10;  Use -v to get more diff&quot;">tmp_path = PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_real_claim_blocks_selecti0')
+
+    @pytest.fixture
+    def native_owner(tmp_path):
+        base = tmp_path.resolve()
+        stable = base / "kit/ext"
+        for relative in ("active", "broker", "lanes", "slots", "state"):
+            (stable / relative).mkdir(parents=True, mode=0o700)
+        (stable.parent / "orch/fabric").mkdir(parents=True, mode=0o700)
+        policy = base / "policy.json"
+        policy.write_text(json.dumps({"routing": {}, "pools": {"grok": {"windows": {"weekly": {}}}}}))
+        S.ensure_policy(policy, stable, hashlib.sha256(policy.read_bytes()).hexdigest())
+        grant = dict(grant_id="fixture-service-grant", purpose="APPLICATION", enabled=True,
+            principal_id="fixture-principal", credential_ref="FIXTURE_APPLICATION_CREDENTIAL",
+            admission_root="service:fixture", caller_hosts=["fixture-host"],
+            workloads=["site_interactive"], pool="go", accounts=["fixture-account"],
+            models=["fixture-model"], route="/v1/chat/completions", stream=False,
+            expires_at=2000, max_turn_seconds=300, max_steps=2,
+            qualification_ref="fixture:offline-owner-concurrency",
+            application_permission_ref="fixture:offline-only")
+        document = {"schema": "mastermind.provider_accounts.v1",
+            "providers": {"go": {"enabled": True,
+                "accounts": [{"name": "fixture-account", "per_account_cap": 1}]}},
+            "application_grants": [grant]}
+        accounts = stable.parent / "orch/fabric/accounts.yaml"
+        accounts.write_text(json.dumps(document))
+        accounts.chmod(0o600)
+        (stable.parent / "orch/fabric/status.json").write_text('{"pools":{}}\n')
+        (stable / "hosts.json").write_text('{"hosts":{}}\n')
+        (stable / "quota_cache.json").write_text("{}\n")
+        names = [name for name in json.loads((ROOT.parent / "preparation.json").read_text())["baseline_hashes"]
+                 if name == "pool" or name.startswith("ext/")]
+        files = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in names}
+        first = G.publish(ROOT, stable, files)
+        store = G.store_path(stable)
+        selected = G.select(store, first.name, None)
+        fixture = dict(base=base, stable=stable, accounts=accounts, document=document,
+                       first=first, store=store, selected=selected, names=names)
+&gt;       assert value(run_owner(fixture, "init")) == {"initialized": True}
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:39: in run_owner
+    child = start_owner(fixture, action, payload, generation=generation)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fixture = {'base': PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_real_claim_blocks_selecti0'), 'stable': P...: 'fixture-service-grant', 'purpose': 'APPLICATION', 'enabled': True, 'principal_id': 'fixture-principal', ...}]}, ...}
+action = 'init', payload = None, generation = None
+
+    def start_owner(fixture, action, payload=None, *, generation=None):
+        child = subprocess.Popen(
+            [sys.executable, "-B", str(WORKER), str(ROOT), str(fixture["store"]),
+             generation or fixture["first"].name, action, json.dumps(payload or {})],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1)
+        try:
+&gt;           assert read_event(child) == {"phase": "ready"}
+E           AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}
+E             
+E             Differing items:
+E             {'phase': 'error'} != {'phase': 'ready'}
+E             Left contains 2 more items:
+E             {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}
+E             Use -v to get more diff
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:32: AssertionError</error></testcase><testcase classname="test_fenced_native_owners" name="test_publication_first_refuses_stale_claim_and_allows_current_source" time="0.247"><error message="failed on setup with &quot;AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}&#10;  &#10;  Differing items:&#10;  {'phase': 'error'} != {'phase': 'ready'}&#10;  Left contains 2 more items:&#10;  {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}&#10;  Use -v to get more diff&quot;">tmp_path = PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_publication_first_refuses0')
+
+    @pytest.fixture
+    def native_owner(tmp_path):
+        base = tmp_path.resolve()
+        stable = base / "kit/ext"
+        for relative in ("active", "broker", "lanes", "slots", "state"):
+            (stable / relative).mkdir(parents=True, mode=0o700)
+        (stable.parent / "orch/fabric").mkdir(parents=True, mode=0o700)
+        policy = base / "policy.json"
+        policy.write_text(json.dumps({"routing": {}, "pools": {"grok": {"windows": {"weekly": {}}}}}))
+        S.ensure_policy(policy, stable, hashlib.sha256(policy.read_bytes()).hexdigest())
+        grant = dict(grant_id="fixture-service-grant", purpose="APPLICATION", enabled=True,
+            principal_id="fixture-principal", credential_ref="FIXTURE_APPLICATION_CREDENTIAL",
+            admission_root="service:fixture", caller_hosts=["fixture-host"],
+            workloads=["site_interactive"], pool="go", accounts=["fixture-account"],
+            models=["fixture-model"], route="/v1/chat/completions", stream=False,
+            expires_at=2000, max_turn_seconds=300, max_steps=2,
+            qualification_ref="fixture:offline-owner-concurrency",
+            application_permission_ref="fixture:offline-only")
+        document = {"schema": "mastermind.provider_accounts.v1",
+            "providers": {"go": {"enabled": True,
+                "accounts": [{"name": "fixture-account", "per_account_cap": 1}]}},
+            "application_grants": [grant]}
+        accounts = stable.parent / "orch/fabric/accounts.yaml"
+        accounts.write_text(json.dumps(document))
+        accounts.chmod(0o600)
+        (stable.parent / "orch/fabric/status.json").write_text('{"pools":{}}\n')
+        (stable / "hosts.json").write_text('{"hosts":{}}\n')
+        (stable / "quota_cache.json").write_text("{}\n")
+        names = [name for name in json.loads((ROOT.parent / "preparation.json").read_text())["baseline_hashes"]
+                 if name == "pool" or name.startswith("ext/")]
+        files = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in names}
+        first = G.publish(ROOT, stable, files)
+        store = G.store_path(stable)
+        selected = G.select(store, first.name, None)
+        fixture = dict(base=base, stable=stable, accounts=accounts, document=document,
+                       first=first, store=store, selected=selected, names=names)
+&gt;       assert value(run_owner(fixture, "init")) == {"initialized": True}
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:39: in run_owner
+    child = start_owner(fixture, action, payload, generation=generation)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fixture = {'base': PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_publication_first_refuses0'), 'stable': P...: 'fixture-service-grant', 'purpose': 'APPLICATION', 'enabled': True, 'principal_id': 'fixture-principal', ...}]}, ...}
+action = 'init', payload = None, generation = None
+
+    def start_owner(fixture, action, payload=None, *, generation=None):
+        child = subprocess.Popen(
+            [sys.executable, "-B", str(WORKER), str(ROOT), str(fixture["store"]),
+             generation or fixture["first"].name, action, json.dumps(payload or {})],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1)
+        try:
+&gt;           assert read_event(child) == {"phase": "ready"}
+E           AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}
+E             
+E             Differing items:
+E             {'phase': 'error'} != {'phase': 'ready'}
+E             Left contains 2 more items:
+E             {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}
+E             Use -v to get more diff
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:32: AssertionError</error></testcase><testcase classname="test_fenced_native_owners" name="test_worker_and_application_share_last_capacity_across_processes" time="0.240"><error message="failed on setup with &quot;AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}&#10;  &#10;  Differing items:&#10;  {'phase': 'error'} != {'phase': 'ready'}&#10;  Left contains 2 more items:&#10;  {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}&#10;  Use -v to get more diff&quot;">tmp_path = PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_worker_and_application_sh0')
+
+    @pytest.fixture
+    def native_owner(tmp_path):
+        base = tmp_path.resolve()
+        stable = base / "kit/ext"
+        for relative in ("active", "broker", "lanes", "slots", "state"):
+            (stable / relative).mkdir(parents=True, mode=0o700)
+        (stable.parent / "orch/fabric").mkdir(parents=True, mode=0o700)
+        policy = base / "policy.json"
+        policy.write_text(json.dumps({"routing": {}, "pools": {"grok": {"windows": {"weekly": {}}}}}))
+        S.ensure_policy(policy, stable, hashlib.sha256(policy.read_bytes()).hexdigest())
+        grant = dict(grant_id="fixture-service-grant", purpose="APPLICATION", enabled=True,
+            principal_id="fixture-principal", credential_ref="FIXTURE_APPLICATION_CREDENTIAL",
+            admission_root="service:fixture", caller_hosts=["fixture-host"],
+            workloads=["site_interactive"], pool="go", accounts=["fixture-account"],
+            models=["fixture-model"], route="/v1/chat/completions", stream=False,
+            expires_at=2000, max_turn_seconds=300, max_steps=2,
+            qualification_ref="fixture:offline-owner-concurrency",
+            application_permission_ref="fixture:offline-only")
+        document = {"schema": "mastermind.provider_accounts.v1",
+            "providers": {"go": {"enabled": True,
+                "accounts": [{"name": "fixture-account", "per_account_cap": 1}]}},
+            "application_grants": [grant]}
+        accounts = stable.parent / "orch/fabric/accounts.yaml"
+        accounts.write_text(json.dumps(document))
+        accounts.chmod(0o600)
+        (stable.parent / "orch/fabric/status.json").write_text('{"pools":{}}\n')
+        (stable / "hosts.json").write_text('{"hosts":{}}\n')
+        (stable / "quota_cache.json").write_text("{}\n")
+        names = [name for name in json.loads((ROOT.parent / "preparation.json").read_text())["baseline_hashes"]
+                 if name == "pool" or name.startswith("ext/")]
+        files = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in names}
+        first = G.publish(ROOT, stable, files)
+        store = G.store_path(stable)
+        selected = G.select(store, first.name, None)
+        fixture = dict(base=base, stable=stable, accounts=accounts, document=document,
+                       first=first, store=store, selected=selected, names=names)
+&gt;       assert value(run_owner(fixture, "init")) == {"initialized": True}
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:39: in run_owner
+    child = start_owner(fixture, action, payload, generation=generation)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fixture = {'base': PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_worker_and_application_sh0'), 'stable': P...: 'fixture-service-grant', 'purpose': 'APPLICATION', 'enabled': True, 'principal_id': 'fixture-principal', ...}]}, ...}
+action = 'init', payload = None, generation = None
+
+    def start_owner(fixture, action, payload=None, *, generation=None):
+        child = subprocess.Popen(
+            [sys.executable, "-B", str(WORKER), str(ROOT), str(fixture["store"]),
+             generation or fixture["first"].name, action, json.dumps(payload or {})],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1)
+        try:
+&gt;           assert read_event(child) == {"phase": "ready"}
+E           AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}
+E             
+E             Differing items:
+E             {'phase': 'error'} != {'phase': 'ready'}
+E             Left contains 2 more items:
+E             {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}
+E             Use -v to get more diff
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:32: AssertionError</error></testcase><testcase classname="test_fenced_native_owners" name="test_changed_owner_document_with_same_mtime_is_read_under_claim_scope" time="0.239"><error message="failed on setup with &quot;AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}&#10;  &#10;  Differing items:&#10;  {'phase': 'error'} != {'phase': 'ready'}&#10;  Left contains 2 more items:&#10;  {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}&#10;  Use -v to get more diff&quot;">tmp_path = PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_changed_owner_document_wi0')
+
+    @pytest.fixture
+    def native_owner(tmp_path):
+        base = tmp_path.resolve()
+        stable = base / "kit/ext"
+        for relative in ("active", "broker", "lanes", "slots", "state"):
+            (stable / relative).mkdir(parents=True, mode=0o700)
+        (stable.parent / "orch/fabric").mkdir(parents=True, mode=0o700)
+        policy = base / "policy.json"
+        policy.write_text(json.dumps({"routing": {}, "pools": {"grok": {"windows": {"weekly": {}}}}}))
+        S.ensure_policy(policy, stable, hashlib.sha256(policy.read_bytes()).hexdigest())
+        grant = dict(grant_id="fixture-service-grant", purpose="APPLICATION", enabled=True,
+            principal_id="fixture-principal", credential_ref="FIXTURE_APPLICATION_CREDENTIAL",
+            admission_root="service:fixture", caller_hosts=["fixture-host"],
+            workloads=["site_interactive"], pool="go", accounts=["fixture-account"],
+            models=["fixture-model"], route="/v1/chat/completions", stream=False,
+            expires_at=2000, max_turn_seconds=300, max_steps=2,
+            qualification_ref="fixture:offline-owner-concurrency",
+            application_permission_ref="fixture:offline-only")
+        document = {"schema": "mastermind.provider_accounts.v1",
+            "providers": {"go": {"enabled": True,
+                "accounts": [{"name": "fixture-account", "per_account_cap": 1}]}},
+            "application_grants": [grant]}
+        accounts = stable.parent / "orch/fabric/accounts.yaml"
+        accounts.write_text(json.dumps(document))
+        accounts.chmod(0o600)
+        (stable.parent / "orch/fabric/status.json").write_text('{"pools":{}}\n')
+        (stable / "hosts.json").write_text('{"hosts":{}}\n')
+        (stable / "quota_cache.json").write_text("{}\n")
+        names = [name for name in json.loads((ROOT.parent / "preparation.json").read_text())["baseline_hashes"]
+                 if name == "pool" or name.startswith("ext/")]
+        files = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in names}
+        first = G.publish(ROOT, stable, files)
+        store = G.store_path(stable)
+        selected = G.select(store, first.name, None)
+        fixture = dict(base=base, stable=stable, accounts=accounts, document=document,
+                       first=first, store=store, selected=selected, names=names)
+&gt;       assert value(run_owner(fixture, "init")) == {"initialized": True}
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:39: in run_owner
+    child = start_owner(fixture, action, payload, generation=generation)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fixture = {'base': PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_changed_owner_document_wi0'), 'stable': P...: 'fixture-service-grant', 'purpose': 'APPLICATION', 'enabled': True, 'principal_id': 'fixture-principal', ...}]}, ...}
+action = 'init', payload = None, generation = None
+
+    def start_owner(fixture, action, payload=None, *, generation=None):
+        child = subprocess.Popen(
+            [sys.executable, "-B", str(WORKER), str(ROOT), str(fixture["store"]),
+             generation or fixture["first"].name, action, json.dumps(payload or {})],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1)
+        try:
+&gt;           assert read_event(child) == {"phase": "ready"}
+E           AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}
+E             
+E             Differing items:
+E             {'phase': 'error'} != {'phase': 'ready'}
+E             Left contains 2 more items:
+E             {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}
+E             Use -v to get more diff
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:32: AssertionError</error></testcase><testcase classname="test_fenced_native_owners" name="test_advisory_status_refresh_releases_broker_before_quota_publication" time="0.245"><error message="failed on setup with &quot;AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}&#10;  &#10;  Differing items:&#10;  {'phase': 'error'} != {'phase': 'ready'}&#10;  Left contains 2 more items:&#10;  {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}&#10;  Use -v to get more diff&quot;">tmp_path = PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_advisory_status_refresh_r0')
+
+    @pytest.fixture
+    def native_owner(tmp_path):
+        base = tmp_path.resolve()
+        stable = base / "kit/ext"
+        for relative in ("active", "broker", "lanes", "slots", "state"):
+            (stable / relative).mkdir(parents=True, mode=0o700)
+        (stable.parent / "orch/fabric").mkdir(parents=True, mode=0o700)
+        policy = base / "policy.json"
+        policy.write_text(json.dumps({"routing": {}, "pools": {"grok": {"windows": {"weekly": {}}}}}))
+        S.ensure_policy(policy, stable, hashlib.sha256(policy.read_bytes()).hexdigest())
+        grant = dict(grant_id="fixture-service-grant", purpose="APPLICATION", enabled=True,
+            principal_id="fixture-principal", credential_ref="FIXTURE_APPLICATION_CREDENTIAL",
+            admission_root="service:fixture", caller_hosts=["fixture-host"],
+            workloads=["site_interactive"], pool="go", accounts=["fixture-account"],
+            models=["fixture-model"], route="/v1/chat/completions", stream=False,
+            expires_at=2000, max_turn_seconds=300, max_steps=2,
+            qualification_ref="fixture:offline-owner-concurrency",
+            application_permission_ref="fixture:offline-only")
+        document = {"schema": "mastermind.provider_accounts.v1",
+            "providers": {"go": {"enabled": True,
+                "accounts": [{"name": "fixture-account", "per_account_cap": 1}]}},
+            "application_grants": [grant]}
+        accounts = stable.parent / "orch/fabric/accounts.yaml"
+        accounts.write_text(json.dumps(document))
+        accounts.chmod(0o600)
+        (stable.parent / "orch/fabric/status.json").write_text('{"pools":{}}\n')
+        (stable / "hosts.json").write_text('{"hosts":{}}\n')
+        (stable / "quota_cache.json").write_text("{}\n")
+        names = [name for name in json.loads((ROOT.parent / "preparation.json").read_text())["baseline_hashes"]
+                 if name == "pool" or name.startswith("ext/")]
+        files = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in names}
+        first = G.publish(ROOT, stable, files)
+        store = G.store_path(stable)
+        selected = G.select(store, first.name, None)
+        fixture = dict(base=base, stable=stable, accounts=accounts, document=document,
+                       first=first, store=store, selected=selected, names=names)
+&gt;       assert value(run_owner(fixture, "init")) == {"initialized": True}
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:39: in run_owner
+    child = start_owner(fixture, action, payload, generation=generation)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fixture = {'base': PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_advisory_status_refresh_r0'), 'stable': P...: 'fixture-service-grant', 'purpose': 'APPLICATION', 'enabled': True, 'principal_id': 'fixture-principal', ...}]}, ...}
+action = 'init', payload = None, generation = None
+
+    def start_owner(fixture, action, payload=None, *, generation=None):
+        child = subprocess.Popen(
+            [sys.executable, "-B", str(WORKER), str(ROOT), str(fixture["store"]),
+             generation or fixture["first"].name, action, json.dumps(payload or {})],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1)
+        try:
+&gt;           assert read_event(child) == {"phase": "ready"}
+E           AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}
+E             
+E             Differing items:
+E             {'phase': 'error'} != {'phase': 'ready'}
+E             Left contains 2 more items:
+E             {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}
+E             Use -v to get more diff
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:32: AssertionError</error></testcase><testcase classname="test_fenced_native_owners" name="test_original_snapshot_boundary_reproduces_broker_to_admission_inversion" time="0.263"><error message="failed on setup with &quot;AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}&#10;  &#10;  Differing items:&#10;  {'phase': 'error'} != {'phase': 'ready'}&#10;  Left contains 2 more items:&#10;  {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}&#10;  Use -v to get more diff&quot;">tmp_path = PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_original_snapshot_boundar0')
+
+    @pytest.fixture
+    def native_owner(tmp_path):
+        base = tmp_path.resolve()
+        stable = base / "kit/ext"
+        for relative in ("active", "broker", "lanes", "slots", "state"):
+            (stable / relative).mkdir(parents=True, mode=0o700)
+        (stable.parent / "orch/fabric").mkdir(parents=True, mode=0o700)
+        policy = base / "policy.json"
+        policy.write_text(json.dumps({"routing": {}, "pools": {"grok": {"windows": {"weekly": {}}}}}))
+        S.ensure_policy(policy, stable, hashlib.sha256(policy.read_bytes()).hexdigest())
+        grant = dict(grant_id="fixture-service-grant", purpose="APPLICATION", enabled=True,
+            principal_id="fixture-principal", credential_ref="FIXTURE_APPLICATION_CREDENTIAL",
+            admission_root="service:fixture", caller_hosts=["fixture-host"],
+            workloads=["site_interactive"], pool="go", accounts=["fixture-account"],
+            models=["fixture-model"], route="/v1/chat/completions", stream=False,
+            expires_at=2000, max_turn_seconds=300, max_steps=2,
+            qualification_ref="fixture:offline-owner-concurrency",
+            application_permission_ref="fixture:offline-only")
+        document = {"schema": "mastermind.provider_accounts.v1",
+            "providers": {"go": {"enabled": True,
+                "accounts": [{"name": "fixture-account", "per_account_cap": 1}]}},
+            "application_grants": [grant]}
+        accounts = stable.parent / "orch/fabric/accounts.yaml"
+        accounts.write_text(json.dumps(document))
+        accounts.chmod(0o600)
+        (stable.parent / "orch/fabric/status.json").write_text('{"pools":{}}\n')
+        (stable / "hosts.json").write_text('{"hosts":{}}\n')
+        (stable / "quota_cache.json").write_text("{}\n")
+        names = [name for name in json.loads((ROOT.parent / "preparation.json").read_text())["baseline_hashes"]
+                 if name == "pool" or name.startswith("ext/")]
+        files = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in names}
+        first = G.publish(ROOT, stable, files)
+        store = G.store_path(stable)
+        selected = G.select(store, first.name, None)
+        fixture = dict(base=base, stable=stable, accounts=accounts, document=document,
+                       first=first, store=store, selected=selected, names=names)
+&gt;       assert value(run_owner(fixture, "init")) == {"initialized": True}
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:39: in run_owner
+    child = start_owner(fixture, action, payload, generation=generation)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fixture = {'base': PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_original_snapshot_boundar0'), 'stable': P...: 'fixture-service-grant', 'purpose': 'APPLICATION', 'enabled': True, 'principal_id': 'fixture-principal', ...}]}, ...}
+action = 'init', payload = None, generation = None
+
+    def start_owner(fixture, action, payload=None, *, generation=None):
+        child = subprocess.Popen(
+            [sys.executable, "-B", str(WORKER), str(ROOT), str(fixture["store"]),
+             generation or fixture["first"].name, action, json.dumps(payload or {})],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1)
+        try:
+&gt;           assert read_event(child) == {"phase": "ready"}
+E           AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}
+E             
+E             Differing items:
+E             {'phase': 'error'} != {'phase': 'ready'}
+E             Left contains 2 more items:
+E             {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}
+E             Use -v to get more diff
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:32: AssertionError</error></testcase><testcase classname="test_fenced_native_owners" name="test_original_pending_unknown_terminal_and_close_survive_selection_change" time="0.287"><error message="failed on setup with &quot;AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}&#10;  &#10;  Differing items:&#10;  {'phase': 'error'} != {'phase': 'ready'}&#10;  Left contains 2 more items:&#10;  {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}&#10;  Use -v to get more diff&quot;">tmp_path = PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_original_pending_unknown_0')
+
+    @pytest.fixture
+    def native_owner(tmp_path):
+        base = tmp_path.resolve()
+        stable = base / "kit/ext"
+        for relative in ("active", "broker", "lanes", "slots", "state"):
+            (stable / relative).mkdir(parents=True, mode=0o700)
+        (stable.parent / "orch/fabric").mkdir(parents=True, mode=0o700)
+        policy = base / "policy.json"
+        policy.write_text(json.dumps({"routing": {}, "pools": {"grok": {"windows": {"weekly": {}}}}}))
+        S.ensure_policy(policy, stable, hashlib.sha256(policy.read_bytes()).hexdigest())
+        grant = dict(grant_id="fixture-service-grant", purpose="APPLICATION", enabled=True,
+            principal_id="fixture-principal", credential_ref="FIXTURE_APPLICATION_CREDENTIAL",
+            admission_root="service:fixture", caller_hosts=["fixture-host"],
+            workloads=["site_interactive"], pool="go", accounts=["fixture-account"],
+            models=["fixture-model"], route="/v1/chat/completions", stream=False,
+            expires_at=2000, max_turn_seconds=300, max_steps=2,
+            qualification_ref="fixture:offline-owner-concurrency",
+            application_permission_ref="fixture:offline-only")
+        document = {"schema": "mastermind.provider_accounts.v1",
+            "providers": {"go": {"enabled": True,
+                "accounts": [{"name": "fixture-account", "per_account_cap": 1}]}},
+            "application_grants": [grant]}
+        accounts = stable.parent / "orch/fabric/accounts.yaml"
+        accounts.write_text(json.dumps(document))
+        accounts.chmod(0o600)
+        (stable.parent / "orch/fabric/status.json").write_text('{"pools":{}}\n')
+        (stable / "hosts.json").write_text('{"hosts":{}}\n')
+        (stable / "quota_cache.json").write_text("{}\n")
+        names = [name for name in json.loads((ROOT.parent / "preparation.json").read_text())["baseline_hashes"]
+                 if name == "pool" or name.startswith("ext/")]
+        files = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in names}
+        first = G.publish(ROOT, stable, files)
+        store = G.store_path(stable)
+        selected = G.select(store, first.name, None)
+        fixture = dict(base=base, stable=stable, accounts=accounts, document=document,
+                       first=first, store=store, selected=selected, names=names)
+&gt;       assert value(run_owner(fixture, "init")) == {"initialized": True}
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:39: in run_owner
+    child = start_owner(fixture, action, payload, generation=generation)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fixture = {'base': PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_original_pending_unknown_0'), 'stable': P...: 'fixture-service-grant', 'purpose': 'APPLICATION', 'enabled': True, 'principal_id': 'fixture-principal', ...}]}, ...}
+action = 'init', payload = None, generation = None
+
+    def start_owner(fixture, action, payload=None, *, generation=None):
+        child = subprocess.Popen(
+            [sys.executable, "-B", str(WORKER), str(ROOT), str(fixture["store"]),
+             generation or fixture["first"].name, action, json.dumps(payload or {})],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1)
+        try:
+&gt;           assert read_event(child) == {"phase": "ready"}
+E           AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}
+E             
+E             Differing items:
+E             {'phase': 'error'} != {'phase': 'ready'}
+E             Left contains 2 more items:
+E             {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}
+E             Use -v to get more diff
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:32: AssertionError</error></testcase><testcase classname="test_fenced_native_owners" name="test_native_owned_loader_refuses_foreign_helper_before_claim" time="0.291"><error message="failed on setup with &quot;AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}&#10;  &#10;  Differing items:&#10;  {'phase': 'error'} != {'phase': 'ready'}&#10;  Left contains 2 more items:&#10;  {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}&#10;  Use -v to get more diff&quot;">tmp_path = PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_native_owned_loader_refus0')
+
+    @pytest.fixture
+    def native_owner(tmp_path):
+        base = tmp_path.resolve()
+        stable = base / "kit/ext"
+        for relative in ("active", "broker", "lanes", "slots", "state"):
+            (stable / relative).mkdir(parents=True, mode=0o700)
+        (stable.parent / "orch/fabric").mkdir(parents=True, mode=0o700)
+        policy = base / "policy.json"
+        policy.write_text(json.dumps({"routing": {}, "pools": {"grok": {"windows": {"weekly": {}}}}}))
+        S.ensure_policy(policy, stable, hashlib.sha256(policy.read_bytes()).hexdigest())
+        grant = dict(grant_id="fixture-service-grant", purpose="APPLICATION", enabled=True,
+            principal_id="fixture-principal", credential_ref="FIXTURE_APPLICATION_CREDENTIAL",
+            admission_root="service:fixture", caller_hosts=["fixture-host"],
+            workloads=["site_interactive"], pool="go", accounts=["fixture-account"],
+            models=["fixture-model"], route="/v1/chat/completions", stream=False,
+            expires_at=2000, max_turn_seconds=300, max_steps=2,
+            qualification_ref="fixture:offline-owner-concurrency",
+            application_permission_ref="fixture:offline-only")
+        document = {"schema": "mastermind.provider_accounts.v1",
+            "providers": {"go": {"enabled": True,
+                "accounts": [{"name": "fixture-account", "per_account_cap": 1}]}},
+            "application_grants": [grant]}
+        accounts = stable.parent / "orch/fabric/accounts.yaml"
+        accounts.write_text(json.dumps(document))
+        accounts.chmod(0o600)
+        (stable.parent / "orch/fabric/status.json").write_text('{"pools":{}}\n')
+        (stable / "hosts.json").write_text('{"hosts":{}}\n')
+        (stable / "quota_cache.json").write_text("{}\n")
+        names = [name for name in json.loads((ROOT.parent / "preparation.json").read_text())["baseline_hashes"]
+                 if name == "pool" or name.startswith("ext/")]
+        files = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in names}
+        first = G.publish(ROOT, stable, files)
+        store = G.store_path(stable)
+        selected = G.select(store, first.name, None)
+        fixture = dict(base=base, stable=stable, accounts=accounts, document=document,
+                       first=first, store=store, selected=selected, names=names)
+&gt;       assert value(run_owner(fixture, "init")) == {"initialized": True}
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:89: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:39: in run_owner
+    child = start_owner(fixture, action, payload, generation=generation)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fixture = {'base': PosixPath('/private/tmp/h6-known-owner-proof-lfz__yh4/fixtures/test_native_owned_loader_refus0'), 'stable': P...: 'fixture-service-grant', 'purpose': 'APPLICATION', 'enabled': True, 'principal_id': 'fixture-principal', ...}]}, ...}
+action = 'init', payload = None, generation = None
+
+    def start_owner(fixture, action, payload=None, *, generation=None):
+        child = subprocess.Popen(
+            [sys.executable, "-B", str(WORKER), str(ROOT), str(fixture["store"]),
+             generation or fixture["first"].name, action, json.dumps(payload or {})],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, bufsize=1)
+        try:
+&gt;           assert read_event(child) == {"phase": "ready"}
+E           AssertionError: assert {'error_type'...ase': 'error'} == {'phase': 'ready'}
+E             
+E             Differing items:
+E             {'phase': 'error'} != {'phase': 'ready'}
+E             Left contains 2 more items:
+E             {'error_type': 'ValueError', 'message': 'paid_yaml_owner_refused'}
+E             Use -v to get more diff
+
+/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py:32: AssertionError</error></testcase></testsuite></testsuites>

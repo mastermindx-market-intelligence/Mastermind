@@ -1,0 +1,21 @@
+{
+  "schema": "mastermind.h6.common_fence_known_owner_source.v1",
+  "preimages": {
+    "ext/support_bundle.py": "c2e638d08e969f0421c6aa7508bd9d906a9191fa712e079b2079d8668f2005b3",
+    "ext/lease_broker.py": "a9c2a5496a70a82578a3ebed45299f212b388b9c2d196f0cc278cdb82ebecea1",
+    "ext/quota_remote.py": "a1a9ab24d502aad6a3a6edd38f2cb8a781be1175e9715eb36c2ddcea475c88c1",
+    "ext/native_go_entry.py": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc"
+  },
+  "postimages": {
+    "ext/support_bundle.py": "97a1ee5dee4aa811bc8400e1689be5428cc16382d92cec2347126d643bdd9873",
+    "ext/lease_broker.py": "b20a5c5c0c03aa182488f599f16f0d84d80ae817f8c8877524ad7c255fc99997",
+    "ext/quota_remote.py": "adce6d1357659030ba5f4e7e22bde3f208ee28e5f0354f62dd14f6412431d41f",
+    "ext/native_go_entry.py": "f4d1da6b10cf532b99e3176bfb4664bba0be601ae9eff65681b544572f526868"
+  },
+  "scope": "native helper preload, fixed owner scope, Broker and quota transactions",
+  "remote_closure_joined": false,
+  "enrollment_joined": false,
+  "qualified": false,
+  "selectable": false,
+  "runtime_changed": false
+}

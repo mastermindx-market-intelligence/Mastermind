@@ -1,0 +1,42 @@
+{
+  "root": "/private/tmp/h6-cache-path-proof-v2yi98qb",
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py::test_strict_cache_reads_canonical_owner_despite_prior_alias_capture",
+    "--basetemp",
+    "/private/tmp/h6-cache-path-proof-v2yi98qb/fixtures",
+    "--junitxml",
+    "/private/tmp/h6-cache-path-proof-v2yi98qb/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 0,
+  "seconds": 6.889,
+  "testcases": 2,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_strict_cache_reads_canonical_owner_despite_prior_alias_capture[False]",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_strict_cache_reads_canonical_owner_despite_prior_alias_capture[True]",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    }
+  ],
+  "files": {
+    "result.log": "ea31942a6db0634ac905cfd5ffd1598d4be691e9d6d68fddb86fc035a77f6733",
+    "result.xml": "45611fe17a05b7f8868ae9557d0039dc71158ede7c566872830ee10fa88f350f"
+  }
+}

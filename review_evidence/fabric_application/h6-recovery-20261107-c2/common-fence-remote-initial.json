@@ -1,0 +1,134 @@
+{
+  "root": "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w",
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "/tmp/h6-common-fence-source-1jky3u6l/test_remote_fence_closure.py",
+    "--basetemp",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures",
+    "--junitxml",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 1,
+  "seconds": 2.187,
+  "testcases": 15,
+  "failures": 1,
+  "errors": 0,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_each_available_successor_maps_exact_physical_owner[plain]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_each_available_successor_maps_exact_physical_owner[plain-physical]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_each_available_successor_maps_exact_physical_owner[paid]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_each_available_successor_maps_exact_physical_owner[paid-physical]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_historical_paid_bytes_and_aliases_still_verify",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_valid_plain_custody_does_not_pass_paid_source_gate[plain]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_valid_plain_custody_does_not_pass_paid_source_gate[plain-physical]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_paid_held_byte_loader_delivers_helper_mapper_and_quota_owner[paid]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_paid_held_byte_loader_delivers_helper_mapper_and_quota_owner[paid-physical]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_successor_custody_refuses_alias_or_membership_drift[quota-alias]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_successor_custody_refuses_alias_or_membership_drift[file-hash]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_successor_custody_refuses_alias_or_membership_drift[extra-file]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_successor_custody_refuses_alias_or_membership_drift[missing-member]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_real_shell_producer_equals_each_named_current_closure",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_successor_stays_closed_without_completed_owner",
+      "classname": "test_remote_fence_closure",
+      "failure": true,
+      "error": false,
+      "skipped": false,
+      "message": "ValueError: unavailable publication path: /Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0/remote-source-r01ak81y/source/application_native_owner.py"
+    }
+  ],
+  "files": {
+    "result.log": "2641784ac24723a20721d5b6f172a61e55cd69a6dc142afc0b446e1ee48706d3",
+    "result.xml": "41dd8b3c96dca0798c8d3f6af9ece569ef7bf4328ac276b20d51ce57b0d926c5"
+  }
+}

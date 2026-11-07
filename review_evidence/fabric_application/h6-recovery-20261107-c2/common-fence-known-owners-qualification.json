@@ -1,0 +1,209 @@
+{
+  "schema": "mastermind.h6.common_fence_known_owners_qualification.v1",
+  "source_base": "680dc0ca78b9b3fcd081d3750304d1c47e5b5b9f",
+  "source_preparation": "common-fence-source-preparation.json",
+  "base_emission_manifest": "01adcdf9d6f085e3d9dfdd911a2520d4f72a581599fc06e06b954a8983c7008d",
+  "predecessor": "Apply the recorded four exact H3 patches and retain pre-fence/; this patch supersedes selector-only, never apply both.",
+  "patch": "common-fence-unqualified.patch",
+  "patch_sha256": "56c3f9d649b48a26e8d6c8309ce1b6164fe86f6ea0d07e3ef42c23bf01bab092",
+  "changes": {
+    "ext/native_runtime_bindings.py": {
+      "before": "2ce5e047ba76e17754c538c993a593787bc0dd5c541c1616e69bf183e7741cce",
+      "after": "15c0c046a1c7e1c9a0cf9aee5af8f6631793d8a9af6f219e16a69830df3b42e3"
+    },
+    "ext/support_bundle.py": {
+      "before": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+      "after": "c38319838f286f1cc1591d1050870a91c44df5c787ac6fa27f7bc916b0f1411e"
+    },
+    "rollout/native_generation.py": {
+      "before": "fb516277cca4f77654454fe3bbf82dca4c1c03f5ee2c9abb379b68f84312dfea",
+      "after": "a570210825da7eb58be83381860c5ffa013ed5889486e4a3b822f96d0dab09db"
+    },
+    "ext/lease_broker.py": {
+      "before": "93531372cf343cd92e47fd430acf949b141759ca8cf2b4a5c86b1be4c56246c2",
+      "after": "b20a5c5c0c03aa182488f599f16f0d84d80ae817f8c8877524ad7c255fc99997"
+    },
+    "ext/quota_remote.py": {
+      "before": "a1a9ab24d502aad6a3a6edd38f2cb8a781be1175e9715eb36c2ddcea475c88c1",
+      "after": "fd0ac449e6a74e491646b360d5c9882d640bfb658f94e950ee709003dec87f8c"
+    },
+    "ext/native_go_entry.py": {
+      "before": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+      "after": "f4d1da6b10cf532b99e3176bfb4664bba0be601ae9eff65681b544572f526868"
+    },
+    "ext/remote_sub.sh": {
+      "before": "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
+      "after": "b79f760c548412a0eacc6fcb515f1ff266a5d10af97a5c6a016406caf00f8d7d"
+    },
+    "ext/paid_provider_entry.py": {
+      "before": "780e4b45c12bdb52c2b56bf17a4842faffbaecc2253aa43d96a484c9a05023c0",
+      "after": "1b4af5ef7db5ab7f61c05eda4fc53aa4e9cfd1253c08cd09f8a2d9dbb5ab7d2c"
+    },
+    "ext/paid_model_owner.py": {
+      "before": "75bbacb052dcb9374245854e2e6b8681fa369e034000689df0d4f752bd1b6e3b",
+      "after": "378c1d30757292da236713543d7c4935b1a83e0445d1e22e53db1b5f3a2ee8fe"
+    },
+    "rollout/native_install.py": {
+      "before": "a37dc78a581798209f02855983fbeb4eb2e17b71f8c0a5e78eda571cbdc7a8d3",
+      "after": "2daa1ff46e22d8e8329b060f17fc46f38a832a363dc5453b1e6215c911cb7459"
+    }
+  },
+  "patch_roundtrip": {
+    "check": true,
+    "forward_hashes": true,
+    "reverse_check": true,
+    "reverse_hashes": true
+  },
+  "probes": {
+    "test_current_selection_reader.py": {
+      "executed_sha256": "753bc630e48bf9735fcfd92fdc51b488ba8a90b2ef4bb080d5600cf79d1a62a0",
+      "persisted_sha256": "340ff5d27ccaec2237ec9274bd7ef7731518fb5eace042be740a0d1e2f547c9f",
+      "replay_change": "explicit H6_COMMON_FENCE_SOURCE input"
+    },
+    "test_common_admission_fence.py": {
+      "executed_sha256": "096024619b3035799ada3161cd746079f400315da9d01f16b0bf8b3d20cc534e",
+      "persisted_sha256": "096024619b3035799ada3161cd746079f400315da9d01f16b0bf8b3d20cc534e",
+      "replay_change": null
+    },
+    "test_fenced_native_owners.py": {
+      "executed_sha256": "07d5fdde75fbf275eb436b7cb5353e29c20a76ec8a9286368dd0c60471673981",
+      "persisted_sha256": "07d5fdde75fbf275eb436b7cb5353e29c20a76ec8a9286368dd0c60471673981",
+      "replay_change": null
+    },
+    "test_remote_fence_closure.py": {
+      "executed_sha256": "8a16225683aad7f269a69fb2c16282a47a872b25fe607bb13e98d7547a85b7d3",
+      "persisted_sha256": "8a16225683aad7f269a69fb2c16282a47a872b25fe607bb13e98d7547a85b7d3",
+      "replay_change": null
+    },
+    "fence_owner_worker.py": {
+      "executed_sha256": "ee61381291079dee84e2ead6fbc4d3fd466bf03503f3af3cc23fe43b2c15159a",
+      "persisted_sha256": "ee61381291079dee84e2ead6fbc4d3fd466bf03503f3af3cc23fe43b2c15159a",
+      "replay_change": null
+    },
+    "run_qualification.py": {
+      "executed_sha256": "bf895daa44e5b39d5fca98c7d71415327350410002d1bdf80e4fbc4bf64124b9",
+      "persisted_sha256": "bf895daa44e5b39d5fca98c7d71415327350410002d1bdf80e4fbc4bf64124b9",
+      "replay_change": null
+    }
+  },
+  "receipts": [
+    {
+      "stem": "common-fence-known-owner-setup-failure",
+      "rc": 1,
+      "seconds": 2.486,
+      "testcases": 8,
+      "failures": 0,
+      "errors": 8,
+      "skips": 0,
+      "files": {
+        "result.log": "809c0d1a02ab9137d6d2be6e7f3647c93bead603f850be0dc1fb4693f646692f",
+        "result.xml": "070bb1fc03896bda53c668c97a8d5f04b0b7f9b9cb3f155b90bfff28e8d9e325"
+      }
+    },
+    {
+      "stem": "common-fence-known-owners",
+      "rc": 0,
+      "seconds": 15.084,
+      "testcases": 8,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "cbafafc5b71fb9ee0b7bc1921c241a47aa46737ee3d112c907caef238951c01d",
+        "result.xml": "16b728921db711fdaba3b6563c3f2b6627f56d649b4fa683167dfe6e53529612"
+      }
+    },
+    {
+      "stem": "common-fence-remote-initial",
+      "rc": 1,
+      "seconds": 2.187,
+      "testcases": 15,
+      "failures": 1,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "2641784ac24723a20721d5b6f172a61e55cd69a6dc142afc0b446e1ee48706d3",
+        "result.xml": "41dd8b3c96dca0798c8d3f6af9ece569ef7bf4328ac276b20d51ce57b0d926c5"
+      }
+    },
+    {
+      "stem": "common-fence-remote-missing-owner",
+      "rc": 0,
+      "seconds": 0.593,
+      "testcases": 1,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "36ee6125777253800df314c891baf72e42248a17540db95c6bdb02de742e24de",
+        "result.xml": "87441b3dbad584135c895994857680f1b50f121f68d3b894a1a16b0bd2b823c3"
+      }
+    },
+    {
+      "stem": "common-fence-cache-path",
+      "rc": 0,
+      "seconds": 6.889,
+      "testcases": 2,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "ea31942a6db0634ac905cfd5ffd1598d4be691e9d6d68fddb86fc035a77f6733",
+        "result.xml": "45611fe17a05b7f8868ae9557d0039dc71158ede7c566872830ee10fa88f350f"
+      }
+    },
+    {
+      "stem": "common-fence-combined",
+      "rc": 0,
+      "seconds": 17.316,
+      "testcases": 73,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "7f6a762b47e2ffa43b3f80c09da256d328b1268d9aad73dcc6e7f5992b8fb211",
+        "result.xml": "7479af9b8b5028a5ae02b3debec6add7375987b122763e1fbc746834912ad6fa"
+      }
+    }
+  ],
+  "lock_order": [
+    "publication",
+    "physical admission",
+    "Broker",
+    "SQLite"
+  ],
+  "positive_scope": [
+    "73 cases in one current-source process, including the earlier48 reader/selector cases",
+    "actual native held-byte dependency loader, real SQLite claims and cross-process admission/Broker/selection/quota locking",
+    "current generation required only for new claims/requests; original pending/unknown/terminal/close preserved",
+    "same-mtime account-document change is freshly read; snapshot quota refresh runs after Broker unlock",
+    "strict quota cache canonical owner at read despite import-time realpath capture; prior code reproduces wrong-target read",
+    "four actual available remote closures: plain/paid with and without delivery; six exact new sets retain missing APPLICATION owner gate",
+    "paid held-byte loader plus actual pure YAML6.0.3; plain closure does not gain paid permission",
+    "historical paid closure and old aliases preserved; source/hash/alias/member drift refuses"
+  ],
+  "enrollment_source": {
+    "implemented": true,
+    "source_judgment": "Both identified custody defects corrected; no remaining defect in the bounded two-file delta",
+    "behavior_qualification": "PENDING actual original and set transaction cases"
+  },
+  "historical_attempts": {
+    "known_owner_initial": "8 setup errors; no behavior executed; callback corrected to original None/True guard contract",
+    "remote_initial": "14 passed and1 test expectation failure: existing publisher correctly wrapped missing owner in ValueError; source unchanged"
+  },
+  "active_owners": {
+    "original": "PR2175 at51b4abe1f68b58b2c41f9aa45aceaf2ab45670f3, last read18:57UTC",
+    "provider_preserving": "PR2232 active source composition; do not duplicate",
+    "selected_observation": "PR2175#issuecomment-6711529944 reports seq37/9c557397 with116 members matching profile.files; eventual owner must reread actual CURRENT"
+  },
+  "gates": [
+    "actual enrollment transaction qualification",
+    "all other configuration/credential/account writers and legacy transition closure",
+    "APPLICATION owner/issuer for remote support remains absent",
+    "billable dispatch meter and actual account envelope remain unqualified",
+    "source normalization through active preserving116 cohort, required CI, protected release and real consumer acceptance"
+  ],
+  "selectable": false,
+  "runtime_changed": false,
+  "mission_complete": false
+}

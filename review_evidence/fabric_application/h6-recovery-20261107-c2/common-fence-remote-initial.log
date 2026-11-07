@@ -1,0 +1,62 @@
+..............F                                                          [100%]
+=================================== FAILURES ===================================
+_______ test_application_successor_stays_closed_without_completed_owner ________
+
+path = PosixPath('/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0/remote-source-r01ak81y/source/application_native_owner.py')
+kind = <built-in function S_ISREG>, mode = None
+
+    def _require_kind(path, kind, mode=None):
+        try:
+>           observed = path.lstat()
+                       ^^^^^^^^^^^^
+
+/private/tmp/h6-common-fence-source-1jky3u6l/candidate/ext/support_bundle.py:180: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0/remote-source-r01ak81y/source/application_native_owner.py')
+
+    def lstat(self):
+        """
+        Like stat(), except if the path points to a symlink, the symlink's
+        status information is returned, rather than its target's.
+        """
+>       return os.lstat(self)
+               ^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0/remote-source-r01ak81y/source/application_native_owner.py'
+
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py:661: FileNotFoundError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = PosixPath('/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0')
+
+    def test_application_successor_stays_closed_without_completed_owner(tmp_path):
+        assert S.COMMON_APPLICATION_SOURCE_FILES == S.COMMON_SOURCE_FILES | {"application_native_owner.py"}
+        assert S.COMMON_APPLICATION_PHYSICAL_ROOT_SOURCE_FILES == (
+            S.COMMON_APPLICATION_SOURCE_FILES | {"artifact_delivery.py"})
+        assert not (ROOT / "ext/application_native_owner.py").exists()
+        f = build_release(tmp_path, "plain")
+        proposed = dict(f["manifest"], **{"application_native_owner.py": "0" * 64})
+        with pytest.raises(FileNotFoundError):
+>           S.publish(f["source"], f["stable"], proposed)
+
+/tmp/h6-common-fence-source-1jky3u6l/test_remote_fence_closure.py:171: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/private/tmp/h6-common-fence-source-1jky3u6l/candidate/ext/support_bundle.py:252: in publish
+    _require_kind(source_dir / name, stat.S_ISREG)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+path = PosixPath('/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0/remote-source-r01ak81y/source/application_native_owner.py')
+kind = <built-in function S_ISREG>, mode = None
+
+    def _require_kind(path, kind, mode=None):
+        try:
+            observed = path.lstat()
+        except OSError as exc:
+>           raise ValueError(f"unavailable publication path: {path}") from exc
+E           ValueError: unavailable publication path: /Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0/remote-source-r01ak81y/source/application_native_owner.py
+
+/private/tmp/h6-common-fence-source-1jky3u6l/candidate/ext/support_bundle.py:182: ValueError
+=========================== short test summary info ============================
+FAILED ../../tmp/h6-common-fence-source-1jky3u6l/test_remote_fence_closure.py::test_application_successor_stays_closed_without_completed_owner
+1 failed, 14 passed in 1.98s

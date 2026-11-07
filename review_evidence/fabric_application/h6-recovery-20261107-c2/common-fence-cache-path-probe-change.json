@@ -1,0 +1,10 @@
+{
+  "fence_owner_worker.py": {
+    "pre": "37aefd1d897f4090052195cf1c7c7fee0ede22f9b823a67e1cfaa8c7908e05f1",
+    "post": "ee61381291079dee84e2ead6fbc4d3fd466bf03503f3af3cc23fe43b2c15159a"
+  },
+  "test_fenced_native_owners.py": {
+    "pre": "f15dcc95eafa322909b2a25117025e516b3c633c4f22e512b341c9eb91abe8db",
+    "post": "07d5fdde75fbf275eb436b7cb5353e29c20a76ec8a9286368dd0c60471673981"
+  }
+}

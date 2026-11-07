@@ -1,0 +1,84 @@
+{
+  "root": "/private/tmp/h6-known-owner-ready-proof-o_zrpkt1",
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py",
+    "--basetemp",
+    "/private/tmp/h6-known-owner-ready-proof-o_zrpkt1/fixtures",
+    "--junitxml",
+    "/private/tmp/h6-known-owner-ready-proof-o_zrpkt1/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 0,
+  "seconds": 15.084,
+  "testcases": 8,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_real_claim_blocks_selection_and_quota_until_sqlite_commit",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publication_first_refuses_stale_claim_and_allows_current_source",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_worker_and_application_share_last_capacity_across_processes",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_owner_document_with_same_mtime_is_read_under_claim_scope",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_advisory_status_refresh_releases_broker_before_quota_publication",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_snapshot_boundary_reproduces_broker_to_admission_inversion",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_pending_unknown_terminal_and_close_survive_selection_change",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_native_owned_loader_refuses_foreign_helper_before_claim",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    }
+  ],
+  "files": {
+    "result.log": "cbafafc5b71fb9ee0b7bc1921c241a47aa46737ee3d112c907caef238951c01d",
+    "result.xml": "16b728921db711fdaba3b6563c3f2b6627f56d649b4fa683167dfe6e53529612"
+  }
+}

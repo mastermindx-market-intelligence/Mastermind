@@ -1,0 +1,1451 @@
+--- a/ext/native_runtime_bindings.py
++++ b/ext/native_runtime_bindings.py
+@@ -14,6 +14,7 @@
+ import stat
+ 
+ SCHEMA = "native-code-generation.v1"
++SELECTION_SCHEMA = "native-code-selection.v1"
+ STORE_NAME = "native-code-releases"
+ HEX = re.compile(r"[0-9a-f]{64}\Z")
+ EXT_NAMES = frozenset({
+@@ -37,15 +38,17 @@
+     return info
+ 
+ 
+-def _json(path):
++def _json(path, *, expected_mode=0o444, maximum=128 * 1024, single_link=False):
+     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+     try:
+         before = os.fstat(fd)
+         if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
+-                or stat.S_IMODE(before.st_mode) != 0o444 or before.st_size > 128 * 1024):
++                or stat.S_IMODE(before.st_mode) != expected_mode
++                or not 0 <= before.st_size <= maximum
++                or single_link and before.st_nlink != 1):
+             raise ValueError("native state binding metadata custody")
+         with os.fdopen(os.dup(fd), "rb") as handle:
+-            data = handle.read(128 * 1024 + 1)
++            data = handle.read(maximum + 1)
+         def identity(value):
+             return (value.st_dev, value.st_ino, value.st_uid, value.st_mode,
+                     value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+@@ -121,3 +124,38 @@
+             continue
+         return Path(target) / tail
+     return path
++
++
++def require_current_selection(code_here):
++    """Return the incumbent selection for this executing native generation.
++
++    A NEW claim's caller must hold the existing physical admission fence until
++    its commit. This pure read does not acquire a lock, publish a selection, or
++    grant admission. Original recovery continues to use owner_path(), which is
++    deliberately independent of CURRENT.
++    """
++    here = Path(code_here)
++    if (not here.is_absolute() or here.name != "ext"
++            or here.parent.parent.name != STORE_NAME
++            or not HEX.fullmatch(here.parent.name)):
++        raise ValueError("native claim source context unavailable")
++    # Reuse the original immutable metadata and fixed-alias custody verifier.
++    owner_path(here / "active", here)
++    try:
++        selected = _json(here.parent.parent / "CURRENT.json", expected_mode=0o600,
++                         maximum=4096, single_link=True)
++    except OSError:
++        raise ValueError("native claim selection unavailable") from None
++    if (type(selected) is not dict or set(selected) != {
++            "schema", "generation", "previous", "sequence"}
++            or selected["schema"] != SELECTION_SCHEMA
++            or type(selected["sequence"]) is not int or selected["sequence"] < 1
++            or type(selected["generation"]) is not str
++            or not HEX.fullmatch(selected["generation"])
++            or selected["previous"] is not None and (
++                type(selected["previous"]) is not str
++                or not HEX.fullmatch(selected["previous"]))):
++        raise ValueError("native claim selection malformed")
++    if selected["generation"] != here.parent.name:
++        raise ValueError("native claim source is no longer selected")
++    return dict(selected)
+--- a/ext/support_bundle.py
++++ b/ext/support_bundle.py
+@@ -3,6 +3,9 @@
+ 
+ import os, sys, json, hashlib, tempfile, shutil, fcntl,errno,stat,time
+ from pathlib import Path
++from contextlib import contextmanager
++
++COMMON_ADMISSION_PROTOCOL = "physical-admission.v1"
+ 
+ # Fixed public source closure (no credentials or controller-only helpers)
+ SOURCE_FILES = frozenset({
+@@ -70,6 +73,21 @@
+ APPLICATION_PHYSICAL_ROOT_SOURCE_FILES = PHYSICAL_ROOT_SOURCE_FILES | {"application_native_owner.py"}
+ SOURCE_GENERATIONS = (APPLICATION_PHYSICAL_ROOT_SOURCE_FILES, APPLICATION_SOURCE_FILES, PAID_INITIALIZED_PHYSICAL_ROOT_SOURCE_FILES, PAID_INITIALIZED_SOURCE_FILES, PRE_HELD_YAML_PAID_INITIALIZED_PHYSICAL_ROOT_SOURCE_FILES, PRE_HELD_YAML_PAID_INITIALIZED_SOURCE_FILES, PAID_MODEL_PHYSICAL_ROOT_SOURCE_FILES, PAID_MODEL_SOURCE_FILES, PHYSICAL_ROOT_SOURCE_FILES, SOURCE_FILES, PRE_COMMISSION_DEADLINE_SOURCE_FILES, PRE_NATIVE_BINDING_SOURCE_FILES, PRE_QUOTA_CONTINUITY_SOURCE_FILES, PRE_CPU_SCOPE_SOURCE_FILES, PRE_CPU_STRESS_SOURCE_FILES, POLICY_SOURCE_FILES, OPERATOR_SOURCE_FILES, PRE_OPERATOR_SOURCE_FILES, PREVIOUS_SOURCE_FILES, LEGACY_SOURCE_FILES)
+ 
++
++# Six explicit successors join the existing helper and cache reader. Every old
++# source set and its original alias membership remain byte-for-byte distinct.
++COMMON_DEPENDENCIES = frozenset({"go_lease_capability.py", "quota_remote.py", "support_bundle.py"})
++COMMON_SOURCE_FILES = SOURCE_FILES | COMMON_DEPENDENCIES | {"paid_model_owner.py"}
++COMMON_PHYSICAL_ROOT_SOURCE_FILES = COMMON_SOURCE_FILES | {"artifact_delivery.py"}
++COMMON_PAID_SOURCE_FILES = PAID_INITIALIZED_SOURCE_FILES | COMMON_DEPENDENCIES
++COMMON_PAID_PHYSICAL_ROOT_SOURCE_FILES = COMMON_PAID_SOURCE_FILES | {"artifact_delivery.py"}
++COMMON_APPLICATION_SOURCE_FILES = COMMON_SOURCE_FILES | {"application_native_owner.py"}
++COMMON_APPLICATION_PHYSICAL_ROOT_SOURCE_FILES = COMMON_APPLICATION_SOURCE_FILES | {"artifact_delivery.py"}
++COMMON_SOURCE_GENERATIONS = (COMMON_SOURCE_FILES, COMMON_PHYSICAL_ROOT_SOURCE_FILES,
++    COMMON_PAID_SOURCE_FILES, COMMON_PAID_PHYSICAL_ROOT_SOURCE_FILES,
++    COMMON_APPLICATION_SOURCE_FILES, COMMON_APPLICATION_PHYSICAL_ROOT_SOURCE_FILES)
++SOURCE_GENERATIONS = COMMON_SOURCE_GENERATIONS + SOURCE_GENERATIONS
++
+ # Fixed symlinks inside ext -> stable_ext/<name>
+ _EXT_SYMLINKS = frozenset({
+     "active","lanes","slots","state","broker","lane_bin",
+@@ -168,8 +186,15 @@
+         raise ValueError(f"unexpected mode: {path}")
+ 
+ 
++
++def _release_ext_names(manifest):
++    names = frozenset(manifest)
++    if names not in SOURCE_GENERATIONS:
++        raise ValueError("manifest must name exactly the fixed source files")
++    return _EXT_SYMLINKS | {"quota_cache.json"} if names in COMMON_SOURCE_GENERATIONS else _EXT_SYMLINKS
++
+ def _release_metadata(manifest, digest, stable_ext):
+-    links = {"ext/" + n: str(stable_ext / n) for n in _EXT_SYMLINKS}
++    links = {"ext/" + n: str(stable_ext / n) for n in _release_ext_names(manifest)}
+     links.update({n: str(stable_ext.parent / n) for n in _ROOT_SYMLINKS})
+     return {"schema": _SCHEMA, "files": manifest, "digest": digest, "links": links}
+ 
+@@ -185,7 +210,7 @@
+     if {p.name for p in root.iterdir()} != {"ext", "RELEASE.json", *_ROOT_SYMLINKS}:
+         raise ValueError("unexpected release contents")
+     if (frozenset(expected["files"]) not in SOURCE_GENERATIONS
+-            or {p.name for p in ext.iterdir()} != set(expected["files"]) | _EXT_SYMLINKS):
++            or {p.name for p in ext.iterdir()} != set(expected["files"]) | _release_ext_names(expected["files"])):
+         raise ValueError("unexpected ext contents")
+     for name, wanted in expected["files"].items():
+         path = ext / name
+@@ -294,10 +319,14 @@
+ _POLICY_LOCK_WAIT_SECONDS = 2.0
+ 
+ 
+-def _acquire_policy_lock(fd):
++def _acquire_policy_lock(fd, *, deadline_ns=None):
+     # Wait for a short metadata critical section, never for a host slot or worker.
++    if deadline_ns is not None and (type(deadline_ns) is not int or deadline_ns <= 0):
++        raise ValueError("ADMISSION_DEADLINE_INVALID")
+     deadline = time.monotonic() + _POLICY_LOCK_WAIT_SECONDS
+     while True:
++        if deadline_ns is not None and time.monotonic_ns() >= deadline_ns:
++            raise TimeoutError("ADMISSION_DEADLINE_EXPIRED")
+         try:
+             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+             return
+@@ -305,6 +334,9 @@
+             remaining = deadline - time.monotonic()
+             if remaining <= 0:
+                 raise BlockingIOError(errno.EAGAIN, "SUPPORT_ADMISSION_LOCK_BUSY")
++            if deadline_ns is not None:
++                remaining = min(remaining, max(0.0,
++                    (deadline_ns - time.monotonic_ns()) / 1_000_000_000))
+             time.sleep(min(0.02, remaining))
+ 
+ 
+@@ -501,7 +533,7 @@
+         raise PolicyPublicationRefused("POLICY_ADMISSION_LOCK_CHANGED")
+ 
+ 
+-def _policy_open_scope(stable_ext):
++def _policy_open_scope(stable_ext, *, deadline_ns=None):
+     """Open and lock the existing owner only; never create a missing installation."""
+     descriptors, handles, lock_fd = [], [], None
+     try:
+@@ -524,7 +556,7 @@
+         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                 or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1 or info.st_size != 0):
+             raise PolicyPublicationRefused("POLICY_ADMISSION_LOCK_INVALID")
+-        _acquire_policy_lock(lock_fd)
++        _acquire_policy_lock(lock_fd, deadline_ns=deadline_ns)
+         lock_identity = _policy_file_identity(info)
+         _policy_handles_current(handles, lock_fd, lock_identity)
+         return handles, lock_fd, lock_identity
+@@ -547,6 +579,72 @@
+                 failure = exc
+     if failure is not None:
+         raise failure
++
++
++def _source_state_owner(code_here):
++    """Delegate immutable source custody to its incumbent identity owner."""
++    here = Path(code_here)
++    if (not here.is_absolute() or here != Path(__file__).absolute().parent
++            or here.name != "ext"):
++        raise ValueError("ADMISSION_SOURCE_CONTEXT_REFUSED")
++    if here.parent.parent.name == "native-code-releases":
++        from native_runtime_bindings import owner_path
++        return owner_path(here / "active", here).parent
++    if here.parent.parent.name == "support-releases":
++        from paid_model_owner import canonical_state_ext
++        return canonical_state_ext(here, os.environ)
++    raise ValueError("ADMISSION_SOURCE_OWNER_UNQUALIFIED")
++
++
++@contextmanager
++def source_admission_scope(code_here, *, deadline_ns=None):
++    """Hold the existing physical owner for this exact delivered code cohort.
++
++    This does not establish a grant or substitute a remote support digest for a
++    native selection. Flat/legacy sources have no implicit fenced eligibility.
++    """
++    stable = _source_state_owner(code_here)
++    with admission_scope(stable, deadline_ns=deadline_ns) as check:
++        def require_current_owner():
++            if _source_state_owner(code_here) != stable:
++                raise ValueError("ADMISSION_SOURCE_OWNER_CHANGED")
++            check()
++        require_current_owner()
++        yield stable, require_current_owner
++
++
++def require_current_admission_source(code_here):
++    """For new work only; original recovery deliberately does not call this."""
++    stable = _source_state_owner(code_here)
++    here = Path(code_here)
++    if here.parent.parent.name == "native-code-releases":
++        from native_runtime_bindings import require_current_selection
++        require_current_selection(here)
++    # Remote eligibility retains the actual committed support source and lane
++    # owner. Its digest is never interpreted as a native CURRENT generation.
++    return stable
++
++
++@contextmanager
++def admission_scope(stable_ext, *, deadline_ns=None):
++    """Hold the incumbent physical owner without creating installation state.
++
++    Callers which also publish take publication before this scope; Broker and
++    SQLite ownership are inside it. The yielded check must run before the
++    caller commits its effect. This helper owns no claim, selection or grant.
++    It is deliberately not reentrant: an already-held caller passes its scope
++    through existing owner operations instead of opening a second flock.
++    """
++    handles, lock_fd, identity = _policy_open_scope(
++        stable_ext, deadline_ns=deadline_ns)
++    try:
++        def require_current():
++            _policy_handles_current(handles, lock_fd, identity)
++            if deadline_ns is not None and time.monotonic_ns() >= deadline_ns:
++                raise TimeoutError("ADMISSION_DEADLINE_EXPIRED")
++        yield require_current
++    finally:
++        _policy_close_scope(handles, lock_fd)
+ 
+ 
+ def _policy_public_document(raw, policy_owner):
+--- a/rollout/native_generation.py
++++ b/rollout/native_generation.py
+@@ -3,7 +3,8 @@
+ 
+ This is an OFFLINE ROLLOUT CANDIDATE. A reviewed manifest is an input, not a
+ claim that this file discovers the full dependency closure. Runtime state stays
+-with the incumbent kit. Publication and selection use an artifact lock only.
++with the incumbent kit. Selection nests its existing physical admission
++fence inside publication; this candidate does not create an installation.
+ """
+ from __future__ import annotations
+ 
+@@ -366,15 +367,50 @@
+     return value
+ 
+ 
++@contextlib.contextmanager
++def verified_admission_scope(store, generation, *, deadline_ns=None):
++    """Use the target's held, verified helper without populating runtime imports.
++
++    Publication ownership, when required, is already held by the caller.
++    Historical artifact verification remains available; a helper-less release
++    does not become eligible for a new fenced selection.
++    """
++    root, meta = verify(store, generation)
++    relative = "ext/support_bundle.py"
++    if relative not in meta["files"]:
++        raise ValueError("native common admission source unavailable")
++    target = root / relative
++    require(target, stat.S_ISREG, 0o555)
++    raw = regular_bytes(target)
++    if digest(raw) != meta["files"][relative]:
++        raise ValueError("native common admission source changed")
++    # Private handle only: native_go_entry retains ownership of ordinary module
++    # slots and its foreign-module refusal.
++    spec = importlib.util.spec_from_file_location("_native_selection_support_bundle", target)
++    if spec is None or spec.loader is None:
++        raise ValueError("native common admission helper unavailable")
++    helper = importlib.util.module_from_spec(spec)
++    exec(compile(raw, str(target), "exec"), helper.__dict__)
++    if (getattr(helper, "COMMON_ADMISSION_PROTOCOL", None) != "physical-admission.v1"
++            or not callable(getattr(helper, "admission_scope", None))):
++        raise ValueError("native common admission protocol unavailable")
++    with helper.admission_scope(Path(meta["stable_ext"]), deadline_ns=deadline_ns) as held:
++        yield held
++
++
+ def _select_locked(store, generation, expected):
+-    verify(store, generation)
+-    old = current(store)
+-    if (old["generation"] if old else None) != expected:
+-        raise ValueError("native selection compare-and-swap refused")
+-    value = {"schema": POINTER_SCHEMA, "generation": generation,
+-             "previous": expected, "sequence": old["sequence"] + 1 if old else 1}
+-    atomic_bytes(Path(store) / "CURRENT.json", canonical(value) + b"\n", 0o600)
+-    return value
++    # All incumbent callers already hold publication. This is the shared entry
++    # used by both select() and installer transitions.
++    with verified_admission_scope(store, generation) as require_admission:
++        verify(store, generation)
++        old = current(store)
++        if (old["generation"] if old else None) != expected:
++            raise ValueError("native selection compare-and-swap refused")
++        value = {"schema": POINTER_SCHEMA, "generation": generation,
++                 "previous": expected, "sequence": old["sequence"] + 1 if old else 1}
++        require_admission()
++        atomic_bytes(Path(store) / "CURRENT.json", canonical(value) + b"\n", 0o600)
++        return value
+ 
+ 
+ def select(store, generation, expected):
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -23,6 +23,7 @@
+ import json
+ import math
+ import os
++from pathlib import Path
+ import re
+ import socket
+ import sqlite3
+@@ -1964,6 +1965,39 @@
+         finally:
+             _ACQUIRE_DEADLINE_NS.reset(token)
+ 
++    @contextmanager
++    def _physical_admission_scope(self, *, deadline_ns=None):
++        from support_bundle import source_admission_scope
++        try:
++            with source_admission_scope(Path(HERE), deadline_ns=deadline_ns) as scope:
++                stable, held = scope
++                # Only the authenticated fixed alias or its original owner is
++                # accepted. Do not resolve arbitrary state-internal symlinks.
++                here = Path(HERE)
++                owners = {
++                    "db_path": (stable / "broker/leases.sqlite", here / "broker/leases.sqlite"),
++                    "lock_path": (stable / "broker/leases.lock", here / "broker/leases.lock"),
++                    "accounts_path": (stable.parent / "orch/fabric/accounts.yaml", here.parent / "orch/fabric/accounts.yaml"),
++                    "status_json": (stable.parent / "orch/fabric/status.json", here.parent / "orch/fabric/status.json"),
++                    "hosts_path": (stable / "hosts.json", here / "hosts.json"),
++                    "grok_marker": (stable / "GROK_EXHAUSTED", here / "GROK_EXHAUSTED"),
++                }
++                if any(Path(getattr(self, name)) not in allowed for name, allowed in owners.items()):
++                    raise ApplicationAdmissionError("physical_owner_mismatch")
++                yield held
++        except TimeoutError:
++            if deadline_ns is not None:
++                require_remaining(deadline_ns)
++            raise
++
++    @staticmethod
++    def _require_current_admission_source():
++        from support_bundle import require_current_admission_source
++        try:
++            require_current_admission_source(Path(HERE))
++        except (OSError, ValueError, KeyError):
++            raise ApplicationAdmissionError("source_no_longer_eligible") from None
++
+     def _acquire(self, orchestrator_id, pool, account, task_class, host,
+                  pid, ttl, wait, poll, model, operator_child_id, capacity_handoff, not_before=None):
+         pool = self.provider_name(pool)
+@@ -1984,30 +2018,33 @@
+             if not_before is not None:
+                 from commission_deadline import require_not_before
+                 require_not_before(not_before)
+-            lock = self._lock()
+-            try:
+-                if not_before is not None:
+-                    require_not_before(not_before)
+-                self._gc_locked()
+-                result, waiter_id, last_reason = self._try_acquire(
+-                    orchestrator_id,
+-                    pool,
+-                    account,
+-                    task_class,
+-                    host,
+-                    pid,
+-                    ttl,
+-                    waiter_id,
+-                    model,
+-                    operator_child_id,
+-                    capacity_handoff,
+-                    not_before,
+-                )
+-                if result.ok or last_reason in ("operator_authorization_refused", "host_account_unavailable", "quota_cooldown"):
+-                    return result
+-            finally:
+-                fcntl.flock(lock, fcntl.LOCK_UN)
+-                lock.close()
++            with self._physical_admission_scope(deadline_ns=_ACQUIRE_DEADLINE_NS.get()) as held:
++                self._require_current_admission_source()
++                lock = self._lock()
++                try:
++                    if not_before is not None:
++                        require_not_before(not_before)
++                    self._gc_locked()
++                    result, waiter_id, last_reason = self._try_acquire(
++                        orchestrator_id,
++                        pool,
++                        account,
++                        task_class,
++                        host,
++                        pid,
++                        ttl,
++                        waiter_id,
++                        model,
++                        operator_child_id,
++                        capacity_handoff,
++                        not_before,
++                        admission_check=held,
++                    )
++                    if result.ok or last_reason in ("operator_authorization_refused", "host_account_unavailable", "quota_cooldown"):
++                        return result
++                finally:
++                    fcntl.flock(lock, fcntl.LOCK_UN)
++                    lock.close()
+             if self.now() >= deadline:
+                 break
+             pause = min(max(0.05, float(poll)), max(0.0, deadline - self.now()))
+@@ -2478,12 +2515,14 @@
+         operator_child_id: Optional[str] = None,
+         capacity_handoff: bool = False,
+         not_before: Optional[str] = None,
++        *, admission_check,
+     ) -> Tuple[AcquireResult, Optional[str], str]:
+         conn = self._conn()
+         try:
+             conn.execute("BEGIN IMMEDIATE")
+             result = self._try_acquire_in_transaction(conn, orch, pool, account, task_class,
+                 host, pid, ttl, waiter_id, model, operator_child_id, capacity_handoff, not_before)
++            admission_check()
+             conn.commit()
+             return result
+         except BaseException:
+@@ -2813,23 +2852,27 @@
+         token = _ACQUIRE_DEADLINE_NS.set(deadline)
+         lock = conn = None
+         try:
+-            lock = self._lock()
+-            if collect:
+-                self._gc_locked()
+-            conn = self._conn()
+-            conn.execute("BEGIN IMMEDIATE")
+-            yield conn
+-            conn.commit()
+-        except BaseException:
+-            if conn is not None:
+-                conn.rollback()
+-            raise
++            with self._physical_admission_scope(deadline_ns=deadline) as held:
++                try:
++                    lock = self._lock()
++                    if collect:
++                        self._gc_locked()
++                    conn = self._conn()
++                    conn.execute("BEGIN IMMEDIATE")
++                    yield conn
++                    held()
++                    conn.commit()
++                except BaseException:
++                    if conn is not None:
++                        conn.rollback()
++                    raise
++                finally:
++                    if conn is not None:
++                        conn.close()
++                    if lock is not None:
++                        fcntl.flock(lock, fcntl.LOCK_UN)
++                        lock.close()
+         finally:
+-            if conn is not None:
+-                conn.close()
+-            if lock is not None:
+-                fcntl.flock(lock, fcntl.LOCK_UN)
+-                lock.close()
+             _ACQUIRE_DEADLINE_NS.reset(token)
+ 
+     def _application_grant(self, principal_id, caller_host, workload, pool, model,
+@@ -3283,6 +3326,7 @@
+                 if transport_accounts is not None and prior["account"] not in transport_accounts:
+                     raise ApplicationAdmissionError("account_unavailable")
+                 return self._application_binding(conn, prior)
++            self._require_current_admission_source()
+             admitted_accounts = frozenset(grant["accounts"])
+             if transport_accounts is not None:
+                 admitted_accounts &= transport_accounts
+@@ -3468,6 +3512,7 @@
+                 raise ApplicationAdmissionError("turn_closed")
+             if self._application_unsettled(conn, turn):
+                 return {"ok": False, "dispatch_permitted": False, "disposition": "effect_unknown"}
++            self._require_current_admission_source()
+             count = conn.execute("SELECT COUNT(*) FROM application_requests WHERE principal_id=? AND turn_id=?",
+                                  (principal_id, turn_id)).fetchone()[0]
+             if count >= turn["max_steps"]:
+@@ -3735,12 +3780,38 @@
+             self._gc_locked()
+             conn = self._conn()
+             try:
+-                return self._snapshot_locked(conn)
++                snapshot = self._snapshot_locked(conn)
+             finally:
+                 conn.close()
+         finally:
+             fcntl.flock(lock, fcntl.LOCK_UN)
+             lock.close()
++        # Advisory provider refresh may publish quota and take admission. It
++        # runs only after releasing the Broker lock and SQLite connection.
++        return self._enrich_snapshot(snapshot)
++
++    def _enrich_snapshot(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
++        """Add advisory observations after every admission/Broker scope."""
++        pools = snapshot["pools"]
++        extra: Dict[str, Any] = {}
++        try:
++            if HERE not in sys.path:
++                sys.path.insert(0, HERE)
++            import pool_status
++
++            extra = pool_status.build_status()
++        except Exception:
++            extra = {}
++        # Merge local observations (offpeak, last 402, bailian key cooldown)
++        # under pools without overwriting broker cap/active.
++        for pname, local in (extra.get("pools") or {}).items():
++            if pname not in pools:
++                continue
++            for k in ("last_402_429", "offpeak", "offpeak_window", "per_key_cap", "keys"):
++                if k in local:
++                    pools[pname][k] = local[k]
++        snapshot["offpeak"] = extra.get("offpeak")
++        return snapshot
+ 
+     def _snapshot_locked(self, conn: sqlite3.Connection) -> Dict[str, Any]:
+         doc = self.load_accounts_doc()
+@@ -3815,23 +3886,6 @@
+                     "wait_s": int(now - float(row["enqueued_at"])),
+                 }
+             )
+-        extra: Dict[str, Any] = {}
+-        try:
+-            if HERE not in sys.path:
+-                sys.path.insert(0, HERE)
+-            import pool_status
+-
+-            extra = pool_status.build_status()
+-        except Exception:
+-            extra = {}
+-        # Merge local observations (offpeak, last 402, bailian key cooldown)
+-        # under pools without overwriting broker cap/active.
+-        for pname, local in (extra.get("pools") or {}).items():
+-            if pname not in pools:
+-                continue
+-            for k in ("last_402_429", "offpeak", "offpeak_window", "per_key_cap", "keys"):
+-                if k in local:
+-                    pools[pname][k] = local[k]
+         return {
+             "schema": "mastermind.provider_capacity.v1",
+             "generated_at": int(now),
+@@ -3841,7 +3895,7 @@
+             "pools": pools,
+             "leases": leases_out,
+             "waiters": waiters_out,
+-            "offpeak": extra.get("offpeak"),
++            "offpeak": None,
+             "provenance": {
+                 "db_path": self.db_path,
+                 "broker_host": self.this_host,
+--- a/ext/quota_remote.py
++++ b/ext/quota_remote.py
+@@ -12,6 +12,7 @@
+ import subprocess
+ import json
+ import os
++from pathlib import Path
+ import sys
+ import tempfile
+ import time
+@@ -897,6 +898,21 @@
+     short lock; it never repeats a provider request or a failed publication.
+     """
+     try:
++        from support_bundle import source_admission_scope
++        with source_admission_scope(Path(HERE)) as scope:
++            stable, held = scope
++            if Path(path) != stable / "quota_cache.json":
++                raise QuotaCacheWriteError("quota cache owner differs from delivered source")
++            return _update_cache_locked(path, update, held)
++    except QuotaCacheWriteError:
++        raise
++    except OSError:
++        raise QuotaCacheWriteError("quota cache physical owner unavailable; reconcile original owner") from None
++
++
++def _update_cache_locked(path: str, update: Callable, admission_check) -> Any:
++    """Inner cache owner; caller holds physical admission through publication."""
++    try:
+         with open(path + ".lock", "a", encoding="utf-8") as lock:
+             deadline = time.monotonic() + CACHE_LOCK_WAIT_S
+             while True:
+@@ -911,6 +927,7 @@
+             try:
+                 cache = _load_cache(path)
+                 changed, result = update(cache)
++                admission_check()
+                 if changed:
+                     _atomic_write(path, cache)
+                 return result
+@@ -1164,6 +1181,8 @@
+     """One bounded, read-only H2 observation from the incumbent cache owner.
+ 
+     This function never refreshes, resolves credentials or accepts a caller path.
++    The caller holds the existing physical admission scope. Reuse its source
++    owner read-only; never retain an import-time resolved cache target.
+     A digest binds the retained bytes; it is not a grant or provider attestation.
+     """
+     import hashlib
+@@ -1181,7 +1200,9 @@
+     def invalid_constant(value):
+         raise ValueError("invalid_capacity_number")
+ 
+-    fd = os.open(CACHE_PATH, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
++    import support_bundle
++    cache_path = support_bundle._source_state_owner(Path(HERE)) / "quota_cache.json"
++    fd = os.open(cache_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+     with os.fdopen(fd, "rb") as source:
+         before = os.fstat(source.fileno())
+         if not stat.S_ISREG(before.st_mode) or before.st_size > 4 * 1024 * 1024:
+--- a/ext/native_go_entry.py
++++ b/ext/native_go_entry.py
+@@ -19,7 +19,7 @@
+ 
+ GLM_HELPER_SHA256 = "020b9ef9c59260d07980a23f2ac277d4e4d7350ff81e010d071fd733cc05b1fc"
+ MODULES = (
+-    "native_runtime_bindings", "commission_deadline", "provider_outcome",
++    "native_runtime_bindings", "support_bundle", "commission_deadline", "provider_outcome",
+     "quota_remote", "glm_keys", "quota_circuit", "model_tier", "pool_status",
+     "go_lease_capability", "lease_broker", "go_lease_gateway", "paid_yaml_runtime", "go_application_handler",
+     "fabric_policy_snapshot", "pool_ledger", "pick",
+--- a/ext/remote_sub.sh
++++ b/ext/remote_sub.sh
+@@ -1406,6 +1406,7 @@
+ }
+ 
+ SUPPORT_FILES=(
++  support_bundle.py paid_model_owner.py go_lease_capability.py quota_remote.py
+   provider_outcome.py quota_circuit.py recovery_artifacts.py capacity_preflight.py native_runtime_bindings.py commission_deadline.py
+   pools.yaml fabric_policy_snapshot.py remote_sub_exec.py fabric_cpu_scope.py native_remote.py fabric_operator_client.py fabric_operator_stop.py fabric_operator_diagnostics.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py yes
+   codex_usage.py go_remote_codex.py go_remote_capsule.py
+@@ -1415,7 +1416,7 @@
+ )
+ # The v2 executor imports this explicit sealed dependency only for bound roots.
+ [ "$REMOTE_PHYSICAL_ROOT" = "-" ] || SUPPORT_FILES+=(artifact_delivery.py)
+-[ "$CANONICAL_PAID_ACTIVE" -eq 0 ] || SUPPORT_FILES+=(paid_glm_model_client.py paid_model_owner.py linux_process_identity.py paid_provider_entry.py paid_initializer.py paid_initializer_token_data.py paid_initializer_nested_data.py)
++[ "$CANONICAL_PAID_ACTIVE" -eq 0 ] || SUPPORT_FILES+=(paid_glm_model_client.py linux_process_identity.py paid_provider_entry.py paid_initializer.py paid_initializer_token_data.py paid_initializer_nested_data.py paid_yaml_runtime.py paid_pyyaml_6_0_3.zip paid_pyyaml_provenance.json)
+ # APPLICATION has one explicit closure; ordinary worker membership is unchanged.
+ if [ "$APPLICATION_ACTIVE" -eq 1 ]; then
+   [ -f "$HERE/application_native_owner.py" ] || {
+@@ -1440,7 +1441,7 @@
+ run_scp() {
+   if [ "$DRY_RUN" -eq 1 ]; then
+     show_args "$SCP_CMD" -q "$PACKET_BASE" "$SSH_ALIAS:$REMOTE_PACKET"
+-    show_args "$SCP_CMD" -q "${SUPPORT_FILES[@]}" support_bundle.py pools.yaml "$(basename "$SUPPORT_MANIFEST")" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/"
++    show_args "$SCP_CMD" -q "${SUPPORT_FILES[@]}" "$(basename "$SUPPORT_MANIFEST")" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/"
+     show_args "<support-publication>" "same shared ext/active and ext/orch state; code=$SUPPORT_DIGEST; immutable advisory snapshot; shared admission recheck"
+     return 0
+   fi
+@@ -1458,7 +1459,7 @@
+     "mkdir -p $REMOTE_LANES_Q/support-releases && mkdir $REMOTE_LANES_Q/tmp/${ID}.support-src" || return $?
+   _src=()
+   for _f in "${SUPPORT_FILES[@]}"; do [ "$_f" = pools.yaml ] || _src+=("$HERE/$_f"); done
+-  commission_run support-upload "$SCP_CMD" -q "${_src[@]}" "$HERE/support_bundle.py" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/" || return $?
++  commission_run support-upload "$SCP_CMD" -q "${_src[@]}" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/" || return $?
+   commission_run manifest-upload "$SCP_CMD" -q "$SUPPORT_MANIFEST" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/manifest.json" || return $?
+   commission_run policy-upload "$SCP_CMD" -q "$POLICY_SOURCE" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/pools.yaml" || return $?
+   # New generation carries hash-bound advisory policy. Publication checks
+--- a/ext/paid_provider_entry.py
++++ b/ext/paid_provider_entry.py
+@@ -30,6 +30,8 @@
+ YAML_NAMES = frozenset({'paid_yaml_runtime.py', 'paid_pyyaml_6_0_3.zip', 'paid_pyyaml_provenance.json'})
+ SOURCE_NAMES = BUNDLE_NAMES | INITIALIZER_NAMES | YAML_NAMES
+ SUPPORT_FILES = frozenset('artifact_production.py artifact_reader.py bailian_keys.py capacity_preflight.py codex_usage.py commission_deadline.py fabric_client_projection.py fabric_cpu_scope.py fabric_operator_client.py fabric_operator_diagnostics.py fabric_operator_stop.py fabric_policy_snapshot.py glm_bound_claude.py glm_codex_exec.sh glm_keys.py go_codex_exec.sh go_remote_capsule.py go_remote_codex.py lane_runtime.py lease_broker.py linux_process_identity.py mm_codex_exec.sh mm_feeder_lib.py model_tier.py native_remote.py native_runtime_bindings.py paid_glm_model_client.py paid_initializer.py paid_initializer_nested_data.py paid_initializer_token_data.py paid_model_owner.py paid_provider_entry.py paid_pyyaml_6_0_3.zip paid_pyyaml_provenance.json paid_yaml_runtime.py pick.py pool_ledger.py pools.yaml provider_outcome.py quota_circuit.py qwen_exec.sh recovery_artifacts.py remote_sub_exec.py slot.py studio_mcp_projection.sh sub.sh yes'.split())
++# The new entry accepts only the complete helper-bearing paid cohort.
++SUPPORT_FILES = SUPPORT_FILES | {"go_lease_capability.py", "quota_remote.py", "support_bundle.py"}
+ _EXECUTOR_SEAL = object()
+ FIELDS = frozenset(('schema_version purpose host_ref transport_alias python_path capture_root '
+     'initializer_commitment initializer_commitment_sha256 run_id model lease_id account '
+--- a/ext/paid_model_owner.py
++++ b/ext/paid_model_owner.py
+@@ -27,15 +27,35 @@
+ 
+ 
+ _PAID_SUPPORT_FILES = frozenset('artifact_production.py artifact_reader.py bailian_keys.py capacity_preflight.py codex_usage.py commission_deadline.py fabric_client_projection.py fabric_cpu_scope.py fabric_operator_client.py fabric_operator_diagnostics.py fabric_operator_stop.py fabric_policy_snapshot.py glm_bound_claude.py glm_codex_exec.sh glm_keys.py go_codex_exec.sh go_remote_capsule.py go_remote_codex.py lane_runtime.py lease_broker.py linux_process_identity.py mm_codex_exec.sh mm_feeder_lib.py model_tier.py native_remote.py native_runtime_bindings.py paid_glm_model_client.py paid_initializer.py paid_initializer_nested_data.py paid_initializer_token_data.py paid_model_owner.py paid_provider_entry.py paid_pyyaml_6_0_3.zip paid_pyyaml_provenance.json paid_yaml_runtime.py pick.py pool_ledger.py pools.yaml provider_outcome.py quota_circuit.py qwen_exec.sh recovery_artifacts.py remote_sub_exec.py slot.py studio_mcp_projection.sh sub.sh yes'.split())
++_COMMON_BASE_SUPPORT_FILES = frozenset(['artifact_production.py', 'artifact_reader.py', 'bailian_keys.py', 'capacity_preflight.py', 'codex_usage.py', 'commission_deadline.py', 'fabric_client_projection.py', 'fabric_cpu_scope.py', 'fabric_operator_client.py', 'fabric_operator_diagnostics.py', 'fabric_operator_stop.py', 'fabric_policy_snapshot.py', 'glm_bound_claude.py', 'glm_codex_exec.sh', 'glm_keys.py', 'go_codex_exec.sh', 'go_remote_capsule.py', 'go_remote_codex.py', 'lane_runtime.py', 'lease_broker.py', 'mm_codex_exec.sh', 'mm_feeder_lib.py', 'model_tier.py', 'native_remote.py', 'native_runtime_bindings.py', 'pick.py', 'pool_ledger.py', 'pools.yaml', 'provider_outcome.py', 'quota_circuit.py', 'qwen_exec.sh', 'recovery_artifacts.py', 'remote_sub_exec.py', 'slot.py', 'studio_mcp_projection.sh', 'sub.sh', 'yes'])
++
++_COMMON_DEPENDENCIES = frozenset({"go_lease_capability.py", "quota_remote.py", "support_bundle.py"})
++_COMMON_PLAIN_SUPPORT_FILES = _COMMON_BASE_SUPPORT_FILES | _COMMON_DEPENDENCIES | {"paid_model_owner.py"}
++_COMMON_PAID_SUPPORT_FILES = _PAID_SUPPORT_FILES | _COMMON_DEPENDENCIES
++_COMMON_APPLICATION_SUPPORT_FILES = _COMMON_PLAIN_SUPPORT_FILES | {"application_native_owner.py"}
++_COMMON_SUPPORT_GENERATIONS = (_COMMON_PLAIN_SUPPORT_FILES,
++    _COMMON_PLAIN_SUPPORT_FILES | {"artifact_delivery.py"},
++    _COMMON_PAID_SUPPORT_FILES, _COMMON_PAID_SUPPORT_FILES | {"artifact_delivery.py"},
++    _COMMON_APPLICATION_SUPPORT_FILES, _COMMON_APPLICATION_SUPPORT_FILES | {"artifact_delivery.py"})
++_OWNER_SOURCE_GENERATIONS = (_PAID_SUPPORT_FILES,) + _COMMON_SUPPORT_GENERATIONS
++
+ _SUPPORT_EXT_LINKS = frozenset(['GROK_EXHAUSTED', 'active', 'bailian_policy.json', 'bailian_usage.json', 'broker', 'codex_glm', 'codex_go', 'codex_minimax', 'glm_shim', 'glm_window_state.json', 'go_shim', 'hosts.json', 'lane_bin', 'lanes', 'slots', 'state'])
+ _SUPPORT_ROOT_LINKS = frozenset(['codex_bailian', 'glm_claude_home', 'go_claude_home', 'minimax_claude_home', 'orch'])
+ 
++
++def _owner_ext_links(files):
++    names = frozenset(files)
++    if names not in _OWNER_SOURCE_GENERATIONS:
++        raise ValueError("paid_support_owner_refused")
++    return _SUPPORT_EXT_LINKS | {"quota_cache.json"} if names in _COMMON_SUPPORT_GENERATIONS else _SUPPORT_EXT_LINKS
++
+ def canonical_state_ext(here, env):
+     """Authenticate the default support aliases, then use their physical owner.
+ 
+     No arbitrary symlink is followed into capture/admission directories. This
+-    repeats the incumbent support publication contract in the remote closure;
+-    the publisher itself is deliberately not uploaded as executable support.
++    repeats the incumbent support publication contract in the remote closure.
++    Named successors include the existing helper and physical cache alias; a
++    successful mapping grants neither paid execution nor APPLICATION authority.
+     """
+     here = Path(here)
+     lanes = Path(env['REMOTE_SUB_LANES'])
+@@ -83,12 +103,12 @@
+     meta=json.loads(raw,object_pairs_hook=unique)
+     if (type(meta) is not dict or set(meta)!={'schema','files','digest','links'}
+             or meta['schema']!='remote-support-code.v1' or meta['digest']!=digest
+-            or type(meta['files']) is not dict or set(meta['files'])!=_PAID_SUPPORT_FILES
++            or type(meta['files']) is not dict or frozenset(meta['files']) not in _OWNER_SOURCE_GENERATIONS
+             or hashlib.sha256(canonical({'schema':meta['schema'],'files':meta['files']})).hexdigest()!=digest
+             or {p.name for p in root.iterdir()}!={'ext','RELEASE.json',*_SUPPORT_ROOT_LINKS}
+-            or {p.name for p in here.iterdir()}!=_PAID_SUPPORT_FILES|_SUPPORT_EXT_LINKS):
++            or {p.name for p in here.iterdir()}!=set(meta['files'])|_owner_ext_links(meta['files'])):
+         raise ValueError('paid_support_owner_refused')
+-    links={'ext/'+name:str(stable/name) for name in _SUPPORT_EXT_LINKS}
++    links={'ext/'+name:str(stable/name) for name in _owner_ext_links(meta['files'])}
+     links.update({name:str(stable.parent/name) for name in _SUPPORT_ROOT_LINKS})
+     if meta['links']!=links:raise ValueError('paid_support_owner_refused')
+     link_ids={}
+--- a/rollout/native_install.py
++++ b/rollout/native_install.py
+@@ -2265,7 +2265,7 @@
+     raise ValueError("service target preimage or original effect differs")
+ 
+ 
+-def _publish_service_target(entry, path, raw, before, progress, prepared, plan_digest, mode):
++def _publish_service_target(entry, path, raw, before, progress, prepared, plan_digest, mode, *, admission_check):
+     """Prepare/commit inode custody before one same-directory atomic rename."""
+     stage = path.parent / (".application-service-" + plan_digest + "." + path.name)
+     if os.path.lexists(prepared):
+@@ -2276,10 +2276,12 @@
+     else:
+         if os.path.lexists(stage):
+             raise ValueError("service publication stage lacks its original commitment")
++        admission_check()
+         generation.atomic_bytes(stage, raw, mode)
+         observed, identity = _service_snapshot(entry, stage, mode=mode)
+         if observed != raw:
+             raise ValueError("service publication stage readback differs")
++        admission_check()
+         _record_once(prepared, {"plan_digest": plan_digest, "target": str(path),
+             "stage": str(stage), "sha256": generation.digest(raw), "identity": identity})
+     state, _ = _service_target(entry, path, raw, before, progress, prepared, plan_digest)
+@@ -2287,6 +2289,7 @@
+         raise ValueError("service target changed before original rename")
+     if _service_snapshot(entry, stage, mode=mode) != (raw, identity):
+         raise ValueError("service publication stage changed before original rename")
++    admission_check()
+     os.replace(stage, path)
+     generation.fsync_directory(path.parent)
+     state, identity = _service_target(entry, path, raw, before, progress, prepared, plan_digest)
+@@ -2382,183 +2385,189 @@
+         raise ValueError("service publication owner differs from original ingress")
+     with generation.publication_lock(store), _service_source(plan["go_ingress_bundle"]) as context:
+         ingress, selection, metadata, entry, startup = context
+-        specification = _service_specification(entry, specification, startup)
+-        role_names, spec_schema, binding_schema, enrollment_schema, receipt_schema, retained_count = _service_set_contract(entry, plan)
+-        scopes = [specification[name]["scope"] for name in role_names]
+-        profile = Path(scopes[0]["account_profile"])
+-        if (specification["schema"] != spec_schema
+-                or ingress["digest"] != plan["ingress_digest"]
+-                or startup.generation != plan["source_generation"] or selection != plan["selection"]
+-                or plan["store"] != ingress["store"]
+-                or metadata["files"][generation.GO_ENTRY] != plan["entry_sha256"]
+-                or specification["operation_id"] != plan["operation_id"] or scopes != plan["scopes"]
+-                or entry.application_service_owners(startup) != plan["owners"]
+-                or _service_owner_identities(entry, startup, profile) != plan["owner_identities"]
+-                or generation.digest(generation.canonical(
+-                    _service_set_grants(specification, retained_count))) != plan["grant_sha256"]):
+-            raise ValueError("service-set plan no longer binds its original owners")
+-        with startup.yaml_runtime.held_yaml(startup.yaml_archive, startup.yaml_provenance, startup.yaml_check):
+-            expected_after, document = _service_set_after(startup, specification, before,
+-                predecessor=bool(retained_count), predecessor_schema=plan.get("predecessor_schema"))
+-            if (after != expected_after
+-                    or _service_enrollment_accounts(startup, bundle / "accounts.after.yaml", document, specification) != document):
+-                raise ValueError("service-set enrollment candidate differs")
+-        paths = entry.application_enrollment_paths(startup)
+-        previous = plan.get("predecessor_custody", {})
+-        intent = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
+-            "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
+-            "ingress_digest": plan["ingress_digest"], "bundle": str(bundle)}
+-        intent_raw = generation.canonical(intent) + b"\n"
+-        private = bundle / _SERVICE_PRIVATE
+-        names = ("intent", "binding", "accounts", "receipt")
+-        target_paths = dict(paths, accounts=startup.paths["accounts_path"])
+-        progress = {name: store / "bootstrap" / (plan["digest"] + ".service-" + name + ".json")
+-                    for name in names}
+-        prepared = {name: store / "bootstrap" / (plan["digest"] + ".service-" + name + "-prepared.json")
+-                    for name in names}
+-        stages = {name: path.parent / (".application-service-" + plan["digest"] + "." + path.name)
+-                  for name, path in target_paths.items()}
+-        private_receipt = store / "bootstrap" / (plan["digest"] + ".service-private.json")
+-        public = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
+-                  "plan_digest": plan["digest"]}
+-        expected_public = {"schema": binding_schema, "operation_id": plan["operation_id"],
+-            "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
+-            "ingress_digest": plan["ingress_digest"], "scopes": scopes, "owners": plan["owners"]}
+-
+-        def original_private():
+-            raw, identity = _service_snapshot(entry, private, mode=0o600)
+-            if (not os.path.lexists(private_receipt)
+-                    or _successor_json(private_receipt) != {"sha256": generation.digest(raw), "identity": identity}):
+-                raise ValueError("original service credential commitment differs; adoption refused")
+-            payload = entry._service_json(raw)
+-            entry.validate_application_service_document(startup, payload)
+-            if (_service_set_public(payload) != expected_public
+-                    or not _service_set_credentials_match(plan, payload["credentials"])):
+-                raise ValueError("original service-set credential payload differs")
+-            return raw, identity
+-
+-        def custody(raw, identity, *, intent_started):
+-            if (_read_service_plan(bundle) != (bundle, plan, specification, before, after)
+-                    or _completed_go_for_service(plan["go_ingress_bundle"])[1] != selection
++        with generation.verified_admission_scope(store, startup.generation) as require_admission:
++            specification = _service_specification(entry, specification, startup)
++            role_names, spec_schema, binding_schema, enrollment_schema, receipt_schema, retained_count = _service_set_contract(entry, plan)
++            scopes = [specification[name]["scope"] for name in role_names]
++            profile = Path(scopes[0]["account_profile"])
++            if (specification["schema"] != spec_schema
++                    or ingress["digest"] != plan["ingress_digest"]
++                    or startup.generation != plan["source_generation"] or selection != plan["selection"]
++                    or plan["store"] != ingress["store"]
++                    or metadata["files"][generation.GO_ENTRY] != plan["entry_sha256"]
++                    or specification["operation_id"] != plan["operation_id"] or scopes != plan["scopes"]
++                    or entry.application_service_owners(startup) != plan["owners"]
+                     or _service_owner_identities(entry, startup, profile) != plan["owner_identities"]
+-                    or original_private() != (raw, identity)):
+-                raise ValueError("service-set original custody changed before publication")
+-            _service_set_predecessor(entry, startup, bundle=bundle, plan=plan)
+-            state, _ = _service_target(entry, paths["intent"], intent_raw, previous.get("intent"),
+-                progress["intent"], prepared["intent"], plan["digest"])
+-            if intent_started and not state.startswith("committed"):
+-                raise ValueError("service-set original intent changed before publication")
+-
+-        def settle(name, path, data, old, mode, *, publish):
+-            state, identity = _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])
+-            if not state.startswith("committed"):
+-                if not publish:
+-                    return state, identity
+-                identity = _publish_service_target(entry, path, data, old, progress[name],
+-                    prepared[name], plan["digest"], mode)
+-            elif state == "committed_receipt_missing":
+-                generation.fsync_directory(path.parent)
+-                if _service_target(entry, path, data, old, progress[name], prepared[name],
+-                        plan["digest"]) != (state, identity):
+-                    raise ValueError("service-set recovered target changed before receipt")
+-            _record_once(progress[name], {"sha256": generation.digest(data), "identity": identity})
+-            return "committed", identity
+-
+-        with _service_broker_lock(entry, startup, plan["owner_identities"]["lock_path"]):
+-            if _service_owner_identities(entry, startup, profile) != plan["owner_identities"]:
+-                raise ValueError("service owners changed before publication")
+-            retained_credential = _service_set_predecessor(entry, startup, bundle=bundle, plan=plan)
+-            retained_credentials = (retained_credential if plan["schema"] in (
+-                                     entry.SERVICE_FAMILY_ENROLLMENT_SCHEMA, entry.SERVICE_ROUTED_ENROLLMENT_SCHEMA,
+-                                     entry.SERVICE_WORKLOAD_ENROLLMENT_SCHEMA, entry.SERVICE_FRESH_FAMILY_ENROLLMENT_SCHEMA)
+-                                    else [retained_credential] if retained_count else []) or []
+-            state, _ = _service_target(entry, paths["intent"], intent_raw, previous.get("intent"),
+-                progress["intent"], prepared["intent"], plan["digest"])
+-            started = state.startswith("committed")
+-            if not started:
+-                if plan["schema"] == entry.SERVICE_FRESH_FAMILY_ENROLLMENT_SCHEMA:
+-                    _service_fresh_family_siblings(entry, startup, scopes)
+-                # Until this original intent is published all live predecessors
+-                # must still be present, even when private preparation resumed.
+-                _service_set_predecessor(entry, startup, bundle=bundle, plan=plan, require_live=True)
+-                for name in ("binding", "receipt"):
+-                    _service_set_before(entry, paths[name], previous.get(name))
+-                _service_set_before(entry, startup.paths["accounts_path"], plan["accounts_before"])
+-                if any(os.path.lexists(path) for name in ("binding", "accounts", "receipt")
+-                        for path in (progress[name], prepared[name], stages[name])):
+-                    raise ValueError("service-set publication precedes its original intent")
+-                if not os.path.lexists(private):
+-                    if any(os.path.lexists(path) for path in (
+-                            private_receipt, progress["intent"], prepared["intent"], stages["intent"])):
+-                        raise ValueError("service-set original credential is missing; regeneration refused")
++                    or generation.digest(generation.canonical(
++                        _service_set_grants(specification, retained_count))) != plan["grant_sha256"]):
++                raise ValueError("service-set plan no longer binds its original owners")
++            with startup.yaml_runtime.held_yaml(startup.yaml_archive, startup.yaml_provenance, startup.yaml_check):
++                expected_after, document = _service_set_after(startup, specification, before,
++                    predecessor=bool(retained_count), predecessor_schema=plan.get("predecessor_schema"))
++                if (after != expected_after
++                        or _service_enrollment_accounts(startup, bundle / "accounts.after.yaml", document, specification) != document):
++                    raise ValueError("service-set enrollment candidate differs")
++            paths = entry.application_enrollment_paths(startup)
++            previous = plan.get("predecessor_custody", {})
++            intent = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
++                "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
++                "ingress_digest": plan["ingress_digest"], "bundle": str(bundle)}
++            intent_raw = generation.canonical(intent) + b"\n"
++            private = bundle / _SERVICE_PRIVATE
++            names = ("intent", "binding", "accounts", "receipt")
++            target_paths = dict(paths, accounts=startup.paths["accounts_path"])
++            progress = {name: store / "bootstrap" / (plan["digest"] + ".service-" + name + ".json")
++                        for name in names}
++            prepared = {name: store / "bootstrap" / (plan["digest"] + ".service-" + name + "-prepared.json")
++                        for name in names}
++            stages = {name: path.parent / (".application-service-" + plan["digest"] + "." + path.name)
++                      for name, path in target_paths.items()}
++            private_receipt = store / "bootstrap" / (plan["digest"] + ".service-private.json")
++            public = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
++                      "plan_digest": plan["digest"]}
++            expected_public = {"schema": binding_schema, "operation_id": plan["operation_id"],
++                "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
++                "ingress_digest": plan["ingress_digest"], "scopes": scopes, "owners": plan["owners"]}
++
++            def original_private():
++                raw, identity = _service_snapshot(entry, private, mode=0o600)
++                if (not os.path.lexists(private_receipt)
++                        or _successor_json(private_receipt) != {"sha256": generation.digest(raw), "identity": identity}):
++                    raise ValueError("original service credential commitment differs; adoption refused")
++                payload = entry._service_json(raw)
++                entry.validate_application_service_document(startup, payload)
++                if (_service_set_public(payload) != expected_public
++                        or not _service_set_credentials_match(plan, payload["credentials"])):
++                    raise ValueError("original service-set credential payload differs")
++                return raw, identity
++
++            def custody(raw, identity, *, intent_started):
++                require_admission()
++                if (_read_service_plan(bundle) != (bundle, plan, specification, before, after)
++                        or _completed_go_for_service(plan["go_ingress_bundle"])[1] != selection
++                        or _service_owner_identities(entry, startup, profile) != plan["owner_identities"]
++                        or original_private() != (raw, identity)):
++                    raise ValueError("service-set original custody changed before publication")
++                _service_set_predecessor(entry, startup, bundle=bundle, plan=plan)
++                state, _ = _service_target(entry, paths["intent"], intent_raw, previous.get("intent"),
++                    progress["intent"], prepared["intent"], plan["digest"])
++                if intent_started and not state.startswith("committed"):
++                    raise ValueError("service-set original intent changed before publication")
++
++            def settle(name, path, data, old, mode, *, publish):
++                state, identity = _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])
++                if not state.startswith("committed"):
++                    if not publish:
++                        return state, identity
++                    identity = _publish_service_target(entry, path, data, old, progress[name],
++                        prepared[name], plan["digest"], mode, admission_check=require_admission)
++                elif state == "committed_receipt_missing":
++                    generation.fsync_directory(path.parent)
++                    if _service_target(entry, path, data, old, progress[name], prepared[name],
++                            plan["digest"]) != (state, identity):
++                        raise ValueError("service-set recovered target changed before receipt")
++                require_admission()
++                _record_once(progress[name], {"sha256": generation.digest(data), "identity": identity})
++                return "committed", identity
++
++            with _service_broker_lock(entry, startup, plan["owner_identities"]["lock_path"]):
++                require_admission()
++                if _service_owner_identities(entry, startup, profile) != plan["owner_identities"]:
++                    raise ValueError("service owners changed before publication")
++                retained_credential = _service_set_predecessor(entry, startup, bundle=bundle, plan=plan)
++                retained_credentials = (retained_credential if plan["schema"] in (
++                                         entry.SERVICE_FAMILY_ENROLLMENT_SCHEMA, entry.SERVICE_ROUTED_ENROLLMENT_SCHEMA,
++                                         entry.SERVICE_WORKLOAD_ENROLLMENT_SCHEMA, entry.SERVICE_FRESH_FAMILY_ENROLLMENT_SCHEMA)
++                                        else [retained_credential] if retained_count else []) or []
++                state, _ = _service_target(entry, paths["intent"], intent_raw, previous.get("intent"),
++                    progress["intent"], prepared["intent"], plan["digest"])
++                started = state.startswith("committed")
++                if not started:
++                    if plan["schema"] == entry.SERVICE_FRESH_FAMILY_ENROLLMENT_SCHEMA:
++                        _service_fresh_family_siblings(entry, startup, scopes)
++                    # Until this original intent is published all live predecessors
++                    # must still be present, even when private preparation resumed.
++                    _service_set_predecessor(entry, startup, bundle=bundle, plan=plan, require_live=True)
++                    for name in ("binding", "receipt"):
++                        _service_set_before(entry, paths[name], previous.get(name))
++                    _service_set_before(entry, startup.paths["accounts_path"], plan["accounts_before"])
++                    if any(os.path.lexists(path) for name in ("binding", "accounts", "receipt")
++                            for path in (progress[name], prepared[name], stages[name])):
++                        raise ValueError("service-set publication precedes its original intent")
++                    if not os.path.lexists(private):
++                        if any(os.path.lexists(path) for path in (
++                                private_receipt, progress["intent"], prepared["intent"], stages["intent"])):
++                            raise ValueError("service-set original credential is missing; regeneration refused")
++                        if reconcile_only:
++                            return dict(public, disposition="prepared")
++                        expires = _service_set_expiry(specification, predecessor=bool(retained_count),
++                                predecessor_schema=plan.get("predecessor_schema"))
++                        if expires is not None and expires <= time.time():
++                            raise ValueError("service grant expired before its original intent")
++                        credentials = retained_credentials + [
++                            secrets.token_urlsafe(48) for _ in range(len(role_names) - retained_count)]
++                        payload = _service_set_payload(entry, startup, plan, specification, scopes, credentials)
++                        entry.validate_application_service_document(startup, payload)
++                        # Commit private custody before replacing working Admin
++                        # enrollment. An uncommitted private write is never adopted.
++                        require_admission()
++                        generation.atomic_bytes(private, generation.canonical(payload) + b"\n", 0o600)
++                        raw, identity = _service_snapshot(entry, private, mode=0o600)
++                        require_admission()
++                        _record_once(private_receipt, {"sha256": generation.digest(raw), "identity": identity})
++                    raw, private_identity = original_private()
+                     if reconcile_only:
+-                        return dict(public, disposition="prepared")
++                        return dict(public, disposition="staged")
+                     expires = _service_set_expiry(specification, predecessor=bool(retained_count),
+-                            predecessor_schema=plan.get("predecessor_schema"))
++                                predecessor_schema=plan.get("predecessor_schema"))
+                     if expires is not None and expires <= time.time():
+                         raise ValueError("service grant expired before its original intent")
+-                    credentials = retained_credentials + [
+-                        secrets.token_urlsafe(48) for _ in range(len(role_names) - retained_count)]
+-                    payload = _service_set_payload(entry, startup, plan, specification, scopes, credentials)
+-                    entry.validate_application_service_document(startup, payload)
+-                    # Commit private custody before replacing working Admin
+-                    # enrollment. An uncommitted private write is never adopted.
+-                    generation.atomic_bytes(private, generation.canonical(payload) + b"\n", 0o600)
+-                    raw, identity = _service_snapshot(entry, private, mode=0o600)
+-                    _record_once(private_receipt, {"sha256": generation.digest(raw), "identity": identity})
+-                raw, private_identity = original_private()
+-                if reconcile_only:
+-                    return dict(public, disposition="staged")
+-                expires = _service_set_expiry(specification, predecessor=bool(retained_count),
+-                            predecessor_schema=plan.get("predecessor_schema"))
+-                if expires is not None and expires <= time.time():
+-                    raise ValueError("service grant expired before its original intent")
+-                custody(raw, private_identity, intent_started=False)
+-                _service_set_predecessor(entry, startup, bundle=bundle, plan=plan, require_live=True)
+-                _service_set_before(entry, startup.paths["accounts_path"], plan["accounts_before"])
+-                settle("intent", paths["intent"], intent_raw, previous.get("intent"), 0o600, publish=True)
+-            else:
+-                if not os.path.lexists(private):
+-                    raise ValueError("original service credential is missing; regeneration refused")
+-                raw, private_identity = original_private()
++                    custody(raw, private_identity, intent_started=False)
++                    _service_set_predecessor(entry, startup, bundle=bundle, plan=plan, require_live=True)
++                    _service_set_before(entry, startup.paths["accounts_path"], plan["accounts_before"])
++                    settle("intent", paths["intent"], intent_raw, previous.get("intent"), 0o600, publish=True)
++                else:
++                    if not os.path.lexists(private):
++                        raise ValueError("original service credential is missing; regeneration refused")
++                    raw, private_identity = original_private()
++                    custody(raw, private_identity, intent_started=True)
++                    settle("intent", paths["intent"], intent_raw, previous.get("intent"), 0o600, publish=False)
++
++                targets = (("binding", paths["binding"], raw, previous.get("binding"), 0o600),
++                    ("accounts", startup.paths["accounts_path"], after, plan["accounts_before"],
++                        plan["accounts_before"]["identity"]["mode"]))
++                states = {name: _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])
++                          for name, path, data, old, _ in targets}
++                if (states["accounts"][0].startswith("committed")
++                        and not states["binding"][0].startswith("committed")):
++                    raise ValueError("service-set original publication order differs")
++                all_committed = all(state.startswith("committed") for state, _ in states.values())
++                if not all_committed:
++                    _service_set_before(entry, paths["receipt"], previous.get("receipt"))
++                    if any(os.path.lexists(path) for path in (
++                            progress["receipt"], prepared["receipt"], stages["receipt"])):
++                        raise ValueError("service-set completion precedes its targets")
++                    if reconcile_only:
++                        return dict(public, disposition="partial" if states["binding"][0].startswith("committed") else "staged")
++                for name, path, data, old, mode in targets:
++                    custody(raw, private_identity, intent_started=True)
++                    state, _ = settle(name, path, data, old, mode, publish=not reconcile_only)
++                    if state != "committed":
++                        raise ValueError("service-set target changed during reconciliation")
++                final = {name: _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])[1]
++                         for name, path, data, old, _ in targets}
+                 custody(raw, private_identity, intent_started=True)
+-                settle("intent", paths["intent"], intent_raw, previous.get("intent"), 0o600, publish=False)
+-
+-            targets = (("binding", paths["binding"], raw, previous.get("binding"), 0o600),
+-                ("accounts", startup.paths["accounts_path"], after, plan["accounts_before"],
+-                    plan["accounts_before"]["identity"]["mode"]))
+-            states = {name: _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])
+-                      for name, path, data, old, _ in targets}
+-            if (states["accounts"][0].startswith("committed")
+-                    and not states["binding"][0].startswith("committed")):
+-                raise ValueError("service-set original publication order differs")
+-            all_committed = all(state.startswith("committed") for state, _ in states.values())
+-            if not all_committed:
+-                _service_set_before(entry, paths["receipt"], previous.get("receipt"))
+-                if any(os.path.lexists(path) for path in (
+-                        progress["receipt"], prepared["receipt"], stages["receipt"])):
+-                    raise ValueError("service-set completion precedes its targets")
+-                if reconcile_only:
+-                    return dict(public, disposition="partial" if states["binding"][0].startswith("committed") else "staged")
+-            for name, path, data, old, mode in targets:
+-                custody(raw, private_identity, intent_started=True)
+-                state, _ = settle(name, path, data, old, mode, publish=not reconcile_only)
+-                if state != "committed":
+-                    raise ValueError("service-set target changed during reconciliation")
+-            final = {name: _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])[1]
+-                     for name, path, data, old, _ in targets}
+-            custody(raw, private_identity, intent_started=True)
+-            receipt = {"schema": receipt_schema, "operation_id": plan["operation_id"],
+-                "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
+-                "ingress_digest": plan["ingress_digest"], "scopes": scopes,
+-                "binding_sha256": generation.digest(raw), "binding_identity": final["binding"],
+-                "accounts_sha256": generation.digest(after), "accounts_identity": final["accounts"]}
+-            receipt_raw = generation.canonical(receipt) + b"\n"
+-            # Completion is a receipt of already committed targets. Reconcile
+-            # may publish it, but cannot publish missing binding/accounts effects.
+-            settle("receipt", paths["receipt"], receipt_raw, previous.get("receipt"), 0o600, publish=True)
+-            entry.validate_completed_application_records(startup, raw, final["binding"], intent_raw, receipt_raw)
+-            return receipt
++                receipt = {"schema": receipt_schema, "operation_id": plan["operation_id"],
++                    "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
++                    "ingress_digest": plan["ingress_digest"], "scopes": scopes,
++                    "binding_sha256": generation.digest(raw), "binding_identity": final["binding"],
++                    "accounts_sha256": generation.digest(after), "accounts_identity": final["accounts"]}
++                receipt_raw = generation.canonical(receipt) + b"\n"
++                # Completion is a receipt of already committed targets. Reconcile
++                # may publish it, but cannot publish missing binding/accounts effects.
++                settle("receipt", paths["receipt"], receipt_raw, previous.get("receipt"), 0o600, publish=True)
++                entry.validate_completed_application_records(startup, raw, final["binding"], intent_raw, receipt_raw)
++                return receipt
+ 
+ 
+ def _service_transaction(bundle, *, reconcile_only=False):
+@@ -2573,154 +2582,162 @@
+         raise ValueError("service publication owner differs from original ingress")
+     with generation.publication_lock(store), _service_source(plan["go_ingress_bundle"]) as context:
+         ingress, selection, metadata, entry, startup = context
+-        specification = _service_specification(entry, specification, startup)
+-        http = specification["schema"] == SERVICE_HTTP_SPEC_SCHEMA
+-        admin = specification["schema"] == SERVICE_ADMIN_SPEC_SCHEMA
+-        role = specification["schema"] == SERVICE_ROLE_SPEC_SCHEMA
+-        selected = specification["schema"] in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA, SERVICE_ROLE_SPEC_SCHEMA)
+-        enrollment_schema = (entry.SERVICE_ROLE_ENROLLMENT_SCHEMA if role else entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
+-            entry.SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
+-            entry.SERVICE_SELECTED_ENROLLMENT_SCHEMA if selected else entry.SERVICE_ENROLLMENT_SCHEMA)
+-        service_schema = (entry.SERVICE_ROLE_SCHEMA if role else entry.SERVICE_HTTP_SCHEMA if http else
+-            entry.SERVICE_ADMIN_SCHEMA if admin else
+-            entry.SERVICE_SELECTED_SCHEMA if selected else entry.SERVICE_SCHEMA)
+-        receipt_schema = (entry.SERVICE_ROLE_RECEIPT_SCHEMA if role else entry.SERVICE_HTTP_RECEIPT_SCHEMA if http else
+-            entry.SERVICE_ADMIN_RECEIPT_SCHEMA if admin else
+-            entry.SERVICE_SELECTED_RECEIPT_SCHEMA if selected else entry.SERVICE_RECEIPT_SCHEMA)
+-        projection = ({"application_recipe": specification["application_recipe"],
+-            "application_accounts": specification["grant"]["accounts"]} if http else {})
+-        paths = entry.application_enrollment_paths(startup,
+-            specification["scope"]["service_profile"] if role else None)
+-        profile = Path(specification["scope"]["account_profile"])
+-        if (plan["schema"] != enrollment_schema or ingress["digest"] != plan["ingress_digest"]
+-                or startup.generation != plan["source_generation"] or selection != plan["selection"]
+-                or plan["store"] != ingress["store"]
+-                or metadata["files"][generation.GO_ENTRY] != plan["entry_sha256"]
+-                or specification["operation_id"] != plan["operation_id"]
+-                or specification["scope"] != plan["scope"]
+-                or entry.application_service_owners(startup, application_http=http) != plan["owners"]
+-                or _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
+-                or any(plan[key] != value for key, value in projection.items())
+-                or generation.digest(generation.canonical(_service_grant_value(specification))) != plan["grant_sha256"]):
+-            raise ValueError("service enrollment plan no longer binds its original owners")
+-        with startup.yaml_runtime.held_yaml(startup.yaml_archive, startup.yaml_provenance, startup.yaml_check):
+-            expected_after, document = _service_enrollment_candidate(startup, specification, before)
+-            if (after != expected_after
+-                    or startup.broker_module._read_application_accounts(bundle / "accounts.after.yaml") != document):
+-                raise ValueError("service enrollment candidate differs")
+-        intent = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
+-            "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
+-            "ingress_digest": plan["ingress_digest"], "bundle": str(bundle)}
+-        private = bundle / _SERVICE_PRIVATE
+-        progress = {name: store / "bootstrap" / (plan["digest"] + ".service-" + name + ".json")
+-                    for name in ("binding", "accounts")}
+-        prepared = {name: store / "bootstrap" / (plan["digest"] + ".service-" + name + "-prepared.json")
+-                    for name in ("binding", "accounts")}
+-        private_receipt = store / "bootstrap" / (plan["digest"] + ".service-private.json")
+-        public = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
+-                  "plan_digest": plan["digest"]}
+-        with _service_broker_lock(entry, startup, plan["owner_identities"]["lock_path"]):
+-            if _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]:
+-                raise ValueError("service owners changed before publication")
+-            original = os.path.lexists(paths["intent"])
+-            if original:
+-                if _successor_json(paths["intent"]) != intent:
+-                    raise ValueError("foreign service enrollment intent")
+-                if not os.path.lexists(private):
+-                    raise ValueError("original service credential is missing; regeneration refused")
+-            else:
+-                if role:
+-                    # A prepared peer may have entered its original transaction
+-                    # since preparation. Do not publish across partial custody.
+-                    _service_role_peers(entry, startup, specification["scope"])
+-                stages = [path.parent / (".application-service-" + plan["digest"] + "." + path.name)
+-                          for path in (paths["binding"], startup.paths["accounts_path"])]
+-                if any(os.path.lexists(path) for path in (private, private_receipt, paths["binding"],
+-                        paths["receipt"], *progress.values(), *prepared.values(), *stages)):
+-                    raise ValueError("service enrollment has unowned effects")
+-                observed, identity = _service_snapshot(entry, startup.paths["accounts_path"])
+-                if identity != plan["accounts_before"]["identity"] or observed != before:
+-                    raise ValueError("service accounts preimage changed")
+-                if reconcile_only:
+-                    return dict(public, disposition="prepared")
+-                if _service_grant_expiry(specification) <= time.time():
+-                    raise ValueError("service grant expired before its original intent")
+-                _record_once(paths["intent"], intent)
+-                # The first intent owns the only credential generation. Any
+-                # interrupted intent without this payload requires reconciliation.
+-                payload = {"schema": service_schema, "operation_id": plan["operation_id"],
++        with generation.verified_admission_scope(store, startup.generation) as require_admission:
++            specification = _service_specification(entry, specification, startup)
++            http = specification["schema"] == SERVICE_HTTP_SPEC_SCHEMA
++            admin = specification["schema"] == SERVICE_ADMIN_SPEC_SCHEMA
++            role = specification["schema"] == SERVICE_ROLE_SPEC_SCHEMA
++            selected = specification["schema"] in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA, SERVICE_ROLE_SPEC_SCHEMA)
++            enrollment_schema = (entry.SERVICE_ROLE_ENROLLMENT_SCHEMA if role else entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
++                entry.SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
++                entry.SERVICE_SELECTED_ENROLLMENT_SCHEMA if selected else entry.SERVICE_ENROLLMENT_SCHEMA)
++            service_schema = (entry.SERVICE_ROLE_SCHEMA if role else entry.SERVICE_HTTP_SCHEMA if http else
++                entry.SERVICE_ADMIN_SCHEMA if admin else
++                entry.SERVICE_SELECTED_SCHEMA if selected else entry.SERVICE_SCHEMA)
++            receipt_schema = (entry.SERVICE_ROLE_RECEIPT_SCHEMA if role else entry.SERVICE_HTTP_RECEIPT_SCHEMA if http else
++                entry.SERVICE_ADMIN_RECEIPT_SCHEMA if admin else
++                entry.SERVICE_SELECTED_RECEIPT_SCHEMA if selected else entry.SERVICE_RECEIPT_SCHEMA)
++            projection = ({"application_recipe": specification["application_recipe"],
++                "application_accounts": specification["grant"]["accounts"]} if http else {})
++            paths = entry.application_enrollment_paths(startup,
++                specification["scope"]["service_profile"] if role else None)
++            profile = Path(specification["scope"]["account_profile"])
++            if (plan["schema"] != enrollment_schema or ingress["digest"] != plan["ingress_digest"]
++                    or startup.generation != plan["source_generation"] or selection != plan["selection"]
++                    or plan["store"] != ingress["store"]
++                    or metadata["files"][generation.GO_ENTRY] != plan["entry_sha256"]
++                    or specification["operation_id"] != plan["operation_id"]
++                    or specification["scope"] != plan["scope"]
++                    or entry.application_service_owners(startup, application_http=http) != plan["owners"]
++                    or _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
++                    or any(plan[key] != value for key, value in projection.items())
++                    or generation.digest(generation.canonical(_service_grant_value(specification))) != plan["grant_sha256"]):
++                raise ValueError("service enrollment plan no longer binds its original owners")
++            with startup.yaml_runtime.held_yaml(startup.yaml_archive, startup.yaml_provenance, startup.yaml_check):
++                expected_after, document = _service_enrollment_candidate(startup, specification, before)
++                if (after != expected_after
++                        or startup.broker_module._read_application_accounts(bundle / "accounts.after.yaml") != document):
++                    raise ValueError("service enrollment candidate differs")
++            intent = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
++                "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
++                "ingress_digest": plan["ingress_digest"], "bundle": str(bundle)}
++            private = bundle / _SERVICE_PRIVATE
++            progress = {name: store / "bootstrap" / (plan["digest"] + ".service-" + name + ".json")
++                        for name in ("binding", "accounts")}
++            prepared = {name: store / "bootstrap" / (plan["digest"] + ".service-" + name + "-prepared.json")
++                        for name in ("binding", "accounts")}
++            private_receipt = store / "bootstrap" / (plan["digest"] + ".service-private.json")
++            public = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
++                      "plan_digest": plan["digest"]}
++            with _service_broker_lock(entry, startup, plan["owner_identities"]["lock_path"]):
++                require_admission()
++                if _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]:
++                    raise ValueError("service owners changed before publication")
++                original = os.path.lexists(paths["intent"])
++                if original:
++                    if _successor_json(paths["intent"]) != intent:
++                        raise ValueError("foreign service enrollment intent")
++                    if not os.path.lexists(private):
++                        raise ValueError("original service credential is missing; regeneration refused")
++                else:
++                    if role:
++                        # A prepared peer may have entered its original transaction
++                        # since preparation. Do not publish across partial custody.
++                        _service_role_peers(entry, startup, specification["scope"])
++                    stages = [path.parent / (".application-service-" + plan["digest"] + "." + path.name)
++                              for path in (paths["binding"], startup.paths["accounts_path"])]
++                    if any(os.path.lexists(path) for path in (private, private_receipt, paths["binding"],
++                            paths["receipt"], *progress.values(), *prepared.values(), *stages)):
++                        raise ValueError("service enrollment has unowned effects")
++                    observed, identity = _service_snapshot(entry, startup.paths["accounts_path"])
++                    if identity != plan["accounts_before"]["identity"] or observed != before:
++                        raise ValueError("service accounts preimage changed")
++                    if reconcile_only:
++                        return dict(public, disposition="prepared")
++                    if _service_grant_expiry(specification) <= time.time():
++                        raise ValueError("service grant expired before its original intent")
++                    require_admission()
++                    _record_once(paths["intent"], intent)
++                    # The first intent owns the only credential generation. Any
++                    # interrupted intent without this payload requires reconciliation.
++                    payload = {"schema": service_schema, "operation_id": plan["operation_id"],
++                        "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
++                        "ingress_digest": plan["ingress_digest"], "scope": plan["scope"],
++                        "owners": plan["owners"], "credential": secrets.token_urlsafe(48), **projection}
++                    entry.validate_application_service_document(startup, payload)
++                    require_admission()
++                    generation.atomic_bytes(private, generation.canonical(payload) + b"\n", 0o600)
++                    private_raw, private_identity = _service_snapshot(entry, private, mode=0o600)
++                    require_admission()
++                    _record_once(private_receipt, {"sha256": generation.digest(private_raw), "identity": private_identity})
++                raw, private_identity = _service_snapshot(entry, private, mode=0o600)
++                if (not os.path.lexists(private_receipt)
++                        or _successor_json(private_receipt) != {"sha256": generation.digest(raw), "identity": private_identity}):
++                    raise ValueError("original service credential commitment differs; adoption refused")
++                payload = entry._service_json(raw)
++                entry.validate_application_service_document(startup, payload)
++                expected_public = {"schema": service_schema, "operation_id": plan["operation_id"],
++                    "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
++                    "ingress_digest": plan["ingress_digest"], "scope": plan["scope"], "owners": plan["owners"], **projection}
++                if {key: value for key, value in payload.items() if key != "credential"} != expected_public:
++                    raise ValueError("original service credential payload differs")
++                targets = (("binding", paths["binding"], raw, None, 0o600),
++                           ("accounts", startup.paths["accounts_path"], after, plan["accounts_before"],
++                            plan["accounts_before"]["identity"]["mode"]))
++                states = {name: _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])
++                          for name, path, data, old, _ in targets}
++                if (states["accounts"][0].startswith("committed")
++                        and not states["binding"][0].startswith("committed")):
++                    raise ValueError("service original publication order differs")
++                all_committed = all(state.startswith("committed") for state, _ in states.values())
++                if os.path.lexists(paths["receipt"]) and not all_committed:
++                    raise ValueError("service completion receipt conflicts with its targets")
++                if reconcile_only and not all_committed:
++                    return dict(public, disposition="partial" if states["binding"][0].startswith("committed") else "staged")
++                for name, path, data, old, mode in targets:
++                    if _read_service_plan(bundle) != (bundle, plan, specification, before, after):
++                        raise ValueError("service bundle changed before target publication")
++                    if (_completed_go_for_service(plan["go_ingress_bundle"])[1] != selection
++                            or _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
++                            or _successor_json(paths["intent"]) != intent
++                            or _service_snapshot(entry, private, mode=0o600) != (raw, private_identity)
++                            or _successor_json(private_receipt) != {"sha256": generation.digest(raw), "identity": private_identity}):
++                        raise ValueError("service original custody changed before target publication")
++                    state, identity = _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])
++                    if not state.startswith("committed"):
++                        if reconcile_only:
++                            raise ValueError("service target changed during reconciliation")
++                        identity = _publish_service_target(entry, path, data, old, progress[name],
++                                                           prepared[name], plan["digest"], mode,
++                                                           admission_check=require_admission)
++                    elif state == "committed_receipt_missing":
++                        # The original rename may have completed before its parent
++                        # fsync. Make that target durable before a bootstrap receipt
++                        # can certify it; never rewrite or re-rename the target.
++                        generation.fsync_directory(path.parent)
++                        if _service_target(entry, path, data, old, progress[name], prepared[name],
++                                           plan["digest"]) != (state, identity):
++                            raise ValueError("service recovered target changed before receipt")
++                    require_admission()
++                    _record_once(progress[name], {"sha256": generation.digest(data), "identity": identity})
++                final = {name: _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])[1]
++                         for name, path, data, old, _ in targets}
++                if (_service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
++                        or _completed_go_for_service(plan["go_ingress_bundle"])[1] != selection
++                        or _successor_json(paths["intent"]) != intent):
++                    raise ValueError("service original custody changed before completion")
++                receipt = {"schema": receipt_schema, "operation_id": plan["operation_id"],
+                     "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
+                     "ingress_digest": plan["ingress_digest"], "scope": plan["scope"],
+-                    "owners": plan["owners"], "credential": secrets.token_urlsafe(48), **projection}
+-                entry.validate_application_service_document(startup, payload)
+-                generation.atomic_bytes(private, generation.canonical(payload) + b"\n", 0o600)
+-                private_raw, private_identity = _service_snapshot(entry, private, mode=0o600)
+-                _record_once(private_receipt, {"sha256": generation.digest(private_raw), "identity": private_identity})
+-            raw, private_identity = _service_snapshot(entry, private, mode=0o600)
+-            if (not os.path.lexists(private_receipt)
+-                    or _successor_json(private_receipt) != {"sha256": generation.digest(raw), "identity": private_identity}):
+-                raise ValueError("original service credential commitment differs; adoption refused")
+-            payload = entry._service_json(raw)
+-            entry.validate_application_service_document(startup, payload)
+-            expected_public = {"schema": service_schema, "operation_id": plan["operation_id"],
+-                "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
+-                "ingress_digest": plan["ingress_digest"], "scope": plan["scope"], "owners": plan["owners"], **projection}
+-            if {key: value for key, value in payload.items() if key != "credential"} != expected_public:
+-                raise ValueError("original service credential payload differs")
+-            targets = (("binding", paths["binding"], raw, None, 0o600),
+-                       ("accounts", startup.paths["accounts_path"], after, plan["accounts_before"],
+-                        plan["accounts_before"]["identity"]["mode"]))
+-            states = {name: _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])
+-                      for name, path, data, old, _ in targets}
+-            if (states["accounts"][0].startswith("committed")
+-                    and not states["binding"][0].startswith("committed")):
+-                raise ValueError("service original publication order differs")
+-            all_committed = all(state.startswith("committed") for state, _ in states.values())
+-            if os.path.lexists(paths["receipt"]) and not all_committed:
+-                raise ValueError("service completion receipt conflicts with its targets")
+-            if reconcile_only and not all_committed:
+-                return dict(public, disposition="partial" if states["binding"][0].startswith("committed") else "staged")
+-            for name, path, data, old, mode in targets:
+-                if _read_service_plan(bundle) != (bundle, plan, specification, before, after):
+-                    raise ValueError("service bundle changed before target publication")
+-                if (_completed_go_for_service(plan["go_ingress_bundle"])[1] != selection
+-                        or _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
+-                        or _successor_json(paths["intent"]) != intent
+-                        or _service_snapshot(entry, private, mode=0o600) != (raw, private_identity)
+-                        or _successor_json(private_receipt) != {"sha256": generation.digest(raw), "identity": private_identity}):
+-                    raise ValueError("service original custody changed before target publication")
+-                state, identity = _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])
+-                if not state.startswith("committed"):
+-                    if reconcile_only:
+-                        raise ValueError("service target changed during reconciliation")
+-                    identity = _publish_service_target(entry, path, data, old, progress[name],
+-                                                       prepared[name], plan["digest"], mode)
+-                elif state == "committed_receipt_missing":
+-                    # The original rename may have completed before its parent
+-                    # fsync. Make that target durable before a bootstrap receipt
+-                    # can certify it; never rewrite or re-rename the target.
+-                    generation.fsync_directory(path.parent)
+-                    if _service_target(entry, path, data, old, progress[name], prepared[name],
+-                                       plan["digest"]) != (state, identity):
+-                        raise ValueError("service recovered target changed before receipt")
+-                _record_once(progress[name], {"sha256": generation.digest(data), "identity": identity})
+-            final = {name: _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])[1]
+-                     for name, path, data, old, _ in targets}
+-            if (_service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
+-                    or _completed_go_for_service(plan["go_ingress_bundle"])[1] != selection
+-                    or _successor_json(paths["intent"]) != intent):
+-                raise ValueError("service original custody changed before completion")
+-            receipt = {"schema": receipt_schema, "operation_id": plan["operation_id"],
+-                "plan_digest": plan["digest"], "source_generation": plan["source_generation"],
+-                "ingress_digest": plan["ingress_digest"], "scope": plan["scope"],
+-                "binding_sha256": generation.digest(raw), "binding_identity": final["binding"],
+-                "accounts_sha256": generation.digest(after), "accounts_identity": final["accounts"]}
+-            if http:
+-                receipt.update(application_recipe_digest=specification["grant"]["recipe_digest"],
+-                    source_projection_sha256=specification["application_recipe"]["source_projection_sha256"],
+-                    provider_profile_identity=plan["owner_identities"]["provider_profile"])
+-            _record_once(paths["receipt"], receipt)
+-            return receipt
++                    "binding_sha256": generation.digest(raw), "binding_identity": final["binding"],
++                    "accounts_sha256": generation.digest(after), "accounts_identity": final["accounts"]}
++                if http:
++                    receipt.update(application_recipe_digest=specification["grant"]["recipe_digest"],
++                        source_projection_sha256=specification["application_recipe"]["source_projection_sha256"],
++                        provider_profile_identity=plan["owner_identities"]["provider_profile"])
++                require_admission()
++                _record_once(paths["receipt"], receipt)
++                return receipt
+ 
+ 
+ 

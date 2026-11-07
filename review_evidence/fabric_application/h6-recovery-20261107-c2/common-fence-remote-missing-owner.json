@@ -1,0 +1,35 @@
+{
+  "root": "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-missing-owner-proof-kvfj9t10",
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "/tmp/h6-common-fence-source-1jky3u6l/test_remote_fence_closure.py::test_application_successor_stays_closed_without_completed_owner",
+    "--basetemp",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-missing-owner-proof-kvfj9t10/fixtures",
+    "--junitxml",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-missing-owner-proof-kvfj9t10/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 0,
+  "seconds": 0.593,
+  "testcases": 1,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_application_successor_stays_closed_without_completed_owner",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    }
+  ],
+  "files": {
+    "result.log": "36ee6125777253800df314c891baf72e42248a17540db95c6bdb02de742e24de",
+    "result.xml": "87441b3dbad584135c895994857680f1b50f121f68d3b894a1a16b0bd2b823c3"
+  }
+}

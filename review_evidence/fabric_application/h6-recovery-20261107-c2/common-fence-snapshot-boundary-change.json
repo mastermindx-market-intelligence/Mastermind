@@ -1,0 +1,7 @@
+{
+  "schema": "mastermind.h6.snapshot_lock_boundary.v1",
+  "before": "93531372cf343cd92e47fd430acf949b141759ca8cf2b4a5c86b1be4c56246c2",
+  "after": "a9c2a5496a70a82578a3ebed45299f212b388b9c2d196f0cc278cdb82ebecea1",
+  "scope": "advisory quota refresh after Broker/SQLite release",
+  "selectable": false
+}

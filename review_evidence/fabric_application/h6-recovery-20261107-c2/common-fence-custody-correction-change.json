@@ -1,0 +1,14 @@
+{
+  "status": "ISOLATED_UNQUALIFIED",
+  "reason": "C3 strict-reader canonical path and held admission at actual enrollment publications",
+  "changes": {
+    "ext/quota_remote.py": {
+      "pre": "adce6d1357659030ba5f4e7e22bde3f208ee28e5f0354f62dd14f6412431d41f",
+      "post": "fd0ac449e6a74e491646b360d5c9882d640bfb658f94e950ee709003dec87f8c"
+    },
+    "rollout/native_install.py": {
+      "pre": "5dcaaa818dee2c22517ac795d97ea57dcd772bf0f1bfd6892c464505e60f828f",
+      "post": "2daa1ff46e22d8e8329b060f17fc46f38a832a363dc5453b1e6215c911cb7459"
+    }
+  }
+}

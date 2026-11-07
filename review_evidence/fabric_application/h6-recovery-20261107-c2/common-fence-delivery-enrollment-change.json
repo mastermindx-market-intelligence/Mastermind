@@ -1,0 +1,24 @@
+{
+  "schema": "mastermind.h6.common_fence_delivery_enrollment_source.v1",
+  "preimages": {
+    "ext/support_bundle.py": "97a1ee5dee4aa811bc8400e1689be5428cc16382d92cec2347126d643bdd9873",
+    "ext/remote_sub.sh": "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
+    "ext/paid_provider_entry.py": "780e4b45c12bdb52c2b56bf17a4842faffbaecc2253aa43d96a484c9a05023c0",
+    "ext/paid_model_owner.py": "75bbacb052dcb9374245854e2e6b8681fa369e034000689df0d4f752bd1b6e3b",
+    "rollout/native_install.py": "a37dc78a581798209f02855983fbeb4eb2e17b71f8c0a5e78eda571cbdc7a8d3"
+  },
+  "postimages": {
+    "ext/support_bundle.py": "c38319838f286f1cc1591d1050870a91c44df5c787ac6fa27f7bc916b0f1411e",
+    "ext/remote_sub.sh": "b79f760c548412a0eacc6fcb515f1ff266a5d10af97a5c6a016406caf00f8d7d",
+    "ext/paid_provider_entry.py": "1b4af5ef7db5ab7f61c05eda4fc53aa4e9cfd1253c08cd09f8a2d9dbb5ab7d2c",
+    "ext/paid_model_owner.py": "378c1d30757292da236713543d7c4935b1a83e0445d1e22e53db1b5f3a2ee8fe",
+    "rollout/native_install.py": "5dcaaa818dee2c22517ac795d97ea57dcd772bf0f1bfd6892c464505e60f828f"
+  },
+  "historical_membership_and_aliases_preserved": true,
+  "new_remote_source_sets": 6,
+  "application_owner_present": false,
+  "scope": "explicit helper-bearing remote source closures and two original enrollment scopes",
+  "qualified": false,
+  "selectable": false,
+  "runtime_changed": false
+}

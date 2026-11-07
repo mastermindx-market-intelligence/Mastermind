@@ -186,3 +186,43 @@ still executing at this readback. Shard 0 retains the exact test-fixture failure
 repaired in d8; its Python tests never executed. No cancellation or successor
 dispatch while the original run remains active. Required current-head hosted
 proof remains owed. MISSION_COMPLETE=false.
+
+## 2026-11-07 known physical owners and source closure checkpoint
+
+Current source input is published680dc0ca. common-fence-unqualified.patch now
+contains the complete ten-file isolated cohort after the four recorded H3
+predecessors; it supersedes selector-only for assembly. Patch forward/reverse
+checks and every changed postimage/preimage passed. Accepted production source,
+artifact builders/manifests and selected runtime remain untouched.
+
+One combined current-source run passed73 cases with0 failures/errors/skips:
+current selection, selector contention, actual native held-byte loader, Broker
+SQLite claims, worker/APPLICATION last-slot competition, quota publication,
+original obligation recovery, status projection after Broker unlock, exact
+remote source families and stale import-time cache-path regression. See
+common-fence-known-owners-qualification.json. Counts overlap prior receipts.
+The initial setup/expectation failures and exact harness corrections are retained.
+
+Both native enrollment transactions now acquire publication -> physical
+admission -> Broker and check held custody at private/intention/progress/
+completion writes and each actual stage/prepare/rename boundary. This checkpoint
+has source judgment but not yet actual two-form enrollment execution proof.
+That is the next ready bounded phase; do not claim the gate complete.
+
+Hosted680 run42402147021 passed private HTTP compatibility and source/transport/
+Macro/Brain composition steps; its repository shard execution continues.
+debb run42398870463 completed FAILURE only in shard0's counter-reader fixture;
+shards1-5 succeeded. d8's exact counter-reader postimage is independently
+verified adopted at Hermes76a0949f, sha2569f5d683be6771494150e7859897bbe074ca2195a480535eda7cac874e714f37f.
+
+Canonical runtime observation is now seq37/9c557397 with116 members
+(PR2175#issuecomment-6711529944), not oldseq36. Original root explicitly owns
+preserving APPLICATION/C4 source integration in existing#2232
+(#issuecomment-6711637028). Do not substitute107/109/112 or duplicate that lane.
+Root's isolated accepted-H6-cut qualification is recorded at#6711649944; it is
+not a protected release or live acceptance.
+
+All unknown configuration/credential writers, legacy transition/drain, actual
+billable meter, service permission/account envelope, remote APPLICATION owner,
+protected delivery and real consumer acceptance remain separate gates.
+MISSION_COMPLETE=false. Continue the next ready enrollment proof in this session.

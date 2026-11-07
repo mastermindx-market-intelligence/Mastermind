@@ -1,0 +1,542 @@
+{
+  "root": "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-common-fence-combined-proof-wi4p8sbg",
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "/tmp/h6-common-fence-source-1jky3u6l/test_current_selection_reader.py",
+    "/tmp/h6-common-fence-source-1jky3u6l/test_common_admission_fence.py",
+    "/tmp/h6-common-fence-source-1jky3u6l/test_fenced_native_owners.py",
+    "/tmp/h6-common-fence-source-1jky3u6l/test_remote_fence_closure.py",
+    "--basetemp",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-common-fence-combined-proof-wi4p8sbg/fixtures",
+    "--junitxml",
+    "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-common-fence-combined-proof-wi4p8sbg/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 0,
+  "seconds": 17.316,
+  "testcases": 73,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_actual_publisher_selection_is_read",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_selection_refuses_old_new_claim_but_preserves_original_owner",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_environment_label_cannot_replace_canonical_selection",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_missing_pointer_refuses_without_breaking_original_owner",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_pointer_mode_must_be_exact[292]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_pointer_mode_must_be_exact[420]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_pointer_mode_must_be_exact[438]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_pointer_mode_must_be_exact[256]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_pointer_kind_and_link_custody[symlink]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_pointer_kind_and_link_custody[hardlink]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_pointer_kind_and_link_custody[directory]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_pointer_kind_and_link_custody[fifo]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_bounded_strict_json[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_bounded_strict_json[{\"schema\":]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_bounded_strict_json[{\"schema\":\"native-code-selection.v1\",\"schema\":\"native-code-selection.v1\"}]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_bounded_strict_json[[]]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_bounded_strict_json[null]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_selection_schema[change0]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_selection_schema[change1]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_selection_schema[change2]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_selection_schema[change3]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_selection_schema[change4]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_selection_schema[change5]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_selection_schema[change6]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_selection_schema[change7]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_selection_schema[change8]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_selection_schema[change9]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_selection_schema[change10]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_missing_selection_field",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_only_canonical_native_source_context[relative]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_only_canonical_native_source_context[flat]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_only_canonical_native_source_context[wrong-generation]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_only_canonical_native_source_context[symlink]",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_fixed_alias_refuses",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_release_metadata_refuses",
+      "classname": "test_current_selection_reader",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_selector_waits_behind_same_physical_owner_across_generations",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_bounded_deadline_waits_on_real_other_process_owner",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_selector_refuses_bad_physical_lock_without_repair[missing]",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_selector_refuses_bad_physical_lock_without_repair[symlink]",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_selector_refuses_bad_physical_lock_without_repair[hardlink]",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_selector_refuses_bad_physical_lock_without_repair[mode]",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_selector_refuses_bad_physical_lock_without_repair[nonempty]",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_held_check_detects_replaced_physical_owner",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_historical_verification_does_not_grant_fenced_selection[missing-helper]",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_historical_verification_does_not_grant_fenced_selection[historical-helper]",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_selector_private_helper_does_not_occupy_runtime_module_slot",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_sealed_helper_stops_before_selection",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_direct_installer_selection_entry_uses_the_same_fence",
+      "classname": "test_common_admission_fence",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_real_claim_blocks_selection_and_quota_until_sqlite_commit",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publication_first_refuses_stale_claim_and_allows_current_source",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_worker_and_application_share_last_capacity_across_processes",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_owner_document_with_same_mtime_is_read_under_claim_scope",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_advisory_status_refresh_releases_broker_before_quota_publication",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_snapshot_boundary_reproduces_broker_to_admission_inversion",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_pending_unknown_terminal_and_close_survive_selection_change",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_native_owned_loader_refuses_foreign_helper_before_claim",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_strict_cache_reads_canonical_owner_despite_prior_alias_capture[False]",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_strict_cache_reads_canonical_owner_despite_prior_alias_capture[True]",
+      "classname": "test_fenced_native_owners",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_each_available_successor_maps_exact_physical_owner[plain]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_each_available_successor_maps_exact_physical_owner[plain-physical]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_each_available_successor_maps_exact_physical_owner[paid]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_each_available_successor_maps_exact_physical_owner[paid-physical]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_historical_paid_bytes_and_aliases_still_verify",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_valid_plain_custody_does_not_pass_paid_source_gate[plain]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_valid_plain_custody_does_not_pass_paid_source_gate[plain-physical]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_paid_held_byte_loader_delivers_helper_mapper_and_quota_owner[paid]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_paid_held_byte_loader_delivers_helper_mapper_and_quota_owner[paid-physical]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_successor_custody_refuses_alias_or_membership_drift[quota-alias]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_successor_custody_refuses_alias_or_membership_drift[file-hash]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_successor_custody_refuses_alias_or_membership_drift[extra-file]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_successor_custody_refuses_alias_or_membership_drift[missing-member]",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_real_shell_producer_equals_each_named_current_closure",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_successor_stays_closed_without_completed_owner",
+      "classname": "test_remote_fence_closure",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    }
+  ],
+  "files": {
+    "result.log": "7f6a762b47e2ffa43b3f80c09da256d328b1268d9aad73dcc6e7f5992b8fb211",
+    "result.xml": "7479af9b8b5028a5ae02b3debec6add7375987b122763e1fbc746834912ad6fa"
+  }
+}

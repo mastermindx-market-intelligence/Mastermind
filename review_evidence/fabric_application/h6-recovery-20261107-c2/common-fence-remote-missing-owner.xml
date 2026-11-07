@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="0" skipped="0" tests="1" time="0.230" timestamp="2026-11-07T12:00:14.047273-07:00" hostname="m2studio"><testcase classname="test_remote_fence_closure" name="test_application_successor_stays_closed_without_completed_owner" time="0.165" /></testsuite></testsuites>

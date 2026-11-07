@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="15" time="1.978" timestamp="2026-11-07T11:56:59.123021-07:00" hostname="m2studio"><testcase classname="test_remote_fence_closure" name="test_each_available_successor_maps_exact_physical_owner[plain]" time="0.159" /><testcase classname="test_remote_fence_closure" name="test_each_available_successor_maps_exact_physical_owner[plain-physical]" time="0.165" /><testcase classname="test_remote_fence_closure" name="test_each_available_successor_maps_exact_physical_owner[paid]" time="0.203" /><testcase classname="test_remote_fence_closure" name="test_each_available_successor_maps_exact_physical_owner[paid-physical]" time="0.212" /><testcase classname="test_remote_fence_closure" name="test_historical_paid_bytes_and_aliases_still_verify" time="0.350" /><testcase classname="test_remote_fence_closure" name="test_valid_plain_custody_does_not_pass_paid_source_gate[plain]" time="0.042" /><testcase classname="test_remote_fence_closure" name="test_valid_plain_custody_does_not_pass_paid_source_gate[plain-physical]" time="0.041" /><testcase classname="test_remote_fence_closure" name="test_paid_held_byte_loader_delivers_helper_mapper_and_quota_owner[paid]" time="0.255" /><testcase classname="test_remote_fence_closure" name="test_paid_held_byte_loader_delivers_helper_mapper_and_quota_owner[paid-physical]" time="0.246" /><testcase classname="test_remote_fence_closure" name="test_successor_custody_refuses_alias_or_membership_drift[quota-alias]" time="0.035" /><testcase classname="test_remote_fence_closure" name="test_successor_custody_refuses_alias_or_membership_drift[file-hash]" time="0.037" /><testcase classname="test_remote_fence_closure" name="test_successor_custody_refuses_alias_or_membership_drift[extra-file]" time="0.037" /><testcase classname="test_remote_fence_closure" name="test_successor_custody_refuses_alias_or_membership_drift[missing-member]" time="0.037" /><testcase classname="test_remote_fence_closure" name="test_real_shell_producer_equals_each_named_current_closure" time="0.010" /><testcase classname="test_remote_fence_closure" name="test_application_successor_stays_closed_without_completed_owner" time="0.038"><failure message="ValueError: unavailable publication path: /Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0/remote-source-r01ak81y/source/application_native_owner.py">path = PosixPath('/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0/remote-source-r01ak81y/source/application_native_owner.py')
+kind = &lt;built-in function S_ISREG&gt;, mode = None
+
+    def _require_kind(path, kind, mode=None):
+        try:
+&gt;           observed = path.lstat()
+                       ^^^^^^^^^^^^
+
+/private/tmp/h6-common-fence-source-1jky3u6l/candidate/ext/support_bundle.py:180: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = PosixPath('/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0/remote-source-r01ak81y/source/application_native_owner.py')
+
+    def lstat(self):
+        """
+        Like stat(), except if the path points to a symlink, the symlink's
+        status information is returned, rather than its target's.
+        """
+&gt;       return os.lstat(self)
+               ^^^^^^^^^^^^^^
+E       FileNotFoundError: [Errno 2] No such file or directory: '/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0/remote-source-r01ak81y/source/application_native_owner.py'
+
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py:661: FileNotFoundError
+
+The above exception was the direct cause of the following exception:
+
+tmp_path = PosixPath('/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0')
+
+    def test_application_successor_stays_closed_without_completed_owner(tmp_path):
+        assert S.COMMON_APPLICATION_SOURCE_FILES == S.COMMON_SOURCE_FILES | {"application_native_owner.py"}
+        assert S.COMMON_APPLICATION_PHYSICAL_ROOT_SOURCE_FILES == (
+            S.COMMON_APPLICATION_SOURCE_FILES | {"artifact_delivery.py"})
+        assert not (ROOT / "ext/application_native_owner.py").exists()
+        f = build_release(tmp_path, "plain")
+        proposed = dict(f["manifest"], **{"application_native_owner.py": "0" * 64})
+        with pytest.raises(FileNotFoundError):
+&gt;           S.publish(f["source"], f["stable"], proposed)
+
+/tmp/h6-common-fence-source-1jky3u6l/test_remote_fence_closure.py:171: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/private/tmp/h6-common-fence-source-1jky3u6l/candidate/ext/support_bundle.py:252: in publish
+    _require_kind(source_dir / name, stat.S_ISREG)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+path = PosixPath('/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0/remote-source-r01ak81y/source/application_native_owner.py')
+kind = &lt;built-in function S_ISREG&gt;, mode = None
+
+    def _require_kind(path, kind, mode=None):
+        try:
+            observed = path.lstat()
+        except OSError as exc:
+&gt;           raise ValueError(f"unavailable publication path: {path}") from exc
+E           ValueError: unavailable publication path: /Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/.pytest_cache/h6-remote-fence-proof-lcd6ow4w/fixtures/test_application_successor_sta0/remote-source-r01ak81y/source/application_native_owner.py
+
+/private/tmp/h6-common-fence-source-1jky3u6l/candidate/ext/support_bundle.py:182: ValueError</failure></testcase></testsuite></testsuites>
