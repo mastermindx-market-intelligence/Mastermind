@@ -128,6 +128,56 @@ def _admission(row, home: Path, session_id: str, *, stored=False):
     return result
 
 
+def _terminal_metadata(value: dict, answer: str | None) -> dict:
+    """Bounded projection of the original stored result, not EVAL qualification.
+
+    Omitted fields stay omitted; false is not confused with missing. Model
+    labels are configured/reported labels, never proof of the serving model.
+    Do not forward reasoning, history, raw errors, tools or served_model:
+    upstream's latter field can contain a proxy address or a fallback hint.
+    """
+    reported, invalid = {}, []
+    for key in ("completed", "failed", "partial", "interrupted",
+                "response_transformed", "response_previewed", "response_reused"):
+        if key in value:
+            if type(value[key]) is bool:
+                reported[key] = value[key]
+            else:
+                invalid.append(key)
+    for key in ("session_id", "model", "requested_model", "provider", "turn_exit_reason"):
+        if key not in value:
+            continue
+        item = value[key]
+        if item is None:
+            reported[key] = None
+            continue
+        valid = (type(item) is str and len(item) <= 256
+                 and not any(ord(c) < 32 or ord(c) == 127 for c in item))
+        if valid:
+            try:
+                valid = len(item.encode("utf-8")) <= 256
+            except UnicodeEncodeError:
+                valid = False
+        if valid:
+            reported[key] = item
+        else:
+            invalid.append(key)
+    if "api_calls" in value:
+        count = value["api_calls"]
+        if type(count) is int and 0 <= count <= 2**53 - 1:
+            reported["api_calls"] = count
+        else:
+            invalid.append("api_calls")
+    output = None
+    if answer is not None:
+        raw = answer.encode("utf-8")
+        output = {"stage": "retained_redacted_final_response",
+                  "sha256": hashlib.sha256(raw).hexdigest(), "utf8_bytes": len(raw)}
+    return {"schema": "mastermind.hermes_native_terminal_metadata/v1",
+            "reported": reported, "invalid_fields": invalid, "output": output,
+            "model_identity_verified": False}
+
+
 def _read_original(home: Path, params, principal: str, *, role: str = "mmsecretary"):
     from hermes_state_runtime import find_session_admission, get_session_admission
     from gateway.session_results import admission_result
@@ -153,13 +203,21 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
         receipt = _admission(row, home, sid, stored=True)
         result = _result("OBSERVED", role=role, admission=receipt)
         saved = admission_result(db, receipt["admission_id"])
-        if saved is not None and receipt["status"] == "terminal":
+        if type(saved) is dict and receipt["status"] == "terminal":
             value = saved.get("result")
             answer = value.get("final_response") if type(value) is dict else None
-            if (type(answer) is str and len(answer.encode("utf-8")) <= MAX_ANSWER_BYTES
-                    and not any(ord(c) < 32 and c not in "\n\r\t" for c in answer)):
+            valid_answer = (type(answer) is str and len(answer) <= MAX_ANSWER_BYTES
+                            and not any(ord(c) < 32 and c not in "\n\r\t" for c in answer))
+            if valid_answer:
+                try:
+                    valid_answer = len(answer.encode("utf-8")) <= MAX_ANSWER_BYTES
+                except UnicodeEncodeError:
+                    valid_answer = False
+            if valid_answer:
                 result["answer"] = answer
                 result["successful"] = not any(value.get(key) for key in ("failed", "error", "interrupted"))
+            if type(value) is dict:
+                result["terminal_metadata"] = _terminal_metadata(value, answer if valid_answer else None)
         return result
     finally:
         db.close()
