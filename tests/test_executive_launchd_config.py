@@ -799,6 +799,8 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         # Provenance is injected only after the installer validates the live
         # receipt; the static template intentionally has no host digest.
         "python_runtime_provenance_digest",
+        # Attended configuration is an installed enrollment, never a template default.
+        "hermes_attended_configuration_sha256",
         # Source-control publication is an installed-only binding: the static
         # template intentionally leaves it absent so an unconfigured host
         # never presents a publication target.
