@@ -104,14 +104,14 @@ def test_existing_native_tool_delivers_goal_lineage_with_only_one_owner_read(mis
             handler = native_handler(reader)
             reply = json.loads(await handler({}, session_id="native-a"))
             assert reply["state"] == "AVAILABLE"
-            assert reply["organization"]["organization"]["caller"]["charter_key"] == "secretary"
-            assert reply["organization"]["goal_lineage"]["workstream"]["work_ref"] == owner["selection"]["work_ref"]
-            assert reply["organization"]["goal_lineage"]["evidence"]["original_parent_consumption"] == "NOT_ESTABLISHED"
+            assert reply["organization_context"]["organization"]["caller"]["charter_key"] == "secretary"
+            assert reply["organization_context"]["goal_lineage"]["workstream"]["work_ref"] == owner["selection"]["work_ref"]
+            assert reply["organization_context"]["goal_lineage"]["evidence"]["original_parent_consumption"] == "NOT_ESTABLISHED"
             assert reply["admitted"] is False and reply["dispatched"] is False
             assert len(calls) == 1
             assert calls[0].url.path == "/workspace/mission/v3/current"
             wrong = json.loads(await handler({}, session_id="other"))
-            assert wrong["state"] == "REFUSED" and "organization" not in wrong
+            assert wrong["state"] == "REFUSED" and "organization_context" not in wrong
         assert len(calls) == 1
 
     asyncio.run(exercise())
@@ -125,6 +125,6 @@ def test_revoked_or_unavailable_read_does_not_disclose_the_chart(mission_body):
             denied = reader_for(access, guard=lambda: False)
             result = await denied.read(session_id="native-a")
             assert result["state"] == "REFUSED"
-            assert "organization" not in result
+            assert "organization_context" not in result
         assert calls == []
     asyncio.run(exercise())
