@@ -849,6 +849,7 @@ def main(argv=None):
             if raw.get("reply_events_armed",False):
                 from integrations.session_bridge.installed_reply_events import build_installed_reply_event_rpc
                 from integrations.session_bridge.reply_policy_selection import ReplyPolicySelection
+                from integrations.session_bridge.dot_canary_policy_selection import validate_dot_canary_settings
                 v3_kwargs["reply_event_rpc"] = build_installed_reply_event_rpc(
                     settings.ceo_ingress_socket_path,ReplyPolicySelection((policies,*additional_policies)),
                     clock=lambda:int(settings.clock()),enabled=True,
