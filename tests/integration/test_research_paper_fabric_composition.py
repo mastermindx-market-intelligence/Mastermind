@@ -105,6 +105,7 @@ class SavedPaperApplicationTests(unittest.TestCase):
             self.assertEqual(operation["input"]["paper"], self.paper)
             self.assertFalse(self.document()["recommend"])
             self.assertFalse(R.latest_for("NVDA")["confirmed"])
+            self.assertFalse(R.latest_for("NVDA", strict=True)["confirmed"])
             self.assertEqual(operation["filing"]["note"]["name"], self.note.name)
         self.native.on_upstream = upstream
         result = self.redigest()
@@ -120,6 +121,7 @@ class SavedPaperApplicationTests(unittest.TestCase):
         self.assertEqual([path.resolve() for path in R._NOTES.glob("*.md")], [self.note.resolve()])
         self.assertEqual(self.note.read_text(), R._paper_note_body(paper))
         self.assertEqual(R.latest_for("NVDA"), paper)
+        self.assertEqual(R.latest_for("NVDA", strict=True), paper)
         self.assertNotIn(R._REDI_KEY, paper)
         turn = self.native.rows("application_turns")[0]
         self.assertEqual((turn["principal_id"], turn["workload"]), ("macro_portfolio_fabric", "portfolio_analysis"))
@@ -133,6 +135,22 @@ class SavedPaperApplicationTests(unittest.TestCase):
             self.assertEqual(self.redigest(), result)
         self.assertEqual((self.path.read_bytes(), self.note.read_bytes(), R._INDEX.read_bytes()), before)
         self.assertEqual(self.counts(), (1, 0, 1, 1, 1))
+        self.weather.assert_not_called()
+        self.research.assert_not_called()
+        self.reason.assert_not_called()
+
+    def test_strict_reader_refuses_partial_evidence_after_original_redigest(self):
+        result = self.redigest()
+        self.assertTrue(result["ok"], result)
+        original = (self.path.read_bytes(), self.note.read_bytes(), R._INDEX.read_bytes())
+        effects = self.counts()
+        damaged = R._PAPERS / "later-unreadable.json"
+        damaged.write_text("{")
+        with self.assertRaises(ValueError):
+            R.latest_for("NVDA", strict=True)
+        self.assertEqual(R.latest_for("NVDA"), result["paper"])
+        self.assertEqual((self.path.read_bytes(), self.note.read_bytes(), R._INDEX.read_bytes()), original)
+        self.assertEqual(self.counts(), effects)
         self.weather.assert_not_called()
         self.research.assert_not_called()
         self.reason.assert_not_called()

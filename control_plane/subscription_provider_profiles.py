@@ -319,9 +319,14 @@ def _validate_quota(value: Any, path: str, *, provider: str, product: str) -> Ma
     return quota
 
 
-def _validate_usage_policy(value: Any, path: str) -> Mapping[str, Any]:
+def _validate_usage_policy(value: Any, path: str, *, supported_coding_agents: bool = False) -> Mapping[str, Any]:
     policy = _closed_mapping(value, path, _USAGE_POLICY_ALLOWED, required=frozenset(_USAGE_POLICY_REQUIRED))
-    for key, expected in _USAGE_POLICY_REQUIRED.items():
+    required = dict(_USAGE_POLICY_REQUIRED)
+    if supported_coding_agents:
+        # BytePlus explicitly documents Claude Code subagents and the Hermes
+        # background service. Individual coding-tool scope remains mandatory.
+        required.update(interactive_only=False, unattended_background_allowed=True)
+    for key, expected in required.items():
         _exact_bool(policy[key], f"{path}.{key}", expected=expected)
     for key in _USAGE_POLICY_OPTIONAL:
         if key in policy:
@@ -367,7 +372,7 @@ def _validate_row(profile_id: str, row: Any) -> Mapping[str, Any]:
             _raise(f"{path}: BytePlus Coding Plan requires supported coding tools")
         policy = mapping.get("usage_policy")
         if not isinstance(policy, Mapping) or policy.get("single_user_only") is not True:
-            _raise(f"{path}: BytePlus Coding Plan requires single-user attended use")
+            _raise(f"{path}: BytePlus Coding Plan requires single-user coding-tool use")
         quota = mapping.get("quota_profile")
         if not isinstance(quota, Mapping) or quota.get("tier") is not None:
             _raise(f"{path}: BytePlus quota tier requires observed entitlement")
@@ -397,7 +402,8 @@ def _validate_row(profile_id: str, row: Any) -> Mapping[str, Any]:
         provider=provider,
         product=product,
     )
-    _validate_usage_policy(mapping.get("usage_policy"), f"{path}.usage_policy")
+    _validate_usage_policy(mapping.get("usage_policy"), f"{path}.usage_policy",
+                           supported_coding_agents=byteplus_plan)
     if "metadata" in mapping:
         _validate_metadata(mapping.get("metadata"), f"{path}.metadata")
     return mapping
