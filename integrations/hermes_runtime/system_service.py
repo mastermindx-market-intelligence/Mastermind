@@ -73,7 +73,7 @@ def _render_unit_text(*, role: str, service_name: str, runtime_user: str,
                       state_dir: str, restart_sec: float | int,
                       start_limit_burst: int, start_limit_interval_sec: int,
                       role_ip: str, implementation_sha: str | None,
-                      secretary_enrollment: bool = False) -> str:
+                      secretary_enrollment: bool = False, meta_enrollment: bool = False) -> str:
     """The one shared pure unit formatter.
 
     Every value must already be qualified by its caller. The text, the
@@ -83,11 +83,16 @@ def _render_unit_text(*, role: str, service_name: str, runtime_user: str,
     """
     implementation_line = ("" if implementation_sha is None else
                            f"Environment=MM_HERMES_IMPLEMENTATION_SHA={implementation_sha}\n")
-    if type(secretary_enrollment) is not bool or (secretary_enrollment and role != "mmsecretary"):
+    if (type(secretary_enrollment) is not bool or type(meta_enrollment) is not bool
+            or (secretary_enrollment and role != "mmsecretary")
+            or (meta_enrollment and role != "mmmeta") or (secretary_enrollment and meta_enrollment)):
         raise RuntimeRefusal("ROOT_UNIT_ENROLLMENT_ROLE_INVALID")
-    reload_command = "enroll-secretary-session" if secretary_enrollment else "canary"
+    reload_command = ("enroll-secretary-session" if secretary_enrollment else
+                      "enroll-meta-session" if meta_enrollment else "canary")
     reload_comment = ("# Operator-only original Secretary session enrollment; no provider prompt."
                       if secretary_enrollment else
+                      "# Operator-only original Meta-CEO session enrollment; no provider prompt."
+                      if meta_enrollment else
                       "# Operator-only provider-charged canary: requires separate authorization.")
     seconds = int(restart_sec) if float(restart_sec).is_integer() else restart_sec
     unit = f"""# ROOT-OWNED /etc/systemd/system/{service_name}.service
@@ -239,7 +244,8 @@ def render_role_units_from_installation(installation, *, release_commit: str) ->
             start_limit_burst=row["start_limit_burst"],
             start_limit_interval_sec=row["start_limit_interval_sec"],
             role_ip=ROLE_PROXY_HOST[role], implementation_sha=release_commit,
-            secretary_enrollment=("session_enrollment" in row.get("native_gateway", {})),
+            secretary_enrollment=(role == "mmsecretary" and "session_enrollment" in row.get("native_gateway", {})),
+            meta_enrollment=(role == "mmmeta" and "session_enrollment" in row.get("native_gateway", {})),
         )
     return rendered
 

@@ -87,6 +87,27 @@ CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
 CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
 CLAUDE_PRINCIPAL_EXECUTION_SURFACE = "claude-code-principal"
 CLAUDE_PRINCIPAL_AUTH_REALM = "oauth-principal-account"
+# Neutral alias for the incumbent OAuth principal realm.  The value is
+# unchanged; only the name is generalized, because the realm is now shared by
+# the Claude principal surface and the Hermes native principal surface below.
+OAUTH_PRINCIPAL_AUTH_REALM = CLAUDE_PRINCIPAL_AUTH_REALM
+# Hermes native principal surface: a second, explicitly named principal
+# execution surface for the same OAuth principal realm.  It is admitted for
+# exactly one reviewed profile id and joins no adapter mapping, no sealed
+# worker fence, no browser-resource path and no supervisor validation-resource
+# eligibility, so it can never be selected by an ordinary worker placement.
+# Naming it grants no admission, enrollment, token, credential or authority;
+# actual enrollment and serving remain separate installed owners.
+HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE = "hermes-native-principal"
+HERMES_NATIVE_PRINCIPAL_PROFILE_ID = "principal.hermes-native.executive-coo.v1"
+# The incumbent principal policy's Executive COO OAuth grant identity and
+# transport contract -- the sole grant declared by the existing sole policy
+# file config/executive_claude_principal_capabilities.json.  The rich-Claude
+# candidate grant in common/claude_principal_capability_contract.py is a
+# different, inert loopback generation and is never borrowed here; only its
+# server identity, version and configuration name coincide.
+PRINCIPAL_COO_MCP_CAPABILITY_ID = "mastermind-executive-coo-v1"
+PRINCIPAL_COO_MCP_URL = "https://mcp.mastermind-x.com/mcp/coo"
 # Paid model-only sealed-input extension: exactly one reviewed surface/realm/
 # profile tuple (fabric.paid.glm.sealed-input.v1).  The surface joins the
 # sealed-worker fence below, so it can never carry MCP servers, plugins,
@@ -106,10 +127,11 @@ ACP_PROVIDER_FREE_AUTH_REALM = "dedicated-worker-no-auth"
 _EXECUTION_SURFACES = frozenset({
     "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
     PAID_GLM_EXECUTION_SURFACE, ACP_EXECUTION_SURFACE, CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
+    HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE,
 })
 _AUTH_REALMS = frozenset({
     "dedicated-worker-account", PAID_GLM_AUTH_REALM, ACP_PROVIDER_FREE_AUTH_REALM,
-    CLAUDE_PRINCIPAL_AUTH_REALM,
+    OAUTH_PRINCIPAL_AUTH_REALM,
 })
 _ADAPTER_EXECUTION_SURFACES = {
     "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
@@ -118,6 +140,9 @@ _ADAPTER_EXECUTION_SURFACES = {
     PAID_FABRIC_ADAPTER_ID: frozenset({PAID_GLM_EXECUTION_SURFACE}),
     "acp": frozenset({ACP_EXECUTION_SURFACE}),
 }
+# The Hermes native principal surface is deliberately absent from every
+# mapping above and from the sealed-worker and supervisor-validation fences
+# below: it is a named principal surface, not a worker placement surface.
 _SEALED_WORKER_EXECUTION_SURFACES = frozenset({
     "codex-exec", "claude-code", PAID_GLM_EXECUTION_SURFACE,
 })
@@ -1092,8 +1117,12 @@ class ExecutionCapabilityProfile:
 
         if self.execution_surface in {
             CLAUDE_OPERATOR_EXECUTION_SURFACE, CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
+            HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE,
         }:
-            raise CapabilityPolicyError("Claude policy cannot use a Codex config projection")
+            raise CapabilityPolicyError(
+                "Claude policy cannot use a Codex config projection; "
+                "principal surfaces carry their own projection"
+            )
 
         agents: dict[str, object]
         multi_agent: object = False
@@ -1220,7 +1249,14 @@ class ExecutionCapabilityProfile:
                 "sandbox": requested["sandbox"],
                 "permissions": {},
             }, launch_provenance={k: requested[k] for k in ("setting_sources", "strict_mcp_config", "skills")})
-        if self.execution_surface == CLAUDE_PRINCIPAL_EXECUTION_SURFACE:
+        if self.execution_surface in {
+            CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
+            HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE,
+        }:
+            # Both principal surfaces share one projection structure and differ
+            # only in their own execution surface, so each yields its own
+            # expected config digest.  This is a policy projection: it is not
+            # native confinement, an installed config or enrollment proof.
             return _digest({
                 "execution_surface": self.execution_surface,
                 "auth_realm": self.auth_realm,
@@ -2558,7 +2594,21 @@ class ExecutionCapabilityRegistry:
             is_claude_principal = (
                 execution_surface == CLAUDE_PRINCIPAL_EXECUTION_SURFACE
             )
-            if auth_realm == CLAUDE_PRINCIPAL_AUTH_REALM and not is_claude_principal:
+            is_hermes_native_principal = (
+                execution_surface == HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE
+            )
+            # The OAuth principal realm is shared by exactly two principal
+            # surfaces.  Every other surface keeps the incumbent refusal.
+            is_oauth_principal_surface = is_claude_principal or is_hermes_native_principal
+            if is_hermes_native_principal and profile_id != HERMES_NATIVE_PRINCIPAL_PROFILE_ID:
+                raise CapabilityPolicyError(
+                    "Hermes native principal surface requires its exact reviewed profile id"
+                )
+            if profile_id == HERMES_NATIVE_PRINCIPAL_PROFILE_ID and not is_hermes_native_principal:
+                raise CapabilityPolicyError(
+                    "Hermes native principal profile requires its exact reviewed surface"
+                )
+            if auth_realm == OAUTH_PRINCIPAL_AUTH_REALM and not is_oauth_principal_surface:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} principal auth realm requires the principal surface"
                 )
@@ -2580,6 +2630,48 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} exceeds the closed Claude principal capability shape"
                 )
+            if is_hermes_native_principal and (
+                auth_realm != OAUTH_PRINCIPAL_AUTH_REALM
+                or sandbox_policy != "read-only"
+                or approval_policy != "never"
+                or network_policy != "disabled"
+                or write_capable
+                or native_helper_policy is not NativeHelperPolicy.DISABLED
+                or native_helper is not None
+                or skills
+                or skill_grants
+                or resource_ids
+                or validation_resource_ids
+                or plugins
+                or len(resolved_mcp) != 1
+                or resolved_mcp[0].auth_status != "oAuth"
+            ):
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} exceeds the closed Hermes native principal "
+                    "capability shape"
+                )
+            if is_hermes_native_principal:
+                # Exactly the incumbent principal policy's Executive COO OAuth
+                # grant, with its existing capability identity and transport
+                # contract.  The rich-Claude candidate grants and every
+                # arbitrary MCP server stay outside this ceiling, and the COO
+                # tool catalog itself is owned by the descriptor owner, so no
+                # tool list is frozen here.
+                hermes_grant = resolved_mcp[0]
+                if (
+                    hermes_grant.capability_id != PRINCIPAL_COO_MCP_CAPABILITY_ID
+                    or hermes_grant.config_name != EXECUTIVE_COO_MCP_CONFIG_NAME
+                    or hermes_grant.transport != "streamable-http"
+                    or hermes_grant.url != PRINCIPAL_COO_MCP_URL
+                    or hermes_grant.command is not None
+                    or hermes_grant.args
+                    or hermes_grant.server_identity != EXECUTIVE_COO_MCP_SERVER_IDENTITY
+                    or hermes_grant.server_version != EXECUTIVE_COO_MCP_SERVER_VERSION
+                ):
+                    raise CapabilityPolicyError(
+                        f"profile {profile_id!r} grant differs from the reviewed "
+                        "Executive COO OAuth grant"
+                    )
             normalized = {
                 "profile_id": profile_id,
                 "enabled": enabled,
@@ -2740,6 +2832,9 @@ __all__ = [
     "DEFAULT_CAPABILITY_SOURCE_ROOT",
     "CLAUDE_PRINCIPAL_AUTH_REALM",
     "CLAUDE_PRINCIPAL_EXECUTION_SURFACE",
+    "HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE",
+    "HERMES_NATIVE_PRINCIPAL_PROFILE_ID",
+    "OAUTH_PRINCIPAL_AUTH_REALM",
     "CapabilityPolicyError",
     "CompanyConsultationGrantProfile",
     "ExecutionCapabilityProfile",

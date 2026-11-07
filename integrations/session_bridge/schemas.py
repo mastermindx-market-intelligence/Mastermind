@@ -12,7 +12,7 @@ SERVER_NAME = "mastermind-session-bridge"
 SERVER_VERSION = "0.2.0"
 RESULT_SCHEMA = "mastermind.session_bridge_result.v1"
 
-TARGET_KINDS = ("fabric_attempt", "codex", "claude", "hermes_secretary")
+TARGET_KINDS = ("fabric_attempt", "codex", "claude", "hermes_secretary", "hermes_meta")
 MAX_INSTRUCTION_CHARS = 700
 MAX_STOP_CONDITION_CHARS = 700
 MAX_OPERATION_KEY_CHARS = 96

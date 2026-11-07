@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, NamedTuple, Protocol, runtime_checkable
 from common.agent_dialogue_contract_v2 import normalize_context_v2
 from control_plane.operator_harness_contract import runtime_binding_id_for
 from control_plane.workstream_admission_contract import canonical_work_ref
@@ -238,6 +238,71 @@ HERMES_REQUEST_SCHEMA = "mastermind.session_bridge.hermes_secretary_request.v1"
 HERMES_COMMIT_SCHEMA = "mastermind.session_bridge.hermes_secretary_commit.v1"
 
 HERMES_KIND = "hermes_secretary"
+HERMES_META_KIND = "hermes_meta"
+
+
+class HermesContinuationFamily(NamedTuple):
+    """One closed schema/digest domain; no route, registry or authority."""
+    kind: str
+    binding_schema: str
+    target_schema: str
+    operation_schema: str
+    request_schema: str
+    commit_schema: str
+    result_schema: str
+    native_schema: str
+    submission_prefix: str
+
+    @property
+    def target_prefix(self) -> str:
+        return self.kind + ":"
+
+
+_HERMES_FAMILIES = (
+    HermesContinuationFamily(
+        HERMES_KIND, HERMES_BINDING_SCHEMA, HERMES_TARGET_SCHEMA,
+        HERMES_OPERATION_SCHEMA, HERMES_REQUEST_SCHEMA, HERMES_COMMIT_SCHEMA,
+        "mastermind.session_bridge.hermes_secretary_result.v1",
+        "mastermind.hermes_secretary_native_control/v1", "session-secretary-"),
+    HermesContinuationFamily(
+        HERMES_META_KIND, "mastermind.session_bridge.hermes_meta_binding.v1",
+        "mastermind.session_bridge.hermes_meta_target.v1",
+        "mastermind.session_bridge.hermes_meta_operation.v1",
+        "mastermind.session_bridge.hermes_meta_request.v1",
+        "mastermind.session_bridge.hermes_meta_commit.v1",
+        "mastermind.session_bridge.hermes_meta_result.v1",
+        "mastermind.hermes_meta_native_control/v1", "session-meta-"),
+)
+HERMES_KINDS = tuple(family.kind for family in _HERMES_FAMILIES)
+HERMES_REQUEST_SCHEMAS = tuple(family.request_schema for family in _HERMES_FAMILIES)
+HERMES_RESULT_SCHEMAS = tuple(family.result_schema for family in _HERMES_FAMILIES)
+HERMES_TARGET_PREFIXES = tuple(family.target_prefix for family in _HERMES_FAMILIES)
+
+
+def hermes_family(kind: str) -> HermesContinuationFamily:
+    if type(kind) is str:
+        for family in _HERMES_FAMILIES:
+            if kind == family.kind:
+                return family
+    raise ValueError("native conversation kind is unsupported")
+
+
+def hermes_family_for_schema(schema: str, *, component: str) -> HermesContinuationFamily:
+    if (type(schema) is not str or type(component) is not str
+            or component not in ("binding", "target", "operation", "request", "commit", "result", "native")):
+        raise ValueError("native conversation schema is unsupported")
+    for family in _HERMES_FAMILIES:
+        if schema == getattr(family, component + "_schema"):
+            return family
+    raise ValueError("native conversation schema is unsupported")
+
+
+def hermes_family_for_target(target_ref: str) -> HermesContinuationFamily:
+    if type(target_ref) is not str or re.fullmatch(
+            r"(hermes_secretary|hermes_meta):[0-9a-f]{64}", target_ref) is None:
+        raise ValueError("native conversation target is malformed")
+    return hermes_family(target_ref.split(":", 1)[0])
+
 
 _HERMES_BINDING_KEYS = frozenset({
     "schema", "composition_sha256", "host_ref", "root_id", "root_job_id", "work_ref",
@@ -293,8 +358,7 @@ def _hermes_binding(value: Any) -> dict:
     """Validate the selected immutable composition binding."""
     if type(value) is not dict or set(value) != set(_HERMES_BINDING_KEYS):
         raise ValueError("native Secretary binding is malformed")
-    if value["schema"] != HERMES_BINDING_SCHEMA:
-        raise ValueError("native Secretary binding schema changed")
+    hermes_family_for_schema(value["schema"], component="binding")
     for field in ("composition_sha256", "expected_host_binding_sha256"):
         item = value[field]
         if type(item) is not str or _HERMES_SHA256.fullmatch(item) is None:
@@ -391,18 +455,20 @@ def _hermes_target_material(binding: dict, root_event_id: int,
     The Office principal is deliberately absent: the trusted READ/SEND pair
     must derive the same target from the same immutable composition.
     """
-    return {"schema": HERMES_TARGET_SCHEMA, "binding": binding,
+    family = hermes_family_for_schema(binding["schema"], component="binding")
+    return {"schema": family.target_schema, "binding": binding,
             "root_event_id": root_event_id, "root_event_sha256": root_event_sha256,
             "native_target": native_target}
 
 
-def _hermes_target_ref(target_digest: str) -> str:
-    return "hermes_secretary:" + target_digest
+def _hermes_target_ref(target_digest: str, *, kind: str = HERMES_KIND) -> str:
+    return hermes_family(kind).target_prefix + target_digest
 
 
 def _hermes_operation_key(target_ref: str) -> str:
+    family = hermes_family_for_target(target_ref)
     return "session-continue-" + _digest(
-        {"schema": HERMES_OPERATION_SCHEMA, "target_ref": target_ref})
+        {"schema": family.operation_schema, "target_ref": target_ref})
 
 
 def _hermes_native_input_digest(text: str) -> str:
@@ -435,8 +501,11 @@ def _hermes_root_event(root_event: Any, binding: dict) -> Any:
 
 def _hermes_derived_target_from_material(material: dict) -> dict:
     """Derive the target, generation, operation and request keys together."""
+    family = hermes_family_for_schema(material["binding"]["schema"], component="binding")
+    if material["schema"] != family.target_schema:
+        raise ValueError("native conversation target family changed")
     digest = _digest(material)
-    target_ref = _hermes_target_ref(digest)
+    target_ref = _hermes_target_ref(digest, kind=family.kind)
     operation_key = _hermes_operation_key(target_ref)
     return {"digest": digest, "target_ref": target_ref,
             "target_generation": digest[:24], "operation_key": operation_key,
@@ -460,7 +529,7 @@ def build_hermes_continuation_target(*, binding: dict, root_event,
             raise ValueError("native Secretary target does not match the binding")
     _hermes_root_event(root_event, binding)
     derived = _hermes_derived_target(binding, root_event, native_target)
-    return {"kind": HERMES_KIND,
+    return {"kind": hermes_family_for_schema(binding["schema"], component="binding").kind,
             "target_ref": derived["target_ref"],
             "generation": derived["target_generation"],
             "addressable": True,
@@ -473,6 +542,7 @@ def build_hermes_continuation_request(*, principal: dict, binding: dict, root_ev
                                        native_target: dict, arguments: dict) -> dict:
     """Build the immutable native Secretary request payload."""
     binding = _hermes_binding(binding)
+    family = hermes_family_for_schema(binding["schema"], component="binding")
     native_target = _hermes_native_target(native_target)
     principal = _hermes_principal(principal)
     _hermes_root_event(root_event, binding)
@@ -487,10 +557,10 @@ def build_hermes_continuation_request(*, principal: dict, binding: dict, root_ev
     stop_condition = _hermes_input_text(arguments["stop_condition"])
     text = ("Instruction:\n" + instruction + "\n\nCompletion condition:\n" + stop_condition)
     native_request = {"operation": "submit", "target": dict(native_target),
-                      "submission_id": "session-secretary-" + derived["request_key"],
+                      "submission_id": family.submission_prefix + derived["request_key"],
                       "text": text}
     payload = {
-        "schema": HERMES_REQUEST_SCHEMA,
+        "schema": family.request_schema,
         "principal": principal,
         "work_ref": binding["work_ref"],
         "root_job_id": binding["root_job_id"],
@@ -516,10 +586,11 @@ def validate_hermes_continuation_request(value: Any) -> dict:
     """Validate the closed native Secretary request payload and detach it."""
     if type(value) is not dict or set(value) != set(_HERMES_REQUEST_KEYS):
         raise ValueError("native Secretary request is malformed")
-    if value["schema"] != HERMES_REQUEST_SCHEMA:
-        raise ValueError("native Secretary request schema changed")
+    family = hermes_family_for_schema(value["schema"], component="request")
     principal = _hermes_principal(value["principal"])
     binding = _hermes_binding(value["binding"])
+    if binding["schema"] != family.binding_schema:
+        raise ValueError("native conversation request binding family changed")
     if value["binding_sha256"] != _digest(binding):
         raise ValueError("native Secretary request binding changed")
     source = value["input"]
@@ -551,7 +622,7 @@ def validate_hermes_continuation_request(value: Any) -> dict:
             or value["operation_key"] != derived["operation_key"]
             or value["read_ref"] != "session-reply-" + derived["request_key"]):
         raise ValueError("native Secretary request derivation changed")
-    if native_request["submission_id"] != "session-secretary-" + derived["request_key"]:
+    if native_request["submission_id"] != family.submission_prefix + derived["request_key"]:
         raise ValueError("native Secretary request submission changed")
     text = ("Instruction:\n" + instruction + "\n\nCompletion condition:\n" + stop_condition)
     if native_request["text"] != text:
@@ -561,7 +632,7 @@ def validate_hermes_continuation_request(value: Any) -> dict:
     if value["native_input_sha256"] != _hermes_native_input_digest(text):
         raise ValueError("native Secretary request native input changed")
     detached = {
-        "schema": HERMES_REQUEST_SCHEMA,
+        "schema": family.request_schema,
         "principal": dict(principal),
         "work_ref": binding["work_ref"],
         "root_job_id": binding["root_job_id"],
@@ -627,7 +698,8 @@ def build_hermes_continuation_commit(request_event, *, operation_name: str,
     supplied = _hermes_native_request(native_request)
     if supplied != value["native_request"]:
         raise ValueError("native Secretary native request changed")
-    return {"schema": HERMES_COMMIT_SCHEMA,
+    family = hermes_family_for_schema(value["schema"], component="request")
+    return {"schema": family.commit_schema,
             "request_event_id": request_event.event_id,
             "request_event_sha256": _digest(request_event.to_dict()),
             "operation_key": value["operation_key"],
@@ -642,11 +714,12 @@ def validate_hermes_continuation_commit(value: Any, *, request_event) -> dict:
     """Validate the closed native Secretary commit payload and its joins."""
     if type(value) is not dict or set(value) != set(_HERMES_COMMIT_KEYS):
         raise ValueError("native Secretary commit is malformed")
-    if value["schema"] != HERMES_COMMIT_SCHEMA:
-        raise ValueError("native Secretary commit schema changed")
+    family = hermes_family_for_schema(value["schema"], component="commit")
     if type(value["request_event_id"]) is not int or value["request_event_id"] < 1:
         raise ValueError("native Secretary commit is malformed")
     request = _hermes_request_event(request_event)
+    if request["schema"] != family.request_schema:
+        raise ValueError("native conversation commit family changed")
     if (value["request_event_id"] != request_event.event_id
             or value["request_event_sha256"] != _digest(request_event.to_dict())
             or value["operation_key"] != request["operation_key"]
