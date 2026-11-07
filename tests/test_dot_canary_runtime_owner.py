@@ -55,7 +55,7 @@ def resources():
         resource_metadata_url=RESOURCE+"/.well-known/oauth-protected-resource/mcp",
         issuer=ISSUER,authorization_servers=[ISSUER],
         jwks_uri=ISSUER+".well-known/jwks.json",
-        required_scopes=list(p.scopes),allowed_subject_digests=[p.subject_digest],
+        required_scopes=sorted(p.scopes),allowed_subject_digests=[p.subject_digest],
         allowed_algorithms=["RS256"],clock_skew_seconds=0,
         max_token_lifetime_seconds=1800,jwks_cache_ttl_seconds=300,
         unknown_kid_refresh_cooldown_seconds=30,fetch_failure_backoff_seconds=5)
