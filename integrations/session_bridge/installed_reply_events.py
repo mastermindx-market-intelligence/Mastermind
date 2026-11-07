@@ -109,6 +109,12 @@ class RuntimeReplyEventHost:
         operation = frame["operation"]
         if operation in ("can_discover", "canary_policy"):
             if frame["arguments"]: raise SubscriptionUnavailable("unexpected discovery arguments")
+        elif operation == "canary_deliver":
+            if (set(frame["arguments"]) != {"thread_ts","message_ts"}
+                    or any(type(v) is not str or
+                           __import__("re").fullmatch(r"[0-9]{10,16}\.[0-9]{6}",v) is None
+                           for v in frame["arguments"].values())):
+                raise SubscriptionUnavailable("closed canary delivery identity required")
         else:
             cls = (CanarySubscribeRequest if operation == "canary_subscribe" else
                    CanaryUnsubscribeRequest if operation == "canary_unsubscribe" else
@@ -129,6 +135,18 @@ class RuntimeReplyEventHost:
             if operation in CANARY_OPERATIONS:
                 if self.canary_owner is None:
                     raise SubscriptionUnavailable("canary event feature not enrolled")
+                if operation == "canary_deliver":
+                    from .installed_dot_canary_source import InstalledA2CanaryReader
+                    from integrations.slack_agent_dialogue.runtime import AGENT_RELAY_SOCKET_PATH
+                    current=await self.canary_owner.policy_for(principal)
+                    if current is None or self.canary_consumer is None:
+                        raise SubscriptionUnavailable("canary delivery account not selected")
+                    reader=InstalledA2CanaryReader(AGENT_RELAY_SOCKET_PATH,current)
+                    results=await self.canary_consumer.deliver_one(
+                        reader,thread_ts=frame["arguments"]["thread_ts"],
+                        message_ts=frame["arguments"]["message_ts"],
+                    )
+                    return result(operation,data=[dataclasses.asdict(x) for x in results])
                 if operation == "canary_policy":
                     policy_value = await self.canary_owner.policy_for(principal)
                     data = dataclasses.asdict(policy_value) if policy_value is not None else None
@@ -249,6 +267,17 @@ class InstalledCanaryEventClient:
             raise SubscriptionUnavailable("invalid canary withdrawal")
         data = await self.parent._call("canary_unsubscribe",principal,dataclasses.asdict(request))
         return CanaryUnsubscribeReceipt(**data)
+
+    async def deliver_one(self,principal,*,thread_ts,message_ts):
+        """Owner-triggered one-shot probe; not an automatic watcher."""
+        if type(principal) is not NeutralPrincipalProjection:
+            raise SubscriptionUnavailable("original authenticated principal required")
+        value=await self.parent._call("canary_deliver",principal,{
+            "thread_ts":thread_ts,"message_ts":message_ts,
+        })
+        if type(value) is not list or len(value)!=1 or type(value[0]) is not dict:
+            raise SubscriptionEffectUnknown("canary delivery outcome unproven")
+        return value[0]
 
 
 def build_installed_reply_event_rpc(socket_path, policies, *, clock, enabled=False,
