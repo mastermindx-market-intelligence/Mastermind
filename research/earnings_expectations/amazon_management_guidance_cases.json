@@ -1,0 +1,37 @@
+{
+  "schema": "earnings.public_management_guidance_research.v1",
+  "issuer_ref": "CIK:1018724",
+  "source_rights_scope": "PUBLIC_COMPANY_IR_SMALL_FACT_EXCERPTS_RESEARCH_NOT_VENDOR_CONSENSUS",
+  "metric": "CONSOLIDATED_NET_SALES",
+  "unit": "USD_BILLION",
+  "basis": "AS_REPORTED_INCLUDES_FOREIGN_EXCHANGE",
+  "forecast_channel": "COMPANY_MANAGEMENT_GUIDANCE_NOT_ANALYST_CONSENSUS",
+  "analyst_consensus_status": "NOT_ADMITTED",
+  "knowledge_warning": "Earlier management range was public a prior quarter; exact first-public timestamp not asserted. Observed actual is later. This does not establish prior sell-side consensus or the buy-side whisper number.",
+  "observations": [
+    {
+      "fiscal_target": "2026Q1",
+      "prior_guidance_release_date": "2026-02-05",
+      "prior_guidance_source": "https://ir.aboutamazon.com/news-release/news-release-details/2026/Amazon-com-Announces-Fourth-Quarter-Results/default.aspx",
+      "low": 173.5,
+      "high": 178.5,
+      "actual": 181.5,
+      "actual_release_date": "2026-04-29",
+      "actual_source": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000012/amzn-20260331xex991.htm",
+      "prior_guidance_fx_qualification": "guidance anticipated approximately +180bp favourable FX impact on reported growth",
+      "market_event_ref": "earnings:CIK:1018724:2026Q1"
+    },
+    {
+      "fiscal_target": "2026Q2",
+      "prior_guidance_release_date": "2026-04-29",
+      "prior_guidance_source": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000012/amzn-20260331xex991.htm",
+      "low": 194.0,
+      "high": 199.0,
+      "actual": 200.6,
+      "actual_release_date": "2026-07-30",
+      "actual_source": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000024/amzn-20260630xex991.htm",
+      "prior_guidance_fx_qualification": "guidance anticipated approximately -10bp unfavourable FX impact on reported growth",
+      "market_event_ref": "earnings:CIK:1018724:2026Q2"
+    }
+  ]
+}

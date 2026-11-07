@@ -37,7 +37,8 @@ test('real HTTP + SDK + maintained process owner: cross-session retained result 
  const value=result=>result.structuredContent??JSON.parse(result.content[0].text);
  const call=async(client,name,args)=>value(await client.callTool({name,arguments:args},undefined,{timeout:30000}));
  const first=await connect();
- const names=(await first.client.listTools()).tools.map(t=>t.name);
+ const listed=(await first.client.listTools()).tools;
+ const names=listed.map(t=>t.name);
  for(const tool of FABRIC_TOOLS) assert.ok(names.includes(tool.name));
  assert.ok(names.every(n=>n.startsWith('fabric_')||n==='studio_ping'||n==='studio_output_page'));
  // This source tree also contains Context/Browser/Computer implementations.
@@ -51,16 +52,57 @@ test('real HTTP + SDK + maintained process owner: cross-session retained result 
  const injected={run_id:'http-unauthorized-host-000',root_id:'http-qualification-001',
    parent_id:'http-qualification-001',task_class:'mechanical',
    task_complexity:'C0_MECHANICAL',work_packet:'Fixture only',host:'ubuntu1'};
- let refused=false;
+ let hostInjectionRefused=false;
  try { const answer=await first.client.callTool({name:'fabric_request',arguments:injected});
-   refused=answer.isError===true;
- } catch { refused=true; } // MCP SDK schema may deny before the backend runs.
- assert.equal(refused,true);
+   hostInjectionRefused=answer.isError===true;
+ } catch { hostInjectionRefused=true; } // MCP SDK schema may deny before the backend runs.
+ assert.equal(hostInjectionRefused,true);
  await assert.rejects(readFile(join(directory,injected.run_id+'.packet'),'utf8'),{code:'ENOENT'});
+ // Actual authenticated SDK tools/list must expose the closed manual selection
+ // schema, not just a module-local FABRIC_TOOLS object.
+ const requestSchema=listed.find(t=>t.name==='fabric_request')?.inputSchema;
+ assert.ok(requestSchema);
+ assert.deepEqual(requestSchema.properties.pool.enum,
+   ['grok','glm','minimax','bailian','cursor','ocfree','go','experiential']);
+ assert.equal(requestSchema.properties.model.type,'string');
+ for(const consent of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
+   assert.equal(requestSchema.properties[consent].type,'boolean');
+ assert.equal(requestSchema.additionalProperties,false);
  const identity={run_id:'http-fixture-001',root_id:'http-qualification-001'};
+ // Experiential is manual-only, exact slug + explicit retention acknowledgment.
+ // Invalid requests must not create even a synthetic native adapter packet.
+ for(const [suffix,overrides] of [
+   ['no-opt-in',{model:'glm-5.3-uncensored'}],
+   ['wrong-model',{model:'glm-5.3-flash-uncensored',retention_opt_in:true}],
+   ['auto-model',{model:'auto',retention_opt_in:true}],
+   ['false-opt-in',{model:'glm-5.3-uncensored',retention_opt_in:false}],
+   ['no-sensitive-opt-in',{model:'glm-5.3-uncensored',retention_opt_in:true,code_exposure_opt_in:true}],
+   ['no-code-opt-in',{model:'glm-5.3-uncensored',retention_opt_in:true,sensitive_data_opt_in:true}],
+ ]) {
+   const badId={run_id:'http-exp-'+suffix,root_id:identity.root_id};
+   const rejected=await call(first.client,'fabric_request',{...badId,parent_id:badId.root_id,
+     task_class:'mechanical',task_complexity:'C0_MECHANICAL',
+     pool:'experiential',work_packet:'SYNTHETIC ONLY. Refuse before adapter.',...overrides});
+   assert.equal(rejected.error,'INVALID_ARGUMENT',suffix);
+   await assert.rejects(readFile(join(directory,badId.run_id+'.packet')),
+     err=>err?.code==='ENOENT');
+ }
+ // An older installed native CLI (this fixture) lacks --strict-manual-pin.
+ // That refusal must survive HTTP/MCP serialization and create no adapter run.
+ const manualId={run_id:'http-fixture-manual-rejected',root_id:identity.root_id};
+ const refused=await call(first.client,'fabric_request',{...manualId,parent_id:manualId.root_id,
+   task_class:'review',task_complexity:'C2_COMPLEX_BOUNDED',pool:'glm',model:'glm-5.3',
+   work_packet:'FIXTURE ONLY. Strict manual preflight must refuse without dispatch.'});
+ assert.equal(refused.error,'MANUAL_ROUTE_UNAVAILABLE');
+ assert.equal(refused.retry_allowed,false);
+ const refusedStatus=await call(first.client,'fabric_status',manualId);
+ assert.equal(refusedStatus.status.state,'NOT_FOUND');
+ assert.equal(refusedStatus.root_verified,false);
+ await assert.rejects(readFile(join(directory,manualId.run_id+'.packet')),
+   err=>err?.code==='ENOENT');
  const request=await call(first.client,'fabric_request',{...identity,parent_id:identity.root_id,
    task_class:'mechanical',task_complexity:'C0_MECHANICAL',work_packet:'OBJECTIVE: fixture transport qualification. No provider calls.'});
- assert.ok(request.controller_pid);assert.equal(request.worker_started,null);
+ assert.ok(request.controller_pid,JSON.stringify(request));assert.equal(request.worker_started,null);
  await first.transport.terminateSession();
  const second=await connect();
  const observed=await call(second.client,'fabric_status',identity);
@@ -70,7 +112,7 @@ test('real HTTP + SDK + maintained process owner: cross-session retained result 
  const result=await call(second.client,'fabric_result',identity);
  assert.equal(result.adapter_response,'RETURN: VERIFIED\n\n');
  const accepted=await call(second.client,'fabric_accept',{...identity,by:'deterministic',
-  expected_response_sha256:result.response_sha256,verification_summary:'Compared exact isolated fixture bytes across HTTP session replacement.'});
+  expected_response_sha256:result.response_sha256,verification_summary:'artifact_digest_comparison'});
  assert.equal(accepted.accepted,true);
  assert.equal(gateway.stats().backend.spawns,1);
  assert.match(await readFile(join(directory,identity.run_id+'.packet'),'utf8'),/No provider calls/);
@@ -100,7 +142,7 @@ test('real HTTP + SDK + maintained process owner: cross-session retained result 
  assert.equal(largeResult.adapter_response,'RETURN: VERIFIED\n\n');
  const largeAccepted=await call(second.client,'fabric_accept',{
    ...largeId,by:'deterministic',expected_response_sha256:largeResult.response_sha256,
-   verification_summary:'Verified the full 12KiB literal packet and complete retained fixture result across the same engine process.'});
+   verification_summary:'artifact_digest_comparison'});
  assert.equal(largeAccepted.accepted,true);
  assert.equal(gateway.stats().backend.spawns,1);
 });

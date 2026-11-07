@@ -1,6 +1,7 @@
 """Real loopback TLS + Unix transport, with an inert retained-owner responder.
 
 The test endpoint is not installed/admitted; no Runtime or provider is invoked.
+The fixture Control responder proves routing, not filesystem sealing authority.
 """
 import asyncio
 import dataclasses
@@ -16,6 +17,9 @@ import pytest
 from control_plane.executive_worker_broker import BROKER_RESPONSE_SCHEMA_VERSION
 from control_plane import executive_fabric_composition as composition
 from control_plane.remote_worker_transport import TransportError
+from ops.executive_os import remote_worker_gateway as gateway_module
+from ops.executive_os.capacity_broker_topology import CONTROL_UID
+from ops.executive_os.remote_assignment_control import AssignmentControlBinding
 from ops.executive_os.remote_worker_gateway import RemoteWorkerGateway
 from ops.executive_os.remote_worker_gateway_config import RemoteWorkerGatewayConfig, REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA
 from test_executive_fabric_composition import binding, root_stats, installed
@@ -25,7 +29,7 @@ from tests.test_remote_worker_gateway import _cert_sha256
 
 
 @asynccontextmanager
-async def endpoint(tmp_path, *, wrong_peer=False, wrong_server=False):
+async def endpoint(tmp_path, monkeypatch, *, wrong_peer=False, wrong_server=False):
     ca_key, ca, _ = _certificate_fixture(tmp_path, name='fabric-ca',
         common_name='Fabric test CA', san='DNS:ca.invalid', ca=True)
     server_key, server_cert, _ = _certificate_fixture(tmp_path, name='fabric-server',
@@ -50,13 +54,29 @@ async def endpoint(tmp_path, *, wrong_peer=False, wrong_server=False):
     server = None
     try:
         route = binding(); route['bridge_uid'] = os.geteuid()
+        peer_uid = os.geteuid() + int(wrong_peer)
+        control_binding = AssignmentControlBinding(
+            worker_id=route['worker_id'], control_uid=CONTROL_UID, control_gid=CONTROL_UID,
+            worker_uid=peer_uid, worker_gid=CONTROL_UID + 1,
+            workspace_root=tmp_path/'assignments', run_root=tmp_path/'runs')
+        seals = []
+        async def fixture_control(control, request, broker_call, *, fabric_target):
+            assert control is control_binding and fabric_target is True
+            packet = request['broker_request']
+            seals.append(packet)
+            # Keep the real TLS/Unix transports; only the filesystem owner is inert.
+            for operation in ('assignment-seal-prepare', 'assignment-seal-commit'):
+                assert await broker_call(operation, packet) == {'echoed': packet}
+            return {'fixture_control_sealed': packet}
+        monkeypatch.setattr(gateway_module, 'seal_original_assignment', fixture_control)
         gateway = RemoteWorkerGateway(RemoteWorkerGatewayConfig(
             schema=REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA, host_ref=route['host_ref'],
             listen_host='127.0.0.1', listen_port=0, certificate_path=server_cert,
             key_path=server_key, ca_path=ca, expected_control_fingerprint=_cert_sha256(client_cert),
             broker_socket_path=sock, allowed_worker_ids={route['worker_id']},
             allowed_operations={'start', 'status', 'assignment-seal', 'assignment-seal-finalize'},
-            broker_target='attended-fabric', expected_broker_peer_uid=os.geteuid() + int(wrong_peer)))
+            broker_target='attended-fabric', expected_broker_peer_uid=peer_uid,
+            assignment_control=control_binding))
         server = await gateway.start_server()
         _, port = server.sockets[0].getsockname()[:2]
         physical = composition.FabricHostBinding(**route)
@@ -70,30 +90,33 @@ async def endpoint(tmp_path, *, wrong_peer=False, wrong_server=False):
         path, digest = installed(tmp_path, json.dumps(doc).encode())
         selected = composition.FabricBindingSource.from_path(path, digest)
         request = payload(physical)
-        yield selected.client_for(physical, request), request, calls
+        yield selected.client_for(physical, request), request, calls, seals
     finally:
         if server is not None:
             server.close(); await server.wait_closed()
         unix.close(); await unix.wait_closed(); sock.unlink(missing_ok=True)
 
 
-def test_original_command_and_assignment_cross_existing_tls_and_unix(tmp_path, root_stats):
+def test_original_command_and_assignment_cross_existing_tls_and_unix(tmp_path, root_stats, monkeypatch):
     async def run():
-        async with endpoint(tmp_path) as (client, p, calls):
+        async with endpoint(tmp_path, monkeypatch) as (client, p, calls, seals):
             command = {**p, 'control_start': {'original': 'validated-projection'}}
             assert await client.request('start', command) == {'echoed': command}
-            assert await client.request('assignment-seal', p) == {'echoed': p}
+            assert await client.request('assignment-seal', p) == {'fixture_control_sealed': p}
             assert await client.request('assignment-seal-finalize', p) == {'echoed': p}
-            assert [r['operation'] for r in calls] == ['start', 'assignment-seal', 'assignment-seal-finalize']
+            assert [r['operation'] for r in calls] == [
+                'start', 'assignment-seal-prepare', 'assignment-seal-commit', 'assignment-seal-finalize']
+            assert seals == [p]
             assert calls[0]['payload'] == command
     asyncio.run(run())
 
 
 @pytest.mark.parametrize('defect', ['wrong_peer', 'wrong_server'])
-def test_mismatched_enrolled_transport_never_reaches_owner(tmp_path, root_stats, defect):
+def test_mismatched_enrolled_transport_never_reaches_owner(tmp_path, root_stats, monkeypatch, defect):
     async def run():
-        async with endpoint(tmp_path, **{defect: True}) as (client, p, calls):
+        async with endpoint(tmp_path, monkeypatch, **{defect: True}) as (client, p, calls, seals):
             with pytest.raises(TransportError):
                 await client.request('status', p)
             assert calls == []
+            assert seals == []
     asyncio.run(run())

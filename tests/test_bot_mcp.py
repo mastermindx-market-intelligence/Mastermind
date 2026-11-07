@@ -139,3 +139,99 @@ def test_intel_hub_tool(tmp_path, monkeypatch):
     one = json.loads(_text(asyncio.run(bot_mcp.get_intel_hub.handler({"ticker": "nvda"}))))
     assert one["ticker"] == "NVDA" and one["composite_conviction"] == 100
     assert "ZZZZ not in" in _text(asyncio.run(bot_mcp.get_intel_hub.handler({"ticker": "ZZZZ"})))
+
+
+# --- D2 boundary freshness (news estate 2026-10-31) -------------------------------------------
+def _write_vendored(root, rel, payload):
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(payload))
+
+
+_NEWS_REC = {"n_recent": 3, "sentiment_lean": "pos", "n_pos": 2, "n_neg": 0,
+             "baskets": ["ai"], "sectors": ["tech"], "is_mag7": True,
+             "top": [{"title": "t", "source": "Reuters", "url": "u", "summary": "s",
+                      "sentiment": "pos", "date": "2026-10-30",
+                      "item_id": "massive:reuters.com:abc123",
+                      "published_utc": "2026-10-30T14:05:00+00:00"}]}
+
+
+def test_get_news_carries_freshness_and_evidence_grade(tmp_path, monkeypatch):
+    """T5: a found ticker carries the vendored file's clocks; existing keys stay unchanged."""
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    _write_vendored(tmp_path, "site/news/by_ticker.json", {
+        "schema": "news_flow.v1", "is_context_only": True, "asof": "2026-10-31",
+        "source_asof": "2026-10-30T22:00:00+00:00", "source_asof_basis": "financial_news.fetched_at",
+        "retained_from_previous_build": True, "retained_reason": "candidate_darker_than_existing",
+        "tickers": {"NVDA": _NEWS_REC}})
+    out = json.loads(_text(asyncio.run(bot_mcp.get_news.handler({"ticker": "nvda"}))))
+    assert {"ticker", "news", "note"} <= set(out)
+    assert out["ticker"] == "NVDA" and out["news"]["n_recent"] == 3
+    assert out["evidence_grade"] == "vendored_snapshot"
+    assert out["freshness"] == {
+        "asof": "2026-10-31", "source_asof": "2026-10-30T22:00:00+00:00",
+        "retained_from_previous_build": True, "generated_utc": None,
+        "basis": "vendored_macro_file", "source_file": "site/news/by_ticker.json"}
+    assert "missing_reason" not in out and "fallback" not in out
+    # a pre-D2 producer file (no source clock) reports null, never an invented clock
+    _write_vendored(tmp_path, "site/news/by_ticker.json", {
+        "schema": "news_flow.v1", "asof": "2026-10-29", "tickers": {"NVDA": _NEWS_REC}})
+    old = json.loads(_text(asyncio.run(bot_mcp.get_news.handler({"ticker": "NVDA"}))))
+    assert old["freshness"]["asof"] == "2026-10-29"
+    assert old["freshness"]["source_asof"] is None
+    assert old["freshness"]["retained_from_previous_build"] is None
+    # an absent ticker keeps the existing plain-text contract
+    assert "no news-flow signal for ZZZZ" in _text(
+        asyncio.run(bot_mcp.get_news.handler({"ticker": "ZZZZ"})))
+
+
+def test_get_intelligence_labels_primary_and_legacy_fallback(tmp_path, monkeypatch):
+    """T6: the unified read is graded vendored_snapshot; the standalone-feed composition is
+    labelled legacy_fallback with its reason and the news file's clocks."""
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    _write_vendored(tmp_path, "site/intelligence/by_ticker.json", {
+        "schema": "intelligence.v1", "is_context_only": True, "as_of": "2026-10-31",
+        "generated_utc": "2026-10-31T06:10:00+00:00",
+        "tickers": {"NVDA": {"ticker": "NVDA", "news": _NEWS_REC, "alt": None,
+                             "has_news": True, "has_alt": False}}})
+    _write_vendored(tmp_path, "site/news/by_ticker.json", {
+        "schema": "news_flow.v1", "asof": "2026-10-31",
+        "source_asof": "2026-10-31T05:00:00+00:00", "retained_from_previous_build": False,
+        "tickers": {"AMD": _NEWS_REC}})
+    _write_vendored(tmp_path, "site/altdata/mastermind.json", {
+        "as_of": "2026-10-30", "signals": [{"ticker": "AMD", "signal_score": 61}]})
+
+    primary = json.loads(_text(asyncio.run(bot_mcp.get_intelligence.handler({"ticker": "NVDA"}))))
+    assert primary["has_news"] is True and "note" in primary
+    assert primary["evidence_grade"] == "vendored_snapshot"
+    assert primary["freshness"]["asof"] == "2026-10-31"
+    assert primary["freshness"]["generated_utc"] == "2026-10-31T06:10:00+00:00"
+    assert primary["freshness"]["source_file"] == "site/intelligence/by_ticker.json"
+    assert primary["freshness"]["basis"] == "vendored_macro_file"
+    assert "missing_reason" not in primary and "fallback" not in primary
+
+    legacy = json.loads(_text(asyncio.run(bot_mcp.get_intelligence.handler({"ticker": "AMD"}))))
+    assert legacy["has_news"] is True and legacy["has_alt"] is True
+    assert legacy["missing_reason"] == "ticker_absent_in_vendored_file"
+    assert legacy["fallback"] == "standalone_news_and_altdata_feeds"
+    assert legacy["evidence_grade"] == "legacy_fallback"
+    assert legacy["freshness"]["source_file"] == "site/news/by_ticker.json"
+    assert legacy["freshness"]["source_asof"] == "2026-10-31T05:00:00+00:00"
+    assert legacy["freshness"]["retained_from_previous_build"] is False
+    assert legacy["alt_freshness"]["asof"] == "2026-10-30"
+
+
+def test_freshness_survives_transport_compaction(tmp_path, monkeypatch):
+    """T6b: the 8k transport budget never drops the freshness block or the grade."""
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    wide = dict(_NEWS_REC, top=[dict(_NEWS_REC["top"][0], summary="x" * 3000) for _ in range(40)])
+    _write_vendored(tmp_path, "site/news/by_ticker.json", {
+        "asof": "2026-10-31", "source_asof": "2026-10-31T05:00:00+00:00",
+        "tickers": {"NVDA": wide}})
+    out = json.loads(_text(asyncio.run(bot_mcp.get_news.handler({"ticker": "NVDA"}))))
+    assert out["_transport_truncated"] is True
+    assert out["freshness"]["source_asof"] == "2026-10-31T05:00:00+00:00"
+    assert out["evidence_grade"] == "vendored_snapshot"
+    tiny = json.loads(_text(bot_mcp._json({"freshness": {"asof": "2026-10-31"}, "evidence_grade": "g",
+                                            **{f"k{i}": {"v": "y" * 200} for i in range(400)}})))
+    assert tiny["freshness"] == {"asof": "2026-10-31"} and tiny["evidence_grade"] == "g"

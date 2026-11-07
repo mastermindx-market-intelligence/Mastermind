@@ -18,12 +18,19 @@ from integrations.executive_mcp.schemas import (
 from integrations.executive_mcp.web_ceo import (
     validate_web_ceo_v2_tool_arguments, web_ceo_v2_tool_spec,
 )
+from integrations.hermes_delegate.schema import (
+    COMMAND_RE, SELECTED_CHILD_ACTIONS, SubmissionError, parse_selected_child,
+)
 
 COO_SERVER_NAME = "mastermind-executive-coo"
 COO_SERVER_VERSION = "1.0.0"
 COO_MCP_PATH = "/mcp/coo"
 COO_READ_NAMES = ("executive_state", "executive_inbox", "executive_fabric")
 _WORK = {"type": "string", "pattern": "^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$", "maxLength": 72}
+#: The canonical coo-cycle dispatch command the host already froze.
+_SELECTED_CHILD_COMMAND = {
+    "type": "string", "pattern": COMMAND_RE.pattern, "maxLength": 294,
+}
 
 
 def _submit_spec():
@@ -43,6 +50,11 @@ COO_TOOL_SPECS = (
     ToolSpec("principal_intent_status", "Reconcile one prior COO request without creating or retrying work.",
              {"type": "object", "additionalProperties": False, "required": ["request_ref", "work_ref"], "properties": {
                  "work_ref": dict(_WORK), "request_ref": {"type": "string", "pattern": "^req-coo-[0-9a-f]{32}$", "maxLength": 40}}}, "Original role-neutral receipt or explicit refusal.", True),
+    ToolSpec("mmx_delegate", "Submit or observe exactly the Executive child the authenticated host already froze, under its canonical command reference. The model cannot select, create, review, consume or cancel a child.",
+             {"type": "object", "additionalProperties": False, "required": ["action", "command"], "properties": {
+                 "action": {"type": "string", "enum": sorted(SELECTED_CHILD_ACTIONS)},
+                 "command": dict(_SELECTED_CHILD_COMMAND)}},
+             "Current selected-child envelope for the exact original command, with its canonical Attempt and three-valued live submit.", False),
 )
 COO_TOOL_NAMES = tuple(spec.name for spec in COO_TOOL_SPECS)
 
@@ -71,8 +83,49 @@ def coo_tool_schema_digest():
 
 
 COO_TOOL_SCHEMA_DIGEST = (
-    "8d4ff58a30c02b717788b80fdfd1c5b8b35493dc11dd76cac351cde7b4509d72"
+    "5cf2a0de4a47686c545d1ee3d9c388ab4dc94c880cb0670140de2eca2e54f550"
 )
+
+# A separate reviewed catalogue. Existing descriptors and the v1 digest above
+# retain their exact meaning for every currently enrolled principal.
+from common import coo_agentos_context_contract as context_wire
+
+COO_CONTEXT_TOOL_SPECS = (*COO_TOOL_SPECS, ToolSpec(context_wire.TOOL,
+    "Read the complete canonical Agent OS context for one explicitly enrolled mission from its adopted snapshot. This read grants no execution authority.",
+    {"type": "object", "additionalProperties": False, "required": ["work_ref"],
+     "properties": {"work_ref": dict(_WORK)}},
+    "Exact adopted context bytes and source/runtime receipt, with explicit degradation and omission accounting.", True))
+COO_CONTEXT_TOOL_NAMES = tuple(spec.name for spec in COO_CONTEXT_TOOL_SPECS)
+COO_CONTEXT_TOOL_SCHEMA_DIGEST = "5fa24aa1d907d66d0ca0a56168617f955e09d063f532cf527fe0d7b923fb50af"
+
+
+def coo_context_tool_schema_snapshot():
+    return [{"annotations": copy.deepcopy(spec.annotations), "input_schema": copy.deepcopy(spec.input_schema),
+             "name": spec.name, "output_schema": None}
+            for spec in sorted(COO_CONTEXT_TOOL_SPECS, key=lambda item: item.name)]
+
+
+def coo_context_tool_schema_digest():
+    return hashlib.sha256(canonical_json(coo_context_tool_schema_snapshot())).hexdigest()
+
+
+def catalogue_specs(catalogue):
+    if catalogue == context_wire.LEGACY_CATALOGUE: return COO_TOOL_SPECS
+    if catalogue == context_wire.CATALOGUE: return COO_CONTEXT_TOOL_SPECS
+    raise GatewayError("invalid_input", "unknown COO catalogue")
+
+
+def validate_coo_context_tool_arguments(name, arguments):
+    if name != context_wire.TOOL:
+        return validate_coo_tool_arguments(name, arguments)
+    try:
+        from common.workspace_project_plan_contract import validate_selection
+        if type(arguments) is not dict or set(arguments) != {"work_ref"} or not _check_work_ref(arguments["work_ref"]):
+            raise ValueError()
+        validate_selection(arguments)
+        return dict(arguments)
+    except (ValueError, TypeError):
+        raise GatewayError("invalid_input", "invalid COO context selector") from None
 
 
 def validate_coo_tool_arguments(name, arguments):
@@ -85,6 +138,10 @@ def validate_coo_tool_arguments(name, arguments):
     try:
         if name == "submit_principal_intent":
             return normalize_principal_request(arguments, expected_work_ref=arguments.get("workstream"))
+        if name == "mmx_delegate":
+            # The closed selected-child branch: the action and the exact
+            # canonical command the host already froze. Nothing else.
+            return parse_selected_child(arguments)
         expected = {"work_ref"} if name == "executive_mandate" else {"work_ref", "request_ref"}
         if set(arguments) != expected or not _check_work_ref(arguments.get("work_ref")):
             raise ValueError()
@@ -93,5 +150,7 @@ def validate_coo_tool_arguments(name, arguments):
         return dict(arguments)
     except CooPrincipalRequestInternalError as exc:
         raise GatewayError("internal_error", "COO request policy is unavailable") from exc
+    except SubmissionError as exc:
+        raise GatewayError("invalid_input", "invalid selected-child request") from exc
     except (TypeError, ValueError) as exc:
         raise GatewayError("invalid_input", "invalid COO request or mission selector") from exc

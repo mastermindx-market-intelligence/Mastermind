@@ -2,6 +2,8 @@
 import asyncio
 import hashlib
 import json
+import os
+import socket
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,18 +34,43 @@ def staged(tmp_path, raw):
                 fabric_bridge_armed=False)
 
 
-def compose(tmp_path, monkeypatch, raw, **kwargs):
+def compose(tmp_path, monkeypatch, raw, *, workspace_listener=None, workspace_socket_path=None, **kwargs):
     runtime = Runtime.at(tmp_path / "fixture-runtime")
     captured = {}
     client = object()
     monkeypatch.setattr(broker, "WorkerBrokerClient", lambda *args, **kwargs: client)
-    monkeypatch.setattr(cli, "activate_launchd_socket", lambda name: object())
+    monkeypatch.setattr(cli, "activate_launchd_socket", _workspace_aware_listener(raw, workspace_listener=workspace_listener, workspace_socket_path=workspace_socket_path))
     def service(config, **bindings):
+        from control_plane.executive_service import ExecutiveControlService
+        value = object.__new__(ExecutiveControlService)
+        value.config, value.runtime = config, runtime
+        value._namespace_custody = SimpleNamespace(bound_runtime=lambda actual: actual)
         captured.update(bindings)
-        return SimpleNamespace(config=config)
+        return value
     monkeypatch.setattr(cli, "ExecutiveControlService", service)
     service = cli._service_from_config(raw, **kwargs)
     return service, captured["supervisor_factory"](runtime), client
+
+
+def _workspace_aware_listener(raw, *, workspace_listener=None, workspace_socket_path=None):
+    """Use only the caller's preallocated private listener; never inspect/adopt a host path."""
+    canonical = ("/var/run/mastermind-executive/", "/private/var/run/mastermind-executive/")
+
+    def factory(name):
+        if name == "WorkspaceControlRoom" and "workspace_control_room" in raw:
+            selected = str(raw["workspace_control_room"]["socket_path"])
+            expected = str(workspace_socket_path) if workspace_socket_path is not None else None
+            # This guard precedes filesystem and listener access, including on
+            # hosts where the actual installed Control Room socket exists.
+            if (expected is None or selected != expected
+                    or any(os.path.normpath(value).startswith(canonical) for value in (selected, expected))):
+                raise AssertionError("private preallocated Workspace fixture listener required")
+            if type(workspace_listener) is not socket.socket or workspace_listener.getsockname() != expected:
+                raise AssertionError("owned Workspace fixture listener required")
+            return workspace_listener
+        return object()
+
+    return factory
 
 
 def test_cleanup_policy_is_shared_contract_and_supervisor_reexport():
@@ -176,14 +203,55 @@ def test_fabric_conflicts_with_existing_remote_source(tmp_path, monkeypatch, roo
                                  remote_worker_binding_source=lambda host, worker: None)
 
 
-def test_fabric_source_cannot_change_fixed_supervisor_principal(tmp_path, monkeypatch, root_stats):
+def test_fabric_owner_uses_its_physical_principal_without_rewriting_primary(tmp_path, monkeypatch, root_stats):
     raw = _raw(tmp_path)
     settings = staged(tmp_path, raw)
     source = cli._staged_fabric_binding_source({**raw, **settings})
     raw["worker_uid"] += 1
-    monkeypatch.setattr(broker, "WorkerBrokerClient", lambda *args, **kwargs: pytest.fail("Wrong principal reached clients"))
-    with pytest.raises(cli.ServiceError, match="fixed Supervisor worker principal"):
+    raw["worker_gid"] += 2
+    service, mixed, _ = compose(tmp_path, monkeypatch, raw, fabric_worker_binding_source=source)
+    assert mixed.primary.worker_uid == raw['worker_uid']
+    assert mixed.primary.worker_gid == raw['worker_gid']
+    for physical in source.bindings:
+        owner = mixed.owners[physical.worker_id]
+        assert owner.worker_uid == physical.worker_uid
+        assert owner.worker_gid == physical.worker_gid
+        assert owner.shared_run_gid == raw['shared_run_gid']
+        assert owner.instance_id == mixed.primary.instance_id
+        assert owner.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP
+
+
+def test_conflicting_host_principals_for_same_worker_refuse_before_clients(tmp_path, monkeypatch, root_stats):
+    raw = _raw(tmp_path)
+    settings = staged(tmp_path, raw)
+    path = Path(settings['fabric_bindings_path'])
+    data = json.loads(path.read_text())
+    other = dict(data['bindings'][0], host_ref='second-host', worker_uid=raw['worker_uid']+1)
+    data['bindings'].append(other)
+    contents = json.dumps(data).encode(); path.write_bytes(contents)
+    settings['fabric_bindings_sha256'] = hashlib.sha256(contents).hexdigest()
+    source = cli._staged_fabric_binding_source({**raw, **settings})
+    monkeypatch.setattr(broker, 'WorkerBrokerClient', lambda *a, **kw: pytest.fail('ambiguous owner reached client'))
+    with pytest.raises(cli.ServiceError, match='conflicting physical principals'):
         cli._service_from_config(raw, fabric_worker_binding_source=source)
+
+
+def test_distinct_fabric_workers_keep_distinct_owners_and_local_group(tmp_path, monkeypatch, root_stats):
+    raw = _raw(tmp_path)
+    settings = staged(tmp_path, raw)
+    path = Path(settings['fabric_bindings_path']); data = json.loads(path.read_text())
+    first = data['bindings'][0]
+    second = dict(first, host_ref='second-host', worker_id='second-worker', worker_uid=1000, worker_gid=1001)
+    data['bindings'].append(second)
+    contents = json.dumps(data).encode(); path.write_bytes(contents)
+    settings['fabric_bindings_sha256'] = hashlib.sha256(contents).hexdigest()
+    source = cli._staged_fabric_binding_source({**raw, **settings})
+    _, mixed, _ = compose(tmp_path, monkeypatch, raw, fabric_worker_binding_source=source)
+    a, b = (mixed.owners[p.worker_id] for p in source.bindings)
+    assert a is not b and a is not mixed.primary and b is not mixed.primary
+    assert (b.worker_uid,b.worker_gid)==(1000,1001)
+    assert b.shared_run_gid == a.shared_run_gid == raw['shared_run_gid']
+    assert a.runtime is b.runtime is mixed.runtime
 
 
 def test_dedicated_worker_canary_cannot_promote_fabric_factory(tmp_path, monkeypatch, root_stats):
@@ -203,3 +271,16 @@ def test_serve_validates_staged_file_before_canary_or_service(tmp_path, monkeypa
     monkeypatch.setattr(cli, "_load_control_environment_attestation", lambda *args, **kwargs: pytest.fail("Changed staged source reached attestation"))
     with pytest.raises(cli.ServiceError, match="Staged Fabric binding source refused"):
         asyncio.run(cli._serve_from_config(tmp_path / "control.json"))
+
+
+def test_workspace_fixture_never_inspects_or_binds_canonical_host_socket(monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("canonical path must be rejected before filesystem/socket access")
+    monkeypatch.setattr(os.path, "exists", forbidden)
+    monkeypatch.setattr(socket, "socket", forbidden)
+    for path in ("/var/run/mastermind-executive/workspace-control-room.sock",
+                 "/private/var/run/mastermind-executive/workspace-control-room.sock"):
+        raw = {"workspace_control_room": {"socket_path": path}}
+        factory = _workspace_aware_listener(raw, workspace_listener=object(), workspace_socket_path=path)
+        with pytest.raises(AssertionError, match="private preallocated"):
+            factory("WorkspaceControlRoom")

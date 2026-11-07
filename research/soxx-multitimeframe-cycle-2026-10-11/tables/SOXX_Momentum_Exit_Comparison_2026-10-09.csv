@@ -1,0 +1,12 @@
+<PARSED TEXT FOR SHEET: 1 / 1 TABS
+TAB NAME: SOXX_Momentum_Exit_Comparison_2026-10-09.csv>
+index,strategy,n,win_pct,mean_net_pct,compounded_pct,measured_mdd_pct,earlier_n,earlier_mean_net_pct,earlier_mean_ex_best_pct,stress_mean_net_pct,year_mean_ex_best_pct
+0,Sell all at +2%,8,75.0,1.0046,8.222,-2.944,5,0.4997,0.1499,0.8035,0.8768
+1,Sell all at +4%,8,50.0,0.6459,4.785,-9.068,5,1.6991,1.1494,0.4451,0.1813
+2,Sell all at +8%,8,50.0,2.6449,21.868,-9.068,5,2.725,1.4323,2.4421,1.8947
+3,Sell all at 3H RSI(14) ≥70,8,50.0,4.8888,43.121,-9.068,5,3.4207,2.5371,4.6838,3.2178
+4,Sell all at 3H joint momentum rollover,8,50.0,5.8272,52.868,-9.398,5,2.6021,1.715,5.6213,3.7635
+5,Half at +2%; remainder at 3H joint rollover,8,62.5,3.4159,29.653,-4.478,5,1.5509,0.9324,3.2124,2.3202
+6,Half at +2%; breakeven remainder + 3H joint rollover,8,75.0,2.8272,24.15,-2.506,5,0.5251,-0.3499,2.6243,1.6473
+7,3H RSI reaches 65 then falls back below 65,8,50.0,7.5214,70.963,-9.068,5,2.936,1.9324,7.3138,5.044
+8,No profit target; 65 RTH-hour time exit,8,50.0,7.7626,73.901,-9.068,5,2.6481,1.4323,7.5548,5.3197

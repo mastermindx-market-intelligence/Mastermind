@@ -431,6 +431,49 @@ _TOML_AGENT_KEY_RE = re.compile(
 )
 
 
+def _native_codex_isolation(config: dict[str, object]) -> bool | None:
+    """Recognize the Chairman-accepted bounded native/peer-denied exception.
+
+    None: legacy/non-enrolled config, keep default disable policy.
+    True: exactly compatible native policy; never overwrite its configuration.
+    False: enabled native cap-2 but peer protections invalid/missing; refuse.
+    This inspects configuration only, NOT a provider/Runtime/capacity grant.
+    """
+    agents = config.get("agents")
+    if not isinstance(agents, dict) or agents.get("enabled") is not True:
+        return None
+    if type(agents.get("max_concurrent_threads_per_session")) is not int:
+        return None
+    if agents["max_concurrent_threads_per_session"] != 2:
+        return None
+
+    features = config.get("features")
+    multi = features.get("multi_agent_v2") if isinstance(features, dict) else None
+    if not isinstance(multi, dict):
+        return False
+    if (
+        multi.get("enabled") is not True
+        or multi.get("disable_direct_message") is not True
+        or type(multi.get("max_concurrent_threads_per_session")) is not int
+        or multi["max_concurrent_threads_per_session"] != 2
+    ):
+        return False
+
+    plugins = config.get("plugins")
+    app = plugins.get("codex-app-tools@openai-bundled") if isinstance(plugins, dict) else None
+    mcp = app.get("mcp_servers") if isinstance(app, dict) else None
+    tools = mcp.get("codex_app") if isinstance(mcp, dict) else None
+    if not isinstance(tools, dict):
+        return False
+    disabled = tools.get("disabled_tools")
+    if not isinstance(disabled, list) or not all(type(item) is str for item in disabled):
+        return False
+    return {
+        "send_message_to_thread", "create_thread",
+        "fork_thread", "handoff_thread",
+    }.issubset(set(disabled))
+
+
 def _render_codex_config(raw: bytes) -> bytes:
     try:
         text = raw.decode("utf-8")
@@ -448,6 +491,14 @@ def _render_codex_config(raw: bytes) -> bytes:
     starts = [index for index, line in enumerate(lines) if line.strip() == "[agents]"]
     if len(starts) > 1:
         raise OrchestratorPolicyError("Codex config contains duplicate [agents] tables")
+    native_reset = _native_codex_isolation(parsed)
+    if native_reset is not None:
+        if not starts or native_reset is False:
+            raise OrchestratorPolicyError(
+                "Codex native reset lacks exact peer-message isolation; "
+                "refusing to overwrite it with older orchestrator policy"
+            )
+        return raw
     required = {
         "max_concurrent_threads_per_session": "max_concurrent_threads_per_session = 1",
         "enabled": "enabled = false",
@@ -719,10 +770,14 @@ def verify_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, 
         if not isinstance(codex_agents, dict):
             issues.append("codex_config.agents")
         else:
-            if codex_agents.get("enabled") is not False:
-                issues.append("codex_config.agents_enabled")
-            if codex_agents.get("max_concurrent_threads_per_session") != 1:
-                issues.append("codex_config.max_concurrent_threads")
+            native_reset = _native_codex_isolation(codex_config)
+            if native_reset is False:
+                issues.append("codex_config.native_message_isolation")
+            if native_reset is not True:
+                if codex_agents.get("enabled") is not False:
+                    issues.append("codex_config.agents_enabled")
+                if codex_agents.get("max_concurrent_threads_per_session") != 1:
+                    issues.append("codex_config.max_concurrent_threads")
     except OrchestratorPolicyError:
         issues.append("codex_config.missing_or_invalid")
 

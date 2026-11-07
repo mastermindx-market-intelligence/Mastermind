@@ -331,3 +331,35 @@ def test_sensitive_untracked_key_file_is_hidden_even_with_nonstandard_name(tmp_p
     serialized = json.dumps(result)
     assert ".netrc" not in serialized
     assert "PRIVATE_TEST_VALUE" not in serialized
+
+
+@pytest.mark.parametrize("unsafe", ["symlink-parent", "relative-parent", "absolute"])
+def test_content_digest_refuses_intermediate_symlink_or_path_escape(tmp_path: Path, unsafe):
+    workspace = tmp_path / "admitted-workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside-source"
+    outside.mkdir()
+    sensitive = outside / "unadmitted.py"
+    sensitive.write_text("ANOTHER_WORKSPACE_PRIVATE_BLOB = 8675309\n")
+    if unsafe == "symlink-parent":
+        (workspace / "shortcut").symlink_to(outside, target_is_directory=True)
+        path = "shortcut/unadmitted.py"
+    elif unsafe == "relative-parent":
+        path = "../outside-source/unadmitted.py"
+    else:
+        path = str(sensitive)
+    digest, state = adapter._stable_content_digest(workspace, path)
+    assert digest is None, "read-only overlay must not hash outside workspace"
+    assert state in {"UNAVAILABLE", "NON_REGULAR"}
+
+
+def test_content_digest_allows_real_nested_file_without_symlinks(tmp_path: Path):
+    workspace = tmp_path / "admitted-workspace"
+    target = workspace / "real" / "nested" / "file.py"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"SAFE = 1\n")
+    content_sha256, state = adapter._stable_content_digest(
+        workspace, "real/nested/file.py"
+    )
+    assert state == "HASHED"
+    assert content_sha256 == __import__("hashlib").sha256(b"SAFE = 1\n").hexdigest()

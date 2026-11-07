@@ -15,8 +15,11 @@ nothing here auto-executes a trade. Paper-only.
 from __future__ import annotations
 
 import json
+import copy
+import math
 import re
 import time
+from contextvars import ContextVar
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -34,6 +37,12 @@ _READ_ROOTS = [_V / "site", _V / "data", _ROOT / "data"]
 # the latent autonomous→flagship peek path (data/portfolio/* lives under the _ROOT/data root).
 _DENY_ROOTS = [(_ROOT / "data" / "portfolio").resolve(), (_ROOT / "data" / "portfolios").resolve()]
 _LEAK_AUDIT = _ROOT / "data" / "brain" / "read_signal_denied.jsonl"
+_INFERENCE_PROVENANCE = ContextVar("bot_inference_provenance", default=None)
+
+
+def _execution_provenance() -> dict:
+    """Trusted invocation context; model arguments never supply these fields."""
+    return dict(_INFERENCE_PROVENANCE.get() or {"source": "claude_cli"})
 
 
 def _ok(text: str) -> dict:
@@ -102,11 +111,13 @@ def _json(obj) -> dict:
         payload = json.dumps(compact, default=str, ensure_ascii=False)
         if len(payload) <= 8000:
             return _ok(payload)
-    # Extremely wide objects still return valid JSON with their top-level scalar contract.
+    # Extremely wide objects still return valid JSON with their top-level scalar contract, plus
+    # the small freshness blocks: a read must never reach the model without its clocks.
     fallback = {
         str(k): v
         for k, v in (obj.items() if isinstance(obj, dict) else [])
         if v is None or isinstance(v, (bool, int, float, str))
+        or (k in _FRESHNESS_KEYS and isinstance(v, dict))
     }
     fallback["_transport_truncated"] = True
     fallback["_note"] = "Nested payload exceeded the MCP transport budget."
@@ -115,6 +126,45 @@ def _json(obj) -> dict:
 
 def _read_json(p: Path):
     return json.loads(p.read_text()) if p.exists() else None
+
+
+# --- vendored-file freshness (news estate D2, 2026-10-31) ---------------------------------------
+# get_news / get_intelligence answer from a VENDORED Macro snapshot, not a live feed. Each answer
+# names the file it came from and only the clocks that file itself carries: `asof` (the Macro
+# build date), `source_asof` (when the underlying news fetch ran; differs from `asof` when the
+# producer retained a previous build's feed), `retained_from_previous_build`, `generated_utc`.
+# An absent clock is null — never inferred from the file's mtime or from today's date.
+_FRESHNESS_BASIS = "vendored_macro_file"
+_FRESHNESS_KEYS = ("freshness", "alt_freshness")
+
+
+def _first_vendored(*rels: str):
+    """(rel, payload) of the first vendored file with a non-empty payload — the same precedence
+    as the `_read_json(site) or _read_json(data)` reads — else (None, {})."""
+    for rel in rels:
+        doc = _read_json(_V / rel)
+        if doc:
+            return rel, doc
+    return None, {}
+
+
+def _freshness(doc, rel) -> dict:
+    doc = doc if isinstance(doc, dict) else {}
+
+    def _clock(*keys):
+        for k in keys:
+            v = doc.get(k)
+            if isinstance(v, str) and v:
+                return v
+        return None
+
+    retained = doc.get("retained_from_previous_build")
+    return {"asof": _clock("asof", "as_of"),
+            "source_asof": _clock("source_asof"),
+            "retained_from_previous_build": retained if isinstance(retained, bool) else None,
+            "generated_utc": _clock("generated_utc"),
+            "basis": _FRESHNESS_BASIS,
+            "source_file": rel}
 
 
 def _pick(d, keys):
@@ -168,6 +218,7 @@ async def get_regime(args):
                     "name": row.get("name"),
                     "direction": row.get("direction"),
                     "status": row.get("status"),
+                    "asof": (row.get("freshness") or {}).get("asof"),
                     "stale": (row.get("freshness") or {}).get("stale"),
                     "age_sessions": (row.get("freshness") or {}).get("age_sessions"),
                 }
@@ -179,7 +230,9 @@ async def get_regime(args):
     try:
         from brain import decision_context as _dc
 
-        dc = _dc.prompt_summary()
+        dc = _dc.prompt_summary(
+            expected_publication=(out.get("market_view") or {}).get("publication")
+        )
         if dc:
             liquidity = dc.get("liquidity") or {}
             quality = liquidity.get("quality") or {}
@@ -210,6 +263,8 @@ async def get_regime(args):
                 "governor": dc.get("governor"),
                 "data_quality": dc.get("data_quality"),
                 "neural_web_health": dc.get("neural_web_health"),
+                "publication": dc.get("publication"),
+                "serving_freshness": dc.get("serving_freshness"),
             }
     except Exception:  # noqa: BLE001
         pass
@@ -316,13 +371,13 @@ async def get_altdata(args):
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_news(args):
     t = (args.get("ticker") or "").upper()
-    bt = (_read_json(_V / "site" / "news" / "by_ticker.json")
-          or _read_json(_V / "data" / "news" / "by_ticker.json") or {})
+    rel, bt = _first_vendored("site/news/by_ticker.json", "data/news/by_ticker.json")
     rec = (bt.get("tickers") or {}).get(t)
     if rec is None:
         return _ok(f"no news-flow signal for {t} — not covered by the macro news surface.")
     return _json({"ticker": t, "news": rec,
-                  "note": "Public-record financial news flow. Context-only — informs narrative, never sizes alone."})
+                  "note": "Public-record financial news flow. Context-only — informs narrative, never sizes alone.",
+                  "freshness": _freshness(bt, rel), "evidence_grade": "vendored_snapshot"})
 
 
 @tool("get_intelligence",
@@ -335,20 +390,32 @@ async def get_news(args):
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_intelligence(args):
     t = (args.get("ticker") or "").upper()
-    uni = (_read_json(_V / "site" / "intelligence" / "by_ticker.json")
-           or _read_json(_V / "data" / "intelligence" / "by_ticker.json") or {})
+    urel, uni = _first_vendored("site/intelligence/by_ticker.json", "data/intelligence/by_ticker.json")
     rec = (uni.get("tickers") or {}).get(t)
-    if rec is None:
+    if rec is not None:
+        labels = {"freshness": _freshness(uni, urel), "evidence_grade": "vendored_snapshot"}
+    else:
         # the unified bundle isn't published yet — compose from the standalone feeds
-        news = ((_read_json(_V / "site" / "news" / "by_ticker.json") or {}).get("tickers") or {}).get(t)
-        mm = (_read_json(_V / "site" / "altdata" / "mastermind.json") or {}).get("signals") or []
+        nrel = "site/news/by_ticker.json"
+        ndoc = _read_json(_V / nrel) or {}
+        news = (ndoc.get("tickers") or {}).get(t)
+        arel = "site/altdata/mastermind.json"
+        adoc = _read_json(_V / arel) or {}
+        mm = adoc.get("signals") or []
         alt = next((s for s in mm if (s.get("ticker") or "").upper() == t), None)
         if news is None and alt is None:
             return _ok(f"no news or alt-data intelligence for {t}.")
         rec = {"ticker": t, "news": news, "alt": alt, "has_news": bool(news), "has_alt": bool(alt)}
+        labels = {"missing_reason": "ticker_absent_in_vendored_file",
+                  "fallback": "standalone_news_and_altdata_feeds",
+                  "evidence_grade": "legacy_fallback",
+                  "freshness": _freshness(ndoc, nrel if ndoc else None)}
+        if alt is not None:
+            labels["alt_freshness"] = _freshness(adoc, arel)
     return _json({"ticker": t, **rec,
                   "note": "News flow (what the tape says) + alt-data signal (what smart money does), side "
-                          "by side. Context-only — the divergence between them is the read; never sizes alone."})
+                          "by side. Context-only — the divergence between them is the read; never sizes alone.",
+                  **labels})
 
 
 @tool("get_quote",
@@ -595,7 +662,30 @@ async def save_research_note(args):
           "prob_correct": {"type": "number"}},
        "required": ["subject", "lean", "thesis"]})
 async def propose_thesis(args):
-    _append(_PROPOSALS, {"source": "claude_cli", "status": "proposed", **args})
+    queue_owner = None
+    try:
+        from brain import research_desk as queue_owner
+        queue_owner.enqueue_proposal(
+            {**args, **_execution_provenance(), "status": "proposed"},
+            queue_path=_PROPOSALS,
+        )
+    except Exception as exc:
+        not_committed = queue_owner is None or isinstance(
+            exc, queue_owner._ProposalQueueNotCommittedError
+        )
+        return _json({
+            "write_status": "unavailable" if not_committed else "unknown",
+            "error": (
+                "research_proposal_queue_unavailable" if not_committed
+                else "research_proposal_queue_outcome_unknown"
+            ),
+            "proposal_queued": False if not_committed else None,
+            "note": (
+                "This attempt did not replace the canonical proposal queue."
+                if not_committed else
+                "Proposal queue outcome is unknown. Reconcile it before considering retry."
+            ),
+        })
     return _ok(f"thesis proposed for {args['subject']} ({args['lean']}) → review queue. NOT executed.")
 
 
@@ -604,7 +694,7 @@ async def propose_thesis(args):
        "tickers": {"type": "array", "items": {"type": "string"}}, "rationale": {"type": "string"}},
        "required": ["name", "rationale"]})
 async def flag_emerging_theme(args):
-    _append(_RESEARCH / "emerging.jsonl", {"source": "claude_cli", **args})
+    _append(_RESEARCH / "emerging.jsonl", {**args, **_execution_provenance()})
     return _ok(f"flagged emerging theme '{args['name']}' → web app.")
 
 
@@ -702,6 +792,7 @@ async def file_research_paper(args):
     paper = {
         "schema": rp.SCHEMA, "id": f"{asof}-{t}", "ticker": t, "asof": asof,
         "generated_at": rp._now(), "mode": "portfolio_research_advisor",
+        "execution_provenance": _execution_provenance(),
         "model": "portfolio-research-advisor",
         "price_at_review": price, "research_score": int(args["research_score"]),
         "viability": args["viability"], "recommend": bool(args["recommend"]),
@@ -711,7 +802,24 @@ async def file_research_paper(args):
         "report_md": report_md,
     }
     rp._attach_gate(paper, confluence)          # -> engine_score, combined, confirmed, gate_reason
-    rp.save_paper(paper)
+    try:
+        rp.save_paper(paper)
+    except rp._PaperSaveNotCommittedError:
+        return _json({
+            "ticker": t,
+            "write_status": "unavailable",
+            "error": "research_paper_save_unavailable",
+            "paper_saved": False,
+            "note": "This attempt did not replace the canonical paper; an older paper may remain.",
+        })
+    except Exception:
+        return _json({
+            "ticker": t,
+            "write_status": "unknown",
+            "error": "research_paper_save_outcome_unknown",
+            "paper_saved": None,
+            "note": "Canonical save outcome is unknown. Reconcile the paper before considering retry.",
+        })
     try:
         rp.write_feed_note(paper)
     except Exception:
@@ -797,6 +905,108 @@ SERVER_NAME = "bot"
 # tool names as Claude sees them: mcp__<server>__<tool>
 TOOL_NAMES = [f"mcp__{SERVER_NAME}__{t.name}" for t in _ALL]
 WEB_TOOLS = ["WebSearch", "WebFetch"]
+
+
+class InferenceToolError(ValueError):
+    """Bounded protocol refusal before any registered handler executes."""
+
+
+def inference_tool_catalog() -> list[dict]:
+    """Describe exactly the incumbent registered roster, without SDK-only tools."""
+    from jsonschema import Draft202012Validator
+
+    catalog = []
+    for tool in _ALL:
+        schema = copy.deepcopy(tool.input_schema)
+        if schema == {}:
+            schema = {"type": "object", "properties": {}}
+        if not isinstance(schema, dict) or schema.get("type") != "object":
+            raise InferenceToolError("fabric_tool_schema_unavailable")
+        # This adapter accepts the published argument contract only. In
+        # particular, source/status, account identity and sizing cannot be
+        # smuggled through JSON Schema's permissive extra-property default.
+        schema["additionalProperties"] = False
+        Draft202012Validator.check_schema(schema)
+        catalog.append({"name": f"mcp__{SERVER_NAME}__{tool.name}",
+                        "description": tool.description, "input_schema": schema})
+    if len({row["name"] for row in catalog}) != len(catalog):
+        raise InferenceToolError("fabric_tool_roster_invalid")
+    return catalog
+
+
+def _finite_json(value) -> bool:
+    if value is None or isinstance(value, (str, bool)) or type(value) is int:
+        return True
+    if type(value) is float:
+        return math.isfinite(value)
+    if isinstance(value, list):
+        return all(_finite_json(item) for item in value)
+    if isinstance(value, dict):
+        return all(isinstance(key, str) and _finite_json(item) for key, item in value.items())
+    return False
+
+
+def validate_inference_calls(blocks: list, *, used_ids=()) -> list[dict]:
+    """Validate the entire completed batch before executing even its first tool."""
+    from jsonschema import Draft202012Validator
+
+    schemas = {row["name"]: row["input_schema"] for row in inference_tool_catalog()}
+    seen, calls = set(used_ids), []
+    for block in blocks:
+        ident, name, args = block.id, block.name, block.input
+        if (not isinstance(ident, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", ident)
+                or ident in seen or name not in schemas or not isinstance(args, dict)
+                or not _finite_json(args)):
+            raise InferenceToolError("fabric_tool_request_invalid")
+        # jsonschema's integer checker admits integral floats; the incumbent
+        # tool contract is Python-typed, so keep explicit integer values exact.
+        props = schemas[name].get("properties", {})
+        if any(props.get(key, {}).get("type") == "integer" and type(value) is not int
+               for key, value in args.items()):
+            raise InferenceToolError("fabric_tool_arguments_invalid")
+        if not Draft202012Validator(schemas[name]).is_valid(args):
+            raise InferenceToolError("fabric_tool_arguments_invalid")
+        seen.add(ident)
+        calls.append({"id": ident, "name": name, "input": copy.deepcopy(args)})
+    return calls
+
+
+async def invoke_inference_tool(call: dict, *, provenance: dict) -> dict:
+    """Invoke the existing handler once; errors after writes are not retry hints."""
+    from types import SimpleNamespace
+
+    validate_inference_calls([SimpleNamespace(**call)])
+    if (set(provenance) != {"provider", "model", "turn_id"}
+            or any(not isinstance(value, str) or not value for value in provenance.values())):
+        raise InferenceToolError("fabric_tool_provenance_invalid")
+    tools = {f"mcp__{SERVER_NAME}__{tool.name}": tool for tool in _ALL}
+    token = _INFERENCE_PROVENANCE.set({"source": "fabric_application", **provenance})
+    try:
+        return await tools[call["name"]].handler(copy.deepcopy(call["input"]))
+    finally:
+        _INFERENCE_PROVENANCE.reset(token)
+
+
+def tool_result_event(result, *, tool_name: str) -> dict:
+    """A paper card can originate only in the registered filing handler's result."""
+    if tool_name != f"mcp__{SERVER_NAME}__file_research_paper":
+        return {"type": "tool_result"}
+    blocks = result.get("content", []) if isinstance(result, dict) else result
+    if not isinstance(blocks, (list, tuple)):
+        blocks = [{"text": str(blocks or "")}]
+    for block in blocks:
+        raw = block.get("text", "") if isinstance(block, dict) else getattr(block, "text", "")
+        if not isinstance(raw, str) or not raw.startswith(PAPER_MARKER + " "):
+            continue
+        try:
+            meta, _ = json.JSONDecoder().raw_decode(raw[len(PAPER_MARKER):].lstrip())
+            keys = {"paper_id", "ticker", "title", "combined", "confirmed",
+                    "research_score", "engine_score", "viability"}
+            if isinstance(meta, dict) and set(meta) == keys and isinstance(meta["paper_id"], str):
+                return {"type": "paper", **meta}
+        except (ValueError, TypeError):
+            pass
+    return {"type": "tool_result"}
 
 
 def build_server():

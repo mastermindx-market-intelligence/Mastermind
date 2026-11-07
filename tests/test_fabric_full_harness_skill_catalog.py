@@ -60,7 +60,7 @@ def test_signed_operator_plus_new_role_plus_workforce_catalog(tmp_path, capsys):
     installer_py.parent.mkdir(parents=True)
     initial = original.read_bytes()
     assert hashlib.sha256(initial).hexdigest() == (
-        "1d4658ac237217ac565e6feda922e55f9bc8a15a0448e8724d00d8ba5ec04594"
+        "1db7e21fcbdac041304b27101eb506cc7810340d61330db293f2ad22efc0bfe1"
     )
     installer_py.write_bytes(initial)
     for option in ("--check", None):
@@ -86,7 +86,7 @@ def test_signed_operator_plus_new_role_plus_workforce_catalog(tmp_path, capsys):
 
     # Existing Worker bootstrap packaging, not a reimplementation of its
     # source/Skill manifest. Stage only its public Skill files in this temp home.
-    packaged = assemble(source_files(REPO, source_commit), source_commit, docs=False)
+    packaged = assemble(source_files(REPO, source_commit, include_orchestration=True), source_commit, docs=False)
     assert packaged["BUILD.json"]
     build = json.loads(packaged["BUILD.json"])
     assert build["execution_authority"] is False
@@ -191,9 +191,12 @@ def test_signed_operator_plus_new_role_plus_workforce_catalog(tmp_path, capsys):
         # has not installed an OAuth token, plugin or provider capability.
         from control_plane.codex_operator_adapter import parse_config_read
 
-        observed_config = parse_config_read(client.request(
+        config_reply = client.request(
             "config/read", {"includeLayers": False}, timeout=10,
-        ))
+        )
+        assert isinstance(config_reply, dict)
+        assert isinstance(config_reply.get("config"), dict)
+        observed_config = parse_config_read(config_reply)
         assert observed_config.get("mcp_servers") in (None, {})
         client.request("skills/extraRoots/set", extra_roots_set_params([]), timeout=10)
         cleared = parse_skills_list_strict(
