@@ -98,6 +98,10 @@ class PersonalPublisherSuccessorTests(unittest.TestCase):
             TRANSACTION="fleet-status-module-successor",
             SCHEMA=status_owner.SCHEMA,
             json=json,
+            _identity=status_owner._identity,
+            _same_identity=status_owner._same_identity,
+            _sync_directory=status_owner._sync_directory,
+            _rename_new=status_owner._rename_new,
             _retained=lambda *a: (self.status_plan, self.status_raw, self.status_digest),
             require_start=lambda *a: True,
         )
@@ -299,6 +303,78 @@ class PersonalPublisherSuccessorTests(unittest.TestCase):
             self.call("status")
         self.write(path, self.after_b)
         path.chmod(0o644)
+        with self.assertRaises(SystemExit):
+            self.call("status")
+
+
+    def test_torn_journal_staging_never_exposes_partial_transaction(self):
+        plan = self.call("preview")["planSha256"]
+        original = svc._fabric_release_new
+
+        def torn(path, blob):
+            if path.name == "workspace-access.mjs.after":
+                original(path, blob[:1])
+                raise OSError("simulated interrupted private journal staging")
+            return original(path, blob)
+
+        with mock.patch.object(svc, "_fabric_release_new", side_effect=torn):
+            with self.assertRaises(OSError):
+                self.call("apply", plan)
+        self.assertEqual(self.snapshot(), self.old_bytes)
+        self.assertFalse((self.roots["state"] / pin.PUBLISHER_TRANSACTION).exists())
+        self.assertEqual(
+            [x.name for x in self.roots["state"].iterdir()
+             if x.name.startswith(".native-pin-publisher-intent.")], [])
+
+    def test_lost_reply_after_atomic_journal_requires_same_plan_reconcile(self):
+        plan = self.call("preview")["planSha256"]
+        original_rename = self.fake_owner._rename_new
+
+        def lost_result(svc_arg, staged, target):
+            original_rename(svc_arg, staged, target)
+            raise OSError("callback lost after journal publication")
+
+        with mock.patch.object(self.fake_owner, "_rename_new", side_effect=lost_result):
+            with self.assertRaises(SystemExit) as raised:
+                self.call("apply", plan)
+        self.assertEqual(
+            str(raised.exception), "NATIVE_POOL_PIN_PREPARATION_EFFECT_UNKNOWN")
+        self.assertEqual(self.snapshot(), self.old_bytes)
+        self.assertEqual(self.call("status")["phase"], "OLD")
+        with self.assertRaises(SystemExit) as refused:
+            self.call("apply", plan)
+        self.assertEqual(str(refused.exception),
+                         "NATIVE_POOL_PIN_RECONCILIATION_REQUIRED")
+        self.assertEqual(self.call("reconcile", plan)["effect"], "APPLIED")
+
+    def test_completed_action_cannot_be_reapplied_as_a_second_write(self):
+        plan = self.call("preview")["planSha256"]
+        self.assertEqual(self.call("apply", plan)["effect"], "APPLIED")
+        after = self.snapshot()
+        with self.assertRaises(SystemExit) as refused:
+            self.call("apply", plan)
+        self.assertEqual(str(refused.exception),
+                         "NATIVE_POOL_PIN_RECONCILIATION_REQUIRED")
+        self.assertEqual(self.snapshot(), after)
+        self.assertEqual(self.call("status")["effect"], "APPLIED")
+
+    def test_foreign_transaction_cannot_be_overwritten_by_atomic_journal(self):
+        plan = self.call("preview")["planSha256"]
+        actual_rename = self.fake_owner._rename_new
+        target = self.roots["state"] / pin.PUBLISHER_TRANSACTION
+
+        def racing_writer(svc_arg, source, dest):
+            self.assertEqual(dest, target)
+            dest.mkdir(mode=0o700)
+            self.write(dest / "foreign.txt", b"unrelated owner's receipt")
+            return actual_rename(svc_arg, source, dest)
+
+        with mock.patch.object(self.fake_owner, "_rename_new", side_effect=racing_writer):
+            with self.assertRaises((OSError, SystemExit)):
+                self.call("apply", plan)
+        self.assertEqual((target / "foreign.txt").read_bytes(),
+                         b"unrelated owner's receipt")
+        self.assertEqual(self.snapshot(), self.old_bytes)
         with self.assertRaises(SystemExit):
             self.call("status")
 

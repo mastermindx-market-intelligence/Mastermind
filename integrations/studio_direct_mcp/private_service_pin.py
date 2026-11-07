@@ -13,6 +13,8 @@ import math
 import os
 from pathlib import Path
 import stat
+import shutil
+import tempfile
 
 SCHEMA = "mastermind.studio_native_pool_pin.v1"
 REFUSAL_CODES = frozenset(
@@ -32,6 +34,7 @@ REFUSAL_CODES = frozenset(
         "MANIFEST_CAS_REFUSED",
         "PLAN_CAS_REFUSED",
         "POST_PROFILE_REFUSED",
+        "PREPARATION_EFFECT_UNKNOWN",
         "PROFILE_REFUSED",
         "RECONCILIATION_REQUIRED",
         "RESULT_REFUSED",
@@ -777,8 +780,8 @@ def _publisher_inputs(svc, account, roots, source, expected_manifest):
     return plan, blobs
 
 
-def _publisher_read(svc, roots):
-    target = roots["state"] / PUBLISHER_TRANSACTION
+def _publisher_read(svc, roots, *, staged=None):
+    target = staged if staged is not None else roots["state"] / PUBLISHER_TRANSACTION
     directory(svc, target)
     names = {p.name for p in target.iterdir()}
     if names - PUBLISHER_JOURNAL_FILES or PUBLISHER_JOURNAL_FILES - {"result.json"} - names:
@@ -821,6 +824,45 @@ def _publisher_read(svc, roots):
     if after != projected:
         fail("RETAINED_BYTES_REFUSED")
     return plan, blobs, digest_plan
+
+
+def _publisher_prepare_intent(svc, roots, plan, blobs):
+    """Publish one complete, checked journal using the incumbent exclusive rename.
+
+    A crash while writing the private staging directory cannot leave a partial
+    active transaction. A lost callback after atomic publication is EFFECT_UNKNOWN
+    and can only be reconciled by the same retained plan; no second apply.
+    """
+    owner = svc._fleet_status_successor_owner_module()
+    target = roots["state"] / PUBLISHER_TRANSACTION
+    stage = Path(tempfile.mkdtemp(
+        prefix=".native-pin-publisher-intent.", dir=target.parent))
+    identity = owner._identity(stage)
+    attempted = False
+    try:
+        svc._fabric_release_new(
+            stage / "plan.json", svc._fabric_release_json(plan))
+        for name, data in blobs.items():
+            svc._fabric_release_new(stage / name, data)
+        svc._fabric_release_new(
+            stage / "intent.json", svc._fabric_release_json({
+                "schema": PUBLISHER_SCHEMA,
+                "planSha256": digest(svc._fabric_release_json(plan)),
+            }))
+        checked, retained, pd = _publisher_read(svc, roots, staged=stage)
+        if (checked != plan or retained != blobs
+                or pd != digest(svc._fabric_release_json(plan))):
+            fail("RETAINED_BYTES_REFUSED")
+        owner._sync_directory(svc, stage)
+        attempted = True
+        owner._rename_new(svc, stage, target)
+    except BaseException:
+        if attempted and not owner._same_identity(stage, identity):
+            fail("PREPARATION_EFFECT_UNKNOWN")
+        raise
+    finally:
+        if owner._same_identity(stage, identity):
+            shutil.rmtree(stage)
 
 
 def _publisher_phase(svc, roots, plan, blobs):
@@ -921,14 +963,11 @@ def run_publisher(svc, args):
                 fail("PLAN_CAS_REFUSED")
             svc._ensure_secure_dir(roots["state"])
             svc._assert_dest_safe(target)
-            target.mkdir(mode=svc.DIR_MODE)
-            svc._fsync_dir(target.parent)
-            svc._fabric_release_new(target / "plan.json", svc._fabric_release_json(plan))
-            for name, data in blobs.items():
-                svc._fabric_release_new(target / name, data)
-            svc._fabric_release_new(target / "intent.json", svc._fabric_release_json(
-                {"schema": PUBLISHER_SCHEMA, "planSha256": pd}))
-            svc._fsync_dir(target)
+            _publisher_prepare_intent(svc, roots, plan, blobs)
+        elif args.operation == "apply":
+            # A persisted original intent must be reconciled explicitly.
+            # A second apply is not a replay channel after a lost callback.
+            fail("RECONCILIATION_REQUIRED")
         if not os.path.lexists(target):
             fail("TRANSACTION_EXISTS")
         plan, blobs, pd = _publisher_read(svc, roots)
