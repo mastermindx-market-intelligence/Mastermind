@@ -1,0 +1,12 @@
+{
+  "candidate_actions": [
+    "PRESERVE_CAUSE_UNCERTAINTY_AND_RECONCILE_THE_KNOWN_ACTION",
+    "REPEAT_THE_PREVIOUS_ACTION_BECAUSE_THE_CHAT_FAILED",
+    "DIAGNOSE_CONTEXT_EXHAUSTION_AS_CERTAIN"
+  ],
+  "policy_sources": [
+    "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/RECONCILE_STATE.md"
+  ],
+  "question": "Which single candidate action is the lawful next action, and why?",
+  "situation": "The user reports only the generic phrase Thinking failed. No provider diagnostic or context measurement is available. A durable checkpoint identifies one possible previous modifying action that can be reconciled."
+}

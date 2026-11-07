@@ -29,6 +29,7 @@ from common.bounded_sync_executor import (
     SyncExecutorClosed,
     SyncExecutorLoopConflict,
 )
+from control_plane.browser_resource_contract import READ_ONLY_BROWSER_TOOLS
 from control_plane.codex_worker import ProcessInspector
 from integrations.business_mcp_auth.audit import (
     AuditAcquisitionUncertain,
@@ -421,6 +422,7 @@ class WorkbenchActionRuntime:
         self._closed = False
         self._close_in_progress = False
         self._close_uncertain: RuntimeCloseUncertain | None = None
+        self._browser_credential_grant = None
         self.services: RuntimeServices
         self.server: object
         self.channel_services: ChannelRuntimeServices
@@ -492,6 +494,9 @@ class WorkbenchActionRuntime:
                 call_receipt_sink=call_receipt_sink,
                 allowed_origins=allowed_origins,
                 action_ttl_ms=action_ttl_ms,
+                resolve_recovery_binding=runtime.resolve_recovery_binding,
+                run_recovery_io=runtime.run_recovery_io,
+                resolve_browser_credential_use=runtime.resolve_browser_credential_use,
             )
             runtime.server = create_deployment(runtime.services)
 
@@ -724,8 +729,8 @@ class WorkbenchActionRuntime:
             self._revoked = True
             raise RuntimeClosed("runtime project root is unavailable") from error
 
-    def resolve_binding(
-        self, caller: ActionCaller, project_ref: str
+    def _resolve_binding(
+        self, caller: ActionCaller, project_ref: str, *, recovery: bool
     ) -> ProjectActionBinding | None:
         with self._gate:
             if self._revoked or self._closing or self._closed:
@@ -737,8 +742,7 @@ class WorkbenchActionRuntime:
                 self._revoked = True
                 return None
             stable = self._lease.stable
-            if current_ms >= stable.lease_expires_at_ms:
-                self._revoked = True
+            if not recovery and current_ms >= stable.lease_expires_at_ms:
                 return None
             if (
                 type(caller) is not ActionCaller
@@ -748,6 +752,7 @@ class WorkbenchActionRuntime:
                 or caller.scopes != stable.required_scopes
                 or type(caller.expires_at) is not int
                 or caller.expires_at <= 0
+                or (recovery and current_ms >= caller.expires_at * 1000)
                 or project_ref != stable.project_ref
             ):
                 return None
@@ -766,11 +771,86 @@ class WorkbenchActionRuntime:
             )
             return ProjectActionBinding(dataclasses.replace(caller), stable.project_ref, scope)
 
-    def _guarded_operation(self, operation: Callable[[], object]) -> object:
+    def resolve_binding(
+        self, caller: ActionCaller, project_ref: str
+    ) -> ProjectActionBinding | None:
+        return self._resolve_binding(caller, project_ref, recovery=False)
+
+    def _adopt_browser_credential_grant(self, grant) -> None:
+        """Installed v3 config narrows this already-owned lease exactly once."""
+        from integrations.workbench_browser_mcp.credential_use import (
+            BrowserCredentialGrant, parse_credential_grant, CredentialUseRefused,
+        )
+        with self._gate:
+            if (type(grant) is not BrowserCredentialGrant or self._browser_credential_grant is not None
+                    or self._revoked or self._closing or self._closed):
+                raise CredentialUseRefused()
+            selected = parse_credential_grant(dataclasses.asdict(grant))
+            self._require_live_lease_locked()
+            if not self._clock_ms() < selected.expires_at_ms <= self._lease.stable.lease_expires_at_ms:
+                raise CredentialUseRefused()
+            self._browser_credential_grant = selected
+
+    def resolve_browser_credential_use(self, caller, browser, grant_ref):
+        """Secret-free private dispatch projection; never a recovery read."""
+        from integrations.workbench_browser_mcp.contracts import BrowserResourceRef
+        from integrations.workbench_browser_mcp.credential_use import CREDENTIAL_USE_SCHEMA
+        import hashlib
+        import json
+
+        with self._gate:
+            grant = self._browser_credential_grant
+            if (grant is None or type(browser) is not BrowserResourceRef
+                    or grant_ref != grant.grant_ref or browser.mode != "isolated"
+                    or browser.profile_ref is not None):
+                return None
+            binding = self.resolve_binding(caller, browser.project_ref)
+            if binding is None:
+                return None
+            scope = binding.scope
+            if (browser.subject_digest != caller.subject_digest or browser.client_ref != caller.client_ref
+                    or browser.resource != caller.resource or browser.host_id != self._host_binding.host_id
+                    or browser.boot_session_id != self._host_binding.boot_session_id
+                    or any(getattr(browser, k) != getattr(scope, k) for k in (
+                        "context_ref", "responsibility_ref", "operation_ref", "owner_ref", "generation"))):
+                return None
+            expires = min(grant.expires_at_ms, scope.expires_at_ms,
+                          caller.expires_at * 1000, browser.expires_at_ms)
+            if not self._clock_ms() < expires:
+                return None
+            bound = [browser.subject_digest, browser.client_ref, browser.resource,
+                     browser.project_ref, scope.context_ref, scope.responsibility_ref,
+                     scope.operation_ref, scope.owner_ref, scope.generation,
+                     browser.host_id, browser.boot_session_id, browser.start_action_id,
+                     scope.root_device, scope.root_inode, grant.grant_ref]
+            return {"schema": CREDENTIAL_USE_SCHEMA, "grant": dataclasses.asdict(grant),
+                    "resource_id": browser.start_action_id, "expires_at_ms": expires,
+                    "binding_sha256": hashlib.sha256(json.dumps(bound, separators=(",", ":")).encode()).hexdigest()}
+
+    def resolve_recovery_binding(
+        self, caller: ActionCaller, project_ref: str
+    ) -> ProjectActionBinding | None:
+        """Project the retained owner for an authenticated browser read only."""
+        return self._resolve_binding(caller, project_ref, recovery=True)
+
+    def _require_live_lease_locked(self) -> None:
+        try:
+            current_ms = _clock(self._clock_ms(), "clock_ms")
+        except Exception as error:
+            self._revoked = True
+            raise RuntimeClosed("runtime clock is unavailable") from error
+        if current_ms >= self._lease.stable.lease_expires_at_ms:
+            raise RuntimeClosed("runtime lease expired")
+
+    def _guarded_operation(
+        self, operation: Callable[[], object], *, recovery: bool = False
+    ) -> object:
         with self._gate:
             if self._revoked or self._closing or self._closed:
                 raise RuntimeClosed("runtime admission is closed")
             self._validate_root_locked()
+            if not recovery:
+                self._require_live_lease_locked()
         try:
             result = operation()
         except BaseException as operation_error:
@@ -781,6 +861,8 @@ class WorkbenchActionRuntime:
                 raise root_error from operation_error
             raise
         with self._gate:
+            if recovery and (self._revoked or self._closing or self._closed):
+                raise RuntimeClosed("runtime admission is closed")
             self._validate_root_locked()
         return result
 
@@ -791,9 +873,28 @@ class WorkbenchActionRuntime:
             if self._revoked or self._closing or self._closed:
                 raise RuntimeClosed("runtime admission is closed")
             self._validate_root_locked()
+            self._require_live_lease_locked()
         try:
             return await self._executor.run(
                 lambda: self._guarded_operation(operation),
+                timeout=self._io_timeout_seconds,
+            )
+        except (SyncExecutorClosed, SyncExecutorLoopConflict) as error:
+            raise RuntimeClosed("runtime admission is closed") from error
+
+    async def run_recovery_io(
+        self, tool: str, operation: Callable[[], object]
+    ) -> object:
+        """Run only an existing read-only browser tool on the original executor."""
+        if type(tool) is not str or tool not in READ_ONLY_BROWSER_TOOLS or not callable(operation):
+            raise RuntimeClosed("browser recovery tool is not read-only")
+        with self._gate:
+            if self._revoked or self._closing or self._closed:
+                raise RuntimeClosed("runtime admission is closed")
+            self._validate_root_locked()
+        try:
+            return await self._executor.run(
+                lambda: self._guarded_operation(operation, recovery=True),
                 timeout=self._io_timeout_seconds,
             )
         except (SyncExecutorClosed, SyncExecutorLoopConflict) as error:
