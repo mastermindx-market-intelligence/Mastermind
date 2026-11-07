@@ -286,9 +286,10 @@ async def execute_request(request, runtime):
                         operation="recover" if recovering else operation, code=str(exc))
     except Exception:
         recovering = operation.startswith("recover_")
-        return envelope("EFFECT_UNKNOWN" if mutation_sent or recovering else "UNAVAILABLE",
+        not_sent = operation in {"create", "send"} and not mutation_sent
+        return envelope("EFFECT_UNKNOWN" if mutation_sent or recovering else "NOT_SENT" if not_sent else "UNAVAILABLE",
                         operation="recover" if recovering else operation,
-                        code="NATIVE_OUTCOME_UNKNOWN" if mutation_sent or recovering else "NATIVE_UNAVAILABLE")
+                        code="NATIVE_OUTCOME_UNKNOWN" if mutation_sent or recovering else "NATIVE_NOT_SENT" if not_sent else "NATIVE_UNAVAILABLE")
 
 
 class NativeRuntime:
@@ -442,20 +443,31 @@ def main():
     import contextlib
     import sys
     request = None
+    operation = "unknown"
+    execution_started = False
     try:
         raw = sys.stdin.buffer.read(65537)
         if len(raw) > 65536:
             raise BridgeRefusal("REQUEST_INVALID")
         request = closed_json(raw)
-        normalize_request(request)
+        operation, _ = normalize_request(request)
         with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
-            result = asyncio.run(execute_request(request, NativeRuntime()))
+            runtime = NativeRuntime()
+            execution_started = True
+            result = asyncio.run(execute_request(request, runtime))
     except Exception:
-        result = envelope("UNAVAILABLE", code="NATIVE_CLIENT_UNAVAILABLE")
+        mutating = operation in {"create", "send"}
+        recovering = operation.startswith("recover_")
+        not_sent = mutating and not execution_started
+        result = envelope("NOT_SENT" if not_sent else "EFFECT_UNKNOWN" if mutating or recovering else "UNAVAILABLE",
+                          operation="recover" if recovering else operation,
+                          code="NATIVE_NOT_SENT" if not_sent else "NATIVE_CLIENT_UNAVAILABLE")
     encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(encoded) > 1024 * 1024:
         mutating = type(request) is dict and request.get("operation") in {"create", "send"}
-        encoded = json.dumps(envelope("EFFECT_UNKNOWN" if mutating else "UNAVAILABLE", code="NATIVE_RESPONSE_TOO_LARGE")).encode()
+        encoded = json.dumps(envelope("EFFECT_UNKNOWN" if mutating or operation.startswith("recover_") else "UNAVAILABLE",
+                                      operation="recover" if operation.startswith("recover_") else operation,
+                                      code="NATIVE_RESPONSE_TOO_LARGE")).encode()
     sys.stdout.buffer.write(encoded + b"\n")
 
 

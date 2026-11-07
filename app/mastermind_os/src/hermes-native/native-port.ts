@@ -6,7 +6,7 @@ import { nativePendingPointer, readNativePending, type NativePendingOperation } 
 
 type NativeInvoke = (command: string, args: Record<string, unknown>) => Promise<unknown>;
 const preDispatch = new Set(["REQUEST_INVALID", "NATIVE_BUSY", "NATIVE_INSTALL_UNAVAILABLE",
-  "NATIVE_PLATFORM_UNAVAILABLE", "NATIVE_CLIENT_NOT_STARTED"]);
+  "NATIVE_PLATFORM_UNAVAILABLE", "NATIVE_CLIENT_NOT_STARTED", "NATIVE_AUTH_NOT_DISPATCHED"]);
 
 /** One foreground adapter over the EXISTING durable pointer owner. Reserve before
  * invoking; only original owner evidence can settle. No payload is persisted and
@@ -46,6 +46,7 @@ export function createNativeHermesPort(input: {
       try {
         if (request.operation === "status") {
           const result = parseNativeView(await input.invoke("hermes_native", { request }));
+          if (result.operation !== "status") throw new Error("NATIVE_RESPONSE_INVALID");
           if (result.state !== "READY") return result;
           const nextScope = result.runtime?.localScope;
           if (!nextScope) throw new Error("NATIVE_RECOVERY_UNAVAILABLE");
@@ -99,6 +100,8 @@ export function createNativeHermesPort(input: {
           current = null;
           throw new Error("NATIVE_IDENTITY_CHANGED");
         }
+        // Settlement must describe this invocation, including the public recovery operation.
+        if (result.operation !== request.operation) throw new Error("NATIVE_RESPONSE_INVALID");
         checkTarget(result, wire as { sessionId?: string; admissionId?: string });
         const isRecovery = request.operation === "recover";
         const settled = mutating && ["REFUSED", "NOT_SENT"].includes(result.state) ||
@@ -114,9 +117,9 @@ export function createNativeHermesPort(input: {
         return { ...result, pendingOperation: remaining };
       } catch (error) {
         const code = typeof error === "string" ? error : error instanceof Error ? error.message : "";
-        if (code === "AUTHENTICATION_CHANGED" || code === "NATIVE_IDENTITY_CHANGED") current = null;
+        if (code === "AUTHENTICATION_CHANGED" || code === "NATIVE_AUTH_NOT_DISPATCHED" || code === "NATIVE_IDENTITY_CHANGED") current = null;
         // Only a typed before-spawn refusal may clear this call's reservation.
-        // Auth change can happen AFTER IO, so it deliberately is not on this list.
+        // An unclassified auth change can happen AFTER IO and must retain the original.
         if (reserved && scope && (!dispatched || preDispatch.has(code))) {
           await input.store.clearIfEqual(scope, reserved);
         }

@@ -4,7 +4,7 @@ import { nativeHermesPort } from "./native-port";
 import type { NativePendingOperation } from "./pending-pointer";
 import "./native-panel.css";
 
-const beforeDispatch = new Set(["REQUEST_INVALID", "NATIVE_BUSY", "NATIVE_INSTALL_UNAVAILABLE", "NATIVE_PLATFORM_UNAVAILABLE", "NATIVE_CLIENT_NOT_STARTED"]);
+const beforeDispatch = new Set(["REQUEST_INVALID", "NATIVE_BUSY", "NATIVE_INSTALL_UNAVAILABLE", "NATIVE_PLATFORM_UNAVAILABLE", "NATIVE_CLIENT_NOT_STARTED", "NATIVE_AUTH_NOT_DISPATCHED"]);
 const knownErrors = new Set([...beforeDispatch, "NATIVE_RECOVERY_UNAVAILABLE", "AUTHENTICATION_CHANGED", "NATIVE_IDENTITY_CHANGED", "NATIVE_RECOVERY_REQUIRED", "NATIVE_RESPONSE_INVALID", "NATIVE_CLIENT_UNAVAILABLE"]);
 function requestId(): string { return crypto.randomUUID().replaceAll("-", ""); }
 function originalPointer(request: NativeOperation): NativePendingOperation | null {
@@ -98,7 +98,9 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
       const raw = typeof error === "string" ? error : error instanceof Error ? error.message : "";
       const code = knownErrors.has(raw) ? raw : "NATIVE_CLIENT_UNAVAILABLE";
       stopAutomatic.current = true;
-      if (code === "AUTHENTICATION_CHANGED" || code === "NATIVE_IDENTITY_CHANGED") { clearPrivate(); setNotice(code); }
+      if (code === "AUTHENTICATION_CHANGED" || code === "NATIVE_AUTH_NOT_DISPATCHED" || code === "NATIVE_IDENTITY_CHANGED") {
+        clearPrivate(); setNotice(code === "NATIVE_AUTH_NOT_DISPATCHED" ? "AUTHENTICATION_CHANGED" : code);
+      }
       else if (mutating && !beforeDispatch.has(code)) {
         heldRef.current = originalPointer(request); setHeld(heldRef.current); setNotice("EFFECT_UNKNOWN");
       } else setNotice(code);
@@ -166,6 +168,7 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
     {notice && <div role="alert" className="hermes-native-notice">
       {notice === "AUTHENTICATION_CHANGED" ? t("Sign-in changed. The previous conversation is hidden; reconnect under your current sign-in.", "登录状态已更改。原会话已隐藏，请使用当前账号重新连接。")
         : notice === "EFFECT_UNKNOWN" ? t("Outcome unknown. Check the previous request before sending again.", "结果未知。请先检查原请求，再继续发送。")
+        : notice === "NATIVE_NOT_SENT" || notice === "NOT_SENT" ? t("The request was not sent. Reconnect and try again when Hermes is available.", "请求尚未发送。请在 Hermes 可用后重新连接并重试。")
         : notice === "NATIVE_RECOVERY_UNAVAILABLE" ? t("Request recovery is unavailable. Sending is paused to protect the original request.", "原请求恢复暂不可用。为保护原请求，发送已暂停。")
         : notice === "NATIVE_IDENTITY_CHANGED" ? t("The local connection changed. Reconnect to check the original request.", "本地连接已更改，请重新连接并检查原请求。")
         : `${t("Native runtime response", "原生运行时响应")}: ${notice}`}

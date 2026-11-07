@@ -87,6 +87,31 @@ describe("thin native Hermes Office", () => {
     expect(screen.queryByRole("textbox", { name: "Message Hermes" })).toBeNull();
   });
 
+  it("reconnects after a proven before-dispatch auth change without inventing an uncertain send", async () => {
+    const p = await openChat();
+    p.request.mockRejectedValueOnce(new Error("NATIVE_AUTH_NOT_DISPATCHED"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Hermes" }), { target: { value: "original" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText(/Sign-in changed/);
+    expect(screen.queryByRole("textbox", { name: "Message Hermes" })).toBeNull();
+    expect(screen.queryByText(/Outcome unknown/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Connect local Hermes" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "New conversation" }).hasAttribute("disabled")).toBe(false));
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(1);
+  });
+
+  it("preserves an unsent draft and explains a proven preflight failure without automatic resend", async () => {
+    const p = await openChat();
+    p.request.mockResolvedValueOnce({ ...view({ operation: "send", state: "NOT_SENT", code: "NATIVE_NOT_SENT" }), pendingOperation: null });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message Hermes" }), { target: { value: "  original draft\n 中文" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText(/The request was not sent/);
+    expect((screen.getByRole("textbox", { name: "Message Hermes" }) as HTMLTextAreaElement).value).toBe("  original draft\n 中文");
+    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByRole("button", { name: "Check previous request" })).toBeNull();
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "send")).toHaveLength(1);
+  });
+
   it("reopens a lost in-flight send with no automatic replay and settles only its original receipt", async () => {
     const factory = new IDBFactory();
     let loseReply: ((reason: Error) => void) | undefined;

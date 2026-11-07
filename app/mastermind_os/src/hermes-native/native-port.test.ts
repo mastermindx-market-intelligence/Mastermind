@@ -14,7 +14,7 @@ function session() { return { id: original.sessionId, storedId: original.session
   requestedModel: "configured", canSend: true, toolAccess: "NONE", running: false, executionGeneration: 1,
   messageCount: 0, messages: [], historyTruncated: false, pending: [], promptsPending: false }; }
 function view(extra: Record<string, unknown> = {}) { return {
-  schema: "mastermind.hermes_native_view.v1", state: "READY", authGeneration: 7,
+  schema: "mastermind.hermes_native_view.v1", state: "READY", operation: "status", authGeneration: 7,
   capabilities: ["native_chat", "native_history", "admission_recovery"],
   delegation: "NOT_ENABLED", retryAllowed: false,
   runtime: { protocol: 1, instanceId: "native", authorityEpoch: 1, version: "0.23.0",
@@ -26,7 +26,8 @@ function receipt(status = "terminal", extra: Record<string, unknown> = {}) {
 }
 type Wire = { operation: string; sessionId?: string; requestId?: string; text?: string };
 function harness(factory = new IDBFactory(),
-    handle: (request: Wire, args: Record<string, unknown>) => Promise<unknown> = async () => view(),
+    handle: (request: Wire, args: Record<string, unknown>) => Promise<unknown> = async request =>
+      view({ operation: request.operation.startsWith("recover_") ? "recover" : request.operation }),
     storeOverride?: DurablePendingPointerStore) {
   const store = storeOverride ?? createIndexedDbPendingPointerStore(factory);
   const invoke = vi.fn(async (_command: string, args: Record<string, unknown>) => handle(args.request as Wire, args));
@@ -84,14 +85,14 @@ describe("native Hermes durable original-request recovery", () => {
     await h.store.reserve(scope, nativePendingPointer(original));
     await h.port.request({ operation: "status" });
     for (const answer of [receipt("queued"), receipt("started"), receipt("unknown"),
-      view({ session: session() }), view({ state: "EFFECT_UNKNOWN", operation: "recover", code: "NATIVE_RECOVERY_UNRESOLVED" }),
-      view({ state: "REFUSED" }), view({ state: "NOT_SENT" }), view({ state: "UNAVAILABLE" })]) {
+      view({ operation: "recover", session: session() }), view({ state: "EFFECT_UNKNOWN", operation: "recover", code: "NATIVE_RECOVERY_UNRESOLVED" }),
+      view({ operation: "recover", state: "REFUSED" }), view({ operation: "recover", state: "NOT_SENT" }), view({ operation: "recover", state: "UNAVAILABLE" })]) {
       h.invoke.mockResolvedValueOnce(answer);
       const result = await h.port.request({ operation: "recover" });
       expect(result.pendingOperation).toEqual(original);
       expect(await h.store.read(scope)).toEqual(nativePendingPointer(original));
     }
-    h.invoke.mockResolvedValueOnce(view({ session: session() }));
+    h.invoke.mockResolvedValueOnce(view({ operation: "read", session: session() }));
     await h.port.request({ operation: "read", sessionId: original.sessionId });
     expect(await h.store.read(scope)).toEqual(nativePendingPointer(original));
   });
@@ -155,6 +156,7 @@ describe("native Hermes durable original-request recovery", () => {
   it("does not clear a crossed or malformed terminal response", async () => {
     for (const answer of [receipt("terminal", { sessionId: "another-session" }),
       receipt("terminal", { sequence: 0 }), view({ state: "ADMITTED" }),
+      { ...receipt(), operation: "send" }, { ...receipt(), operation: undefined },
       { ...receipt(), session: { ...session(), id: "other", storedId: "other" } }]) {
       const h = harness();
       await h.store.reserve(scope, nativePendingPointer(original));
@@ -190,7 +192,7 @@ describe("native Hermes durable original-request recovery", () => {
     }
     const h = harness();
     await h.port.request({ operation: "status" });
-    h.invoke.mockResolvedValueOnce(view({ state: "NOT_SENT" }));
+    h.invoke.mockResolvedValueOnce(view({ operation: "send", state: "NOT_SENT" }));
     expect((await h.port.request(send)).pendingOperation).toBeNull();
   });
 
@@ -224,5 +226,42 @@ describe("native Hermes durable original-request recovery", () => {
     }
     expect(h.invoke.mock.calls.every(([, args]) => (args.request as Wire).operation === "status")).toBe(true);
     expect(() => nativePendingPointer({ ...original, requestId: original.requestId + "\n" })).toThrow("REQUEST_INVALID");
+  });
+
+  it("clears a proven before-dispatch auth rejection and requires fresh sign-in before another request", async () => {
+    for (const request of [send, { operation: "create" as const, role: "secretary" as const, requestId: "d".repeat(32) }]) {
+      const h = harness();
+      await h.port.request({ operation: "status" });
+      h.invoke.mockRejectedValueOnce(new Error("NATIVE_AUTH_NOT_DISPATCHED"));
+      await expect(h.port.request(request)).rejects.toThrow("NATIVE_AUTH_NOT_DISPATCHED");
+      expect(await h.store.read(scope)).toBeNull();
+      await expect(h.port.request(request)).rejects.toThrow("NATIVE_RECOVERY_UNAVAILABLE");
+      expect(h.invoke).toHaveBeenCalledTimes(2);
+      h.invoke.mockResolvedValueOnce(view({ authGeneration: 8 }));
+      expect((await h.port.request({ operation: "status" })).pendingOperation).toBeNull();
+      h.invoke.mockResolvedValueOnce(view({ operation: request.operation, state: "NOT_SENT", authGeneration: 8 }));
+      expect((await h.port.request(request)).pendingOperation).toBeNull();
+      expect(h.invoke).toHaveBeenCalledTimes(4);
+    }
+  });
+
+  it("does not settle a reservation from a crossed or missing public operation", async () => {
+    for (const operation of ["read", undefined]) {
+      for (const state of ["REFUSED", "NOT_SENT", "OPENED"]) {
+        const h = harness();
+        const create = { operation: "create" as const, role: "secretary" as const, requestId: "d".repeat(32) };
+        await h.port.request({ operation: "status" });
+        h.invoke.mockResolvedValueOnce(view({ operation, state, ...(state === "OPENED" ? { session: session() } : {}) }));
+        await expect(h.port.request(create)).rejects.toThrow("NATIVE_RESPONSE_INVALID");
+        expect(await h.store.read(scope)).toEqual(nativePendingPointer({ kind: "create", requestId: create.requestId }));
+      }
+    }
+  });
+
+  it("cannot qualify an attachment from a crossed status response", async () => {
+    const h = harness(undefined, async () => view({ operation: "list" }));
+    await expect(h.port.request({ operation: "status" })).rejects.toThrow("NATIVE_RESPONSE_INVALID");
+    await expect(h.port.request(send)).rejects.toThrow("NATIVE_RECOVERY_UNAVAILABLE");
+    expect(h.invoke).toHaveBeenCalledTimes(1);
   });
 });

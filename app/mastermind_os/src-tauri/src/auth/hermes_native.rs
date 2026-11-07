@@ -30,20 +30,39 @@ fn validate(request: &Value) -> Result<bool> {
     Ok(matches!(operation, "create" | "send"))
 }
 
-fn unavailable(mutating: bool, code: &'static str) -> Value {
+fn unavailable(mutating: bool, code: &'static str, operation: &str) -> Value {
     serde_json::json!({"schema":SCHEMA, "state":if mutating {"EFFECT_UNKNOWN"} else {"UNAVAILABLE"},
-        "capabilities":[], "delegation":"NOT_ENABLED", "retryAllowed":false, "code":code})
+        "capabilities":[], "delegation":"NOT_ENABLED", "retryAllowed":false, "code":code, "operation":operation})
 }
 
-fn qualified_auth(app: &AppHandle, generation: Option<u64>) -> Result<u64> {
+fn qualified_auth(app: &AppHandle, generation: Option<u64>, before_dispatch: bool) -> Result<u64> {
     let state = app.state::<NativeAuth>();
     let inner = state.lock()?;
     let current = inner.generation;
     if !core::release_allowed(generation.unwrap_or(current), current,
         inner.token(Resource::Acquisition).is_some(), inner.status().status == "signed_in") {
-        return Err("AUTHENTICATION_CHANGED".into());
+        return Err(if before_dispatch { "NATIVE_AUTH_NOT_DISPATCHED" } else { "AUTHENTICATION_CHANGED" }.into());
     }
     Ok(current)
+}
+
+// Preserve positive no-dispatch evidence even if sign-out wins before return.
+// Private results still require the same current sign-in; ambiguous results stay held.
+fn release_result(result: Result<Value>, authentication: Result<u64>, operation: &str) -> Result<Value> {
+    let mut value = result?;
+    let generation = match authentication {
+        Ok(generation) => generation,
+        Err(code) => {
+            if code == "AUTHENTICATION_CHANGED" && matches!(operation, "create" | "send")
+                && value.get("operation").and_then(Value::as_str) == Some(operation)
+                && value.get("state").and_then(Value::as_str) == Some("NOT_SENT") {
+                return Err("NATIVE_AUTH_NOT_DISPATCHED".into());
+            }
+            return Err(code);
+        }
+    };
+    value["authGeneration"] = generation.into();
+    Ok(value)
 }
 
 #[cfg(unix)]
@@ -74,7 +93,10 @@ fn run_local(app: AppHandle, request: Value, generation: u64, mutating: bool) ->
     use std::{io::{Read, Write}, process::{Command, Stdio}, thread, time::{Duration, Instant}};
     // A foreground client is bounded, not another scheduler. A concurrent invocation is not queued.
     let _single = IN_FLIGHT.try_lock().map_err(|_| "NATIVE_BUSY")?;
-    qualified_auth(&app, Some(generation))?;
+    qualified_auth(&app, Some(generation), true)?;
+    let operation = match request["operation"].as_str().unwrap_or("") {
+        "recover_create" | "recover_send" => "recover", operation => operation,
+    };
     let home = app.path().home_dir().map_err(|_| "NATIVE_INSTALL_UNAVAILABLE")?;
     if home.canonicalize().map_err(|_| "NATIVE_INSTALL_UNAVAILABLE")? != home {
         return Err("NATIVE_INSTALL_UNAVAILABLE".into());
@@ -100,7 +122,7 @@ fn run_local(app: AppHandle, request: Value, generation: u64, mutating: bool) ->
     let state = app.state::<NativeAuth>();
     let inner = state.lock()?;
     if !core::release_allowed(generation, inner.generation, inner.token(Resource::Acquisition).is_some(),
-        inner.status().status == "signed_in") { return Err("AUTHENTICATION_CHANGED".into()); }
+        inner.status().status == "signed_in") { return Err("NATIVE_AUTH_NOT_DISPATCHED".into()); }
     let child = Command::new(python).args(["-I", "-B", "-c", BRIDGE])
         .env_clear().env("HOME", &home).env("PATH", "/usr/bin:/bin:/opt/homebrew/bin")
         .env("LANG", "en_US.UTF-8").current_dir(&home)
@@ -131,18 +153,17 @@ fn run_local(app: AppHandle, request: Value, generation: u64, mutating: bool) ->
     };
     let wrote = matches!(writer.join(), Ok(Ok(())));
     let output = reader.join().ok().and_then(std::result::Result::ok);
-    qualified_auth(&app, Some(generation))?;
     if timed_out || !wrote || !status.is_some_and(|status| status.success()) {
-        return Ok(unavailable(mutating, "NATIVE_CLIENT_INTERRUPTED"));
+        return Ok(unavailable(mutating, "NATIVE_CLIENT_INTERRUPTED", operation));
     }
     let output = match output { Some(bytes) if bytes.len() <= 1_048_576 => bytes,
-        _ => return Ok(unavailable(mutating, "NATIVE_RESPONSE_TOO_LARGE")) };
+        _ => return Ok(unavailable(mutating, "NATIVE_RESPONSE_TOO_LARGE", operation)) };
     let mut value: Value = match serde_json::from_slice(&output) { Ok(value) => value,
-        Err(_) => return Ok(unavailable(mutating, "NATIVE_RESPONSE_INVALID")) };
+        Err(_) => return Ok(unavailable(mutating, "NATIVE_RESPONSE_INVALID", operation)) };
     if value.get("schema").and_then(Value::as_str) != Some(SCHEMA)
         || value.get("retryAllowed").and_then(Value::as_bool) != Some(false)
         || value.get("delegation").and_then(Value::as_str) != Some("NOT_ENABLED") {
-        return Ok(unavailable(mutating, "NATIVE_RESPONSE_INVALID"));
+        return Ok(unavailable(mutating, "NATIVE_RESPONSE_INVALID", operation));
     }
     value["authGeneration"] = generation.into();
     Ok(value)
@@ -156,19 +177,17 @@ fn run_local(_app: AppHandle, _request: Value, _generation: u64, _mutating: bool
 #[tauri::command]
 pub async fn hermes_native(app: AppHandle, request: Value, expected_auth_generation: Option<u64>) -> Result<Value> {
     let mutating = validate(&request)?;
-    let generation = qualified_auth(&app, expected_auth_generation)?;
+    let generation = qualified_auth(&app, expected_auth_generation, true)?;
     // A durable reservation may outlive a sign-in change before this invocation.
     // Mutations must carry the generation observed before reserving that pointer.
     if !core::dispatch_generation_allowed(expected_auth_generation, generation, mutating) {
-        return Err("AUTHENTICATION_CHANGED".into());
+        return Err("NATIVE_AUTH_NOT_DISPATCHED".into());
     }
+    let operation = request["operation"].as_str().unwrap_or("").to_owned();
     let check = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || run_local(app, request, generation, mutating))
         .await.map_err(|_| "NATIVE_CLIENT_UNAVAILABLE")?;
-    qualified_auth(&check, Some(generation))?;
-    let mut value = result?;
-    value["authGeneration"] = generation.into();
-    Ok(value)
+    release_result(result, qualified_auth(&check, Some(generation), false), &operation)
 }
 
 #[cfg(test)]
@@ -183,11 +202,27 @@ mod native_tests {
         assert!(validate(&serde_json::json!({"operation":"send","sessionId":"../other","requestId":"a".repeat(32),"text":"original"})).is_err());
     }
     #[test]
+    fn auth_races_preserve_no_dispatch_proof_and_withhold_possible_effects() {
+        let changed = || Err("AUTHENTICATION_CHANGED".into());
+        assert_eq!(release_result(Err("NATIVE_AUTH_NOT_DISPATCHED".into()), changed(), "send").unwrap_err(),
+                   "NATIVE_AUTH_NOT_DISPATCHED");
+        let not_sent = serde_json::json!({"state":"NOT_SENT", "operation":"send"});
+        assert_eq!(release_result(Ok(not_sent.clone()), changed(), "send").unwrap_err(), "NATIVE_AUTH_NOT_DISPATCHED");
+        assert_eq!(release_result(Ok(not_sent), changed(), "create").unwrap_err(), "AUTHENTICATION_CHANGED");
+        for state in ["ADMITTED", "OPENED", "EFFECT_UNKNOWN", "UNAVAILABLE"] {
+            let value = serde_json::json!({"state":state,"operation":"send","private":"withheld"});
+            assert_eq!(release_result(Ok(value), changed(), "send").unwrap_err(), "AUTHENTICATION_CHANGED");
+        }
+        let released = release_result(Ok(serde_json::json!({"state":"ADMITTED","operation":"send"})), Ok(9), "send").unwrap();
+        assert_eq!(released["authGeneration"], 9);
+    }
+
+    #[test]
     fn interrupted_modification_cannot_claim_absence_or_retry() {
-        let value = unavailable(true, "NATIVE_CLIENT_INTERRUPTED");
+        let value = unavailable(true, "NATIVE_CLIENT_INTERRUPTED", "send");
         assert_eq!(value["state"], "EFFECT_UNKNOWN");
         assert_eq!(value["retryAllowed"], false);
         assert_eq!(value["delegation"], "NOT_ENABLED");
-        assert_eq!(unavailable(false, "NATIVE_CLIENT_INTERRUPTED")["state"], "UNAVAILABLE");
+        assert_eq!(unavailable(false, "NATIVE_CLIENT_INTERRUPTED", "read")["state"], "UNAVAILABLE");
     }
 }

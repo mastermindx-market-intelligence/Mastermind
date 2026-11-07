@@ -190,6 +190,64 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(runtime.identifies, 0)
 
 
+class PreDispatchFailureTests(unittest.TestCase):
+    def setUp(self):
+        self.b = load()
+
+    def test_identify_connect_and_history_timeouts_are_not_sent_without_a_modifying_rpc(self):
+        for operation in ("create", "send"):
+            for stage in ("identify", "connect", "history"):
+                if operation == "create" and stage == "history":
+                    continue
+                with self.subTest(operation=operation, stage=stage):
+                    runtime = FakeRuntime()
+                    async def fail_identify():
+                        raise TimeoutError("private diagnostic")
+                    @asynccontextmanager
+                    async def fail_connect(endpoint):
+                        raise ConnectionError("private diagnostic")
+                        yield
+                    async def fail_history(method, **params):
+                        runtime.calls.append((method, params))
+                        raise TimeoutError("private diagnostic")
+                    if stage == "identify":
+                        runtime.identify = fail_identify
+                    elif stage == "connect":
+                        runtime.connect = fail_connect
+                    else:
+                        runtime.rpc = fail_history
+                    request = {"operation": operation, "requestId": "c" * 32}
+                    request.update({"role": "secretary"} if operation == "create" else {"sessionId": "session-1", "text": "original"})
+                    result = asyncio.run(self.b.execute_request(request, runtime))
+                    self.assertEqual(result["state"], "NOT_SENT")
+                    self.assertEqual(result["operation"], operation)
+                    self.assertEqual(runtime.calls, [("session.resume", {"session_id": "session-1"})] if stage == "history" else [])
+                    self.assertFalse(result["retryAllowed"])
+                    self.assertNotIn("private", str(result))
+
+    def test_runtime_initialization_failure_cannot_create_an_uncertain_new_request(self):
+        import io
+        import json
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        for request in ({"operation": "create", "role": "secretary", "requestId": "c" * 32},
+                        {"operation": "send", "sessionId": "session-1", "requestId": "c" * 32, "text": "original"},
+                        {"operation": "recover_send", "sessionId": "session-1", "requestId": "c" * 32}):
+            output = io.BytesIO()
+            with patch("sys.stdin", SimpleNamespace(buffer=io.BytesIO(json.dumps(request).encode()))), \
+                 patch("sys.stdout", SimpleNamespace(buffer=output)), \
+                 patch.object(self.b, "NativeRuntime", side_effect=RuntimeError("private dependency diagnostic")), \
+                 patch.object(self.b, "execute_request") as execute:
+                self.b.main()
+            result = json.loads(output.getvalue())
+            recovering = request["operation"].startswith("recover_")
+            self.assertEqual(result["state"], "EFFECT_UNKNOWN" if recovering else "NOT_SENT")
+            self.assertEqual(result["operation"], "recover" if recovering else request["operation"])
+            self.assertFalse(result["retryAllowed"])
+            self.assertNotIn("private", str(result))
+            execute.assert_not_called()
+
+
 class FakeRuntime:
     home = Path("/fixture/hermes")
 

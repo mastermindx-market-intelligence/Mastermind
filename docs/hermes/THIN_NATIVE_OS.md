@@ -177,6 +177,49 @@ The original canary file remains byte-for-byte unchanged. This proves actual nat
 request-ID-to-admission recovery; packaged UI sign-in/history remain separately owed.
 Candidate bridge SHA256: `4f6eac9d057eb36c3afd94350cd98fd974a374bdd92ad71ecec76a9e941bc012`.
 
+## Concurrent Pro continuation: failure-boundary repair
+
+The Chairman explicitly authorized concurrent disjoint implementation after the
+previous generic live-writer pause. The assigned Pro continuation retained this
+operation/workspace and verified source law at
+`d2f72b2d0d3066502adef103afa847904a70b18d`. Candidate
+`ea7a1f0b52e8449ca68ed7622611821a0784480b` was already published by the
+continuing writer; no replacement operation or workspace was created.
+
+Hosted OS run [42341856573](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42341856573)
+passed native-macos. Frontend had 6656 passing, 12 skipped and one failure:
+`FreshConversationContinuation.test.tsx` observed its transport call before the
+after-commit unresolved callback. The repair retains the exact reference,
+source-witness, original-pointer and callback assertions, and awaits that effect.
+
+Exact-source inspection also reproduced two ordinary no-send dead ends and an
+operation-binding gap. The continuation now distinguishes native authentication
+failure before dispatch from authentication loss after possible IO. Positive
+no-dispatch evidence survives the final auth check without releasing private
+results. Identity, connection, preflight history and runtime-initialization
+failures before a modifying RPC return `NOT_SENT`; a dispatched or previously
+uncertain original remains held. The port requires the matching public operation
+before qualifying status or settling its exact reservation. Crossed/missing
+operations cannot clear it. The panel hides private state on auth change, explains
+a proven unsent request, retains an unsent draft and never automatically resends.
+
+Actual repair checks:
+
+| Check | Result | Retained receipt |
+|---|---|---|
+| Native port/panel/contract plus continuation regression | 40 passed after correcting the new test fixture's raw-host/port boundary | `/tmp/hermes-thin-boundaries-web-20261107-pro-03.log` |
+| Python bridge including pre-dispatch and recovery negatives | 27 passed | `/tmp/hermes-thin-boundaries-python-20261107-pro-01.log` |
+| Native host/auth-generation/release guards | 9 passed | `/tmp/hermes-thin-boundaries-native-20261107-pro-01.log` |
+| Typecheck | Passed | `/tmp/hermes-thin-boundaries-typecheck-20261107-pro-01.log` |
+
+The inspected running installed app exposes real native accessibility controls and
+reports signed-in state, but still identifies the older fca92d5a source below.
+This establishes the available UI path, not acceptance of this repaired candidate.
+Its existing public native-client build input was located in that installed
+binary; the successor will reuse that identity rather than create a registration.
+No native create/send, synthetic pending record, active service restart or release
+replacement occurred during these repairs.
+
 ## Remaining acceptance and protected release
 
 THIN-1/THIN-2 source candidates and reopened-request behavior are qualified by the
