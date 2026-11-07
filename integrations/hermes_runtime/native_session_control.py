@@ -1222,6 +1222,10 @@ def install_private_control(runner, home: Path, role: str, *,
                 return role_result("TARGET", target=_target(runner, home, _id(params["session_id"]), peer_subject))
             if operation == "read_original":
                 return _read_original(home, params, peer_subject, role=role)
+            if operation == "read_evaluation_trial":
+                from .native_eval_publication import read_original_trial
+                return read_original_trial(runner, home, params, peer_subject,
+                                           owner=evaluation_owner, role=role)
             if operation == "publish_evaluation":
                 from .native_eval_publication import publish_original
                 return publish_original(runner, home, params, peer_subject,
@@ -1274,6 +1278,10 @@ def install_private_control(runner, home: Path, role: str, *,
             if type(params["ticket"]) is not str or not 1 <= len(params["ticket"]) <= 256:
                 raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
         except Exception as exc:
+            if operation == "read_evaluation_trial":
+                if isinstance(exc, RuntimeRefusal):
+                    return role_result("REFUSED", reason=exc.code)
+                return role_result("UNAVAILABLE", reason="EVALUATION_TRIAL_UNAVAILABLE")
             if operation == "publish_evaluation":
                 from .native_eval_publication import PublicationEffectUnknown
                 if isinstance(exc, PublicationEffectUnknown):
@@ -1467,6 +1475,15 @@ class NativeSecretaryClient:
     def evaluation_capabilities(self):
         """Read the held producer descriptor; never an execution grant."""
         return self._call({"operation": "evaluation_capabilities", "profile_id": str(self.home)})
+
+    def read_evaluation_trial(self, *, session_id, submission_id, input_sha256, admission_id, evaluation_binding):
+        """One read of already retained evidence; loss cannot imply a write."""
+        from .native_eval_publication import _request
+        params = _request({"operation": "read_evaluation_trial", "profile_id": str(self.home),
+            "session_id": session_id, "submission_id": submission_id, "input_sha256": input_sha256,
+            "admission_id": admission_id, "evaluation_binding": evaluation_binding}, self.home,
+            operation="read_evaluation_trial")
+        return self._call(params)
 
     def publish_evaluation(self, *, session_id, submission_id, input_sha256, admission_id, evaluation_binding):
         from .native_eval_publication import _request

@@ -95,6 +95,8 @@ RELEASE_PATHS = (
     "scripts/agent_eval/canonical.py",
     "scripts/agent_eval/errors.py",
     "scripts/agent_eval/harness2_native.py",
+    "scripts/agent_eval/harness2_context.py",
+    "scripts/ohf/harness2_recursion.py",
     "scripts/agent_eval/privacy.py",
     "scripts/agent_eval/store.py",
     "scripts/agent_eval/verification.py",

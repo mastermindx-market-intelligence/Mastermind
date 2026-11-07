@@ -73,7 +73,8 @@ def main(argv: list[str] | None = None, *,
     for command, help_text in (
             ("eval-submit", "Admit one selected evaluation on the enrolled native session; stdin only"),
             ("eval-read", "Read the exact original evaluation identity once; stdin only"),
-            ("eval-publish", "Publish one terminal original evaluation without inference; stdin only")):
+            ("eval-publish", "Publish one terminal original evaluation without inference; stdin only"),
+            ("eval-trial", "Read consumption eligibility of an already published original trial; stdin only")):
         evaluation_p = sub.add_parser(command, help=help_text)
         evaluation_p.add_argument("--profile", type=Path, required=True)
         evaluation_p.add_argument("--hermes-bin", type=Path, required=True)
@@ -128,7 +129,7 @@ def main(argv: list[str] | None = None, *,
             return _enroll_secretary_session(args.profile, args.hermes_bin, native_launch=native_launch)
         elif args.command == "enroll-meta-session":
             return _enroll_meta_session(args.profile, args.hermes_bin, native_launch=native_launch)
-        elif args.command in {"eval-submit", "eval-read", "eval-publish"}:
+        elif args.command in {"eval-submit", "eval-read", "eval-publish", "eval-trial"}:
             return _native_evaluation(args.profile, args.hermes_bin,
                 operation=args.command.removeprefix("eval-"), native_launch=native_launch)
         elif args.command == "text-turn":
@@ -456,10 +457,10 @@ def _native_evaluation(profile_path: Path, hermes_bin: Path, *, operation: str, 
         except (Exception, KeyboardInterrupt):
             # asyncio.run may fail during shutdown after the native call has
             # committed. The inner coroutine cannot classify that outer loss.
-            value = result(operation, "UNAVAILABLE" if operation == "read" else "EFFECT_UNKNOWN",
+            value = result(operation, "UNAVAILABLE" if operation in {"read", "trial"} else "EFFECT_UNKNOWN",
                 recovery=recovery, reason="EVALUATION_OPERATOR_RUNNER_RECONCILIATION_REQUIRED")
     print(json.dumps(value, sort_keys=True, separators=(",", ":")))
-    if value["status"] in {"ADMITTED", "OBSERVED", "PUBLISHED"}:
+    if value["status"] in {"ADMITTED", "OBSERVED", "PUBLISHED", "TRIAL_OBSERVED"}:
         return 0
     return 3 if value["status"] == "EFFECT_UNKNOWN" else POLICY_EXIT
 

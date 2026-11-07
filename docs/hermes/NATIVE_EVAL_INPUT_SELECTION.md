@@ -323,10 +323,28 @@ match to the frozen public label. A differing label stays unavailable/conflictin
 Exactly one correlated physical session can yield the fingerprint of
 `[original_profile_id, native_agent_session_id]`; multiple IDs stay conflicting.
 
+Transport observation v2 also retains a digest and UTF-8 byte length of the
+actual adopted agent's runtime provider selector at each dispatch and each HTTP
+attempt. The `provider_client_check` field records selector equality at the
+qualified original client-factory return; it does not attest the factory's
+internal inputs or copied client kwargs. Samples do not prove continuous
+identity between boundaries. Conflict or unavailability remains sticky within
+the dispatch. These fields
+share the existing 16 KiB metadata budget. Historical transport v1 remains
+closed and unchanged, with no inferred provider observation.
+
+After the same complete request/content joins, `execution.provider` may identify
+the frozen public selector only when every dispatch/client/attempt witness
+matches its exact bytes. For the supported named Z.ai route this is `custom`,
+the actual native runtime selector. It does not identify a remote operator,
+prove that a request arrived, or replace `requested_provider="zai-glm"` with a
+model label. Missing witnesses stay unavailable; observed disagreements stay
+conflicting. Current transport producer and reader must be released together.
+
 Provider request coverage remains partial. Response-reported labels do not prove
 the serving model. Explicit wire sampling digests remain in the trace and are not
 relabeled as complete effective sampling. Network-origin hashes are not EVAL
-destination-string digests. Unobserved provider/auth, effective environment,
+destination-string digests. Unobserved auth, effective environment,
 freshness, capability/source/network coverage, effects and cleanup stay missing or
 unknown. This publisher therefore creates invalid v3 evidence of attempts,
 never a valid Harness2 trial or learning promotion.
@@ -339,12 +357,12 @@ normally; this publication path only freezes its bounded evidence projection.
 
 ## Attended original-attempt operations
 
-The existing held `hermes-runtime` entry now selects three finite operator
-commands: `eval-submit`, `eval-read`, and `eval-publish`. They use the original
+The existing held `hermes-runtime` entry now selects four finite operator
+commands: `eval-submit`, `eval-read`, `eval-publish`, and `eval-trial`. They use the original
 mmmeta native owner. They do not enroll a session, start a gateway, invoke the
 text-turn runner, or run a polling loop.
 
-All three accept the existing `--profile` and `--hermes-bin` paths selected by
+All four accept the existing `--profile` and `--hermes-bin` paths selected by
 the held installation. The JSON body is read from stdin, bounded to 60 KiB;
 there is no prompt, credential, artifact-root, callback, or observation flag.
 Invocation must already be inside the original qualified PID1 role unit and
@@ -419,6 +437,51 @@ It does not provide valid held-out trials, complete source/auth/environment/
 effect/cleanup coverage, or learning promotion. Tests of the held archive,
 CLI, actual SQLite retirement/readback and create-only publisher remain source
 qualification; original-carrier installed acceptance is separate.
+
+## Read an already published original Trial
+
+The finite `eval-trial` command accepts the same original recovery selector as
+`eval-read` and uses the existing same-UID private control carrier. It reads
+evidence only. It performs no submission, publication, repair, enrollment,
+refinement call, retry or artifact creation.
+
+The selected owner joins the original authenticated admission/tombstone and
+frozen publication, an already present byte-identical run in the original
+ArtifactStore, and that store's scenario/configuration/experiment graph matching
+the retained marker. Missing filesystem publication is refused even when the
+original publication field is frozen; this read does not reconcile it.
+
+Output must still exist in the original result. Its exact UTF-8 bytes, size and
+`retained_redacted_final_response` stage must match the run's output digest and
+the original admission/binding-derived output locator. Whitespace is preserved.
+The reader never follows that locator as a file or URL. Normal result expiry
+remains controlling; publication retention does not preserve or regenerate the
+answer. Absence is reported as output not retained, without inventing an expiry
+cause.
+
+The original Harness2 `Trial` and validator check the detached candidate files,
+original output, exact recomputed run, `NO_EFFECT` and `VALID`. A closed private
+Trial projection is limited to 256 KiB in full, independently of the existing
+wire bound, and is validated again by the attended consumer. It is never
+truncated. Both original native publication/graph and current reader ownership
+are required; graph consistency alone does not authenticate provenance.
+
+An ineligible published run returns its original ID, digest, validity and reason
+codes without a Trial, output or graph. The verified effect and validity gates
+are applied before constructing a candidate, so failed or empty output cannot
+hide those original diagnostics. An otherwise eligible run whose output is
+empty or whose candidate exceeds the bound or fails privacy validation also
+retains a closed refusal summary. The current incomplete native producer
+remains ineligible. Synthetic complete historical producer fixtures exercise the
+eligible branch without changing current production validity or capabilities.
+
+The CLI emits only original recovery and an eligibility summary under
+`mastermind.hermes_native_eval_trial_operator/v1`. Existing submit/read/publish
+result schemas remain unchanged. Eligibility means evidence is consumable by an
+otherwise admitted port; it grants no parent/Attempt, resource budget or new
+execution. The underlying private `decode_trial` returns the incumbent Trial
+object for that consumer. Read loss and owner replacement are unavailable reads,
+including outer asyncio shutdown loss, and never unknown publication effects.
 
 ## Native APPLICATION composition proof — 2026-11-07
 

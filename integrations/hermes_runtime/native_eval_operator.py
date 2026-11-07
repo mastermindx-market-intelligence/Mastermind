@@ -21,6 +21,7 @@ from .native_eval_publication import SCHEMA as PUBLICATION_SCHEMA, _TERMINAL
 SUBMIT_SCHEMA = "mastermind.hermes_native_eval_submit/v1"
 RECOVERY_SCHEMA = "mastermind.hermes_native_eval_recovery/v1"
 RESULT_SCHEMA = "mastermind.hermes_native_eval_operator/v1"
+TRIAL_RESULT_SCHEMA = "mastermind.hermes_native_eval_trial_operator/v1"
 MAX_REQUEST_BYTES = 60 * 1024
 _RECOVERY = {"schema", "profile_id", "session_id", "run_id", "submission_id",
              "input_sha256", "admission_id", "evaluation_binding"}
@@ -51,7 +52,7 @@ def _binding(value, run_id):
 
 def parse_request(operation, raw):
     from ops.executive_os.release_manifest import _closed_json
-    if operation not in {"submit", "read", "publish"} or type(raw) is not bytes or not 0 < len(raw) <= MAX_REQUEST_BYTES:
+    if operation not in {"submit", "read", "publish", "trial"} or type(raw) is not bytes or not 0 < len(raw) <= MAX_REQUEST_BYTES:
         _refuse()
     value = _closed_json(raw)
     if type(value) is not dict:
@@ -94,10 +95,14 @@ def recovery_for(operation, request, home):
     return copy.deepcopy(request)
 
 
-def result(operation, status, *, recovery, reason=None, admission=None, publication=None):
-    return {"schema": RESULT_SCHEMA, "operation": operation, "status": status,
-            "reason": reason, "recovery": recovery, "admission": admission,
-            "publication": publication, "complete_evaluation": False}
+def result(operation, status, *, recovery, reason=None, admission=None, publication=None, trial=None):
+    value = {"schema": TRIAL_RESULT_SCHEMA if operation == "trial" else RESULT_SCHEMA,
+             "operation": operation, "status": status, "reason": reason,
+             "recovery": recovery, "admission": admission,
+             "publication": publication, "complete_evaluation": False}
+    if operation == "trial":
+        value["trial"] = trial
+    return value
 
 
 def _envelope(value, allowed):
@@ -204,6 +209,48 @@ def _publication(value, recovery):
     return copy.deepcopy(item)
 
 
+def _trial_response(value, recovery, home, *, expected_admission):
+    from .native_eval_publication import decode_trial, _trial_summary
+    allowed = {"schema", "status", "admission", "evaluation_binding", "trial_summary"}
+    status = value.get("status") if type(value) is dict else None
+    allowed |= {"trial"} if status == "TRIAL_OBSERVED" else {"reason"}
+    _envelope(value, allowed)
+    if set(value) != allowed or status not in {"TRIAL_OBSERVED", "REFUSED"}:
+        _refuse()
+    admission = _receipt(value["admission"], recovery, home)
+    binding = _binding(value["evaluation_binding"], recovery["run_id"])
+    if (admission != expected_admission or binding != recovery["evaluation_binding"] or admission["status"] != "terminal"
+            or admission["outcome"] not in _TERMINAL):
+        _refuse()
+    summary = value["trial_summary"]
+    if (type(summary) is not dict or set(summary) != {
+            "run_id", "run_digest", "validity", "reason_codes", "eligible_for_consumption", "eligibility_reason"}
+            or summary["run_id"] != recovery["run_id"]
+            or summary["validity"] not in contracts._VALIDITY_STATUSES
+            or type(summary["eligible_for_consumption"]) is not bool
+            or type(summary["reason_codes"]) is not list or len(summary["reason_codes"]) > 128
+            or any(type(code) is not str or re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", code) is None
+                   for code in summary["reason_codes"])
+            or summary["reason_codes"] != sorted(set(summary["reason_codes"]))):
+        _refuse()
+    _digest(summary["run_digest"], prefixed=True)
+    if status == "TRIAL_OBSERVED":
+        trial = decode_trial(value["trial"], admission_id=admission["admission_id"], evaluation_binding=binding)
+        if (trial.run["capabilities"]["profile_id"] != str(home)
+                or summary != _trial_summary(trial.run, eligible=True)):
+            _refuse()
+    else:
+        reasons = {"NATIVE_TRIAL_INVALID", "NATIVE_EFFECT_REQUIRES_RECONCILIATION",
+            "NATIVE_EVAL_TRIAL_OUTPUT_NOT_RETAINED", "NATIVE_EVAL_TRIAL_OUTPUT_LIMIT",
+            "NATIVE_EVAL_TRIAL_OUTPUT_INVALID", "NATIVE_EVAL_TRIAL_OUTPUT_CONFLICT",
+            "NATIVE_EVAL_TRIAL_DOCUMENT_LIMIT", "NATIVE_EVAL_TRIAL_EVIDENCE_INVALID"}
+        if (summary["eligible_for_consumption"] is not False
+                or value["reason"] not in reasons or summary["eligibility_reason"] != value["reason"]
+                or value["reason"] == "NATIVE_TRIAL_INVALID" and summary["validity"] == "VALID"):
+            _refuse()
+    return admission, copy.deepcopy(summary)
+
+
 async def execute(operation, request, *, recovery, profile, home, implementation, native_launch, connected):
     entered, admission = False, None
     recovery = copy.deepcopy(recovery)
@@ -261,6 +308,21 @@ async def execute(operation, request, *, recovery, profile, home, implementation
             await current()
             if operation == "read":
                 return result(operation, "OBSERVED", recovery=recovery, admission=admission)
+            if operation == "trial":
+                if admission["status"] != "terminal" or admission["outcome"] not in _TERMINAL:
+                    return result(operation, "OBSERVED", recovery=recovery, admission=admission,
+                                  reason="ORIGINAL_NOT_TERMINAL")
+                value = await asyncio.to_thread(client.read_evaluation_trial,
+                    session_id=recovery["session_id"], submission_id=recovery["submission_id"],
+                    input_sha256=recovery["input_sha256"], admission_id=recovery["admission_id"],
+                    evaluation_binding=recovery["evaluation_binding"])
+                await current()
+                if type(value) is dict and "trial_summary" in value:
+                    admission, summary = _trial_response(value, recovery, home, expected_admission=admission)
+                    await current()
+                    return result(operation, value["status"], recovery=recovery, admission=admission,
+                        reason=value.get("reason"), trial=summary)
+                return _failure(operation, value, recovery, admission)
             if admission["status"] != "terminal" or admission["outcome"] not in _TERMINAL:
                 return result(operation, "OBSERVED", recovery=recovery, admission=admission,
                               reason="ORIGINAL_NOT_PUBLISHABLE")

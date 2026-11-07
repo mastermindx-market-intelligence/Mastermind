@@ -22,7 +22,8 @@ from types import ModuleType
 
 from .errors import RuntimeRefusal
 
-SCHEMA = "mastermind.hermes_native_transport_observation/v1"
+SCHEMA = "mastermind.hermes_native_transport_observation/v2"
+PREVIOUS_SCHEMA = "mastermind.hermes_native_transport_observation/v1"
 COVERAGE = "selected_nonstream_sync_httpx_only"
 EXECUTION_STAGE = "original_execute_admission_wrapper"
 HTTP_STAGE = "httpx_client_send_single_request"
@@ -91,6 +92,16 @@ def _scalar(value, kind):
                 "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
     valid = type(value) is int and -(2**63) <= value < 2**63
     return {"status": "present", "value": value} if valid else {"status": "invalid"}
+
+
+def _runtime_provider(agent):
+    """Digest the actual native runtime selector; never retain arbitrary labels."""
+    try:
+        return _scalar(getattr(agent, "provider"), "model")
+    except AttributeError:
+        return {"status": "absent"}
+    except Exception:
+        return {"status": "unobserved"}
 
 
 def _field(value, name, kind):
@@ -267,7 +278,8 @@ class Contribution:
         wall, mono = self._clock_start()
         record = {"state": "entered", "started_at_ms": wall, "finished_at_ms": None, "duration_ms": None}
         if kind == "attempt":
-            record.update(dispatch_sequence=dispatch_sequence, request=_request_projection(request), response=None)
+            record.update(dispatch_sequence=dispatch_sequence, request=_request_projection(request), response=None,
+                          runtime_provider=_runtime_provider(agent))
             records, maximum = self.attempts, MAX_ATTEMPTS
         else:
             identifiers = identifiers or {}
@@ -288,7 +300,8 @@ class Contribution:
                     record["identity"] = dict(caller.record["identity"])
                     record["invalid_fields"] = list(caller.record["invalid_fields"])
                 record.update(call_sequence=caller.record["sequence"] if caller else None,
-                              client_binding="pending")
+                              client_binding="pending", runtime_provider=_runtime_provider(agent),
+                              provider_client_check="pending")
                 records, maximum = self.dispatches, MAX_DISPATCHES
         with self.scope.live.event_stream.lock, self.scope.lock:
             if self.scope.closed or not self.scope.current() or not self.scope.adopted(agent):
@@ -319,6 +332,30 @@ class Contribution:
         with self.scope.live.event_stream.lock, self.scope.lock:
             if not self.scope.closed and self.scope.current() and self.scope.adopted(agent):
                 span.record.update(fields)
+
+    def check_provider_client(self, agent, span):
+        """Observe the original factory return without changing its client.
+
+        Conflict and loss are sticky within this dispatch. A later factory
+        return or restored mutable label cannot erase an earlier failed join.
+        """
+        if span is None or not self.scope._tool_current(agent):
+            return
+        actual = _runtime_provider(agent)
+        with self.scope.live.event_stream.lock, self.scope.lock:
+            if self.scope.closed or not self.scope.current() or not self.scope.adopted(agent):
+                return
+            selected = span.record["runtime_provider"]
+            previous = span.record["provider_client_check"]
+            if previous == "conflicting":
+                return
+            if actual["status"] == selected["status"] == "observed_digest":
+                observed = "matched" if actual == selected else "conflicting"
+            else:
+                observed = "unavailable"
+            if previous == "unavailable" and observed == "matched":
+                observed = "unavailable"
+            span.record["provider_client_check"] = observed
 
     def seal_execution(self, outcome):
         """Called only under the original scope/event locks, before closing."""
@@ -512,6 +549,7 @@ def prepare(binding, vendor):
                     note(contribution, "update", agent, span, client_binding="multiple" if previous else "unsupported")
                 else:
                     context.client = transport_client
+                    note(contribution, "check_provider_client", agent, span)
                     note(contribution, "update", agent, span, client_binding="qualified_sync_httpx")
             return client
 
@@ -745,7 +783,9 @@ def validate_document(value):
     _shape(value, ("schema", "coverage", "http_stage", "installation", "complete_evaluation",
                    "provider_delivery_proven", "model_identity_verified", "execution", "calls",
                    "dispatches", "attempts", "errors", "overflow"))
-    for key, expected in (("schema", SCHEMA), ("coverage", COVERAGE), ("http_stage", HTTP_STAGE)):
+    _enum(value["schema"], {SCHEMA, PREVIOUS_SCHEMA})
+    provider_observed = value["schema"] == SCHEMA
+    for key, expected in (("coverage", COVERAGE), ("http_stage", HTTP_STAGE)):
         _enum(value[key], {expected})
     if any(value[key] is not False for key in ("complete_evaluation", "provider_delivery_proven", "model_identity_verified")):
         raise ValueError("unsupported evidence promotion")
@@ -792,7 +832,13 @@ def validate_document(value):
             fields = (("dispatch_sequence", "request", "response") if kind == "attempts" else
                       ("identity", "invalid_fields", "api_call_count", "retry_count") if kind == "calls" else
                       ("identity", "invalid_fields", "call_sequence", "client_binding"))
+            if provider_observed and kind != "calls":
+                fields += ("runtime_provider",)
+                if kind == "dispatches":
+                    fields += ("provider_client_check",)
             _shape(record, (*common, *fields))
+            if provider_observed and kind != "calls":
+                _validate_scalar(record["runtime_provider"], "model")
             if type(record["sequence"]) is not int or record["sequence"] != sequence:
                 raise ValueError("transport sequence disagreement")
             _enum(record["state"], {"entered", "raised", "headers_returned", "headers_unobserved"}
@@ -842,6 +888,11 @@ def validate_document(value):
                     _enum(record["client_binding"], {"pending", "unsupported", "multiple", "qualified_sync_httpx"})
                     if record["client_binding"] == "multiple" and "multiple_clients" not in errors:
                         raise ValueError("missing multiple-client error")
+                    if provider_observed:
+                        check = record["provider_client_check"]
+                        _enum(check, {"pending", "matched", "unavailable", "conflicting"})
+                        if check in {"matched", "conflicting"} and record["runtime_provider"]["status"] != "observed_digest":
+                            raise ValueError("unobserved runtime provider comparison")
     if installation["status"] == "unavailable" and any(counts.values()):
         raise ValueError("records from unavailable instrumentation")
     if _observation()._encoded_size(value) > _observation().MAX_METADATA_BYTES:
