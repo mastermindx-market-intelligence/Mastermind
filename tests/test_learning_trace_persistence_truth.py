@@ -91,28 +91,28 @@ def test_trace_replace_failure_preserves_prior_complete_bytes(tmp_path, monkeypa
     assert not list(path.parent.glob(f".{path.name}.*.tmp"))
 
 
-def test_non_trace_jsonl_keeps_existing_best_effort_read_contract(tmp_path, monkeypatch):
+def test_unrelated_jsonl_keeps_existing_best_effort_read_contract(tmp_path, monkeypatch):
     pl = _wire(tmp_path, monkeypatch)
-    path = tmp_path / "learning" / "context_requests.jsonl"
+    path = tmp_path / "learning" / "legacy_best_effort.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"id": "ctx-good"}) + "\n{broken\n", encoding="utf-8")
 
     assert pl._read_jsonl(path) == [{"id": "ctx-good"}]
 
 
-def test_context_request_stat_failure_keeps_actual_consumer_best_effort(tmp_path, monkeypatch):
+def test_unrelated_jsonl_stat_failure_keeps_best_effort(tmp_path, monkeypatch):
     pl = _wire(tmp_path, monkeypatch)
-    path = pl._DIR / "context_requests.jsonl"
+    path = pl._DIR / "legacy_best_effort.jsonl"
     original_exists = Path.exists
 
     def fail_target_exists(self):
         if self == path:
-            raise OSError("context-history-stat-unavailable")
+            raise OSError("legacy-history-stat-unavailable")
         return original_exists(self)
 
     monkeypatch.setattr(Path, "exists", fail_target_exists)
 
-    assert pl.context_requests() == []
+    assert pl._read_jsonl(path) == []
 
 
 @pytest.mark.parametrize("name", ["applications.jsonl", "presentations.jsonl"])
@@ -184,7 +184,7 @@ def test_trace_directory_fsync_failure_reports_unconfirmed_visible_effect(tmp_pa
     assert not list(path.parent.glob(f".{path.name}.*.tmp"))
 
 
-def test_context_request_directory_fsync_retains_existing_best_effort(tmp_path, monkeypatch):
+def test_unrelated_jsonl_directory_fsync_retains_best_effort(tmp_path, monkeypatch):
     pl = _wire(tmp_path, monkeypatch)
     real_fsync = os.fsync
     attempts = []
@@ -192,16 +192,17 @@ def test_context_request_directory_fsync_retains_existing_best_effort(tmp_path, 
     def fail_directory_fsync(fd):
         if stat.S_ISDIR(os.fstat(fd).st_mode):
             attempts.append("directory")
-            raise OSError("context-directory-durability-unavailable")
+            raise OSError("legacy-directory-durability-unavailable")
         return real_fsync(fd)
 
     monkeypatch.setattr(os, "fsync", fail_directory_fsync)
 
-    result = pl.request_context("autonomous", "terminal.flow", "Need verified flow context", "AAPL")
+    path = pl._DIR / "legacy_best_effort.jsonl"
+    row = {"schema": "legacy.v1", "id": "good"}
 
-    assert result["ok"] is True
+    assert pl._append_jsonl(path, row) is True
     assert attempts == ["directory"]
-    assert pl.context_requests() == [result["request"]]
+    assert pl._read_jsonl(path) == [row]
 
 
 def test_real_presentation_publication_is_stable_and_deduplicated(tmp_path, monkeypatch):

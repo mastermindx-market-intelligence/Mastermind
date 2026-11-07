@@ -345,6 +345,10 @@ def compose(
         if not bridge_source.is_file():
             _refuse("BRIDGE_SOURCE_MISSING", str(bridge_source))
         (overlay / BRIDGE_NAME).write_bytes(bridge_source.read_bytes())
+        policy_source = Path(__file__).resolve().parents[3] / "control_plane" / "experiential_plan_policy.py"
+        if not policy_source.is_file():
+            _refuse("PLAN_POLICY_SOURCE_MISSING")
+        (overlay / "experiential_plan_policy.py").write_bytes(policy_source.read_bytes())
         if owner_modules:
             module_dir = overlay / "experiential53"
             module_dir.mkdir(mode=0o700)
@@ -370,7 +374,8 @@ def compose(
         "preimages_sha256": manifest["preimages_sha256"],
         "postimages_sha256": postimages,
         "patches_sha256": manifest["patches_sha256"],
-        "bridge": {BRIDGE_NAME: sha256_file(overlay / BRIDGE_NAME)},
+        "bridge": {BRIDGE_NAME: sha256_file(overlay / BRIDGE_NAME),
+                   "experiential_plan_policy.py": sha256_file(overlay / "experiential_plan_policy.py")},
         "owner_modules": {name: hashlib.sha256(data).hexdigest()
                           for name, data in owner_modules.items()},
         "host_context_owner_required": True,

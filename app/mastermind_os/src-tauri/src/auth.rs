@@ -3,6 +3,7 @@
 pub mod host_observation;
 pub mod hermes_native;
 pub mod control_room_read;
+pub mod company_priorities;
 mod draft_continuity;
 mod transport_diagnostics;
 use transport_diagnostics::{ExecutiveObservation, ExecutiveReason, ProgramsRead};

@@ -712,7 +712,7 @@ REVIEWED_FILES['research/competitive_intelligence/x_engagement/2026-10-30/accoun
 REVIEWED_FILES['app/mastermind_os/src/projects/ProjectPlanningJourney.tsx'] = {'sha256': '1bfbec76a4f007d5ab5570eb5080891c896714129d4f0c51d7cfaf56a260b419', 'sites': ((371, 26, 29, 'int', '512'), (487, 57, 60, 'int', '512'))}
 
 # fixed HTTP not-found status. Exact full postimage and literal sites only.
-REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': 'b5fd60efebebc04ea12d1d1976663c74f907dec2f151a2d71a6f442182b5e5b2', 'sites': ((93, 39, 42, 'int', '404'),)}
+REVIEWED_FILES['integrations/mastermind_executive_app/fresh_conversation_transport.py'] = {'sha256': '7213ad3122ca5038b759f1aeb02fbb97fc2bec990dd2d660f9bad7c247e73385', 'sites': ((98, 39, 42, 'int', '404'),)}
 
 # fixed HTTP unavailable status. Exact full postimage and literal sites only.
 # 2026-11-06 source audit: the fixed planning/execution pair shares the original
@@ -726,7 +726,12 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # 2026-11-07 attended source check: native Hermes composition and exact pending
 # auth-timer expiry move these unchanged three operands. Preserve whole-file and
 # exact-token qualification; this supplies no runtime or formal release approval.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '2842f2dc712cb1b8718a2dfcba592bb390c153d4666b73c3a797f0d67380b499', 'sites': ((3613, 68, 71, 'int', '503'), (3618, 69, 72, 'int', '503'), (3622, 67, 70, 'int', '503'))}
+# Accepted Office READ adds only one module declaration; all prior bytes and
+# three HTTP-status operands are exact Root6a. Source-only pin, no runtime grant.
+# C20 combined native-v2 and protected company-priorities auth source.
+# Exact unchanged three HTTP-status operands mapped from the protected source;
+# self-review plus source guard tests, never a runtime or OS identity grant.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '90f49b0b038762e4ac554e3a4c0b67115b1358f704573349a7f9e76e5f3eb7da', 'sites': ((3618, 68, 71, 'int', '503'), (3623, 69, 72, 'int', '503'), (3627, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}
@@ -745,8 +750,15 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'fe28ea9
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "7531a99e59e878aecc1df9d0bf0b6a388a8b1af3dfd5f8d3035a9beb5c91edf6",
+    "sha256": "cd9b97a999f868084c1b53067ec7bbe3a9ef469319b4077b0ccec33404b68735",
     "sites": ((23, 17, 20, "int", "512"),),
+}
+
+# HTTPX 0.28.1 donor same-host HTTPS upgrade: standard HTTPS port only. No principal,
+# UID/GID or fleet selection. Full archive/site drift restores ordinary D8.
+REVIEWED_FILES["integrations/hermes_runtime/tests/fixtures/transport_observation/httpx___client.py.source"] = {
+    "sha256": "c43f941baefe58c91e96d00039e1868fe719d91453026d7db1647194563bff8d",
+    "sites": ((73, 42, 45, "int", "443"),),
 }
 
 # Fixed Secretary wire-response byte ceiling, not an OS identity. The complete
