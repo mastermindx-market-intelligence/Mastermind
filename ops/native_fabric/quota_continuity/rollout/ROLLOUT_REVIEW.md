@@ -795,3 +795,14 @@ The missing-directory counterexample reproduced as one test/one failure. Adding 
 The changed Macro provider factory was separately exercised with actual 5ca Mastermind inference consumers and required production/Fabric fixture flags: 47 passes, zero failures/errors/skips, exit0. Exact source archives and log SHA256 d5f3160abe22ac3b2497bab2e42ff2033c91355c1df3e119bd286a466685f6bb are now durably recorded in hardening-current-provider-inference-20261107.json. This is a separate run from the retained 198-case earlier-provider proof, not installed acceptance. All native executable, builder and manifest inputs remain at the qualified 17ed identities.
 
 The preceding f790 collector projection is now explicitly historical. Original #2175 source 2cf01336ba7f7e5bc2011f50c0319892ddebb292 advances the collector to 5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d and retains a pending native companion on the original operation. Those earlier static successor hashes must not be used as the current cohort identity. The active companion's overlapping builder/manifest/inventory/test fence is preserved; this CI-only repair does not implement a competing native inverse or consume its uncertain result.
+
+
+## 2026-11-07: original J package and sparse executor composition
+
+Consumed original collector/private-J publication `2b8343dd43d2600d4c304977b125118e7ea36348` and recovered the original native package worker's complete four-path artifact (`a71bac2d11eefbc5b56b4b72dab432279d7e2c6de860bfbc0bf83443aaf0c307`). Its commissioned base reproduced all three real builds and 148 stage cases. The original return and its failed incomplete-export attempt remain in the source receipt.
+
+The actual combined source retains the sparse executor and pool publisher. Exact whole-parent checks now admit the separately qualified collector successor at each existing inverse; all 54 previous literal assignments and historical fixture bytes stay fixed. Actual 107/109/112 manifests are `bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e`, `ce7f661017ca993602eaefbe0a3be91df3965689eea9368394e66e9942ad5646`, and `677c3b585e171a99915c764d41ad6a36cfb200aa6c91374744532e7128c1a812`.
+
+The 188-case stage suite passed within the 374-case consumer run. That larger run had 367 passes, six Linux-only skips, and one publisher failure caused by PyYAML being present only in the host user site, which the actual publisher correctly excludes. Installing PyYAML6.0.3 inside the disposable proof venv made the exact affected case pass; the failed run is retained. No guard or assertion was weakened. See `review_evidence/fabric_application/hardening-j-sparse-package-composition-20261107.json`.
+
+This is source composition, not native selection, runtime enrollment, reconciliation of the separate original J driver, or measured availability.

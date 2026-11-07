@@ -196,6 +196,12 @@ GO_PARTICIPANT_OPERATOR = "90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f
 GO_PARTICIPANT_OPERATOR_PREIMAGE = "f81b4f053a22ba973b06214f6d06ed2d66e3fc471c781311f074718683cf4675"
 GO_BASE_ORIGINAL_COLLECTOR_SHA256 = "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183"
 GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256 = "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83"
+# Exact committed successor of the closed original-collection collector: the J
+# repair that preserves completed/uncertain original results. It replaces
+# exactly one member of the complete current107 closure, so every parent
+# closure below is re-derived for that lineage while the prior lineage and the
+# historical collector stay accepted. No other source or entrypoint hash moves.
+GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256 = "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d"
 
 
 GO_ORIGINAL_ARTIFACT_ADDITIONS = {
@@ -223,6 +229,10 @@ GO_REQUEST_REFUSAL_TASK_DIGEST = "2d66d51376b4bfd9740947988777809ee53c0314d7155a
 # unrelated or mixed complete parents remain ineligible.
 ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256 = "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
 ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256 = "3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9"
+# The same APPLICATION carrier closure with the one committed
+# original-collection successor member. The protected WORKER closure above is
+# a frozen historical fixture and keeps its own exact parent.
+ADMISSION_INTEGRITY_APPLICATION_SUCCESSOR_PARENT_MANIFEST_SHA256 = "6d8adb18ece5b01dadb8ea60aa868e490f78d4371898934d63ea2e30b66eab82"
 ADMISSION_INTEGRITY_PREIMAGES = {
     "ext/fabric_task.py": GO_REQUEST_REFUSAL_TASK_DIGEST,
     "ext/lane_runtime.py": GO_CENSUS_EXIT_RUNTIME_DIGEST,
@@ -248,7 +258,8 @@ def before_admission_integrity(manifest):
     parent_identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
     if parent_identity == ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256:
         return previous
-    if (parent_identity == ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256
+    if (parent_identity in (ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256,
+                            ADMISSION_INTEGRITY_APPLICATION_SUCCESSOR_PARENT_MANIFEST_SHA256)
             and all(previous.get("ext/" + name) == digest
                     for name, digest in APPLICATION_CARRIER_DIGESTS.items())):
         return previous
@@ -275,6 +286,9 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     Ubuntu4 and poll cohorts. Every other member/key stays bound to actual395b.
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
+    The committed successor of that collector is accepted the same way, so the
+    prior published generation keeps validating and no historical namespace can
+    be relabeled with either forward collector.
     """
     actual_manifest = manifest
     manifest = normalize_application_carrier_base_manifest(manifest)
@@ -368,8 +382,10 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     historical["ext/provider_outcome.py"] = GO_BASE_PROVIDER_OUTCOME_SHA256
     collector = manifest["ext/original_delivery_collector.py"]
     if (collector not in {GO_BASE_ORIGINAL_COLLECTOR_SHA256,
-                          GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256}
-            or (collector == GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256
+                          GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256,
+                          GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256}
+            or (collector in {GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256,
+                              GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256}
                 and set(manifest) != expected)):
         raise ValueError("native Go original collector is not the exact current source")
     historical["ext/original_delivery_collector.py"] = GO_BASE_ORIGINAL_COLLECTOR_SHA256
@@ -559,6 +575,10 @@ APPLICATION_CARRIER_PREIMAGES = {
     "support_bundle.py": "212df1af82652235ea10c9cabe95400aa40f8e819c6d5ef4c15666dbbfca3a4b"
 }
 APPLICATION_CARRIER_BASE_SHA256 = "e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4"
+# The same APPLICATION carrier base with the one committed original-collection
+# successor member; the prior lineage stays accepted for the published
+# generation and its frozen fixtures.
+APPLICATION_CARRIER_SUCCESSOR_BASE_SHA256 = "a68a4af9834da02d85ac00300ccaf0540c0fbccedd9c3a7c883157696558df35"
 
 
 # One complete successor of #2194's exact two-repair APPLICATION closure.
@@ -568,6 +588,10 @@ APPLICATION_CARRIER_BASE_SHA256 = "e43384b1bfdae31d694f6771455dc32681241c80ec18e
 # parent is the already qualified sparse-executor successor; older pins stay fixed.
 APPLICATION_POOL_COMPOSITION_PARENT_SHA256 = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
 APPLICATION_POOL_COMPOSITION_SPARSE_PARENT_SHA256 = "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+# The original-collection successor has exact parents with and without the
+# qualified sparse executor. Historical parent identities remain unchanged.
+APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256 = "4f6a64b8b22188c324923b4575dcc1b6490ca59df21ba303d9f16db0f6fd6552"
+APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256 = "2ebfb9435053b90e4ce3bf9dfc6780460f6b2669f070c40c16f5772e928c9608"
 APPLICATION_POOL_COMPOSITION_PREIMAGES = {
     "ext/support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
     "ext/go_lease_gateway.py": "df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1",
@@ -594,7 +618,9 @@ def before_application_pool_composition(manifest):
     previous.update(APPLICATION_POOL_COMPOSITION_PREIMAGES)
     identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
     if identity not in (APPLICATION_POOL_COMPOSITION_PARENT_SHA256,
-                        APPLICATION_POOL_COMPOSITION_SPARSE_PARENT_SHA256):
+                        APPLICATION_POOL_COMPOSITION_SPARSE_PARENT_SHA256,
+                        APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256,
+                        APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256):
         raise ValueError("application pool composition parent closure differs")
     return previous
 
@@ -605,6 +631,7 @@ def before_application_pool_composition(manifest):
 SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE = "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea"
 SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST = "d15238fa70942463de99ca4f7679ad9e27d6b91f9034ac792f903efd1c22cafc"
 SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256 = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+SPARSE_COMMIT_PREFLIGHT_SUCCESSOR_PARENT_MANIFEST_SHA256 = APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256
 
 
 # Exact published scoped-model successor from APPLICATION d5df6b2. Only the
@@ -619,6 +646,7 @@ EXACT_SCOPED_MODEL_DIGESTS = {
     "ext/lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
 }
 EXACT_SCOPED_MODEL_PARENT_MANIFEST_SHA256 = "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+EXACT_SCOPED_MODEL_SUCCESSOR_PARENT_MANIFEST_SHA256 = APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256
 
 
 def before_exact_scoped_models(manifest):
@@ -633,7 +661,8 @@ def before_exact_scoped_models(manifest):
     previous = dict(manifest)
     previous.update(EXACT_SCOPED_MODEL_PREIMAGES)
     identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
-    if identity != EXACT_SCOPED_MODEL_PARENT_MANIFEST_SHA256:
+    if identity not in (EXACT_SCOPED_MODEL_PARENT_MANIFEST_SHA256,
+                        EXACT_SCOPED_MODEL_SUCCESSOR_PARENT_MANIFEST_SHA256):
         raise ValueError("native scoped-model parent closure differs")
     return previous
 
@@ -646,7 +675,8 @@ def before_sparse_commit_preflight(manifest):
     previous = dict(manifest)
     previous["ext/remote_sub_exec.py"] = SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE
     identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
-    if identity != SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256:
+    if identity not in (SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256,
+                        SPARSE_COMMIT_PREFLIGHT_SUCCESSOR_PARENT_MANIFEST_SHA256):
         raise ValueError("native sparse commit preflight parent closure differs")
     return previous
 
@@ -700,7 +730,8 @@ def normalize_application_carrier_base_manifest(manifest):
     historical.update({"ext/" + name: expected
                        for name, expected in APPLICATION_CARRIER_PREIMAGES.items()})
     identity = sha((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode())
-    if identity != APPLICATION_CARRIER_BASE_SHA256:
+    if identity not in (APPLICATION_CARRIER_BASE_SHA256,
+                        APPLICATION_CARRIER_SUCCESSOR_BASE_SHA256):
         raise ValueError("application carrier cannot relabel a prior or mixed native base")
     return historical
 
