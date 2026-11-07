@@ -323,10 +323,28 @@ match to the frozen public label. A differing label stays unavailable/conflictin
 Exactly one correlated physical session can yield the fingerprint of
 `[original_profile_id, native_agent_session_id]`; multiple IDs stay conflicting.
 
+Transport observation v2 also retains a digest and UTF-8 byte length of the
+actual adopted agent's runtime provider selector at each dispatch and each HTTP
+attempt. The `provider_client_check` field records selector equality at the
+qualified original client-factory return; it does not attest the factory's
+internal inputs or copied client kwargs. Samples do not prove continuous
+identity between boundaries. Conflict or unavailability remains sticky within
+the dispatch. These fields
+share the existing 16 KiB metadata budget. Historical transport v1 remains
+closed and unchanged, with no inferred provider observation.
+
+After the same complete request/content joins, `execution.provider` may identify
+the frozen public selector only when every dispatch/client/attempt witness
+matches its exact bytes. For the supported named Z.ai route this is `custom`,
+the actual native runtime selector. It does not identify a remote operator,
+prove that a request arrived, or replace `requested_provider="zai-glm"` with a
+model label. Missing witnesses stay unavailable; observed disagreements stay
+conflicting. Current transport producer and reader must be released together.
+
 Provider request coverage remains partial. Response-reported labels do not prove
 the serving model. Explicit wire sampling digests remain in the trace and are not
 relabeled as complete effective sampling. Network-origin hashes are not EVAL
-destination-string digests. Unobserved provider/auth, effective environment,
+destination-string digests. Unobserved auth, effective environment,
 freshness, capability/source/network coverage, effects and cleanup stay missing or
 unknown. This publisher therefore creates invalid v3 evidence of attempts,
 never a valid Harness2 trial or learning promotion.

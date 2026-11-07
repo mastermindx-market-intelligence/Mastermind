@@ -18,6 +18,8 @@ import httpx
 from integrations.hermes_runtime import native_eval_inputs as inputs
 from integrations.hermes_runtime import native_eval_publication as publication
 from integrations.hermes_runtime import native_session_control as control
+from integrations.hermes_runtime import native_request_observation as observation
+from integrations.hermes_runtime import native_transport_observation as transport
 from integrations.hermes_runtime.errors import RuntimeRefusal
 from integrations.hermes_runtime.tests.test_native_eval_inputs import (
     admission_db, compile_selected, marker, source_owner, trial,
@@ -25,6 +27,7 @@ from integrations.hermes_runtime.tests.test_native_eval_inputs import (
     current_result, signed, rsa_key, joined, owner, env, isolated_git_env, identity,
 )
 from integrations.hermes_runtime.tests.test_native_request_observation import module
+from integrations.hermes_runtime.tests.test_native_transport_observation import run_call, retained_read, sdk
 from scripts.agent_eval.canonical import canonical_json_bytes
 from scripts.agent_eval.errors import ContractDefect, ContractError
 
@@ -370,8 +373,10 @@ def test_existing_artifact_is_not_proof_of_original_frozen_publication(original,
 
 
 @pytest.fixture
-def wire_projection(lifecycle, engine, tmp_path, monkeypatch):
+def wire_projection(lifecycle, engine, tmp_path, monkeypatch, request):
     openai = pytest.importorskip("openai")
+    mode = getattr(request, "param", "ordinary")
+    selected = {}
     t = native_trial(lifecycle, tmp_path)
     original_turn = lifecycle.turn_for
     def turn_for(*args, **kwargs):
@@ -387,22 +392,44 @@ def wire_projection(lifecycle, engine, tmp_path, monkeypatch):
     bodies = []
     def handler(request):
         bodies.append(json.loads(request.content))
+        if mode == "raised_attempt":
+            raise httpx.ConnectError("fixture transport loss", request=request)
+        if mode == "retry_restore" and len(bodies) <= 2:
+            selected["agent"].provider = "PRIVATE_OTHER_PROVIDER" if len(bodies) == 1 else selected["provider"]
+            return httpx.Response(500, headers={"retry-after-ms": "1"}, json={"error": {"message": "fixture"}})
+        # Restore after the observed edge: a later correct label cannot erase
+        # a different selector measured at client creation or an earlier send.
+        selected["agent"].provider = selected["provider"]
         return httpx.Response(200, json=success("glm-5.3"))
     def downstream(out):
+        selected.update(agent=out["agent"], provider=out["agent"].provider)
         extra, top = actual_custom_effort(out["agent"].reasoning_config["effort"])
         assert extra == {}
         out["kwargs"].update(top)
-        engine.invoke(out["agent"], out["kwargs"], lambda: openai.OpenAI(
-            api_key="synthetic-fixture", base_url="https://api.z.ai/api/paas/v4/", max_retries=0,
-            http_client=httpx.Client(transport=httpx.MockTransport(handler))), request_id="eval-request")
+        def make_client():
+            if mode == "factory_change":
+                out["agent"].provider = "PRIVATE_OTHER_PROVIDER"
+            hooks = {}
+            if mode == "send_change":
+                hooks = {"request": [lambda _request: setattr(out["agent"], "provider", "PRIVATE_OTHER_PROVIDER")]}
+            return openai.OpenAI(
+                api_key="synthetic-fixture", base_url="https://api.z.ai/api/paas/v4/",
+                max_retries=2 if mode == "retry_restore" else 0,
+                http_client=httpx.Client(transport=httpx.MockTransport(handler), event_hooks=hooks))
+        if mode == "raised_attempt":
+            with pytest.raises(openai.APIConnectionError):
+                engine.invoke(out["agent"], out["kwargs"], make_client, request_id="eval-request")
+        else:
+            engine.invoke(out["agent"], out["kwargs"], make_client, request_id="eval-request")
     out = execute_trial(lifecycle, t, after_request=downstream)
     receipt = {"admission_id": "eval-admission", "ref": {"profile_id": t.owner.profile_id, "session_id": t.session},
-        "sequence": 1, "status": "terminal", "outcome": "completed", "authority_epoch": 2, "execution_generation": 3}
+        "sequence": 1, "status": "terminal", "outcome": "failed" if mode == "raised_attempt" else "completed",
+        "authority_epoch": 2, "execution_generation": 3}
     # The native lifecycle fixture's role is mmsecretary. It exercises the same
     # selected private historical projection without enabling that role live.
     projected = control._project_original_result(receipt, out["marker"], out["saved"], role="mmsecretary")
     assert "request_observation" in projected and "evaluation_inputs" in projected
-    assert len(bodies) == 1
+    assert len(bodies) == (3 if mode == "retry_restore" else 1)
     def build(value=None):
         return publication._build_run(out["marker"], receipt, projected if value is None else value,
             finalizer_ref=t.owner.producer["runner_code_ref"], now="2026-11-08T00:00:00Z", missing_reason="NOT_OBSERVED")
@@ -413,6 +440,14 @@ def test_actual_sdk_and_pinned_worker_observations_feed_conservative_native_rece
     w = wire_projection
     run = w.build()
     assert run["execution"]["model_requested"] == "glm-5.3"
+    assert run["execution"]["provider"] == "custom"
+    runtime = w.projected["request_observation"]["transport"]
+    provider = transport._scalar("custom", "model")
+    assert runtime["schema"] == transport.SCHEMA
+    assert all(row["runtime_provider"] == provider and row["provider_client_check"] == "matched"
+        for row in runtime["dispatches"])
+    assert all(row["runtime_provider"] == provider for row in runtime["attempts"])
+    assert run["execution"]["auth_realm_class"] is None
     assert run["execution"]["reasoning_effort"] == "low" and run["randomness"]["seed"] == 0
     assert run["execution"]["process_fingerprint"] is not None
     assert run["execution"]["native_session_fingerprint"] is not None
@@ -456,8 +491,116 @@ def test_ambiguous_or_changed_cross_boundary_payload_never_exports_scalar_eviden
         obs["observations"].append(copy.deepcopy(obs["observations"][0]))
     run = w.build(value)
     assert run["execution"]["model_requested"] is None
+    assert run["execution"]["provider"] is None
     assert run["execution"]["reasoning_effort"] is None
     assert run["randomness"]["seed"] is None
+
+
+def historical_transport(value):
+    value = copy.deepcopy(value)
+    value["schema"] = transport.PREVIOUS_SCHEMA
+    for record in value["dispatches"]:
+        record.pop("runtime_provider")
+        record.pop("provider_client_check")
+    for record in value["attempts"]:
+        record.pop("runtime_provider")
+    return value
+
+
+def test_transport_v1_remains_closed_and_survives_the_original_retained_reader(engine, monkeypatch):
+    doc, carrier = run_call(engine, lambda: sdk(lambda request: httpx.Response(200, json=success())))
+    saved, read = retained_read(engine, carrier, monkeypatch)
+    legacy = historical_transport(doc["transport"])
+    assert transport.validate_document(legacy) == legacy
+    saved[observation.RESULT_KEY]["transport"] = legacy
+    assert read()["request_observation"]["transport"] == legacy
+    legacy["dispatches"][0]["runtime_provider"] = doc["transport"]["dispatches"][0]["runtime_provider"]
+    assert read()["request_observation_error"] == "INVALID_RETAINED_OBSERVATION"
+
+
+@pytest.mark.parametrize("change", ["missing", "raw_label", "false_match", "attempt_shape", "schema"])
+def test_provider_projection_is_closed_in_the_authenticated_retained_reader(engine, monkeypatch, change):
+    _, carrier = run_call(engine, lambda: sdk(lambda request: httpx.Response(200, json=success())))
+    saved, read = retained_read(engine, carrier, monkeypatch)
+    value = saved[observation.RESULT_KEY]["transport"]
+    dispatch, attempt = value["dispatches"][0], value["attempts"][0]
+    if change == "missing":
+        dispatch.pop("runtime_provider")
+    elif change == "raw_label":
+        dispatch["runtime_provider"]["value"] = "PRIVATE_PROVIDER"
+    elif change == "false_match":
+        dispatch["runtime_provider"] = {"status": "absent"}
+    elif change == "attempt_shape":
+        attempt["runtime_provider"] = {"status": "present", "value": "PRIVATE_PROVIDER"}
+    else:
+        value["schema"] += "-unknown"
+    observed = read()
+    assert observed["request_observation_error"] == "INVALID_RETAINED_OBSERVATION"
+    assert observed["answer"] == "[redacted]" and "PRIVATE_PROVIDER" not in json.dumps(observed)
+
+
+@pytest.mark.parametrize("wire_projection", ["factory_change", "send_change", "retry_restore"], indirect=True)
+def test_actual_provider_changes_cannot_be_hidden_by_restored_agent_labels(wire_projection):
+    w = wire_projection
+    run = w.build()
+    assert run["execution"]["provider"] is None
+    unavailable = {item["path"]: item["reason"] for item in run["observation_availability"]["unavailable"]}
+    assert unavailable["execution.provider"] == "OBSERVATION_CONFLICT"
+    assert run["execution"]["model_requested"] == "glm-5.3"
+    assert "PRIVATE_OTHER_PROVIDER" not in json.dumps(w.projected)
+    if len(w.bodies) == 3:
+        attempts = w.projected["request_observation"]["transport"]["attempts"]
+        assert [a["runtime_provider"] for a in attempts] == [
+            transport._scalar(label, "model") for label in ("custom", "PRIVATE_OTHER_PROVIDER", "custom")]
+    assert run["effect"]["state"] == "EFFECT_UNKNOWN" and run["validity"]["status"] != "VALID"
+
+
+@pytest.mark.parametrize("wire_projection", ["raised_attempt"], indirect=True)
+def test_raised_original_http_attempt_still_measures_runtime_selector_without_delivery(wire_projection):
+    value = wire_projection.projected["request_observation"]["transport"]
+    run = wire_projection.build()
+    assert value["attempts"][0]["state"] == "raised" and value["attempts"][0]["response"] is None
+    assert run["execution"]["provider"] == "custom" and run["execution"]["completion_status"] == "FAILED"
+    assert run["execution"]["model_served"] is None
+    assert value["provider_delivery_proven"] is value["model_identity_verified"] is False
+    assert run["validity"]["status"] != "VALID"
+
+
+@pytest.mark.parametrize("change", ["historical_v1", "dispatch_missing", "attempt_missing", "client_missing",
+    "client_conflict", "dispatch_conflict", "attempt_conflict", "overflow", "entered", "missing_attempt"])
+def test_provider_scalar_requires_every_retained_original_witness(wire_projection, change):
+    from integrations.hermes_runtime import native_transport_observation as transport
+    value = copy.deepcopy(wire_projection.projected)
+    doc = value["request_observation"]["transport"]
+    dispatch, attempt = doc["dispatches"][0], doc["attempts"][0]
+    if change == "historical_v1":
+        doc = value["request_observation"]["transport"] = historical_transport(doc)
+    elif change == "dispatch_missing":
+        dispatch["runtime_provider"] = {"status": "unobserved"}
+        dispatch["provider_client_check"] = "unavailable"
+    elif change == "attempt_missing":
+        attempt["runtime_provider"] = {"status": "unobserved"}
+    elif change == "client_missing":
+        dispatch["provider_client_check"] = "unavailable"
+    elif change == "client_conflict":
+        dispatch["provider_client_check"] = "conflicting"
+    elif change in {"dispatch_conflict", "attempt_conflict"}:
+        target = dispatch if change == "dispatch_conflict" else attempt
+        target["runtime_provider"] = transport._scalar("other-runtime-selector", "model")
+    elif change == "overflow":
+        doc["overflow"] = True
+    elif change == "entered":
+        dispatch.update(state="entered", finished_at_ms=None, duration_ms=None)
+    else:
+        doc["attempts"] = []
+    assert transport.validate_document(doc) == doc
+    run = wire_projection.build(value)
+    assert run["execution"]["provider"] is None and run["validity"]["status"] != "VALID"
+    unavailable = {item["path"]: item["reason"] for item in run["observation_availability"]["unavailable"]}
+    assert unavailable["execution.provider"] == ("OBSERVATION_CONFLICT" if change.endswith("conflict") else "NOT_OBSERVED")
+    if change == "historical_v1":
+        assert run["execution"]["model_requested"] == "glm-5.3"
+        assert run["randomness"]["seed"] == 0 and run["execution"]["reasoning_effort"] == "low"
 
 
 def test_future_wall_clock_does_not_invent_time_or_block_honest_invalid_receipt(wire_projection):

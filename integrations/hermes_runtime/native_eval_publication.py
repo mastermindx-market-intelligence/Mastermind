@@ -221,6 +221,23 @@ def _wire_observations(draft, unavailable, observation, marker, selected_inputs)
         if (attempt["request"]["content_sha256"] != event["content_sha256"]
                 or attempt["request"]["content_fields"] != event["fields"]):
             return
+    from .native_transport_observation import SCHEMA as CURRENT_TRANSPORT_OBSERVATION
+    if transport["schema"] == CURRENT_TRANSPORT_OBSERVATION:
+        # Identify the frozen public runtime selector only when its label
+        # matched samples at dispatch, original factory return and every
+        # retained HTTP-send boundary. This does not attest factory inputs,
+        # client endpoint configuration, remote identity or delivery.
+        selected_provider = marker["configuration"]["execution"]["provider"]
+        provider_bytes = selected_provider.encode("utf-8")
+        expected_provider = {"status": "observed_digest",
+            "sha256": hashlib.sha256(provider_bytes).hexdigest(), "bytes": len(provider_bytes)}
+        witnesses = [row["runtime_provider"] for row in (*dispatches, *attempts)]
+        if (any(row["provider_client_check"] == "conflicting" for row in dispatches)
+                or any(item["status"] == "observed_digest" and item != expected_provider for item in witnesses)):
+            unavailable["execution.provider"] = "OBSERVATION_CONFLICT"
+        elif (all(row["provider_client_check"] == "matched" for row in dispatches)
+                and all(item == expected_provider for item in witnesses)):
+            draft["execution"]["provider"] = selected_provider
     physical_ids = {row["identity"].get("agent_session_id") for row in calls}
     if len(physical_ids) == 1:
         draft["execution"]["native_session_fingerprint"] = digest_value([
