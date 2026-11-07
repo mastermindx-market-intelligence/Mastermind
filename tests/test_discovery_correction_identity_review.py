@@ -4,8 +4,8 @@ import pytest
 
 RECORDS = {
     "app/mastermind_os/src-tauri/src/auth.rs": (
-        "c6d6589fed23633189e2556662cb02261f7b6f94519932d32c9b868d25cfb315",
-        ((3677, 68, 71, "int", "503"), (3682, 69, 72, "int", "503"), (3686, 67, 70, "int", "503"))),
+        "57b58e9fa3bca82cb9185e590ab360bb0cf89bc214bec2f60d41cc5413908609",
+        ((3678, 68, 71, "int", "503"), (3683, 69, 72, "int", "503"), (3687, 67, 70, "int", "503"))),
     "app/mastermind_os/src/fixtures/discovery-correction-owner.json": (
         "363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f",
         ((163, 18, 21, "int", "401"),)),

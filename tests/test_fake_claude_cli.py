@@ -813,9 +813,22 @@ def test_fake_state_lock_refuses_a_concurrent_process_without_losing_updates(tmp
     try:
         state_path = tmp_path / "state.json"
         deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline and not state_path.exists():
+        # The fake first records its start, then its evidence read/submission.
+        # File existence alone races that second write under a loaded runner.
+        state = None
+        while time.monotonic() < deadline:
+            assert first.poll() is None
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                # The original process has not committed its readiness state.
+                state = None
+            if state is not None and all(state[key] == 1 for key in ("starts", "reads", "submissions")):
+                break
             time.sleep(0.01)
-        assert state_path.exists()
+        assert state is not None
+        assert state["starts"] == state["reads"] == state["submissions"] == 1
+        assert first.poll() is None
 
         second = _run(
             command.argv,
@@ -823,6 +836,7 @@ def test_fake_state_lock_refuses_a_concurrent_process_without_losing_updates(tmp
             environment=second_environment,
         )
 
+        assert first.poll() is None
         assert second.returncode == 73
         assert second.stdout == b""
         assert second.stderr == b"fake claude: state lock rejected\n"
