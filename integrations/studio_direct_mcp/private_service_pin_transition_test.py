@@ -1288,19 +1288,19 @@ class ForwardPinTransitionTests(unittest.TestCase):
                 mock.patch.object(svc, "_pin_forward_native_context", self.forward_context):
             with self.assertRaises(SystemExit):
                 self.invoke()
-            with self.assertRaises(OSError):
+            with self.assertRaisesRegex(SystemExit, "NATIVE_POOL_PIN_FORWARD_EFFECT_UNKNOWN_DURABILITY"):
                 svc._pin_require_start(self.account, self.roots)
 
 
 
 REAL_FORWARD_PROOF = '''
-"""One real disposable intact-Go forward pin proof.
+"""One real disposable intact or retained Go forward pin proof.
 
 This process owns the real native kit and the real native transition. It
 publishes the kit identity, refuses the native apply while one old Studio
 seat still pins the old pool bridge, waits for the forward pin to land, then
-commits the real intact-Go transition exactly once. No native work, CAS or
-admission is mocked and no live path is read.
+commits the real selected Go transition exactly once. Native readers, CAS and
+admission run against real fixture artifacts; no live path is read.
 """
 import json
 import os
@@ -1312,12 +1312,15 @@ from unittest import mock
 import pytest
 
 REPO = Path(%(repo)r)
+RETAINED = %(retained)r
 sys.path.insert(0, str(REPO / "ops/native_fabric/quota_continuity/tests"))
 sys.path.insert(0, str(REPO / "tests"))
 sys.path.insert(0, str(REPO / "integrations/studio_direct_mcp"))
 
 from test_go_native_install import (  # noqa: F401
     go_owner,
+    retained_go_owner,
+    assert_retained_history,
     native_stage,
     owner,
 )
@@ -1349,18 +1352,32 @@ def wait_for(name, seconds=300):
     raise AssertionError("forward proof step did not arrive: " + name)
 
 
-def test_real_forward_pin_moves_a_seat_onto_the_intact_go_ingress(go_owner):
-    case = go_owner
-    plan = case.go_plan
-    bundle = case.go_bundle
+def test_real_forward_pin_moves_a_seat_onto_the_go_ingress(request):
+    case = request.getfixturevalue("retained_go_owner" if RETAINED else "go_owner")
+    plan = case.retained_plan if RETAINED else case.go_plan
+    bundle = case.retained_bundle if RETAINED else case.go_bundle
+    apply = installer.apply_retained_go if RETAINED else installer.apply_go
+    if RETAINED:
+        assert not case.original.exists()
+        with pytest.raises((ValueError, OSError)):
+            installer.read_successor(case.successor)
+        installer.read_retained_successor_after_bootstrap_prune(case.successor)
+        assert_retained_history(case)
     entry = plan["entries"]["pool"]
     account = "chatgpt1"
 
     with launchd_fixture(), mock.patch.object(svc, "_user_root", return_value=HOME):
         roots, before_config, before_manifest = build_disposable_seat(
             svc, HOME, account, entry["target"], entry["previous"])
-        prior_bundle, prior, _, _, _ = installer._completed_successor(
-            plan["prior_successor_bundle"])
+        if RETAINED:
+            evidence = installer._retained_successor_evidence(
+                case.successor, original_absent=True, current_bridges=False)
+            prior_bundle, prior = evidence["bundle"], evidence["plan"]
+        else:
+            prior_bundle, prior, _, _, _ = installer._completed_successor(
+                plan["prior_successor_bundle"])
+        assert prior["digest"] == plan["prior_successor_digest"]
+        assert prior["bootstrap_digest"] == plan["bootstrap_digest"]
         prior_pool = prior["entries"]["pool"]
         original_binding = {
             "successor_bundle": str(prior_bundle),
@@ -1381,7 +1398,7 @@ def test_real_forward_pin_moves_a_seat_onto_the_intact_go_ingress(go_owner):
         # One old Studio seat still pins the old pool bridge: the real native
         # transition is refused before any ingress write.
         with pytest.raises(ValueError, match="STUDIO_CONSUMER_PIN_MIGRATION_REQUIRED"):
-            installer.apply_go(bundle)
+            apply(bundle)
         assert g.current(case.store) == plan["expected_selection"]
         assert not (case.store / "bootstrap/.go-application-ingress-v1.json").exists()
 
@@ -1392,21 +1409,43 @@ def test_real_forward_pin_moves_a_seat_onto_the_intact_go_ingress(go_owner):
         "pool_bridge": entry["bridge"],
         "pool_previous": entry["previous"],
         "go_digest": plan["digest"],
+        "go_schema": plan["schema"],
         "account": account,
+        "retained": RETAINED,
+        "retained_pins": case.pins if RETAINED else None,
+        "retained_status_plan_digest": case.successor_plan["digest"] if RETAINED else None,
     }))
 
     wait_for("forward.done")
     with mock.patch.object(installer.studio_consumer_owner,
                            "STUDIO_CONSUMER_ROOT", CONSUMERS):
-        receipt = installer.apply_go(bundle)
-    assert receipt["schema"] == installer.GO_SCHEMA
-    assert receipt["selection"] == g.current(case.store)
-    assert g.digest(Path(entry["target"]).read_bytes()) == entry["bridge"]
+        receipt = apply(bundle)
+    assert receipt["schema"] == (installer.GO_RETAINED_SCHEMA if RETAINED else installer.GO_SCHEMA)
+    selected = {"schema": g.POINTER_SCHEMA, "generation": plan["target_generation"],
+                "previous": plan["expected_selection"]["generation"],
+                "sequence": plan["expected_selection"]["sequence"] + 1}
+    assert receipt["selection"] == g.current(case.store) == selected
+    assert set(plan["entries"]) == {"pool", "task", "go", "remote"}
+    for name, installed in plan["entries"].items():
+        expected = installed["previous"] if name == "remote" else installed["bridge"]
+        assert g.digest(Path(installed["target"]).read_bytes()) == expected
+    if RETAINED:
+        # This old public reader must now reject the replaced live bridges.
+        # The Studio forward path must instead authenticate retained history.
+        with pytest.raises(ValueError):
+            installer.read_retained_successor_after_bootstrap_prune(case.successor)
+        historical = installer._retained_successor_evidence(
+            case.successor, original_absent=True, current_bridges=False)
+        assert historical["plan"]["digest"] == plan["prior_successor_digest"]
+        assert_retained_history(case)
     (WORK / "applied.json").write_text(json.dumps({
         "receipt": receipt,
         "selection": g.current(case.store),
     }))
     wait_for("proof.done")
+    assert g.current(case.store) == selected
+    if RETAINED:
+        assert_retained_history(case)
 '''
 
 
@@ -1438,7 +1477,51 @@ class RealIntactGoForwardTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         return json.loads(out.getvalue())
 
+    @contextmanager
+    def native_fixture_proof(self, kit):
+        """Share only the existing fixture's two trust anchors with its importer.
+
+        The isolated process executes the unchanged generated native proof body
+        and actual readers. No production override or synthetic proof JSON exists.
+        Unrelated subprocesses are forwarded unchanged.
+        """
+        if not kit["retained"]:
+            yield
+            return
+        run = subprocess.run
+        prefix = (
+            "import sys,json\n"
+            "sys.path.insert(0,sys.argv[1])\n"
+            "import native_install as fixture_owner\n"
+            "fixture_owner.RETAINED_STATUS_PROOF_SHA256=json.loads(sys.argv[3])\n"
+            "fixture_owner.RETAINED_STATUS_PLAN_DIGEST=sys.argv[4]\n"
+        )
+        calls = []
+        def with_fixture_pins(command, *args, **kwargs):
+            if (isinstance(command, (list, tuple)) and "-c" in command
+                    and command[0] == sys.executable and command[-1] == kit["bundle"]):
+                position = command.index("-c") + 1
+                body = command[position]
+                if "import native_install as i" in body:
+                    self.assertIn("plan,payloads=i.read_retained_go(bundle)", body)
+                    adapted = list(command)
+                    adapted[position] = prefix + body
+                    adapted.extend((json.dumps(kit["retained_pins"], sort_keys=True),
+                                    kit["retained_status_plan_digest"]))
+                    calls.append(body)
+                    return run(adapted, *args, **kwargs)
+            return run(command, *args, **kwargs)
+        with mock.patch.object(subprocess, "run", with_fixture_pins):
+            yield
+        self.assertTrue(calls)
+
     def test_real_forward_pin_commits_with_the_native_go_transition(self):
+        self.run_real_forward(False)
+
+    def test_real_forward_pin_commits_after_retained_go_replaces_old_bridges(self):
+        self.run_real_forward(True)
+
+    def run_real_forward(self, retained):
         repo = Path(svc.__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory() as temporary:
             self.work = (Path(temporary) / "forward-proof").resolve()
@@ -1446,7 +1529,7 @@ class RealIntactGoForwardTests(unittest.TestCase):
             home = self.work / "studio-home"
             home.mkdir(mode=0o700)
             proof = self.work / "test_forward_pin_proof.py"
-            proof.write_text(REAL_FORWARD_PROOF % {"repo": str(repo)})
+            proof.write_text(REAL_FORWARD_PROOF % {"repo": str(repo), "retained": retained})
             (self.work / "pytest.ini").write_text("[pytest]\n")
             environment = dict(os.environ, MM_FORWARD_WORK=str(self.work))
             process = subprocess.Popen(
@@ -1469,42 +1552,49 @@ class RealIntactGoForwardTests(unittest.TestCase):
             try:
                 kit = json.loads(
                     self.wait_for("kit.json", process, output).read_bytes())
-                account = kit["account"]
-                with launchd_fixture(), mock.patch.object(svc, "_user_root", return_value=home):
-                    roots = svc._build_runtime_roots(account)
-                    args = SimpleNamespace(
-                        account=account,
-                        forward_go_bundle=kit["bundle"],
-                        expected_plan_sha256=None,
-                        operation="preview")
-                    preview = self.capture(
-                        lambda: svc.cmd_native_pool_pin_forward(args))
-                    self.assertEqual(preview["effect"], "NOT_APPLIED")
-                    self.assertEqual(preview["goPlanSha256"], kit["go_digest"])
-                    args.expected_plan_sha256 = preview["planSha256"]
-                    args.operation = "apply"
-                    applied = self.capture(
-                        lambda: svc.cmd_native_pool_pin_forward(args))
-                    self.assertEqual(applied["effect"], "APPLIED")
-                    self.assertEqual(applied["poolBridgeSha256"], kit["pool_bridge"])
-                    config = json.loads(roots["config"].read_bytes())
+                with self.native_fixture_proof(kit):
+                    account = kit["account"]
+                    with launchd_fixture(), mock.patch.object(svc, "_user_root", return_value=home):
+                        roots = svc._build_runtime_roots(account)
+                        args = SimpleNamespace(
+                            account=account,
+                            forward_go_bundle=kit["bundle"],
+                            expected_plan_sha256=None,
+                            operation="preview")
+                        preview = self.capture(
+                            lambda: svc.cmd_native_pool_pin_forward(args))
+                        self.assertEqual(preview["effect"], "NOT_APPLIED")
+                        self.assertEqual(preview["goPlanSha256"], kit["go_digest"])
+                        args.expected_plan_sha256 = preview["planSha256"]
+                        args.operation = "apply"
+                        applied = self.capture(
+                            lambda: svc.cmd_native_pool_pin_forward(args))
+                        self.assertEqual(applied["effect"], "APPLIED")
+                        self.assertEqual(applied["poolBridgeSha256"], kit["pool_bridge"])
+                        config = json.loads(roots["config"].read_bytes())
+                        self.assertEqual(
+                            config["fleetStatus"]["fabricLauncherSha256"],
+                            kit["pool_bridge"])
+                        # The prepared seat is start-held until the completed Go.
+                        with self.assertRaises(SystemExit):
+                            svc._pin_require_start(account, roots)
+                    (self.work / "forward.done").write_text("ok")
+                    applied_evidence = json.loads(
+                        self.wait_for("applied.json", process, output).read_bytes())
                     self.assertEqual(
-                        config["fleetStatus"]["fabricLauncherSha256"],
-                        kit["pool_bridge"])
-                    # The prepared seat is start-held until the completed Go.
-                    with self.assertRaises(SystemExit):
+                        applied_evidence["receipt"]["schema"],
+                        kit["go_schema"])
+                    with launchd_fixture(), mock.patch.object(svc, "_user_root", return_value=home):
+                        roots = svc._build_runtime_roots(account)
+                        # The same source path now proves start readiness and the
+                        # exact retained/intact identity after bridge replacement.
+                        args.operation = "status"
+                        with svc._pin_forward_native_context(args) as binding:
+                            self.assertEqual(binding["phase"], "SELECTED")
+                            self.assertEqual(binding["go_schema"], kit["go_schema"])
+                            self.assertEqual(binding["go_digest"], kit["go_digest"])
                         svc._pin_require_start(account, roots)
-                (self.work / "forward.done").write_text("ok")
-                applied_evidence = json.loads(
-                    self.wait_for("applied.json", process, output).read_bytes())
-                self.assertEqual(
-                    applied_evidence["receipt"]["schema"],
-                    "native-ingress-go-application.v1")
-                with launchd_fixture(), mock.patch.object(svc, "_user_root", return_value=home):
-                    roots = svc._build_runtime_roots(account)
-                    # The same source path now proves start readiness.
-                    svc._pin_require_start(account, roots)
-                (self.work / "proof.done").write_text("ok")
+                    (self.work / "proof.done").write_text("ok")
             finally:
                 (self.work / "abort.done").write_text("ok")
                 try:

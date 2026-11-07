@@ -373,20 +373,27 @@ class RegionalCases:
                 return self
             def __exit__(self, *_):
                 return False
-        original_thread = threading.Thread
-        def first_run_thread(target, **kwargs):
-            if kwargs.get("name") == self.book+"-first-run":
-                return SimpleNamespace(start=target)
-            return original_thread(target=target, **kwargs)
+        # Keep the actual Thread class: native HTTP deadlines construct Timer,
+        # whose initializer calls threading.Thread.__init__ directly.
+        original_start = threading.Thread.start
+        first_run_started = []
+        def first_run_start(thread):
+            if thread.name == self.book+"-first-run":
+                first_run_started.append(thread.name)
+                return thread.run()
+            return original_start(thread)
         receipts = []
         with patch.object(locks, "acquire_or_log", return_value=Lock()), \
              patch.object(scheduler, "_ledger_start", return_value=SimpleNamespace(run_id=self.run_id)), \
              patch.object(scheduler, "_ledger_end", side_effect=lambda *a, **k: receipts.append((a, k))), \
              patch.object(scheduler, "_post_mark_forward_evaluation"), \
              patch.object(cli_bridge, "available", side_effect=AssertionError("legacy readiness")), \
-             patch.object(threading, "Thread", side_effect=first_run_thread):
+             patch.object(threading.Thread, "start", first_run_start):
             self.assertTrue(getattr(scheduler, "maybe_first_"+self.book+"_run")())
-        self.assertEqual(self.original()["state"]["run_id"], self.run_id)
+        state = self.original()["state"]
+        self.assertEqual(state["run_id"], self.run_id)
+        self.assertEqual(state["phase"], "complete", state)
+        self.assertEqual(first_run_started, [self.book+"-first-run"])
         self.assertEqual(len(receipts), 1)
         before = self.counts()
         with patch.object(locks, "acquire_or_log", return_value=Lock()), \

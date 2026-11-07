@@ -1,0 +1,210 @@
+{
+  "schema": "hermes-final-qualified-source.v1",
+  "source_head": "1d43e5c74319c19e804f427199ad434494e52384",
+  "tested_merge": "3606db049f8ba37e9bfd70bd272d87d7888a9034",
+  "identical_source_tree": "69dbe135db4344d6adb577105dceacd808d53ec7",
+  "native_builds_and_local_enrollment": {
+    "schema": "hermes-final-composed-source-qualification.v1",
+    "head": "1d43e5c74319c19e804f427199ad434494e52384",
+    "tree": "69dbe135db4344d6adb577105dceacd808d53ec7",
+    "proof_root": "/private/tmp/mmx-hermes-final-qualification-_7s4adli",
+    "python": "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+    "builds": [
+      {
+        "files": 107,
+        "command": [
+          "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+          "--output",
+          "/private/tmp/mmx-hermes-final-qualification-_7s4adli/107"
+        ],
+        "exit_code": 0,
+        "log_sha256": "ef5ecce8e496b1a3b33095a641aac742037772d0f40ec6a45faac1d001220090",
+        "manifest_sha256": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+        "inventory_sha256": "f98a03d15d2f656e331d0b9d943321b8c1bd4384a114f619ff818dca0e647f40"
+      },
+      {
+        "files": 109,
+        "command": [
+          "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+          "--output",
+          "/private/tmp/mmx-hermes-final-qualification-_7s4adli/109",
+          "--include-go-application"
+        ],
+        "exit_code": 0,
+        "log_sha256": "c8a4c309d2fc80940ec196086311bc818f12bad7c338626a471ec2bf88b68081",
+        "manifest_sha256": "2ce4700472cbb617a3860dc53d512fc5a02dbabdf40e621e328cef72d962b5ba",
+        "inventory_sha256": "4b1408692955934d2d541f05f0937a9f0bb1c455ae5bac68bac96deb44c2c14d"
+      },
+      {
+        "files": 112,
+        "command": [
+          "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+          "--output",
+          "/private/tmp/mmx-hermes-final-qualification-_7s4adli/112",
+          "--include-go-application",
+          "--include-application-http"
+        ],
+        "exit_code": 0,
+        "log_sha256": "799d5343b939b42f425e794177f4f97c69a75e214458a43337c5f2e910f4646f",
+        "manifest_sha256": "80a2b1cdf539364b43073f24d86084d4ee19585dc46830f15e252a5864a2fdd6",
+        "inventory_sha256": "677001103f51d76185e4ae318e524733fe5c7ca56544ee9f351f4f74bd92a1a1"
+      }
+    ],
+    "state": "TEST_COMPLETED",
+    "command": [
+      "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "-o",
+      "addopts=",
+      "--noconftest",
+      "-p",
+      "no:cacheprovider",
+      "--junitxml=/tmp/mmx-hermes-final-enrollment.xml",
+      "tests/test_hermes_primary_application_enrollment.py",
+      "tests/test_hermes_primary_retained_enrollment.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_native_install.py",
+      "ops/native_fabric/quota_continuity/tests/test_retained_go_service_enrollment.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_service_startup.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_service_set_composition.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_service_family_composition.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_service_routed_composition.py",
+      "ops/native_fabric/quota_continuity/tests/test_go_service_workload_composition.py",
+      "ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py"
+    ],
+    "pid": 40914,
+    "timeout_seconds": 2700,
+    "started_at_epoch": 1794046882.749793,
+    "exit_code": 0,
+    "elapsed_seconds": 2091.46,
+    "log_sha256": "f82ff4fc93e45e43a55f079cc0ae32155187e3c7173051a876f14cc943f9a24b",
+    "junit": "/tmp/mmx-hermes-final-enrollment.xml",
+    "suites": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "0",
+        "tests": "385",
+        "time": "2090.482",
+        "timestamp": "2026-11-07T03:21:23.208877-07:00",
+        "hostname": "m2studio"
+      }
+    ],
+    "failures": [],
+    "head_after": "1d43e5c74319c19e804f427199ad434494e52384",
+    "tracked_source_unchanged": true
+  },
+  "host_memory": {
+    "schema": "hermes-host-memory-composition-qualification.v1",
+    "head": "1d43e5c74319c19e804f427199ad434494e52384",
+    "command": [
+      "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "--tb=short",
+      "-o",
+      "addopts=",
+      "--noconftest",
+      "-p",
+      "no:cacheprovider",
+      "--junitxml=/tmp/mmx-hermes-host-memory.xml",
+      "tests/test_hermes_primary_application_host.py",
+      "tests/test_hermes_primary_session_return.py",
+      "integrations/hermes_runtime/tests/test_native_agentos_memory.py",
+      "integrations/hermes_harness/tests/test_native_agentos_context.py",
+      "integrations/hermes_harness/tests/test_native_executive_consumer.py",
+      "tests/test_hermes_native_agentos_memory.py",
+      "tests/test_hermes_consumer_bootstrap.py",
+      "tests/test_hermes_diagnostic_privacy.py"
+    ],
+    "state": "TEST_COMPLETED",
+    "exit_code": 0,
+    "log_sha256": "f572243266d0c4f01ff38ac9e39c4e6b0c364e5022dcd82beced461834f75ac6",
+    "junit": "/tmp/mmx-hermes-host-memory.xml",
+    "suites": [
+      {
+        "name": "pytest",
+        "errors": "0",
+        "failures": "0",
+        "skipped": "11",
+        "tests": "465",
+        "time": "306.523",
+        "timestamp": "2026-11-07T03:23:05.056507-07:00",
+        "hostname": "m2studio"
+      }
+    ],
+    "failures": []
+  },
+  "host_memory_skips": "11 pinned-vendor loader cases require MASTERMIND_HERMES_VENDOR_ROOT; they are not Linux-only and are not claimed passed.",
+  "hosted": {
+    "enrollment": {
+      "run": 42363587247,
+      "job": 128376831817,
+      "tests": 385,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "native_owner": {
+      "run": 42363587268,
+      "job": 128376832171,
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "native_contract": {
+      "run": 42363587268,
+      "job": 128376832220,
+      "tests": 69,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "native_host": {
+      "run": 42363587268,
+      "job": 128376832297,
+      "passed": 137
+    },
+    "harness": {
+      "run": 42363587249,
+      "conclusion": "success"
+    },
+    "runtime": {
+      "run": 42363587218,
+      "conclusion": "success"
+    }
+  },
+  "source_join": {
+    "incoming_original": "39bd39aaa8c5fa1f6112fc34c593815323428b2f",
+    "protected_master": "ca0dd928f45f4f7a77399f6a1d92a0f68895c2ba",
+    "governing_pin": "e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46",
+    "governing_source_delta": [],
+    "automatic_merge_tree_before_receipt": "65781c7594c9729f88450b5155792eed27f68bb5",
+    "changes": "Preserve protected Brain cognition and Workbench credential source; consume original delivery fixture diagnostics/loader dependency. Keep all APPLICATION routing and identity spans."
+  },
+  "remaining": {
+    "current_composed_consumers": "owed after new source join",
+    "studio_forward_original": "recovered but not accepted; root repair and real predecessor/crash proofs ongoing",
+    "native_source_guards": "incumbent Grok writer preserved",
+    "metabolism_correction03": "incumbent Grok writer preserved",
+    "original_j_driver_effects": "not reconciled by package worker acceptance",
+    "live_activation": false,
+    "measured_availability": false
+  },
+  "limits": {
+    "provider_is_fixture": true,
+    "live_provider_acceptance": false,
+    "monetary_acceptance": false,
+    "installed_hermes_acceptance": false
+  }
+}
