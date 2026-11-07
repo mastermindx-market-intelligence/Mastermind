@@ -715,7 +715,7 @@ REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '2d9a6efb443d1971317957ef0fc1efeb964d303babe7cb0720683f0c83294b96', 'sites': ((3513, 68, 71, 'int', '503'), (3518, 69, 72, 'int', '503'), (3522, 67, 70, 'int', '503'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '3b2699dffc841f1b5f1cd7381e8902b94eded1fd21b934b57bed89c1a876c85c', 'sites': ((3514, 68, 71, 'int', '503'), (3519, 69, 72, 'int', '503'), (3523, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}
@@ -759,3 +759,13 @@ REVIEWED_FILES['ops/executive_os/install.sh'] = {
 
 # Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
 REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e40d488bd0c18f6cc422aeb15ce853cba330a8d5c9559cc7a7612b1ce119a3ed', 'sites': ((22, 12, 15, 'int', '458'), (23, 7, 12, 'int', '0o700'), (125, 49, 54, 'int', '0o755'), (128, 60, 65, 'int', '0o755'))}
+
+# Hermes native Fabric: two bounded escalation-reason length limits, not
+# principals, account selections, permissions or process identities. Only the
+# exact reviewed source postimage and these complete typed numeric AST tokens
+# are exempt; any source drift exposes both to the ordinary D8 scanner again.
+# This does not confer trusted session grants or Fabric execution authority.
+REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
+    "sha256": "4a646f1fcbc11158fe5bb737fef4779dfbd36fb75c2ee0cced5b6ad16875f7f1",
+    "sites": ((48, 65, 68, "int", "500"), (216, 60, 63, "int", "500")),
+}
