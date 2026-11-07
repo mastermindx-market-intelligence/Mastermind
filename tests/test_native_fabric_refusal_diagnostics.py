@@ -56,7 +56,7 @@ def component_namespace(source: str, here: Path) -> dict:
     """Execute exact materialized functions; omit import-time native side effects."""
     names = {
         "FabricTaskError", "validate_run_id", "_bounded_regular",
-        "_acceptance_unknown", "inspect_run", "_parse_route",
+        "_acceptance_unknown", "inspect_run", "_inspect_run", "_parse_route",
         "_safe_request_refusal_code",
     }
     nodes = []

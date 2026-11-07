@@ -19,7 +19,7 @@ from control_plane import executive_memory_issuer as issuer
 
 
 def test_real_ordinary_unix_parent_cannot_reach_economic_owner_or_its_source_reader(monkeypatch):
-    assert os.geteuid()==501
+    assert os.geteuid() not in (0,450) # genuine ordinary Mac/Linux caller, never Control/root
     a,b=socket.socketpair(socket.AF_UNIX,socket.SOCK_STREAM)
     fd=os.dup(a.fileno());calls=[]
     monkeypatch.setattr(sys,'argv',['protected_memory_economic_helper.py',str(fd)])
@@ -36,12 +36,12 @@ def test_real_ordinary_unix_parent_cannot_reach_economic_owner_or_its_source_rea
 
 
 def test_real_foreign_peer_refuses_before_runner_ready_identity_config_or_credential(monkeypatch):
-    assert os.geteuid()==501
+    assert os.geteuid() not in (0,450) # genuine ordinary Mac/Linux caller, never Control/root
     a,b=socket.socketpair(socket.AF_UNIX,socket.SOCK_STREAM)
     fd=os.dup(a.fileno());calls=[]
     monkeypatch.setattr(sys,'argv',['protected_memory_model_runner.py',str(fd)])
     # Test only the first outer UID prerequisite; the socket capture itself is
-    # genuine UID501 and cannot be promoted by this Python function override.
+    # genuine ordinary-user UID and cannot be promoted by this Python function override.
     monkeypatch.setattr(runner.os,'geteuid',lambda:450)
     monkeypatch.setattr(executive_installed_peer,'qualify_installed_peer',lambda *_a,**_k:calls.append('installed'))
     monkeypatch.setattr(runner,'_credential',lambda *_a:calls.append('credential'))
@@ -58,7 +58,7 @@ def test_real_foreign_peer_refuses_before_runner_ready_identity_config_or_creden
 
 @pytest.mark.parametrize('operation',['describe','qualify_transport','exchange','completed_result','economic'])
 def test_genuine_ordinary_local_peer_cannot_reach_fixed_source_key_or_exchange(monkeypatch,operation):
-    assert os.geteuid()==501
+    assert os.geteuid() not in (0,450) # genuine ordinary Mac/Linux caller, never Control/root
     a,b=socket.socketpair(socket.AF_UNIX,socket.SOCK_STREAM);calls=[]
     # Only the receiver process UID is substituted. The accepted socket's
     # kernel UID remains the genuine local ordinary user, never Control450.

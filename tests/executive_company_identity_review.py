@@ -34,8 +34,8 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Selected-child App-peer admission changes the enclosing ingress AST.
         # The original Fabric reply operands and Company listener remain unchanged.
-        "source_sha256": "a91967f4580d25482c359d9e73233d592c3e920c5875e9f15b34e451b5ba98b7",
-        "ast_sha256": "9d076f5bd8d37e05aeeb547616e5c4aab7a698fe2a0951d3aecfd8451a0adddb",
+        "source_sha256": "c9baa4cb69b844bb9c856420065b537444f542c510c5c06de79836a99c0ab038",
+        "ast_sha256": "a27058f63ee15e2bece03ac01ffdaa5cc4d39001dae50d8934cad189037d3895",
         "sites": (
             (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
@@ -75,3 +75,7 @@ REVIEWED_ANCHORS = {
 # Company method plus each original Fabric operand/path against protected
 # source. Only whole-source/enclosing-method pins change; no new literal site
 # or scanner exemption is added. This is source review, not host acceptance.
+
+# Accepted protected320 + native Memory ingress union: original catalog branch,
+# three exact operand paths and Company listener AST remain unchanged; enclosing
+# source/ingress hashes bind the reviewed additive routes only.

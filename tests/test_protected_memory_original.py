@@ -6,6 +6,8 @@ a newly authenticated caller, service/user recipient, grant, live study or E0.
 """
 import asyncio
 import json
+import pwd
+import os
 import pytest
 from tests.test_protected_memory_execution import joined
 from tests.test_protected_memory_profile import configured
@@ -23,7 +25,7 @@ def completed(joined):
     class Unused:
         inspector=execution.ProcessInspector()
         def __getattr__(self,name):raise AssertionError('ordinary adapter not used')
-    asyncio.run(ExecutiveSupervisor(runtime,Unused()).run_protected_memory_case(lease))
+    asyncio.run(ExecutiveSupervisor(runtime,Unused(),worker_user=pwd.getpwuid(os.getuid()).pw_name).run_protected_memory_case(lease))
     return runtime,job,lease
 
 

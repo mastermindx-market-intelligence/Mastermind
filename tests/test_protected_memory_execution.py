@@ -10,6 +10,7 @@ import base64
 import dataclasses
 import hashlib
 import json
+import pwd
 import os
 from pathlib import Path
 import socket
@@ -160,7 +161,7 @@ def joined(configured,installed,monkeypatch,economy,request):
     class Unused:
         inspector=Inspector()
         def __getattr__(self,name):raise AssertionError('ordinary adapter not used')
-    supervisor=ExecutiveSupervisor(runtime,Unused())
+    supervisor=ExecutiveSupervisor(runtime,Unused(),worker_user=pwd.getpwuid(os.getuid()).pw_name)
     supervisor.retain_protected_memory_economic_delegation(lease,token,
         task_class=authorization['task_class'],task_complexity=authorization['task_complexity'])
     result['supervisor']=supervisor;result['config']=config;result['installed']=installed
@@ -252,7 +253,7 @@ def test_actual_existing_supervisor_internal_entry_terminalizes_safe_runtime_rec
     class Unused:
         inspector=execution.ProcessInspector()
         def __getattr__(self,name):raise AssertionError('ordinary adapter not used')
-    supervisor=ExecutiveSupervisor(runtime,Unused())
+    supervisor=ExecutiveSupervisor(runtime,Unused(),worker_user=pwd.getpwuid(os.getuid()).pw_name)
     view=asyncio.run(supervisor.run_protected_memory_case(lease))
     assert view['answer']=='Fixture untrusted answer' and len(calls)==1 and not errors
     assert runtime.jobs.get_job(job.job_id).status.value=='COMPLETED'
@@ -328,3 +329,19 @@ def test_v3_changed_original_native_grant_never_uses_current_access_exemption(jo
     state['grant_changed']=True
     with pytest.raises(ValueError):execution.start_memory_execution(prepared)
     assert calls==[]
+
+
+@pytest.fixture
+def absent_control_user(monkeypatch):
+    """Linux CI has no NSS user450; the inert UID premise is not enrollment."""
+    real=pwd.getpwuid
+    def lookup(uid):
+        if uid==450:raise KeyError('explicit inert missing Control account')
+        return real(uid)
+    monkeypatch.setattr(pwd,'getpwuid',lookup)
+
+
+def test_disposable_supervisor_does_not_require_a_real_control_account(absent_control_user,joined):
+    runtime,_,_,_,_,_,_,state,_=joined
+    assert state['supervisor'].worker_user==pwd.getpwuid(os.getuid()).pw_name
+    assert state['supervisor'].runtime is runtime
