@@ -13,7 +13,7 @@ const sourcePath = process.env.MOBILE_PLUGIN_SOURCE
 if (!sourcePath) throw new Error('MOBILE_PLUGIN_SOURCE must identify the qualified source artifact')
 const source = readFileSync(sourcePath, 'utf8')
 
-const owned = (area: string) => registry.get(area).filter(item => item.id.startsWith(ID + ':'))
+const owned = (area: string) => registry.getArea(area).filter(item => item.id.startsWith(ID + ':'))
 
 afterEach(() => {
   unloadRuntimePlugin(ID)
