@@ -1,0 +1,2269 @@
+{
+  "provenance": {
+    "kind": "synthetic_cross_language_contract_cases",
+    "not": "Not live receipts and not installed Runtime events; every value is a synthetic closed-shape contract case built only for decoder tests.",
+    "python_validator": "common.workspace_source_operation_contract.validate_status (immutable fec4e87f96eb05ff684b8e989d2193f5e54af317), stdlib only, executed on every status case raw value before writing this fixture",
+    "python_status_results": {
+      "accepted": 13,
+      "rejected": 33
+    },
+    "python_context_grammar_probe": {
+      "accepted": 8,
+      "rejected": 7
+    },
+    "status_schema": "mastermind.workspace_source_operation_status.v1",
+    "context_schema": "mastermind.workspace_source_operation_context.v1"
+  },
+  "context_expectations": {
+    "add_project_file": {
+      "action": "add_project_file",
+      "workRef": "WS:PROJ-7"
+    },
+    "set_project_communication_preference": {
+      "action": "set_project_communication_preference",
+      "workRef": "WS:PROJ-7"
+    }
+  },
+  "status_expectations": {
+    "add_project_file": {
+      "action": "add_project_file",
+      "workRef": "WS:PROJ-7",
+      "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+      "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+      "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+    },
+    "set_project_communication_preference": {
+      "action": "set_project_communication_preference",
+      "workRef": "WS:PROJ-7",
+      "requestId": "mmos-project-preference-set-d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5",
+      "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+      "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+    }
+  },
+  "context_cases": [
+    {
+      "name": "context_add_file_valid",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "can_inspect": true
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "valid",
+      "python_grammar_probe": "accept"
+    },
+    {
+      "name": "context_preference_valid",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "set_project_communication_preference",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "7e7f80817e7f80817e7f80817e7f80817e7f80817e7f80817e7f80817e7f8081"
+        },
+        "can_inspect": true
+      },
+      "expected": {
+        "action": "set_project_communication_preference",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "valid",
+      "python_grammar_probe": "accept"
+    },
+    {
+      "name": "context_invalid_action_mismatch",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "can_inspect": true
+      },
+      "expected": {
+        "action": "set_project_communication_preference",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "expected_action_mismatch",
+      "python_grammar_probe": "accept"
+    },
+    {
+      "name": "context_invalid_work_ref_mismatch",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:QA-CHECK-1"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "can_inspect": true
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "expected_work_ref_mismatch",
+      "python_grammar_probe": "accept"
+    },
+    {
+      "name": "context_invalid_can_inspect_false",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "can_inspect": false
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "can_inspect_is_not_true",
+      "python_grammar_probe": "accept"
+    },
+    {
+      "name": "context_invalid_missing_can_inspect",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        }
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "missing_can_inspect_key",
+      "python_grammar_probe": "accept"
+    },
+    {
+      "name": "context_invalid_extra_field",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "can_inspect": true,
+        "issued_by": "someone"
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "extra_field",
+      "python_grammar_probe": "accept"
+    },
+    {
+      "name": "context_invalid_wrong_schema",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v2",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "can_inspect": true
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "unknown_schema",
+      "python_grammar_probe": "accept"
+    },
+    {
+      "name": "context_invalid_scope_uppercase",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4A4B4C4D4A4B4C4D4A4B4C4D4A4B4C4D4A4B4C4D4A4B4C4D4A4B4C4D4A4B4C4D"
+        },
+        "can_inspect": true
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "principal_scope_not_lower_hex64",
+      "python_grammar_probe": "reject"
+    },
+    {
+      "name": "context_invalid_scope_short",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4"
+        },
+        "can_inspect": true
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "principal_scope_not_hex64",
+      "python_grammar_probe": "reject"
+    },
+    {
+      "name": "context_invalid_work_ref_lowercase",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:proj-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "can_inspect": true
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "work_ref_lowercase_key",
+      "python_grammar_probe": "reject"
+    },
+    {
+      "name": "context_invalid_work_ref_no_prefix",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "can_inspect": true
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "work_ref_missing_ws_prefix",
+      "python_grammar_probe": "reject"
+    },
+    {
+      "name": "context_invalid_work_ref_empty_key",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "can_inspect": true
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "work_ref_key_too_short",
+      "python_grammar_probe": "reject"
+    },
+    {
+      "name": "context_invalid_work_ref_too_long",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "can_inspect": true
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "work_ref_key_too_long",
+      "python_grammar_probe": "reject"
+    },
+    {
+      "name": "context_invalid_work_ref_trailing_newline",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_context.v1",
+        "selection": {
+          "action": "add_project_file",
+          "work_ref": "WS:PROJ-7\n"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "can_inspect": true
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7"
+      },
+      "decode": "invalid",
+      "decode_reject_reason": "work_ref_trailing_newline",
+      "python_grammar_probe": "reject"
+    }
+  ],
+  "status_cases": [
+    {
+      "name": "accepted_publication_add_file",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "valid",
+      "disposition": "accepted",
+      "python_validate_status": "accept"
+    },
+    {
+      "name": "accepted_publication_preference_two_sources",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "set_project_communication_preference",
+          "request_id": "mmos-project-preference-set-d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "cafebab0cafebab0cafebab0cafebab0cafebab0",
+              "path": "project/communication-preferences.json",
+              "content_sha256": "0f1e2d3c0f1e2d3c0f1e2d3c0f1e2d3c0f1e2d3c0f1e2d3c0f1e2d3c0f1e2d3c"
+            },
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/notes/résumé-文件.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "set_project_communication_preference",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-preference-set-d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "valid",
+      "disposition": "accepted",
+      "python_validate_status": "accept"
+    },
+    {
+      "name": "unavailable_null_evidence",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "ORIGINAL_OPERATION_NOT_OBSERVED",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": null,
+        "receipt": null,
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "valid",
+      "disposition": "unknown",
+      "python_validate_status": "accept"
+    },
+    {
+      "name": "unknown_in_progress_intent",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "set_project_communication_preference",
+          "request_id": "mmos-project-preference-set-d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "IN_PROGRESS",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "INTENT",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "set_project_communication_preference",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-preference-set-d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "valid",
+      "disposition": "unknown",
+      "python_validate_status": "accept"
+    },
+    {
+      "name": "unknown_partial_phase_attempted_retained",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "PHASE_ATTEMPT_UNRESOLVED",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "PHASE_ATTEMPTED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "6a6b6c6d6a6b6c6d6a6b6c6d6a6b6c6d6a6b6c6d6a6b6c6d6a6b6c6d6a6b6c6d",
+          "sources": [],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "valid",
+      "disposition": "unknown",
+      "python_validate_status": "accept"
+    },
+    {
+      "name": "unknown_proposal_observed",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "IN_PROGRESS",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "PROPOSAL_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": {
+            "number": 12,
+            "url": "https://github.com/mastermindx-market-intelligence/macro/pull/12",
+            "head_commit": "1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b",
+            "head_branch": "agentos/project-file-7"
+          }
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "valid",
+      "disposition": "unknown",
+      "python_validate_status": "accept"
+    },
+    {
+      "name": "refused_not_dispatched",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "refused",
+        "reason": "NOT_DISPATCHED",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": null,
+        "receipt": null,
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "valid",
+      "disposition": "refused",
+      "python_validate_status": "accept"
+    },
+    {
+      "name": "refused_conflict",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "set_project_communication_preference",
+          "request_id": "mmos-project-preference-set-d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "refused",
+        "reason": "CONFLICT",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": null,
+        "receipt": null,
+        "advance": null
+      },
+      "expected": {
+        "action": "set_project_communication_preference",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-preference-set-d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "valid",
+      "disposition": "refused",
+      "python_validate_status": "accept"
+    },
+    {
+      "name": "unknown_source_unavailable_no_receipt",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "SOURCE_UNAVAILABLE",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": null,
+        "receipt": null,
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "valid",
+      "disposition": "unknown",
+      "python_validate_status": "accept"
+    },
+    {
+      "name": "invalid_accepted_with_proposal_receipt",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "PROPOSAL_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": {
+            "number": 12,
+            "url": "https://github.com/mastermindx-market-intelligence/macro/pull/12",
+            "head_commit": "1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b",
+            "head_branch": "agentos/project-file-7"
+          }
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "accepted_requires_source_observed_receipt_without_proposal",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_source_observed_missing_sources",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "source_observed_requires_nonempty_sources",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_digest_contradiction",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "request_sha256_equals_recipe_fingerprint",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_advance_on_accepted",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": {
+          "phase_receipt_digest": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c"
+        }
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "advance_witness_only_exists_for_ready_for_advance",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_ready_for_advance_on_plain_action",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "READY_FOR_ADVANCE",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "CANDIDATE",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": {
+          "phase_receipt_digest": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c"
+        }
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "ready_for_advance_is_adopt_plan_only",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_partial_receipt_on_refused",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "refused",
+        "reason": "REFUSED",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": null,
+        "receipt": {
+          "kind": "INTENT",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "refused",
+      "decode_reject_reason": "partial_publication_is_never_refused",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_intent_with_sources",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "IN_PROGRESS",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "INTENT",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "intent_carries_no_sources",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_sources_over_limit",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            },
+            {
+              "repository": "macro",
+              "commit": "cafebab0cafebab0cafebab0cafebab0cafebab0",
+              "path": "project/communication-preferences.json",
+              "content_sha256": "0f1e2d3c0f1e2d3c0f1e2d3c0f1e2d3c0f1e2d3c0f1e2d3c0f1e2d3c0f1e2d3c"
+            },
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/third.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            },
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/fourth.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "sources_over_max_three",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_repository_not_macro",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "Mastermind",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "repository_is_not_the_canonical_macro_repo",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_path_parent_segment",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/../secrets/preferences.json",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "path_parent_segment",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_path_backslash",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project\\preferences.json",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "path_backslash",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_path_control_character",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/pref\u0000erences.json",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "path_control_character",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_path_newline",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/preferences.json\n",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "path_trailing_newline",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_path_oversized_unicode",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "üüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüüü",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "path_over_512_utf8_bytes",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_branch_forbidden_char",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "IN_PROGRESS",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "PROPOSAL_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": {
+            "number": 12,
+            "url": "https://github.com/mastermindx-market-intelligence/macro/pull/12",
+            "head_commit": "1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b",
+            "head_branch": "release~1"
+          }
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "branch_forbidden_character",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_branch_double_slash",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "IN_PROGRESS",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "PROPOSAL_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": {
+            "number": 12,
+            "url": "https://github.com/mastermindx-market-intelligence/macro/pull/12",
+            "head_commit": "1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b",
+            "head_branch": "feature//x"
+          }
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "branch_double_slash",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_branch_leading_dash",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "IN_PROGRESS",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "PROPOSAL_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": {
+            "number": 12,
+            "url": "https://github.com/mastermindx-market-intelligence/macro/pull/12",
+            "head_commit": "1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b",
+            "head_branch": "-work"
+          }
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "branch_leading_dash",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_branch_dot_lock",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "IN_PROGRESS",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "PROPOSAL_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": {
+            "number": 12,
+            "url": "https://github.com/mastermindx-market-intelligence/macro/pull/12",
+            "head_commit": "1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b",
+            "head_branch": "release.lock"
+          }
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "branch_lock_suffix",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_branch_non_ascii",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "IN_PROGRESS",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "PROPOSAL_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": {
+            "number": 12,
+            "url": "https://github.com/mastermindx-market-intelligence/macro/pull/12",
+            "head_commit": "1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b",
+            "head_branch": "brünch"
+          }
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "branch_non_ascii",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_proposal_url_not_fixed_prefix",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "IN_PROGRESS",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "PROPOSAL_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": {
+            "number": 12,
+            "url": "https://gitlab.com/other/macro/pull/12",
+            "head_commit": "1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b1f2e3d4c5b",
+            "head_branch": "agentos/project-file-7"
+          }
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "proposal_url_not_canonical",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_event_id_zero",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 0,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "event_id_below_one",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_recorded_at_fractional",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000.5,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "recorded_at_ms_not_an_exact_integer",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_event_id_boolean",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": true,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "event_id_boolean_is_not_an_exact_int",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_unknown_schema",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v2",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "ORIGINAL_OPERATION_NOT_OBSERVED",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": null,
+        "receipt": null,
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "unknown_schema",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_phase_adopt_only_on_plain_action",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "IN_PROGRESS",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "ADOPTION",
+        "receipt": {
+          "kind": "INTENT",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "adoption_phase_requires_adopt_plan",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_receipt_with_null_digests",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "IN_PROGRESS",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "INTENT",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "receipt_requires_public_and_trusted_digests",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_no_receipt_with_digests",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "SOURCE_UNAVAILABLE",
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": null,
+        "receipt": null,
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "no_receipt_never_carries_digests_or_phase",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_extra_field",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "ORIGINAL_OPERATION_NOT_OBSERVED",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": null,
+        "receipt": null,
+        "advance": null,
+        "can_publish": true
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "extra_field",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_missing_field",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "ORIGINAL_OPERATION_NOT_OBSERVED",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": null,
+        "receipt": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "missing_advance_key",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_request_id_wrong_action_prefix",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "set_project_communication_preference",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "ORIGINAL_OPERATION_NOT_OBSERVED",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": null,
+        "receipt": null,
+        "advance": null
+      },
+      "expected": {
+        "action": "set_project_communication_preference",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-preference-set-d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "request_id_not_paired_with_action",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_work_ref_lowercase",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:proj-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "ORIGINAL_OPERATION_NOT_OBSERVED",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": null,
+        "receipt": null,
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "work_ref_lowercase_key",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "invalid_reason_refused_on_unknown",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "REFUSED",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": null,
+        "receipt": null,
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "refused_reason_on_unknown_disposition",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "decode_mismatch_request_id",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-preference-set-d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "expected_request_id_mismatch",
+      "python_validate_status": "reject"
+    },
+    {
+      "name": "decode_mismatch_request_sha",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "6a6b6c6d6a6b6c6d6a6b6c6d6a6b6c6d6a6b6c6d6a6b6c6d6a6b6c6d6a6b6c6d",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "expected_public_request_sha_mismatch",
+      "python_validate_status": "accept"
+    },
+    {
+      "name": "decode_mismatch_principal_scope",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "7e7f80817e7f80817e7f80817e7f80817e7f80817e7f80817e7f80817e7f8081"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "expected_owner_scope_mismatch",
+      "python_validate_status": "accept"
+    },
+    {
+      "name": "decode_mismatch_work_ref",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:QA-CHECK-1"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "unknown",
+        "reason": "ORIGINAL_OPERATION_NOT_OBSERVED",
+        "request_sha256": null,
+        "recipe_fingerprint_sha256": null,
+        "phase": null,
+        "receipt": null,
+        "advance": null
+      },
+      "expected": {
+        "action": "add_project_file",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "unknown",
+      "decode_reject_reason": "expected_work_ref_mismatch",
+      "python_validate_status": "accept"
+    },
+    {
+      "name": "decode_mismatch_action",
+      "raw": {
+        "schema": "mastermind.workspace_source_operation_status.v1",
+        "selection": {
+          "action": "add_project_file",
+          "request_id": "mmos-project-file-add-c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+          "work_ref": "WS:PROJ-7"
+        },
+        "owner_context": {
+          "principal_scope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+        },
+        "disposition": "accepted",
+        "reason": null,
+        "request_sha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "recipe_fingerprint_sha256": "9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c9f8e7d6c",
+        "phase": "PUBLICATION",
+        "receipt": {
+          "kind": "SOURCE_OBSERVED",
+          "event_id": 41001,
+          "recorded_at_ms": 1762185000000,
+          "receipt_sha256": "5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c5f5e5d5c",
+          "sources": [
+            {
+              "repository": "macro",
+              "commit": "0badc0de0badc0de0badc0de0badc0de0badc0de",
+              "path": "project/proposal.md",
+              "content_sha256": "c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3c0d1e2f3"
+            }
+          ],
+          "proposal": null
+        },
+        "advance": null
+      },
+      "expected": {
+        "action": "set_project_communication_preference",
+        "workRef": "WS:PROJ-7",
+        "requestId": "mmos-project-preference-set-d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5d0d0d5d5",
+        "requestSha256": "aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22aa11bb22",
+        "principalScope": "4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d4a4b4c4d"
+      },
+      "decode": "invalid",
+      "disposition": "accepted",
+      "decode_reject_reason": "expected_action_mismatch",
+      "python_validate_status": "accept"
+    }
+  ]
+}

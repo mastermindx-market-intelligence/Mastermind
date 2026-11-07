@@ -1,0 +1,79 @@
+symbol,asset_type,policy,candidates,resolved,statuses,mean,win,sum_net,skipped,opportunity_mean
+SOXX,semi,time,10,10,{'resolved': 10},3.70352,40.0,37.0352,,
+SOXX,semi,old_guard,10,10,{'resolved': 10},4.18474,70.0,41.8474,,
+SOXX,semi,fast_weak_control,10,10,{'resolved': 10},2.41427,60.0,24.1427,,
+SOXX,semi,momentum_reset,10,10,{'resolved': 10},3.91452,50.0,39.1452,,
+SOXX,semi,strict_structure,10,1,"{'not_admitted': 9, 'resolved': 1}",10.33714,100.0,10.3371,12,0.63812
+SOXX,semi,pivot_retest,10,3,"{'not_admitted': 7, 'resolved': 3}",4.81158,66.7,14.4347,10,0.91129
+SMH,semi,time,8,8,{'resolved': 8},3.09042,37.5,24.7233,,
+SMH,semi,old_guard,8,8,{'resolved': 8},3.12745,50.0,25.0196,,
+SMH,semi,fast_weak_control,8,8,{'resolved': 8},1.50392,50.0,12.0313,,
+SMH,semi,momentum_reset,8,8,{'resolved': 8},3.30187,50.0,26.415,,
+SMH,semi,strict_structure,8,2,"{'not_admitted': 6, 'resolved': 2}",-1.3471,0.0,-2.6942,10,0.17431
+SMH,semi,pivot_retest,8,2,"{'not_admitted': 6, 'resolved': 2}",-1.3471,0.0,-2.6942,10,0.17431
+QQQ,control,time,7,7,{'resolved': 7},0.4033,28.6,2.8231,,
+QQQ,control,old_guard,7,7,{'resolved': 7},0.26603,28.6,1.8622,,
+QQQ,control,fast_weak_control,7,7,{'resolved': 7},0.30788,28.6,2.1552,,
+QQQ,control,momentum_reset,7,7,{'resolved': 7},0.50626,28.6,3.5438,,
+QQQ,control,strict_structure,7,2,"{'not_admitted': 5, 'resolved': 2}",-0.86764,0.0,-1.7353,8,-0.23955
+QQQ,control,pivot_retest,7,4,"{'not_admitted': 3, 'resolved': 4}",-0.6477,25.0,-2.5908,6,-0.30536
+AMD,semi,time,6,6,{'resolved': 6},-1.45349,0.0,-8.7209,,
+AMD,semi,old_guard,6,6,{'resolved': 6},-1.45349,0.0,-8.7209,,
+AMD,semi,fast_weak_control,6,6,{'resolved': 6},-1.45349,0.0,-8.7209,,
+AMD,semi,momentum_reset,6,6,{'resolved': 6},-1.45349,0.0,-8.7209,,
+AMD,semi,strict_structure,6,1,"{'not_admitted': 5, 'resolved': 1}",-1.08259,0.0,-1.0826,10,0.17027
+AMD,semi,pivot_retest,6,2,"{'not_admitted': 4, 'resolved': 2}",1.45023,50.0,2.9005,9,0.47666
+AVGO,semi,time,4,4,{'resolved': 4},-1.52407,0.0,-6.0963,,
+AVGO,semi,old_guard,4,4,{'resolved': 4},-1.33257,25.0,-5.3303,,
+AVGO,semi,fast_weak_control,4,4,{'resolved': 4},-0.63904,25.0,-2.5562,,
+AVGO,semi,momentum_reset,4,4,{'resolved': 4},-1.52407,0.0,-6.0963,,
+AVGO,semi,strict_structure,4,1,"{'not_admitted': 3, 'resolved': 1}",-2.17308,0.0,-2.1731,7,-0.37929
+AVGO,semi,pivot_retest,4,1,"{'not_admitted': 3, 'resolved': 1}",-2.17308,0.0,-2.1731,6,-0.53087
+MU,semi,time,8,8,{'resolved': 8},-1.05265,0.0,-8.4212,,
+MU,semi,old_guard,8,8,{'resolved': 8},-0.94977,12.5,-7.5982,,
+MU,semi,fast_weak_control,8,8,{'resolved': 8},-0.6877,25.0,-5.5016,,
+MU,semi,momentum_reset,8,8,{'resolved': 8},-1.05265,0.0,-8.4212,,
+MU,semi,strict_structure,8,2,"{'not_admitted': 6, 'resolved': 2}",-0.66465,0.0,-1.3293,9,-0.1701
+MU,semi,pivot_retest,8,2,"{'not_admitted': 6, 'resolved': 2}",-0.66465,0.0,-1.3293,9,-0.1701
+INTC,semi,time,6,6,{'resolved': 6},4.75446,16.7,28.5267,,
+INTC,semi,old_guard,6,6,{'resolved': 6},1.88853,50.0,11.3312,,
+INTC,semi,fast_weak_control,6,6,{'resolved': 6},5.67087,50.0,34.0252,,
+INTC,semi,momentum_reset,6,6,{'resolved': 6},4.75446,16.7,28.5267,,
+INTC,semi,strict_structure,6,0,{'not_admitted': 6},,,0,7,-0.18185
+INTC,semi,pivot_retest,6,0,{'not_admitted': 6},,,0,7,-0.18185
+NVDA,semi,time,6,5,"{'resolved': 5, 'unobserved_session_path': 1}",0.20313,20.0,1.0156,,
+NVDA,semi,old_guard,6,5,"{'resolved': 5, 'unobserved_session_path': 1}",0.39099,40.0,1.955,,
+NVDA,semi,fast_weak_control,6,5,"{'resolved': 5, 'unobserved_session_path': 1}",0.66038,40.0,3.3019,,
+NVDA,semi,momentum_reset,6,5,"{'resolved': 5, 'unobserved_session_path': 1}",0.37138,40.0,1.8569,,
+NVDA,semi,strict_structure,6,4,"{'not_admitted': 2, 'resolved': 4}",-0.80645,0.0,-3.2258,5,-0.11663
+NVDA,semi,pivot_retest,6,4,"{'not_admitted': 2, 'resolved': 4}",-0.80645,0.0,-3.2258,5,-0.11663
+AMAT,semi,time,9,8,"{'resolved': 8, 'unobserved_session_path': 1}",-1.40068,0.0,-11.2055,,
+AMAT,semi,old_guard,9,8,"{'resolved': 8, 'unobserved_session_path': 1}",-1.40068,0.0,-11.2055,,
+AMAT,semi,fast_weak_control,9,9,{'resolved': 9},0.15564,22.2,1.4008,,
+AMAT,semi,momentum_reset,9,8,"{'resolved': 8, 'unobserved_session_path': 1}",-1.40068,0.0,-11.2055,,
+AMAT,semi,strict_structure,9,1,"{'not_admitted': 8, 'resolved': 1}",-0.56214,0.0,-0.5621,11,0.09251
+AMAT,semi,pivot_retest,9,2,"{'not_admitted': 7, 'resolved': 2}",-1.04596,0.0,-2.0919,10,-0.00947
+LRCX,semi,time,6,6,{'resolved': 6},3.197,33.3,19.182,,
+LRCX,semi,old_guard,6,6,{'resolved': 6},1.85023,33.3,11.1014,,
+LRCX,semi,fast_weak_control,6,6,{'resolved': 6},-0.0318,33.3,-0.1908,,
+LRCX,semi,momentum_reset,6,6,{'resolved': 6},1.99361,33.3,11.9617,,
+LRCX,semi,strict_structure,6,3,"{'not_admitted': 3, 'resolved': 3}",5.89676,66.7,17.6903,9,1.32237
+LRCX,semi,pivot_retest,6,3,"{'not_admitted': 3, 'resolved': 3}",5.89676,66.7,17.6903,8,1.43257
+KLAC,semi,time,10,10,{'resolved': 10},-0.39144,10.0,-3.9144,,
+KLAC,semi,old_guard,10,10,{'resolved': 10},0.19734,20.0,1.9734,,
+KLAC,semi,fast_weak_control,10,10,{'resolved': 10},-1.01744,10.0,-10.1744,,
+KLAC,semi,momentum_reset,10,10,{'resolved': 10},-0.39144,10.0,-3.9144,,
+KLAC,semi,strict_structure,10,0,{'not_admitted': 10},,,0,13,-0.40797
+KLAC,semi,pivot_retest,10,0,{'not_admitted': 10},,,0,13,-0.40797
+SPY,control,time,7,7,{'resolved': 7},1.51698,71.4,10.6189,,
+SPY,control,old_guard,7,7,{'resolved': 7},1.44702,71.4,10.1292,,
+SPY,control,fast_weak_control,7,7,{'resolved': 7},-0.5471,14.3,-3.8297,,
+SPY,control,momentum_reset,7,7,{'resolved': 7},0.43354,57.1,3.0348,,
+SPY,control,strict_structure,7,4,"{'not_admitted': 3, 'resolved': 4}",0.21622,50.0,0.8649,3,0.24339
+SPY,control,pivot_retest,7,5,"{'not_admitted': 2, 'resolved': 5}",0.47435,60.0,2.3717,2,0.36896
+XLV,control,time,4,3,"{'resolved': 3, 'unobserved_session_path': 1}",0.31919,33.3,0.9576,,
+XLV,control,old_guard,4,3,"{'resolved': 3, 'unobserved_session_path': 1}",0.31748,33.3,0.9524,,
+XLV,control,fast_weak_control,4,4,{'resolved': 4},0.85058,50.0,3.4023,,
+XLV,control,momentum_reset,4,3,"{'resolved': 3, 'unobserved_session_path': 1}",1.05384,33.3,3.1615,,
+XLV,control,strict_structure,4,2,"{'not_admitted': 2, 'resolved': 2}",1.7534,50.0,3.5068,2,0.57901
+XLV,control,pivot_retest,4,3,"{'not_admitted': 1, 'resolved': 3}",0.87396,33.3,2.6219,1,0.45259

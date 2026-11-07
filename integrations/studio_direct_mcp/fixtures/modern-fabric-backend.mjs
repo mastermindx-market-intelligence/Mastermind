@@ -1,14 +1,22 @@
 // Disposable stdio fixture: no Fabric adapter, credentials or real work.
+import { createHash } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema, McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { createFabricFacade } from '../fabric-backend.mjs';
 const names = ['fabric_capabilities', 'fabric_request', 'fabric_status', 'fabric_wait',
-  'fabric_result', 'fabric_accept', 'fabric_controller_output'];
+  'fabric_result', 'fabric_accept', 'fabric_controller_output',
+  // Optional synthetic catalog only; no real result or provider access.
+  ...(process.env.FIXTURE_PAGED === 'true' ? ['fabric_result_page'] : [])];
 let effects = 0;
 let resultCalls = 0;
-const finished = value => ({ content: [{ type: 'text', text:
-  `Process started with PID 123 (shell: /bin/zsh)\nInitial output:\n${JSON.stringify(value)}\nMMX_FABRIC_EXIT=0\n` }] });
+const finished = value => {
+  const stdout = Buffer.from(JSON.stringify(value), 'utf8');
+  const envelope = { exit_code: 0, stdout_base64: stdout.toString('base64'),
+    stdout_bytes: stdout.length, stdout_sha256: createHash('sha256').update(stdout).digest('hex') };
+  return { content: [{ type: 'text', text:
+    `Process started with PID 123 (shell: /bin/zsh)\nInitial output:\n${JSON.stringify(envelope)}\nMMX_FABRIC_EXIT=0\n` }] };
+};
 // Real incumbent facade, disposable engine. This checks its anti-replay state
 // across the new HTTP request lifetime without starting a shell/provider.
 const facade = createFabricFacade({ async callTool(request) {
@@ -19,14 +27,16 @@ const facade = createFabricFacade({ async callTool(request) {
     result_available: false, fixture_effects: effects, fixture_pid: process.pid });
   if (command.includes("'request' '--id' 'fixture-timeout'")) {
     effects++;
-    await new Promise(resolve => setTimeout(resolve, 700));
-    return { content: [{ type: 'text', text: 'Process started with PID 456 (shell: /bin/zsh)\nInitial output:\n' }] };
+    // Keep this disposable effect pending until its stdio owner is closed.
+    // The real gateway timeout or HTTP abort must occur before any completion.
+    await new Promise(() => {});
   }
   throw new Error('Unexpected fixture engine call');
 } });
 const server = new Server({ name: 'disposable-fabric-fixture', version: '0.0.0' }, { capabilities: { tools: {} } });
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools:
-  [...names, ...(process.env.FIXTURE_UNRELATED === 'true' ? ['start_process'] : [])]
+  [...names, ...(process.env.FIXTURE_UNRELATED === 'true' ? ['start_process'] : []),
+    ...(process.env.FIXTURE_ORIGINAL_COLLISION === 'true' ? ['fabric_collect_original'] : [])]
     .map(name => ({ name, inputSchema: { type: 'object' } })) }));
 server.setRequestHandler(CallToolRequestSchema, async request => {
   const name = request.params.name;

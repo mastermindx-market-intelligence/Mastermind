@@ -13,9 +13,15 @@ from pathlib import Path
 from common.executive_workspace_contract import _check_work_ref
 from control_plane.coo_principal_host import _refuse, _authority, validate_missions
 from control_plane.coo_principal_mandate import PrincipalFact
-from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry, observed_mcp_tool_schema_digest
+from control_plane.executive_agent_capabilities import (
+    CLAUDE_PRINCIPAL_AUTH_REALM,
+    CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
+    ExecutionCapabilityRegistry,
+    observed_mcp_tool_schema_digest,
+)
 
 DEFAULT_INSTALL_PATH = Path("/Library/Application Support/MastermindExecutive/config/executive-mcp.json")
+CLAUDE_PRINCIPAL_POLICY = Path("config/executive_claude_principal_capabilities.json")
 
 
 def _fixed_original_target_reader(path, source, initial, *, expected_uid):
@@ -91,7 +97,7 @@ class CooInstalledSource:
         loader = entry.current_projection_loader(path, source, initial, "coo", None,
                                                   expected_uid=expected_uid)
         def registry():
-            policy = source / "config/executive_agent_capabilities.json"
+            policy = source / CLAUDE_PRINCIPAL_POLICY
             entry.require_sealed_path(policy)
             return ExecutionCapabilityRegistry.load(policy, source_root=source)
         owner = cls(loader, registry)
@@ -124,7 +130,10 @@ class CooInstalledSource:
         if type(registry) is not ExecutionCapabilityRegistry:
             _refuse()
         profile = registry.profiles.get(row["capability_profile_id"])
-        if profile is None or not profile.enabled or profile.profile_digest != row["capability_profile_digest"]:
+        if (profile is None or not profile.enabled
+                or profile.profile_digest != row["capability_profile_digest"]
+                or profile.execution_surface != CLAUDE_PRINCIPAL_EXECUTION_SURFACE
+                or profile.auth_realm != CLAUDE_PRINCIPAL_AUTH_REALM):
             _refuse()
         specs = {s.name: {"name": s.name, "inputSchema": s.input_schema,
                          "annotations": s.annotations} for s in COO_TOOL_SPECS}
@@ -149,6 +158,37 @@ class CooInstalledSource:
             _refuse()
         return row, fact, authority
 
+
+    def for_workspace_read_principal(self, principal, work_ref):
+        """Read-only, two-resource membership using the *original* installed COO.
+
+        The caller independently verifies an enrolled Workspace bearer for
+        its distinct resource. This method only matches that verified
+        pseudonymous identity to the installed COO mission's policy/issuer/
+        subject/client. COO tools/actions and direct Fabric runs do NOT inherit
+        Workspace authorization. Disabled, renamed or rotated owner facts
+        always refuse. Never reinterpret a Workspace token as a COO token.
+        """
+        from common.executive_workspace_contract import RESOURCE, SCOPE
+        row, fact, authority = self.snapshot(work_ref)
+        # Workspace and COO use distinct resource *and policy* IDs. Each
+        # installed authorizer independently validates its own policy ID and
+        # original resource/scope; only pseudonymous issuer/subject/client
+        # are shared cross-resource membership identities.
+        expected = {
+            "issuer_digest": fact.issuer_digest,
+            "subject_digest": fact.subject_digest, "client_ref": fact.client_ref,
+            "resource": RESOURCE, "scopes": [SCOPE],
+        }
+        if (type(principal) is not dict or set(principal) != set(expected) | {"policy_id"}
+                or type(principal["policy_id"]) is not str
+                or not 1 <= len(principal["policy_id"]) <= 256
+                or {k: principal[k] for k in expected} != expected or row["enabled"] is not True
+                or fact.resource_ref == RESOURCE
+                or "mastermind.executive.read" not in fact.scopes
+                or authority.work_ref != work_ref):
+            _refuse()
+        return row, fact, authority
 
 
 def validate_control_coo(raw):

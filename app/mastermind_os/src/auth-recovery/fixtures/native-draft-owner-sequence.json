@@ -1,0 +1,69 @@
+{
+  "different": {
+    "cause": "PRINCIPAL_CHANGED",
+    "owner_instance": "c278936ae3f5daa15e7333df099c55ff",
+    "phase": "QUALIFIED",
+    "principal_scope": "132900c64b4630f2b4818db8ab77b28aa35ca657899a563d375663ced9208b06",
+    "privacy_epoch": 2,
+    "schema": "mastermind.native_draft_continuity.v1",
+    "valid_until_ms": 1793905267180
+  },
+  "expired": {
+    "cause": "TOKEN_EXPIRED",
+    "owner_instance": "c278936ae3f5daa15e7333df099c55ff",
+    "phase": "EXPIRED",
+    "principal_scope": null,
+    "privacy_epoch": 1,
+    "schema": "mastermind.native_draft_continuity.v1",
+    "valid_until_ms": null
+  },
+  "expired_auth": {
+    "acquisition": false,
+    "content": false,
+    "reason": "NATIVE_TOKEN_EXPIRED",
+    "status": "signed_out"
+  },
+  "logout": {
+    "cause": "EXPLICIT_LOGOUT",
+    "owner_instance": "c278936ae3f5daa15e7333df099c55ff",
+    "phase": "WITHDRAWN",
+    "principal_scope": null,
+    "privacy_epoch": 3,
+    "schema": "mastermind.native_draft_continuity.v1",
+    "valid_until_ms": null
+  },
+  "logout_auth": {
+    "acquisition": false,
+    "content": false,
+    "reason": "USER_SIGNED_OUT",
+    "status": "signed_out"
+  },
+  "now_ms": 1793905207180,
+  "qualified": {
+    "cause": "OWNER_QUALIFIED",
+    "owner_instance": "c278936ae3f5daa15e7333df099c55ff",
+    "phase": "QUALIFIED",
+    "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda",
+    "privacy_epoch": 1,
+    "schema": "mastermind.native_draft_continuity.v1",
+    "valid_until_ms": 1793905267180
+  },
+  "reauthenticating": {
+    "cause": "REAUTHENTICATION",
+    "owner_instance": "c278936ae3f5daa15e7333df099c55ff",
+    "phase": "REAUTHENTICATING",
+    "principal_scope": null,
+    "privacy_epoch": 1,
+    "schema": "mastermind.native_draft_continuity.v1",
+    "valid_until_ms": null
+  },
+  "same": {
+    "cause": "OWNER_QUALIFIED",
+    "owner_instance": "c278936ae3f5daa15e7333df099c55ff",
+    "phase": "QUALIFIED",
+    "principal_scope": "86be87764ddac759c70a68fc060f9bf7146283f9048f27d28094965575f92bda",
+    "privacy_epoch": 1,
+    "schema": "mastermind.native_draft_continuity.v1",
+    "valid_until_ms": 1793905267180
+  }
+}

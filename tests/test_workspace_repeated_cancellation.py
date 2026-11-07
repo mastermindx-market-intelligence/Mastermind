@@ -1,8 +1,34 @@
 """Independent reviewer lifecycle regressions retained by the source owner; all work is test-owned."""
 import asyncio
+import os
 import threading
 import pytest
+
+import control_plane.workspace_control_room_lifecycle as lifecycle_mod
+from control_plane.workspace_control_room_lifecycle import HostedControlRoom
+from scripts import chairman_control_room as ccr
+from scripts.chairman_control_room import UNIX_CONTROL_ROOM_ORIGIN
+from tests.executive_installed_control_fixture import unix_listener
 from tests.test_workspace_read_service import cache_fixture, service, frame
+
+
+def _unix_room(tmp_path, *, monkeypatch, shutdown_timeout=10.0):
+    monkeypatch.setattr(lifecycle_mod, "_TRUSTED_SOCKET_PARENT_UID", os.geteuid())
+    listener, path = unix_listener()
+    config = ccr.ServerConfig(repo_root=tmp_path, macro_root=None, bindings_path=None,
+        token="fixture", origin=UNIX_CONTROL_ROOM_ORIGIN, port=0, state_ttl=10.0)
+    host = HostedControlRoom(config, listener=listener, socket_path=path,
+                             allowed_peer_uids=(os.geteuid(),),
+                             shutdown_timeout=shutdown_timeout)
+    return host, listener, path
+
+
+def _dispose(listener, path):
+    listener.close()
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def test_repeated_cancel_retains_acquisition_until_close(tmp_path):
@@ -34,11 +60,9 @@ def test_repeated_cancel_retains_acquisition_until_close(tmp_path):
     asyncio.run(check())
 
 
-def test_repeated_cancel_retains_host_close_until_drain(tmp_path):
-    from tests.test_workspace_control_room_lifecycle import config
-    from control_plane.workspace_control_room_lifecycle import HostedControlRoom
+def test_repeated_cancel_retains_host_close_until_drain(tmp_path, monkeypatch):
+    host, listener, path = _unix_room(tmp_path, monkeypatch=monkeypatch)
     entered, release, drained = threading.Event(), threading.Event(), threading.Event()
-    host = HostedControlRoom(config(tmp_path))
     def close_owned():
         entered.set()
         try:
@@ -61,15 +85,16 @@ def test_repeated_cancel_retains_host_close_until_drain(tmp_path):
             release.set()
             await asyncio.gather(task, return_exceptions=True)
             assert await asyncio.to_thread(drained.wait, 2)
-    asyncio.run(check())
+    try:
+        asyncio.run(check())
+    finally:
+        _dispose(listener, path)
 
 
-def test_repeated_cancel_start_waits_before_cleanup(tmp_path):
-    from tests.test_workspace_control_room_lifecycle import config
-    from control_plane.workspace_control_room_lifecycle import HostedControlRoom
+def test_repeated_cancel_start_waits_before_cleanup(tmp_path, monkeypatch):
+    host, listener, path = _unix_room(tmp_path, monkeypatch=monkeypatch)
     entered, release, finished = threading.Event(), threading.Event(), threading.Event()
     cleanup_saw_finished = []
-    host = HostedControlRoom(config(tmp_path))
     def start_owned():
         entered.set()
         assert release.wait(3)
@@ -92,4 +117,7 @@ def test_repeated_cancel_start_waits_before_cleanup(tmp_path):
             release.set()
             await asyncio.gather(task, return_exceptions=True)
             assert await asyncio.to_thread(finished.wait, 2)
-    asyncio.run(check())
+    try:
+        asyncio.run(check())
+    finally:
+        _dispose(listener, path)

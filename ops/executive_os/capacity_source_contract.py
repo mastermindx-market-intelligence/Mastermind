@@ -965,7 +965,12 @@ def validate_native_subscription_capacity_enrollment(value: object) -> dict[str,
                         ("config_custody_ref", "custody")):
         if type(value[key]) is not str or re.fullmatch(prefix + r"-[0-9a-f]{64}", value[key]) is None:
             raise CapacitySourceContractError("NATIVE_ENROLLMENT_INVALID")
-    source = value["registration_source"]
+    source = validate_native_registration_source(value["registration_source"])
+    return {**value, "registration_source": source}
+
+
+def validate_native_registration_source(source: object) -> dict[str, str]:
+    """Copy the existing four source pins; syntax confers no acceptance."""
     if (type(source) is not dict or set(source) != {"release_commit", "previous_release_commit", "material_source_digest", "export_sha256"}
             or any(type(source[key]) is not str or _COMMIT_RE.fullmatch(source[key]) is None
                    for key in ("release_commit", "previous_release_commit"))
@@ -973,7 +978,7 @@ def validate_native_subscription_capacity_enrollment(value: object) -> dict[str,
             or any(type(source[key]) is not str or _DIGEST_RE.fullmatch(source[key]) is None
                    for key in ("material_source_digest", "export_sha256"))):
         raise CapacitySourceContractError("NATIVE_REGISTRATION_SOURCE_INVALID")
-    return {**value, "registration_source": dict(source)}
+    return dict(source)
 
 
 def acquire_native_registration(realm_owner: object) -> dict[str, Any]:
@@ -1060,11 +1065,22 @@ def validate_native_registration_document(config: object, document: object) -> d
     row_fields = {"schema", "capacity_capability_id", "capability_generation", "provider", "billing_mode",
                   "credential_kind", "execution_surface", "registration_state", "material_source_digest",
                   "registration_receipt_digest"}
+    schema_fields = {
+        "mastermind.provider_native_capability_registration/v1": row_fields,
+        "mastermind.provider_native_capability_registration/v2": row_fields | {"provider_enabled"},
+    }
     selected = None
+    export_schema = None
     identities: set[str] = set()
     for row in document["registrations"]:
-        if (type(row) is not dict or set(row) != row_fields
-                or row["schema"] != "mastermind.provider_native_capability_registration/v1"
+        if type(row) is not dict:
+            raise CapacitySourceContractError("NATIVE_REGISTRATION_INVALID")
+        schema = row.get("schema")
+        # A source export derives all rows from one closed registry version.
+        # Foreign rows receive the same validation as the selected capability.
+        if (type(schema) is not str or schema not in schema_fields
+                or set(row) != schema_fields[schema]
+                or (export_schema is not None and schema != export_schema)
                 or type(row["capacity_capability_id"]) is not str
                 or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", row["capacity_capability_id"]) is None
                 or row["capacity_capability_id"] in identities
@@ -1075,6 +1091,13 @@ def validate_native_registration_document(config: object, document: object) -> d
                 or row["registration_state"] not in {"registered", "revoked"}
                 or row["material_source_digest"] != source["material_source_digest"]):
             raise CapacitySourceContractError("NATIVE_REGISTRATION_INVALID")
+        if schema == "mastermind.provider_native_capability_registration/v2":
+            enabled = row["provider_enabled"]
+            if type(enabled) is not bool or (row["registration_state"] == "revoked" and enabled):
+                raise CapacitySourceContractError("NATIVE_REGISTRATION_INVALID")
+        export_schema = schema
+        # The V2 enablement flag participates in the existing receipt identity;
+        # this validator grants no authentication, source custody or admission.
         unsigned = {key: value for key, value in row.items() if key != "registration_receipt_digest"}
         expected = hashlib.sha256(json.dumps(unsigned, sort_keys=True, separators=(",", ":"),
                     ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest()

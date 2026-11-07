@@ -143,6 +143,28 @@ def test_all_six_arm_fields_require_explicit_boolean_false_before_effect(qualifi
     assert 'runtime-idle' not in calls
 
 
+def test_fresh_install_control_passes_wholly_disarmed_until_foreground_key_is_removed(qualified_host, tmp_path):
+    from tests.test_c1_installer_control_config import _render_default_control_config
+    installed = _render_default_control_config(tmp_path)
+    host, prior, artifacts, calls = qualified_host
+    delta = render.build_finite_control_delta(
+        definition_dir=str(lifecycle.DEFINITION), worker_artifacts=artifacts)
+    assert 'coo_foreground_only' not in delta
+    assert installed['coo_foreground_only'] is False
+    assert 'fabric_bridge_armed' not in installed
+    prior.control = {**installed, **delta}
+    assert prior.control['fabric_bridge_armed'] is False
+    assert prior.worker['operator_harness_armed'] is False
+    host.qualify()
+    assert 'runtime-idle' in calls
+
+    prior.control.pop('coo_foreground_only')
+    before = len(calls)
+    with pytest.raises(lifecycle.LifecycleError, match='configs_not_wholly_disarmed'):
+        host.qualify()
+    assert calls[before:] == ['installed', 'no-transaction', 'stopped', 'primary-quiescent', 'credential-disarmed', 'disarmed']
+
+
 def test_production_qualifier_refuses_missing_configured_interpreter(qualified_host):
     host, _, _, _ = qualified_host
     Path(lifecycle.PYTHON).unlink()

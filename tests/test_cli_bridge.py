@@ -44,7 +44,7 @@ def test_headless_reasoning_forces_prompt_free_permission_mode(monkeypatch):
             role="scout",
             log_run=False,
             _backend_override="cli",
-            _oauth_candidates=[],
+            _subscription_slots=[],
         )
     )
 

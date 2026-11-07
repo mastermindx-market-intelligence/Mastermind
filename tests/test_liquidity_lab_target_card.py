@@ -15,6 +15,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 from datetime import date, datetime, timedelta, timezone
+import hashlib
 import json
 from pathlib import Path
 
@@ -31,9 +32,11 @@ from brain.liquidity_lab.contracts import (
 from brain.liquidity_lab.target_card import (
     BASIS_RULINGS,
     BROAD_TARGET_CARD_V1 as CARD,
+    BROAD_TARGET_CARD_V1_SHA256,
     CARD_VERSION,
     PLANNING_HORIZONS,
     UNDERLYING_HOLIDAY_NOTE,
+    V1_FROZEN_AT,
     anchor_session,
     build_broad_target_card,
     is_target_session,
@@ -62,7 +65,8 @@ def test_building_the_card_never_mutates_the_registry():
     before = (tuple(TARGETS), len(TARGETS), [dataclasses.asdict(t) for t in TARGETS],
               dict(TARGET_BY_ID), HORIZONS_BDAYS)
     build_broad_target_card(frozen_at=date(2026, 10, 13))
-    build_broad_target_card(frozen_at=date(2026, 10, 14))
+    with pytest.raises(ContractError, match="frozen at 2026-10-13"):
+        build_broad_target_card(frozen_at=date(2026, 10, 14))
     after = (tuple(TARGETS), len(TARGETS), [dataclasses.asdict(t) for t in TARGETS],
              dict(TARGET_BY_ID), HORIZONS_BDAYS)
     assert before == after
@@ -125,6 +129,15 @@ def test_frozen_at_is_caller_supplied_and_build_is_deterministic():
     assert json.dumps(json.loads(encoded)) == encoded
     assert first.to_dict()["frozen_at"] == "2026-10-13"
     assert first.to_dict()["validated"] is False
+    digest = hashlib.sha256(
+        json.dumps(first.to_dict(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    assert digest == BROAD_TARGET_CARD_V1_SHA256 == (
+        "f53d9296ae1556544a0d55d1a3d742bbc169138c0ae04b5a458ceb6eaf3c5537"
+    )
+    assert V1_FROZEN_AT == date(2026, 10, 13)
+    with pytest.raises(ContractError, match="frozen at 2026-10-13"):
+        build_broad_target_card(frozen_at=date(2026, 10, 12))
 
 
 def test_tlt_yield_change_in_basis_points_is_not_a_fund_return():
@@ -195,6 +208,18 @@ def test_unruled_asset_class_fails_closed(monkeypatch):
     assert card_module.TARGETS is not real_targets
     monkeypatch.undo()
     assert card_module.TARGETS is real_targets and len(real_targets) == 20
+
+
+def test_registry_field_drift_cannot_stay_labelled_v1(monkeypatch):
+    real = TARGET_BY_ID["spy"]
+    drifted = dataclasses.replace(real, region="global")
+    targets = tuple(drifted if t.target_id == "spy" else t for t in TARGETS)
+    monkeypatch.setattr(card_module, "TARGETS", targets)
+    monkeypatch.setattr(card_module, "TARGET_BY_ID", {**TARGET_BY_ID, "spy": drifted})
+    with pytest.raises(ContractError, match="content hash drifted"):
+        card_module.build_broad_target_card(frozen_at=date(2026, 10, 13))
+    monkeypatch.undo()
+    assert card_module.build_broad_target_card(frozen_at=date(2026, 10, 13)) == CARD
 
 
 def test_calendar_helpers_anchor_count_and_refuse_outside_coverage():

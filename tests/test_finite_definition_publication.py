@@ -224,15 +224,16 @@ def test_protected_mode_review_is_exact_source_only():
     source=Path(__file__).parents[1]/'ops/executive_os/finite_definition_publication.py'
     body=source.read_text()
     spans=reviewed_literal_spans('ops/executive_os/finite_definition_publication.py',body)
-    assert len(spans)==19
+    assert len(spans)==30
     spellings=[body.splitlines()[line-1][start:end] for line,start,end,_ in spans]
-    assert spellings.count('"_mastermind_minimax"')==2
+    assert spellings.count('"_mastermind_minimax"')==4
     assert spellings.count('0o440')==1
     assert spellings.count('0o444')==2
-    assert spellings.count('0o700')==6
+    assert spellings.count('0o700')==7
     assert spellings.count('0o755')==4
     assert spellings.count('450')==1
-    assert spellings.count('470')==3
+    assert spellings.count('470')==10
+    assert spellings.count('0o555')==1
     assert reviewed_literal_spans('ops/executive_os/finite_definition_publication.py',
         body+'\n# changed source')==()
     assert reviewed_literal_spans('ops/executive_os/foreign.py',body)==()

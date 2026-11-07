@@ -43,6 +43,7 @@ class FakeClient:
         self.calls=[]
         self.turn=None
         self.sid=None
+        self.plan_contract="executive-plan-v1"
         self.lost_begin=False
         self.bad_result=False
         self.terminal=True
@@ -53,11 +54,12 @@ class FakeClient:
         self.calls.append((method,copy.deepcopy(fields)))
         if method=='initialize':
             c=fields['config'];self.sid=c['session_id']
+            self.plan_contract=c.get('result_contract','executive-plan-v1')
             return {'sdk_version':'0.2.160','cli_version':'2.1.275','session_id':self.sid,
                     'registration_zero_turn':True,'native_subscription_verified':True,
                     'applied_launch_provenance':{'setting_sources':[],'strict_mcp_config':True,'skills':[]},
                     'settings_readback_provenance':'native-get_settings/0.2.160/2.1.275',
-                    'result_contract':native_plan_contract(),
+                    'result_contract':native_plan_contract(self.plan_contract),
                     'initialization':{'model':c['model'],'cwd':c['cwd'],'tools':['Read','Glob','Grep','StructuredOutput'],
                         'skills':[],'plugins':[],'mcp_servers':[],'permissionMode':'dontAsk'},
                     'mcp_status':{'servers':[]},'server_info':{'account':{'apiProvider':'firstParty','subscriptionType':'Claude Max'}},
@@ -73,7 +75,7 @@ class FakeClient:
         return {'acknowledged':True}
     def request_raw_turn_page(self, **kwargs):
         result={'terminal':self.terminal,'success':not self.bad_result,'session_id':self.sid,'turn_id':self.turn,
-                'result_source':'native-structured-output','result_contract':native_plan_contract(),
+                'result_source':'native-structured-output','result_contract':native_plan_contract(self.plan_contract),
                 'native_result_id':'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','summary':'{"answer":"verified"}'}
         return SimpleNamespace(consume=lambda:result)
     def graceful_close(self, **kwargs):
@@ -310,6 +312,54 @@ def test_native_requested_version_cannot_override_bound_runtime_floor(configured
     assert 'native model/runtime is not qualified' in validation.reasons
     assert not c.running and not c.calls
 
+@pytest.mark.parametrize("contract", ["executive-plan-v3", "executive-plan-v4", "executive-plan-v5"])
+def test_native_adapter_selects_exact_versioned_plan_contract(configured, contract):
+    a, client, profile, epoch, generation = configured
+    from control_plane.claude_operator_helper_protocol import native_plan_contract
+    alt = ClaudeOperatorAdapter(
+        binary_path=a.binary_path, provider_home=a.provider_home,
+        workspace_root=a.workspace_root, worker_id=a.worker_id,
+        expected_harness_version=a.expected_harness_version,
+        expected_config_digest=a.expected_config_digest,
+        network_policy=a.network_policy, turn_input_loader=a.turn_input_loader,
+        policy_observer=a.policy_observer,
+        sdk_python=a.sdk_python, helper_path=a.helper_path,
+        process_identity_observer=a.process_identity_observer,
+        base_sha_resolver=a.base_sha_resolver,
+        client_factory=a.client_factory,
+        plan_contract=contract,
+    )
+    session, launch = start((alt, client, profile, epoch, generation))
+    assert launch.decision is LaunchDecision.ALLOW
+    init = [fields for method, fields in client.calls if method == "initialize"][0]
+    assert init["config"]["result_contract"] == contract
+    turn = TurnRef("turn", "epoch", "generation", "attempt")
+    alt.begin_turn(
+        operation_id=OperationId("ohf-op:turn"),
+        turn=turn, generation=generation, launch=launch,
+    )
+    candidate = alt.collect_candidate_result(turn)
+    assert candidate is not None
+    assert client.plan_contract == contract
+    alt.graceful_stop(generation, operation_id=OperationId("ohf-op:stop"))
+
+
+@pytest.mark.parametrize("contract", ["executive-plan-v2", "executive-plan-v6", "", True, None])
+def test_native_adapter_refuses_unqualified_plan_contract(configured, contract):
+    a, _, _, _, _ = configured
+    with pytest.raises(ValueError, match="contract"):
+        ClaudeOperatorAdapter(
+            binary_path=a.binary_path, provider_home=a.provider_home,
+            workspace_root=a.workspace_root, worker_id=a.worker_id,
+            expected_harness_version=a.expected_harness_version,
+            expected_config_digest=a.expected_config_digest,
+            network_policy=a.network_policy, turn_input_loader=a.turn_input_loader,
+            policy_observer=a.policy_observer,
+            client_factory=a.client_factory,
+            process_identity_observer=a.process_identity_observer,
+            base_sha_resolver=a.base_sha_resolver,
+            plan_contract=contract,
+        )
 
 def projected_browser_observer():
     registry = ExecutionCapabilityRegistry.load(

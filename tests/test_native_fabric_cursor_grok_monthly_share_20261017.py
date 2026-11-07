@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -270,6 +271,66 @@ class CursorMonthlyShareSourceTests(unittest.TestCase):
         )
         base["_cursor_grok_monthly_share"] = lambda *args: False
         self.assertEqual(base["probe"](), "POOL=glm MODEL=glm-5.3")
+
+
+    def _admitted_key(self, doc):
+        for index in range(1000):
+            key = f"bounded-proof-{index}"
+            if self.choose(key, doc):
+                return key
+        self.fail("valid entitlement positive control selected no route key")
+
+    @staticmethod
+    def _clock_at(instant):
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return instant.astimezone(tz) if tz is not None else instant.replace(tzinfo=None)
+        return FixedDateTime
+
+    def test_unbounded_remaining_fails_closed_without_overflow(self):
+        doc = self.policy()
+        key = self._admitted_key(doc)
+        doc["routing"]["cursor_grok_monthly_share"]["cursor_entitlement"]["remaining_pct"] = 10 ** 10000
+        self.assertFalse(self.choose(key, doc))
+
+    def test_nonfinite_and_invalid_remaining_keep_closed_boundary(self):
+        doc = self.policy()
+        key = self._admitted_key(doc)
+        for value in (-10 ** 10000, float("inf"), float("-inf"), float("nan"),
+                      True, None, "80", 19.99, 100.01):
+            with self.subTest(value_type=type(value).__name__):
+                doc["routing"]["cursor_grok_monthly_share"]["cursor_entitlement"]["remaining_pct"] = value
+                self.assertFalse(self.choose(key, doc))
+
+    def test_date_only_observation_requires_aware_utc(self):
+        # Make the old parser's local-midnight timestamp fresh on any host zone.
+        midnight = datetime(2026, 11, 7)
+        instant = datetime.fromtimestamp(midnight.timestamp() + 120, timezone.utc)
+        with mock.patch(__name__ + ".datetime", self._clock_at(instant)):
+            doc = self.policy()
+            key = self._admitted_key(doc)
+            doc["routing"]["cursor_grok_monthly_share"]["cursor_entitlement"]["observed_at"] = "2026-11-07Z"
+            self.assertFalse(self.choose(key, doc))
+
+    def test_date_only_reset_requires_aware_utc(self):
+        instant = datetime(2026, 11, 7, 12, tzinfo=timezone.utc)
+        with mock.patch(__name__ + ".datetime", self._clock_at(instant)):
+            doc = self.policy()
+            key = self._admitted_key(doc)
+            doc["routing"]["cursor_grok_monthly_share"]["cursor_entitlement"]["reset_at"] = "2026-11-17Z"
+            self.assertFalse(self.choose(key, doc))
+
+    def test_malformed_timestamp_shapes_remain_ineligible(self):
+        key = self._admitted_key(self.policy())
+        for field in ("observed_at", "reset_at"):
+            for value in (None, True, 7, "Z", "not-a-timestampZ",
+                          "2026-11-07T00:00:00+01:00Z", "2026-11-07T00:00:00+00:00"):
+                with self.subTest(field=field, value=value):
+                    doc = self.policy()
+                    doc["routing"]["cursor_grok_monthly_share"]["cursor_entitlement"][field] = value
+                    self.assertFalse(self.choose(key, doc))
+
 
 
 if __name__ == "__main__":

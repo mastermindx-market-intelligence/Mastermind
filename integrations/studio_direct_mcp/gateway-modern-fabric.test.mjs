@@ -6,11 +6,12 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { Client as LegacyClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport as LegacyTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
-import { startGateway, resolveConfig } from './gateway.mjs';
+import { startGateway, resolveConfig, setLogSink, fabricRequestLogFields } from './gateway.mjs';
 import { startPrivateGateway } from './private-tunnel-gateway.mjs';
 
 const profile = { host: '127.0.0.1', port: 0, accountLabel: 'fabric-test',
-  fabricOnly: true, backendMode: 'shared-account', modernFabricProtocol: true,
+  fabricOnly: true, gitPublish: false, paperDesign: false,
+  backendMode: 'shared-account', modernFabricProtocol: true,
   command: process.execPath, args: [fileURLToPath(new URL('./fixtures/modern-fabric-backend.mjs', import.meta.url))],
   requestTimeoutMs: 3000 };
 const metadata = { [PROTOCOL_VERSION_META_KEY]: '2026-07-28',
@@ -86,6 +87,72 @@ test('pinned modern client lists/calls through real HTTP and retains the existin
   } finally { await first?.close(); await second?.close(); await legacy?.close(); await gw.close(); }
 });
 
+test('real Fabric tool logs include run, class and stable 12-hex request fingerprint without packet disclosure', async () => {
+  const logged = [];
+  setLogSink(line => logged.push(JSON.parse(line)));
+  let gw, client;
+  const args = {
+    run_id: 'fingerprint-fixture-001', root_id: 'fixture-root', parent_id: 'fixture-root',
+    task_class: 'review', task_complexity: 'C1_ROUTINE_BOUNDED',
+    work_packet: `Prose SHA ${'a'.repeat(12)}; machine_sha256=${'a'.repeat(64)}
+fixture_key=example-not-a-real-secret`,
+  };
+  try {
+    gw = await startPrivateGateway(profile);
+    client = await connect(gw);
+    const response = value(await client.callTool({ name: 'fabric_request', arguments: args }));
+    assert.equal(response.effects, 1);
+    const entry = logged.find(row => row.event === 'tool_call' && row.tool === 'fabric_request');
+    assert.ok(entry, 'real gateway tool_call log is present');
+    assert.equal(entry.run_id, args.run_id);
+    assert.equal(entry.task_class, args.task_class);
+    assert.match(entry.request_fingerprint, /^[0-9a-f]{12}$/);
+    const expected = createHash('sha256').update(JSON.stringify(
+      Object.fromEntries(Object.keys(args).sort().map(key => [key, args[key]])),
+    )).digest('hex').slice(0, 12);
+    assert.equal(entry.request_fingerprint, expected);
+    assert.equal(fabricRequestLogFields('fabric_request',
+      Object.fromEntries(Object.entries(args).reverse())).request_fingerprint, expected);
+    assert.notEqual(fabricRequestLogFields('fabric_request',
+      { ...args, work_packet: args.work_packet + ' changed' }).request_fingerprint, expected);
+    assert.equal(JSON.stringify(entry).includes('fixture_key'), false);
+    assert.equal(JSON.stringify(entry).includes('a'.repeat(64)), false);
+    assert.deepEqual(fabricRequestLogFields('fabric_status', args), {});
+  } finally {
+    await client?.close();
+    await gw?.close();
+    setLogSink(line => process.stderr.write(line + '\n'));
+  }
+});
+
+test('modern Fabric permits only an actually exposed optional result page and preserves backend owner', async () => {
+  // Distinct read-only synthetic fixture: no real Fabric result or provider.
+  const gw = await startPrivateGateway({ ...profile, childEnv: { FIXTURE_PAGED: 'true' } });
+  let first, second;
+  try {
+    first = await connect(gw);
+    const catalog = (await first.listTools()).tools.map(t => t.name);
+    assert.equal(catalog.length, 10); // eight Fabric methods + gateway ping/page.
+    assert.ok(catalog.includes('fabric_result_page'));
+    assert.ok(!catalog.includes('start_process'));
+    const args = { run_id: 'synthetic-paged', root_id: 'synthetic-root', offset: 0, max_bytes: 4096 };
+    const firstPage = value(await first.callTool({ name: 'fabric_result_page', arguments: args }));
+    assert.equal(firstPage.name, 'fabric_result_page');
+    assert.deepEqual(firstPage.args, args);
+    const pid = firstPage.pid;
+    await first.close();
+    second = await connect(gw);
+    const following = value(await second.callTool({ name: 'fabric_result_page',
+      arguments: { ...args, offset: 4096 } }));
+    assert.equal(following.name, 'fabric_result_page');
+    assert.equal(following.pid, pid);
+    assert.equal(gw.stats().backend.spawns, 1);
+    assert.equal(gw.stats().sessions.active, 0);
+    await assert.rejects(second.callTool({ name: 'start_process', arguments: {} }),
+      /Fabric-only boundary/);
+  } finally { await first?.close(); await second?.close(); await gw.close(); }
+});
+
 test('malformed modern claims are rejected before backend acquisition; metadata cannot grant identity', async () => {
   const gw = await startPrivateGateway(profile);
   try {
@@ -120,14 +187,14 @@ test('modern calls cannot reach unrelated tools, and catalog drift fails closed'
 });
 
 test('an effectful timeout preserves UNKNOWN and the real facade refuses replay on the next exchange', async () => {
-  const gw = await startPrivateGateway({ ...profile, requestTimeoutMs: 300,
+  const gw = await startPrivateGateway({ ...profile,
     childEnv: { FIXTURE_FACADE_TIMEOUT: 'true' } });
   let client;
   const args = { run_id: 'fixture-timeout', root_id: 'fixture-root', parent_id: 'fixture-root',
     task_class: 'mechanical', task_complexity: 'C0_MECHANICAL', work_packet: 'Disposable fixture only.' };
   try {
     client = await connect(gw);
-    await client.listTools(); // Establish stdio outside the effect deadline.
+    await client.listTools(); // Verify startup before the deliberately pending effect.
     await assert.rejects(client.callTool({ name: 'fabric_request', arguments: args }), error => {
       assert.match(error.message, /EFFECT_UNKNOWN/);
       assert.equal(error.code, -32603);

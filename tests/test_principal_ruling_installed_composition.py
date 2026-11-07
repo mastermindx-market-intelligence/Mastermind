@@ -3,6 +3,7 @@ import asyncio
 import copy
 import dataclasses
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -79,10 +80,20 @@ def test_running_principal_cannot_follow_target_rotation(tmp_path, monkeypatch, 
     with pytest.raises(ValueError, match="configuration changed"): loader()
 
 
-@pytest.mark.parametrize("version", [2, 3])
+@pytest.mark.parametrize("version,events_enabled", [(2, False), (3, False), (3, True)])
 @pytest.mark.parametrize("selected", [False, True])
-def test_same_listener_selection_preserves_coo_profile_and_owns_lifecycle(rsa_key, tmp_path, version, selected):
+def test_same_listener_selection_preserves_coo_profile_and_owns_lifecycle(rsa_key, tmp_path, version, events_enabled, selected):
     _, token, _, settings = producer.fixture.setup_principal(rsa_key, tmp_path)
+    events = {}
+    if events_enabled:
+        from integrations.session_bridge.web_reply_event_rpc import WebReplyEventRpc
+        from tests.test_session_bridge_return_tools import tool as canonical_read_tool
+        from tests.test_session_bridge_web_reply_event_asgi import Owner
+        settings = dataclasses.replace(settings, executive=dataclasses.replace(
+            settings.executive, read_from_ceo_ingress=True))
+        reader, _ = canonical_read_tool()
+        events = dict(session_reply_read_tool=reader,
+            reply_event_rpc=WebReplyEventRpc(Owner(), clock=settings.executive.clock))
     kwargs = dict(coo_settings=settings, audit_sink=producer.fixture.fixture.Sink(),
         principal_ruling_target=producer.target() if selected else None)
     if version == 2:
@@ -94,7 +105,7 @@ def test_same_listener_selection_preserves_coo_profile_and_owns_lifecycle(rsa_ke
             device = unused
         app = server.build_web_ceo_v3_with_coo_mcp_app(settings.executive, **kwargs,
             mdm_reader=Mdm(), session_target_projector=unused,
-            session_reply_handler=unused, session_summon_handler=unused)
+            session_reply_handler=unused, session_summon_handler=unused, **events)
     async def exercise():
         async with app._app.router.lifespan_context(app._app):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
@@ -107,17 +118,27 @@ def test_same_listener_selection_preserves_coo_profile_and_owns_lifecycle(rsa_ke
                 else:
                     assert ruling.status_code == 404
                 assert (await client.post(producer.PATH+"/", headers=producer.headers(token), json=producer.rpc("tools/list"))).status_code == 404
+                if events_enabled:
+                    from tests.test_mastermind_executive_app_asgi import _read_token
+                    reader_token = _read_token(rsa_key)
+                    headers = dict(producer.headers(reader_token), **{"mcp-protocol-version": "2026-07-28"})
+                    request = {"jsonrpc": "2.0", "id": 1, "method": "events/list", "params": {}}
+                    listed = await client.post("/mcp", headers=headers, json=request)
+                    assert listed.status_code == 200, listed.text
+                    assert listed.json()["result"]["events"][0]["name"] == "session.reply_committed"
+                    headers["authorization"] = "Bearer " + token
+                    assert (await client.post("/mcp", headers=headers, json=request)).status_code in (401, 403)
     asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("lose_response", [False, True])
-def test_selected_composition_reaches_original_worker(tmp_path, monkeypatch, rsa_key, lose_response):
+def test_selected_composition_reaches_original_worker(short_socket_root, monkeypatch, rsa_key, lose_response):
     def composed(core, *, target):
         return server.build_web_ceo_v2_with_coo_mcp_app(core.settings.executive,
             coo_settings=core.settings, audit_sink=core._audit_sink, principal_ruling_target=target)
     monkeypatch.setattr(producer, "build_principal_ruling_mcp_app", composed)
     producer.test_signed_mcp_consumption_and_original_response_recovery(
-        tmp_path, monkeypatch, rsa_key, lose_response, True)
+        short_socket_root, monkeypatch, rsa_key, lose_response, True)
 
 
 def test_unselected_prefix_retains_existing_metadata_semantics(rsa_key, tmp_path):
@@ -146,14 +167,18 @@ def test_control_dialogue_selection_requires_separate_exact_opt_in(principal, di
     from ops.executive_os.coo_principal_host import validate_control_coo
     raw = dict(coo_principal_armed=principal, coo_principal_dialogue_armed=dialogue,
         executive_mcp_profile="web_ceo_v2", workspace_acquisition={}, workspace_resource_policy={},
-        workspace_control_room={}, ceo_ingress_app_peer_uid=458)
+        workspace_control_room={"transport": "unix",
+                                "socket_path": "/var/run/mastermind-executive/workspace-control-room.sock",
+                                "launchd_socket_name": "WorkspaceControlRoom",
+                                "allowed_peer_uids": [os.geteuid()]}, ceo_ingress_app_peer_uid=458)
     if valid: assert validate_control_coo(raw) is principal
     else:
         with pytest.raises(ValueError): validate_control_coo(raw)
 
 
 @pytest.mark.parametrize("selected", [False, True])
-def test_control_launcher_selects_same_service_runtime_without_observation_socket(tmp_path, monkeypatch, selected):
+def test_control_launcher_selects_same_service_runtime_without_observation_socket(short_socket_root, monkeypatch, selected):
+    tmp_path = short_socket_root
     from types import SimpleNamespace
     from scripts import executive_os_phase1c as cli
     from tests.test_c1_ceo_ingress_composition import _raw
@@ -165,7 +190,11 @@ def test_control_launcher_selects_same_service_runtime_without_observation_socke
     owner, _, _, _ = host.setup(tmp_path)
     raw = _raw(tmp_path)
     raw.update(ceo_ingress_app_peer_uid=458, ceo_ingress_app_armed=False,
-        ceo_ingress_app_macro_root=tmp_path/"macro", workspace_control_room={"port": 8787},
+        ceo_ingress_app_macro_root=tmp_path/"macro",
+        workspace_control_room={"transport": "unix",
+                                "socket_path": "/var/run/mastermind-executive/workspace-control-room.sock",
+                                "launchd_socket_name": "WorkspaceControlRoom",
+                                "allowed_peer_uids": [raw["control_uid"]]},
         workspace_acquisition={}, workspace_resource_policy=json.loads(json.dumps(dataclasses.asdict(_workspace_policy()))),
         ceo_ingress_app_boot_python=tmp_path/"sealed-python", executive_mcp_profile="web_ceo_v2",
         coo_principal_armed=True, coo_principal_dialogue_armed=selected)
@@ -176,7 +205,18 @@ def test_control_launcher_selects_same_service_runtime_without_observation_socke
     import socket
     from contextlib import ExitStack
     sockets = ExitStack()
+    import shutil
+    import control_plane.workspace_control_room_lifecycle as room_lifecycle
+    from tests.executive_installed_control_fixture import unix_listener
+    # The Control Room socket parent is a test-owned egid dir, not /var/run.
+    monkeypatch.setattr(room_lifecycle, "_TRUSTED_SOCKET_PARENT_UID", os.geteuid())
     def activated(name):
+        if name == "WorkspaceControlRoom":
+            listener, room_path = unix_listener()
+            sockets.callback(shutil.rmtree, os.path.dirname(room_path), ignore_errors=True)
+            sockets.enter_context(listener)
+            raw["workspace_control_room"]["socket_path"] = room_path
+            return listener
         value = sockets.enter_context(socket.socket(socket.AF_UNIX))
         value.bind(str(raw["control_socket_path" if name == "Operator" else "ceo_ingress_socket_path"]))
         value.listen()

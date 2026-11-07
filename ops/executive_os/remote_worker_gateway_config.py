@@ -22,9 +22,17 @@ from control_plane.remote_worker_transport import (
 )
 
 REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA = "mastermind.remote_worker_gateway_config/v1"
+HOST_OBSERVATION_GATEWAY_CONFIG_SCHEMA = "mastermind.remote_worker_gateway_config/v2"
+HOST_OBSERVATION_PROFILE = "hermes-role-metadata-read"
+HERMES_ROLE_METADATA_READ_SCHEMA = "mastermind.hermes_role_metadata_read_binding/v1"
+SECRETARY_GATEWAY_CONFIG_SCHEMA = "mastermind.remote_worker_gateway_config/v3"
+SECRETARY_GATEWAY_PROFILE = "hermes-secretary-conversation"
+HERMES_SECRETARY_CONVERSATION_SCHEMA = "mastermind.hermes_secretary_conversation_binding/v1"
+SECRETARY_CREDENTIAL_PATH = Path("/etc/mastermind-executive/remote-worker-gateway/secretary-conversation.token")
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
+_SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 WORKER_BROKER_TARGET = "worker-broker"
 FABRIC_BROKER_TARGET = "attended-fabric"
@@ -40,6 +48,163 @@ FABRIC_ALLOWED_OPERATIONS = frozenset(
         "assignment-seal-finalize",
     }
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class HermesRoleMetadataReadBinding:
+    """An optional fixed read capability; this claim is not source attestation."""
+
+    implementation_sha: str
+
+    def __post_init__(self) -> None:
+        if type(self.implementation_sha) is not str or _SHA_RE.fullmatch(self.implementation_sha) is None:
+            raise ValueError("Hermes metadata read binding is invalid")
+
+    @classmethod
+    def from_wire(cls, value) -> HermesRoleMetadataReadBinding:
+        if (type(value) is not dict or set(value) != {"schema", "implementation_sha"}
+                or value["schema"] != HERMES_ROLE_METADATA_READ_SCHEMA):
+            raise ValueError("Hermes metadata read binding is invalid")
+        return cls(value["implementation_sha"])
+
+    def to_wire(self) -> dict[str, str]:
+        return {"schema": HERMES_ROLE_METADATA_READ_SCHEMA, "implementation_sha": self.implementation_sha}
+
+
+def _validate_tls_listener(config) -> None:
+    """One TLS/listener validator shared by the closed gateway profiles."""
+    try:
+        validate_host_ref(config.host_ref)
+    except TransportValidationError as exc:
+        raise ValueError("remote worker gateway host_ref is invalid") from exc
+    try:
+        listen_ip = ipaddress.ip_address(config.listen_host)
+    except ValueError as exc:
+        raise ValueError("remote worker gateway listen address must be an IP literal") from exc
+    if listen_ip.is_unspecified or listen_ip.is_multicast or listen_ip.is_global:
+        raise ValueError("remote worker gateway listen address is not private")
+    if isinstance(config.listen_port, bool) or not isinstance(config.listen_port, int):
+        raise ValueError("remote worker gateway listen port is invalid")
+    if not 0 <= config.listen_port <= 65535:
+        raise ValueError("remote worker gateway listen port is invalid")
+    for field_name in ("certificate_path", "key_path", "ca_path"):
+        path = Path(getattr(config, field_name))
+        if not path.is_absolute() or not path.is_file():
+            raise ValueError("remote worker gateway TLS configuration is invalid")
+        object.__setattr__(config, field_name, path)
+    if not _HEX64_RE.fullmatch(str(config.expected_control_fingerprint)):
+        raise ValueError("remote worker gateway control fingerprint is invalid")
+
+
+def _validate_request_limits(config) -> None:
+    if not 0.1 <= float(config.request_timeout_seconds) <= 3600:
+        raise ValueError("remote worker gateway request timeout is invalid")
+    if isinstance(config.max_frame_bytes, bool) or not isinstance(config.max_frame_bytes, int):
+        raise ValueError("remote worker gateway frame ceiling is invalid")
+    if not 1024 <= config.max_frame_bytes <= MAX_FRAME_BYTES:
+        raise ValueError("remote worker gateway frame ceiling is invalid")
+
+
+@dataclasses.dataclass(frozen=True)
+class HostObservationGatewayConfig:
+    """The same MH1 listener with only its fixed host-read capability.
+
+    This variant deliberately has no Worker identity, broker endpoint, operation
+    allowlist, assignment Control, or provider execution configuration.
+    """
+
+    schema: str
+    profile: str
+    host_ref: str
+    listen_host: str
+    listen_port: int
+    certificate_path: Path
+    key_path: Path
+    ca_path: Path
+    expected_control_fingerprint: str
+    hermes_role_metadata_read: HermesRoleMetadataReadBinding
+    request_timeout_seconds: float = 4.0
+    max_frame_bytes: int = MAX_FRAME_BYTES
+
+    def __post_init__(self) -> None:
+        if (self.schema != HOST_OBSERVATION_GATEWAY_CONFIG_SCHEMA
+                or self.profile != HOST_OBSERVATION_PROFILE
+                or type(self.hermes_role_metadata_read) is not HermesRoleMetadataReadBinding):
+            raise ValueError("host observation gateway profile is invalid")
+        if (type(self.listen_host) is not str
+                or type(self.expected_control_fingerprint) is not str
+                or type(self.request_timeout_seconds) not in (int, float)):
+            raise ValueError("host observation gateway configuration is invalid")
+        _validate_tls_listener(self)
+        _validate_request_limits(self)
+
+
+@dataclasses.dataclass(frozen=True)
+class HermesSecretaryConversationBinding:
+    """One existing native session and its separately enrolled role credential."""
+
+    implementation_sha: str
+    root_id: str
+    session_id: str
+    gateway_port: int
+    credential_path: Path
+
+    def __post_init__(self) -> None:
+        if (type(self.implementation_sha) is not str or _SHA_RE.fullmatch(self.implementation_sha) is None
+                or type(self.root_id) is not str or _ID_RE.fullmatch(self.root_id) is None
+                or type(self.session_id) is not str or not self.session_id or len(self.session_id) > 1024
+                or any(ord(c) < 32 or ord(c) == 127 for c in self.session_id)
+                or type(self.gateway_port) is not int or not 1024 <= self.gateway_port <= 65535
+                or self.credential_path != SECRETARY_CREDENTIAL_PATH):
+            raise ValueError("Hermes Secretary conversation binding is invalid")
+
+    @classmethod
+    def from_wire(cls, value) -> HermesSecretaryConversationBinding:
+        fields = {"schema", "implementation_sha", "root_id", "session_id", "gateway_port", "credential_path"}
+        if (type(value) is not dict or set(value) != fields
+                or value["schema"] != HERMES_SECRETARY_CONVERSATION_SCHEMA
+                or value["credential_path"] != str(SECRETARY_CREDENTIAL_PATH)):
+            raise ValueError("Hermes Secretary conversation binding is invalid")
+        return cls(value["implementation_sha"], value["root_id"], value["session_id"],
+                   value["gateway_port"], SECRETARY_CREDENTIAL_PATH)
+
+    def to_wire(self) -> dict:
+        return {"schema": HERMES_SECRETARY_CONVERSATION_SCHEMA,
+                "implementation_sha": self.implementation_sha, "root_id": self.root_id,
+                "session_id": self.session_id, "gateway_port": self.gateway_port,
+                "credential_path": str(self.credential_path)}
+
+
+@dataclasses.dataclass(frozen=True)
+class HermesSecretaryGatewayConfig:
+    """The existing listener with metadata and a single bound Secretary session."""
+
+    schema: str
+    profile: str
+    host_ref: str
+    listen_host: str
+    listen_port: int
+    certificate_path: Path
+    key_path: Path
+    ca_path: Path
+    expected_control_fingerprint: str
+    hermes_role_metadata_read: HermesRoleMetadataReadBinding
+    hermes_secretary_conversation: HermesSecretaryConversationBinding
+    request_timeout_seconds: float = 4.0
+    max_frame_bytes: int = MAX_FRAME_BYTES
+
+    def __post_init__(self) -> None:
+        if (self.schema != SECRETARY_GATEWAY_CONFIG_SCHEMA or self.profile != SECRETARY_GATEWAY_PROFILE
+                or type(self.hermes_role_metadata_read) is not HermesRoleMetadataReadBinding
+                or type(self.hermes_secretary_conversation) is not HermesSecretaryConversationBinding
+                or self.hermes_role_metadata_read.implementation_sha
+                   != self.hermes_secretary_conversation.implementation_sha
+                or type(self.listen_host) is not str
+                or type(self.expected_control_fingerprint) is not str
+                or type(self.request_timeout_seconds) not in (int, float)):
+            raise ValueError("Hermes Secretary gateway profile is invalid")
+        _validate_tls_listener(self)
+        _validate_request_limits(self)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -62,34 +227,16 @@ class RemoteWorkerGatewayConfig:
     assignment_control: AssignmentControlBinding | None = None
     broker_target: str = WORKER_BROKER_TARGET
     expected_broker_peer_uid: int | None = None
+    hermes_role_metadata_read: HermesRoleMetadataReadBinding | None = None
 
     def __post_init__(self) -> None:
+        if self.hermes_role_metadata_read is not None and not isinstance(
+            self.hermes_role_metadata_read, HermesRoleMetadataReadBinding
+        ):
+            raise ValueError("Hermes metadata read binding is invalid")
         if self.schema != REMOTE_WORKER_GATEWAY_CONFIG_SCHEMA:
             raise ValueError("remote worker gateway config schema is unsupported")
-        try:
-            validate_host_ref(self.host_ref)
-        except TransportValidationError as exc:
-            raise ValueError("remote worker gateway host_ref is invalid") from exc
-
-        try:
-            listen_ip = ipaddress.ip_address(self.listen_host)
-        except ValueError as exc:
-            raise ValueError("remote worker gateway listen address must be an IP literal") from exc
-        if listen_ip.is_unspecified or listen_ip.is_multicast or listen_ip.is_global:
-            raise ValueError("remote worker gateway listen address is not private")
-        if isinstance(self.listen_port, bool) or not isinstance(self.listen_port, int):
-            raise ValueError("remote worker gateway listen port is invalid")
-        if not 0 <= self.listen_port <= 65535:
-            raise ValueError("remote worker gateway listen port is invalid")
-
-        for field_name in ("certificate_path", "key_path", "ca_path"):
-            path = Path(getattr(self, field_name))
-            if not path.is_absolute() or not path.is_file():
-                raise ValueError("remote worker gateway TLS configuration is invalid")
-            object.__setattr__(self, field_name, path)
-
-        if not _HEX64_RE.fullmatch(str(self.expected_control_fingerprint)):
-            raise ValueError("remote worker gateway control fingerprint is invalid")
+        _validate_tls_listener(self)
 
         broker_socket = Path(self.broker_socket_path)
         if not broker_socket.is_absolute():
@@ -151,9 +298,7 @@ class RemoteWorkerGatewayConfig:
         ):
             raise ValueError("gateway assignment seal requires explicit Control binding")
 
-        if not 0.1 <= float(self.request_timeout_seconds) <= 3600:
-            raise ValueError("remote worker gateway request timeout is invalid")
-        if isinstance(self.max_frame_bytes, bool) or not isinstance(self.max_frame_bytes, int):
-            raise ValueError("remote worker gateway frame ceiling is invalid")
-        if not 1024 <= self.max_frame_bytes <= MAX_FRAME_BYTES:
-            raise ValueError("remote worker gateway frame ceiling is invalid")
+        _validate_request_limits(self)
+
+
+GatewayConfig = RemoteWorkerGatewayConfig | HostObservationGatewayConfig | HermesSecretaryGatewayConfig

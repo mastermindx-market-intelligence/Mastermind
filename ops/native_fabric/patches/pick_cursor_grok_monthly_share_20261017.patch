@@ -16,7 +16,7 @@
          return _pick_scored(tc, prefer_c, doc, needs=needs, subject_pool=subject_pool, host_modes=host_modes,
                               task_complexity=complexity, escalation_reason=escalation_reason)
  
-@@ -2161,6 +2170,59 @@
+@@ -2161,6 +2170,64 @@
      return same
  
  
@@ -34,15 +34,20 @@
 +            or proof.get("on_demand_enabled") is not False):
 +        return False
 +    remaining = proof.get("remaining_pct")
-+    if (type(remaining) not in (int, float) or not math.isfinite(remaining)
-+            or not 20.0 <= remaining <= 100.0):
++    if (type(remaining) not in (int, float) or not 20.0 <= remaining <= 100.0
++            or not math.isfinite(remaining)):
 +        return False
 +    if any(type(proof.get(k)) is not str or not proof[k].endswith("Z")
 +           for k in ("observed_at", "reset_at")):
 +        return False
 +    try:
-+        observed = datetime.fromisoformat(proof["observed_at"][:-1] + "+00:00").timestamp()
-+        reset = datetime.fromisoformat(proof["reset_at"][:-1] + "+00:00").timestamp()
++        observed_at = datetime.fromisoformat(proof["observed_at"][:-1] + "+00:00")
++        reset_at = datetime.fromisoformat(proof["reset_at"][:-1] + "+00:00")
++        if any(value.tzinfo is None or value.utcoffset() != timezone.utc.utcoffset(None)
++               for value in (observed_at, reset_at)):
++            return False
++        observed = observed_at.timestamp()
++        reset = reset_at.timestamp()
 +        now = datetime.now(timezone.utc).timestamp()
 +    except (ValueError, OverflowError):
 +        return False
