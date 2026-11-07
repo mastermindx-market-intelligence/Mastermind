@@ -53,3 +53,14 @@ class AgentOsProjectKnowledgeSourceReader(_Reader):
                 source_ref=source_ref, expected_revision=expected_revision)
         except InstalledProjectReadUnavailable:
             raise ProjectKnowledgeSourceUnavailable("SOURCE_UNAVAILABLE") from None
+
+
+class AgentOsProjectDiscoverySourceReader(_Reader):
+    def read(self, *, work_ref, discovery_ref, expected_source_commit):
+        from control_plane.installed_project_read_binding import (
+            InstalledProjectReadUnavailable, read_installed_project_discovery_source_binding)
+        try:
+            return read_installed_project_discovery_source_binding(self, work_ref=work_ref,
+                discovery_ref=discovery_ref, expected_source_commit=expected_source_commit)
+        except InstalledProjectReadUnavailable:
+            raise ProjectKnowledgeSourceUnavailable("SOURCE_UNAVAILABLE") from None

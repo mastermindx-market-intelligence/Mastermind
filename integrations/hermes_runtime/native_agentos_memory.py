@@ -31,6 +31,7 @@ from . import native_request_observation as observation
 
 READBACK_SCHEMA = "mastermind.hermes_native_consumer_readback/v2"
 CURRENT_READBACK_SCHEMA = "mastermind.hermes_native_consumer_readback/v3"
+DISCOVERY_READBACK_SCHEMA = "mastermind.hermes_native_consumer_readback/v4"
 _CLAIM_ATTRIBUTE = "_mmx_agentos_memory_claim"
 _INSTANCE_ATTRIBUTE = "_mmx_agentos_memory_instance"
 _PACKAGE_MODULE = "integrations.hermes_harness.native_selected_child_plugin"
@@ -442,7 +443,7 @@ class NativeAgentOsMemoryFactory:
                     or instance.manager.get_provider("agentos") is not provider
                     or (readiness["state"] == "READY") != (snapshot is not None)))):
             _refuse("NATIVE_AGENTOS_FACTORY_UNAVAILABLE")
-        return {"schema": CURRENT_READBACK_SCHEMA if self.publication.workspace_principal is not None else READBACK_SCHEMA,
+        result = {"schema": DISCOVERY_READBACK_SCHEMA if self.publication.discovery else CURRENT_READBACK_SCHEMA if self.publication.workspace_principal is not None else READBACK_SCHEMA,
             "binding": {
             "implementation_sha": self.slot.owner, "publication_sha256": self.publication_sha256,
             "profile_id": str(self.role_home), "instance_id": self.instance_id,
@@ -450,6 +451,10 @@ class NativeAgentOsMemoryFactory:
             "enrollment_request_id": self.slot.publication.session.request_id,
             "principal_id": self.slot.publication.session.principal_id, "session_id": self.session_id},
             "context": context, "selected_child": None}
+        if self.publication.discovery:
+            from integrations.hermes_harness.native_discovery_tools import readback
+            result["discovery"] = readback(self.slot)
+        return result
 
 
 def register_memory_provider(ctx):
@@ -481,14 +486,37 @@ def validate_consumer_readback(value, *, publication, expected_binding):
             _refuse("NATIVE_AGENTOS_READBACK_INVALID")
     if type(publication) is not ExecutiveContextConsumerPublication:
         _refuse("NATIVE_AGENTOS_READBACK_INVALID")
-    shape(value, ("schema", "binding", "context", "selected_child"))
+    shape(value, ("schema", "binding", "context", "selected_child", "discovery") if publication.discovery
+          else ("schema", "binding", "context", "selected_child"))
     shape(value["binding"], ("implementation_sha", "publication_sha256", "profile_id", "instance_id",
         "authority_epoch", "enrollment_request_id", "principal_id", "session_id"))
-    expected_schema = CURRENT_READBACK_SCHEMA if publication.workspace_principal is not None else READBACK_SCHEMA
+    expected_schema = DISCOVERY_READBACK_SCHEMA if publication.discovery else CURRENT_READBACK_SCHEMA if publication.workspace_principal is not None else READBACK_SCHEMA
     if (value["schema"] != expected_schema or value["binding"] != expected_binding
             or not observation._integer(value["binding"]["authority_epoch"])
             or value["binding"]["authority_epoch"] < 1):
         _refuse("NATIVE_AGENTOS_READBACK_INVALID")
+    if publication.discovery:
+        from integrations.hermes_harness.native_discovery_tools import schemas
+        from integrations.hermes_harness.native_executive_consumer import schema_digest
+        from common import coo_discovery_contract as discovery_wire
+        from common import workspace_discovery_correction_contract as correction
+        discovery = value["discovery"]
+        shape(discovery, ("catalogue", "registered", "tools", "uncertain_original", "reservation_unresolved"))
+        expected_tools = [{"name": name, "schema_sha256": schema_digest(schemas()[name])}
+                          for name in discovery_wire.TOOLS]
+        if (discovery["catalogue"] != discovery_wire.CATALOGUE or discovery["registered"] is not True
+                or discovery["tools"] != expected_tools or type(discovery["reservation_unresolved"]) is not bool):
+            _refuse("NATIVE_AGENTOS_READBACK_INVALID")
+        pending = discovery["uncertain_original"]
+        if pending is not None:
+            shape(pending, ("operation", "lookup"))
+            try:
+                selected = correction.validate_lookup(pending["lookup"])
+                if (type(pending["operation"]) is not str or pending["operation"] not in {"prepare", "submit", "reconcile"}
+                        or selected["work_ref"] != publication.work_ref):
+                    raise ValueError()
+            except (TypeError, ValueError):
+                _refuse("NATIVE_AGENTOS_READBACK_INVALID")
     context = value["context"]
     shape(context, ("provider", "source_mode", "factory_registered", "provider_installed",
                     "readiness", "active_claim", "snapshot", "last_delivery"))

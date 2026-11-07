@@ -79,6 +79,8 @@ CONTEXT_CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v2"
 CONTEXT_TOOLS_SCHEMA_DIGEST = "5fa24aa1d907d66d0ca0a56168617f955e09d063f532cf527fe0d7b923fb50af"
 CURRENT_CONTEXT_CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v3"
 CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST = "41644c90bbd8b5927c5cc7f97f65fef144ba9f9ca6e0277d702d7a8a26fa0da0"
+DISCOVERY_CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v4"
+DISCOVERY_TOOLS_SCHEMA_DIGEST = "94db08906bd04c78565f6172d7a657c13bbe608f3b14dba5649cbedb23deed42"
 _WORKSPACE_RESOURCE = "https://mcp.mastermind-x.com/workspace/read"
 _WORKSPACE_SCOPE = "mastermind.workspace.read"
 _CURRENT_PRIMARY_RESOURCE = "https://mcp.mastermind-x.com/mcp"
@@ -485,11 +487,12 @@ class ExecutiveContextConsumerPublication:
     context: ConsumerContext
     selected_child: ConsumerSelectedChild | None
     workspace_principal: ConsumerPrincipal | None = None
+    discovery: bool = False
 
     def __post_init__(self):
         from common.workspace_project_plan_contract import validate_selection
         from integrations.executive_mcp.coo import (
-            coo_context_tool_schema_digest, coo_current_context_tool_schema_digest)
+            coo_context_tool_schema_digest, coo_current_context_tool_schema_digest, coo_discovery_tool_schema_digest)
         from integrations.mastermind_executive_app.coo_binding import _digest as binding_record_digest
         try:
             validate_selection({"work_ref": self.work_ref})
@@ -504,6 +507,8 @@ class ExecutiveContextConsumerPublication:
                 or type(self.plugin) is not ConsumerPlugin or type(self.context) is not ConsumerContext
                 or (self.selected_child is not None and type(self.selected_child) is not ConsumerSelectedChild)):
             raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
+        if type(self.discovery) is not bool or self.discovery and self.workspace_principal is None:
+            raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
         if self.workspace_principal is None:
             if (self.context.source_mode != "ADOPTED_SNAPSHOT"
                     or self.tools_schema_digest != CONTEXT_TOOLS_SCHEMA_DIGEST
@@ -512,9 +517,10 @@ class ExecutiveContextConsumerPublication:
                 raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
         else:
             wp, principal = self.workspace_principal, self.principal
+            expected_tools = DISCOVERY_TOOLS_SCHEMA_DIGEST if self.discovery else CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST
+            observed_tools = coo_discovery_tool_schema_digest() if self.discovery else coo_current_context_tool_schema_digest()
             if (type(wp) is not ConsumerPrincipal or self.context.source_mode != "CANONICAL_PROJECT_DATA"
-                    or self.tools_schema_digest != CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST
-                    or coo_current_context_tool_schema_digest() != CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST
+                    or self.tools_schema_digest != expected_tools or observed_tools != expected_tools
                     or wp.resource_ref != _WORKSPACE_RESOURCE or wp.scopes != (_WORKSPACE_SCOPE,)
                     or wp.policy_id == principal.policy_id
                     or any(getattr(wp, key) != getattr(principal, key)
@@ -557,10 +563,10 @@ def selected_child_publication(publication: ConsumerPublication) -> ExecutiveCon
 
 
 def _validate_context_publication(value):
-    current = type(value) is dict and value.get("schema") == CURRENT_CONTEXT_CONSUMER_SCHEMA
+    current = type(value) is dict and value.get("schema") in {CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA}
     keys = _CONTEXT_PUBLICATION_KEYS | {"workspace_principal"} if current else _CONTEXT_PUBLICATION_KEYS
     if (type(value) is not dict or set(value) != keys
-            or value.get("schema") not in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA}):
+            or value.get("schema") not in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA}):
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
     for name, keys in (("principal", _PRINCIPAL_KEYS), ("mcp", _MCP_KEYS),
                        ("session", _SESSION_KEYS), ("plugin", _PLUGIN_KEYS),
@@ -591,7 +597,7 @@ def _typed_context_publication(document):
     principal["scopes"] = tuple(principal["scopes"])
     workspace = None
     mcp = dict(document["mcp"])
-    if document["schema"] == CURRENT_CONTEXT_CONSUMER_SCHEMA:
+    if document["schema"] in {CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA}:
         raw_workspace = dict(document["workspace_principal"])
         raw_workspace["scopes"] = tuple(raw_workspace["scopes"])
         workspace = ConsumerPrincipal(**raw_workspace)
@@ -600,6 +606,7 @@ def _typed_context_publication(document):
         mcp["_workspace_principal_scope"] = hashlib.sha256(_canonical(frame)).hexdigest()
     return ExecutiveContextConsumerPublication(
         **common, principal=ConsumerPrincipal(**principal), mcp=ConsumerMcp(**mcp), workspace_principal=workspace,
+        discovery=document["schema"] == DISCOVERY_CONSUMER_SCHEMA,
         session=ConsumerSession(**document["session"]), plugin=ConsumerPlugin(**document["plugin"]),
         context=ConsumerContext(**document["context"]), selected_child=(None
             if document["selected_child"] is None else ConsumerSelectedChild(**document["selected_child"])))
@@ -612,7 +619,7 @@ def validate_consumer_publication(value: Any) -> dict[str, Any]:
     here. No credential, bearer template, client secret, private path or
     authority boolean is accepted: the closed key set cannot carry one.
     """
-    if type(value) is dict and value.get("schema") in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA}:
+    if type(value) is dict and value.get("schema") in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA}:
         return _validate_context_publication(value)
     if type(value) is not dict or set(value) != _PUBLICATION_KEYS:
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
@@ -688,7 +695,7 @@ def publication_from_document(document: Mapping[str, Any]) -> ConsumerPublicatio
 
 def _typed_publication(document: Mapping[str, Any]) -> ConsumerPublication:
     """Build the typed publication from an already validated document."""
-    if document["schema"] in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA}:
+    if document["schema"] in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA}:
         return _typed_context_publication(document)
     principal = document["principal"]
     mcp = document["mcp"]
@@ -741,7 +748,10 @@ class ConsumerSlot:
                  "qualification_outcome", "load_attempted", "loader_entered",
                  "loader_result", "loader_record", "load_outcome", "registration_context",
                  "registration_binding", "registration_error", "registration_attempted",
-                 "memory_factory", "context_registration", "import_current")
+                 "memory_factory", "context_registration", "import_current",
+                 "discovery_binding", "discovery_context", "discovery_attempted", "discovery_handles",
+                 "discovery_registration", "discovery_error", "discovery_call", "discovery_last_call",
+                 "discovery_last_result", "discovery_uncertain", "discovery_uncertain_call")
 
     def __init__(self, *, owner: str, profile_id: str, source: str, plugin_id: str,
                  publication: ConsumerPublication,
@@ -770,6 +780,12 @@ class ConsumerSlot:
         self.load_outcome = "NOT_ATTEMPTED"
         self.memory_factory = self.context_registration = None
         self.import_current = None
+        self.discovery_binding = self.discovery_context = self.discovery_registration = None
+        self.discovery_error = self.discovery_call = self.discovery_last_call = None
+        self.discovery_last_result = self.discovery_uncertain = None
+        self.discovery_uncertain_call = None
+        self.discovery_attempted = False
+        self.discovery_handles = []
 
     @property
     def delegate_binding(self):
@@ -961,6 +977,14 @@ class _ConsumerRefused(Exception):
 class _ConsumerUncertain(Exception):
     """A possible send whose effect is unknown."""
 
+    def __init__(self, message, *, original_future=None):
+        super().__init__(message)
+        self.original_future = original_future
+
+
+class _ConsumerNotDispatched(_ConsumerUncertain):
+    """The original caller proved refusal before session.call_tool entry."""
+
 
 def _refusal_envelope(reason: str, publication: ExecutiveConsumerPublication) -> dict[str, Any]:
     """The canonical no-effect envelope the C28 adapter accepts."""
@@ -1009,10 +1033,13 @@ class _NativeMcpCaller:
             self._check()
             if currentness is not None and currentness() is not True:
                 raise _ConsumerUncertain("original native call binding is unavailable")
-        check()
+        try:
+            check()
+        except Exception as exc:
+            raise _ConsumerNotDispatched("original native call refused before scheduling") from exc
         try:
             if asyncio.get_running_loop() is self._loop:
-                raise _ConsumerUncertain("synchronous RPC cannot block its owner loop")
+                raise _ConsumerNotDispatched("synchronous RPC cannot block its owner loop")
         except RuntimeError:
             pass
         server, session, loop = self._server, self._session, self._loop
@@ -1023,7 +1050,7 @@ class _NativeMcpCaller:
             inflight = getattr(server, "_inflight_tasks", None)
             task = asyncio.current_task()
             if lock is None:
-                raise _ConsumerUncertain("native RPC lock is unavailable")
+                raise _ConsumerNotDispatched("native RPC lock is unavailable")
             # Context reads do not queue behind a still-owned SDK request after
             # its observer timed out. Check on the original loop, without any
             # await before acquisition; the incumbent lock/inflight set remain
@@ -1033,18 +1060,27 @@ class _NativeMcpCaller:
                 waiters = getattr(lock, "_waiters", False)
                 # asyncio.Lock fairness can suspend an unlocked acquire while
                 # an older waiter is waking. Qualify that incumbent shape too.
-                if (type(lock) is not asyncio.Lock or type(waiters) not in (type(None), deque)
+                if (type(lock) is not asyncio.Lock or type(inflight) is not set
+                        or type(waiters) not in (type(None), deque)
                         or lock.locked() or waiters or inflight):
-                    raise _ConsumerUncertain("original native RPC is still in flight")
+                    raise _ConsumerNotDispatched("original native RPC is still in flight")
             async with lock:
                 # The connection/authority may change while waiting for this lock.
-                check()
+                try:
+                    check()
+                except Exception as exc:
+                    raise _ConsumerNotDispatched("original native call refused at send edge") from exc
                 if inflight is not None and task is not None:
                     inflight.add(task)
                 try:
-                    result = await session.call_tool(tool_name, arguments=payload)
-                    check()
-                    return result
+                    try:
+                        result = await session.call_tool(tool_name, arguments=payload)
+                        check()
+                        return result
+                    except _ConsumerNotDispatched as exc:
+                        # Only this caller's pre-entry checks can prove no send.
+                        # A session/late guard exception cannot borrow that fact.
+                        raise _ConsumerUncertain("native RPC failed after send entry") from exc
                 finally:
                     if inflight is not None and task is not None:
                         inflight.discard(task)
@@ -1059,7 +1095,9 @@ class _NativeMcpCaller:
             return future.result(timeout=self._timeout)
         except concurrent.futures.TimeoutError as exc:
             future.add_done_callback(_consume_future_result)
-            raise _ConsumerUncertain("native RPC timed out; original request retained") from exc
+            raise _ConsumerUncertain("native RPC timed out; original request retained", original_future=future) from exc
+        except _ConsumerNotDispatched:
+            raise
         except Exception as exc:
             raise _ConsumerUncertain("native RPC failed") from exc
 
@@ -1281,6 +1319,14 @@ def install_native_consumer(
                 or not slot.memory_factory.loader_ready()):
             raise RuntimeRefusal("NATIVE_AGENTOS_FACTORY_UNAVAILABLE")
     child = selected_child_publication(publication)
+    discovery_required = context_required and publication.discovery
+    if discovery_required:
+        from .native_discovery_tools import qualify_binding
+        if slot.discovery_binding is not None:
+            raise RuntimeRefusal("NATIVE_CONSUMER_ORIGINAL_LOAD_RETAINED")
+        slot.discovery_binding = qualify_binding(slot=slot, server=server, session=session, loop=loop,
+            profile_id=profile_id, session_id=session_id, session_key=route,
+            currentness=session_guard, trust_gate=trust_gate, timeout=timeout)
     if child is not None:
         caller = _NativeMcpCaller(server=server, session=session, loop=loop,
                                  timeout=timeout, currentness=session_guard)
@@ -1304,18 +1350,23 @@ def install_native_consumer(
     loaded = getattr(manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME)
     if ((child is not None and slot.registration is None)
             or (context_required and slot.context_registration is None)
+            or (discovery_required and (slot.discovery_registration is None or slot.discovery_error is not None))
             or slot.registration_error is not None
             or loaded is None or getattr(loaded, "enabled", None) is not True
             or getattr(loaded, "error", None) is not None
             or getattr(loaded, "manifest", None) is not manifest):
         if slot.load_outcome not in {"EFFECT_UNKNOWN", "REFUSED"}:
-            slot.load_outcome = "EFFECT_UNKNOWN" if slot.registration_attempted else "REFUSED"
+            slot.load_outcome = "EFFECT_UNKNOWN" if slot.registration_attempted or slot.discovery_attempted else "REFUSED"
         return slot
     if package_check() is not True or session_guard() is not True:
         slot.load_outcome = "CURRENTNESS_UNAVAILABLE"
         return slot
     slot.loader_record = loaded
     slot.load_outcome = "REGISTERED" if child is not None else "CONTEXT_REGISTERED"
+    if discovery_required:
+        from .native_discovery_tools import registration_current
+        if not registration_current(slot.discovery_binding):
+            slot.load_outcome = "CURRENTNESS_UNAVAILABLE"
     return slot
 
 

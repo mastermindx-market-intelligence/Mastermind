@@ -28,6 +28,7 @@ import re
 import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
+from common import workspace_discovery_correction_contract as correction
 
 from common.workspace_project_journal_contract import validate_selection
 from common.workspace_source_operation_contract import validate_lookup
@@ -42,7 +43,7 @@ _EVENT_SCHEMA = "mastermind.project_source_operation_event.v1"
 _LOOKUP_SCHEMA = "mastermind.workspace_source_operation_lookup.v1"
 _PUBLICATION_REPOSITORY = "mastermindx-market-intelligence/macro"
 
-_KNOWLEDGE_ACTIONS = frozenset({"add_project_file", "set_project_communication_preference"})
+_KNOWLEDGE_ACTIONS = frozenset({"add_project_file", "set_project_communication_preference", correction.ACTION})
 _LOOKUP7_KEYS = frozenset({"action", "request_id", "work_ref", "source_commit",
                            "base_revision", "request_sha256", "expected_preference_revision"})
 _IDENTITY3_KEYS = ("action", "request_id", "work_ref")
@@ -77,6 +78,11 @@ def _hex40(value):
 
 def _lookup_identity(value):
     """Validate the exact body-free seven-field knowledge selection."""
+    if type(value) is dict and value.get("action") == correction.ACTION:
+        try:
+            return correction.validate_lookup(value)
+        except ValueError:
+            raise KnowledgeOperationConflict() from None
     if (type(value) is not dict or set(value) != _LOOKUP7_KEYS
             or type(value["action"]) is not str
             or value["action"] not in _KNOWLEDGE_ACTIONS):
@@ -269,8 +275,7 @@ class KnowledgePublisherEvents:
         for key in ("recipe_fingerprint_sha256", "permission_binding_digest"):
             _hex64(original.get(key))
         binding = original.get("lookup_binding")
-        if (type(binding) is not dict or set(binding) != _LOOKUP7_KEYS
-                or any(binding[key] != identity[key] for key in _LOOKUP7_KEYS)):
+        if type(binding) is not dict or _lookup_identity(binding) != identity:
             raise KnowledgeOperationConflict()
         if (type(original.get("publication_binding")) is not dict
                 or set(original["publication_binding"]) != {"expected_commit", "postimages", "branch"}
@@ -280,8 +285,10 @@ class KnowledgePublisherEvents:
         if original["publication_binding"]["expected_commit"] != identity["source_commit"]:
             raise KnowledgeOperationConflict()
         images = original["publication_binding"]["postimages"]
-        if (type(images) is not list or len(images) != 2
-                or len({item.get("path") for item in images}) != 2):
+        count = 3 if identity["action"] == correction.ACTION else 2
+        if (type(images) is not list or len(images) != count
+                or any(type(item) is not dict for item in images)
+                or len({item.get("path") for item in images}) != count):
             raise KnowledgeOperationConflict()
         for item in images:
             if (type(item) is not dict
@@ -291,6 +298,10 @@ class KnowledgePublisherEvents:
             _hex64(item["content_sha256"])
             if item["expected_preimage_sha256"] is not None:
                 _hex64(item["expected_preimage_sha256"])
+        if identity["action"] == correction.ACTION:
+            expected = correction.expected_preimages(identity, scope)
+            if ({item["path"]: item["expected_preimage_sha256"] for item in images} != expected):
+                raise KnowledgeOperationConflict()
 
     def _phase(self, identity, planned, status, status_context):
         if status.get("disposition") == "refused":
@@ -317,7 +328,7 @@ class KnowledgePublisherEvents:
     def _source_proof(planned, receipt):
         """Both planned postimages in one actual same Macro commit, or conflict."""
         sources = receipt.get("sources")
-        if (type(sources) is not list or len(sources) != 2
+        if (type(sources) is not list or len(sources) != len(planned["postimages"])
                 or any(type(item) is not dict or item.get("repository") != "macro"
                        for item in sources)):
             raise KnowledgeOperationConflict()
