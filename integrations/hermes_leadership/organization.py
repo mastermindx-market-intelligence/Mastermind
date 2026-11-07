@@ -131,7 +131,7 @@ def organization_context(charter_key: str, summary: dict) -> dict:
         "organization": {
             "human_root": {"key": "chairman", "title": "Chairman", "live_presence": "NOT_OBSERVED"},
             "seats": seats,
-            "live_roster_joined": False,
+            "live_roster_state": "NOT_OBSERVED",
             "caller": {"charter_key": charter_key, "advisory_reporting_path": _chain(charter_key)},
         },
         "goal_lineage": {
@@ -159,7 +159,7 @@ def organization_context(charter_key: str, summary: dict) -> dict:
                 "original_parent_consumption": "NOT_ESTABLISHED",
                 "acceptance_state": _text(acceptance.get("state"), limit=128),
                 "acceptance_reason_codes": list(reasons),
-                "product_accepted": False,
+                "product_acceptance": "NOT_ESTABLISHED",
             },
             "source": {
                 "mission_fingerprint": fingerprint,
