@@ -288,12 +288,10 @@ class SourceOperationEvents:
                 AND json_extract(payload_json,'$.schema')=?
                 AND json_extract(payload_json,'$.identity.principal_scope')=?
                 AND json_extract(payload_json,'$.identity.work_ref')=?
+                AND json_extract(payload_json,'$.identity.action') IN
+                    ('add_project_file','set_project_communication_preference')
                 AND json_extract(payload_json,'$.kind')='SOURCE_OBSERVED'
-                AND ((json_extract(payload_json,'$.identity.action') IN
-                    ('add_project_file','set_project_communication_preference','publish_project_proposal','publish_project_plan_proposal')
-                    AND json_extract(payload_json,'$.phase')='PUBLICATION')
-                    OR (json_extract(payload_json,'$.identity.action')='ADOPT_PLAN'
-                    AND json_extract(payload_json,'$.phase')='ADOPTION'))
+                AND json_extract(payload_json,'$.phase')='PUBLICATION'
                 ORDER BY event_id DESC LIMIT 65
             """, (AGGREGATE, SCHEMA, scope, work_ref)).fetchall()
             _guard(guard)

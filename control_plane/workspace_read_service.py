@@ -499,7 +499,7 @@ class WorkspaceReadService:
                  product_acceptance_observe=None, activity_membership=None,
                  project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_instructions_reader=None, project_direction_reader=None, project_archive_reader=None,
                  project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
-                 canonical_project_data=None, project_discovery=None,
+                 canonical_project_data=None,
                  control_room_presenter=None,
                  control_room_actions=None, project_admission_permissions=None, instruction_admission_permissions=None,
                  byok_roles_reader=None):
@@ -515,7 +515,6 @@ class WorkspaceReadService:
                 raise ValueError("nominal installed instruction permission source required")
             instruction_admission_permissions.check()
         self._instruction_admission_permissions = instruction_admission_permissions
-        self._project_discovery = project_discovery
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -722,34 +721,20 @@ class WorkspaceReadService:
         except Exception: return error("access_denied", 403)
         return result
 
-    def _read_project_plan(self, selected, principal=None):
+    def _read_project_plan(self, selected):
         from common import workspace_project_plan_contract as wire
-        selected=wire.validate_selection(selected)
         before = self.cache.snapshot()
         work_ref = selected["work_ref"]
-        if not _qualified(before):raise ValueError("source_unavailable")
-        data=None
-        if self._canonical_project_data is not None and principal is not None:
-            from control_plane.installed_canonical_project_data_binding import read_installed_project_data
-            data=read_installed_project_data(self._canonical_project_data,principal,operation='project_plan',selection=selected)
         def member(snapshot):
-            if not _qualified(snapshot):raise ValueError("source_unavailable")
-            rows=[row for row in snapshot.document["work"] if row.get("work_ref")==work_ref]
-            if len(rows)==1:return
-            # Only an actual same-principal CREATE/PLAN publication can expose
-            # a new project beyond the installed C catalogue. This does not
-            # add it to that catalogue or change any other read family.
-            if rows or data is None:raise LookupError("selection_not_found")
-            witness=data[1].witness();publication=witness['source_operation']
-            if (publication is None or data[1].code_commit==data[1].data_commit
-                    or publication['selection']['work_ref']!=work_ref
-                    or publication['selection']['action'] not in {'publish_project_proposal','publish_project_plan_proposal'}):
+            if not _qualified(snapshot):
+                raise ValueError("source_unavailable")
+            rows = [row for row in snapshot.document["work"] if row.get("work_ref") == work_ref]
+            if len(rows) != 1:
                 raise LookupError("selection_not_found")
         member(before)
-        if data is None and self._project_plan_reader is None:
+        if self._project_plan_reader is None:
             return wire.unavailable(work_ref, "SOURCE_UNAVAILABLE")
-        body = wire.validate_body(self._project_plan_reader.read(work_ref=work_ref) if data is None else data[0])
-        if body['selection']!=selected:return wire.unavailable(work_ref,"SOURCE_CHANGED")
+        body = wire.validate_body(self._project_plan_reader.read(work_ref=work_ref))
         after = self.cache.snapshot()
         member(after)
         if (before.owner is not after.owner or before.instance != after.instance
@@ -759,10 +744,8 @@ class WorkspaceReadService:
             return wire.unavailable(work_ref, "SOURCE_CHANGED")
         if body.get("availability") == "AVAILABLE":
             source = wire.validate_source(body.get("source"), work_ref)
-            code=before.document.get("sources", {}).get("macro_sha")
-            if (data is not None and code!=data[1].code_commit) or source['commit']!=(code if data is None else data[1].data_commit):
+            if before.document.get("sources", {}).get("macro_sha") != source["commit"]:
                 return wire.unavailable(work_ref, "SOURCE_CHANGED")
-        if data is not None:data[1].check()
         bounded_canonical({"ok": True, "result": body}, limit=wire.MAX_RESPONSE_BYTES)
         return body
 
@@ -778,7 +761,7 @@ class WorkspaceReadService:
             stamp = permission_stamp(self.authorize, frame["principal"])
         except Exception:
             return error("access_denied", 403)
-        task = asyncio.create_task(asyncio.to_thread(self._read_project_plan, frame["selection"], frame["principal"]))
+        task = asyncio.create_task(asyncio.to_thread(self._read_project_plan, frame["selection"]))
         try:
             body = await await_owned(task)
             result = {"ok": True, "result": body}
@@ -1061,11 +1044,6 @@ class WorkspaceReadService:
             _join(before.document, selected)
         if not _qualified(before, selected):
             raise ValueError("source_unavailable")
-        if selected is None and self._project_discovery is not None:
-            from control_plane.workspace_project_discovery_read import read_programs
-            discovered = read_programs(self, frame, before)
-            if discovered is not None:
-                return discovered
         fabric = None
         runtime = None
         if selected is not None:
@@ -1476,117 +1454,6 @@ class WorkspaceReadService:
         except Exception:
             return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
 
-    def capture_selected_child_target(self, *, work_ref, root_job_id, child_job_ids):
-        """Freeze one trusted host's chosen children through the incumbent read.
-
-        This is a HOST-INTERNAL entry, not an HTTP frame: it takes no
-        principal, it admits nothing and it never dispatches a Job. It
-        reuses the incumbent bounded admitted-plan observation, its VM
-        budget, its one-selection discipline, its identity joins and its
-        close receipt, so the admitted plan and the chosen children are
-        always ONE coherent observation.
-
-        The observation is BRACKETED by the same current Control Room
-        evidence the incumbent admitted-plan read uses: the owner, the
-        instance, the publication, the published document, the source
-        validity and the cache currentness are read before and after the
-        Runtime observation and must be one coherent source. A missing,
-        unqualified or changing Workspace source refuses the capture even
-        when the COO row itself is unchanged, so a CCR responsibility or
-        root publication change can never freeze an old root.
-        """
-        from common.executive_workspace_contract import _check_job_id, _check_work_ref
-        from control_plane.coo_principal_host import SELECTED_CHILD_SOURCE_SCHEMA
-        from control_plane.executive_coo_policy import CooCyclePolicy, CooCyclePolicyError
-        from control_plane.executive_runtime import (
-            BoundedSelectedChildCapture,
-        )
-        if not _check_work_ref(work_ref) or not _check_job_id(root_job_id):
-            raise ValueError("invalid_input")
-        if type(child_job_ids) not in (list, tuple):
-            raise ValueError("invalid_input")
-        chosen = tuple(child_job_ids)
-        if not 1 <= len(chosen) <= 16 or len(set(chosen)) != len(chosen):
-            raise ValueError("invalid_input")
-        if any(type(item) is not str or not _check_job_id(item) for item in chosen):
-            raise ValueError("invalid_input")
-        selection = {"work_ref": work_ref, "root_job_id": root_job_id}
-        try:
-            before = self.cache.snapshot()
-        except Exception:
-            raise ValueError("source_unavailable") from None
-        try:
-            _join(before.document, selection)
-        except LookupError:
-            raise ValueError("selection_not_found") from None
-        if not _qualified(before, selection):
-            raise ValueError("source_unavailable")
-        try:
-            policy_before = CooCyclePolicy.load()
-        except CooCyclePolicyError:
-            raise ValueError("source_unavailable") from None
-        bounded = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
-        with bounded.observe_bounded_read() as observation:
-            capture = observation.read_selected_child_target_bounded(
-                root_job_id, child_job_ids=chosen)
-        # The receipt exists only after the physical close of the observation.
-        receipt = observation.receipt
-        try:
-            policy_after = CooCyclePolicy.load()
-        except CooCyclePolicyError:
-            raise ValueError("source_unavailable") from None
-        try:
-            after = self.cache.snapshot()
-        except Exception:
-            raise ValueError("source_unavailable") from None
-        try:
-            _join(after.document, selection)
-        except LookupError:
-            raise ValueError("source_unavailable") from None
-        if not _qualified(after, selection):
-            raise ValueError("source_unavailable")
-        if (before.owner is not after.owner
-                or before.instance != after.instance
-                or before.publication != after.publication
-                or digest(before.document) != digest(after.document)
-                or digest(_plan_validity_identity(before.validity))
-                != digest(_plan_validity_identity(after.validity))
-                or digest(before.currentness) != digest(after.currentness)):
-            raise ValueError("source_unavailable")
-        plan = getattr(capture, "plan", None)
-        admission = getattr(plan, "admission", None)
-        if (not isinstance(capture, BoundedSelectedChildCapture)
-                or plan.root_job_id != root_job_id
-                or plan.root_metadata.work_ref not in (None, work_ref)
-                or type(admission) is not dict
-                or policy_before.policy_sha256 != policy_after.policy_sha256
-                or policy_before.source_sha256 != policy_after.source_sha256
-                or receipt.state not in {"SAME", "UNKNOWN"}):
-            raise ValueError("source_unavailable")
-        try:
-            # The admitted policy is the CURRENT policy of its own version.
-            # An unrecognized or stale policy digest is a refusal, never an
-            # upgrade of an existing root.
-            admitted = CooCyclePolicy.for_digest(admission.get("policy_sha"))
-        except CooCyclePolicyError:
-            raise ValueError("source_unavailable") from None
-        if admitted.policy_sha256 != admission.get("policy_sha"):
-            raise ValueError("source_unavailable")
-        return {
-            "work_ref": work_ref,
-            "root_job_id": root_job_id,
-            "children": [dict(child) for child in capture.children],
-            "source": {
-                "schema": SELECTED_CHILD_SOURCE_SCHEMA,
-                "plan_attempt_id": admission["plan_attempt_id"],
-                "plan_digest": admission["plan_digest"],
-                "policy_sha": admission["policy_sha"],
-                "reservation_digest": admission["reservation_digest"],
-                "observation_state": receipt.state,
-                "observation_source_identity": receipt.source_identity,
-            },
-        }
-
     async def _handle_v3_frame(self, frame):
         try:
             validate_v3_frame(frame)
@@ -1865,11 +1732,6 @@ class WorkspaceReadService:
         """Join the canonical v3 companion and reducer through existing custody."""
         selected = frame["selection"]
         before = self.cache.snapshot()
-        if self._project_discovery is not None and not any(row.get('work_ref') == selected['work_ref'] for row in before.document.get('work', [])):
-            if not _qualified(before):
-                raise ValueError('source_unavailable')
-            from control_plane.workspace_project_discovery_read import read_mission
-            return read_mission(self, frame, before)
         _join(before.document, selected)
         if not _qualified(before, selected):
             raise ValueError("source_unavailable")
@@ -2310,10 +2172,6 @@ class WorkspaceReadService:
             return await self._handle_v4_frame(frame)
         if isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
             return await self._handle_v3_frame(frame)
-        from common import workspace_host_observation_contract as host_observation_wire
-        if type(frame) is dict and frame.get("schema") == host_observation_wire.FRAME_SCHEMA:
-            from control_plane.workspace_host_observation_read import handle_host_observation_frame
-            return await handle_host_observation_frame(self, frame)
         from common import workspace_resource_capacity_contract as capacity_wire
         if type(frame) is dict and frame.get("schema") == capacity_wire.FRAME_SCHEMA:
             from control_plane.workspace_resource_capacity_read import handle_capacity_frame
@@ -2513,7 +2371,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_observe=None, activity_membership=None,
                                project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_instructions_reader=None, project_direction_reader=None, project_archive_reader=None,
                                project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
-                               canonical_project_data_factory=None, canonical_project_read_bindings_factory=None,
+                               canonical_project_data_factory=None,
                                cross_plane_context=None, cross_plane_enrollment=None,
                                project_admission_permissions=None, instruction_admission_permissions=None, byok_roles_reader=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
@@ -2546,9 +2404,6 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
             control_room=control_room, authorize=authorize,
             enrollment=cross_plane_enrollment,
         )
-    if canonical_project_read_bindings_factory is not None and (
-            not callable(canonical_project_read_bindings_factory) or canonical_project_data_factory is not None):
-        raise ValueError('ambiguous installed project DATA composition')
     cache = ExistingControlRoomCache(control_room.current_owner)
     # The original source+permission owner, not a new publisher or identity.
     # Discovery requires an independent callback and remains dark by default.
@@ -2566,19 +2421,6 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     if project_session_source_factory is not None and not callable(project_session_source_factory):
         raise ValueError("project session source factory must be installed")
     def provide(runtime):
-        data_binding = discovery_binding = None
-        if canonical_project_read_bindings_factory is not None:
-            from control_plane.installed_canonical_project_data_binding import _ProjectDataReadBinding
-            from control_plane.installed_project_discovery_binding import _ProjectDiscoveryBinding
-            pair = canonical_project_read_bindings_factory(runtime)
-            if (type(pair) is not tuple or len(pair) != 2
-                    or type(pair[0]) is not _ProjectDataReadBinding or type(pair[1]) is not _ProjectDiscoveryBinding
-                    or pair[0].store is not runtime.store or pair[1].store is not runtime.store
-                    or pair[1].owner.data is not pair[0].owner):
-                raise ValueError('installed project READ owners differ')
-            data_binding, discovery_binding = pair
-        elif canonical_project_data_factory is not None:
-            data_binding = canonical_project_data_factory(runtime)
         session_source = project_session_source_factory(runtime) if project_session_source_factory is not None else None
         if session_source is not None and (type(session_source) is not ExistingManagedProjectSessionSource
                 or session_source._service._require_runtime() is not runtime):
@@ -2599,12 +2441,11 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     project_knowledge_catalogue_reader=project_knowledge_catalogue_reader,
                                     project_knowledge_memory_reader=project_knowledge_memory_reader,
                                     project_knowledge_source_reader=project_knowledge_source_reader,
-                                    canonical_project_data=data_binding, project_discovery=discovery_binding,
+                                    canonical_project_data=(None if canonical_project_data_factory is None else canonical_project_data_factory(runtime)),
                                     project_session_source=session_source,
                                     project_direction_reader=project_direction_reader,
                                     project_archive_reader=project_archive_reader,
                                     activity_membership=activity_membership,
                                     project_admission_permissions=project_admission_permissions,
                                     instruction_admission_permissions=instruction_admission_permissions)
-    from control_plane.workspace_read_provider_binding import bind_installed_read_provider
-    return bind_installed_read_provider(provide,canonical_project_read_bindings_factory)
+    return provide

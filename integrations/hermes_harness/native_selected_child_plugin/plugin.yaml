@@ -1,6 +1,0 @@
-name: native_selected_child_plugin
-version: "1.0.0"
-description: "Exposes the closed selected-child delegation tool (mmx_delegate) for the qualified Executive connection. Unbound discovery registers nothing, and the raw Executive MCP tools of that server stay non-model-facing."
-author: "Mastermind"
-provides_tools:
-  - mmx_delegate

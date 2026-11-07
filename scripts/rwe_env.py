@@ -20,10 +20,9 @@ Subcommands
     and write ``DIR/rwe_receipt.json``.
 ``receipt --env DIR``
     Recompute and rewrite the receipt for an already-realized env.
-``gate --env DIR [--subset PATH | --shard-index N]``
+``gate --env DIR [--subset PATH]``
     Run the repository test gate (or a bounded ``pytest`` subset) using
-    ``DIR``'s interpreter, and append the outcome to the receipt. A canonical
-    hosted shard records only ``proof.shard``; the workflow owns full fan-in.
+    ``DIR``'s interpreter, and append the outcome to the receipt.
 ``run --receipt-out PATH [--subset PATH] [--lock PATH] [--python PATH]``
     Realize one fresh disposable environment, run the gate, export its final
     secret-free receipt, and remove the environment before returning.
@@ -36,14 +35,11 @@ path *classes* and content digests.
 from __future__ import annotations
 
 import argparse
-import codecs
 import hashlib
-import io
 import json
 import os
 import platform
 import re
-import selectors
 import shutil
 import subprocess
 import sys
@@ -920,61 +916,8 @@ def _display_subset_path(root: Path, subset: str) -> str:
     return relative.as_posix()
 
 
-def _stream_gate(argv: Sequence[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
-    """Tee the original gate's two streams without hiding progress until exit.
-
-    Drain both pipes together so either can exceed the OS pipe capacity. Keep
-    stdout and stderr separate: the receipt parser deliberately prefers a
-    stdout count, including zero, over unrelated stderr output. An interrupted
-    or failed observation raises before a completed gate receipt is written.
-    """
-    captured: dict[str, list[str]] = {"stdout": [], "stderr": []}
-    with subprocess.Popen(
-        list(argv), cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-    ) as process, selectors.DefaultSelector() as pending:
-        for name, stream, destination in (
-            ("stdout", process.stdout, sys.stdout),
-            ("stderr", process.stderr, sys.stderr),
-        ):
-            assert stream is not None
-            decoder = io.IncrementalNewlineDecoder(
-                codecs.getincrementaldecoder(stream.encoding)(errors=stream.errors), translate=True,
-            )
-            pending.register(stream, selectors.EVENT_READ, (name, destination, decoder))
-        try:
-            while pending.get_map():
-                for key, _ in pending.select():
-                    name, destination, decoder = key.data
-                    chunk = os.read(key.fd, 65536)
-                    text = decoder.decode(chunk, final=not chunk)
-                    if text:
-                        captured[name].append(text)
-                        destination.write(text)
-                        destination.flush()
-                    if not chunk:
-                        pending.unregister(key.fileobj)
-            returncode = process.wait()
-        except BaseException:
-            # This wrapper owns only this gate child. Never report an
-            # interrupted read or a partial capture as a completed test run.
-            if process.poll() is None:
-                process.kill()
-            process.wait()
-            raise
-    return subprocess.CompletedProcess(
-        list(argv), returncode, "".join(captured["stdout"]), "".join(captured["stderr"]),
-    )
-
-
 def cmd_gate(args: argparse.Namespace) -> int:
     root = Path(args.root).resolve() if args.root else repo_root()
-    shard_index = getattr(args, "shard_index", None)
-    if shard_index is not None and (
-        type(shard_index) is not int or shard_index not in range(6) or args.subset is not None
-    ):
-        print("rwe_env gate refused: one canonical shard index (0..5), without --subset, is required",
-              file=sys.stderr)
-        return 2
     env_dir = Path(args.env).resolve()
     venv_python = _venv_python(env_dir)
     if not venv_python.is_file():
@@ -1027,27 +970,24 @@ def cmd_gate(args: argparse.Namespace) -> int:
     if subset is not None:
         display_python = "<env>/bin/python"
         display_subset = _display_subset_path(root, subset)
-        argv = [str(venv_python), "-u", "-m", "pytest", "-q", subset]
-        display_argv = [display_python, "-u", "-m", "pytest", "-q", display_subset]
-        completed = _stream_gate(argv, cwd=root)
+        argv = [str(venv_python), "-m", "pytest", "-q", subset]
+        display_argv = [display_python, "-m", "pytest", "-q", display_subset]
+        completed = subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)
         if not present and "full_gate_unavailable:vendor_absent" not in degraded:
             degraded.append("full_gate_unavailable:vendor_absent")
-    elif shard_index is not None:
-        display_python = "<env>/bin/python"
-        suffix = ["-u", "-m", "scripts.ci_parallel_shard", "--jobs", "6", "--index", str(shard_index)]
-        argv = [str(venv_python), *suffix]
-        display_argv = [display_python, *suffix]
-        completed = _stream_gate(argv, cwd=root)
     else:
         display_python = "<env>/bin/python"
-        argv = [str(venv_python), "-u", str(root / GATE_SCRIPT_RELATIVE), "--progress"]
-        display_argv = [display_python, "-u", GATE_SCRIPT_RELATIVE.as_posix(), "--progress"]
-        completed = _stream_gate(argv, cwd=root)
+        argv = [str(venv_python), str(root / GATE_SCRIPT_RELATIVE)]
+        display_argv = [display_python, GATE_SCRIPT_RELATIVE.as_posix()]
+        completed = subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)
         if completed.returncode == 0 and "full_gate_unavailable:vendor_absent" in degraded:
             # a full gate just ran successfully, so any stale degraded flag
             # from an earlier subset-only run no longer applies (MINOR-3).
             degraded.remove("full_gate_unavailable:vendor_absent")
     elapsed = time.monotonic() - start
+
+    sys.stdout.write(completed.stdout)
+    sys.stderr.write(completed.stderr)
 
     discovered = _parse_discovered(completed.stdout)
     if discovered is None:
@@ -1059,21 +999,6 @@ def cmd_gate(args: argparse.Namespace) -> int:
         "discovered": discovered,
         "seconds": round(elapsed, 2),
     }
-    observation_failed = False
-    if shard_index is not None:
-        records = [line for line in completed.stdout.splitlines()
-                   if line.startswith("parallel_shard=")]
-        match = re.fullmatch(
-            r"parallel_shard=(\d+)/6 modules=(\d+) included_sha256=([0-9a-f]{64})",
-            records[0],
-        ) if len(records) == 1 else None
-        valid = (match is not None and int(match[1]) == shard_index + 1
-                 and discovered is not None and 0 < int(match[2]) <= discovered)
-        gate_proof.update(scope="canonical_shard", index=shard_index, jobs=6,
-                          selected_modules=int(match[2]) if valid else None,
-                          included_sha256=match[3] if valid else None,
-                          plan_observation="matched" if valid else "invalid")
-        observation_failed = not valid
 
     # Build (or rebuild) the receipt so `gate` works standalone after `realize`.
     if existing is not None and "definition" in existing:
@@ -1092,16 +1017,12 @@ def cmd_gate(args: argparse.Namespace) -> int:
         )
         receipt = {"schema": SCHEMA, "proof": {}}
 
-    proof = receipt.setdefault("proof", {})
-    proof.pop("gate" if shard_index is not None else "shard", None)
-    proof["shard" if shard_index is not None else "gate"] = gate_proof
+    receipt.setdefault("proof", {})["gate"] = gate_proof
     receipt["degraded"] = degraded
     write_receipt(env_dir, receipt)
 
-    print(f"{'shard' if shard_index is not None else 'gate'}: {gate_proof}")
-    # Preserve an actual child failure. A zero exit without its one canonical
-    # plan record cannot qualify a shard, and can never become a full-gate proof.
-    return completed.returncode or (2 if observation_failed else 0)
+    print(f"gate: {gate_proof}")
+    return completed.returncode
 
 
 # ---------------------------------------------------------------------------
@@ -1399,9 +1320,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_gate = sub.add_parser("gate", help="run the repository test gate inside an env")
     p_gate.add_argument("--env", required=True)
-    gate_scope = p_gate.add_mutually_exclusive_group()
-    gate_scope.add_argument("--subset", default=None)
-    gate_scope.add_argument("--shard-index", type=int, choices=range(6), default=None)
+    p_gate.add_argument("--subset", default=None)
     p_gate.add_argument("--root", default=None)
     p_gate.set_defaults(func=cmd_gate)
 

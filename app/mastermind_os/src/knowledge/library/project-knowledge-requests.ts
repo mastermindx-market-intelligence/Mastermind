@@ -467,27 +467,6 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-/** Local draft DATA only. No project, request identity, source, grant or upload.
- * The later publisher still uses buildProjectFileRequest with its independently
- * current source context and must compare this exact staged file part.
- */
-export async function readStagedProjectFile(
-  file: File,
-  signal?: AbortSignal | null,
-): Promise<Readonly<ProjectFileAddRequestFile>> {
-  const meta = captureFileMeta(file);
-  const displayName = validateDisplayName(meta.name);
-  const mediaType = mediaTypeForBasename(displayName);
-  if (mediaType === null || (meta.type !== '' && meta.type !== mediaType)) {
-    reject('UNSUPPORTED_FILE_TYPE', 'file type does not match the trusted extension mapping');
-  }
-  ensureNotAborted(signal);
-  const bytes = await readFileBytes(meta);
-  ensureNotAborted(signal);
-  return deepFreeze({display_name: displayName, media_type: mediaType,
-    content_utf8: decodeFileText(bytes)});
-}
-
 /**
  * Builds the exact closed public project file add request from one actual
  * browser File the user explicitly selected. Pure construction: on any

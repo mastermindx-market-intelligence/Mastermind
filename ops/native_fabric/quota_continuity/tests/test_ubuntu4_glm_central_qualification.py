@@ -80,31 +80,6 @@ class Ubuntu4GlmCentralQualification(unittest.TestCase):
                 state_dir="fixture-states")
         return result, seen, picker
 
-    def test_current_107_central_cohort_refuses_each_mixed_predecessor(self):
-        """The new source cannot borrow historical manifests or mixed credentials."""
-        spec = importlib.util.spec_from_file_location(
-            "ubuntu4_current_native_builder", ROOT / "rollout/build_review_stage.py")
-        builder = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(builder)
-        manifest = json.loads((ROOT / "rollout/native-manifest.json").read_text())
-        self.assertEqual(len(manifest), 107)
-        dependencies = {
-            name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES
-        }
-        expected = builder.GO_CENTRAL_U4_REFRESH_DIGESTS
-        actual = {name: manifest["ext/" + name] for name in expected}
-        self.assertEqual(actual, expected)
-        builder.validate_go_base_manifest(manifest, dependencies)
-        for name in expected:
-            with self.subTest(member=name):
-                mixed = dict(manifest)
-                mixed["ext/" + name] = (
-                    builder.GO_REQUEST_REFUSAL_TASK_DIGEST if name == "fabric_task.py"
-                    else builder.GO_UBUNTU4_DIGESTS[name]
-                )
-                with self.assertRaisesRegex(ValueError, "central Ubuntu4 cohort is not exact or is partial"):
-                    builder.validate_go_base_manifest(mixed, dependencies)
-
     # --- positive -----------------------------------------------------------
 
     def test_glm_pool_qualifies_only_the_glm_codex_executor_mode(self):

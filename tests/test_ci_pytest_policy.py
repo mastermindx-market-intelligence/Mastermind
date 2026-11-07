@@ -930,7 +930,7 @@ def test_hosted_gate_stays_a_single_required_check_job():
     assert len(gate_steps) == 1
     gate = gate_steps[0]
     assert gate["env"]["SHARDS_STATUS"] == "${{ needs.pytest_shards.result }}"
-    assert 'if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then' in gate["run"]
+    assert 'if [ "$EVENT_TYPE" = "pull_request" ]; then' in gate["run"]
     assert '[ "$SHARDS_STATUS" != success ]' in gate["run"]
     assert '[ "$PR_FAST_STATUS" != success ]' in gate["run"]
     assert "exit 1" in gate["run"]

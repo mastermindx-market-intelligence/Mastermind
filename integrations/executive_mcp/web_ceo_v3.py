@@ -236,10 +236,7 @@ def web_ceo_v3_schema_snapshot_sha256() -> str:
 
 
 # Filled from the deterministic snapshot by the implementation test.
-# The current snapshot inherits both Session Bridge native role targets.
-# Removing only hermes_meta reproduces the previous V3 snapshot exactly;
-# tool order, other schemas, versions and legacy/v1/v2 identities stay frozen.
-WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "acffd2d8fd3a3d83c5132127877178ef78bbc1640e217e976ef789cb1a3545a9"
+WEB_CEO_V3_SCHEMA_SNAPSHOT_SHA256 = "968205a25e11142a017d7351fbbbc8c579e74e9b1c148af817c83628e375f9ea"
 
 
 def validate_installed_mcp_profile_current(value: Any = "legacy") -> str:

@@ -1,4 +1,3 @@
-import {workStatusPresentation} from './work-status-presentation';
 import { useState, type ReactNode } from "react";
 import {
   allEvidence,
@@ -270,11 +269,11 @@ function TupleRows(props: { rows: Array<[string, string]> }) {
   );
 }
 
-function FactStrip({doc, copy, labels}: {doc: MissionDocument; copy: CopyTable; labels?: {review:string;acceptance:string}}) {
+function FactStrip({doc, copy}: {doc: MissionDocument; copy: CopyTable}) {
   const facts = [
     [copy.sectionReturn, doc.transport.dispatch_state === "RETURNED" ? copy.returnReceived : copy.returnUnknown],
-    [copy.sectionReview, labels?.review ?? doc.review.verdict],
-    [copy.sectionAcceptance, labels?.acceptance ?? doc.acceptance.state],
+    [copy.sectionReview, doc.review.verdict],
+    [copy.sectionAcceptance, doc.acceptance.state],
     [copy.sectionRelease, copy.releaseUnknown],
   ];
   return <section className="card mm-work-journey__facts" aria-label={copy.ladderTitle}>
@@ -304,12 +303,13 @@ export function ProjectWorkDetail(props: ProjectWorkDetailProps) {
   }
   const doc = props.document;
   const owed = doc.principal.owed_turn;
-  const labels = workStatusPresentation({dispatch:doc.transport.dispatch_state,
-    review:doc.review.verdict,acceptance:doc.acceptance.state,read:doc.read_state.state},props.locale);
-  const readCaveat = labels.readCaveat;
-  const answer = labels.dispatch;
+  const readCaveat =
+    doc.read_state.state !== "CURRENT"
+      ? `${copy.readCaveatLead}${doc.read_state.state}${copy.readCaveatTail}`
+      : null;
+  const answer = `${copy.labelDispatchState}: ${doc.transport.dispatch_state} · ${copy.labelVerdict}: ${doc.review.verdict} · ${copy.labelAcceptanceState}: ${doc.acceptance.state}`;
   return (
-    <article className="mm-work-journey" lang={props.locale}>
+    <article className="mm-work-journey">
       <header className="mm-work-journey__head">
         <h2 className="section-title mm-work-journey__title">
           {workHeading(doc, copy)}
@@ -319,7 +319,7 @@ export function ProjectWorkDetail(props: ProjectWorkDetailProps) {
           <p className="muted mm-work-journey__caveat">{readCaveat}</p>
         )}
       </header>
-      <FactStrip doc={doc} copy={copy} labels={labels} />
+      <FactStrip doc={doc} copy={copy} />
       <div className="mm-work-journey__columns">
         <div className="mm-work-journey__main">
           <section className="mm-work-journey__block">
@@ -329,7 +329,7 @@ export function ProjectWorkDetail(props: ProjectWorkDetailProps) {
             {props.resultPanel === undefined ? (
               <p className="muted empty">{copy.resultsNotSupplied}</p>
             ) : (
-              <details className="mm-work-journey__details"><summary>{props.locale === "zh-CN" ? "其他结果来源详情" : "Additional result source details"}</summary>{props.resultPanel}</details>
+              props.resultPanel
             )}
           </section>
         </div>
@@ -340,9 +340,15 @@ export function ProjectWorkDetail(props: ProjectWorkDetailProps) {
               rows={[
                 [
                   copy.labelOwedSeat,
-                  owed === null || owed.seat === null || owed.seat === "unknown"
+                  owed === null || owed.seat === null
                     ? copy.valueNotSupplied
-                    : ({chairman:props.locale === "zh-CN" ? "董事长" : "Chairman",ceo:"CEO",coo:"COO",worker:props.locale === "zh-CN" ? "执行者" : "Worker"})[owed.seat],
+                    : owed.seat,
+                ],
+                [
+                  copy.labelOwedReason,
+                  owed === null || owed.reason === null
+                    ? copy.valueNotSupplied
+                    : owed.reason,
                 ],
                 [
                   copy.labelNextAction,
@@ -356,10 +362,8 @@ export function ProjectWorkDetail(props: ProjectWorkDetailProps) {
         </aside>
       </div>
       <details className="mm-work-journey__details">
-        <summary>{props.locale === "zh-CN" ? "工作来源详情" : "Work source details"}</summary>
+        <summary>{copy.sourceTuples}</summary>
         <TupleRows rows={[
-          [copy.ladderRead, doc.read_state.state],
-          [copy.labelOwedReason, owed?.reason ?? copy.valueNotSupplied],
           [copy.labelDispatchState, doc.transport.dispatch_state],
           [copy.labelReviewRequired, doc.review.required === null ? copy.valueNotSupplied : String(doc.review.required)],
           [copy.labelVerdict, doc.review.verdict],

@@ -194,10 +194,10 @@ def cli_path() -> str | None:
 
 def _selected_backend(override: str | None = None) -> str:
     """Resolve routing without evaluating a broken project config ahead of an explicit override."""
-    if override is not None:
+    if override:
         return str(override).strip().lower()
     env = os.environ.get("BOT_LLM_BACKEND")
-    if env is not None:
+    if env:
         return env.strip().lower()
     try:
         return str(_cfg().get("backend", "waterfall")).strip().lower()
@@ -208,8 +208,6 @@ def _selected_backend(override: str | None = None) -> str:
 def available() -> bool:
     """True if the configured subscription CLI backend is reachable."""
     selected = _selected_backend()
-    if selected not in {"waterfall", "codex", "cli", "sdk"}:
-        return False
     if selected == "waterfall":
         try:
             from brain import provider_waterfall
@@ -490,10 +488,6 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
     _veto_kw = ({"before_provider_start": before_provider_start}
                 if before_provider_start is not None else {})
     selected_backend = _selected_backend(_backend_override)
-    if selected_backend not in {"waterfall", "codex", "cli", "sdk"}:
-        return {"ok": False, "text": None, "backend": selected_backend,
-                "error": "fabric_tools_unavailable" if selected_backend == "fabric"
-                else "backend_unsupported"}
     if selected_backend == "waterfall":
         from brain import provider_waterfall
         return await provider_waterfall.reason(
@@ -1309,9 +1303,6 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
     ~600 chars of streamed text + any error event to detect key failure and mark_cooling
     so the NEXT chat turn rotates to a healthy key.
     """
-    if _selected_backend() not in {"waterfall", "cli", "sdk"}:
-        yield {"type": "error", "error": "backend_chat_unsupported"}
-        return
     if not _SDK:
         yield {"type": "error", "error": "reasoning needs the Claude Agent SDK + a subscription credential"}
         return

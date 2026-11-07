@@ -107,7 +107,7 @@ describe("Atelier observed conversation window", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review evidence" }));
     expect(!!screen.queryByText("Only the exact returned result.")).toBe(exact);
     expect(!!screen.queryByText("private:other-result")).toBe(exact);
-    if (!exact) expect(screen.getByText("Result source · UNASSOCIATED for this window")).toBeTruthy();
+    if (!exact) expect(screen.getByText("Result source · UNASSOCIATED for this window. Review and acceptance remain separate.")).toBeTruthy();
   });
   it("renders the decoded owner window without inventing a session or transcript", async () => {
     const { projection } = await input();
@@ -140,7 +140,7 @@ describe("Atelier observed conversation window", () => {
     expect(screen.getByText(state)).toBeTruthy();
     const text = reads.conversation!.value!.view.items.find(item => item.text)!.text!;
     if (state !== "STALE") expect(screen.queryByText(text)).toBeNull();
-    if (state === "STALE") expect(screen.getByText("Showing an earlier view. Newer replies may be missing.")).toBeTruthy();
+    if (state === "STALE") expect(screen.getByText("Retained window; current conversation state is not established.")).toBeTruthy();
     if (state === "WITHHELD") { expect(document.body.textContent).not.toContain("private:"); expect(screen.queryByRole("textbox")).toBeNull(); }
   });
   it.each(["auth", "target", "revision", "session", "binding"])("withdraws inspected content synchronously at a %s boundary", async boundary => {
@@ -161,7 +161,7 @@ describe("Atelier observed conversation window", () => {
   it("keeps unknown effect and independent receipts visible without a resend control", async () => {
     const { reads, context } = await input(); reads.mission!.value!.transport.dispatch_state = "EFFECT_UNKNOWN";
     render(<Harness projection={projectOffice(reads, context)} />);
-    expect(screen.getByRole("alert").textContent).toContain("Don’t send it again");
+    expect(screen.getByRole("alert").textContent).toContain("original operation");
     expect(screen.getByRole("region", { name: "Independent receipts" }).textContent).toContain("acceptanceNOT_PROJECTED");
     expect(screen.queryByRole("button", { name: /retry|resend|failover|stop/i })).toBeNull();
   });

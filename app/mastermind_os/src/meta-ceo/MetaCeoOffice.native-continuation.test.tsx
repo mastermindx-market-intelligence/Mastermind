@@ -64,7 +64,7 @@ describe("Meta-CEO Today canonical continuation placement", () => {
     expect(screen.queryByRole("region", {
       name: "Continue the exact selected Executive session",
     })).toBeNull();
-    expect(screen.getByRole("button", {name: "Send unavailable"}).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("Read + preview only")).toBeTruthy();
   });
 
   it("refuses a stale Mission even with a nominally bound target", () => {
@@ -82,6 +82,6 @@ describe("Meta-CEO Today canonical continuation placement", () => {
   it("does not fabricate a control when the original owner does not supply it", () => {
     show(bound, undefined, false);
     expect(screen.queryByRole("button", { name: "Existing native continuation" })).toBeNull();
-    expect(screen.getByRole("button", {name: "Send unavailable"}).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("Read + preview only")).toBeTruthy();
   });
 });

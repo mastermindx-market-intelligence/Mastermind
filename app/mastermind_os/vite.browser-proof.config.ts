@@ -3,8 +3,8 @@
  *
  * Never used by the default build: `npm run build` runs `tsc -b && vite build`
  * with vite.config.ts, whose input remains index.html and whose outDir remains
- * dist/. This config builds two explicit inert fixture entries into the separate
- * dist-browser-proof/ artifact directory. Neither entry is imported by the
+ * dist/. This config builds only browser-proof.html into the separate
+ * dist-browser-proof/ artifact directory, so the harness can never enter the
  * production bundle.
  *
  * Build command (run at the app root):
@@ -20,7 +20,7 @@ export default defineConfig({
     outDir: "dist-browser-proof",
     emptyOutDir: true,
     rollupOptions: {
-      input: ["browser-proof.html", "project-execution-proof.html"],
+      input: "browser-proof.html",
     },
   },
 });

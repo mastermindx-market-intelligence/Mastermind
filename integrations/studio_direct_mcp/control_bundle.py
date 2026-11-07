@@ -27,7 +27,7 @@ LEGACY_CONTROL_FILES = (
     "studio_direct_control.py",
 )
 STATUS_CONTROL_FILES = (*LEGACY_CONTROL_FILES, "private_service_status_successor.py")
-CAPTURED_CONTROL_FILES = (
+CONTROL_FILES = (
     *STATUS_CONTROL_FILES,
     "private_service_pin.py",
     "private_service_pin_enrollment.py",
@@ -35,13 +35,6 @@ CAPTURED_CONTROL_FILES = (
     "ops/native_fabric/quota_continuity/rollout/native_install.py",
     "ops/native_fabric/quota_continuity/rollout/native_generation.py",
     "ops/fabric_launch/install.py",
-)
-# Preserve the exact ten-member captured generation for locked migration.
-CONTROL_FILES = (
-    *CAPTURED_CONTROL_FILES,
-    "fleet_git_failure_compat.py",
-    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
-    "ops/native_fabric/quota_continuity/rollout/preimages/native_generation_75330d.py",
 )
 # Exact inert pre-control-bundle snapshots observed on the original M2 host.
 # These are NOT executable/source dependencies and confer no runtime authority.
@@ -245,12 +238,11 @@ def _read_manifest(path: Path) -> dict:
     if not isinstance(value, dict) or set(value) != expected_keys or value.get("schema") != SCHEMA:
         raise Refusal("CONTROL_MANIFEST_INVALID")
     files = value.get("files")
-    # Legacy three/four and captured ten-member identities remain observable
-    # for migration. New runtime admission requires the full thirteen members.
+    # Legacy three/four-member identities remain observable for migration.
+    # New runtime admission and post-install verification require the full ten.
     if (not isinstance(files, dict)
             or frozenset(files) not in (frozenset(LEGACY_CONTROL_FILES),
                                        frozenset(STATUS_CONTROL_FILES),
-                                       frozenset(CAPTURED_CONTROL_FILES),
                                        frozenset(CONTROL_FILES))):
         raise Refusal("CONTROL_MANIFEST_INVALID")
     if any(not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest) for digest in files.values()):
@@ -279,8 +271,7 @@ def _verify_locked(*, control_root: Path, launcher: Path) -> dict:
         raise Refusal("CONTROL_BUNDLE_MISMATCH")
     _require_code_layout(
         root, manifest["files"], complete=True,
-        allow_cache=frozenset(manifest["files"]) not in (
-            frozenset(CAPTURED_CONTROL_FILES), frozenset(CONTROL_FILES)),
+        allow_cache=set(manifest["files"]) != set(CONTROL_FILES),
     )
     observed = {}
     for name in manifest["files"]:
@@ -303,10 +294,9 @@ def verify(*, control_root: Path, launcher: Path) -> dict:
     root = _require_private_dir(control_root)
     if not os.path.lexists(root / ".control-bundle.lock"):
         # Legacy identity observation is read-only and does not claim a locked
-        # generation. Both captured generations require their existing lock.
+        # generation. New ten-file bundles require their existing owner lock.
         manifest = _read_manifest(root / "manifest.json")
-        if frozenset(manifest["files"]) in (
-                frozenset(CAPTURED_CONTROL_FILES), frozenset(CONTROL_FILES)):
+        if set(manifest["files"]) == set(CONTROL_FILES):
             raise Refusal("CONTROL_BUNDLE_LOCK_REQUIRED")
         observed = _verify_locked(control_root=root, launcher=launcher)
         identity = ("schema", "files", "launcherHash", "bundleDigest", "source")

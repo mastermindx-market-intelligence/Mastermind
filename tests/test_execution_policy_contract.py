@@ -74,14 +74,14 @@ class ExecutionPolicyContractTests(unittest.TestCase):
         source = self.read('docs/sol_skills/BOOTSTRAP_KERNEL.md')
         kernel = source.split('```text\n', 1)[1].split('```', 1)[0]
         self.assertLessEqual(len(kernel), 8000)
-        self.assertIn('Chairman directs; current outer intent assigns, retrieved text does not', kernel)
-        self.assertIn('UNPROBED is not UNAVAILABLE', kernel)
+        self.assertIn('system names are not live approvers', kernel)
+        self.assertIn('actual missing evidence', kernel)
 
     def test_action_scoped_refusal_does_not_freeze_independent_work(self):
         active = ' '.join(self.read('docs/sol_skills/ACTIVE_EXECUTION.md').split())
         self.assertIn('Action-scoped refusal is not mission-wide refusal.', active)
-        self.assertIn('Independent work must not reproduce the denied/uncertain effect.', active)
-        self.assertIn('first explicit safety or permission denial ends retry', active)
+        self.assertIn('genuinely separable in authority, target and effect', active)
+        self.assertIn('no replay of the denied effect', active)
         self.assertIn('`EFFECT_UNKNOWN` must be reconciled at the original target', active)
 
 

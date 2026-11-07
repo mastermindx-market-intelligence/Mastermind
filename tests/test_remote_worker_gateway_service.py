@@ -14,7 +14,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from test_executive_fabric_composition import root_stats, altered
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "ops/executive_os/com.mastermind.executive.remote-worker-gateway.plist.template"
@@ -64,95 +63,6 @@ def _fixture(tmp_path: Path):
     }
     _write(config_path, json.dumps(document, sort_keys=True), 0o440)
     return root, config_path, document
-
-
-def _observation_fixture(tmp_path, monkeypatch):
-    service = _service_module()
-    parent = tmp_path / 'shared'
-    parent.mkdir(mode=0o755); parent.chmod(0o755)
-    root, _, document = _fixture(parent)
-    path = root / 'host-observation.json'
-    for field in ('broker_socket_path', 'allowed_worker_ids', 'allowed_operations'):
-        document.pop(field)
-    document.update(schema='mastermind.remote_worker_gateway_config/v2',
-                    profile='hermes-role-metadata-read',
-                    hermes_role_metadata_read={
-                        'schema': 'mastermind.hermes_role_metadata_read_binding/v1',
-                        'implementation_sha': 'c' * 40})
-    _write(path, json.dumps(document), 0o440)
-    monkeypatch.setattr(service, 'LINUX_HOST_OBSERVATION_ROOT', root)
-    monkeypatch.setattr(service, 'LINUX_HOST_OBSERVATION_CONFIG', path)
-    monkeypatch.setattr(service.sys, 'platform', 'linux')
-    return root, path, document
-
-
-def test_observation_loader_uses_private_child_and_preserves_shared_parent(tmp_path, root_stats, monkeypatch):
-    service = _service_module()
-    root, path, document = _observation_fixture(tmp_path, monkeypatch)
-    config = service.load_remote_worker_gateway_config(path, expected_group_gid=root.stat().st_gid)
-    assert type(config) is service.HostObservationGatewayConfig
-    assert stat.S_IMODE(root.parent.stat().st_mode) == 0o755
-    assert stat.S_IMODE(root.stat().st_mode) == 0o750
-    assert not hasattr(config, 'broker_socket_path')
-    assert not hasattr(config, 'allowed_worker_ids')
-    assert not hasattr(config, 'assignment_control')
-    assert json.loads(service._canonical_config(config)) == document
-    with pytest.raises(service.RemoteWorkerGatewayServiceError):
-        service.load_remote_worker_gateway_config(path, allowed_root=root,
-                                                   expected_group_gid=root.stat().st_gid)
-
-
-@pytest.mark.parametrize('field,value', [
-    ('broker_socket_path', '/run/invented.sock'), ('allowed_worker_ids', []),
-    ('allowed_operations', []), ('broker_target', 'attended-fabric'),
-    ('expected_broker_peer_uid', 1000), ('assignment_control', {}),
-    ('provider', 'invented'), ('profile', 'worker'), ('listen_host', '8.8.8.8'),
-    ('listen_port', True), ('request_timeout_seconds', True),
-    ('hermes_role_metadata_read', None),
-])
-def test_observation_config_cannot_acquire_execution_fields(tmp_path, root_stats, monkeypatch, field, value):
-    service = _service_module()
-    root, path, document = _observation_fixture(tmp_path, monkeypatch)
-    document[field] = value; _write(path, json.dumps(document), 0o440)
-    with pytest.raises(service.RemoteWorkerGatewayServiceError):
-        service.load_remote_worker_gateway_config(path, expected_group_gid=root.stat().st_gid)
-
-
-def test_observation_shared_ancestor_must_remain_root_controlled(tmp_path, root_stats, monkeypatch):
-    service = _service_module()
-    root, path, _ = _observation_fixture(tmp_path, monkeypatch)
-    original = Path.lstat
-    def unsafe(p):
-        info = original(p)
-        return altered(info, st_mode=info.st_mode | 0o002) if p == root.parent else info
-    monkeypatch.setattr(Path, 'lstat', unsafe)
-    with pytest.raises(service.RemoteWorkerGatewayServiceError, match='GATEWAY_DIRECTORY_INVALID'):
-        service.load_remote_worker_gateway_config(path, expected_group_gid=root.stat().st_gid)
-
-
-def test_observation_service_requires_no_broker_endpoint_or_startup_rpc(tmp_path, root_stats, monkeypatch):
-    service = _service_module()
-    root, path, _ = _observation_fixture(tmp_path, monkeypatch)
-    config = service.load_remote_worker_gateway_config(path, expected_group_gid=root.stat().st_gid)
-    events = []
-    def forbidden(*a, **kw): pytest.fail('read-only service touched broker')
-    monkeypatch.setattr(service, '_broker_socket_identity', forbidden)
-    monkeypatch.setattr(service, '_fabric_socket_identity', forbidden)
-    class Server:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        def close(self): events.append('close')
-        async def wait_closed(self): events.append('closed')
-    class Gateway:
-        broker_call = forbidden
-        def __init__(self, received): assert received is config
-        async def start_server(self):
-            assert self._host_observer is not None
-            events.append('start')
-            return Server()
-    async def shutdown(): events.append('shutdown')
-    asyncio.run(service.serve_remote_worker_gateway(config, gateway_factory=Gateway, shutdown_waiter=shutdown))
-    assert events == ['start', 'shutdown', 'close', 'closed']
 
 
 def test_secure_config_loader_returns_existing_gateway_config(tmp_path):

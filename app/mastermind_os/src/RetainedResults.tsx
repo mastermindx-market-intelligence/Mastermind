@@ -360,7 +360,7 @@ export function RetainedResults({
   );
   return (
     <section
-      className="card retained-results-reader"
+      className="card"
       ref={region}
       tabIndex={-1}
       onKeyDown={onKeyDown}
@@ -382,7 +382,6 @@ export function RetainedResults({
       {requestInvalid ? <p className="muted" role="status">{t("This requested result is invalid or outside the current project scope.")}</p> : null}
       {open ? (
         <div id="retained-results-panel">
-          <div hidden={view !== "list"}>
           <h3 className="section-title" ref={listHeading} tabIndex={-1}>
             {t("Retained result list")}
           </h3>
@@ -463,7 +462,6 @@ export function RetainedResults({
               </dl>
             </details>
           ) : null}
-          </div>
           {view === "detail" ? (
             <div>
               <button ref={back} className="button" onClick={backToResults}>

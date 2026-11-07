@@ -92,7 +92,7 @@ def test_bootstrap_still_uses_protected_source_and_contains_no_live_operation():
     raw = text("BOOTSTRAP_KERNEL.md").split("```text\n", 1)[1].split("```", 1)[0]
     assert "docs/sol_skills/INDEX.md" in raw
     assert "protected master" in raw
-    assert "at SAME SHA" in raw
+    assert "SAME repository + SHA" in raw
     assert "pro-continuity-reliability-20260919-sol-001" not in raw
 
 @pytest.mark.parametrize("scenario_id", [f"PCR{i:02d}" for i in range(1,18)])

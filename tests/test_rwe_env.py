@@ -375,7 +375,6 @@ def test_gate_receipt_has_no_forbidden_substrings_for_out_of_repo_subset(
         return _FakeCompleted("1 passed in 0.01s\n", returncode=0)
 
     monkeypatch.setattr(rwe.subprocess, "run", fake_run)
-    monkeypatch.setattr(rwe, "_stream_gate", fake_run)
 
     args = argparse.Namespace(root=str(root), env=str(env_dir), subset=str(subset_path))
     rc = rwe.cmd_gate(args)
@@ -574,7 +573,6 @@ def test_gate_refuses_full_gate_without_vendor(tmp_path, monkeypatch, capsys):
         raise AssertionError("gate must refuse before invoking the full test-gate subprocess")
 
     monkeypatch.setattr(rwe.subprocess, "run", fake_run)
-    monkeypatch.setattr(rwe, "_stream_gate", fake_run)
 
     args = argparse.Namespace(root=str(root), env=str(env_dir), subset=None)
     rc = rwe.cmd_gate(args)
@@ -825,7 +823,6 @@ def test_gate_discovered_count_prefers_stdout_over_stderr_even_when_stdout_is_ze
         )
 
     monkeypatch.setattr(rwe.subprocess, "run", fake_run)
-    monkeypatch.setattr(rwe, "_stream_gate", fake_run)
 
     subset_path = root / "test_subset_fixture.py"
     subset_path.write_text("def test_ok():\n    assert True\n", encoding="utf-8")
@@ -865,7 +862,6 @@ def test_gate_clears_vendor_absent_degraded_flag_on_successful_full_gate(tmp_pat
         return _FakeCompleted("36 passed in 1.0s\n", returncode=0)
 
     monkeypatch.setattr(rwe.subprocess, "run", fake_run)
-    monkeypatch.setattr(rwe, "_stream_gate", fake_run)
 
     args = argparse.Namespace(root=str(root), env=str(env_dir), subset=None)
     rc = rwe.cmd_gate(args)

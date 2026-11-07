@@ -5,7 +5,7 @@
 // registry, credentials, permission, recipient or command authority: every
 // action forwards to an existing owner callback the caller actually supplied,
 // and button presence never grants permission.
-import { useEffect, useLayoutEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { Knowledge } from "../knowledge/Knowledge";
 import type { KnowledgeProps } from "../knowledge/Knowledge";
@@ -150,14 +150,6 @@ const ZH = {
   "Detail": "详情",
   "Limitations": "限制",
   "Tools": "工具",
-  "Choose a tool to see what’s available for this project.": "选择工具，查看此项目可用的操作。",
-  "Why unavailable": "为何不可用",
-  "Read a current project before opening a direction preview.": "先读取当前项目，再打开方向预览。",
-  "No qualified records are available to search in this view.": "此视图暂无可验证的记录可供搜索。",
-  "No review source is available for this project here.": "此处暂无此项目的审阅来源。",
-  "Placement is not connected to this view.": "此视图尚未接入安置操作。",
-  "Release is not connected to this view.": "此视图尚未接入发布操作。",
-  "This navigation is not connected here.": "此处尚未接入此导航。",
   "CAPABILITIES, IN CONTEXT": "上下文中的能力",
   "Capabilities shown here come from the supplied view only. Buttons open existing routes; button presence never grants permission, and this read-only surface never sends work.":
     "此处显示的能力仅来自已提供视图。按钮只打开既有路由；按钮的存在从不授予许可，此只读界面从不发送工作。",
@@ -175,7 +167,6 @@ const ZH = {
   "Open Meta-CEO office": "打开 Meta-CEO 办公室",
   "Selected tool": "已选工具",
   "Other tools": "其他工具",
-  "Back to tools": "返回工具列表",
   "Open search": "打开搜索",
   "Open source context": "打开来源上下文",
   "Open return review": "打开回报复核",
@@ -993,7 +984,6 @@ function CapabilityCard({
       : !routeAction
         ? needsPort(locale, portLabel(locale, capability.target))
         : null;
-  const stateLabel = capability.state === "READ_ONLY" ? t("Read only") : capability.state === "PREVIEW_ONLY" ? t("Preview only") : t("Unavailable");
   const note =
     capability.state === "PREVIEW_ONLY"
       ? t("Preview only — sending is separate and unavailable here; this read-only surface never accepts or releases work.")
@@ -1005,21 +995,14 @@ function CapabilityCard({
       <div className="discovery-capability-head">
         <h3>{t(action.label)}</h3>
         <span className={capability.state === "UNAVAILABLE" ? "discovery-chip" : chipClass(capability.state)}>
-          {stateLabel}
+          {capability.state === "READ_ONLY" ? t("Read only") : capability.state === "PREVIEW_ONLY" ? t("Preview only") : t("Unavailable")}
         </span>
       </div>
-      {note && note !== stateLabel ? <p className="discovery-fineprint">{note}</p> : null}
+      {note ? <p className="discovery-fineprint">{note}</p> : null}
       <button type="button" className="discovery-action" disabled={!enabled} onClick={enabled ? routeAction : undefined}>
         {t(action.button)}
       </button>
-      {reason ? <>
-        <p className="discovery-reason">{t(capability.state!=="UNAVAILABLE" ? "This navigation is not connected here." :
-          capability.id==="direction_preview" ? "Read a current project before opening a direction preview." :
-          capability.id==="search" ? "No qualified records are available to search in this view." :
-          capability.id==="return_review" ? "No review source is available for this project here." :
-          capability.id==="placement" ? "Placement is not connected to this view." : "Release is not connected to this view.")}</p>
-        <details className="discovery-preview-section"><summary>{t("Why unavailable")}</summary><p className="discovery-fineprint">{reason}</p></details>
-      </> : null}
+      {reason ? <p className="discovery-reason">{reason}</p> : null}
     </article>
   );
 }
@@ -1031,11 +1014,7 @@ function ToolsView({
   onModeChange,
   onOpenMetaCeo,
   onOpenKnowledge,
-  selectedCapability, onSelectCapability, returnFocusRequest,
 }: {
-  selectedCapability: DiscoveryCapability["id"]|null;
-  onSelectCapability:(id:DiscoveryCapability["id"])=>void;
-  returnFocusRequest:number;
   view: DiscoveryView;
   projection: OfficeProjection;
   locale: "en" | "zh-CN";
@@ -1046,47 +1025,24 @@ function ToolsView({
   const t = makeT(locale);
   const context = projection.context;
   const callbacks: CapabilityCallbacks = { onModeChange, onOpenMetaCeo, onOpenKnowledge };
-  const inspectorHeading=useRef<HTMLHeadingElement>(null),listHeading=useRef<HTMLHeadingElement>(null);
-  const selectors=useRef(new Map<DiscoveryCapability["id"],HTMLButtonElement>());
-  const [gesture,setGesture]=useState<{kind:"inspect"|"back";id:DiscoveryCapability["id"]}|null>(null);
-  const returned=useRef(0);
-  const focusSelector=(id:DiscoveryCapability["id"]|null)=>{
-    const target=(id?selectors.current.get(id):null)??listHeading.current;
-    target?.focus();target?.scrollIntoView?.({block:"nearest"});
-  };
-  useLayoutEffect(()=>{
-    if(!gesture)return;
-    if(gesture.kind==="inspect"){
-      inspectorHeading.current?.focus();inspectorHeading.current?.scrollIntoView?.({block:"start"});
-    }else focusSelector(gesture.id);
-  },[gesture]);
-  useLayoutEffect(()=>{
-    if(returnFocusRequest<=0||returnFocusRequest===returned.current)return;
-    returned.current=returnFocusRequest;focusSelector(selectedCapability);
-  },[returnFocusRequest,selectedCapability]);
+  const [selectedCapability, setSelectedCapability] = useState<DiscoveryCapability["id"] | null>(null);
   const selected = view.capabilities.find((item) => item.id === selectedCapability)
     ?? view.capabilities.find((item) => item.state !== "UNAVAILABLE") ?? view.capabilities[0];
   return (
-    <section className="discovery-view discovery-tools-view" onKeyDown={(event)=>{
-      if(event.key!=="Escape"||event.defaultPrevented||event.nativeEvent.isComposing||!selected)return;
-      if((event.target as HTMLElement).closest('input,textarea,[contenteditable="true"]'))return;
-      event.preventDefault();event.stopPropagation();setGesture({kind:"back",id:selected.id});
-    }}>
+    <section className="discovery-view">
       <header className="discovery-heading">
         <p className="discovery-eyebrow">{t("CAPABILITIES, IN CONTEXT")}</p>
         <h1>{t("Tools")}</h1>
         <p className="discovery-lede">
-          {t("Choose a tool to see what’s available for this project.")}
+          {t("Capabilities shown here come from the supplied view only. Buttons open existing routes; button presence never grants permission, and this read-only surface never sends work.")}
         </p>
       </header>
       <div className="discovery-layout discovery-tools-layout">
         <section className="discovery-panel discovery-tool-inspector" aria-label={t("Selected tool")}>
-          <h2 ref={inspectorHeading} tabIndex={-1} className="discovery-section-title">{t("Selected tool")}</h2>
+          <h2 className="discovery-section-title">{t("Selected tool")}</h2>
           {selected ? <CapabilityCard capability={selected} locale={locale} callbacks={callbacks} /> :
             <p className="discovery-muted">{t("No capabilities were supplied.")}</p>}
-          {selected && <button type="button" className="discovery-action" onClick={()=>setGesture({kind:"back",id:selected.id})}>{t("Back to tools")}</button>}
           <details className="discovery-preview-section"><summary>{t("Project context")}</summary>
-            <p className="discovery-fineprint">{t("Capabilities shown here come from the supplied view only. Buttons open existing routes; button presence never grants permission, and this read-only surface never sends work.")}</p>
             <MetaRow label={t("Work reference")} value={context.selection?.workRef ?? t("Not supplied")} />
             <MetaRow label={t("Root job")} value={context.selection?.rootJobId ?? t("Not supplied")} />
             <MetaRow label={t("Session")} value={context.sessionRef ?? t("Not supplied")} />
@@ -1094,14 +1050,13 @@ function ToolsView({
           </details>
         </section>
         <section className="discovery-panel discovery-capabilities" aria-label={t("Other tools")}>
-          <h2 ref={listHeading} tabIndex={-1} className="discovery-section-title">{t("Other tools")}</h2>
+          <h2 className="discovery-section-title">{t("Other tools")}</h2>
           {view.capabilities.length === 0 ? <p className="discovery-muted">{t("No capabilities were supplied.")}</p> :
             <ul className="discovery-list">{view.capabilities.map((capability) => {
               const label = t(CAP_ACTIONS[capability.id].label);
               return <li key={capability.id}><button type="button" className="discovery-item"
                 aria-label={label} aria-pressed={selected?.id === capability.id}
-                ref={node=>{if(node)selectors.current.set(capability.id,node);else selectors.current.delete(capability.id);}}
-                onClick={() => {onSelectCapability(capability.id);setGesture({kind:"inspect",id:capability.id});}}>
+                onClick={() => setSelectedCapability(capability.id)}>
                 <span className="discovery-item-title">{label}</span>
                 <span className="discovery-muted">{capability.state === "READ_ONLY" ? t("Read only") : capability.state === "PREVIEW_ONLY" ? t("Preview only") : t("Unavailable")}</span>
               </button></li>;
@@ -1129,9 +1084,6 @@ function DiscoveryBody(props: DiscoveryWorkspaceProps) {
     onRefreshSources,
   } = props;
   const locale: "en" | "zh-CN" = localeProp === "zh-CN" ? "zh-CN" : "en";
-  const [selectedCapability,setSelectedCapability]=useState<DiscoveryCapability["id"]|null>(null);
-  const [toolsReturn,setToolsReturn]=useState<DiscoveryCapability["id"]|null>(null);
-  const [toolsReturnRequest,setToolsReturnRequest]=useState(0);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterState>({ kind: "all", expanded: false });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1226,15 +1178,7 @@ function DiscoveryBody(props: DiscoveryWorkspaceProps) {
         view={view}
         projection={projection}
         locale={locale}
-        selectedCapability={selectedCapability}
-        onSelectCapability={setSelectedCapability}
-        returnFocusRequest={toolsReturnRequest}
-        onModeChange={onModeChange ? (next)=>{
-          const selected=view.capabilities.find(item=>item.id===selectedCapability)
-            ?? view.capabilities.find(item=>item.state!=="UNAVAILABLE") ?? view.capabilities[0];
-          setToolsReturn(selected?.id??null);
-          onModeChange(next);
-        } : undefined}
+        onModeChange={onModeChange}
         onOpenMetaCeo={onOpenMetaCeo}
         onOpenKnowledge={onOpenKnowledge}
       />
@@ -1256,10 +1200,6 @@ function DiscoveryBody(props: DiscoveryWorkspaceProps) {
   }
   return (
     <div ref={rootRef} className="atelier-discovery" lang={locale} onKeyDown={onKeyDown}>
-      {mode!=="Tools" && toolsReturn && onModeChange && view.capabilities.some(item=>item.id===toolsReturn) ?
-        <button type="button" className="discovery-action" onClick={()=>{
-          setToolsReturn(null);setToolsReturnRequest(value=>value+1);onModeChange("Tools");
-        }}>{makeT(locale)("Back to tools")}</button> : null}
       {body}
     </div>
   );

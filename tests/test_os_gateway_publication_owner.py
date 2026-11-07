@@ -426,11 +426,11 @@ def _stage_audit_leaf(root: Path, *, entries=(), mode: int = 0o700) -> Path:
     return leaf
 
 
-def _mixed_identity(home: Path, audit_leaf: Path, mcp_audit_root: Path | None = None):
+def _mixed_identity(home: Path, audit_leaf: Path):
     """TESTDATA mixed installed-identity adapter (never a Root-origin proof).
 
-    The Studio seat subtree and its audit leaf observe as UID501; configured
-    MCP audit leaf subtrees observe as UID458; other paths observe as Root. File descriptors are
+    The Studio seat subtree and the canonical audit leaf observe as the real
+    UID 501 pair; every other path observes as Root.  File descriptors are
     mapped through their /proc path so a held descriptor observes the same
     installed identity as its name.
     """
@@ -445,8 +445,6 @@ def _mixed_identity(home: Path, audit_leaf: Path, mcp_audit_root: Path | None = 
     def identity_for(text: str):
         if inside(text, home) or inside(text, audit_leaf):
             return STUDIO_UID, STUDIO_GID
-        if mcp_audit_root is not None and text.startswith(os.fspath(mcp_audit_root) + os.sep):
-            return 458, 458
         return 0, 0
 
     def rebind(info: os.stat_result, uid: int, gid: int) -> os.stat_result:
@@ -517,7 +515,7 @@ def _mixed_identity(home: Path, audit_leaf: Path, mcp_audit_root: Path | None = 
 def _harness_chown(path, uid, gid):
     """TESTDATA: remap only the identities this disposable workspace can hold."""
 
-    if (uid, gid) not in ((0, 0), (STUDIO_UID, STUDIO_GID), (458, 458)):
+    if (uid, gid) not in ((0, 0), (STUDIO_UID, STUDIO_GID)):
         raise ValueError("marker harness only adapts the installed identities")
     return None
 
@@ -677,17 +675,6 @@ def gateway(monkeypatch, gateway_tmp_path):
     # The qualified fixed audit parent exists; the canonical leaf is absent.
     (root / "audit").mkdir(mode=0o755)
     audit_leaf = root / "audit" / "os-commission-publication"
-    from ops.executive_os import mcp_auth_audit_directories as mcp_audit
-    mcp_audit_root = root / "mcp-auth"
-    mcp_audit_root.mkdir(mode=0o755)
-    mcp_audit_root.chmod(0o755)
-    for name in ("read", "submit", "workspace"):
-        (mcp_audit_root / name).mkdir(mode=0o700)
-    monkeypatch.setattr(mcp_audit, "ROOT", mcp_audit_root)
-    monkeypatch.setattr(mcp_audit, "_effective_uid", lambda: 0)
-    # The same explicit root/UID fixture boundary as _has_acl below. Native
-    # descriptor custody uses real OS identities; these tests model the roles.
-    monkeypatch.setattr(mcp_audit, "has_macos_acl", lambda *a, **k: False)
 
     # Gateway root rebindings: the Studio seat and the canonical audit leaf
     # observe as the real UID 501 pair, everything else as Root.
@@ -713,7 +700,7 @@ def gateway(monkeypatch, gateway_tmp_path):
         from ops.executive_os import os_gateway_studio_reader as studio_reader
         from test_os_gateway_studio_prefix_identity import MechanicalPrefixGuard
         monkeypatch.setattr(studio_reader, "_PrefixMutationGuard", MechanicalPrefixGuard)
-    bound_lstat, bound_stat, bound_fstat = _mixed_identity(home, audit_leaf, mcp_audit_root)
+    bound_lstat, bound_stat, bound_fstat = _mixed_identity(home, audit_leaf)
     monkeypatch.setattr(Path, "lstat", bound_lstat)
     monkeypatch.setattr(control.os, "stat", bound_stat)
     monkeypatch.setattr(control.os, "fstat", bound_fstat)
@@ -1652,10 +1639,7 @@ def test_full_inflight_marker_is_durable_before_the_first_write(gateway, monkeyp
         "target_control_sha256",
         "target_worker_sha256",
         *sorted(control._GATEWAY_MANIFEST_FIELDS),
-        *sorted(control._MCP_AUDIT_FIELDS),
     }
-    assert manifest[control._MCP_AUDIT_AFTER_FIELD] is None
-    assert set(manifest[control._MCP_AUDIT_BEFORE_FIELD]["leaves"]) == {"read", "submit", "workspace"}
     assert manifest["gateway_release_bundle_digest"] == s.bundle
     assert manifest["gateway_prior_grant_present"] is False
     # The audit prerequisite is bound in the SAME retained intent, before any
@@ -2608,7 +2592,7 @@ def test_studio_os_principal_is_distinct_from_instance_key(gateway, monkeypatch)
 
 
 @pytest.mark.parametrize("name,expected_count", [
-    ("ops/executive_os/autonomy_control.py", 6),
+    ("ops/executive_os/autonomy_control.py", 4),
     ("ops/executive_os/os_gateway_studio_reader.py", 1),
 ])
 def test_gateway_identity_review_pins_exact_constant_tokens_and_refuses_drift(

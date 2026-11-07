@@ -36,7 +36,7 @@ therefore cannot install, authenticate or select the Executive connector by itse
 
 ## Backend contract consumed by this package
 
-The current protected Executive COO contract is server version `1.0.0` with exactly these seven
+The current protected Executive COO contract is server version `1.0.0` with exactly these six
 role-correct tools:
 
 - `executive_mandate`;
@@ -44,15 +44,12 @@ role-correct tools:
 - `executive_inbox`;
 - `executive_fabric`;
 - `submit_principal_intent`;
-- `principal_intent_status`;
-- `mmx_delegate`.
+- `principal_intent_status`.
 
 The first four recover current mission/runtime context. `submit_principal_intent` submits one
 bounded **in-mission COO request** through the existing principal admission path. Acceptance is not
 Worker START or completion. `principal_intent_status` reconciles the original request reference
-without creating or retrying work. `mmx_delegate` submits or observes exactly the Executive child
-the authenticated host already froze, under its canonical command reference; it never selects,
-creates, reviews, consumes or cancels a child.
+without creating or retrying work.
 
 This package never uses `submit_ceo_intent`. CEO and COO remain different principals/policies.
 A future orchestration-root operation for governed fan-out is a separate H4 contract and is not

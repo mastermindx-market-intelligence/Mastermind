@@ -369,9 +369,8 @@ def reviewed_literal_spans(path: str, source: str):
     elif path == "control_plane/finite_initial_registration.py":
         from tests.test_finite_initial_identity_review import REVIEWED_ANCHORS_BY_PATH
         reviewed_anchors = REVIEWED_ANCHORS_BY_PATH[path]
-    elif path in {"ops/executive_os/attended_control_staging.py", "control_plane/fabric_attended_registration.py",
-                  "ops/executive_os/attended_control_retirement.py"}:
-        from tests.test_executive_finite_identity_review import REVIEWED_ANCHORS_BY_PATH
+    elif path in {"ops/executive_os/attended_control_staging.py", "control_plane/fabric_attended_registration.py"}:
+        from tests.executive_finite_identity_review import REVIEWED_ANCHORS_BY_PATH
         reviewed_anchors = REVIEWED_ANCHORS_BY_PATH[path]
     elif path in {"control_plane/direct_native_correction.py",
                   "integrations/mastermind_executive_app/direct_native.py"}:

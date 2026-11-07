@@ -57,7 +57,7 @@ def sealed_regular(path: Path, *, expected_sha: str) -> bytes:
     return content
 
 
-def manifest_read(path: Path, *, expected_profile_id: str = "m2-9691-20261104-exact-selected-code") -> dict:
+def manifest_read(path: Path) -> dict:
     try:
         m = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -73,7 +73,7 @@ def manifest_read(path: Path, *, expected_profile_id: str = "m2-9691-20261104-ex
         refuse("PROFILE_POSTIMAGE_SET_REFUSED")
     if set(m["patches_sha256"]) != {name + ".patch" for name in NAMES}:
         refuse("PROFILE_PATCH_SET_REFUSED")
-    if m.get("profile") != expected_profile_id:
+    if m.get("profile") != "m2-9691-20261104-exact-selected-code":
         refuse("PROFILE_IDENTITY_REFUSED")
     if (type(m.get("selected_generation")) is not str
             or re.fullmatch(r"[0-9a-f]{64}", m["selected_generation"]) is None
@@ -96,12 +96,10 @@ def _root_is_directory(root: Path) -> None:
 
 def qualify(*, installed_ext: Path, output: Path,
             owner_modules_root: Path, verify_only: bool = False,
-            profile_dir: Path = MODULE_DIR,
-            expected_profile_id: str = "m2-9691-20261104-exact-selected-code") -> dict:
+            profile_dir: Path = MODULE_DIR) -> dict:
     _root_is_directory(installed_ext)
     _root_is_directory(owner_modules_root)
-    profile = manifest_read(profile_dir / "profile_manifest.json",
-                            expected_profile_id=expected_profile_id)
+    profile = manifest_read(profile_dir / "profile_manifest.json")
     # The M2 publisher reads CURRENT once and executes one immutable generation.
     # Bind the same original selection instead of replacing a newer generation.
     store = installed_ext.parent.parent

@@ -984,8 +984,7 @@ def _seed_committed_exact_reply_fixture(s, *, foreign_index=None, indexed_actor=
 
 def _capture_exact_read_ownership(monkeypatch):
     trace = {'observations': _record_reference_observations(monkeypatch),
-             'connections': [], 'activations': [], 'loaders': [], 'selections': [],
-             'principal_filters': []}
+             'connections': [], 'activations': [], 'loaders': [], 'selections': []}
     connect = sqlite3.connect
     activate = er._RuntimeReadProgressGuard.activate
     initialize_loader = er._BoundedRoleResultLoader.__init__
@@ -1017,12 +1016,9 @@ def _capture_exact_read_ownership(monkeypatch):
             # ownership/budget assertions instead of a missing-method stub.
             continue
 
-        def selected(self, *, read_ref, original_principals=None,
-                     _selection=selection, _kind=kind):
+        def selected(self, *, read_ref, _selection=selection, _kind=kind):
             trace['selections'].append((_kind, self))
-            trace['principal_filters'].append((_kind, original_principals))
-            return _selection(self, read_ref=read_ref,
-                              original_principals=original_principals)
+            return _selection(self, read_ref=read_ref)
 
         monkeypatch.setattr(er.BoundedRuntimeReadObservation, name, selected)
     return trace
@@ -1126,8 +1122,6 @@ def test_exact_original_reference_uses_only_closed_bounded_provenance(setup, mon
         assert _call_exact_read_public(s, read_ref, 'reference') == read_ref
         _assert_exact_read_closed(trace)
         assert [kind for kind, _ in trace['selections']] == ['original']
-        assert trace['principal_filters'] == [
-            ('original', s.owner._original_principals(s.projection))]
     assert not s.service.calls and events(s) == before
 
 

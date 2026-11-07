@@ -49,38 +49,6 @@ The repository already contains conversation, draft, original-result and selecte
 
 Important qualification from the actual #1362 diff: its new native session transport is explicitly **READ-only** (`send` rejects `NATIVE_SESSION_READ_ONLY`). It adds context/reply/reference reading, while preserving a separate native SEND/F2 hold. Therefore even an eventual #1362 source merge is **not** proof of unrestricted native chat or session continuation. Web SEND and native READ are separate capabilities and must be qualified separately.
 
-### Scoped source supersession — 2026-11-05
-
-The current project lead authorizes replacing only that historical reader-slice
-public **Session SEND absence** assertion with the separately qualified fixed
-`POST /os/executive/session/send` composition. The subject is the existing
-four-field continuation body, current Executive READ plus submit permission,
-current target and original operation key. It is not generic CEO submit.
-Native source `7057a5eddfc3fab3dc3a48c3fa8ab2fafe64270c`, current caller
-`7a9b427855acae98d14934ed4f85bc55a69499ce`, and finite source review
-`a1b0911109e12f76b27316d98c60ab2f63a894ab14dedba455cf526e20f7d2a7`
-qualify that subject. The supported single-RawClient auth path withdraws the
-JavaScript transport before native replacement; assumption disposition
-`f798437613a5ca351ca7796fdfd21c2055b1e2d923589932662d37b824d23d1c`
-does not claim unconditional JavaScript/private-native epoch equality.
-
-The new public exposure and current caller passed their one finite consequence
-review at source `57b9e6b291afd95475f121ece31a204f8c2e9404`:
-`c063e02126c0ee2a7760db019afccbca587fa0499edcdd20669c86ab7bcc4c45`,
-SOURCE_COMPONENT_RISK_PASS with no findings. This clears only the scoped
-public Session SEND source gate; the earlier native verdict alone did not clear it.
-All complete predecessor GET/POST profiles, request caps, fixed upstream and
-the existing Session owner's authentication and UNKNOWN/original-key behavior
-remain required.
-
-This scoped source decision does **not** clear the original F2
-`executive_submit` review or operation, retrieve or replay its held artifacts,
-or clear any runtime, provider, canary, arming, `09b`, `#1515` or S6 hold.
-Generic submit bytes, legacy POST routes and runtime admission guards remain
-unchanged. No live edge, service, credential, provider or backend effect follows
-from this source-only composition. Protected source and the actual backend
-operation gates still govern any later installation or exposure.
-
 Fresh installed-owner observations on October 22:
 
 - `session_targets` returned an empty array. No addressable target was invented from an open app or a UI row.

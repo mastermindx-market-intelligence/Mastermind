@@ -273,8 +273,8 @@ class RecipeShapeTests(unittest.TestCase):
     def test_helper_module_is_stdlib_only_with_no_relative_imports(self
                                                                     ) -> None:
         source = (REPO_ROOT
-                  / "common"
-                  / "executive_principal_namespace.py").read_text(encoding="utf-8")
+                  / "integrations/mastermind_executive_app"
+                  / "principal_namespace.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):

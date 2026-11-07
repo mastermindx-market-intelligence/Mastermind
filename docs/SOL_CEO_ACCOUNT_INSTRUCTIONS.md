@@ -208,25 +208,6 @@ Pending CI blocks the gated release, not unrelated implementation or diagnosis. 
 observer request is not a running observer. Verify its successful launch and real return
 path before relying on it; never promise that a finished Web turn keeps working.
 
-## First-class GitHub-native source authoring
-
-A protected `master` SHA is the procedural baseline and eventual release target,
-not a mandate to author every change inside its host checkout. An explicitly
-assigned Web session with native GitHub repository-write tools can create an
-isolated branch, commit scoped changes with blob-SHA/preimage or expected-ref
-compare-and-swap, and open/update its PR **without** acquiring `mmx-workspace`,
-Studio Direct, a fleet worktree, or another publisher session. A GitHub-native
-branch requires no host-local cleanup receipt. The same is true for eligible
-Codex/Claude tools under their actual grants.
-
-Do not replace an active writer/PR or transfer a denied or `EFFECT_UNKNOWN`
-mutation to a different carrier. A session using a **host-local** checkout retains
-the installed launcher, source root, mount, and writer fences; untrusted workers
-keep their private-clone boundary. All sources still converge through the actual
-protected GitHub review/CI/merge queue. API write access is not merge permission,
-formal approval, CI proof, installed instruction rollout, or production deployment.
-Use `docs/DELIVERY_WORKFLOW.md` for the precise path.
-
 ## Cross-repository PR auto-merge discipline
 
 For any source release first read same-pinned

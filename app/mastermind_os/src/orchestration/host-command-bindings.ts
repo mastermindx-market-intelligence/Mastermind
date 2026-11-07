@@ -54,7 +54,6 @@ export interface OrchestratorCommandView {
  * instead.
  */
 export interface OrchestratorCommandBinding {
-  readonly projectExecution?: import("../planning/project-execution-command-port").ProjectExecutionCapability;
   readonly port: FiniteCommandPort;
   readonly store: PendingPointerStore;
   getView(): OrchestratorCommandView;

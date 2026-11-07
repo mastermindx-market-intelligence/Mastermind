@@ -56,8 +56,7 @@ describe("explicit shell presentation", () => {
     const projection = projectOffice(input, context), onDraftChange = vi.fn();
     const { rerender } = render(<MetaCeoOffice locale="zh-CN" projection={projection}
       draft={{ text: "Original private draft 原样", context }} onDraftChange={onDraftChange} />);
-    // The localized answer-state heading replaces the retired office slogan.
-    expect(screen.getByRole("heading", { name: "决策情况尚未确认。" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "让整个公司有方向地前进。" })).toBeTruthy();
     expect(screen.getAllByText("Do exactly this. 不改写。").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "查看方向预览" }));
     const preview = screen.getByRole("region", { name: "方向预览" });

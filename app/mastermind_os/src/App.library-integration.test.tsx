@@ -94,7 +94,7 @@ it('joins explicit project file Search Open to exact Library reread and preserve
  fireEvent.submit(input.closest('form')!);
  const open=await screen.findAllByRole('button',{name:'Open'});fireEvent.click(open[0]);
  await screen.findByRole('button',{name:'Back'});
- await waitFor(()=>expect(screen.getAllByRole('heading',{level:1})).toHaveLength(1));
+ expect(screen.getAllByRole('heading',{level:1})).toHaveLength(1);
  fireEvent.click(screen.getByRole('button',{name:'Back'}));
  expect((screen.getByLabelText('Search this project') as HTMLInputElement).value).toBe('中文');
  expect(e.invoke.mock.calls.some(([name])=>name==='read_project_knowledge_source')).toBe(true);
@@ -133,7 +133,6 @@ it('opens a saved Search reply only through its independently supplied Session o
 async function openFileWithGenuineDraft(){
  const e=await setup(false,undefined,true);
  fireEvent.click(screen.getByRole('button',{name:'Conversations'}));
- fireEvent.click(await screen.findByRole('button',{name:/^Open conversation:/}));
  await screen.findByText(e.destinationPair.window.view.items.find(item=>item.text)!.text!);
  fireEvent.click(screen.getByRole('button',{name:'Unsent notes'}));
  fireEvent.change(screen.getByRole('textbox',{name:'Unsent notes'}),{target:{value:'Original current App draft'}});
@@ -149,42 +148,16 @@ it('appends and undoes an actual Library source in the genuine mounted unsent dr
  expect(await screen.findByText('Excerpt added to the draft. Not sent.')).toBeTruthy();
  fireEvent.click(screen.getByRole('button',{name:'Remove added excerpt'}));
  fireEvent.click(screen.getByRole('button',{name:'Conversations'}));
- fireEvent.click(await screen.findByRole('button',{name:/^Open conversation:/}));
  fireEvent.click(screen.getByRole('button',{name:'Unsent notes'}));
  expect(screen.getByRole('textbox',{name:'Unsent notes'})).toHaveProperty('value','Original current App draft');
  expect(e.invoke.mock.calls.some(([name])=>/submit|prepare|send|create|source_operation/.test(name))).toBe(false);
 });
-it('returns to original notes only after the explicit guarded source gesture',async()=>{
- const e=await openFileWithGenuineDraft();
- fireEvent.click(screen.getByRole('button',{name:'Add excerpt to draft'}));
- fireEvent.click(within(screen.getByRole('heading',{level:1}).closest('article')!).getByRole('button',{name:'Back'}));
- fireEvent.click(within(screen.getByText('Uploaded file').closest('.knowledge-library-row')! as HTMLElement).getByRole('button',{name:'Open'}));
- fireEvent.click(await screen.findByRole('button',{name:'Open original conversation'}));
- const notes=await screen.findByRole('button',{name:'Unsent notes'});
- expect(document.activeElement).toBe(notes);
- expect(e.invoke.mock.calls.some(([name])=>/submit|prepare|send|create|source_operation/.test(name))).toBe(false);
-});
-it.each(['content','generation'] as const)('refuses a stale original return after no-render %s loss',async(kind)=>{
- const e=await openFileWithGenuineDraft();
- fireEvent.click(screen.getByRole('button',{name:'Add excerpt to draft'}));
- fireEvent.click(within(screen.getByRole('heading',{level:1}).closest('article')!).getByRole('button',{name:'Back'}));
- fireEvent.click(within(screen.getByText('Uploaded file').closest('.knowledge-library-row')! as HTMLElement).getByRole('button',{name:'Open'}));
- const control=await screen.findByRole('button',{name:'Open original conversation'});
- if(kind==='content')vi.spyOn(e.host.auth!,'getState').mockReturnValue({...signed,content:false} as never);
- else vi.spyOn(e.host,'invalidationGeneration').mockReturnValue(e.host.invalidationGeneration!()+1);
- fireEvent.click(control);
- expect(screen.queryByRole('button',{name:'Unsent notes'})).toBeNull();
- expect(e.invoke.mock.calls.some(([name])=>/submit|prepare|send|create|source_operation/.test(name))).toBe(false);
-});
 it('refuses a stale Library append when actual Content permission disappears without a React notification',async()=>{
  const e=await openFileWithGenuineDraft(),oldAdd=screen.getByRole('button',{name:'Add excerpt to draft'});
- const currentAuth = vi.spyOn(e.host.auth!,'getState').mockReturnValue({...signed,content:false} as never);
+ vi.spyOn(e.host.auth!,'getState').mockReturnValue({...signed,content:false} as never);
  fireEvent.click(oldAdd);
  expect(screen.queryByText('Excerpt added to the draft. Not sent.')).toBeNull();
- // Reacquire the real read capability before inspecting the retained draft.
- currentAuth.mockRestore();
  fireEvent.click(screen.getByRole('button',{name:'Conversations'}));
- fireEvent.click(await screen.findByRole('button',{name:/^Open conversation:/}));
  fireEvent.click(screen.getByRole('button',{name:'Unsent notes'}));
  expect(screen.getByRole('textbox',{name:'Unsent notes'})).toHaveProperty('value','Original current App draft');
  expect(e.invoke.mock.calls.some(([name])=>/submit|prepare|send|create|source_operation/.test(name))).toBe(false);

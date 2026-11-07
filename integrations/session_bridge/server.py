@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .schemas import TARGET_KINDS, summon_input_schema
+from .schemas import summon_input_schema
 from .gateway import SessionBridgeGateway
 
 
@@ -25,17 +25,17 @@ def build_tools() -> list[Any]:
     return [
         mcp_types.Tool(
             name="session_targets",
-            description="List exact addressable targets from canonical projections. Select kind hermes_secretary or hermes_meta for the corresponding enrolled native conversation.",
+            description="List exact addressable Fabric/Codex/Claude targets from canonical current projections.",
             inputSchema={
                 "type": "object",
-                "properties": {"kind": {"type": "string", "enum": list(TARGET_KINDS)}},
+                "properties": {"kind": {"type": "string", "enum": ["fabric_attempt", "codex", "claude"]}},
                 "additionalProperties": False,
             },
             annotations=read_only,
         ),
         mcp_types.Tool(
             name="session_send",
-            description="Commit one governed continuation to one exact target through its selected canonical owner.",
+            description="Commit one governed continuation to one exact current target, then request native attention.",
             inputSchema={
                 "type": "object",
                 "properties": {

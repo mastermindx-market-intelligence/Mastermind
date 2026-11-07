@@ -5,8 +5,7 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { createOsExecutiveSessionHost } from './orchestration/os-executive-session-host';
-import { decodeHermesPublicResult, type ExecutiveSessionTransport, type QualifiedSessionAnswerRead } from './orchestration/executive-session-command-port';
-import metaFixture from './fixtures/native-hermes-meta-session-send-producer.json';
+import type { ExecutiveSessionTransport } from './orchestration/executive-session-command-port';
 import type { OperationPointer, PendingPointerStore } from './orchestration/operation-controller';
 import type { AuthState } from './host';
 
@@ -68,7 +67,7 @@ function fixture(retained: OperationPointer | null = null, target = true, conten
 }
 beforeEach(()=>{ history.replaceState(null,'','/os/?work_ref=WS%3AALPHA&root_job_id=JOB-1'); delete window.MastermindMissionHost; });
 afterEach(()=>{cleanup();dispose?.();dispose=undefined;delete window.MastermindMissionHost;vi.restoreAllMocks();});
-async function panel() { fireEvent.click(screen.getByRole('button',{name:'Conversations'})); fireEvent.click(await screen.findByRole('button',{name:'Open session requests'})); return screen.findByLabelText('Session continuation'); }
+async function panel() { fireEvent.click(screen.getByRole('button',{name:'Conversations'})); return screen.findByLabelText('Session continuation'); }
 async function enter() { await waitFor(()=>expect((screen.getByRole('button',{name:'Send'}) as HTMLButtonElement).disabled).toBe(true));
   fireEvent.change(screen.getByLabelText('What would you like done?'),{target:{value:'Continue this selected slice'}});
   fireEvent.change(screen.getByLabelText('How will we know it is done?'),{target:{value:'Owner confirms the slice'}});
@@ -110,7 +109,7 @@ describe('App selected-session composition',()=>{
     // React must have actually committed the qualified view first.
     const originalClear = vi.mocked(f.store.clearIfEqual).getMockImplementation()!;
     vi.mocked(f.store.clearIfEqual).mockImplementation((scope, p) => {
-      expect(screen.getByRole("region", { name: "Original reply" })).toBeTruthy();
+      expect(screen.getByRole("region", { name: "Qualified original answer" })).toBeTruthy();
       expect(screen.getByText("The bounded original finding is confirmed.")).toBeTruthy();
       expect(p).toEqual(pointer);
       return originalClear(scope, p);
@@ -118,7 +117,7 @@ describe('App selected-session composition',()=>{
     render(<App />); await panel();
     fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
     await waitFor(() => expect(f.store.clearIfEqual).toHaveBeenCalledTimes(1));
-    const answer = screen.getByRole("region", { name: "Original reply" });
+    const answer = screen.getByRole("region", { name: "Qualified original answer" });
     expect(answer.closest(".conversation-window")).not.toBeNull();
     expect(answer.textContent).toContain("Original-parent acceptance is not established");
     expect(read).toHaveBeenCalledWith(pointer, expect.any(AbortSignal));
@@ -136,12 +135,12 @@ describe('App selected-session composition',()=>{
     render(<App />); await panel();
     fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
     await waitFor(() => expect(f.saved()).toBeNull());
-    expect(screen.getAllByRole("region", { name: "Original reply" })).toHaveLength(1);
+    expect(screen.getAllByRole("region", { name: "Qualified original answer" })).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Today" }));
     expect(screen.queryByText("A qualified answer remains in this Office session.")).toBeNull();
-    await panel();
+    fireEvent.click(screen.getByRole("button", { name: "Conversations" }));
     expect(await screen.findByText("A qualified answer remains in this Office session.")).toBeTruthy();
-    expect(screen.getAllByRole("region", { name: "Original reply" })).toHaveLength(1);
+    expect(screen.getAllByRole("region", { name: "Qualified original answer" })).toHaveLength(1);
     expect(read).toHaveBeenCalledTimes(1);
     expect(f.transport.send).not.toHaveBeenCalled();
   });
@@ -157,11 +156,11 @@ describe('App selected-session composition',()=>{
     fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
     await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(f.store.clearIfEqual).toHaveBeenCalledTimes(1));
-    expect(screen.getAllByRole("region", { name: "Original reply" })).toHaveLength(1);
+    expect(screen.getAllByRole("region", { name: "Qualified original answer" })).toHaveLength(1);
     expect(f.saved()).toEqual(pointer);
     fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
     await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
-    expect(screen.getAllByRole("region", { name: "Original reply" })).toHaveLength(1);
+    expect(screen.getAllByRole("region", { name: "Qualified original answer" })).toHaveLength(1);
     expect(f.saved()).toEqual(pointer);
     expect(f.transport.send).not.toHaveBeenCalled();
   });
@@ -181,7 +180,7 @@ describe('App selected-session composition',()=>{
         disposition: "accepted", reason: "ACCEPTED" },
       answer: { text: "No stale answer may leak.", nextStep: "none", readRef: "read-ref-1", parentConsumed: false },
     }));
-    expect(screen.queryByRole("region", { name: "Original reply" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Qualified original answer" })).toBeNull();
     expect(screen.queryByText("No stale answer may leak.")).toBeNull();
     expect(f.store.clearIfEqual).not.toHaveBeenCalled();
     expect(f.saved()).toEqual(pointer);
@@ -209,7 +208,7 @@ describe('App selected-session composition',()=>{
     expect(screen.queryByText("Must not publish a late old-view answer.")).toBeNull();
     expect(f.saved()).toEqual(pointer);
     expect(f.store.clearIfEqual).not.toHaveBeenCalled();
-    await panel();
+    fireEvent.click(screen.getByRole("button", { name: "Conversations" }));
     fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
     await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("Reopened only under original authority.")).toBeTruthy();
@@ -240,7 +239,7 @@ describe('App selected-session composition',()=>{
     render(<App />); await panel();
     fireEvent.click(await screen.findByRole("button", { name: "Check status" }));
     await waitFor(() => expect(f.host.binding.port.readQualifiedAnswer).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole("region", { name: "Original reply" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Qualified original answer" })).toBeNull();
     expect(f.saved()).toEqual(pointer);
     expect(f.store.clearIfEqual).not.toHaveBeenCalled();
   });
@@ -357,7 +356,7 @@ describe('App selected-session composition',()=>{
     expect(document.activeElement).toBe(instruction);
     // The passive observation body may re-key; the independent Session owner has not changed.
     const observedReads=f.readCurrentWindow.mock.calls.length;
-    fireEvent.click(screen.getByRole('button',{name:'刷新回复'}));
+    fireEvent.click(screen.getByRole('button',{name:'Refresh observed window'}));
     await waitFor(()=>expect(f.readCurrentWindow).toHaveBeenCalledTimes(observedReads+1));
     view.rerender(<App/>);
     expect(screen.getByLabelText('What would you like done?')).toBe(instruction);
@@ -371,78 +370,4 @@ describe('App selected-session composition',()=>{
     expect(f.transport.send).not.toHaveBeenCalled();
   });
 
-});
-
-it('opens the genuine Executive-only session source without a Window read and refuses detached entry owners',async()=>{
- const f=fixture(pointer,false,false);const view=render(<App/>);
- fireEvent.click(screen.getByRole('button',{name:'Conversations'}));
- const open=await screen.findByRole('button',{name:'Open session requests'});
- const host=window.MastermindMissionHost!;
- window.MastermindMissionHost={...host};fireEvent.click(open);
- expect(document.querySelector('.conversations-list')).not.toBeNull();expect(document.querySelector('.conversation-window')).toBeNull();
- window.MastermindMissionHost=host;
- const context=f.host.binding.port.context();expect(context).not.toBeNull();
- const changed=vi.spyOn(f.host.binding.port,'context').mockReturnValue(context);
- fireEvent.click(open);expect(document.querySelector('.conversations-list')).not.toBeNull();
- expect(f.transport.reply).not.toHaveBeenCalled();expect(f.transport.send).not.toHaveBeenCalled();expect(f.saved()).toEqual(pointer);
- // An intervening committed render may capture the temporary getter. Restore
- // alone must not authorize that stale callback; qualify the current owner.
- view.rerender(<App/>);
- changed.mockRestore();fireEvent.click(open);
- expect(document.querySelector('.conversations-list')).not.toBeNull();
- expect(f.transport.reply).not.toHaveBeenCalled();expect(f.transport.send).not.toHaveBeenCalled();expect(f.saved()).toEqual(pointer);
- view.rerender(<App/>);
- fireEvent.click(screen.getByRole('button',{name:'Open session requests'}));await screen.findByLabelText('Session continuation');
- expect(f.readCurrentWindow).not.toHaveBeenCalled();expect(f.transport.reply).not.toHaveBeenCalled();expect(f.saved()).toEqual(pointer);
- fireEvent.click(screen.getByRole('button',{name:'Back to conversations'}));
- await waitFor(()=>expect(document.activeElement).toBe(screen.getByRole('button',{name:'Open session requests'})));
-});
-
-it("never retags an original Meta phase to a replacement web host while its answer is awaited", async () => {
-  const original: OperationPointer = {kind: "message",
-    operationKey: metaFixture.arguments.operation_key,
-    targetKey: metaFixture.arguments.target_ref};
-  const f = fixture(original, false, true);
-  const held = deferred<QualifiedSessionAnswerRead>();
-  const read = vi.spyOn(f.host.binding.port, "readQualifiedAnswer").mockReturnValueOnce(held.promise);
-  const phases: string[] = [];
-  const observer = new MutationObserver(records => {
-    for (const record of records) for (const node of record.addedNodes) {
-      if (!(node instanceof Element)) continue;
-      if (node.matches(".session-native-phase")) phases.push(node.textContent ?? "");
-      for (const phase of node.querySelectorAll(".session-native-phase")) phases.push(phase.textContent ?? "");
-    }
-  });
-  observer.observe(document.body, {childList: true, subtree: true});
-  let replacement: ReturnType<typeof createOsExecutiveSessionHost> | null = null;
-  try {
-    render(<App/>); await panel();
-    fireEvent.click(await screen.findByRole("button", {name: "Check status"}));
-    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
-    replacement = createOsExecutiveSessionHost(f.transport, f.store);
-    await replacement.ready;
-    await replacement.refresh({workRef: "WS:ALPHA", rootJobId: "JOB-1"});
-    const owner = window.MastermindMissionHost!;
-    window.MastermindMissionHost = {...owner, sessionCommandBinding: replacement.binding,
-      session: {refresh: selected => replacement!.refresh(selected as Parameters<typeof replacement.refresh>[0]),
-        setStopCondition: replacement.setStopCondition}};
-    const result = await decodeHermesPublicResult(metaFixture.reply.data);
-    expect(result).not.toBeNull();
-    await act(async () => {
-      held.resolve({receipt: {...original, disposition: "accepted", reason: "ACCEPTED"},
-        nativeResult: result,
-        answer: {kind: "hermes_meta", text: result!.answer!, successful: result!.successful!,
-          readRef: result!.read_ref, parentConsumed: false, nextStep: null}});
-      await held.promise;
-    });
-    await act(async () => {await Promise.resolve();});
-    expect(phases).toEqual([]);
-    expect(screen.queryByText(metaFixture.reply.data.answer)).toBeNull();
-    expect(f.saved()).toEqual(original);
-    expect(f.store.clearIfEqual).not.toHaveBeenCalled();
-    expect(f.store.reserve).not.toHaveBeenCalled();
-    expect(f.transport.send).not.toHaveBeenCalled();
-  } finally {
-    observer.disconnect(); replacement?.dispose(); f.host.dispose(); dispose = undefined;
-  }
 });

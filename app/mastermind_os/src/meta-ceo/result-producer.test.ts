@@ -20,16 +20,8 @@
  * The Node filesystem module is really imported and really read. Nothing in
  * this file mocks or replaces it. This project ships no @types/node, so the
  * built-in specifier is declared once below, inside this test file only.
- *
- * The committed export is located from this module's own file URL. A URL
- * pathname is percent-encoded, so the URL is converted to a filesystem path
- * rather than read as an encoded pathname. A checkout under a directory whose
- * name contains a space would otherwise never open.
  */
 import { beforeAll, describe, expect, it } from "vitest";
-
-// @ts-expect-error node:url has no @types/node declaration in this project.
-import { fileURLToPath } from "node:url";
 
 import { decodeMissionv3, type Missionv3Document } from "../mission";
 import {
@@ -126,21 +118,8 @@ function resolveFreshGate(env: CallerEnv | undefined): FreshGate {
 }
 
 const GATE = resolveFreshGate(callerEnv);
-
-/**
- * Resolves the committed export directory that sits beside this test file.
- *
- * `import.meta.url` is a file URL, and a URL pathname is percent-encoded. A
- * checkout whose path contains a space, or any other character a URL escapes,
- * would therefore be handed to the filesystem in its encoded form and fail to
- * open. `fileURLToPath` decodes the URL into the real path for this platform,
- * so the committed export is found wherever the repository is checked out.
- */
-function committedFixtureDir(moduleUrl: string): string {
-  return fileURLToPath(new URL("./fixtures/result-producer/", moduleUrl));
-}
-
-const COMMITTED_DIR = committedFixtureDir(import.meta.url);
+const COMMITTED_DIR = new URL("./fixtures/result-producer/", import.meta.url)
+  .pathname;
 
 async function realFs(): Promise<NodeFs> {
   // @ts-expect-error node:fs/promises is resolved by the vitest worker.
@@ -694,43 +673,6 @@ function registerConsumer(get: () => ConsumedExport): void {
 }
 
 describe("result-producer consumer", () => {
-  describe("committed export directory resolution", () => {
-    it("resolves the committed export directory beside this test file", () => {
-      expect(COMMITTED_DIR).toBe(committedFixtureDir(import.meta.url));
-      expect(COMMITTED_DIR).toContain("/fixtures/result-producer/");
-    });
-
-    it("leaves a plain ancestor directory readable and unencoded", () => {
-      expect(
-        committedFixtureDir(
-          "file:///opt/mastermind/app/mastermind_os/src/meta-ceo/result-producer.test.ts",
-        ),
-      ).toBe(
-        "/opt/mastermind/app/mastermind_os/src/meta-ceo/fixtures/result-producer/",
-      );
-    });
-
-    it("decodes an encoded space in the ancestor directory", () => {
-      const resolved = committedFixtureDir(
-        "file:///opt/Mastermind%202/app/mastermind_os/src/meta-ceo/result-producer.test.ts",
-      );
-      expect(resolved).toBe(
-        "/opt/Mastermind 2/app/mastermind_os/src/meta-ceo/fixtures/result-producer/",
-      );
-      expect(resolved).toContain("Mastermind 2");
-      expect(resolved).not.toContain("%20");
-    });
-
-    it("decodes unicode, hash, and percent sequences in the ancestor directory", () => {
-      const resolved = committedFixtureDir(
-        "file:///opt/m%C3%BCber%20%23one/100%25/app/mastermind_os/src/meta-ceo/result-producer.test.ts",
-      );
-      expect(resolved).toBe(
-        "/opt/müber #one/100%/app/mastermind_os/src/meta-ceo/fixtures/result-producer/",
-      );
-    });
-  });
-
   describe.skipIf(GATE.mode !== "fresh")(
     "fresh external producer gate",
     { timeout: 120_000 },

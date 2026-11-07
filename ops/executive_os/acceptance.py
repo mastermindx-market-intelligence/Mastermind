@@ -871,16 +871,10 @@ def _attended_worker_membership(
     config: Mapping[str, Any], *, control_uid: int, control_gid: int,
     primary_worker_uid: int, primary_worker_gid: int, ops_gid: int,
 ) -> dict[str, Any] | None:
-    """Derive one group from protected active or retained finite provenance."""
+    """Derive one group from the protected current finite composition, never CLI input."""
     from control_plane.executive_fabric_composition import FabricBindingSource
     from control_plane.fabric_attended_canary import definition
 
-    if 'retired_finite_composition' in config:
-        from ops.executive_os.attended_control_retirement import retained_selection
-        try:
-            config = retained_selection(config)
-        except Exception as exc:
-            raise AcceptanceError("retired finite predecessor is unavailable") from exc
     stanza = config.get("fabric_attended_probe")
     if stanza is None:
         return None

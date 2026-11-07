@@ -47,10 +47,6 @@ def _preview(body, request, scope):
     if selected["action"] in {"add_project_file", "set_project_communication_preference"}:
         _knowledge_preview(body["preview"], request["request"], selected, scope)
         return body
-    if selected["action"] == "ADOPT_PLAN":
-        from integrations.mastermind_workspace_app.project_plan_adoption_preview import validate_plan_adoption_preview
-        validate_plan_adoption_preview(body["preview"], request["request"], selected)
-        return body
     preview = body["preview"]
     if (selected["action"] != "publish_project_proposal" or type(preview) is not dict
             or set(preview) != {"schema", "state", "work_ref", "source_commit", "canonical_path", "content_sha256", "goal", "profile"}
@@ -118,7 +114,7 @@ async def source_operation_http(request, *, config, operation):
     if factory is None or factory.policy != config.authenticator.policy:
         return _refuse_json(503, "source_unavailable")
     try:
-        if operation in {"read", "options"}:
+        if operation == "read":
             refused = await _reject_any_body(request)
             if refused is not None: return refused
             raw_query = request.scope.get("query_string", b"")
@@ -131,7 +127,7 @@ async def source_operation_http(request, *, config, operation):
             if "schema" in value: raise ValueError()
             if value.get("action") in {"add_project_file", "set_project_communication_preference"}:
                 if value.get("expected_preference_revision") == "null": value["expected_preference_revision"] = None
-            elif operation != "options": value["schema"] = "mastermind.workspace_source_operation_lookup.v1"
+            else: value["schema"] = "mastermind.workspace_source_operation_lookup.v1"
         else:
             if request.scope.get("query_string"): raise ValueError()
             content_types = [v for k, v in request.scope.get("headers", ()) if k.lower() == b"content-type"]
@@ -143,13 +139,10 @@ async def source_operation_http(request, *, config, operation):
             def nonfinite(_): raise ValueError()
             value = json.loads(bytes(raw).decode("utf-8"), object_pairs_hook=_unique, parse_constant=nonfinite)
             if len(raw)>operation_request_limit(operation,value):raise ValueError()
-        if operation == "read" and value.get("action") == "publish_project_proposal" and value.get("work_ref") == "null":
-            from integrations.mastermind_workspace_app.project_proposal_request import creation_work_ref
-            value["work_ref"] = creation_work_ref(value["request_id"],principal=principal)
         frame = validate_frame({"schema": FRAME_SCHEMA, "operation": operation,
             "principal": principal_frame(principal), "verified_expires_at": principal.expires_at, "request": value})
         action = value["action"]
-        work_ref = None if operation == "options" else value["request"].get("work_ref") if operation == "prepare" else value["work_ref"]
+        work_ref = value["request"].get("work_ref") if operation == "prepare" else value["work_ref"]
         permission = factory.bind(principal, action=action, work_ref=work_ref)
         scope = permission.principal_scope
         latest_gate = None
@@ -183,14 +176,7 @@ async def source_operation_http(request, *, config, operation):
             return _envelope_response(envelope)
         if type(envelope) is not dict or set(envelope) != {"ok", "result"} or envelope["ok"] is not True: raise ValueError()
         result = envelope["result"]
-        if operation == "options":
-            if (type(result) is not dict or set(result)!={'schema','expected_macro_sha','profiles','owner_context','grounding'}
-                    or result['schema']!='mastermind.project_creation_options.v1'
-                    or result['owner_context']!={'principal_scope':scope}
-                    or type(result['expected_macro_sha']) is not str
-                    or re.fullmatch(r'[a-f0-9]{40}',result['expected_macro_sha']) is None
-                    or type(result['profiles']) is not list or not 1<=len(result['profiles'])<=8):raise ValueError()
-        elif operation == "prepare": result = _preview(result, value, scope)
+        if operation == "prepare": result = _preview(result, value, scope)
         else:
             result = validate_status(result)
             if (result["selection"] != {k: value[k] for k in ("action", "request_id", "work_ref")}

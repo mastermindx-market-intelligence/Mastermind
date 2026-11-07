@@ -134,10 +134,10 @@ Then:
 * canonical conflict → report conflict; no new operation under the same key;
 * true canonical `not_found` → re-read current state/grounding before deciding whether the same
   operation may be resubmitted through the same carrier;
-* status unavailable/ambiguous → retain the original `EFFECT_UNKNOWN`. Non-convergent or irreversible effects stay held. A **distinct, non-force, forward-only Git ref transition** may qualify under Step 4C, without pretending the historical operation was rejected or replaying it.
+* status unavailable/ambiguous → remain uncertain and fail closed.
 
 Never interpret client timeout/cancellation as proof the underlying synchronous mutation stopped.
-Never auto-failover to another carrier. Uncertainty is an effect-scoped fence, not a permanent freeze of unrelated source qualification, tests, reviews or other provably independent work.
+Never auto-failover to another carrier.
 
 ## Step 4A — Reported terminal, protected result still outstanding
 
@@ -188,34 +188,6 @@ that another session, reviewer or team must act:
 This is a diagnostic ordering inside existing ownership and Step 8 rules.
 It creates no gate state, approval, account, queue, lease, retry path or release
 permission. Do not reopen an already-denied protected-result operation.
-
-## Step 4C — Safe forward progress after legacy Git-push uncertainty
-
-The original action and its historical `EFFECT_UNKNOWN` remain recorded. **Do
-not replay, rehome, force-push, or claim old-call rejection.** A distinct **new
-forward-only Git ref operation** may be admitted on the *same original registered
-workspace, publisher, branch, and origin* when all of these are proven:
-
-1. Original push process ended/fenced; no active writer, conflicting lease,
-   queued publication, safety/permission denial or pending external effect.
-2. Exact current remote ref and PR head freshly observed; immutable proposed
-   head is a strict descendant of both the remote head and relevant original
-   intended commit. Preserve original source; divergence is a HOLD.
-3. The **installed** publisher advertises the specific recovery schema,
-   validates prior legacy action identity, uses a **new stable action ID** and
-   durable receipt, and executes only an atomic **non-force fast-forward** ref
-   update. Stale ref, wrong target, protected branch and concurrent non-FF
-   advance are refused. No force, force-with-lease or alternate carrier.
-4. New result is read back against the exact remote/PR. A lost new callback
-   is reconciled by *that* ID, never another push. An old action's historical
-   outcome is not reclassified because a new publication succeeded.
-
-**Explicit permission/safety refusal**, irreversibles (trades, payments,
-messages, runtime deploys/merges), and uninspectable active processes stay
-held. Source/tests/research on disjoint lanes continue. Full qualification,
-failure matrix and #9596 references:
-`docs/runbooks/uncertain-git-publication-recovery.md`. No source-only policy
-grants installation, CI waiver, review, merge or production acceptance.
 
 ## Step 5 — Duplicate/conflict semantics
 

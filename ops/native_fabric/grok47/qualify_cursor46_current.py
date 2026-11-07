@@ -76,44 +76,6 @@ CHANGES = (
     ),
 )
 
-# Exact current APPLICATION-aware picker, separate from the immutable installed
-# predecessors above. Only the offline legacy-role transform changes; explicit
-# APPLICATION observations keep their existing quota-only semantics.
-APPLICATION_PICKER_SHA256 = "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892"
-APPLICATION_AFFINITY_BEFORE = '''    if model != "cursor-grok-4.6-high":
-        return False
-    if exhausted is None:
-        if application:
-            return False
-        exhausted = _grok_exhausted()
-    if not exhausted:
-        return False
-    if application:
-        return policy_allows("grok", task_class, doc, now=now,
-                             grok_exhausted=exhausted)[0]
-    return policy_allows("grok", task_class, doc)[0]'''
-APPLICATION_AFFINITY_AFTER = '''    if model != "cursor-grok-4.6-high":
-        return False
-    if application:
-        if exhausted is None or not exhausted:
-            return False
-        return policy_allows("grok", task_class, doc, now=now,
-                             grok_exhausted=exhausted)[0]
-    if not policy_allows("grok", task_class, doc)[0]:
-        return False
-    if exhausted is None:
-        exhausted = _grok_exhausted()
-    if exhausted:
-        return True
-    tc = task_class.lower()
-    if tc in LABOR_CLASSES_R30:
-        return False
-    if tc not in ("review", "audit") and (
-            tc in EXECUTE_CLASSES_DEFAULT or is_execute_class(tc, doc)):
-        return False
-    return (tc == "review" or is_judgment_class(tc, doc)
-            or tc in operator_classes(doc))'''
-
 
 def sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
@@ -123,14 +85,7 @@ def apply_reviewed_hunks(raw: bytes) -> bytes:
     """Pure source transform. No historical release or installed file is mutated."""
     text = raw.decode("utf-8")
     original_overlay = HISTORICAL_OVERLAY.read_text(encoding="utf-8")
-    changes = CHANGES
-    if sha(raw) == APPLICATION_PICKER_SHA256:
-        old, new = APPLICATION_AFFINITY_BEFORE, APPLICATION_AFFINITY_AFTER
-        if text.count(old) != 1 or text.count(new) != 0:
-            raise ValueError("reviewed_application_selector_hunk_identity_mismatch")
-        text = text.replace(old, new, 1)
-        changes = CHANGES[1:]
-    for old, new in changes:
+    for old, new in CHANGES:
         if (text.count(old) != 1 or text.count(new) != 0
                 or original_overlay.count(old) != 1):
             raise ValueError("reviewed_selector_hunk_identity_mismatch")

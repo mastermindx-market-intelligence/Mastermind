@@ -26,7 +26,6 @@
 .source-table-scroll tr:last-child td { border-bottom:0; }
 .source-markdown hr { margin:1.25em 0; border:0; border-top:1px solid var(--border); }
 .source-markdown :focus-visible { outline:2px solid var(--brass); outline-offset:3px; }
-.source-code-block pre:focus-visible { outline-offset:-3px; }
 .source-markdown-fallback { padding:12px; border:1px dashed var(--border); border-radius:8px; color:var(--muted); }
 .source-preview-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .source-preview-controls button { min-height:44px; padding:8px 12px; }

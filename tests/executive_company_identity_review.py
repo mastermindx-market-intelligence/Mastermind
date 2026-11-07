@@ -32,18 +32,58 @@ REVIEWED_ANCHORS = {
         "node_type": "AsyncFunctionDef",
         # Existing section-sign/em-dash prose needs an exact full-source pin
         # in addition to the method AST; all three literal lines are ASCII.
-        # Selected-child App-peer admission changes the enclosing ingress AST.
-        # The original Fabric reply operands and Company listener remain unchanged.
-        "source_sha256": "ea7aee823d3b38eb5c8b102d713678cc35a818213bb6777560cdce09a7976720",
-        "ast_sha256": "d6dc49f5ec033025ac0fbf1903374049a4ec7c5cde5daa504c3f0473e5507164",
-        "sites": (
-            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
-              "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
-              "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
-              "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
-        ),
+        # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
+        # The original CCR branch and listener remain structurally unchanged.
+        "source_sha256": 'b82f61a07a8191e5935fbf64dab5cdb1d1238eae309812fa41fbf59f6d04c2aa',
+        "ast_sha256": '83aef0bdc6356c12bab0fcce640c7d0a7dcbd91a313a3f99d7ad6d0e1da0997a',
+        "sites": ((('body', 3, 'body', 48, 'body', 3, 'orelse', 0, 'body', 2, 'body', 0, 'value', 'args', 1),
+  'int',
+  403,
+  '403'),
+ (('body',
+   3,
+   'body',
+   48,
+   'body',
+   3,
+   'orelse',
+   0,
+   'body',
+   2,
+   'orelse',
+   0,
+   'body',
+   4,
+   'body',
+   0,
+   'value',
+   'args',
+   1),
+  'int',
+  403,
+  '403'),
+ (('body',
+   3,
+   'body',
+   48,
+   'body',
+   3,
+   'orelse',
+   0,
+   'body',
+   2,
+   'orelse',
+   0,
+   'handlers',
+   0,
+   'body',
+   0,
+   'value',
+   'args',
+   1),
+  'int',
+  503,
+  '503')),
     },
 }
 
@@ -54,12 +94,3 @@ REVIEWED_ANCHORS = {
 
 # Parent reviewed the BYOK + protected Workspace composition at 49c2e1d.
 # The exact 136-node Fabric response branch and original three operands are unchanged.
-
-# 2026-11-06 composed-source audit: qualified project execution/planning and
-# bounded project conversation/Fresh READ coexist with protected BYOK and host
-# observation. The whole Company listener AST and exact 136-node protected
-# Fabric response branch are unchanged; only the enclosing ingress composition
-# and mapped sites change. These fixed pins are a new source-drift qualification,
-# not inherited native SEND approval or installation/release authority.
-
-# Parent C17 dispatch composition retains the protected821 ingress AST and exact operands.

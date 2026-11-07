@@ -78,7 +78,7 @@ describe("optional compound Mission/Result host read", () => {
     expect(bindMissionHost(noMethod).readMissionResult).toBeUndefined();
   });
 
-  it("registers the native compound read but refuses acquisition while signed out", async () => {
+  it("does not register a native compound command", async () => {
     const commands: string[] = [];
     const native = await createNativeClient((async (command: string) => {
       commands.push(command);
@@ -86,12 +86,8 @@ describe("optional compound Mission/Result host read", () => {
         return { status: "signed_out", reason: null, acquisition: false, content: false };
       throw new Error(`unexpected command ${command}`);
     }) as never, async () => () => {});
-    const initializationCommands = [...commands];
-    expect(native.readMissionResult).toEqual(expect.any(Function));
-    const host = bindMissionHost(native);
-    expect(host.readMissionResult).toEqual(expect.any(Function));
-    await expect(host.readMissionResult!(request())).rejects.toThrow("READ_CANCELLED");
-    expect(commands).toEqual(initializationCommands);
+    expect(native.readMissionResult).toBeUndefined();
+    expect(bindMissionHost(native).readMissionResult).toBeUndefined();
     expect(commands).not.toContain("read_mission_result");
   });
 

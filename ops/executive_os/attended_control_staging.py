@@ -19,8 +19,7 @@ from ops.executive_os.attended_worker_definition import build_finite_control_del
 from control_plane.executive_autonomy import validate_disarmed_interlock_document
 
 OPERATION = 'FINITE_CONTROL_STAGE'
-COMMANDS = frozenset({'finite-control-stage', 'finite-control-stage-reconcile',
-                      'finite-control-retire', 'finite-control-retire-reconcile'})
+COMMANDS = frozenset({'finite-control-stage', 'finite-control-stage-reconcile'})
 FIELDS = frozenset({'fabric_bridge_armed', 'fabric_bindings_path',
                     'fabric_bindings_sha256', 'fabric_attended_probe'})
 NATIVE_FIELDS = FIELDS | {'native_capacity_v2'}
@@ -107,9 +106,6 @@ def _native_source_pin(worker):
 
 
 class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
-    operation = OPERATION
-    receipt_transform = staticmethod(rebind_disarmed_receipt)
-
     @staticmethod
     def _current_receipt():
         try:
@@ -127,7 +123,7 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
     def _seal_generation(self, generation, tx, *, operation):
         # Finite staging is wholly disarmed and cannot use the armed CEO
         # coexistence transformer. Retain its receipt in the SAME global owner.
-        if operation != self.operation:
+        if operation != OPERATION:
             raise owner.TransactionEffectUnknown()
         raw = self._current_receipt()
         target = b''
@@ -138,7 +134,7 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
             validate_disarmed_interlock_document(payload, metadata=metadata,
                 control_config_sha256=tx.prior_configs.control_sha256,
                 worker_config_sha256=tx.prior_configs.worker_sha256)
-            target = owner._encoded_json(self.receipt_transform(tx, payload))
+            target = owner._encoded_json(rebind_disarmed_receipt(tx, payload))
         owner.ProductionTransactionHost._seal_generation(self, generation, tx, operation=operation)
         owner._atomic_file(generation/owner._FINITE_RECEIPT_ARCHIVE, raw,
             mode=0o400, uid=0, gid=0, replace=False)
@@ -156,7 +152,7 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
             raise owner.TransactionEffectUnknown()
         self._verify_published_inode(self._transaction_owner_fd)
         manifest = self._manifest()
-        if (manifest['operation'] != self.operation or manifest['transaction_id'] != tx.transaction_id
+        if (manifest['operation'] != OPERATION or manifest['transaction_id'] != tx.transaction_id
                 or manifest['expected_sha'] != tx.expected_sha
                 or not owner._FINITE_RECEIPT_FIELDS <= set(manifest)):
             raise owner.TransactionEffectUnknown()
@@ -165,7 +161,7 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
         if (owner.sha256_bytes(raw) != manifest['finite_prior_receipt_sha256']
                 or bool(raw) is not manifest['finite_prior_receipt_present']):
             raise owner.TransactionEffectUnknown()
-        target = owner._encoded_json(self.receipt_transform(tx, json.loads(raw))) if raw else b''
+        target = owner._encoded_json(rebind_disarmed_receipt(tx, json.loads(raw))) if raw else b''
         if owner.sha256_bytes(target) != manifest['finite_target_receipt_sha256']:
             raise owner.TransactionEffectUnknown()
         return raw, target
@@ -339,9 +335,6 @@ def execute_staging(host, expected_sha, expected_control_sha256):
 
 
 def run_command(args, *, host=None):
-    if args.command in {'finite-control-retire', 'finite-control-retire-reconcile'}:
-        from ops.executive_os.attended_control_retirement import run_command as retire
-        return retire(args, host=host)
     host = ProductionFiniteStagingHost() if host is None else host
     try:
         if args.command == 'finite-control-stage':

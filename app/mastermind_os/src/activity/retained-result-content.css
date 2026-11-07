@@ -1,7 +1,0 @@
-.mm-result-reading { min-width:0; max-width:100%; overflow-wrap:anywhere; }
-.mm-result-reading h3 { font-family:var(--font-ui); font-size:20px; line-height:28px; margin:20px 0 12px; }
-.mm-result-reading__summary, .mm-result-reading li { font-family:var(--font-ui); font-size:16px; line-height:1.6; white-space:pre-wrap; }
-.mm-result-reading pre { min-width:0; max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; overflow-x:auto; }
-.retained-results-reader details > summary, .mm-result-reading details > summary { box-sizing:border-box; min-height:44px; padding-block:12px; cursor:pointer; }
-.retained-results-reader summary:focus-visible, .mm-result-reading summary:focus-visible { outline:2px solid var(--focus); outline-offset:3px; }
-.mm-result-reading:lang(zh-CN) h3, .mm-result-reading:lang(zh-CN) summary { text-transform:none; letter-spacing:normal; }

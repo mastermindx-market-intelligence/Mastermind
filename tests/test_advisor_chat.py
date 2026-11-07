@@ -7,9 +7,6 @@ message stream so we can assert that cli_bridge.chat_stream maps SDK messages
 from __future__ import annotations
 
 import asyncio
-import json
-
-import pytest
 
 from brain import advisor, cli_bridge
 
@@ -368,32 +365,3 @@ def test_history_roundtrip(tmp_path, monkeypatch):
     assert h[0]["role"] == "user" and h[0]["content"] == "should we add NVDA?"
     assert h[1]["tools"][0]["name"].endswith("get_decision_matrix")
     assert advisor.load_history(None) == []                # missing id never throws
-
-
-@pytest.mark.parametrize("conversation_id", ["../escape", "/absolute", "a/b", "a\\b", "a%2fb", "a\x00b", "a" * 65])
-def test_history_rejects_invalid_identity_before_file_access(tmp_path, monkeypatch, conversation_id):
-    monkeypatch.setattr(advisor, "_HISTORY", tmp_path / "history")
-    with pytest.raises(advisor.FabricConversationError, match="fabric_conversation_id_invalid"):
-        advisor.save_fabric_conversation({"conversation_id": conversation_id})
-    assert not (tmp_path / "history").exists()
-
-
-def test_fabric_history_save_replaces_leaf_without_overwriting_symlink_target(tmp_path, monkeypatch):
-    monkeypatch.setattr(advisor, "_ROOT", tmp_path)
-    monkeypatch.setattr(advisor, "_SESSIONS", tmp_path / "sessions.json")
-    history = tmp_path / "history"
-    history.mkdir()
-    monkeypatch.setattr(advisor, "_HISTORY", history)
-    cid = "conversation-1"
-    retained = history / "retained.json"
-    raw = json.dumps({"schema": advisor._FABRIC_SCHEMA, "backend": "fabric", "scope": "fixture",
-        "conversation_id": cid, "rendered": [], "messages": [], "turns": []})
-    retained.write_text(raw)
-    leaf = history / (cid + ".json")
-    leaf.symlink_to(retained)
-    with advisor.fabric_conversation(cid, scope="fixture") as doc:
-        doc["rendered"].append({"role": "user", "content": "Observed state."})
-        advisor.save_fabric_conversation(doc)
-    assert retained.read_text() == raw
-    assert not leaf.is_symlink()
-    assert advisor.load_history(cid) == [{"role": "user", "content": "Observed state."}]

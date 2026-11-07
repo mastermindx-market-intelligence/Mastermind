@@ -83,7 +83,6 @@ def make_service(tmp_path, f):
 def test_real_source_and_fresh_root_qualification(tmp_path,damage):
     f=frame(); service=make_service(tmp_path/'service',f)
     runtime=Runtime.at(tmp_path/'runtime')
-    service.runtime=runtime  # Exact disposable Runtime used by original foreground admission.
     expected=service._load_coo_execution_binding()
     assert route.placement_member(ModelRouter.load(),selected(f)) in expected['work_placement_union']
     if damage=='operation': f['arguments']['operation_key']='foreign-operation'
@@ -117,7 +116,6 @@ def test_real_source_and_fresh_root_qualification(tmp_path,damage):
 
 def test_changed_qualification_refuses_original_physical_before_admission(tmp_path):
     f=frame();service=make_service(tmp_path/'service',f);runtime=Runtime.at(tmp_path/'runtime')
-    service.runtime=runtime  # Persisted creation provenance is read from this same owner.
     async def run():
         async with foreground._session_bridge_foreground_dispatch(runtime,f,lambda:None) as op:
             async with service._foreground_cycle_scope(op):
@@ -135,7 +133,6 @@ def test_changed_qualification_refuses_original_physical_before_admission(tmp_pa
 
 def test_original_qualification_replay_has_no_fresh_bound_root(tmp_path):
     f=frame();service=make_service(tmp_path/'service',f);runtime=Runtime.at(tmp_path/'runtime')
-    service.runtime=runtime  # Persisted creation provenance is read from this same owner.
     async def run():
         async with foreground._session_bridge_foreground_dispatch(runtime,f,lambda:None) as op:
             async with service._foreground_cycle_scope(op):
@@ -239,7 +236,6 @@ def test_qualifier_removal_after_root_binding_stops_actual_child_admission(tmp_p
     f = frame()
     service = make_service(tmp_path / 'service', f)
     runtime = Runtime.at(tmp_path / 'runtime')
-    service.runtime = runtime  # Same actual Runtime as the original foreground source.
     async def run():
         async with foreground._session_bridge_foreground_dispatch(runtime, f, lambda: None) as op:
             async with service._foreground_cycle_scope(op):

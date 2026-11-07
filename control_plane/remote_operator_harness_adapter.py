@@ -162,16 +162,11 @@ class RemoteOperatorHarnessAdapter:
 
     def _fresh_write_options(self, operation, payload):
         guard = self._fresh_effect_guard
-        attempt_id = self._foreground_attempt_id
-        continuation = getattr(self, "_native_continuation_guard", None)
-        if (operation == "ohf-begin-turn" and continuation is not None
-                and payload.get("operation_id", {}).get("command_id") == continuation[2]):
-            guard, attempt_id, _ = continuation
         if guard is None:
             return {}
         identity = payload.get("epoch", payload.get("turn", {}))
         generation = payload.get("generation", {})
-        if (identity.get("attempt_id") != attempt_id
+        if (identity.get("attempt_id") != self._foreground_attempt_id
                 or generation.get("session_epoch_id") != identity.get("session_epoch_id")
                 or ("turn" in payload and generation.get("process_generation_id")
                     != identity.get("process_generation_id"))):
@@ -183,21 +178,6 @@ class RemoteOperatorHarnessAdapter:
                 raise BrokerProtocolError("foreground request bytes changed")
             guard()
         return {"before_write": before_write}
-
-    def bind_native_continuation_guard(self, guard, *, attempt_id, operation_id):
-        """Exact private supervisor source for ONE ACK-bound retained turn.
-
-        This never removes the original creation guard: start/resume and any
-        different turn still use it. No wire flag, Job receipt or caller DTO
-        can select this source. Runtime's existing turn/operation reservation
-        remains the duplicate fence.
-        """
-        if (not callable(guard) or type(attempt_id) is not str or not attempt_id
-                or type(operation_id) is not OperationId
-                or not operation_id.command_id.startswith("ohf-op:native-continuation:")):
-            raise BrokerProtocolError("native continuation guard binding is invalid")
-        guard()
-        self._native_continuation_guard = (guard, attempt_id, operation_id.command_id)
 
     @staticmethod
     def _mapping(value: Any, *, name: str) -> dict[str, Any]:

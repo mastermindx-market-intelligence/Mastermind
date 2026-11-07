@@ -277,28 +277,12 @@ def build_runtime_native_reply_writer(runtime: Any, *, dialogue_socket_path: Pat
                              socket_path=dialogue_socket_path, service_call=call)
 
 
-def build_runtime_project_conversation_reader(runtime: Any, *, dialogue_socket_path: Path,
-        codex_owner_configured: Callable[[], bool], authorized_policies: Any,
-        reference_cursor_key: bytes, supervisor: Any = None):
-    """Compose only the existing nominal READ source; no listeners or grants."""
-    from .runtime_owner import RuntimeFabricTargetProjector, RuntimeCodexTargetProjector
-    from .runtime_return import RuntimeSessionReturn
-    from .project_conversations import RuntimeProjectConversationsReader
-    fabric = RuntimeFabricTargetProjector(runtime)
-    codex = RuntimeCodexTargetProjector(fabric, owner_configured=codex_owner_configured)
-    return RuntimeProjectConversationsReader(RuntimeSessionReturn(runtime,
-        fabric=fabric, codex=codex, socket_path=dialogue_socket_path,
-        authorized_policies=authorized_policies, reference_cursor_key=reference_cursor_key),
-        supervisor=supervisor).installed_binding()
-
-
 def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                  summon_handler: Callable | None = None,
                                  codex_owner_configured: Callable[[], bool] | None = None,
                                  attention_requester: Callable | None = None,
                                  authorized_policies: Any = None,
-                                 reference_cursor_key: bytes | None = None,
-                                 hermes_session: Any | None = None):
+                                 reference_cursor_key: bytes | None = None):
     """Compose the installed fabric path from existing Runtime/Dialogue owners.
 
     Compatibility schemas do not grant native Codex or Claude ownership. Those
@@ -320,8 +304,7 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
     returns = RuntimeSessionReturn(runtime, fabric=projector, codex=codex,
                                    socket_path=dialogue_socket_path,
                                    authorized_policies=authorized_policies,
-                                   reference_cursor_key=reference_cursor_key,
-                                   hermes=hermes_session)
+                                   reference_cursor_key=reference_cursor_key)
     reply_reader = NativeReplyReader(returns, socket_path=dialogue_socket_path,
                                     projected_principal=True)
     reader = CanonicalTargetReader(
@@ -349,21 +332,13 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
             return attention_requester(target_ref, reference, read_ref)
         return CanonicalReplyCoordinator(reply_writer=writer, attention_waker=attention)
 
-    async def targets(principal, kind):
-        from control_plane.native_continuation import HERMES_KINDS
-        if kind in HERMES_KINDS:
-            return await returns.hermes_targets(principal, kind=kind)
-        # The omitted kind preserves the existing legacy inventory. Native
-        # Secretary discovery requires the caller's explicit closed selection.
-        values = await _maybe(reader(kind))
+    def targets(principal, kind):
+        values = reader(kind)
         if isinstance(values, Mapping):
-            values = [item for group in values.values() for item in group]
+            return [item for group in values.values() for item in group]
         return values
 
     async def send(principal, arguments):
-        from control_plane.native_continuation import HERMES_TARGET_PREFIXES
-        if arguments["target_ref"].startswith(HERMES_TARGET_PREFIXES):
-            return await returns.send_hermes(principal, arguments)
         committed = await returns.reconcile_existing_send(principal, arguments)
         read_ref = returns.bind_request(principal, arguments)
         if committed is not None:
@@ -380,22 +355,11 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
             arguments["stop_condition"], arguments["operation_key"]))
         return {**result, "read_ref": read_ref}
 
-    async def read_reply(principal, arguments):
-        from control_plane.native_continuation import HERMES_REQUEST_SCHEMAS
-        read_ref = arguments.get("read_ref")
-        if read_ref is None:
-            read_ref = returns.resolve_operation_read_ref(
-                principal=principal, operation_key=arguments["operation_key"])
-        if returns.original_request_schema(
-                principal=principal, read_ref=read_ref) in HERMES_REQUEST_SCHEMAS:
-            return await returns.read_hermes(principal, read_ref)
-        return await reply_reader(principal, arguments)
-
     def references(principal, arguments):
         return returns.session_reply_references(principal=principal, **arguments)
 
     return private_ingress_owner(InstalledSessionBridgeProvider(
-        target_projector=targets, reply_handler=send, reply_read_handler=read_reply,
+        target_projector=targets, reply_handler=send, reply_read_handler=reply_reader,
         reference_handler=references,
         summon_handler=(summon_handler if summon_handler is not None else unavailable)))
 

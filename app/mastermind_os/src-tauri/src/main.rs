@@ -1,9 +1,4 @@
 mod auth;
-mod native_session_send;
-mod project_planning;
-mod project_execution;
-mod fresh_conversation;
-mod project_conversations_read;
 mod native_client;
 mod native_refresh;
 mod terminal_handoff;
@@ -102,12 +97,10 @@ fn main() {
             terminal_session::read_terminal_sharing_requests,
             terminal_sharing_navigation::open_terminal_sharing_request,
             auth::auth_status,
-            auth::native_draft_identity::read_native_draft_continuity,
             auth::sign_in,
             auth::sign_out,
             auth::read_programs,
             auth::read_byok_roles,
-            auth::control_room_read::read_control_room_state,
             auth::read_work,
             auth::read_mission,
             auth::read_mission_v3,
@@ -125,7 +118,6 @@ fn main() {
             auth::read_project_archive,
             auth::read_project_archive_page,
             auth::read_source_operation_context,
-            auth::source_operation_options,
             auth::source_operation_prepare,
             auth::source_operation_read,
             auth::source_operation_submit,
@@ -140,11 +132,9 @@ fn main() {
             auth::read_admitted_plan,
             auth::read_retained_activity,
             auth::read_resource_capacity,
-            auth::host_observation::read_host_observation,
             auth::read_fabric_catalog,
             auth::read_fabric_status,
             auth::read_result,
-            auth::read_mission_result,
             auth::read_result_references,
             auth::read_current_window,
             auth::executive_auth_status,
@@ -154,13 +144,7 @@ fn main() {
             auth::executive_direct_native_result,
             auth::executive_direct_native_consume,
             auth::executive_direct_correction,
-            auth::executive_project_planning,
-            auth::executive_project_execution,
-            auth::executive_fresh_conversation,
             auth::executive_session_context,
-            auth::executive_session_send,
-            auth::executive_project_history_context,
-            auth::executive_project_conversations_read,
             auth::executive_session_reply,
             auth::executive_session_references,
             auth::executive_project_session_references

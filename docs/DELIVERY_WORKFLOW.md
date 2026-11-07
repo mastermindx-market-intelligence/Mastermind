@@ -4,45 +4,9 @@
 for live paper-portfolio state; GitHub owns code, configuration, tests, and
 reviewable documentation.
 
-## Start every session with an isolated source owner
+## Start every session in isolation
 
-The protected `master` commit pins **governing procedure and release identity**, not
-the machine or directory in which a proposed change must be authored. Authorized
-sessions may use either of the following pre-effect authoring paths. Choose one
-supported path for the original operation; a refused or uncertain effect is never
-permission to replay it using the other path.
-
-### GitHub-native authoring (no host worktree required)
-
-An attended Web session with an actually authorized GitHub connector/API can create
-and update an isolated GitHub branch and open a PR **without** `mmx-workspace`,
-Studio Direct, a local checkout, an external SSD, an Executive Job, or a second
-publisher chat. These host-local requirements do not apply to a GitHub-native
-mutation. This is a source-authoring route, **not** a protected-merge bypass.
-
-1. Verify the exact repository, current protected `master` commit and compatible
-   procedure. Recover the original branch/PR and any active writer, denial or
-   uncertain effect. Continue an existing operation on its **same branch/carrier**;
-   for a genuinely new, unstarted operation create a unique branch from an exact
-   protected commit. Do not duplicate an active or held PR to escape its gates.
-2. Verify actual GitHub write permission. Make narrowly scoped changes on that
-   branch through the authorized native file/tree/commit/ref APIs. Bind updates to
-   the current file blob SHA and/or an expected branch-head SHA (compare-and-swap);
-   inspect changed head/preimages on a conflict. Never force-update a shared ref,
-   write directly to `master`, select arbitrary credentials, or overwrite a
-   concurrent writer. An ambiguous mutation response requires original-branch
-   readback before another effect; an explicit safety/permission denial is final
-   for that effect, not a reason to switch to Studio/local publishing.
-3. Inspect the resulting exact-head diff and path set, run available affected
-   validation, and truthfully distinguish local tests from GitHub-hosted checks.
-   Without a local runner, use hosted PR CI and do not claim unexecuted local
-   tests. Keep incomplete/failing work Draft; make qualified, reviewable work
-   Ready and use the same protected review/CI/merge-queue procedure below. GitHub
-   native authoring does not waive any actual release hold or formal approval.
-
-### Host-local worktree authoring
-
-From any clean administrative checkout, harness-provisioned sessions use the exact workspace already assigned by their harness. When actually editing or publishing through a host-local checkout, attended ChatGPT Web/host sessions use the installed canonical source-custody launcher instead of raw clone/worktree commands or the repository Python payload:
+From any clean administrative checkout, harness-provisioned sessions use the exact workspace already assigned by their harness. Attended ChatGPT Web/host sessions use the installed canonical source-custody launcher instead of raw clone/worktree commands or the repository Python payload:
 
 ```bash
 git fetch origin --prune
@@ -71,21 +35,6 @@ worktree and move only the task's deliberate edits there.
 
 ## Complete a change
 
-**Default is one-pass delivery, not a ceremony.** The assigned session implements,
-self-checks the diff, runs available affected tests, opens one Ready PR, requests
-native protected auto-merge once and consumes the resulting merge receipt. Do not
-serialize extra review/approval/handoff rounds, repeated status sweeps, checkpoint
-comments per command or an external publisher just to finish ordinary work.
-Pending CI is an automated release dependency, not a new human assignment.
-
-**Fast queue policy:** verified inert changes get source checks, ordinary code gets
-focused executable tests, and privileged/financial/security/CI or unqualified
-changes get full canonical CI. The protected `test` check stays mandatory, and
-protected-main pushes still run the full suite. Real-world browser/installed proof
-is required when a change affects that surface, not for inert docs. Preserve
-actual protected rules, explicit HOLDs, live writers, denied or uncertain effects;
-these are exceptional barriers, not default workflow steps.
-
 ### One qualification, normal protected release
 
 Ordinary reversible FAST/STANDARD changes use the same session: implement, self-check
@@ -110,35 +59,21 @@ review claim. No additional non-author arming ceremony follows a completed quali
 The optional automatic review host remains OFF until separately enabled; its absence
 adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.md).
 
-1. Run the smallest relevant **available** local tests when a runner exists.
-   Publish an honest candidate when scoped source and available qualification
-   are stable. GitHub-native authors without a local test runner may publish a
-   reviewable PR for hosted CI: no local worktree or unexecutable local test is
-   itself a source-publishing hold. Never claim tests that did not run.
-   When an enforced GitHub rule or explicit authorized request requires review,
-   mark a qualified Draft PR **Ready for Review before asking the reviewer**.
-   No risk tier dispatches a reviewer solely for an obsolete universal-review
-   rule. Pending hosted CI is a merge/release gate, not a prerequisite for PR
-   publication or review readiness. Keep incomplete or actually failing work in
-   Draft; do not imply review merely because a request exists.
-2. On a local checkout, review `git diff --check`, `git status` and the
-   staged diff. On a GitHub-native branch, inspect exact-head changed-file
-   enumeration, complete diff and file preimages using available GitHub reads.
-   Never publish `.env*`, credentials, logs, caches, runtime `data/`, or
-   backup archives.
-3. Publish the scoped change on the operation's isolated branch and open a PR.
-   For a host-local worktree:
+1. Run the smallest relevant local test set while iterating. Publish a truthful
+   candidate once its scoped source is stable and the relevant local qualification passes.
+   When a native GitHub rule or authorized explicit manual request actually requires a review, mark a qualified Draft PR **Ready for Review
+   before asking the reviewer**. No risk tier dispatches a reviewer merely to satisfy an obsolete universal-review habit. Hosted CI may still be queued or running: full required
+   CI is a merge/release gate, not a prerequisite for review readiness. Keep unfinished
+   or locally failing work in Draft; do not imply a reviewer is working just because
+   a request exists.
+2. Review `git diff --check`, `git status`, and the staged diff. Never stage
+   `.env*`, credentials, logs, caches, runtime `data/`, or backup archives.
+3. Commit a scoped change, push the branch, and open a PR:
 
    ```bash
    git push -u origin HEAD
    gh pr create --fill
    ```
-
-   For GitHub-native authoring, use the authorized branch/file/commit and PR
-   tools with their expected preimages/head leases, then read back the branch
-   SHA, exact PR head and diff. No local `git push` or launcher receipt is
-   required for that path. Neither authoring path may directly merge a
-   protected branch.
 
 4. CI blocks merge/release, not independent useful work. Incomplete scope, failed
    local qualification, or a known failing hosted check keeps release held; diagnose the failure and repair it within the assigned scope. A **pending** hosted check alone is not a reason
@@ -185,17 +120,9 @@ adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.m
 
    ```bash
    gh pr merge <PR> --repo mastermindx-market-intelligence/Mastermind \
-     --auto --squash \
+     --auto --squash --delete-branch \
      --match-head-commit <CURRENT_40_HEX_HEAD>
    ```
-
-   Branch cleanup remains queue/repository-owned after merge; the native CLI
-   does not support `--delete-branch` during queue enrollment.
-
-   GitHub CLI refuses `--delete-branch` when merge queue is enabled. Do not add
-   that flag to the auto-merge request: branch cleanup is an optional separate
-   post-merge step, never a prerequisite for merge-queue admission. Read the
-   actual merged PR/SHA first; preserve occupied or still-live source branches.
 
    Reconcile the actual returned request: pending conditions may create an
    auto-merge request; satisfied conditions may enter the existing protected
@@ -216,22 +143,14 @@ adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.m
 7. Deploy only when the assigned change requires runtime rollout and release is authorized.
    A source-only, research, documentation or instruction task must not restart an unrelated
    application. For a required deployment, resolve this operation's actual merge commit from
-   GitHub using the accepted `pr_number`; the newest default-branch commit may belong
-   to another operation:
+   GitHub; the newest default-branch commit may belong to another operation:
 
    ```bash
-   merge_sha="$(gh pr view "${pr_number:?set the accepted PR number}" \
-     --repo mastermindx-market-intelligence/Mastermind \
-     --json mergeCommit --jq '.mergeCommit.oid')" &&
-     [[ "$merge_sha" =~ ^[0-9a-f]{40}$ ]] &&
-     ./scripts/deploy_from_git.sh "$merge_sha"
+   git fetch origin master
+   merge_sha="$(gh pr view --json mergeCommit --jq '.mergeCommit.oid')"
+   test -n "$merge_sha" && test "$merge_sha" != null
+   ./scripts/deploy_from_git.sh "$merge_sha"
    ```
-
-   Missing, malformed or unreadable merge evidence blocks deployment. The unchanged
-   wrapper fetches and refuses a receipt that is no longer current `origin/master`.
-   Reconcile the new release identity and its authorization; never substitute the
-   moving branch tip for this PR's receipt. Merge acceptance does not itself
-   authorize deployment.
 
 The deploy wrapper archives `origin/master` into a temporary clean release
 directory. Local uncommitted files cannot enter the release. The VPS deploy
@@ -388,9 +307,7 @@ and must pass its failing acceptance tests before it is eligible to merge.
 
 ## Release attended Web workspaces
 
-**Only if this operation acquired a host-local `mmx-workspace` checkout**, release
-that same workspace through the custody owner. A GitHub-native operation has no
-local worktree to release or register:
+After the operation is terminal, release the same workspace through the custody owner:
 
 ```bash
 mmx-workspace release \

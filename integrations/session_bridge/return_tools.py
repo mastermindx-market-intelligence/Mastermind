@@ -82,21 +82,15 @@ class NativeReplyReadTool:
             # verified type; a caller-supplied dict is never authentication.
             principal_projection(principal)
             data = await self._reader(principal, validated)
-            from .hermes_native import RESULT_SCHEMAS as HERMES_RESULT_SCHEMAS, validate_public_result
-            if type(data) is dict and data.get("schema") in HERMES_RESULT_SCHEMAS:
-                data = validate_public_result(data)
-                if any(data[field] != value for field, value in validated.items()):
-                    raise ValueError
-            else:
-                expected_keys = _REPLY_KEYS | ({"operation_key"} if "operation_key" in validated else set())
-                if (type(data) is not dict or set(data) != expected_keys
-                        or data["schema"] != "mastermind.native_reply_read.v1"
-                        or not isinstance(data["read_ref"], str) or _REF.fullmatch(data["read_ref"]) is None
-                        or ("read_ref" in validated and data["read_ref"] != validated["read_ref"])
-                        or ("operation_key" in validated and data["operation_key"] != validated["operation_key"])
-                        or data["reply_committed"] is not True
-                        or data["parent_consumed"] is not False):
-                    raise ValueError
+            expected_keys = _REPLY_KEYS | ({"operation_key"} if "operation_key" in validated else set())
+            if (type(data) is not dict or set(data) != expected_keys
+                    or data["schema"] != "mastermind.native_reply_read.v1"
+                    or not isinstance(data["read_ref"], str) or _REF.fullmatch(data["read_ref"]) is None
+                    or ("read_ref" in validated and data["read_ref"] != validated["read_ref"])
+                    or ("operation_key" in validated and data["operation_key"] != validated["operation_key"])
+                    or data["reply_committed"] is not True
+                    or data["parent_consumed"] is not False):
+                raise ValueError
             result = {"schema": RESULT_SCHEMA, "tool": TOOL_NAME, "ok": True,
                       "data": data, "error": None}
             encoded = json.dumps(result, ensure_ascii=True, allow_nan=False).encode("ascii")

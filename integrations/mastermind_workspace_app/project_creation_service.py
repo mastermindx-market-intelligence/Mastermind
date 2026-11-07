@@ -30,11 +30,10 @@ class ProjectCreationSourceOwner:
     def __init__(self, *, events, private_inputs, permission_factory, adapter,
                  publisher_binding, qualify_publisher, pr_owner):
         from integrations.mastermind_workspace_app.project_creation_operation import ProjectCreationRecipeAdapter
-        from integrations.mastermind_workspace_app.project_journey_recipes import InstalledProjectCreationRecipeAdapter
         if (type(events) is not SourceOperationEvents or type(private_inputs) is not ProjectSourceOriginalInput
                 or private_inputs.supervisor.runtime.store is not events.store
                 or type(permission_factory) is not WorkspaceSourceOperationContextFactory
-                or type(adapter) not in (ProjectCreationRecipeAdapter, InstalledProjectCreationRecipeAdapter)
+                or type(adapter) is not ProjectCreationRecipeAdapter
                 or type(publisher_binding) is not PublisherBinding or not callable(qualify_publisher)):
             raise ValueError("fixed project source owners required")
         self._events, self._private = events, private_inputs

@@ -13,7 +13,6 @@ from integrations.business_mcp_auth.contracts import (
     AuthErrorCode,
     ResourcePolicy,
     VerifiedPrincipal,
-    client_ref_digest,
     load_resource_policy,
     subject_digest,
 )
@@ -28,7 +27,6 @@ __all__ = [
     "AuthErrorCode",
     "ResourcePolicy",
     "VerifiedPrincipal",
-    "client_ref_digest",
     "load_resource_policy",
     "subject_digest",
 ]

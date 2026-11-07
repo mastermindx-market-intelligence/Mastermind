@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ChangeEvent } from "react";
-import type { ProjectPlanContinuityRead, ProjectPlanProposalRecord } from "./project-plan-continuity";
+import type { ProjectPlanContinuityRead } from "./project-plan-continuity";
 import "./project-plan-continuity.css";
 
 export type ProjectPlanContinuityLocale = "en" | "zh-CN";
@@ -8,17 +8,6 @@ export type ProjectPlanContinuityLocale = "en" | "zh-CN";
 interface ProjectPlanContinuityProps {
   data: ProjectPlanContinuityRead;
   locale?: ProjectPlanContinuityLocale;
-  selectedProposalId?: string|null;
-  onSelectedProposal?: (id:string)=>void;
-}
-
-/** One selection rule shared with the fenced workspace composition. A hint
- * chooses only an actually captured record; it never creates eligibility.
- */
-export function selectedRecordedPlanProposal(data:ProjectPlanContinuityRead,hint:string|null):ProjectPlanProposalRecord|null {
-  const items=data.proposals.state==='AVAILABLE'?data.proposals.items:[];
-  return items.find(item=>isRecordedProposal(item)&&item.proposal_id===hint) as ProjectPlanProposalRecord|undefined
-    ?? items.filter(isRecordedProposal)[0] ?? null;
 }
 
 /** Read-only presenter for the already-decoded planning continuity projection:
@@ -28,7 +17,7 @@ export function selectedRecordedPlanProposal(data:ProjectPlanContinuityRead,hint
  * body copies; every rendered string is derived from the current `data` on
  * each render. Captured bodies, ids, rationales, reasons and source refs stay
  * authored data, never reserialized, trimmed or dangerously injected. */
-export function ProjectPlanContinuity({ data, locale = "en", selectedProposalId:controlledId,onSelectedProposal }: ProjectPlanContinuityProps) {
+export function ProjectPlanContinuity({ data, locale = "en" }: ProjectPlanContinuityProps) {
   const zh = locale === "zh-CN";
   const t = zh ? ZH_COPY : EN_COPY;
   const [selectedProposalId, setSelectedProposalId] = useState<string | null>(null);
@@ -43,7 +32,10 @@ export function ProjectPlanContinuity({ data, locale = "en", selectedProposalId:
   const recordedItems = items.filter(isRecordedProposal);
   // Selection is only ever an index hint: the lookup always re-runs against
   // the current props, so stale ids from other data fall back safely.
-  const selectedEntry = selectedRecordedPlanProposal(data,controlledId===undefined?selectedProposalId:controlledId);
+  const selectedEntry =
+    items.find((item) => isRecordedProposal(item) && item.proposal_id === selectedProposalId) ??
+    recordedItems[0] ??
+    null;
 
   const statusText = adoptionAvailable
     ? adoption.adoption.display_revision
@@ -56,7 +48,6 @@ export function ProjectPlanContinuity({ data, locale = "en", selectedProposalId:
 
   const handleProposalChange = (event: ChangeEvent<HTMLSelectElement>) => {
     setSelectedProposalId(event.currentTarget.value);
-    onSelectedProposal?.(event.currentTarget.value);
   };
 
   return (

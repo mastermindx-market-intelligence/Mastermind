@@ -25,10 +25,7 @@ HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102
 PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
 PRE_POLL255_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
 PRE_POLL255_WITH_UBUNTU4_TASK_SHA = "36fbd16469befa0f4ade8d75fe15b3384a042b726668879c59ae03c82d194058"
-PRE_REMOTE_CWD_TASK_SHA = "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
-PRE_REFUSAL_DIAGNOSTICS_TASK_SHA = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
-CURRENT_TASK_SHA = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
-CENTRAL_TASK_SHA = "d5fbc3c4e8b234d48e4639eda83d24e65a84646b78e1de75649305b40ff45e91"
+CURRENT_TASK_SHA = "c132a163aa6071eb577d8ecea0749d47ef2377b58c92dacb5fcc4a34c8dbc9a7"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -39,7 +36,7 @@ AFTER = {
     "ext/pick.py": "9bbb96c8da84e38bbd802fdd373a0e8ba386395abc5a80bc8628b49d5afd8174",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
 }
-COMPOSED_PICK = "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892"
+COMPOSED_PICK = "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132"
 
 
 def _preobserver_picker():
@@ -56,8 +53,8 @@ def _preobserver_picker():
 
 
 def _pre_central_glm_task(value: bytes) -> bytes:
-    """Only the three exact central GLM hunks precede current107 diagnostics."""
-    assert hashlib.sha256(value).hexdigest() == CENTRAL_TASK_SHA
+    """Restore the exact pre-central epoch only in the private F1 fixture."""
+    assert hashlib.sha256(value).hexdigest() == CURRENT_TASK_SHA
     pairs = (
         (b'r"(?:GLM_REMOTE_AUTH_UNAVAILABLE|GLM_CENTRAL_CAPABILITY_REQUIRED) host=(?P=host)"',
          b'r"GLM_REMOTE_AUTH_UNAVAILABLE host=(?P=host)"'),
@@ -69,69 +66,7 @@ def _pre_central_glm_task(value: bytes) -> bytes:
     for newer, older in pairs:
         assert value.count(newer) == 1
         value = value.replace(newer, older, 1)
-    assert hashlib.sha256(value).hexdigest() == CURRENT_TASK_SHA
-    return value
-
-
-def _pre_refusal_diagnostics_task(value: bytes) -> bytes:
-    """Undo only the exact diagnostic successor inside the disposable F1 stage."""
-    assert hashlib.sha256(value).hexdigest() == CURRENT_TASK_SHA
-    pairs = (
-        (
-            b"# Closed diagnostics only: these labels grant no routing, retry or acceptance.\n"
-            b"# Never retain arbitrary picker text, provider output, paths or account detail.\n"
-            b"_REQUEST_REFUSAL_CODES = frozenset({\n"
-            b"    \"NO_OPERATOR_AVAILABLE\", \"NO_POOL_AVAILABLE\", \"NO_ROUTE\",\n"
-            b"    \"ROUTE_INCOMPLETE\", \"REQUEST_ROUTING_RETURN_UNQUALIFIED\",\n"
-            b"    \"REQUEST_MAX_TURNS_INVALID\", \"REQUEST_MAX_TURNS_ROUTE_UNSUPPORTED\",\n"
-            b"    \"ECONOMIC_POLICY_REFUSED\", \"UNCLASSIFIED_PRELAUNCH_REFUSAL\",\n"
-            b"})\n"
-            b"\n"
-            b"\n"
-            b"def _safe_request_refusal_code(exc: BaseException) -> str:\n"
-            b"    unknown = \"UNCLASSIFIED_PRELAUNCH_REFUSAL\"\n"
-            b"    if type(exc) is not FabricTaskError:\n"
-            b"        return unknown\n"
-            b"    args = exc.args\n"
-            b"    if not args or type(args[0]) is not str or len(args[0]) > 1024:\n"
-            b"        return unknown\n"
-            b"    message = args[0]\n"
-            b"    # The deadline-aware picker runs in an owned subprocess. It returns only\n"
-            b"    # this fixed no-operator marker; historical receipts omitted the cause.\n"
-            b"    if message == \"NONE reason=no_operator_available\":\n"
-            b"        return \"NO_OPERATOR_AVAILABLE\"\n"
-            b"    if message == \"NONE reason=no_pool_available\":\n"
-            b"        return \"NO_POOL_AVAILABLE\"\n"
-            b"    code = message.partition(\":\")[0]\n"
-            b"    return code if code in _REQUEST_REFUSAL_CODES else unknown\n"
-            b"\n"
-            b"\n",
-            b"",
-        ),
-        (
-            b"                refusal_diagnostic: dict[str, str] = {}\n",
-            b"",
-        ),
-        (
-            b"                    code = proof.get(\"refusal_code\")\n"
-            b"                    refusal_diagnostic[\"request_refusal_code\"] = (\n"
-            b"                        code if type(code) is str and code in _REQUEST_REFUSAL_CODES\n"
-            b"                        else \"UNCLASSIFIED_PRELAUNCH_REFUSAL\")\n",
-            b"",
-        ),
-        (
-            b"                    \"same_run_replay_allowed\": False, **refusal_diagnostic}\n",
-            b"                    \"same_run_replay_allowed\": False}\n",
-        ),
-        (
-            b"                    \"refusal_code\": _safe_request_refusal_code(exc),\n",
-            b"",
-        ),
-    )
-    for newer, older in pairs:
-        assert value.count(newer) == 1
-        value = value.replace(newer, older, 1)
-    assert hashlib.sha256(value).hexdigest() == PRE_REFUSAL_DIAGNOSTICS_TASK_SHA
+    assert hashlib.sha256(value).hexdigest() == "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
     return value
 
 
@@ -237,20 +172,10 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
             assert sha(source) == COMPOSED_PICK
             current = _inverse_judgment(_preobserver_picker())
         elif relative == "ext/fabric_task.py":
-            assert sha(source) == CENTRAL_TASK_SHA
-            # Restore central GLM first, then the protected request diagnostics
-            # and remote-cwd predecessor. Each intermediate SHA is exact.
-            latest = _pre_refusal_diagnostics_task(_pre_central_glm_task(source.read_bytes()))
-            # Undo only the remote cwd default before the exact older epochs.
-            remote_cwd = (
-                b'    # Resolve an implicit working directory on the receiving host.\n'
-                b'    # The receiving host still validates explicit --cwd values.\n'
-                b'    p_request.add_argument("--cwd", default="~")\n'
-            )
-            caller_cwd = b'    p_request.add_argument("--cwd", default=os.getcwd())\n'
-            assert latest.count(remote_cwd) == 1
-            latest = latest.replace(remote_cwd, caller_cwd, 1)
-            assert hashlib.sha256(latest).hexdigest() == PRE_REMOTE_CWD_TASK_SHA
+            assert sha(source) == CURRENT_TASK_SHA
+            # Restore the exact pre-poll-qualifier epoch first. The historical
+            # manual-auto fixture and every subsequent inverse stay immutable.
+            latest = _pre_central_glm_task(source.read_bytes())
             start = b'# These reviewed wrapper bytes classify normal SSH255 as controller uncertainty\n'
             end = b'def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]:\n'
             hook = (b'    if state == "EFFECT_UNKNOWN" and _qualify_completed_poll255(rid, original_log, **owner):\n'
@@ -301,7 +226,7 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     # judgment routing stays present in the CURRENT composed native source.
     assert all(sha(stage / name) == digest for name, digest in AFTER.items())
     assert sha(NATIVE / "candidate/pick.py") == COMPOSED_PICK
-    assert sha(NATIVE / "candidate/fabric_task.py") == CENTRAL_TASK_SHA
+    assert sha(NATIVE / "candidate/fabric_task.py") == CURRENT_TASK_SHA
     assert b'if tc not in {"review", "audit"}' in (
         NATIVE / "candidate/pick.py").read_bytes()
     # Neither stage nor source is published/selected by this test.

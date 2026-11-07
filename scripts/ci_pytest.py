@@ -772,18 +772,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "either way, and any shard failing fails the gate."
         ),
     )
-    parser.add_argument(
-        "--progress", action="store_true",
-        help="stream the existing module timing records for the serial gate",
-    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     root = Path(args.root).resolve() if args.root else repo_root()
     try:
         if args.jobs < 1:
             raise PolicyError("jobs must be at least 1")
         gate = resolve_gate(root)
-        # jobs=1 keeps the historical module set/order and default argv.
-        # Progress is opt-in and changes observability only, never placement.
+        # jobs=1 keeps the historical single-process argv exactly, so the
+        # default gate invocation is unchanged by this feature.
         shards = (
             partition_modules(gate["included"], jobs=args.jobs)
             if args.jobs > 1
@@ -798,7 +794,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if shards is not None:
         return run_shards(shards, root=root)
     completed = subprocess.run(
-        pytest_argv(gate["included"], progress=args.progress),
+        pytest_argv(gate["included"]),
         cwd=root,
         check=False,
     )

@@ -16,12 +16,6 @@ ENDPOINTS = MappingProxyType({
     "health": "https://www.mastermind-x.com/api/health",
     "status": "https://www.mastermind-x.com/api/status",
     "market_pulse": "https://www.mastermind-x.com/api/intelligence-hub/market-pulse",
-    "macro_overlay": "https://www.mastermind-x.com/api/overlay",
-    "market_risk": "https://app.mastermind-x.com/data/market_risk.json",
-})
-BODY_LIMITS = MappingProxyType({
-    "health": MAX_BODY_BYTES, "status": MAX_BODY_BYTES, "market_pulse": MAX_BODY_BYTES,
-    "macro_overlay": 512 * 1024, "market_risk": 64 * 1024,
 })
 SYMBOL_PATTERN = r"[A-Z][A-Z0-9.-]{0,14}"
 
@@ -95,8 +89,8 @@ def utc_now(value: object) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def strict_json(body: bytes, *, max_bytes: int = MAX_BODY_BYTES) -> dict[str, Any]:
-    if type(max_bytes) is not int or max_bytes <= 0 or type(body) is not bytes or len(body) > max_bytes:
+def strict_json(body: bytes) -> dict[str, Any]:
+    if type(body) is not bytes or len(body) > MAX_BODY_BYTES:
         raise ValueError("invalid_body")
     def pairs(rows):
         result = {}

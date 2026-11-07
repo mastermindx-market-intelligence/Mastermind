@@ -517,16 +517,11 @@ class ExecutiveOperatorSupervisor:
         )
         docs_profile_ok = (
             profile.profile_id
-            in {
-                "operator.appserver.readonly.docs-mcp.native-helper.v1",
-                "operator.appserver.readonly.docs-mcp.native-helper.sol61.v1",
-            }
+            == "operator.appserver.readonly.docs-mcp.native-helper.v1"
             and profile.execution_surface == "codex-app-server"
             and profile.network_policy == "disabled"
             and profile.native_helper_policy.value == "PARENT_READ_ONLY_CEILING"
             and profile.native_helper is not None
-            and profile.native_helper.default_model == str(quota.model)
-            and profile.native_helper.default_reasoning_effort == str(quota.effort)
             and profile.mcp_servers == ("openai-developer-docs-v1",)
             and not profile.resource_grants
         )
@@ -1420,20 +1415,13 @@ class ExecutiveOperatorSupervisor:
                 or job.constraints.get("execution_profile_id") != NATIVE_RETURN_TX5_EXECUTION_PROFILE
                 or not self.runtime.operator_harness.is_interactive_job(job_id)):
             raise StateConflict("native retention requires an unstarted explicit interactive Job")
-        from control_plane.foreground_operation import _current_foreground_operation_or_none
-        foreground_operation = _current_foreground_operation_or_none()
-        if foreground_operation is not None:
-            foreground_operation.require_root(job.root_job_id)
-        from control_plane.fresh_conversation_admission import require_original_creation_request
-        require_original_creation_request(self.runtime, self.runtime.jobs.get_job(job.root_job_id), foreground_operation)
         outcome = self.runtime.attempts.dispatch_cycle_job(
             job_id, command_id=command_id, lease_owner=self.instance_id)
         if (outcome is None or outcome.attempt.status is not AttemptStatus.CLAIMED
                 or outcome.lease_token is None):
             raise ExecutiveOperatorSupervisorError("native retention has no fresh exact Capacity claim")
         retained = await asyncio.to_thread(self._run_claimed, job,
-            AttemptLease(outcome.attempt, outcome.lease_token), retain_native=True,
-            **({"foreground_operation": foreground_operation} if foreground_operation is not None else {}))
+            AttemptLease(outcome.attempt, outcome.lease_token), retain_native=True)
         assert isinstance(retained, RetainedNativeOperatorSession)
         return retained
 
@@ -1483,13 +1471,6 @@ class ExecutiveOperatorSupervisor:
                          sort_keys=True, ensure_ascii=False, separators=(",", ":")))
         operation = OperationId("ohf-op:native-continuation:" + canonical_digest({
             "request_event": captured["event"], "message": message}))
-        from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
-        if isinstance(retained.adapter, RemoteOperatorHarnessAdapter):
-            # The original create request guards initial start/turn only. A
-            # later native turn has its own exact retained writer + durable
-            # ACK source; install that source at the SAME remote write fence.
-            retained.adapter.bind_native_continuation_guard(guard,
-                attempt_id=facts.attempt_id, operation_id=operation)
         def load_turn(_turn):
             guard()  # Recheck the exact writer and ACK immediately before provider I/O.
             return prompt

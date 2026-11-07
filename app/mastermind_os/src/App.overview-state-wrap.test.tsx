@@ -50,8 +50,6 @@ async function openOverview(width: number, extendedStates = false) {
   await act(async () => { root!.render(<App />); });
   await click('Projects'); await click('Open project Beta program');
   await click('Project details');
-  await click('Work controls');
-  expect(container.querySelector('[aria-label="Inspect Work controls"]')?.hasAttribute('hidden')).toBe(false);
   await act(async () => { Array.from(container.querySelectorAll('summary')).find(n => n.textContent === 'More work details')!.click(); });
   await click('Overview');
   expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Overview');

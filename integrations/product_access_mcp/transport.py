@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from .contracts import BODY_LIMITS, ENDPOINTS, HttpObservation, symbols_checked
+from .contracts import ENDPOINTS, MAX_BODY_BYTES, HttpObservation, symbols_checked
 
 REQUEST_TIMEOUT_SECONDS = 6.0
 
@@ -29,7 +29,6 @@ class PublicTransport:
         if type(endpoint) is not str or endpoint not in ENDPOINTS:
             raise ValueError("invalid_endpoint")
         url = ENDPOINTS[endpoint]
-        max_body_bytes = BODY_LIMITS[endpoint]
         if endpoint == "market_pulse":
             url += "?" + urlencode({"symbols": ",".join(symbols_checked(symbols))})
         elif symbols:
@@ -58,11 +57,11 @@ class PublicTransport:
                         if length is not None:
                             if not length.isascii() or not length.isdecimal():
                                 return HttpObservation(status=status, error="invalid_content_length")
-                            if int(length) > max_body_bytes:
+                            if int(length) > MAX_BODY_BYTES:
                                 return HttpObservation(status=status, error="response_too_large")
                         body = bytearray()
                         async for chunk in response.aiter_bytes():
-                            if len(body) + len(chunk) > max_body_bytes:
+                            if len(body) + len(chunk) > MAX_BODY_BYTES:
                                 return HttpObservation(status=status, error="response_too_large")
                             body.extend(chunk)
                         return HttpObservation(status=status, body=bytes(body), content_type=content_type)

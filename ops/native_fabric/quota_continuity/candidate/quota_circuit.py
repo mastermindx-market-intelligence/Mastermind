@@ -358,19 +358,19 @@ def validate_qwen_feedback(value, feedback, lease, provider, now):
             "classification_source": source, "kind": kind}
 
 
-def account_cap(br, pool, acct, base, conn=None):
+def account_cap(br, pool, acct, base):
     if base is None:
         return None
     name = acct.get("name")
     try:
-        row = cooldown(br, pool, name) if conn is None else cooldown(br, pool, name, conn)
+        row = cooldown(br, pool, name)
     except (ValueError, TypeError, KeyError):
         return None  # A malformed target account cannot close other pools.
     if row is not None and row["until_ts"] > br.now():
         return None
     cap = base if row is None else min(base, 1)  # half-open; admission_room enforces the shared scope.
     try:
-        soft = soft_cooldown(br, pool, name) if conn is None else soft_cooldown(br, pool, name, conn)
+        soft = soft_cooldown(br, pool, name)
     except (ValueError, TypeError, KeyError):
         soft = None  # An unqualified soft row never destabilizes admission.
     if (soft is not None and soft["until_ts"] > br.now()

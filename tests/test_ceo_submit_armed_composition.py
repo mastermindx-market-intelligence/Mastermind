@@ -812,24 +812,6 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
     return modes == 1
 
 
-def _is_js_mkdir_mode_literal(line: str, token_text: str) -> bool:
-    """Admit only an exact JS mkdir(directory, {recursive:true, mode:octal}) statement.
-
-    Like the Python mkdir keyword-mode exemption, this is a permission, not a
-    UID/GID or service-port literal. The exact closed one-statement shape
-    prevents unrelated identities, extra properties, callees or operations
-    from being smuggled through the exemption.
-    """
-    if not re.fullmatch(r"0o[0-7]{3,4}", token_text):
-        return False
-    matched = re.fullmatch(
-        r"\s*await\s+mkdir\(\s*dir\s*,\s*\{\s*recursive\s*:\s*true"
-        r"\s*,\s*mode\s*:\s*(0o[0-7]{3,4})\s*\}\s*\)\s*;\s*",
-        line,
-    )
-    return matched is not None and matched.group(1) == token_text
-
-
 def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
     stripped = line.lstrip()
     if stripped.startswith(_COMMENT_PREFIXES):
@@ -841,8 +823,6 @@ def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bo
         return True
     if _line_mentions_identity_name(line):
         return False
-    if _is_js_mkdir_mode_literal(line, token_text):
-        return True
     # Recognize only the mode slot of this closed shell statement shape.
     # Additional commands, substitutions and unquoted operands stay guarded.
     chmod = re.fullmatch(
@@ -1576,30 +1556,28 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    # Pin the sole transport owner, not a line displaced by closed wire constants.
-    assert [path for path, _line in clients] == ["integrations/mastermind_executive_app/gateway.py"]
+    assert clients == [("integrations/mastermind_executive_app/gateway.py", 356)]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
 
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
-    # Exact source review of the canonical installed wrapper. Keep a pinned
-    # full-source digest; never derive it during this test. The pinned digest
-    # covers the composed C18 Secretary and frozen selected-child target
-    # injection. The installed entry AST remains exactly the
-    # independently reviewed 060525... anchor checked below. This does not
-    # exempt other run calls or imports, even inside the same function. This
-    # static literal freezes the combined candidate, not independent review or
-    # release authority, and grants no native SEND or installed-release
-    # approval.
-    # PR #2151: the installed-only retirement config validator changes this
-    # full-file pin. The exact installed entry AST and all ten mutation
-    # refusals remain unchanged; no additional call is admitted.
+    # H2 direct-native host composition: the qualified current-config/source
+    # generation callback changes this module; the installed event-loop AST
+    # remains exactly the independently reviewed 060525... anchor below.
+    # Keep a pinned full-source digest. Never derive it during this test.
+    # Exact source review of the canonical installed wrapper. This does not
+    # exempt other run calls or imports, even inside the same function.
+    # Return plus attention composition changes the module; the installed entry
+    # AST below remains identical to protected d65414e. This static literal
+    # freezes the combined candidate, not independent review or release authority.
+    # The accepted current Knowledge/Instructions owner composition changes this
+    # module; the exact installed event-loop AST and closed call below stay fixed.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'c2a07369ad481d54b494f766043386f1809fb6f075d4cac53792c792158ac25a'):
+            '0147f1eae70f9e443c9c07876c2c23a4d5aa5fbeac65291e7f2ec89d789ac539'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -2477,35 +2455,6 @@ def _d8_lowlevel_mkdir_chain_source(mkdir_line: str) -> str:
         "    descriptor = reopen(descriptor, dir_fd=parent_descriptor)",
         "    " + mkdir_line,
     ])
-
-
-def test_d8_js_mkdir_private_directory_mode_is_not_an_identity():
-    """The Studio publisher's exact private receipt mkdir uses an octal mode."""
-    path = "integrations/studio_direct_mcp/git-publish.mjs"
-    source = "    await mkdir(dir, {recursive:true, mode:0o700});\n"
-    assert _scan_added_identity_diff(_d8_frozen_source_diff(path, source)) == []
-
-
-@pytest.mark.parametrize("source", [
-    "await mkdir(peer_uid, {recursive:true, mode:0o700});",
-    "await makedir(dir, {recursive:true, mode:0o700});",
-    "await mkdir(dir, {recursive:false, mode:0o700});",
-    "await mkdir(dir, {recursive:true, mode:0o700, peer_uid:501});",
-    "await mkdir(dir, {recursive:true, mode:0o700}); peer_uid = 501;",
-    "await mkdir(dir, {recursive:true, mode:0o700}); anotherEffect();",
-    "await mkdir(dir, {recursive:true, mode:0o700});\npeer_uid = 501;",
-])
-def test_d8_js_mkdir_near_misses_remain_guarded(source):
-    path = "integrations/studio_direct_mcp/git-publish.mjs"
-    assert not _is_js_mkdir_mode_literal(source, "0o700")
-    findings = _scan_added_identity_diff(_d8_frozen_source_diff(path, source))
-    # The D8 scanner is contextual; a shape alone is not an identity. Actual
-    # identity-bearing text remains guarded even beside a mkdir mode token.
-    if "peer_uid:501" in source or "peer_uid = 501" in source:
-        assert "501" in findings
-    if "mkdir(peer_uid" in source:
-        assert "0o700" in findings
-
 
 
 def test_d8_lowlevel_mkdir_mode_slot_with_dir_fd_is_not_identity():

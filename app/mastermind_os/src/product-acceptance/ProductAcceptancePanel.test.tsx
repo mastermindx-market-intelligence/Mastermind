@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { openLegacyProjectTabs } from "../test-operational-navigation";
 import userEvent from "@testing-library/user-event";
 import { App } from "../App";
 import { decodeProgramsObservation } from "../programs-observation";
@@ -59,10 +60,7 @@ describe("actual App Evidence composition",()=>{
   try {
    await user.click(screen.getByRole("button",{name:"Projects"}));
    await user.click(await screen.findByRole("button",{name:"Open project Acceptance project"}));
-   await user.click(await screen.findByRole("button",{name:"Project details",exact:true}));
-   await user.click(screen.getByRole("button",{name:"Work controls",exact:true}));
-   const workDetails=within(screen.getByRole("region",{name:"Inspect Work controls",exact:true}));
-   await user.click(workDetails.getByText("More work details",{selector:"summary"}));
+   await openLegacyProjectTabs(user);
    const tab=await screen.findByRole("tab",{name:"Evidence"});
    await user.click(tab);
    const panel=await screen.findByRole("region",{name:"Product acceptance receipt"});

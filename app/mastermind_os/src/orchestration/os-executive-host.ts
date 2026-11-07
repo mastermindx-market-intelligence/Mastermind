@@ -1,5 +1,3 @@
-import { attachProjectExecution } from "../planning/project-execution-command-port";
-import type { ProjectExecutionTransport } from "../planning/project-execution-transport";
 import {
   createExecutiveLaunchBinding,
   type ExecutiveToolEnvelope,
@@ -9,8 +7,6 @@ import type { OwnerContext, PendingPointerStore } from "./operation-controller";
 import type { DirectNativeTransport, DirectSelection, DirectTerminalSelection } from "../direct-native-result";
 import { DirectNativeCommandPort } from "./direct-native-command-port";
 import { closedReadFailurePhase, type DiagnosticPhase, type ExecutiveDiagnosticSnapshot } from "../diagnostic-state";
-import type { FreshConversationTransport } from "./fresh-conversation-transport";
-import type { ProjectPlanningTransport } from "../planning/project-planning-transport";
 
 /** Implemented inside the existing private web/Rust auth owner. No token getter. */
 export interface OsExecutiveTransport {
@@ -23,9 +19,6 @@ export interface OsExecutiveTransport {
   /** Observer-only closed diagnostics; a snapshot read performs no native call. */
   diagnostics?(): ExecutiveDiagnosticSnapshot;
   readonly directNative?: DirectNativeTransport;
-  readonly projectPlanning?: ProjectPlanningTransport;
-  readonly projectExecution?: ProjectExecutionTransport;
-  readonly freshConversation?: FreshConversationTransport;
 }
 
 interface VerifiedContext {
@@ -55,11 +48,9 @@ export function decodeExecutiveContext(value: unknown, nowMs: number): VerifiedC
  * while signed out too, so later sign-in can qualify it without remounting App.
  * Auth events and expiry invalidate first; async replies can never restore an
  * older principal. Persistence and operation identity remain their existing owners.
- * The legacy Launch catalog is optional; project work and fresh conversations
- * use this same qualified context and pending-operation store without that catalog.
  */
 export function createOsExecutiveHost(
-  config: LaunchConfiguration | null,
+  config: LaunchConfiguration,
   transport: OsExecutiveTransport,
   store: PendingPointerStore,
   now: () => number = Date.now,
@@ -155,7 +146,7 @@ export function createOsExecutiveHost(
     correction:transport.directNative.correction?(args,signal)=>directCall("correction",args,signal):undefined,
     read:(args,signal)=>directCall("read",args,signal),consume:(args,signal)=>directCall("consume",args,signal),
   },context) : null;
-  const launchBinding = createExecutiveLaunchBinding(config, {
+  const binding = createExecutiveLaunchBinding(config, {
     async callTool(name, args, signal): Promise<ExecutiveToolEnvelope> {
       const owner = context();
       const capturedEpoch = epoch;
@@ -196,24 +187,6 @@ export function createOsExecutiveHost(
   }, direct ? {port:direct,capability:{read:(selection,signal)=>direct.read(selection,signal),
     inspectCorrection:(selection,signal)=>direct.inspectCorrection(selection,signal),makeCorrectionIntent:(selection,fence)=>direct.makeCorrectionIntent(selection,fence),
     makeConsumeIntent:(selection,digest)=>direct.makeConsumeIntent(selection,digest)}} : undefined);
-  const binding = transport.projectExecution ? attachProjectExecution(launchBinding, {
-    async request(operation, args, signal) {
-      const owner = context(), capturedEpoch = epoch, authGeneration = transport.authGeneration();
-      if (!owner || signal.aborted) throw Error("EXECUTIVE_UNAVAILABLE");
-      const request = new AbortController(), boundarySignal = boundary.signal;
-      const abort = () => request.abort();
-      signal.addEventListener("abort", abort, {once:true}); boundarySignal.addEventListener("abort", abort, {once:true});
-      if (signal.aborted || boundarySignal.aborted) abort();
-      try {
-        const raw = await transport.projectExecution!.request(operation,args,request.signal);
-        const current = context();
-        if (request.signal.aborted || capturedEpoch !== epoch || authGeneration !== transport.authGeneration() ||
-            current?.principalScope !== owner.principalScope || current.generation !== owner.generation)
-          throw Error("EXECUTIVE_EPOCH_CHANGED");
-        return raw;
-      } finally {signal.removeEventListener("abort",abort); boundarySignal.removeEventListener("abort",abort);}
-    },
-  }) : launchBinding;
   const unsubscribe = transport.subscribe(() => { void refresh(); });
   const ready = refresh();
   return {

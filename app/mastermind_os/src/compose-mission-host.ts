@@ -1,8 +1,6 @@
 import { bindMissionHost, type RawClient, type SessionHostAttachment } from "./host";
-import { createProjectConversationHistoryReaderFactory } from "./conversations/project-conversation-history-owner";
-import {createProjectConversationCatalogueReaderFactory} from './conversations/project-conversation-catalogue-factory';
 import { readLaunchBindingConfig } from "./launch-config";
-import type { ExecutiveSessionSelection } from "./orchestration/executive-session-command-port";
+import type { MissionSelection } from "./mission";
 import type { LaunchConfiguration } from "./orchestration/executive-launch-command-port";
 import { createIndexedDbPendingPointerStore } from "./orchestration/indexeddb-pending-pointer-store";
 import { createIndexedDbSessionPendingPointerStore } from "./orchestration/indexeddb-session-pending-pointer-store";
@@ -50,11 +48,10 @@ function executiveObservation(transport: OsExecutiveTransport | undefined): {
 }
 
 /**
- * One app instance composes the existing read/auth owner with the shared
- * Executive command owner and the independent selected-session continuation
- * host. A Launch catalog enables only legacy Launch choices; project work and
- * fresh conversations use the same command context and store without it.
- * Absent Executive configuration/auth keeps these owners unavailable.
+ * One app instance composes the existing read/auth owner with the fixed
+ * launch adapter and — independently — the selected-session continuation
+ * host. Session continuation may exist without a Launch catalog; absent
+ * Executive configuration/auth keeps it unavailable and it sends no requests.
  * The session store is a separate durable namespace: Launch records are never
  * read, migrated or cleared by it.
  */
@@ -65,7 +62,7 @@ export function composeMissionHost(
   hostKind: DiagnosticHostKind = "unknown",
 ) {
   // Mount while signed out: the existing auth owner later qualifies this binding.
-  const executive = client.executive
+  const executive = config && client.executive
     ? createOsExecutiveHost(config, client.executive, createIndexedDbPendingPointerStore(indexedDB))
     : null;
   // Separate session capability/controller and lifecycle; no shared slot with
@@ -76,19 +73,10 @@ export function composeMissionHost(
         createIndexedDbSessionPendingPointerStore(indexedDB),
       )
     : null;
-  const projectHistoryReader = client.executiveSession
-    ? createProjectConversationHistoryReaderFactory(client.executiveSession) : undefined;
-  const projectCatalogueReader = client.executiveSession
-    ? createProjectConversationCatalogueReaderFactory(client.executiveSession) : undefined;
   const sessionAttachment: SessionHostAttachment | undefined = session
     ? {
         binding: session.binding,
-        ...(projectHistoryReader ? {createProjectHistoryReader: projectHistoryReader} : {}),
-        ...(projectCatalogueReader ? {createProjectCatalogueReader: projectCatalogueReader} : {}),
-        // The session selection carries the closed target kind; the generic
-        // attachment keeps its opaque signature.
-        refresh: (selection) =>
-          session.refresh(selection as ExecutiveSessionSelection | null),
+        refresh: (selection) => session.refresh(selection as MissionSelection | null),
         setStopCondition: (provider) => session.setStopCondition(provider),
       }
     : undefined;

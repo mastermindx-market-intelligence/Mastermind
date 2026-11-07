@@ -23,31 +23,6 @@ baseline read/auth surface provides no enrollment, shell, generic HTTP or
 caller-selected URL command. Conditional Executive and selected-session
 transports are separate source capabilities; see the pinned map below.
 
-## Project team candidate — 6 November 2026
-
-The current project-team implementation adds a source-qualified Start work path,
-goal and handoff capture, nested COO teams, retained project run history, and
-explicit follow-ups from completed results. It reuses the Executive Runtime,
-original input store, worker placements, workspace allocator and app operation
-controller. The standard app composition mounts that existing Executive command
-owner when the client supplies an Executive transport, even without a legacy
-Launch manifest. Current-project Start work, new conversations and completed-run
-follow-ups keep the same authenticated context and operation store. An absent
-manifest supplies no legacy Launch choices or submit authority. After confirmed
-project creation, Open project refreshes the existing catalogue and opens the
-exact saved project, where Start work is a separate action. It preserves the
-setup draft and original operation if the project cannot yet be read. See
-[Project team execution](docs/project-team-execution.md) for the architecture,
-code artifact continuity, transport boundaries and remaining installed journey
-qualification.
-
-This candidate also composes the published native Session Send source from
-[9679d5e](https://github.com/mastermindx-market-intelligence/Mastermind/commit/9679d5e864be2d742abbd35eaf976ed090b7a82e).
-Native Send uses its fixed private Executive command and current source owner;
-it does not borrow Workspace or Content authorization. The dated source audit
-below remains historical evidence of the earlier read-only native surface.
-Source changes do not establish installation or a successful provider response.
-
 ## Source capability reconciliation — 5 November 2026
 
 This is a bounded documentation audit at protected `f030206fdad98900c81ca8b97540a47e992610c3`.

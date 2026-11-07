@@ -15,11 +15,8 @@ nothing here auto-executes a trade. Paper-only.
 from __future__ import annotations
 
 import json
-import copy
-import math
 import re
 import time
-from contextvars import ContextVar
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -37,12 +34,6 @@ _READ_ROOTS = [_V / "site", _V / "data", _ROOT / "data"]
 # the latent autonomous→flagship peek path (data/portfolio/* lives under the _ROOT/data root).
 _DENY_ROOTS = [(_ROOT / "data" / "portfolio").resolve(), (_ROOT / "data" / "portfolios").resolve()]
 _LEAK_AUDIT = _ROOT / "data" / "brain" / "read_signal_denied.jsonl"
-_INFERENCE_PROVENANCE = ContextVar("bot_inference_provenance", default=None)
-
-
-def _execution_provenance() -> dict:
-    """Trusted invocation context; model arguments never supply these fields."""
-    return dict(_INFERENCE_PROVENANCE.get() or {"source": "claude_cli"})
 
 
 def _ok(text: str) -> dict:
@@ -662,7 +653,7 @@ async def save_research_note(args):
           "prob_correct": {"type": "number"}},
        "required": ["subject", "lean", "thesis"]})
 async def propose_thesis(args):
-    _append(_PROPOSALS, {**args, **_execution_provenance(), "status": "proposed"})
+    _append(_PROPOSALS, {"source": "claude_cli", "status": "proposed", **args})
     return _ok(f"thesis proposed for {args['subject']} ({args['lean']}) → review queue. NOT executed.")
 
 
@@ -671,7 +662,7 @@ async def propose_thesis(args):
        "tickers": {"type": "array", "items": {"type": "string"}}, "rationale": {"type": "string"}},
        "required": ["name", "rationale"]})
 async def flag_emerging_theme(args):
-    _append(_RESEARCH / "emerging.jsonl", {**args, **_execution_provenance()})
+    _append(_RESEARCH / "emerging.jsonl", {"source": "claude_cli", **args})
     return _ok(f"flagged emerging theme '{args['name']}' → web app.")
 
 
@@ -769,7 +760,6 @@ async def file_research_paper(args):
     paper = {
         "schema": rp.SCHEMA, "id": f"{asof}-{t}", "ticker": t, "asof": asof,
         "generated_at": rp._now(), "mode": "portfolio_research_advisor",
-        "execution_provenance": _execution_provenance(),
         "model": "portfolio-research-advisor",
         "price_at_review": price, "research_score": int(args["research_score"]),
         "viability": args["viability"], "recommend": bool(args["recommend"]),
@@ -865,108 +855,6 @@ SERVER_NAME = "bot"
 # tool names as Claude sees them: mcp__<server>__<tool>
 TOOL_NAMES = [f"mcp__{SERVER_NAME}__{t.name}" for t in _ALL]
 WEB_TOOLS = ["WebSearch", "WebFetch"]
-
-
-class InferenceToolError(ValueError):
-    """Bounded protocol refusal before any registered handler executes."""
-
-
-def inference_tool_catalog() -> list[dict]:
-    """Describe exactly the incumbent registered roster, without SDK-only tools."""
-    from jsonschema import Draft202012Validator
-
-    catalog = []
-    for tool in _ALL:
-        schema = copy.deepcopy(tool.input_schema)
-        if schema == {}:
-            schema = {"type": "object", "properties": {}}
-        if not isinstance(schema, dict) or schema.get("type") != "object":
-            raise InferenceToolError("fabric_tool_schema_unavailable")
-        # This adapter accepts the published argument contract only. In
-        # particular, source/status, account identity and sizing cannot be
-        # smuggled through JSON Schema's permissive extra-property default.
-        schema["additionalProperties"] = False
-        Draft202012Validator.check_schema(schema)
-        catalog.append({"name": f"mcp__{SERVER_NAME}__{tool.name}",
-                        "description": tool.description, "input_schema": schema})
-    if len({row["name"] for row in catalog}) != len(catalog):
-        raise InferenceToolError("fabric_tool_roster_invalid")
-    return catalog
-
-
-def _finite_json(value) -> bool:
-    if value is None or isinstance(value, (str, bool)) or type(value) is int:
-        return True
-    if type(value) is float:
-        return math.isfinite(value)
-    if isinstance(value, list):
-        return all(_finite_json(item) for item in value)
-    if isinstance(value, dict):
-        return all(isinstance(key, str) and _finite_json(item) for key, item in value.items())
-    return False
-
-
-def validate_inference_calls(blocks: list, *, used_ids=()) -> list[dict]:
-    """Validate the entire completed batch before executing even its first tool."""
-    from jsonschema import Draft202012Validator
-
-    schemas = {row["name"]: row["input_schema"] for row in inference_tool_catalog()}
-    seen, calls = set(used_ids), []
-    for block in blocks:
-        ident, name, args = block.id, block.name, block.input
-        if (not isinstance(ident, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", ident)
-                or ident in seen or name not in schemas or not isinstance(args, dict)
-                or not _finite_json(args)):
-            raise InferenceToolError("fabric_tool_request_invalid")
-        # jsonschema's integer checker admits integral floats; the incumbent
-        # tool contract is Python-typed, so keep explicit integer values exact.
-        props = schemas[name].get("properties", {})
-        if any(props.get(key, {}).get("type") == "integer" and type(value) is not int
-               for key, value in args.items()):
-            raise InferenceToolError("fabric_tool_arguments_invalid")
-        if not Draft202012Validator(schemas[name]).is_valid(args):
-            raise InferenceToolError("fabric_tool_arguments_invalid")
-        seen.add(ident)
-        calls.append({"id": ident, "name": name, "input": copy.deepcopy(args)})
-    return calls
-
-
-async def invoke_inference_tool(call: dict, *, provenance: dict) -> dict:
-    """Invoke the existing handler once; errors after writes are not retry hints."""
-    from types import SimpleNamespace
-
-    validate_inference_calls([SimpleNamespace(**call)])
-    if (set(provenance) != {"provider", "model", "turn_id"}
-            or any(not isinstance(value, str) or not value for value in provenance.values())):
-        raise InferenceToolError("fabric_tool_provenance_invalid")
-    tools = {f"mcp__{SERVER_NAME}__{tool.name}": tool for tool in _ALL}
-    token = _INFERENCE_PROVENANCE.set({"source": "fabric_application", **provenance})
-    try:
-        return await tools[call["name"]].handler(copy.deepcopy(call["input"]))
-    finally:
-        _INFERENCE_PROVENANCE.reset(token)
-
-
-def tool_result_event(result, *, tool_name: str) -> dict:
-    """A paper card can originate only in the registered filing handler's result."""
-    if tool_name != f"mcp__{SERVER_NAME}__file_research_paper":
-        return {"type": "tool_result"}
-    blocks = result.get("content", []) if isinstance(result, dict) else result
-    if not isinstance(blocks, (list, tuple)):
-        blocks = [{"text": str(blocks or "")}]
-    for block in blocks:
-        raw = block.get("text", "") if isinstance(block, dict) else getattr(block, "text", "")
-        if not isinstance(raw, str) or not raw.startswith(PAPER_MARKER + " "):
-            continue
-        try:
-            meta, _ = json.JSONDecoder().raw_decode(raw[len(PAPER_MARKER):].lstrip())
-            keys = {"paper_id", "ticker", "title", "combined", "confirmed",
-                    "research_score", "engine_score", "viability"}
-            if isinstance(meta, dict) and set(meta) == keys and isinstance(meta["paper_id"], str):
-                return {"type": "paper", **meta}
-        except (ValueError, TypeError):
-            pass
-    return {"type": "tool_result"}
 
 
 def build_server():

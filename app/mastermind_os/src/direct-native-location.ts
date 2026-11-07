@@ -1,34 +1,24 @@
 import { locationSelectionInput } from "./mission";
-import { sessionTargetKind } from "./orchestration/executive-session-command-port";
-/** Display-route hints only; canonical backend access never trusts them. */
+/** A display-route hint only; canonical backend access never trusts it. */
 export function directLocationInput(search = window.location.search) {
-  const raw = search.startsWith("?") ? search.slice(1) : search;
-  const refused = { hasIdentity: true, selection: null, direct: false };
+  const original = locationSelectionInput(search),
+    raw = search.startsWith("?") ? search.slice(1) : search;
+  const parts = raw.split("&"),
+    hints = parts.filter((p) => p.startsWith("direct_native_job="));
+  if (!hints.length) return { ...original, direct: false };
+  if (hints.length !== 1 || parts.length !== 3)
+    return { hasIdentity: true, selection: null, direct: false };
   try {
-    let parts = raw.split("&");
-    // App retains this closed session choice in the same URL. Peel only
-    // that owned field; the Mission owner still validates the exact pair.
-    const kinds = parts.filter((part) => {
-      const at = part.indexOf("=");
-      return at > 0 && decodeURIComponent(part.slice(0, at)) === "session_target_kind";
-    });
-    if (kinds.length) {
-      if (kinds.length !== 1) return refused;
-      const kind = decodeURIComponent(kinds[0].slice(kinds[0].indexOf("=") + 1));
-      if (sessionTargetKind({ targetKind: kind }) === null) return refused;
-      parts = parts.filter((part) => part !== kinds[0]);
-    }
-    const original = locationSelectionInput(parts.join("&"));
-    const hints = parts.filter((part) => part.startsWith("direct_native_job="));
-    if (!hints.length) return { ...original, direct: false };
-    if (hints.length !== 1 || parts.length !== 3) return refused;
-    const hint = decodeURIComponent(hints[0].slice("direct_native_job=".length));
-    const selected = locationSelectionInput(
-      parts.filter((part) => part !== hints[0]).join("&"),
+    const hint = decodeURIComponent(
+      hints[0].slice("direct_native_job=".length),
     );
-    if (!selected.selection || hint !== selected.selection.rootJobId) return refused;
+    const selected = locationSelectionInput(
+      parts.filter((p) => p !== hints[0]).join("&"),
+    );
+    if (!selected.selection || hint !== selected.selection.rootJobId)
+      return { hasIdentity: true, selection: null, direct: false };
     return { ...selected, direct: true };
   } catch {
-    return refused;
+    return { hasIdentity: true, selection: null, direct: false };
   }
 }

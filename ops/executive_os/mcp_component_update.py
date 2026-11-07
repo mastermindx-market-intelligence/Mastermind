@@ -10,16 +10,6 @@ gateway role and nothing else:
 * ``/Library/LaunchDaemons/com.mastermind.executive.mcp.plist`` - the release
   substitution of the closed installed gateway profile.
 
-OPTIONALLY, and only when the caller supplies the PAIRED selected-child
-publication selection: the one frozen ``selected_child_target`` projection of
-the installed gateway configuration.  The selection is ONE optional input to
-the SAME verbs: both coordinates absent preserve the source-only behaviour
-byte-for-byte, and exactly one of them refuses.  The publication is
-non-secret, is qualified by its own closed validator, and is retained in the
-transaction marker so a reconciliation recovers THAT candidate and never
-reopens a replacement input.  A source-only release update carries an
-installed publication forward byte for byte.
-
 Verbs (run as root through ``service-control.sh``; this tool never calls it):
 
 ``plan``       read-only: compile the candidate, verify the sealed target
@@ -80,7 +70,6 @@ Exit codes: 0 COMPLETE (or PLANNED), 1 refused with no effect, 2 EFFECT_UNKNOWN,
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import dataclasses
 import errno
@@ -303,14 +292,6 @@ class Candidate:
     plist_after: bytes
     probes_before: tuple[Probe, ...]
     probes_after: tuple[Probe, ...]
-    # The one frozen selected-child publication this candidate installs.
-    # Absent preserves the existing source-only behaviour byte for byte.
-    selected_child_target: dict[str, Any] | None = None
-    # The FROZEN capability-profile digest map this candidate applied, taken
-    # from the exact sealed target release registry at plan time.  It is
-    # bound into the plan identity and retained in the transaction marker so
-    # a recovery reproduces THIS after-image and never a re-derived one.
-    capability_profile_digests: dict[str, str] | None = None
 
     @property
     def config_before_sha256(self) -> str:
@@ -361,13 +342,10 @@ def build_probes(document: dict) -> tuple[Probe, ...]:
 
 
 def compile_candidate(prior_config: bytes, prior_plist: bytes, *, release_sha: str,
-                      set_public_mcp_resource: bool,
-                      selected_child_target: dict[str, Any] | None = None,
-                      capability_profile_digests: dict[str, str] | None = None) -> Candidate:
+                      set_public_mcp_resource: bool) -> Candidate:
     """Compile the only permitted change set, or raise UpdateRefused."""
     try:
-        return _compile_candidate(prior_config, prior_plist, release_sha, set_public_mcp_resource,
-                                  selected_child_target, capability_profile_digests)
+        return _compile_candidate(prior_config, prior_plist, release_sha, set_public_mcp_resource)
     except UpdateRefused:
         raise
     except AuthError as error:
@@ -376,101 +354,8 @@ def compile_candidate(prior_config: bytes, prior_plist: bytes, *, release_sha: s
         raise UpdateRefused("CANDIDATE_REFUSED: " + str(error)[:160]) from None
 
 
-def _preserved_profile_ids(prior: dict[str, Any]) -> set[str]:
-    """The exact capability-profile ids of the preserved installed missions."""
-
-    block = prior.get("coo")
-    missions = block.get("missions") if isinstance(block, dict) else None
-    if not isinstance(missions, list):
-        return set()
-    return {row["capability_profile_id"] for row in missions
-            if isinstance(row, dict) and type(row.get("capability_profile_id")) is str}
-
-
-def _validate_capability_profile_map(
-    digests: Any, profile_ids: set[str],
-) -> dict[str, str]:
-    """The exact frozen map: one lowercase64hex digest per preserved profile.
-
-    The keys correspond EXACTLY to the relevant original preserved mission
-    profile ids: an extra entry, a missing entry or a malformed value is a
-    refusal, never a partial rewrite.
-    """
-
-    if type(digests) is not dict:
-        raise ValueError("capability profile digest map is not an object")
-    if set(digests) != set(profile_ids):
-        raise ValueError("capability profile digest map does not match the preserved missions")
-    for key, value in digests.items():
-        if type(key) is not str or not key:
-            raise ValueError("capability profile digest key is invalid")
-        if type(value) is not str or HEX64.fullmatch(value) is None:
-            raise ValueError("capability profile digest value is invalid")
-    return {key: digests[key] for key in sorted(digests)}
-
-
-def _apply_capability_profile_digests(
-    prior: dict[str, Any], proposed: dict[str, Any],
-    digests: dict[str, str] | None,
-) -> None:
-    """Re-derive the installed missions' capability-profile digests.
-
-    The exact replacement comes from the TARGET sealed release registry, so
-    a legitimate tool-projection change moves the mission's stored digest
-    with it. ONLY that one field changes: every other mission field,
-    principal action, scope and binding is preserved byte for byte, and no
-    principal realm or permission is created.
-
-    ``None`` is the LEGACY no-rewrite compilation: it reproduces the
-    original behaviour byte for byte and is what a marker without the frozen
-    map member recovers with.  A supplied map is the frozen map of the
-    original transaction and is validated against the preserved missions
-    before a single field is rewritten.
-    """
-
-    if digests is None:
-        # The legacy no-rewrite compilation: the installed digests stay
-        # exactly as they are.  This is the pre-C30 recovery behaviour and
-        # it is reproduced exactly, never approximated.
-        return
-    frozen = _validate_capability_profile_map(digests, _preserved_profile_ids(prior))
-    if not frozen:
-        # An installation without a preserved mission profile has nothing to
-        # rewrite.  The source-only behaviour is preserved byte for byte.
-        return
-    prior_block = prior.get("coo")
-    proposed_block = proposed.get("coo")
-    if not isinstance(prior_block, dict) or not isinstance(proposed_block, dict):
-        raise ValueError("candidate changed the installed COO block")
-    prior_missions = prior_block.get("missions")
-    missions = proposed_block.get("missions")
-    if not isinstance(prior_missions, list) or not isinstance(missions, list):
-        raise ValueError("candidate changed the installed mission set")
-    if len(missions) != len(prior_missions):
-        raise ValueError("candidate changed the installed mission set")
-    for row, prior_row in zip(missions, prior_missions):
-        if not isinstance(row, dict) or not isinstance(prior_row, dict):
-            raise ValueError("candidate changed the installed mission set")
-        profile_id = row.get("capability_profile_id")
-        digest = frozen.get(profile_id) if type(profile_id) is str else None
-        if digest is None:
-            continue
-        if row.get("capability_profile_digest") != prior_row.get("capability_profile_digest"):
-            raise ValueError("candidate changed an installed capability-profile digest")
-        row["capability_profile_digest"] = digest
-    left = copy.deepcopy(proposed_block)
-    right = copy.deepcopy(prior_block)
-    for block in (left, right):
-        for mission in block.get("missions") or []:
-            if isinstance(mission, dict):
-                mission["capability_profile_digest"] = None
-    if left != right:
-        raise ValueError("candidate changed an unrelated installed COO field")
-
-
 def _compile_candidate(prior_config: bytes, prior_plist_bytes: bytes, release_sha: str,
-                       set_public: bool, selected_child_target: dict[str, Any] | None = None,
-                       capability_profile_digests: dict[str, str] | None = None) -> Candidate:
+                       set_public: bool) -> Candidate:
     _sha(release_sha, HEX40, "target release sha shape")
     prior = _strict_json(prior_config, "MCP_COMPONENT_CONFIG_MALFORMED")
     prior_plist = _strict_plist(prior_plist_bytes)
@@ -485,22 +370,8 @@ def _compile_candidate(prior_config: bytes, prior_plist_bytes: bytes, release_sh
     if set_public:
         require("public_mcp_resource" not in prior, "public_mcp_resource is already configured")
         proposed["public_mcp_resource"] = PUBLIC_MCP_RESOURCE
-    if selected_child_target is not None:
-        # The frozen publication is qualified by its own closed validator
-        # before it reaches the candidate, and it may only be installed or
-        # replaced: a candidate never withdraws an installed target.
-        proposed["selected_child_target"] = copy.deepcopy(selected_child_target)
-    elif "selected_child_target" in prior:
-        # A source-only release update carries the INSTALLED publication
-        # forward byte for byte. It is never withdrawn and never rewritten.
-        proposed["selected_child_target"] = copy.deepcopy(prior["selected_child_target"])
-    _apply_capability_profile_digests(prior, proposed, capability_profile_digests)
-    frozen_digests = (None if capability_profile_digests is None
-                      else _validate_capability_profile_map(
-                          capability_profile_digests, _preserved_profile_ids(prior)))
     changed = {key for key in set(prior) | set(proposed) if prior.get(key, _MISSING) != proposed.get(key, _MISSING)}
-    require(changed <= {"release_sha", "public_mcp_resource", "selected_child_target", "coo"},
-            "candidate changed an unrelated config field")
+    require(changed <= {"release_sha", "public_mcp_resource"}, "candidate changed an unrelated config field")
     _, public_after = _semantic(proposed)
     config_after = canonical(proposed) + b"\n"
     require(_strict_json(config_after, "MCP_COMPONENT_CONFIG_MALFORMED") == proposed, "config round trip differs")
@@ -521,9 +392,6 @@ def _compile_candidate(prior_config: bytes, prior_plist_bytes: bytes, release_sh
         plist_after=plist_after,
         probes_before=build_probes(prior),
         probes_after=build_probes(proposed),
-        selected_child_target=copy.deepcopy(proposed.get("selected_child_target")),
-        capability_profile_digests=(None if frozen_digests is None
-                                    else dict(frozen_digests)),
     )
 
 
@@ -531,7 +399,7 @@ _MISSING = object()
 
 
 def plan_document(candidate: Candidate, *, manifest_sha256: str, closure_sha256: str) -> dict:
-    document = {
+    return {
         "schema": PLAN_SCHEMA,
         "release_sha": candidate.release_sha,
         "prior_release_sha": candidate.prior_release_sha,
@@ -553,20 +421,6 @@ def plan_document(candidate: Candidate, *, manifest_sha256: str, closure_sha256:
             "launchctl enable+bootstrap " + LAUNCHD_ROOT,
         ],
     }
-    if candidate.selected_child_target is not None:
-        # The frozen publication's identity, not its content: the operator
-        # approves this exact work scope, root and material digest.
-        document["selected_child_target"] = {
-            "work_ref": candidate.selected_child_target["work_ref"],
-            "root_job_id": candidate.selected_child_target["root_job_id"],
-            "material_digest": candidate.selected_child_target["material_digest"],
-        }
-    # The frozen capability-profile transform is part of the plan identity:
-    # the operator approves THIS exact map, and the after-image it produces
-    # is the one a recovery reproduces.  An empty map is still recorded.
-    document["capability_profile_digests"] = dict(
-        candidate.capability_profile_digests or {})
-    return document
 
 
 def plan_digest(plan: dict) -> str:
@@ -623,19 +477,6 @@ class Host(Protocol):
     def release_lock(self) -> None: ...
     def read_config(self) -> bytes: ...
     def read_plist(self) -> bytes: ...
-    def read_selected_child_input(self, path: str, sha256: str) -> bytes: ...
-    def installed_coo_source(self) -> Any: ...
-    def begin_selected_child_preparation(self) -> bytes: ...
-    def preparation_destination_available(self, destination: str) -> None: ...
-    def request_selected_child_capture(self, frame: dict[str, Any]) -> dict[str, Any]: ...
-    def recheck_selected_child_preparation(self) -> None: ...
-    def ceo_ingress_socket_path(self) -> str: ...
-    def preparation_input_path(self, work_ref: str) -> str: ...
-    def write_selected_child_input(self, publication: dict[str, Any],
-                                   destination: str) -> dict[str, Any]: ...
-    def derive_capability_profile_digests(
-        self, release_sha: str, profile_ids: tuple[str, ...]
-    ) -> dict[str, str]: ...
     def verify_release(self, release_sha: str) -> str: ...
     def verify_closure(self) -> str: ...
     def readback(self, release_sha: str) -> dict: ...
@@ -708,7 +549,6 @@ class ProductionHost:
 
     def __init__(self) -> None:
         self._lock_fd: int | None = None
-        self._preparation: _PreparationQualification | None = None
 
     # identity and trust
     def require_root(self) -> None:
@@ -718,8 +558,6 @@ class ProductionHost:
             raise UpdateRefused("ROOT_REQUIRED")
 
     def _budget(self) -> Any:
-        if self._preparation is not None:
-            return self._preparation.budget
         return installed._Budget(installed._SERVICE_BUDGET_SECONDS)
 
     def receipts_ready(self) -> None:
@@ -763,140 +601,10 @@ class ProductionHost:
 
     # installed images
     def read_config(self) -> bytes:
-        if self._preparation is not None:
-            current = _preparation_config(self._preparation.topology, self._preparation.budget)
-            if current != self._preparation.config:
-                raise UpdateRefused("PREPARATION_SOURCE_CHANGED")
-            return current[0]
         return self._trusted(CONFIG_PATH, MAX_CONFIG_BYTES, installed._role_topology("gateway").config_mode)
 
     def read_plist(self) -> bytes:
         return self._trusted(PLIST_PATH, MAX_PLIST_BYTES, 0o644)
-
-    def read_selected_child_input(self, path: str, sha256: str) -> bytes:
-        """Read the PAIRED capture input through the incumbent trusted read.
-
-        The read is the existing no-follow, bounded, single-link,
-        root-controlled-ancestor pattern: the same custody the installed
-        configuration and plist already use. The supplied digest binds
-        those bytes to the caller's selection; it is never on its own a
-        proof of source authenticity, which comes from this custody read
-        together with the closed validator on the content and the derived
-        material digest over the frozen coordinates.
-        """
-        if type(path) is not str or not path or "\x00" in path or not path.startswith("/"):
-            raise UpdateRefused("SELECTED_CHILD_INPUT_PATH_INVALID")
-        if type(sha256) is not str or HEX64.fullmatch(sha256) is None:
-            raise UpdateRefused("SELECTED_CHILD_INPUT_DIGEST_INVALID")
-        data = self._trusted(path, MAX_CONFIG_BYTES, 0o600)
-        if digest(data) != sha256:
-            raise UpdateRefused("SELECTED_CHILD_INPUT_DIGEST_MISMATCH")
-        return data
-
-
-    def begin_selected_child_preparation(self) -> bytes:
-        if os.getegid() != 0:
-            raise UpdateRefused("PREPARATION_ROOT_GROUP_REQUIRED")
-        try:
-            self._preparation = _PreparationQualification()
-            return self._preparation.config[0]
-        except (PeerIdentityError, ValueError, TypeError, KeyError, OSError):
-            raise UpdateRefused("PREPARATION_SOURCE_UNAVAILABLE") from None
-
-    def preparation_destination_available(self, destination: str) -> None:
-        try:
-            os.lstat(destination)
-        except FileNotFoundError:
-            return
-        except OSError:
-            raise UpdateRefused("PREPARATION_INPUT_REFUSED:unavailable") from None
-        raise UpdateRefused("PREPARATION_INPUT_REFUSED:already exists")
-
-    def request_selected_child_capture(self, frame: dict[str, Any]) -> dict[str, Any]:
-        from integrations.mastermind_workspace_app.contract import MAX_RESPONSE_BYTES
-        qualification = self._preparation
-        if qualification is None:
-            raise UpdateRefused("PREPARATION_SOURCE_UNAVAILABLE")
-        qualification.check()
-        packet = canonical({
-            "schema": _PREPARATION_CHILD_SCHEMA,
-            "release_sha": qualification.release_sha,
-            "config_sha256": hashlib.sha256(qualification.config[0]).hexdigest(),
-            "deadline": qualification.budget.caller_deadline, "frame": frame,
-        }) + b"\n"
-        if len(packet) > MAX_CONFIG_BYTES:
-            raise UpdateRefused("PREPARATION_SELECTOR_INVALID")
-        _name, uid, gid, groups = qualification.account
-        process = subprocess.Popen(
-            [installed._NETWORK_RUNTIME_LAUNCHER, "-I", "-B",
-             str(qualification.helper), _PREPARATION_CHILD_VERB],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            close_fds=True, bufsize=0, cwd=str(qualification.root),
-            env={"LANG": "C", "PYTHONDONTWRITEBYTECODE": "1"},
-            user=uid, group=gid, extra_groups=list(groups))
-        return _exchange_preparation_child(
-            process, packet, budget=qualification.budget, maximum=MAX_RESPONSE_BYTES)
-
-    def recheck_selected_child_preparation(self) -> None:
-        try:
-            if self._preparation is None:
-                raise UpdateRefused("PREPARATION_SOURCE_UNAVAILABLE")
-            self._preparation.check()
-        except (PeerIdentityError, ValueError, TypeError, KeyError, OSError):
-            raise UpdateRefused("PREPARATION_SOURCE_CHANGED") from None
-
-    def installed_coo_source(self) -> Any:
-        """The installed COO source of the sealed gateway configuration.
-
-        The source is the incumbent installed composition over the sealed
-        release: it re-proves the document, the mission, the capability
-        registry and the binding.  A changed, unreadable or withdrawn
-        installation is unavailable, never an inferred permission.
-        """
-        from ops.executive_os.coo_principal_host import CooInstalledSource
-        document = _strict_json(self.read_config(), "MCP_COMPONENT_CONFIG_MALFORMED")
-        release = document.get("release_sha") if type(document) is dict else None
-        if type(release) is not str or HEX40.fullmatch(release) is None:
-            raise UpdateRefused("PREPARATION_CONFIG_INVALID")
-        root = Path(installed._SERVICE_RELEASES) / release
-        try:
-            return CooInstalledSource.from_path(
-                CONFIG_PATH, root, expected_uid=os.geteuid())
-        except (ValueError, TypeError, KeyError, OSError):
-            raise UpdateRefused("PREPARATION_SOURCE_UNAVAILABLE") from None
-
-    def ceo_ingress_socket_path(self) -> str:
-        """The canonical CeoIngress socket of the installed configuration."""
-
-        document = _strict_json(self.read_config(), "MCP_COMPONENT_CONFIG_MALFORMED")
-        path = document.get("ceo_ingress_socket_path") if type(document) is dict else None
-        if type(path) is not str or not path.startswith("/"):
-            raise UpdateRefused("PREPARATION_CONFIG_INVALID")
-        return path
-
-    def preparation_input_path(self, work_ref: str) -> str:
-        """The one installed destination of a preparation."""
-
-        return preparation_destination(work_ref)
-
-    def write_selected_child_input(self, publication: dict[str, Any],
-                                   destination: str) -> dict[str, Any]:
-        """Materialize the closed publication with the exclusive writer.
-
-        The writer is the incumbent one: an exclusive, no-follow create of a
-        root-owned, single-link, group-0 file under a root-controlled parent
-        chain, with an exact readback.  It never overwrites an existing
-        file.
-        """
-        from ops.executive_os.coo_principal_host import write_selected_child_target_input
-        try:
-            os.makedirs(PREPARATION_CAPTURE_DIR, mode=0o755, exist_ok=True)
-        except OSError:
-            raise UpdateRefused("PREPARATION_INPUT_REFUSED") from None
-        try:
-            return write_selected_child_target_input(publication, destination)
-        except ValueError as error:
-            raise UpdateRefused("PREPARATION_INPUT_REFUSED:" + str(error)[:80]) from None
 
     def verify_release(self, release_sha: str) -> str:
         try:
@@ -907,37 +615,6 @@ class ProductionHost:
         except PeerIdentityError as error:
             raise UpdateRefused("RELEASE_UNVERIFIED:" + str(error)) from None
         return observed.manifest_digest
-
-    def derive_capability_profile_digests(
-        self, release_sha: str, profile_ids: tuple[str, ...]
-    ) -> dict[str, str]:
-        """The exact capability-profile digests of the TARGET sealed release.
-
-        The registry inside the sealed target release is the only source of
-        the replacement digest. A hand-authored digest, a copied prior digest
-        or a hardcoded tool-schema digest is never accepted, and no new
-        principal realm or permission is created here.
-        """
-        from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
-        root = Path(installed._SERVICE_RELEASES) / release_sha
-        policy = root / "config" / "executive_claude_principal_capabilities.json"
-        try:
-            budget = self._budget()
-            before = installed._observe_ancestors(str(policy), budget)
-            registry = ExecutionCapabilityRegistry.load(policy, source_root=root)
-            after = installed._observe_ancestors(str(policy), budget)
-        except Exception as error:
-            raise UpdateRefused(
-                "CAPABILITY_PROFILE_UNAVAILABLE:" + type(error).__name__.upper()) from None
-        if before != after:
-            raise UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE:ANCESTORS_CHANGED")
-        digests: dict[str, str] = {}
-        for profile_id in profile_ids:
-            profile = registry.profiles.get(profile_id)
-            if profile is None or not profile.enabled:
-                raise UpdateRefused("CAPABILITY_PROFILE_UNAVAILABLE")
-            digests[profile_id] = profile.profile_digest
-        return digests
 
     def verify_closure(self) -> str:
         try:
@@ -1215,15 +892,6 @@ _MARKER_KEYS = frozenset({
     "dispatched", "config_before_sha256", "config_after_sha256", "plist_before_sha256",
     "plist_after_sha256", "manifest_sha256", "closure_sha256", "started_at", "last_verify",
 })
-# The selected-child publication is OPTIONAL in the marker: a transaction
-# that carries none keeps the original marker shape byte for byte.
-#
-# The frozen capability-profile digest map is OPTIONAL for the same reason:
-# an AUTHENTIC OLD marker predates the map and is recovered with the legacy
-# no-rewrite compilation.  Every NEW transaction records the exact chosen
-# map, including ``{}`` where there is no mission to rewrite, so the
-# after-image of a recovery never depends on the CURRENT registry.
-_MARKER_OPTIONAL_KEYS = frozenset({"selected_child_target", "capability_profile_digests"})
 
 
 def _unknown(code: str) -> TransactionEffectUnknown:
@@ -1232,10 +900,7 @@ def _unknown(code: str) -> TransactionEffectUnknown:
 
 def _validate_marker(marker: Any) -> None:
     try:
-        require(isinstance(marker, dict), "marker shape")
-        keys = set(marker)
-        require(_MARKER_KEYS <= keys and keys <= (_MARKER_KEYS | _MARKER_OPTIONAL_KEYS),
-                "marker keys")
+        require(isinstance(marker, dict) and set(marker) == _MARKER_KEYS, "marker keys")
         require(marker["schema"] == MARKER_SCHEMA, "marker schema")
         for key in ("plan_sha256", "config_before_sha256", "config_after_sha256", "plist_before_sha256",
                     "plist_after_sha256", "manifest_sha256", "closure_sha256"):
@@ -1253,28 +918,7 @@ def _validate_marker(marker: Any) -> None:
                     < marker["dispatched"].index("recover_enable_done"), "marker recover order")
         require(type(marker["set_public_mcp_resource"]) is bool, "marker flag")
         require(isinstance(marker["last_verify"], list), "marker verify")
-        if "selected_child_target" in marker:
-            # The original captured publication, retained in the transaction
-            # so a reconciliation recovers THIS candidate and never a
-            # replacement input.
-            from control_plane.coo_principal_host import validate_selected_child_target
-            publication = marker["selected_child_target"]
-            if publication is not None:
-                validate_selected_child_target(publication)
-        if "capability_profile_digests" in marker:
-            # The FROZEN map of the original transaction: one lowercase64hex
-            # digest per preserved mission profile id.  A malformed entry, an
-            # extra entry or a missing entry is a malformed marker, never a
-            # partially rewritten candidate.
-            frozen = marker["capability_profile_digests"]
-            if type(frozen) is not dict:
-                raise ValueError("marker capability profile map")
-            for key, value in frozen.items():
-                if type(key) is not str or not key:
-                    raise ValueError("marker capability profile key")
-                if type(value) is not str or HEX64.fullmatch(value) is None:
-                    raise ValueError("marker capability profile value")
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError):
         raise _unknown("MARKER_MALFORMED") from None
 
 
@@ -1599,7 +1243,7 @@ def _verify(host: Host, marker: dict, candidate: Candidate) -> dict:
 
 def _receipt(host: Host, marker: dict, candidate: Candidate, outcome: str, readback: dict,
              process: dict | None = None) -> dict:
-    receipt = {
+    return {
         "schema": RECEIPT_SCHEMA,
         "outcome": outcome,
         "release_sha": marker["release_sha"],
@@ -1618,117 +1262,32 @@ def _receipt(host: Host, marker: dict, candidate: Candidate, outcome: str, readb
         "before_images": [] if outcome == "ABORTED_UNCHANGED" else [_before_name(kind, _tag(marker)) for kind in KINDS],
         "recorded_at": host.now(),
     }
-    if candidate.selected_child_target is not None:
-        # The published publication's identity for the parent's readback.
-        receipt["selected_child_target"] = {
-            "work_ref": candidate.selected_child_target["work_ref"],
-            "root_job_id": candidate.selected_child_target["root_job_id"],
-            "material_digest": candidate.selected_child_target["material_digest"],
-        }
-    return receipt
 
 
-def selected_child_selector(input_path: str | None, input_sha256: str | None) -> tuple[str, str] | None:
-    """The PAIRED selected-child publication input, or NOTHING.
-
-    The two coordinates are ONE selection: the exact qualified input path
-    and the exact digest of its raw bytes. Both absent preserve the
-    existing source-only behaviour byte for byte; exactly one of them is a
-    refusal and is never treated as an absent selection.
-    """
-
-    if input_path is None and input_sha256 is None:
-        return None
-    if input_path is None or input_sha256 is None:
-        raise UpdateRefused("SELECTED_CHILD_INPUT_INCOMPLETE")
-    if type(input_path) is not str or not input_path:
-        raise UpdateRefused("SELECTED_CHILD_INPUT_PATH_INVALID")
-    if type(input_sha256) is not str or HEX64.fullmatch(input_sha256) is None:
-        raise UpdateRefused("SELECTED_CHILD_INPUT_DIGEST_INVALID")
-    return (input_path, input_sha256)
-
-
-def _selected_child_publication(host: Host, selector: tuple[str, str] | None) -> dict[str, Any] | None:
-    """Qualify the paired capture input with the closed publication validator."""
-
-    if selector is None:
-        return None
-    raw = host.read_selected_child_input(selector[0], selector[1])
-    document = _strict_json(raw, "MCP_COMPONENT_SELECTED_CHILD_MALFORMED")
-    if type(document) is not dict:
-        raise UpdateRefused("SELECTED_CHILD_INPUT_INVALID")
-    from control_plane.coo_principal_host import validate_selected_child_target
-    try:
-        return validate_selected_child_target(document)
-    except (ValueError, TypeError, KeyError):
-        raise UpdateRefused("SELECTED_CHILD_INPUT_INVALID") from None
-
-
-def _mission_capability_profile_digests(
-    host: Host, release_sha: str, config: bytes
-) -> dict[str, str]:
-    """The target release's exact digests for the installed missions' profiles.
-
-    Derived from the sealed target release registry. An installation without
-    COO missions has no profile to re-derive and the source-only behaviour is
-    preserved byte for byte.
-    """
-
-    try:
-        document = _strict_json(config, "MCP_COMPONENT_CONFIG_MALFORMED")
-    except ValueError:
-        # An unreadable prior document is the candidate compiler's refusal,
-        # not a second trust decision here.
-        return {}
-    if not isinstance(document, dict):
-        return {}
-    block = document.get("coo")
-    missions = block.get("missions") if isinstance(block, dict) else None
-    if not isinstance(missions, list):
-        return {}
-    profile_ids = {row.get("capability_profile_id") for row in missions
-                    if isinstance(row, dict) and type(row.get("capability_profile_id")) is str}
-    if not profile_ids:
-        return {}
-    return host.derive_capability_profile_digests(release_sha, tuple(sorted(profile_ids)))
-
-
-def build_plan(host: Host, release_sha: str, set_public: bool,
-               selector: tuple[str, str] | None = None) -> tuple[dict, Candidate]:
-    publication = _selected_child_publication(host, selector)
-    prior = host.read_config()
-    digests = _mission_capability_profile_digests(host, release_sha, prior)
-    candidate = compile_candidate(prior, host.read_plist(), release_sha=release_sha,
-                                  set_public_mcp_resource=set_public,
-                                  selected_child_target=publication,
-                                  capability_profile_digests=digests)
+def build_plan(host: Host, release_sha: str, set_public: bool) -> tuple[dict, Candidate]:
+    candidate = compile_candidate(host.read_config(), host.read_plist(), release_sha=release_sha,
+                                  set_public_mcp_resource=set_public)
     manifest = host.verify_release(release_sha)
     closure = host.verify_closure()
     return plan_document(candidate, manifest_sha256=manifest, closure_sha256=closure), candidate
 
 
-def plan(host: Host, *, release_sha: str, set_public: bool,
-         selected_child_input: str | None = None,
-         selected_child_sha256: str | None = None) -> dict:
+def plan(host: Host, *, release_sha: str, set_public: bool) -> dict:
     host.require_root()
     host.receipts_ready()
-    selector = selected_child_selector(selected_child_input, selected_child_sha256)
-    document, _ = build_plan(host, release_sha, set_public, selector)
+    document, _ = build_plan(host, release_sha, set_public)
     return {"ok": True, "outcome": "PLANNED", "plan": document, "plan_sha256": plan_digest(document),
             "warnings": list(WARNINGS)}
 
 
-def apply(host: Host, *, release_sha: str, set_public: bool, plan_sha256: str,
-          selected_child_input: str | None = None,
-          selected_child_sha256: str | None = None) -> dict:
+def apply(host: Host, *, release_sha: str, set_public: bool, plan_sha256: str) -> dict:
     host.require_root()
     host.receipts_ready()
-    selector = selected_child_selector(selected_child_input, selected_child_sha256)
     host.acquire_lock()
     try:
         if host.marker_read() is not None:
             raise UpdateRefused("TRANSACTION_PRESENT")
-        document, candidate = build_plan(host, release_sha, set_public, selector)
+        document, candidate = build_plan(host, release_sha, set_public)
         if plan_digest(document) != plan_sha256:
             raise UpdateRefused("PLAN_DIGEST_MISMATCH")
         tag = plan_sha256[:12]
@@ -1760,17 +1319,6 @@ def apply(host: Host, *, release_sha: str, set_public: bool, plan_sha256: str,
             "started_at": host.now(),
             "last_verify": [],
         }
-        if candidate.selected_child_target is not None:
-            # The ORIGINAL captured publication is retained in the
-            # transaction, so a reconciliation recovers THIS candidate and
-            # never reopens a replacement input.
-            marker["selected_child_target"] = copy.deepcopy(candidate.selected_child_target)
-        # EVERY new transaction records the exact chosen capability-profile
-        # map, including the empty map.  The recovery then reproduces THIS
-        # after-image from the frozen map and never from the CURRENT
-        # registry, so an authentic old transaction is never re-derived.
-        marker["capability_profile_digests"] = dict(
-            candidate.capability_profile_digests or {})
         host.marker_create(marker)
         try:
             host.preserve("config", tag, candidate.config_before)
@@ -1794,23 +1342,8 @@ def _candidate_from_marker(host: Host, marker: dict) -> Candidate:
             raise _unknown("BEFORE_IMAGE_MISSING")
         if digest(config) != marker["config_before_sha256"] or digest(plist) != marker["plist_before_sha256"]:
             raise _unknown("BEFORE_IMAGE_DRIFTED")
-        # The ORIGINAL captured publication comes from the transaction
-        # itself. A reconciliation never reopens an input, never recaptures
-        # and never reselects a child.
-        #
-        # The capability-profile transform is the FROZEN map of the original
-        # transaction.  The registry is NEVER reopened here: a new marker
-        # carries its own map, and an authentic OLD marker without the
-        # member is recovered with the legacy no-rewrite compilation, which
-        # reproduces the original after-image byte for byte.
-        if "capability_profile_digests" in marker:
-            frozen = dict(marker["capability_profile_digests"])
-        else:
-            frozen = None
         candidate = compile_candidate(config, plist, release_sha=marker["release_sha"],
-                                      set_public_mcp_resource=marker["set_public_mcp_resource"],
-                                      selected_child_target=marker.get("selected_child_target"),
-                                      capability_profile_digests=frozen)
+                                      set_public_mcp_resource=marker["set_public_mcp_resource"])
         if (candidate.config_after_sha256 != marker["config_after_sha256"]
                 or candidate.plist_after_sha256 != marker["plist_after_sha256"]):
             raise _unknown("AFTER_IMAGE_DRIFTED")
@@ -1849,466 +1382,17 @@ def reconcile(host: Host, *, release_sha: str) -> dict:
         host.release_lock()
 
 
-# --- the finite selected-child preparation entry -------------------------------
-#
-# One operator entry that makes the frozen selected-child publication
-# REACHABLE through the installed owner.  It qualifies the installed
-# source/config/principal association, issues EXACTLY ONE request through
-# the existing admitted App identity on the incumbent principal-facts
-# transport, and materializes the closed returned capture with the existing
-# exclusive root-owned 0600 input writer.
-#
-# It dispatches no Job, previews no CooCycle, opens no other Runtime,
-# creates no daemon and no auth store, and never recaptures an uncertain
-# answer.  The kernel peer check of the incumbent socket is untouched: only
-# an admitted peer is served, and a peer refusal is a refusal here too.
-
-PREPARATION_CAPTURE_DIR = installed._SERVICE_ROOT + "/captures"
-MAX_PREPARATION_CHILDREN = 16
-
-
-
-# A single, private, read-only child joins the installed App identity to the
-# existing FACT socket. It is neither an enrollment nor a second control plane.
-_PREPARATION_CHILD_VERB = "_capture-selected-child"
-_PREPARATION_CHILD_SCHEMA = "mastermind.selected_child_capture_process.v1"
-_PREPARATION_CHILD_CLEANUP_SECONDS = 1.0
-
-
-def _preparation_account(topology):
-    import grp
-    import pwd
-    account = pwd.getpwnam(topology.username)
-    group = grp.getgrnam(topology.group)
-    if (account.pw_uid != topology.service_uid or account.pw_uid == 0
-            or account.pw_gid != group.gr_gid or group.gr_gid == 0):
-        raise UpdateRefused("PREPARATION_APP_IDENTITY_UNAVAILABLE")
-    groups = tuple(sorted(set(os.getgrouplist(account.pw_name, account.pw_gid))))
-    if account.pw_gid not in groups or 0 in groups:
-        raise UpdateRefused("PREPARATION_APP_IDENTITY_UNAVAILABLE")
-    return account.pw_name, account.pw_uid, account.pw_gid, groups
-
-
-def _preparation_config(topology, budget):
-    before = installed._observe_ancestors(CONFIG_PATH, budget)
-    raw, info = installed._read_trusted_bytes(
-        CONFIG_PATH, budget=budget, maximum=MAX_CONFIG_BYTES,
-        expected_mode=topology.config_mode, expected_gid=topology.config_gid)
-    if installed._observe_ancestors(CONFIG_PATH, budget) != before:
-        raise UpdateRefused("PREPARATION_SOURCE_CHANGED")
-    return raw, installed._object_identity(info), before
-
-
-class _PreparationQualification:
-    def __init__(self):
-        endpoint = time.monotonic_ns() + int(installed._SERVICE_BUDGET_SECONDS * 1_000_000_000)
-        self.budget = installed._Budget(
-            installed._SERVICE_BUDGET_SECONDS, deadline_monotonic_ns=endpoint)
-        self.topology = installed._role_topology("gateway")
-        self.account = _preparation_account(self.topology)
-        self.config = _preparation_config(self.topology, self.budget)
-        document = _strict_json(self.config[0], "MCP_COMPONENT_CONFIG_MALFORMED")
-        self.release_sha = document.get("release_sha") if type(document) is dict else None
-        if type(self.release_sha) is not str or HEX40.fullmatch(self.release_sha) is None:
-            raise UpdateRefused("PREPARATION_CONFIG_INVALID")
-        self.root = Path(installed._SERVICE_RELEASES) / self.release_sha
-        self.helper = self.root / "ops/executive_os/mcp_component_update.py"
-        if _ROOT != self.root or os.path.abspath(__file__) != str(self.helper):
-            raise UpdateRefused("PREPARATION_HELPER_RELEASE_MISMATCH")
-        self.plist = installed._verify_role_plist(
-            self.topology, self.budget, expected_release=self.release_sha)
-        self.release = installed._verify_release(self.topology, self.release_sha, self.budget)
-        self.runtime = installed._verify_python_runtime(self.budget)
-        self.closure = installed._verify_network_closure(self.budget)
-        self.check()
-
-    def check(self):
-        self.budget.check()
-        if (_preparation_account(self.topology) != self.account
-                or _preparation_config(self.topology, self.budget) != self.config
-                or installed._verify_role_plist(
-                    self.topology, self.budget,
-                    expected_release=self.release_sha) != self.plist):
-            raise UpdateRefused("PREPARATION_SOURCE_CHANGED")
-        installed._recheck_release(self.release, self.budget)
-        installed._recheck_python_runtime(self.runtime, self.budget)
-        installed._recheck_network_closure(self.closure, self.budget)
-        # The potentially expensive inventories are bracketed by the original
-        # configuration, account and plist observations.
-        if (_preparation_account(self.topology) != self.account
-                or installed._verify_role_plist(
-                    self.topology, self.budget,
-                    expected_release=self.release_sha) != self.plist
-                or _preparation_config(self.topology, self.budget) != self.config):
-            raise UpdateRefused("PREPARATION_SOURCE_CHANGED")
-        self.budget.check()
-
-
-def _preparation_json(raw, maximum):
-    if type(raw) is not bytes or not 0 < len(raw) <= maximum:
-        raise UpdateRefused("PREPARATION_RESPONSE_INVALID")
-    try:
-        value = installed._load_strict_json(raw, code="PREPARATION_RESPONSE_INVALID")
-    except (PeerIdentityError, ValueError):
-        raise UpdateRefused("PREPARATION_RESPONSE_INVALID") from None
-    if type(value) is not dict or canonical(value) + b"\n" != raw:
-        raise UpdateRefused("PREPARATION_RESPONSE_INVALID")
-    return value
-
-
-def _exchange_preparation_child(process, packet, *, budget, maximum):
-    """Bound both pipes, EOF, exit and cleanup on the original held Popen."""
-    import selectors
-    reply = bytearray()
-    pending = memoryview(packet)
-    selector = None
-    try:
-        selector = selectors.DefaultSelector()
-        for pipe, event in ((process.stdin, selectors.EVENT_WRITE),
-                            (process.stdout, selectors.EVENT_READ)):
-            os.set_blocking(pipe.fileno(), False)
-            selector.register(pipe, event)
-        while selector.get_map():
-            remaining = budget.check() - _PREPARATION_CHILD_CLEANUP_SECONDS
-            if remaining <= 0:
-                raise UpdateRefused("PREPARATION_CHILD_TIMEOUT")
-            ready = selector.select(remaining)
-            if not ready:
-                raise UpdateRefused("PREPARATION_CHILD_TIMEOUT")
-            for key, _event in ready:
-                pipe = key.fileobj
-                try:
-                    if pipe is process.stdin:
-                        count = os.write(pipe.fileno(), pending[:16384])
-                        if count <= 0:
-                            raise UpdateRefused("PREPARATION_CHILD_INPUT_UNAVAILABLE")
-                        pending = pending[count:]
-                        if not pending:
-                            selector.unregister(pipe)
-                            pipe.close()
-                    else:
-                        block = os.read(pipe.fileno(), min(65536, maximum + 1 - len(reply)))
-                        if not block:
-                            selector.unregister(pipe)
-                            pipe.close()
-                        else:
-                            reply.extend(block)
-                            if len(reply) > maximum:
-                                raise UpdateRefused("PREPARATION_RESPONSE_INVALID")
-                except BlockingIOError:
-                    continue
-        remaining = budget.check() - _PREPARATION_CHILD_CLEANUP_SECONDS
-        if remaining <= 0:
-            raise UpdateRefused("PREPARATION_CHILD_TIMEOUT")
-        try:
-            returncode = process.wait(timeout=remaining)
-        except subprocess.TimeoutExpired:
-            raise UpdateRefused("PREPARATION_CHILD_TIMEOUT") from None
-        if returncode != 0:
-            raise UpdateRefused("PREPARATION_REQUEST_UNAVAILABLE")
-        return _preparation_json(bytes(reply), maximum)
-    finally:
-        cleanup_unproven = False
-        if selector is not None:
-            try:
-                selector.close()
-            except Exception:
-                cleanup_unproven = True
-        for pipe in (process.stdin, process.stdout):
-            try:
-                if pipe is not None and not pipe.closed:
-                    pipe.close()
-            except Exception:
-                cleanup_unproven = True
-        # A selector or pipe-close failure cannot bypass original-child cleanup.
-        try:
-            if process.poll() is None:
-                try:
-                    process.kill()
-                except OSError:
-                    cleanup_unproven = True
-                # Even a failed signal cannot skip the original wait/reap.
-                try:
-                    process.wait(timeout=max(0.0, budget.remaining()))
-                except (OSError, subprocess.TimeoutExpired):
-                    cleanup_unproven = True
-            if process.poll() is None:
-                cleanup_unproven = True
-        except (OSError, subprocess.TimeoutExpired):
-            cleanup_unproven = True
-        if cleanup_unproven:
-            raise UpdateRefused("PREPARATION_CHILD_CLEANUP_UNPROVEN") from None
-
-
-def _preparation_child_pipe(fd, *, budget, maximum=None, output=None):
-    """One finite stdin read or stdout write; no inherited file access."""
-    import selectors
-    original_blocking = os.get_blocking(fd)
-    selector = selectors.DefaultSelector()
-    data = bytearray()
-    pending = memoryview(output) if output is not None else None
-    try:
-        os.set_blocking(fd, False)
-        selector.register(fd, selectors.EVENT_WRITE if pending is not None else selectors.EVENT_READ)
-        while True:
-            if not selector.select(budget.check()):
-                raise UpdateRefused("PREPARATION_CHILD_TIMEOUT")
-            try:
-                if pending is not None:
-                    count = os.write(fd, pending[:16384])
-                    if count <= 0:
-                        raise UpdateRefused("PREPARATION_CHILD_OUTPUT_UNAVAILABLE")
-                    pending = pending[count:]
-                    if not pending:
-                        return None
-                else:
-                    block = os.read(fd, min(65536, maximum + 1 - len(data)))
-                    if not block:
-                        return bytes(data)
-                    data.extend(block)
-                    if len(data) > maximum:
-                        raise UpdateRefused("PREPARATION_RESPONSE_INVALID")
-            except BlockingIOError:
-                continue
-    finally:
-        selector.close()
-        os.set_blocking(fd, original_blocking)
-
-
-def _run_preparation_child():
-    from control_plane.coo_principal_host import FACT_SCHEMA, validate_facts_frame
-    from integrations.mastermind_workspace_app.contract import MAX_RESPONSE_BYTES
-    from integrations.mastermind_workspace_app.installed import CeoIngressWorkspaceClient
-    if sys.platform != "darwin":
-        raise UpdateRefused("PLATFORM_UNSUPPORTED")
-    topology = installed._role_topology("gateway")
-    account = _preparation_account(topology)
-    if (os.getuid() != account[1] or os.geteuid() != account[1]
-            or os.getgid() != account[2] or os.getegid() != account[2]
-            or tuple(sorted(set(os.getgroups()))) != account[3]):
-        raise UpdateRefused("PREPARATION_APP_IDENTITY_UNAVAILABLE")
-    startup_deadline = time.monotonic_ns() + int(installed._SERVICE_BUDGET_SECONDS * 1_000_000_000)
-    budget = installed._Budget(
-        installed._SERVICE_BUDGET_SECONDS, deadline_monotonic_ns=startup_deadline)
-    packet = _preparation_json(
-        _preparation_child_pipe(0, budget=budget, maximum=MAX_CONFIG_BYTES),
-        MAX_CONFIG_BYTES)
-    if (set(packet) != {"schema", "release_sha", "config_sha256", "deadline", "frame"}
-            or packet["schema"] != _PREPARATION_CHILD_SCHEMA
-            or type(packet["deadline"]) is not int or packet["deadline"] <= 0):
-        raise UpdateRefused("PREPARATION_CONFIG_INVALID")
-    budget = installed._Budget(
-        installed._SERVICE_BUDGET_SECONDS,
-        deadline_monotonic_ns=min(startup_deadline, packet["deadline"]))
-    original = _preparation_config(topology, budget)
-    document = _strict_json(original[0], "MCP_COMPONENT_CONFIG_MALFORMED")
-    validate_document(document)
-    release = document["release_sha"]
-    root = Path(installed._SERVICE_RELEASES) / release
-    if (packet["release_sha"] != release or _ROOT != root
-            or os.path.abspath(__file__) != str(root / "ops/executive_os/mcp_component_update.py")
-            or packet["config_sha256"] != hashlib.sha256(original[0]).hexdigest()):
-        raise UpdateRefused("PREPARATION_SOURCE_CHANGED")
-    frame = packet["frame"]
-    validate_facts_frame(frame)
-    if (frame.get("schema") != FACT_SCHEMA or frame.get("operation") != "mission"
-            or set(frame) != {"schema", "operation", "work_ref", "principal", "preparation"}
-            or frame["principal"] != _preparation_principal(document, frame["work_ref"])):
-        raise UpdateRefused("PREPARATION_SELECTOR_INVALID")
-    socket_path = document["ceo_ingress_socket_path"]
-    if type(socket_path) is not str or not socket_path.startswith("/"):
-        raise UpdateRefused("PREPARATION_CONFIG_INVALID")
-    timeout = min(10.0, budget.check())
-    if timeout < 0.1:
-        raise UpdateRefused("PREPARATION_CHILD_TIMEOUT")
-    response = asyncio.run(CeoIngressWorkspaceClient(
-        socket_path, timeout_seconds=timeout).request(frame))
-    if (_preparation_config(topology, budget) != original
-            or _preparation_account(topology) != account):
-        raise UpdateRefused("PREPARATION_SOURCE_CHANGED")
-    raw = canonical(response) + b"\n"
-    if len(raw) > MAX_RESPONSE_BYTES:
-        raise UpdateRefused("PREPARATION_RESPONSE_INVALID")
-    _preparation_child_pipe(1, budget=budget, output=raw)
-
-
-def preparation_destination(work_ref: str) -> str:
-    """The one installed destination of a preparation.
-
-    The destination is DERIVED from the work reference, never accepted from
-    the caller: no path, account, label or port is ever taken from the
-    command line.  It is deterministic, so a second preparation of the same
-    work scope finds the destination occupied and refuses.
-    """
-
-    name = "selected-child-target-" + hashlib.sha256(
-        work_ref.encode("utf-8")).hexdigest()[:16] + ".json"
-    return PREPARATION_CAPTURE_DIR + "/" + name
-
-
-def _preparation_principal(document: dict[str, Any], work_ref: str) -> dict[str, Any]:
-    """Select the exact enrolled v1/v2 binding owned by this mission."""
-    from integrations.business_mcp_auth.contracts import load_resource_policy
-    from integrations.mastermind_executive_app.coo_binding import coo_binding_records, _digest
-    block = document.get("coo")
-    missions = block.get("missions") if type(block) is dict else None
-    rows = [row for row in missions or []
-            if type(row) is dict and row.get("work_ref") == work_ref]
-    if len(rows) != 1 or rows[0].get("enabled") is not True:
-        raise UpdateRefused("PREPARATION_MISSION_UNAVAILABLE")
-    try:
-        records = coo_binding_records(block["binding"], load_resource_policy(block["policy"]))
-        matches = [record for record in records
-                   if _digest(record) == rows[0]["principal_binding_digest"]]
-    except (ValueError, TypeError, KeyError, AuthError):
-        raise UpdateRefused("PREPARATION_BINDING_UNAVAILABLE") from None
-    if len(matches) != 1:
-        raise UpdateRefused("PREPARATION_BINDING_UNAVAILABLE")
-    inner = matches[0]
-    return {key: inner[key] for key in (
-        "policy_id", "issuer_digest", "subject_digest", "client_ref", "resource", "scopes")}
-
-
-
-def prepare_selected_child(host: Host, *, work_ref: str, root_job_id: str,
-                           child_job_ids: list[str]) -> dict[str, Any]:
-    """One App-identity FACT capture, then one exclusive root-owned input."""
-    from common.executive_workspace_contract import _check_job_id, _check_work_ref
-    from control_plane.coo_principal_host import (
-        FACT_PREPARATION_SCHEMA, FACT_SCHEMA, build_selected_child_publication,
-        validate_facts_frame,
-    )
-    if (not _check_work_ref(work_ref) or not _check_job_id(root_job_id)
-            or type(child_job_ids) is not list
-            or not 1 <= len(child_job_ids) <= MAX_PREPARATION_CHILDREN
-            or any(type(item) is not str or not _check_job_id(item) for item in child_job_ids)
-            or len(set(child_job_ids)) != len(child_job_ids)):
-        raise UpdateRefused("PREPARATION_SELECTOR_INVALID")
-    host.require_root()
-    config_bytes = host.begin_selected_child_preparation()
-    document = _strict_json(config_bytes, "MCP_COMPONENT_CONFIG_MALFORMED")
-    try:
-        validate_document(document)
-    except (ValueError, TypeError, KeyError):
-        raise UpdateRefused("PREPARATION_CONFIG_INVALID") from None
-    principal = _preparation_principal(document, work_ref)
-    installed_source = host.installed_coo_source()
-    from copy import deepcopy
-    original = deepcopy(installed_source.for_principal(principal, work_ref))
-    row, _fact, _authority = original
-    if type(row) is not dict or row.get("enabled") is not True:
-        raise UpdateRefused("PREPARATION_MISSION_UNAVAILABLE")
-    destination = host.preparation_input_path(work_ref)
-    # An occupied original destination is a refusal before another capture.
-    host.preparation_destination_available(destination)
-    frame = {
-        "schema": FACT_SCHEMA, "operation": "mission", "work_ref": work_ref,
-        "principal": principal,
-        "preparation": {"schema": FACT_PREPARATION_SCHEMA,
-                        "root_job_id": root_job_id, "child_job_ids": list(child_job_ids)},
-    }
-    validate_facts_frame(frame)
-    try:
-        response = host.request_selected_child_capture(frame)
-    except UpdateRefused:
-        raise
-    except Exception:
-        raise UpdateRefused("PREPARATION_REQUEST_UNAVAILABLE") from None
-    if type(response) is not dict or response.get("ok") is not True:
-        error = response.get("error") if type(response) is dict else None
-        code = error.get("code") if type(error) is dict else None
-        if type(code) is str and re.fullmatch(r"[a-zA-Z0-9_]{1,80}", code):
-            raise UpdateRefused("PREPARATION_REQUEST_" + code.upper())
-        raise UpdateRefused("PREPARATION_REQUEST_REFUSED")
-    capture = response.get("result")
-    if (set(response) != {"ok", "result"} or type(capture) is not dict
-            or set(capture) != {"work_ref", "root_job_id", "children", "source"}
-            or capture["work_ref"] != work_ref or capture["root_job_id"] != root_job_id):
-        raise UpdateRefused("PREPARATION_RESPONSE_INVALID")
-    try:
-        publication = build_selected_child_publication(
-            work_ref=capture["work_ref"], root_job_id=capture["root_job_id"],
-            children=capture["children"], source=capture["source"])
-        if [child["job_id"] for child in publication["children"]] != child_job_ids:
-            raise ValueError("foreign or reordered selected child")
-    except (ValueError, TypeError, KeyError):
-        raise UpdateRefused("PREPARATION_RESPONSE_INVALID") from None
-    # Rejoin the same source, mission, registry and principal immediately before
-    # publication. No changed capture is retried or substituted.
-    try:
-        host.recheck_selected_child_preparation()
-        if (installed_source.for_principal(principal, work_ref) != original
-                or host.read_config() != config_bytes):
-            raise UpdateRefused("PREPARATION_SOURCE_CHANGED")
-    except UpdateRefused:
-        raise
-    except Exception:
-        raise UpdateRefused("PREPARATION_SOURCE_CHANGED") from None
-    try:
-        written = host.write_selected_child_input(publication, destination)
-        return {
-            "ok": True, "outcome": "PREPARED", "input_path": written["path"],
-            "sha256": written["sha256"],
-            "selected_child_target": {
-                "work_ref": publication["work_ref"], "root_job_id": publication["root_job_id"],
-                "material_digest": publication["material_digest"],
-            },
-        }
-    except Exception:
-        # Creation may have happened before a short write/fsync/readback error.
-        # Preserve and report the ORIGINAL path; never overwrite or recapture.
-        raise TransactionEffectUnknown("PREPARATION_INPUT_EFFECT_UNKNOWN:" + destination) from None
-
-
-
 # --- closed command line ---
 
 _VERBS: dict[str, dict[str, bool]] = {
-    "plan": {"--release-sha": True, "--set-public-mcp-resource": False,
-             "--selected-child-target-input": True, "--selected-child-target-sha256": True},
-    "apply": {"--release-sha": True, "--set-public-mcp-resource": False, "--plan-sha256": True,
-              "--selected-child-target-input": True, "--selected-child-target-sha256": True},
+    "plan": {"--release-sha": True, "--set-public-mcp-resource": False},
+    "apply": {"--release-sha": True, "--set-public-mcp-resource": False, "--plan-sha256": True},
     "reconcile": {"--release-sha": True},
 }
-
-#: The closed argv walk of the preparation entry.  Every flag is bounded and
-#: explicit; the child selector may repeat, every other flag may not.  No
-#: destination, path, account, label, port or release is ever accepted.
-_PREPARATION_FLAGS = ("--work-ref", "--root-job-id", "--child-job-id")
 
 
 class UsageError(ValueError):
     pass
-
-
-def parse_preparation_arguments(argv: list[str]) -> dict[str, Any]:
-    """The closed argv walk of the finite preparation entry."""
-
-    if not argv or argv[0] != "prepare-selected-child":
-        raise UsageError("verb")
-    values: dict[str, Any] = {"--work-ref": None, "--root-job-id": None,
-                               "--child-job-id": []}
-    index = 1
-    while index < len(argv):
-        flag = argv[index]
-        if flag not in _PREPARATION_FLAGS:
-            raise UsageError("flag")
-        index += 1
-        if index >= len(argv):
-            raise UsageError("value")
-        value = argv[index]
-        index += 1
-        if flag == "--child-job-id":
-            values[flag].append(value)
-        elif values[flag] is not None:
-            raise UsageError("flag")
-        else:
-            values[flag] = value
-    if values["--work-ref"] is None or values["--root-job-id"] is None:
-        raise UsageError("value")
-    if not values["--child-job-id"]:
-        raise UsageError("value")
-    return values
 
 
 def parse_arguments(argv: list[str]) -> tuple[str, dict[str, Any]]:
@@ -2337,21 +1421,6 @@ def parse_arguments(argv: list[str]) -> tuple[str, dict[str, Any]]:
         plan_value = values.get("--plan-sha256")
         if not isinstance(plan_value, str) or HEX64.fullmatch(plan_value) is None:
             raise UsageError("plan")
-    # The selected-child publication input is PAIRED: the exact qualified
-    # input path and the exact digest of its raw bytes are ONE selection.
-    # Both absent preserve the source-only behaviour; exactly one refuses.
-    has_input = "--selected-child-target-input" in values
-    has_digest = "--selected-child-target-sha256" in values
-    if has_input != has_digest:
-        raise UsageError("selected child target input")
-    if has_input:
-        path_value = values["--selected-child-target-input"]
-        digest_value = values["--selected-child-target-sha256"]
-        if (not isinstance(path_value, str) or not path_value.startswith("/")
-                or "\x00" in path_value or ".." in path_value.split("/")):
-            raise UsageError("selected child target input")
-        if not isinstance(digest_value, str) or HEX64.fullmatch(digest_value) is None:
-            raise UsageError("selected child target input")
     return verb, values
 
 
@@ -2362,63 +1431,20 @@ def _emit(document: dict) -> None:
 
 def main(argv: list[str] | None = None, host: Host | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments[:1] == [_PREPARATION_CHILD_VERB]:
-        if arguments != [_PREPARATION_CHILD_VERB] or host is not None:
-            return 64
-        try:
-            _run_preparation_child()
-        except Exception:
-            return 1
-        return 0
-    if arguments[:1] == ["prepare-selected-child"]:
-        try:
-            selection = parse_preparation_arguments(arguments)
-        except UsageError:
-            sys.stderr.write("usage: mcp_component_update.py prepare-selected-child "
-                             "--work-ref <work ref> --root-job-id <job id> "
-                             "--child-job-id <job id> [--child-job-id <job id> ...]\n")
-            return 64
-        host = host if host is not None else ProductionHost()
-        try:
-            result = prepare_selected_child(
-                host, work_ref=selection["--work-ref"],
-                root_job_id=selection["--root-job-id"],
-                child_job_ids=list(selection["--child-job-id"]))
-        except TransactionEffectUnknown as error:
-            _emit({"ok": False, "outcome": "EFFECT_UNKNOWN", "code": error.code,
-                   "note": "Preserve and inspect the original input path; no overwrite or automatic recapture."})
-            return 2
-        except UpdateRefused as error:
-            _emit({"ok": False, "outcome": "REFUSED", "code": error.code})
-            return 1
-        except Exception as error:
-            _emit({"ok": False, "outcome": "REFUSED",
-                   "code": "UNEXPECTED_" + type(error).__name__.upper()})
-            return 1
-        _emit(result)
-        return 0
     try:
         verb, values = parse_arguments(arguments)
     except UsageError:
         sys.stderr.write("usage: mcp_component_update.py plan|apply|reconcile --release-sha <40hex> "
-                         "[--set-public-mcp-resource] [--plan-sha256 <64hex>] "
-                         "[--selected-child-target-input <absolute path> "
-                         "--selected-child-target-sha256 <64hex>]\n")
+                         "[--set-public-mcp-resource] [--plan-sha256 <64hex>]\n")
         return 64
     host = host if host is not None else ProductionHost()
     release = values["--release-sha"]
     public = bool(values.get("--set-public-mcp-resource", False))
-    child_input = values.get("--selected-child-target-input")
-    child_digest = values.get("--selected-child-target-sha256")
     try:
         if verb == "plan":
-            result = plan(host, release_sha=release, set_public=public,
-                          selected_child_input=child_input,
-                          selected_child_sha256=child_digest)
+            result = plan(host, release_sha=release, set_public=public)
         elif verb == "apply":
-            result = apply(host, release_sha=release, set_public=public, plan_sha256=values["--plan-sha256"],
-                           selected_child_input=child_input,
-                           selected_child_sha256=child_digest)
+            result = apply(host, release_sha=release, set_public=public, plan_sha256=values["--plan-sha256"])
         else:
             result = reconcile(host, release_sha=release)
     except UpdateRefused as error:

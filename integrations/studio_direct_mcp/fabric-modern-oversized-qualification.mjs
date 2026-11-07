@@ -46,7 +46,7 @@ async function connect(){
 async function call(c,name,args){return unwrap(await c.callTool({name,arguments:args},undefined,{timeout:30000}));}
 try {
   gateway=await startPrivateGateway({host:'127.0.0.1',port:0,accountLabel:'synthetic-modern-paging',
-    modernFabricProtocol:true,fabricOnly:true,gitPublish:false,paperDesign:false,backendMode:'shared-account',
+    modernFabricProtocol:true,fabricOnly:true,backendMode:'shared-account',
     command:process.execPath,args:[backend],cwd:homedir(),requestTimeoutMs:30000,
     childEnv:{NODE_OPTIONS:'',MMX_FABRIC_ENGINE_ENTRY:engineEntry,
       MMX_FABRIC_SDK_PACKAGE:fileURLToPath(new URL('./package.json',import.meta.url)),

@@ -19,7 +19,6 @@
 
 import {
   useCallback,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -38,7 +37,6 @@ import type {
   ProjectFileSearchResult,
 } from './project-file-search';
 import './project-search.css';
-import type {createProjectConversationHistoryOwner} from '../conversations/project-conversation-history-owner';
 
 export type ProjectSearchLocale = 'en' | 'zh-CN';
 export type ProjectSearchTheme = 'dark' | 'light';
@@ -52,8 +50,6 @@ export interface ProjectSearchWorkspaceProps {
   locale?: ProjectSearchLocale;
   theme?: ProjectSearchTheme;
   sessionHistory?: SavedConversationSearchOwner;
-  /** Actual target-independent project READ owner; refresh is explicit only. */
-  savedHistory?: ReturnType<typeof createProjectConversationHistoryOwner>;
   projectFiles?: ProjectFileSearchOwner;
   onOpenSaved?: (match: SavedConversationMatch, page: SavedSourcePageWitness) => void;
   onOpenFile?: (match: ProjectFileMatch) => void;
@@ -332,7 +328,6 @@ interface Strings {
   partialNote: string;
   completeNote: string;
   noMatches: string;
-  noMatchesPartial: string;
   noPreview: string;
   openDisabled: string;
   invalidQuery: string;
@@ -377,7 +372,6 @@ const STRINGS: Record<ProjectSearchLocale, Strings> = {
     partialNote: 'Coverage is partial; further pages or entries may exist.',
     completeNote: 'No more results were reported for this search.',
     noMatches: 'No matches for this query.',
-    noMatchesPartial: 'No matches in the pages checked.',
     noPreview: 'Select Inspect on a result to read it here.',
     openDisabled: 'Open is not available for this match.',
     invalidQuery: 'Enter 2–128 characters without control characters.',
@@ -420,7 +414,6 @@ const STRINGS: Record<ProjectSearchLocale, Strings> = {
     partialNote: '覆盖不完整；可能存在更多页面或条目。',
     completeNote: '本次搜索未返回更多结果。',
     noMatches: '没有匹配的结果。',
-    noMatchesPartial: '已检查的页面中没有匹配结果。',
     noPreview: '在结果上选择“查看”后在此处阅读。',
     openDisabled: '此结果的打开操作不可用。',
     invalidQuery: '请输入 2–128 个字符，且不包含控制字符。',
@@ -470,8 +463,7 @@ export function ProjectSearchWorkspace(props: ProjectSearchWorkspaceProps) {
     hostGeneration,
     locale = 'en',
     theme = 'dark',
-    sessionHistory: legacySessionHistory,
-    savedHistory,
+    sessionHistory,
     projectFiles,
     onOpenSaved,
     onOpenFile,
@@ -479,10 +471,6 @@ export function ProjectSearchWorkspace(props: ProjectSearchWorkspaceProps) {
 
   const strings = STRINGS[locale === 'zh-CN' ? 'zh-CN' : 'en'];
 
-  const sessionHistory=savedHistory?.owner ?? legacySessionHistory;
-  const [,sourceChanged]=useState(0);
-  const [preparing,setPreparing]=useState(false);
-  useEffect(()=>savedHistory?.subscribe(()=>sourceChanged(value=>value+1)),[savedHistory]);
   const savedContext = readOwnerContext(sessionHistory);
   const filesContext = readOwnerContext(projectFiles,false);
 
@@ -530,11 +518,6 @@ export function ProjectSearchWorkspace(props: ProjectSearchWorkspaceProps) {
         {strings.title}
       </h1>
       <p className="project-search__scope">{strings.scopeNote}</p>
-      {savedHistory && <button type="button" disabled={!identityReady || preparing} onClick={()=>{
-        if(!identityReady || preparing)return;
-        setPreparing(true);
-        void savedHistory.refresh().catch(()=>{}).finally(()=>setPreparing(false));
-      }}>{preparing ? locale==='zh-CN'?'正在读取…':'Reading…' : locale==='zh-CN'?'读取已保存回复的搜索来源':'Read saved reply search source'}</button>}
       <ProjectSearchBody
         key={bodyKey}
         bodyKey={bodyKey}
@@ -862,13 +845,11 @@ function ProjectSearchBody(props: ProjectSearchBodyProps) {
   if (openBlocked) {
     statusParts.push(strings.openDisabled);
   } else if (notice) {
-    statusParts.push(notice === 'no-matches' && coverage?.status === 'PARTIAL'
-      ? strings.noMatchesPartial : noticeText(notice, strings));
+    statusParts.push(noticeText(notice, strings));
+  } else if (!loading && coverage && coverage.status === 'PARTIAL') {
+    statusParts.push(strings.partialNote);
   } else if (!loading && coverage && coverage.status === 'COMPLETE' && !nextPage) {
     statusParts.push(strings.completeNote);
-  }
-  if (!loading && !openBlocked && coverage?.status === 'PARTIAL' && (!notice || notice === 'no-matches')) {
-    statusParts.push(strings.partialNote);
   }
 
   return (
@@ -957,11 +938,11 @@ function ProjectSearchBody(props: ProjectSearchBodyProps) {
                         ? strings.savedReplyTitle
                         : row.file?.displayName ?? ''}
                     </p>
-                    {row.source === 'saved' ? (
-                      <p className="project-search__rowMeta">
-                        {row.saved?.reference.requested_at ?? ''}
-                      </p>
-                    ) : null}
+                    <p className="project-search__rowMeta">
+                      {row.source === 'saved'
+                        ? row.saved?.reference.requested_at ?? ''
+                        : row.file?.source.path ?? ''}
+                    </p>
                     <p className="project-search__rowExcerpt">{row.source === 'saved' ? row.saved?.excerpt : row.file?.excerpt}</p>
                     {row.source === 'saved' && row.saved ? (
                       <details className="project-search__details">
@@ -1028,7 +1009,7 @@ function ProjectSearchBody(props: ProjectSearchBodyProps) {
               );
             })}
           </ul>
-          {nextPage !== null && !atVisibleCap ? (
+          {nextPage !== null && !atVisibleCap && rows.length > 0 ? (
             <div className="project-search__pager">
               <button
                 type="button"

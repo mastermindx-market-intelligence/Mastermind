@@ -144,11 +144,9 @@ positive and `CONTENT_OVER_BUDGET` bodies are produced in attempt-owned
 directories and consumed as whole HTTP bytes. A present, empty, missing, or
 mismatched explicit directory is refused and is not replaced with the committed
 file. Mutations of a committed AVAILABLE body stay labeled synthetic. Native
-clients register `read_mission_result` through the fixed authenticated transport,
-with the same exact selector, bounded response and auth-generation checks as the
-mounted typed host. Hosts without `readMissionResult` retain the legacy Result
-card and Office does not claim a pair. A failed compound read does not call the
-standalone Result route. The App captures the mounted typed method and
+clients have no compound command; without `readMissionResult` the legacy Result
+card remains and Office does not claim a pair. A failed compound read does not
+call the standalone Result route. The App captures the mounted typed method and
 checks that same function again before the queued call and before publication.
 A superseded callback stays silent. A cancellation that still owns the ticket,
 including `READ_CANCELLED` after raw-method replacement or acquisition expiry,

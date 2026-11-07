@@ -49,34 +49,6 @@ class FabricTaskError(RuntimeError):
     pass
 
 
-# Closed diagnostics only: these labels grant no routing, retry or acceptance.
-# Never retain arbitrary picker text, provider output, paths or account detail.
-_REQUEST_REFUSAL_CODES = frozenset({
-    "NO_OPERATOR_AVAILABLE", "NO_POOL_AVAILABLE", "NO_ROUTE",
-    "ROUTE_INCOMPLETE", "REQUEST_ROUTING_RETURN_UNQUALIFIED",
-    "REQUEST_MAX_TURNS_INVALID", "REQUEST_MAX_TURNS_ROUTE_UNSUPPORTED",
-    "ECONOMIC_POLICY_REFUSED", "UNCLASSIFIED_PRELAUNCH_REFUSAL",
-})
-
-
-def _safe_request_refusal_code(exc: BaseException) -> str:
-    unknown = "UNCLASSIFIED_PRELAUNCH_REFUSAL"
-    if type(exc) is not FabricTaskError:
-        return unknown
-    args = exc.args
-    if not args or type(args[0]) is not str or len(args[0]) > 1024:
-        return unknown
-    message = args[0]
-    # The deadline-aware picker runs in an owned subprocess. It returns only
-    # this fixed no-operator marker; historical receipts omitted the cause.
-    if message == "NONE reason=no_operator_available":
-        return "NO_OPERATOR_AVAILABLE"
-    if message == "NONE reason=no_pool_available":
-        return "NO_POOL_AVAILABLE"
-    code = message.partition(":")[0]
-    return code if code in _REQUEST_REFUSAL_CODES else unknown
-
-
 def validate_run_id(value: object) -> str:
     token = str(value or "").strip()
     if not RUN_ID_RE.fullmatch(token):
@@ -738,7 +710,6 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
                 if row.get("schema") != "mastermind.fabric_request_artifact.v1" or row.get("run_id") != rid:
                     raise FabricTaskError("retained_request_invalid")
                 state = "REQUEST_RETAINED_NO_START_EVIDENCE"
-                refusal_diagnostic: dict[str, str] = {}
                 refused = retained.with_name(rid + ".request-refused.json")
                 launch = retained.with_name(rid + ".request-launch.json")
                 if refused.exists() and not (launch.exists() or launch.is_symlink()):
@@ -751,10 +722,6 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
                             or proof.get("launch_attempted") is not False):
                         raise FabricTaskError("retained_refusal_invalid")
                     state = "REQUEST_REFUSED_BEFORE_LAUNCH"
-                    code = proof.get("refusal_code")
-                    refusal_diagnostic["request_refusal_code"] = (
-                        code if type(code) is str and code in _REQUEST_REFUSAL_CODES
-                        else "UNCLASSIFIED_PRELAUNCH_REFUSAL")
                 return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
                     "state": state, "rc": None, "signal": None,
                     "result_available": False, "result_bytes": None,
@@ -762,7 +729,7 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
                     "request_root_id": row.get("root_id"), "request_parent_run_id": row.get("parent_run_id"),
                     "execution_absence_proven": state == "REQUEST_REFUSED_BEFORE_LAUNCH",
                     "background_execution": False, "request_retained": True,
-                    "same_run_replay_allowed": False, **refusal_diagnostic}
+                    "same_run_replay_allowed": False}
             except (OSError, ValueError, FabricTaskError, AttributeError):
                 return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
                     "state": "STATUS_UNREADABLE", "rc": None, "signal": None,
@@ -1426,7 +1393,6 @@ def request(
                     **({"selection_diagnostics": selection_diagnostics}
                        if selection_diagnostics is not None else {}),
                     "reason": "prelaunch_" + type(exc).__name__,
-                    "refusal_code": _safe_request_refusal_code(exc),
                     **({"eligible_at": exc.eligible_at} if hasattr(exc, "eligible_at") else {}),
                     "launch_attempted": False, "created_at": time.time(),
                 })
@@ -1698,9 +1664,7 @@ def main(argv: list[str] | None = None) -> int:
     p_request.add_argument("--class", dest="task_class", required=True)
     p_request.add_argument("--native-return", action="store_true", help="Subscribe this new paid child to the separately reviewed/trusted native Stop hook")
     p_request.add_argument("--artifact-output", action="append", help="Required new file basename; opts into verified artifact production")
-    # Resolve an implicit working directory on the receiving host.
-    # The receiving host still validates explicit --cwd values.
-    p_request.add_argument("--cwd", default="~")
+    p_request.add_argument("--cwd", default=os.getcwd())
     p_request.add_argument("--new-macro-worktree", metavar="COMMIT_SHA40",
                            help="Explicit new Macro sparse workspace at original run ID; never resume/reuse")
     p_request.add_argument("--cpu-scope-percent", type=int, choices=(100, 200, 400),

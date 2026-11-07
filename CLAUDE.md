@@ -11,25 +11,6 @@ source, test, and maintenance actions follow the current assignment and applicab
 under the Executive contract below. This distinction does not grant runtime, credential,
 trading, or source-write authority and never promotes research into trade execution.
 
-## Human-first product work
-
-For any user-facing design, mockup, build or review, read the existing shared content
-law `docs/DESIGN_DOCTRINE.md` and visual/composition law
-`research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md` in `mastermindx-market-intelligence/macro`.
-Pin that repository's accepted main revision separately from the Sol Skillpack; do not
-substitute an unmerged proposal, chat memory or a stale vendored copy. Use the target
-product's accepted shell and token implementation, not a parallel design system.
-
-Mastermind does the synthesis; the user receives the understanding. Apply a
-3–4-second orientation target, purposeful hierarchy, optional descriptions/subtext,
-preserved analytical depth, accessible disclosure and navigation/return continuity.
-Carry the reading contract into designer-to-builder handoffs and review it in the
-implemented journey. Rendering, design critique, observed human comprehension and real
-product acceptance are separate claims; missing human evidence is not yet tested.
-This applies beyond Paper and beyond Sector Intelligence. It changes no model route,
-source custody, trading authority, lifecycle or release gate. Independent permitted
-work can continue while an acceptance or source-access requirement is outstanding.
-
 ## Executive contract
 
 Binding on every worker session. Full text: `AGENTS.md` § "Executive contract" —
@@ -50,8 +31,7 @@ These role descriptions do not themselves grant authority.
 **Source-of-truth order** — higher layer wins on conflict:
 1. Charter — `research/MASTERMIND_CHARTER_V2.md` (P1–P10); `DOCTRINE.md` beneath it.
 2. Strategic state — `config/strategic_state.yml` (phase, north star, P0 objectives,
-   resource policy, core-product value/readiness model, descriptive phase gates,
-   review triggers, and standing constraints). Read via
+   resource policy, standing constraints). Read via
    `control_plane.strategic_state.load_strategic_state()`.
 3. Authority map — `config/authority_map.yml`.
 4. Your current assigned Job / Directive.
@@ -104,17 +84,6 @@ with source/effect checks, not an unreachable original parent as the sole actor.
 Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; this summary adds no
 runtime authority, required form, new watcher or extra human approval. Existing exact grants,
 source custody, effect reconciliation, review and release controls remain in force.
-
-**Source-authoring surfaces are alternatives, not sequential gates.** An assigned session
-with permitted GitHub-native tools can author/commit a scoped branch and create a PR
-without Studio Direct, a host worktree, `mmx-workspace`, or a separate publishing
-chat. Use exact repository/branch identity, file preimages or expected-head CAS,
-original-operation custody and truthful tests. Protected-source pinning governs
-procedure, not candidate checkout origin. For actual host-local edits retain the
-host-selected workspace launcher and its isolation rules. Never switch an explicitly
-denied/uncertain effect to another carrier; never push directly to protected
-`master`, self-approve, bypass CI/review/queue or infer installed adoption from
-this source rule. See `docs/DELIVERY_WORKFLOW.md`.
 
 ### Standing authorization: saved credentials for assigned website access
 
@@ -259,8 +228,7 @@ on real events, as normal Macro PRs: `DEC-*` for a choice with durable consequen
 `DSC-*` for a verified non-obvious fact (falsifier + so-what required), a handoff when
 claimed work transfers or pauses. Account-local chat memory is not company memory.
 Boundaries: knowledge plane, never a control plane (invariant I1) — it never gates
-execution, never ranks priorities (Strategic State owns the company portfolio and the
-Improvement Agenda ranks only portfolio/intelligence self-improvement candidates), and
+execution, never ranks priorities (strategic state + improvement agenda own that), and
 a `claim:` note is never liveness (`control_plane/` owns that). Decisions do not live in
 `governance.jsonl` — an `executive_decision` event cites the durable `DEC:<KEY>`. No
 second store or local mirror in this repo (Charter P7 / `duplicate_control_planes`).
@@ -268,14 +236,8 @@ Read bridge: `scripts/ceo_boot_packet.py` reads the brief one-way
 (`agentos.py brief --json --no-remember`); there is no write path back. Phase 2b
 reuses that resolver/collector to annotate `brain/improvement_agenda.py` only after
 ranking and only through explicit `{workstream, wave}` references. The Improvement
-Agenda remains the sole ranked queue for its portfolio/intelligence self-improvement
-domain, not the company-wide portfolio. The boot packet ignores legacy
-`brief.unblocked` for rendering and recommendations. New company work maps to an
-active Strategic State P0 or a mandatory safety/maintenance obligation by naming the
-concrete customer/machine capability it advances; a label-only relabel is not admission.
-Unstarted/draft work that no longer maps returns to portfolio review before expansion.
-Strategy changes do not silently cancel STARTed/effect-unknown work or seize source
-custody; reconcile/reclassify it at the next safe checkpoint.
+Agenda remains the sole priority queue; the boot packet ignores legacy
+`brief.unblocked` for rendering and recommendations.
 
 ## What you can see
 - `vendor/macro/` — the macro dashboard, vendored as a pinned submodule. The whole

@@ -117,8 +117,6 @@ class AppPolicies:
             raise ValueError(
                 f"submit policy must require exactly {expected_submit!r}"
             )
-        from integrations.mastermind_executive_app.installed_principal_read_pair import bind_installed_read_pair
-        object.__setattr__(self, "_installed_read_pair", bind_installed_read_pair(self))
 
 
 def load_app_policies(payload: Mapping[str, Any]) -> AppPolicies:
@@ -398,26 +396,6 @@ class CeoIngressClient:
         return await self._send_frame(socket_path, wire_frame, keep_write_open=True,
                                       foreground_source=source)
 
-    async def send_project_planning_frame(self,socket_path,frame):
-        from common.project_planning_private_contract import frame as validate
-        from integrations.session_bridge.http_foreground import current_request,HttpForegroundClosed
-        try:
-            frame=validate(frame)
-            source=current_request()
-        except (ValueError,HttpForegroundClosed):
-            return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project planning original foreground unavailable')
-        return await self._send_frame(socket_path,frame,keep_write_open=True,foreground_source=source)
-
-    async def send_project_execution_frame(self,socket_path,frame):
-        from common.project_execution_private_contract import frame as validate
-        from integrations.session_bridge.http_foreground import current_request,HttpForegroundClosed
-        try:
-            frame=validate(frame)
-            source=current_request()
-        except (ValueError,HttpForegroundClosed):
-            return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project execution original foreground unavailable')
-        return await self._send_frame(socket_path,frame,keep_write_open=True,foreground_source=source)
-
     async def _send_frame(
         self, socket_path: "Path | str", frame: Mapping[str, Any], *,
         keep_write_open: bool,
@@ -429,49 +407,11 @@ class CeoIngressClient:
         stream_limit = _STREAM_LIMIT
         principal_encoded = None
         direct_encoded = None
-        conversation_read_encoded = None
         from common.direct_native_result_contract import PRIVATE_SCHEMA as direct_schema, validate_private_frame
         from control_plane.direct_native_execution import SUBMIT_SCHEMA as direct_submit_schema
         direct_result_frame = isinstance(frame, Mapping) and frame.get("schema") == direct_schema
         direct_submit_frame = isinstance(frame, Mapping) and frame.get("schema") == direct_submit_schema
         direct_frame = direct_result_frame or direct_submit_frame
-        from common import project_planning_private_contract as planning_wire
-        planning_frame=isinstance(frame,Mapping) and frame.get('schema')==planning_wire.SCHEMA
-        from common import fresh_conversation_contract as fresh_wire
-        fresh_frame=isinstance(frame,Mapping) and frame.get("schema")==fresh_wire.SCHEMA
-        if fresh_frame:
-            try: frame=fresh_wire.validate_private_frame(dict(frame))
-            except (ValueError,TypeError):
-                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail="conversation frame invalid")
-        from common import project_conversation_read_contract as conversation_read_wire
-        conversation_read_frame = isinstance(frame, Mapping) and frame.get("schema") == conversation_read_wire.SCHEMA
-        if conversation_read_frame:
-            try:
-                frame = conversation_read_wire.frame(dict(frame))
-                conversation_read_encoded = conversation_read_wire.encode_frame(frame)[:-1]
-            except (ValueError, TypeError):
-                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
-                    detail="project conversation read frame invalid")
-            request_ceiling = conversation_read_wire.MAX_REQUEST_BYTES
-            response_ceiling = conversation_read_wire.MAX_RESPONSE_BYTES
-            stream_limit = response_ceiling + 4096
-        from common import project_execution_private_contract as execution_wire
-        execution_frame=isinstance(frame,Mapping) and frame.get('schema')==execution_wire.SCHEMA
-        if execution_frame:
-            try:frame=execution_wire.frame(dict(frame))
-            except (ValueError,TypeError):
-                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project execution frame invalid')
-            request_ceiling=execution_wire.MAX_BYTES
-            response_ceiling=execution_wire.MAX_BYTES
-            stream_limit=response_ceiling+4096
-        strict_response=direct_frame or planning_frame or execution_frame or fresh_frame or conversation_read_frame
-        if planning_frame:
-            try: frame=planning_wire.frame(dict(frame))
-            except (ValueError,TypeError):
-                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,detail='project planning frame invalid')
-            request_ceiling=planning_wire.MAX_BYTES
-            response_ceiling=planning_wire.MAX_BYTES
-            stream_limit=response_ceiling+4096
         if direct_result_frame:
             try:
                 frame = validate_private_frame(dict(frame))
@@ -543,9 +483,7 @@ class CeoIngressClient:
             response_ceiling = release_ingress.MAX_RESPONSE_BYTES
             stream_limit = response_ceiling + 4096
         try:
-            if conversation_read_encoded is not None:
-                encoded = conversation_read_encoded
-            elif principal_encoded is not None:
+            if principal_encoded is not None:
                 encoded = principal_encoded
             elif direct_encoded is not None:
                 encoded = direct_encoded
@@ -634,7 +572,7 @@ class CeoIngressClient:
                     transport=TRANSPORT_SENT_UNKNOWN, detail="response exceeded byte ceiling"
                 )
             try:
-                if strict_response:
+                if direct_frame:
                     def unique(pairs):
                         value = {}
                         for key, item in pairs:
@@ -660,7 +598,7 @@ class CeoIngressClient:
                     transport=TRANSPORT_SENT_UNKNOWN, detail="response was not valid JSON"
                 )
             except (ValueError, RecursionError):
-                if not strict_response:
+                if not direct_frame:
                     raise
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="direct-native response was invalid")
@@ -960,16 +898,9 @@ class CeoIngressReadGateway:
 
         if value is None:
             return True
-        legacy_keys = {
+        if type(value) is not dict or set(value) != {
             "schema", "company_phase", "north_star", "p0", "constraints"
-        }
-        extension_keys = {
-            "resource_policy", "core_product_value_model", "phase_gates",
-            "review_triggers",
-        }
-        if type(value) is not dict or set(value) not in (
-            legacy_keys, legacy_keys | extension_keys
-        ):
+        }:
             return False
         receipts = receipts or {}
         consumed = consumed if consumed is not None else set()
@@ -1022,7 +953,7 @@ class CeoIngressReadGateway:
         current_constraint_keys = set(strategic_state.REQUIRED_CONSTRAINTS) | {
             "unbounded_autonomous_strategic_modification"
         }
-        if not (
+        return (
             set(value["constraints"]) == current_constraint_keys
             and all(
                 type(name) is str
@@ -1031,80 +962,7 @@ class CeoIngressReadGateway:
                 and level
                 for name, level in value["constraints"].items()
             )
-        ):
-            return False
-        if set(value) == legacy_keys:
-            return True
-
-        # The v1 producer now includes the complete strategy review rubric.
-        # Keep its wire shape closed, then reuse the strategy owner's semantic
-        # validators after authenticating every bounded narrative leaf.
-        policy = value["resource_policy"]
-        model = value["core_product_value_model"]
-        gates = value["phase_gates"]
-        if (
-            type(policy) is not dict
-            or not policy
-            or any(type(name) is not str or not name.strip() for name in policy)
-            or any(type(weight) not in (int, float) for weight in policy.values())
-            or type(model) is not dict
-            or set(model) != {
-                "products", "dimensions", "evidence_rule", "production_readiness"
-            }
-            or type(model["products"]) is not list
-            or not model["products"]
-            or any(type(item) is not str or not item.strip() for item in model["products"])
-            or type(model["dimensions"]) is not dict
-            or not model["dimensions"]
-            or any(type(name) is not str or not name.strip() for name in model["dimensions"])
-            or any(type(weight) not in (int, float) for weight in model["dimensions"].values())
-            or type(gates) is not dict
-            or not gates
-        ):
-            return False
-        narratives = [
-            (model["evidence_rule"], "strategic_state.core_product_value_model.evidence_rule")
-        ]
-        lists = [
-            (model["production_readiness"], "strategic_state.core_product_value_model.production_readiness"),
-            (value["review_triggers"], "strategic_state.review_triggers"),
-        ]
-        for name, gate in gates.items():
-            if (
-                type(name) is not str
-                or re.fullmatch(r"[A-Z][A-Z0-9_]*", name) is None
-                or type(gate) is not dict
-                or set(gate) != {"purpose", "criteria", "on_pass"}
-            ):
-                return False
-            prefix = f"strategic_state.phase_gates.{name}"
-            narratives.extend((gate[field], f"{prefix}.{field}") for field in ("purpose", "on_pass"))
-            lists.append((gate["criteria"], f"{prefix}.criteria"))
-        for items, field in lists:
-            if type(items) is not list or not items:
-                return False
-            narratives.extend((item, f"{field}[{index}]") for index, item in enumerate(items))
-        if not all(
-            CeoIngressReadGateway._valid_bounded_text(
-                item, field=field, receipts=receipts, consumed=consumed,
-                allow_empty=False,
-            )
-            for item, field in narratives
-        ):
-            return False
-        projected = {
-            key: CeoIngressReadGateway._fabric_preview_projection(value[key])
-            for key in extension_keys
-        }
-        try:
-            where = Path("<executive strategic summary>")
-            strategic_state._validate_resource_policy(projected, where)
-            strategic_state._validate_core_product_value_model(projected, where)
-            strategic_state._validate_phase_gates(projected, where)
-            strategic_state._str_list(projected, "review_triggers", where)
-        except strategic_state.StrategicStateError:
-            return False
-        return True
+        )
 
     @staticmethod
     def _valid_runtime_counts(value: object) -> bool:

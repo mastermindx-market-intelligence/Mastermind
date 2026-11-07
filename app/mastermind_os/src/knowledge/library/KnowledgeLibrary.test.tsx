@@ -12,7 +12,7 @@
  */
 
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { KnowledgeLibrary } from './KnowledgeLibrary';
 import { sha256Hex } from './knowledge-library-contract';
 import type { KnowledgeLibraryProps } from './knowledge-library-contract';
@@ -492,71 +492,5 @@ describe('KnowledgeLibrary actions handoff', () => {
     await waitFor(() => expect(screen.getByText('Scope and sources for the market intelligence project.')).toBeTruthy());
     expect(readSource.mock.calls[0][0].sourceRef).toBe(FILE_REF);
     view.unmount();
-  });
-});
-
-describe('KnowledgeLibrary pending source navigation', () => {
-  it.each([
-    ['en', 'LIST'],
-    ['en', 'RECORDS'],
-    ['zh-CN', 'LIST'],
-    ['zh-CN', 'RECORDS'],
-  ] as const)('returns from a pending %s %s read without losing query or focus', async (locale, origin) => {
-    const pending = [deferred<unknown>(), deferred<unknown>()];
-    let readIndex = 0;
-    const readSource = vi.fn((_request: SourceRequest) => pending[readIndex++].promise);
-    await renderWithOwner({ readSource, locale });
-
-    const zh = locale === 'zh-CN';
-    if (origin === 'RECORDS') {
-      fireEvent.click(screen.getByRole('button', { name: zh ? '浏览全部记录' : 'Browse all records' }));
-    }
-    const query = document.getElementById(
-      origin === 'LIST' ? 'knowledge-library-files-query' : 'knowledge-library-records-query',
-    ) as HTMLInputElement;
-    const queryText = origin === 'LIST' ? 'brief' : 'workstream';
-    fireEvent.change(query, { target: { value: queryText } });
-    const open = screen.getByRole('button', { name: zh ? '打开' : 'Open' });
-    const loadingText = zh ? '正在加载…' : 'Loading…';
-    const backName = zh ? '返回' : 'Back';
-
-    const payload = sourcePayload({
-      title: 'Original brief', media_type: 'text/markdown',
-      content_utf8: SOURCE_TEXT, content_sha256: SOURCE_SHA,
-    });
-    if (origin === 'RECORDS') {
-      payload.selection.source_ref = RECORD_REF;
-      payload.source.path = 'agentos/workstreams/WS-2026-11-MARKET-INTELLIGENCE.md';
-      payload.source.revision = MEM_SOURCE_REV;
-    }
-
-    fireEvent.click(open);
-    expect(readSource).toHaveBeenCalledTimes(1);
-    expect(readSource.mock.calls[0][0].signal.aborted).toBe(false);
-    expect(screen.getByText(loadingText)).toBeTruthy();
-    expect(query.closest('[hidden]')).not.toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: backName }));
-    expect(readSource.mock.calls[0][0].signal.aborted).toBe(true);
-    await waitFor(() => expect(document.activeElement).toBe(open));
-    expect(query.closest('[hidden]')).toBeNull();
-    expect(query.value).toBe(queryText);
-    expect(screen.queryByText(loadingText)).toBeNull();
-
-    fireEvent.click(open);
-    expect(readSource).toHaveBeenCalledTimes(2);
-    expect(readSource.mock.calls[1][0].signal.aborted).toBe(false);
-    await act(async () => { pending[0].resolve(payload); });
-    expect(screen.getByText(loadingText)).toBeTruthy();
-    expect(screen.queryByText('Scope and sources for the market intelligence project.')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: backName }));
-    expect(readSource.mock.calls[1][0].signal.aborted).toBe(true);
-    await act(async () => { pending[1].resolve(payload); });
-    await waitFor(() => expect(document.activeElement).toBe(open));
-    expect(query.closest('[hidden]')).toBeNull();
-    expect(query.value).toBe(queryText);
-    expect(screen.queryByText('Scope and sources for the market intelligence project.')).toBeNull();
-    expect(screen.queryByText(loadingText)).toBeNull();
   });
 });

@@ -36,7 +36,6 @@ from types import MappingProxyType
 from abc import ABC, abstractmethod
 from collections.abc import Iterator as IteratorABC, Sequence as SequenceABC
 from contextlib import ExitStack, contextmanager
-from contextvars import ContextVar
 from datetime import datetime, timezone
 from enum import Enum
 import inspect
@@ -1387,35 +1386,6 @@ def _project_work_placement(
         projected["routing_reason_codes"] = reasons
 
     return projected
-
-
-def _assert_cycle_placement_compatible(
-    constraints: Mapping[str, Any], *, role: str,
-    requested_authorities: Sequence[str], allowed_write_paths: Sequence[str],
-    validation_commands: Sequence[Sequence[str]],
-) -> None:
-    """Pure route ceiling check; neither admission nor a Capacity grant.
-
-    Resolve the step's existing host placement before this check. Paid model
-    input is sealed text, and finite attended execution retains its original
-    request owner. Neither route can acquire code or test authority by carrying
-    a native parent's wider grant.
-    """
-    profile = constraints.get("execution_profile_id")
-    paid = "paid_execution_route" in constraints or profile == "fabric.paid.glm.sealed-input.v1"
-    attended = "attended_route" in constraints or profile == "fabric.attended.claude.bounded.v1"
-    authorities = set(requested_authorities)
-    if paid and (
-        attended or role not in {"work", "repair"}
-        or authorities not in ({"READ"}, {"READ", "RESEARCH"})
-        or allowed_write_paths or validation_commands
-    ):
-        raise StateConflict("paid placement requires a READ/RESEARCH work or repair step")
-    if attended and (
-        authorities != {"READ"} or allowed_write_paths or validation_commands
-    ):
-        raise StateConflict("attended placement requires an exact READ-only step")
-
 
 def _has_executive_provenance(
     provenance: dict[str, Any] | None, *, target: str
@@ -2801,17 +2771,6 @@ def _direct_native_provenance(connection, row, *, required=False):
     outer = created.get("provenance")
     value = outer.get("direct_native") if isinstance(outer,dict) else None
     keys = {"schema_version","principal_scope","receiver_binding_digest","authority_generation_digest","source","source_digest","binding"}
-    if type(value) is dict and (("project_planning" in value) != ("project_planning_sha256" in outer)):
-        raise StateConflict("project planning original-command provenance differs")
-    if type(value) is dict and "project_planning" in value:
-        from control_plane.project_planning_admission import normalize_context
-        planning = normalize_context(value["project_planning"])
-        if (planning["principal_scope"] != value.get("principal_scope")
-                or planning["work_ref"] != value.get("source", {}).get("work_ref")
-                or direct_native.digest(planning) != value.get("authority_generation_digest")
-                or direct_native.digest(planning) != outer.get("project_planning_sha256")):
-            raise StateConflict("project planning immutable provenance drifted")
-        keys.add("project_planning")
     if (type(value) is not dict or set(value) != keys or value["schema_version"] != direct_native.PROVENANCE_SCHEMA
             or row["parent_job_id"] is not None or row["root_job_id"] != row["job_id"]
             or row["orchestration_role"] is not None or row["attempt_limit"] != 1
@@ -11799,26 +11758,9 @@ def _assert_orchestration_lineage_for_create(
             raise StateConflict(
                 "active interactive plan lineage is not recognized"
             )
-    plan_mode = str(plan_attempt["execution_mode"] or AttemptExecutionMode.SEALED_WORKER.value)
-    if plan_mode == AttemptExecutionMode.SEALED_WORKER.value:
-        # Native sealed planners use the canonical collector/terminal owner,
-        # not the operator-harness event family. Never fall back after a
-        # native validation error or accept another/currently stale Attempt.
-        plan_job = connection.execute(
-            "SELECT * FROM jobs WHERE job_id=?", (plan_attempt["job_id"],)
-        ).fetchone()
-        completed_attempt, _plan_seal, _plan_terminal, sealed_plan_digest = (
-            _validated_role_completion_material(connection, job_row=plan_job,
-                expected_role="plan", root_job_id=str(parent_row["root_job_id"]))
-        )
-        if completed_attempt["attempt_id"] != plan_attempt_id:
-            raise StateConflict("native plan completion does not match its exact Attempt")
-    elif plan_mode == AttemptExecutionMode.OPERATOR_HARNESS.value:
-        _, sealed_plan_digest = _sealed_role_result(
-            connection, attempt_id=str(plan_attempt_id), expected_role="plan"
-        )
-    else:
-        raise StateConflict("plan lineage has an unsupported execution mode")
+    _, sealed_plan_digest = _sealed_role_result(
+        connection, attempt_id=str(plan_attempt_id), expected_role="plan"
+    )
     if sealed_plan_digest != plan_digest:
         raise StateConflict("plan digest does not match the sealed plan role result")
     if role in {"work", "aggregation"}:
@@ -12083,13 +12025,8 @@ def _validated_aggregation_terminal_payload(
 
 def _assert_orchestration_dispatch_eligible(
     connection: sqlite3.Connection, job_row: sqlite3.Row
-) -> Mapping[str, Any] | None:
-    """Re-prove the role-specific cycle phase before any capacity mutation.
-
-    Returns the currently admitted plan reservation for the roles that read
-    one, so a caller can re-prove a host-frozen selection against the same
-    transaction without re-reading the admission.
-    """
+) -> None:
+    """Re-prove the role-specific cycle phase before any capacity mutation."""
 
     role, provenance, _ = _decode_orchestration_job_fields(job_row)
     if role is None or provenance is None:
@@ -12172,7 +12109,7 @@ def _assert_orchestration_dispatch_eligible(
     if role in {"work", "repair"}:
         if current is None or current["current_job_id"] != job_row["job_id"]:
             raise StateConflict("dispatch target is not the current admitted revision")
-        return admission
+        return
     if role == "review":
         if (
             current is None
@@ -12180,7 +12117,7 @@ def _assert_orchestration_dispatch_eligible(
             or job_row["reviews_job_id"] != current["current_job_id"]
         ):
             raise StateConflict("review dispatch target is not current/admitted")
-        return admission
+        return
     raise StateConflict("orchestration dispatch role is invalid")
 
 
@@ -12671,9 +12608,8 @@ def _insert_cycle_child(
     constraints = _normalise_constraints(
         constraints, host_admitted_placement_union=role == "aggregation"
     )
-    _assert_cycle_placement_compatible(constraints, role=role,
-        requested_authorities=requested_authorities, allowed_write_paths=allowed_write_paths,
-        validation_commands=validation_commands)
+    if role == "aggregation" and constraints.get("execution_profile_id") == "fabric.paid.glm.sealed-input.v1":
+        raise StateConflict("paid model-only profile cannot become a coordinator")
     numbers = [
         int(match.group(1))
         for row in connection.execute("SELECT job_id FROM jobs")
@@ -13999,8 +13935,6 @@ class JobRegistry:
         spec: _JobCreationSpec,
         _c2_capability: object | None = None,
         _instruction_source: object | None = None,
-        _fresh_conversation_source: object | None = None,
-        _project_execution_source: object | None = None,
     ) -> Job:
         """Own the existing Job insert plus immutable creation receipt.
 
@@ -14080,51 +14014,6 @@ class JobRegistry:
         # Only the private nominal capture may label a NEW instruction root.
         # Public provenance and private carrier inputs cannot manufacture it.
         provenance = spec.event_provenance
-        from control_plane.fresh_conversation_admission import FreshConversationCreationSource, TASK_KIND
-        fresh_fields = (isinstance(provenance, Mapping) and any(key in provenance
-            for key in ("fresh_conversation", "fresh_conversation_digest"))) or spec.constraints.get("task_kind") == TASK_KIND
-        if _fresh_conversation_source is not None or fresh_fields:
-            if (type(_fresh_conversation_source) is not FreshConversationCreationSource
-                    or _instruction_source is not None or _c2_capability is not None
-                    or spec.parent_job_id is not None or spec.orchestration_role != "aggregation"
-                    or not fresh_fields):
-                raise StateConflict("FRESH_CONVERSATION_SOURCE_REQUIRED")
-            fresh_material = _fresh_conversation_source.material()
-            if (provenance.get("fresh_conversation") != fresh_material
-                    or provenance.get("fresh_conversation_digest") != orchestration_digest(fresh_material)
-                    or provenance.get("workstream") != fresh_material["work_ref"]
-                    or provenance.get("fingerprint") != fresh_material["intent_fingerprint"]
-                    or spec.command_id != fresh_material["command_id"] or spec.attempt_limit != 1):
-                raise StateConflict("FRESH_CONVERSATION_SOURCE_MISMATCH")
-            _fresh_conversation_source.check()
-            # Existing normalized scalar, privately stamped in the SAME Job
-            # and immutable creation transaction. It is a denial, never a grant.
-            spec = dataclasses.replace(spec, constraints={**spec.constraints, "task_kind": TASK_KIND})
-        project_fields = isinstance(provenance, Mapping) and any(key in provenance
-            for key in ("project_execution", "project_execution_digest"))
-        if _project_execution_source is not None or project_fields:
-            from control_plane.project_execution_admission import ProjectExecutionSource
-            if (type(_project_execution_source) is not ProjectExecutionSource
-                    or _instruction_source is not None or _c2_capability is not None
-                    or _fresh_conversation_source is not None or spec.parent_job_id is not None
-                    or spec.orchestration_role != "aggregation" or not project_fields
-                    or provenance.get("schema") != "mastermind.ceo_intent.v2"
-                    or not isinstance(spec.orchestration_provenance_source, Mapping)
-                    or _orchestration_source_creator(spec.orchestration_provenance_source,
-                        role=spec.orchestration_role) != CEO_ORCHESTRATION_ROOT_CREATOR
-                    or spec.orchestration_provenance_source.get("source_id") != provenance.get("intent_id")
-                    or spec.orchestration_provenance_source.get("source_digest") != provenance.get("fingerprint")):
-                raise StateConflict("PROJECT_EXECUTION_SOURCE_REQUIRED")
-            project_material = _project_execution_source.material()
-            if (provenance.get("project_execution") != project_material
-                    or provenance.get("project_execution_digest") != orchestration_digest(project_material)
-                    or provenance.get("workstream") != project_material["work_ref"]
-                    or provenance.get("fingerprint") != project_material["intent_fingerprint"]
-                    or spec.command_id != project_material["command_id"]):
-                raise StateConflict("PROJECT_EXECUTION_SOURCE_MISMATCH")
-            _project_execution_source.check_fresh()
-            from control_plane.project_execution_admission import _check_parent_transaction
-            _check_parent_transaction(_project_execution_source, connection)
         instruction_fields = isinstance(provenance, Mapping) and any(key in provenance for key in ("instruction_source", "instruction_source_digest"))
         if _instruction_source is not None or instruction_fields:
             from control_plane.instruction_work_source import InstructionWorkSource
@@ -14296,18 +14185,6 @@ class JobRegistry:
             # from arbitrary historical provenance; no legacy Job is backfilled.
             event_payload["instruction_admission"] = {"schema": "mastermind.instruction_driven_root.v1",
                 "source": material, "source_digest": hashlib.sha256(instruction_canonical(material)).hexdigest()}
-        if _fresh_conversation_source is not None:
-            event_payload["fresh_conversation_admission"] = {
-                "schema": "mastermind.fresh_conversation_driven_root.v1", "task_kind": TASK_KIND,
-                "source": fresh_material, "source_digest": orchestration_digest(fresh_material)}
-            event_payload["fresh_conversation_original_request"] = {
-                "schema": "mastermind.fresh_conversation_original_request.v1",
-                "operation_key": _fresh_conversation_source.public_operation_key(),
-                "creation_digest": orchestration_digest(fresh_material)}
-        if _project_execution_source is not None:
-            event_payload["project_execution_admission"] = {
-                "schema": "mastermind.project_execution_driven_root.v1",
-                "source": project_material, "source_digest": orchestration_digest(project_material)}
         self.store.append_event(
             connection,
             aggregate_type="job",
@@ -14325,8 +14202,6 @@ class JobRegistry:
             raise PersistenceError("created Job disappeared inside its transaction")
         if _instruction_source is not None:
             _instruction_source.check()
-        if _fresh_conversation_source is not None:
-            _fresh_conversation_source.check()
         return _job_from_row(row)
 
     def create_v2_orchestration_root(
@@ -14341,8 +14216,6 @@ class JobRegistry:
         frontier_selection: Mapping[str, Any] | None = None,
         _instruction_source: object | None = None,
         _instruction_admission_guard: Callable[[], None] | None = None,
-        _fresh_conversation_source: object | None = None,
-        _project_execution_source: object | None = None,
     ) -> Job:
         """The sole strict v2 intent -> Phase 1F-C aggregation-root boundary.
 
@@ -14417,26 +14290,6 @@ class JobRegistry:
                 dialogue_source,
                 work_ref=work_ref,
             )
-        if _fresh_conversation_source is not None:
-            from control_plane.fresh_conversation_admission import FreshConversationCreationSource
-            if type(_fresh_conversation_source) is not FreshConversationCreationSource or _instruction_source is not None:
-                raise StateConflict("FRESH_CONVERSATION_SOURCE_REQUIRED")
-            _fresh_conversation_source.check_intent(normalized)
-            material = _fresh_conversation_source.material()
-            if orchestration_digest(dialogue_source) != material["dialogue_source_sha256"]:
-                raise StateConflict("FRESH_CONVERSATION_SOURCE_MISMATCH")
-            provenance.update(fresh_conversation=material, fresh_conversation_digest=orchestration_digest(material))
-        if _project_execution_source is not None:
-            from control_plane.project_execution_admission import ProjectExecutionSource
-            if (type(_project_execution_source) is not ProjectExecutionSource
-                    or _instruction_source is not None or _fresh_conversation_source is not None):
-                raise StateConflict("PROJECT_EXECUTION_SOURCE_REQUIRED")
-            _project_execution_source.check_intent(normalized)
-            material = _project_execution_source.material()
-            if (orchestration_digest(dialogue_source) != material["dialogue_source_sha256"]
-                    or orchestration_digest(execution_binding) != material["execution_binding_sha256"]):
-                raise StateConflict("PROJECT_EXECUTION_SOURCE_MISMATCH")
-            provenance.update(project_execution=material, project_execution_digest=orchestration_digest(material))
         return self.create_job(
             normalized["objective"],
             department=normalized["department"],
@@ -14462,10 +14315,6 @@ class JobRegistry:
                 "source_digest": fingerprint,
             },
             _v2_root_capability=_V2_ROOT_CREATION_CAPABILITY,
-            _fresh_conversation_source=_fresh_conversation_source,
-            _project_execution_source=_project_execution_source,
-            **({"_principal_commit_guard": _project_execution_source.check_fresh}
-               if _project_execution_source is not None else {}),
             **({"_instruction_source": _instruction_source,
                 "_principal_commit_guard": _instruction_admission_guard} if _instruction_source is not None else {}),
         )
@@ -14827,9 +14676,6 @@ class JobRegistry:
             raise StateConflict(
                 "interactive creation requires a strict v2 aggregation root"
             )
-        from control_plane.fresh_conversation_admission import require_original_creation_request
-        from control_plane.foreground_operation import _current_foreground_operation_or_none
-        require_original_creation_request(self.store, root, _current_foreground_operation_or_none())
         constraints = self._operator_child_constraints(root)
         native = (root.constraints.get("operator_harness_armed") is True
                   and root.constraints.get("operator_execution_profile_id")
@@ -15155,33 +15001,6 @@ class JobRegistry:
                     raise StateConflict(
                         "plan step validation IDs do not equal the reviewed root set"
                     )
-                if is_v5:
-                    # Validate the entire reserved plan, including deferred
-                    # dependencies, before creating any child or admission event.
-                    raw_constraints = _strict_canonical_json_loads(
-                        str(root["constraints_json"]), name="root constraints"
-                    )
-                    role = "aggregation" if step.get("delegation") else "work"
-                    projected = _normalise_constraints(raw_constraints,
-                        host_admitted_placement_union=role == "aggregation")
-                    projected["cost_class"] = str(step["cost_class"])
-                    if "placement" in step:
-                        projected = _project_work_placement(projected, raw_constraints,
-                            step["placement"], raw_root_constraints=raw_constraints,
-                            plan_schema_version=plan_body["schema_version"])
-                    projected = _normalise_constraints(projected,
-                        host_admitted_placement_union=role == "aggregation")
-                    _assert_cycle_placement_compatible(projected, role=role,
-                        requested_authorities=step["requested_authorities"],
-                        allowed_write_paths=step["allowed_write_paths"],
-                        validation_commands=root_validations if has_tests else [])
-                    _assert_child_does_not_widen_parent(root,
-                        requested=step["requested_authorities"],
-                        allowed_write_paths=step["allowed_write_paths"], constraints=projected)
-                    if (role == "work" and raw_constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY
-                            and (set(step["requested_authorities"]) - {"READ", "RESEARCH"}
-                                or step["allowed_write_paths"] or has_tests)):
-                        raise StateConflict("isolated analysis child admits READ/RESEARCH only")
                 member_command = f"{command_id}:member:{ordinal}"
                 if is_v3:
                     reservation_steps.append(
@@ -16694,8 +16513,6 @@ class JobRegistry:
         _planner_plan_schema_version: str | None = None,
         _direct_native_admission: direct_native.DirectNativeAdmission | None = None,
         _instruction_source: object | None = None,
-        _fresh_conversation_source: object | None = None,
-        _project_execution_source: object | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -16711,16 +16528,6 @@ class JobRegistry:
         that must record who asked and on what grounding.  It changes no job
         column and confers no authority.
         """
-        project_fields = isinstance(provenance, Mapping) and any(key in provenance
-            for key in ("project_execution", "project_execution_digest"))
-        if _project_execution_source is not None or project_fields:
-            from control_plane.project_execution_admission import ProjectExecutionSource
-            if (type(_project_execution_source) is not ProjectExecutionSource or not project_fields
-                    or parent_job_id is not None or orchestration_role != "aggregation"
-                    or _v2_root_capability is not _V2_ROOT_CREATION_CAPABILITY
-                    or _instruction_source is not None or _fresh_conversation_source is not None
-                    or _direct_native_admission is not None or _principal_commit_guard is None):
-                raise StateConflict("PROJECT_EXECUTION_SOURCE_REQUIRED")
         instruction_fields = isinstance(provenance, Mapping) and any(key in provenance for key in ("instruction_source", "instruction_source_digest"))
         if instruction_fields:
             raise StateConflict("INSTRUCTION_ADMISSION_SOURCE_REQUIRED")
@@ -17264,8 +17071,6 @@ class JobRegistry:
                     planner_plan_schema_version=_planner_plan_schema_version,
                 ),
                 **({"_instruction_source": _instruction_source} if _instruction_source is not None else {}),
-                _fresh_conversation_source=_fresh_conversation_source,
-                _project_execution_source=_project_execution_source,
             )
             # Refusal rolls back both the Job and its JOB_CREATED event.
             recheck_principal()
@@ -17279,9 +17084,6 @@ class JobRegistry:
         intent=validate_intent(intent)
         if intent["schema"] != INTENT_SCHEMA_DIRECT or intent["workstream"] != admission.access.work_ref:
             raise StateConflict("direct intent and host source differ")
-        expected_planning = admission._project_planning
-        if intent.get("project_planning_sha256") != (None if expected_planning is None else direct_native.digest(expected_planning)):
-            raise StateConflict("project planning original-command fingerprint differs")
         root=Path(workspace_root)
         if not root.is_absolute() or root != root.resolve(strict=True):
             raise StateConflict("direct workspace root must be an existing canonical owner directory")
@@ -18136,156 +17938,6 @@ REMOTE_LAUNCH_IDENTITY_KEY = "remote_launch_identity"
 REMOTE_LAUNCH_IDENTITY_SCHEMA = "mastermind.remote_launch_identity/v1"
 
 
-@dataclasses.dataclass(frozen=True)
-class ExpectedChildSelection:
-    """One host-frozen selection, re-proved at the canonical claim boundary.
-
-    Every field is an exact coordinate. ``expected_current_attempt_id`` is
-    exact absence when it is ``None``; it never means "any current Attempt".
-    ``attempt_ordinal`` is the frozen Attempt ordinal the host selected, so
-    the dispatch command is derived once and never recomputed from a later
-    ``attempt_count``.
-    """
-
-    root_job_id: str
-    parent_job_id: str
-    job_id: str
-    plan_attempt_id: str
-    plan_digest: str
-    plan_step_id: str
-    repair_round: int
-    expected_current_attempt_id: str | None
-    attempt_ordinal: int
-    command_id: str
-
-
-# The canonical claim is reached through the incumbent supervisor, whose
-# signature is outside the selected-child change's grant. The binding is
-# task-scoped, matched by exact Job and command, and consumed by the claim
-# that owns it, so no other claim can observe or spend it.
-@dataclasses.dataclass(frozen=True)
-class _SelectedChildClaim:
-    selection: ExpectedChildSelection
-    admission_guard: Callable[[], None] | None = dataclasses.field(default=None, repr=False)
-
-
-_EXPECTED_CHILD_SELECTION: ContextVar[_SelectedChildClaim | None] = ContextVar(
-    "mastermind_expected_child_selection", default=None
-)
-
-
-@contextmanager
-def expected_child_selection(
-    expected: ExpectedChildSelection | None, *, admission_guard: Callable[[], None] | None = None,
-):
-    """Bind exact selection and private host guard to the incumbent claim task."""
-    if expected is not None and type(expected) is not ExpectedChildSelection:
-        raise StateConflict("selected child selection is not the host's frozen value")
-    if admission_guard is not None and (expected is None or not callable(admission_guard)):
-        raise StateConflict("selected child admission guard is unavailable")
-    bound = _EXPECTED_CHILD_SELECTION.get()
-    if bound is not None and (bound.selection != expected or bound.admission_guard is not admission_guard):
-        raise StateConflict("selected child claim binding cannot be replaced")
-    value = None if expected is None else _SelectedChildClaim(expected, admission_guard)
-    token = _EXPECTED_CHILD_SELECTION.set(value)
-    try:
-        yield expected
-    finally:
-        _EXPECTED_CHILD_SELECTION.reset(token)
-
-
-def current_expected_child_selection() -> ExpectedChildSelection | None:
-    """Return the selection bound to this task, if any."""
-    bound = _EXPECTED_CHILD_SELECTION.get()
-    return None if bound is None else bound.selection
-
-
-def _resolve_expected_child_selection(job_id, command_id, explicit):
-    bound = current_expected_child_selection()
-    for expected in (explicit, bound):
-        if expected is not None and (type(expected) is not ExpectedChildSelection
-                or expected.job_id != job_id or expected.command_id != command_id):
-            raise StateConflict("selected child selection does not name this claim")
-    if explicit is not None and bound is not None and explicit != bound:
-        raise StateConflict("selected child explicit and bound selections differ")
-    return explicit if explicit is not None else bound
-
-
-def _recheck_selected_child_admission(expected):
-    """Recheck the private synchronous guard inside the fresh claim transaction."""
-    bound = _EXPECTED_CHILD_SELECTION.get()
-    if bound is None:
-        return
-    if bound.selection != expected:
-        raise StateConflict("selected child claim binding changed")
-    guard = bound.admission_guard
-    if guard is None:
-        return
-    if (not callable(guard) or inspect.iscoroutinefunction(guard)
-            or inspect.iscoroutinefunction(getattr(guard, "__call__", None))):
-        raise StateConflict("selected child admission guard must be synchronous")
-    result = guard()
-    if inspect.isawaitable(result):
-        if inspect.iscoroutine(result):
-            result.close()
-        raise StateConflict("selected child admission guard refused")
-    if result is not None:
-        raise StateConflict("selected child admission guard refused")
-
-
-def _assert_expected_child_selection(
-    connection: sqlite3.Connection,
-    job_row: sqlite3.Row,
-    expected: ExpectedChildSelection,
-    *,
-    admission: Mapping[str, Any] | None,
-) -> None:
-    """Re-prove one host-frozen selection inside the canonical claim.
-
-    This runs in the same transaction that inserts the Attempt and flips the
-    Job, so there is no validate/release/lock gap between the host's frozen
-    selection and the claim that acts on it.
-    """
-
-    def refuse(reason: str) -> None:
-        raise StateConflict(f"selected child claim refused: {reason}")
-
-    if job_row["job_id"] != expected.job_id:
-        refuse("job identity drifted")
-    if job_row["parent_job_id"] != expected.parent_job_id:
-        refuse("parent identity drifted")
-    if job_row["root_job_id"] != expected.root_job_id:
-        refuse("root identity drifted")
-    if job_row["plan_attempt_id"] != expected.plan_attempt_id:
-        refuse("plan attempt drifted")
-    if job_row["plan_digest"] != expected.plan_digest:
-        refuse("plan digest drifted")
-    if job_row["plan_step_id"] != expected.plan_step_id:
-        refuse("plan step drifted")
-    if int(job_row["repair_round"]) != expected.repair_round:
-        refuse("repair round drifted")
-    if job_row["current_attempt_id"] != expected.expected_current_attempt_id:
-        refuse("current Attempt drifted")
-    attempt_count = int(job_row["attempt_count"])
-    if expected.attempt_ordinal != attempt_count + 1:
-        refuse("frozen ordinal is not the next Attempt")
-    scope_id = (
-        job_row["job_id"]
-        if job_row["orchestration_role"] == "aggregation"
-        else job_row["parent_job_id"]
-    )
-    if expected.command_id != (
-        f"coo-cycle:{scope_id}:dispatch:{job_row['job_id']}:attempt:"
-        f"{expected.attempt_ordinal}"
-    ):
-        refuse("command reference is not the deterministic dispatch command")
-    if admission is not None:
-        if admission.get("plan_attempt_id") != expected.plan_attempt_id:
-            refuse("admitted plan attempt drifted")
-        if admission.get("plan_digest") != expected.plan_digest:
-            refuse("admitted plan digest drifted")
-
-
 class AttemptRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
@@ -18335,11 +17987,6 @@ class AttemptRegistry:
         _initial_capacity_evidence: Mapping[str, Any] | None = None,
     ) -> AttemptLease | None:
         """Own the existing quota/Attempt/Job/claim mutation sequence."""
-        from control_plane.fresh_conversation_admission import require_initial_native_claim
-        def fresh_conversation_claim_guard():
-            require_initial_native_claim(self.store, root_job_id=job_row["root_job_id"],
-                role=orchestration_role, profile=constraints.get("execution_profile_id"))
-        fresh_conversation_claim_guard()
 
         self.store._assert_owned_snapshot_connection(connection)
         # A pause cannot revoke an already-issued lease. This gate is only on
@@ -18618,7 +18265,6 @@ class AttemptRegistry:
         ).fetchone()
         if attempt_row is None:  # pragma: no cover - same-transaction invariant
             raise PersistenceError("claimed Attempt disappeared inside its transaction")
-        fresh_conversation_claim_guard()
         return AttemptLease(
             attempt=_attempt_from_row(_direct_attempt_view(connection,attempt_row)),
             lease_token=lease_token,
@@ -18633,7 +18279,6 @@ class AttemptRegistry:
         lease_seconds: int | None = None,
         lease_owner: str = "local-supervisor",
         command_id: str | None = None,
-        expected_selection: ExpectedChildSelection | None = None,
         _coo_cycle_dispatch_capability: object | None = None,
         exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
         _initial_prepared: object | None = None,
@@ -18669,9 +18314,6 @@ class AttemptRegistry:
             worker_id, selected_quota = d["worker_id"], d["quota_class"]
             if command_id is None:
                 raise StateConflict("exact worker target requires command-bound child dispatch")
-        # Resolve both identity carriers before the original-command replay
-        # branch. A mismatched bound selection can never degrade to a generic claim.
-        expected = _resolve_expected_child_selection(job_id, command_id, expected_selection)
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
             direct_row=connection.execute("SELECT * FROM jobs WHERE job_id=?",(job_id,)).fetchone()
@@ -18752,9 +18394,6 @@ class AttemptRegistry:
                             str(replay_token) if replay_token is not None else None
                         ),
                     )
-            # Exact original replay above is read-only and does not reacquire
-            # current mandate authority or reapply pre-claim Attempt absence.
-            _recheck_selected_child_admission(expected)
             if _initial_prepared is not None:
                 from control_plane.finite_initial_admission import _activate
                 _activate(_initial_prepared, self.store, connection, job_id, command_id, worker_id, selected_quota)
@@ -18804,15 +18443,7 @@ class AttemptRegistry:
                         "orchestration Job attempt_limit exceeds policy"
                     )
                 quarantined_workers = _phase1fc_tx9_quarantined_workers(connection)
-                admission = _assert_orchestration_dispatch_eligible(
-                    connection, job_row
-                )
-                if expected is not None:
-                    # Re-prove the host's frozen selection in the same
-                    # transaction that inserts the Attempt and flips the Job.
-                    _assert_expected_child_selection(
-                        connection, job_row, expected, admission=admission
-                    )
+                _assert_orchestration_dispatch_eligible(connection, job_row)
                 if (
                     int(job_row["attempt_count"]) > 0
                     and job_row["current_attempt_id"] is None
@@ -19046,9 +18677,6 @@ class AttemptRegistry:
                 _direct_native_access.check()
             if _initial_prepared is not None and claimed is None:
                 raise StateConflict("finite initial common claim lost CAS")
-            # Revocation before COMMIT rolls back Attempt, Job and claim event
-            # together; no provider is started by this transaction.
-            _recheck_selected_child_admission(expected)
         return claimed
 
     def _validate_exact_target_launch(
@@ -19192,14 +18820,11 @@ class AttemptRegistry:
         quota_class: str | None = None,
         lease_seconds: int | None = None,
         lease_owner: str = "executive-coo-cycle",
-        expected_selection: ExpectedChildSelection | None = None,
         exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
         _initial_prepared: object | None = None,
     ) -> OrchestrationDispatchOutcome | None:
         """Claim exactly one persisted orchestration Job under one command."""
 
-        expected_selection = _resolve_expected_child_selection(
-            job_id, command_id, expected_selection)
         job = JobRegistry(self.store).get_job(job_id)
         if job is None:
             raise StateConflict(f"job {job_id!r} does not exist")
@@ -19223,7 +18848,6 @@ class AttemptRegistry:
             lease_seconds=lease_seconds,
             lease_owner=lease_owner,
             command_id=command_id,
-            expected_selection=expected_selection,
             _coo_cycle_dispatch_capability=_COO_CYCLE_DISPATCH_CAPABILITY,
             # Sealed owner-issued finite preparation only; claim_job verifies it.
             _initial_prepared=_initial_prepared,
@@ -26561,22 +26185,6 @@ class BoundedAdmittedPlanSnapshot:
 
 
 @dataclasses.dataclass(frozen=True)
-class BoundedSelectedChildCapture:
-    """One bounded selection that freezes a host's chosen children.
-
-    It carries the SAME canonical admitted plan the plan reader returns,
-    plus the exact frozen coordinates of the chosen children: their
-    ExecutiveChildSelection fields and the initial intended Attempt
-    ordinal. The ordinal is read ONCE here; it is never recomputed from a
-    later ``attempt_count`` and no replacement child is ever selected.
-    """
-
-    plan: BoundedAdmittedPlanSnapshot
-    children: tuple[dict[str, Any], ...]
-    observation_source_identity: str | None = None
-
-
-@dataclasses.dataclass(frozen=True)
 class BoundedProductAcceptanceSubject:
     """Current live programme scope and two canonical terminal results.
 
@@ -27254,15 +26862,8 @@ def _read_admitted_plan_bounded(
     vm_guard: _RuntimeReadProgressGuard,
     *,
     root_job_id: str,
-    child_job_ids: tuple[str, ...] | None = None,
-) -> BoundedAdmittedPlanSnapshot | BoundedSelectedChildCapture:
-    """Revalidate one exact admission with one shared loader and VM budget.
-
-    With ``child_job_ids`` the SAME selection also freezes the chosen
-    children: it reuses this loader, this VM budget and this one-selection
-    allowance, so the admitted plan and the chosen children are always one
-    coherent observation.
-    """
+) -> BoundedAdmittedPlanSnapshot:
+    """Revalidate one exact admission with one shared loader and VM budget."""
 
     root_token = _bounded_acquisition_identifier(root_job_id, name="root")
     acquisition._require_open()
@@ -27288,95 +26889,18 @@ def _read_admitted_plan_bounded(
         # Preserve canonical branch selection, uniqueness and all seal/grant/
         # policy checks. Active failure never falls back to completed history.
         admission, plan = _validated_plan_admission(loader, root_row)
-        snapshot = BoundedAdmittedPlanSnapshot(
+        return BoundedAdmittedPlanSnapshot(
             root_job_id=root_token,
             root_metadata=root_metadata,
             admission=json.loads(_json_dumps(admission)),
             plan=json.loads(_json_dumps(plan)),
         )
-        if child_job_ids is None:
-            return snapshot
-        children = _capture_selected_children(
-            loader, root_row, admission, plan, root_token, child_job_ids)
-        return BoundedSelectedChildCapture(plan=snapshot, children=children)
     except sqlite3.OperationalError as exc:
         if vm_guard.tripped:
             raise RuntimeRoleResultOverBudget() from exc
         raise
     finally:
         vm_guard.deactivate()
-
-
-def _capture_selected_children(
-    loader: _BoundedRoleResultLoader,
-    root_row: sqlite3.Row,
-    admission: dict[str, Any],
-    plan_body: dict[str, Any],
-    root_token: str,
-    child_job_ids: tuple[str, ...],
-) -> tuple[dict[str, Any], ...]:
-    """Freeze the exact chosen children from one admitted plan.
-
-    The current work-or-repair lineage is re-derived by the incumbent
-    dispatch-lineage owner, so a foreign, superseded or off-plan child is a
-    refusal. The Attempt ordinal is read ONCE, here, as the intended next
-    Attempt of this child; nothing else recomputes it.
-    """
-
-    if type(child_job_ids) is not tuple or not 1 <= len(child_job_ids) <= 16:
-        raise StateConflict("selected child capture set is not bounded")
-    chosen = _bounded_acquisition_identifiers(child_job_ids, name="child")
-    current = _current_orchestration_tree_material_for_dispatch(
-        loader, root_row, admission, plan_body)
-    by_step = {str(item["plan_step_id"]): item for item in current}
-    captured: list[dict[str, Any]] = []
-    for job_token in chosen:
-        row = loader.execute(
-            "SELECT * FROM jobs WHERE job_id=?", (job_token,)
-        ).fetchone()
-        if row is None:
-            raise StateConflict("selected child is not an admitted Job")
-        if (row["root_job_id"] != root_token or row["parent_job_id"] != root_token
-                or int(row["depth"]) != 1):
-            raise StateConflict("selected child is outside the chosen root")
-        if row["orchestration_role"] not in {"work", "repair"}:
-            raise StateConflict("selected child role is unsupported")
-        if (row["plan_attempt_id"] != admission["plan_attempt_id"]
-                or row["plan_digest"] != admission["plan_digest"]):
-            raise StateConflict("selected child is not on the admitted plan")
-        step_id = str(row["plan_step_id"])
-        step = by_step.get(step_id)
-        if step is None or step["current_job_id"] != job_token:
-            raise StateConflict("selected child is superseded")
-        repair_round = int(row["repair_round"])
-        if repair_round not in {0, 1, 2}:
-            raise StateConflict("selected child repair round is unsupported")
-        attempt_count = int(row["attempt_count"])
-        ordinal = attempt_count + 1
-        if ordinal < 1:
-            raise StateConflict("selected child Attempt ordinal is invalid")
-        current_attempt_id = row["current_attempt_id"]
-        if current_attempt_id is not None:
-            attempt = loader.execute(
-                "SELECT * FROM attempts WHERE attempt_id=?", (current_attempt_id,)
-            ).fetchone()
-            if (attempt is None or attempt["job_id"] != job_token
-                    or int(attempt["attempt_number"]) != attempt_count):
-                raise StateConflict("selected child current Attempt is unverified")
-        captured.append({
-            "command_id": (
-                f"coo-cycle:{root_token}:dispatch:{job_token}:attempt:{ordinal}"),
-            "attempt_ordinal": ordinal,
-            "root_job_id": root_token,
-            "parent_job_id": root_token,
-            "job_id": job_token,
-            "plan_attempt_id": admission["plan_attempt_id"],
-            "plan_digest": admission["plan_digest"],
-            "plan_step_id": step_id,
-            "repair_round": repair_round,
-            "expected_current_attempt_id": current_attempt_id,
-        })
-    return tuple(captured)
 
 
 # Retained OHF candidate reads reuse the EXISTING one-selection Runtime owner,
@@ -27579,16 +27103,11 @@ class BoundedRuntimeReadObservation:
     @staticmethod
     def _load_session_original_request_bounded(
         loader: _BoundedRoleResultLoader, read_ref: str,
-        original_principals: tuple[tuple[str, ...], ...] | None = None,
     ) -> tuple[Event, dict[str, Any]]:
         """Load one original request and root through the selection's loader."""
         from control_plane.native_continuation import (
             _ACTOR, _EVENT, _PREFIX, _READ, _SCHEMA, _continue_key,
             _digest, _request_key, _validate_payload,
-        )
-        from control_plane.native_continuation import (
-            HERMES_REQUEST_SCHEMAS, validate_hermes_continuation_request_event,
-            _hermes_root_event,
         )
 
         match = _READ.fullmatch(read_ref) if isinstance(read_ref, str) else None
@@ -27602,28 +27121,13 @@ class BoundedRuntimeReadObservation:
                 or event.aggregate_id != match[1]):
             raise RuntimeReadUnavailable("original request unavailable")
         value = event.payload
-        schema = value.get("schema") if type(value) is dict else None
-        if schema in HERMES_REQUEST_SCHEMAS:
-            # The native Secretary request has no Dialogue, Attempt or worker
-            # carrier. Its principal filter is required and is applied before
-            # any root read; the bounded UNIQUE root join is unchanged.
-            if original_principals is None:
-                raise RuntimeReadUnavailable("original request principal filter is required")
-            try:
-                value = validate_hermes_continuation_request_event(
-                    event, original_principals=original_principals)
-            except ValueError:
-                raise RuntimeReadUnavailable("original request binding changed") from None
-        else:
-            # The legacy continuation request keeps its own closed payload law
-            # and its own ValueError refusals.
-            _validate_payload(value)
-            if (value.get("schema") != _SCHEMA or value.get("read_ref") != read_ref
-                    or _request_key(value["operation_key"]) != match[1]
-                    or value["request_message_key"] != _continue_key(value["operation_key"])
-                    or (event.job_id, event.attempt_id, event.worker_id) != (
-                        value["job_id"], value["attempt_id"], value["worker_id"])):
-                raise RuntimeReadUnavailable("original request binding changed")
+        _validate_payload(value)
+        if (value.get("schema") != _SCHEMA or value.get("read_ref") != read_ref
+                or _request_key(value["operation_key"]) != match[1]
+                or value["request_message_key"] != _continue_key(value["operation_key"])
+                or (event.job_id, event.attempt_id, event.worker_id) != (
+                    value["job_id"], value["attempt_id"], value["worker_id"])):
+            raise RuntimeReadUnavailable("original request binding changed")
         metadata = loader.execute(
             "SELECT event_id,length(CAST(payload_json AS BLOB)) AS payload_bytes "
             "FROM events WHERE job_id=? AND event_type='JOB_CREATED' "
@@ -27636,8 +27140,6 @@ class BoundedRuntimeReadObservation:
         if root_row is None:
             raise RuntimeReadUnavailable("original root disappeared")
         root = _event_from_row(root_row)
-        if schema in HERMES_REQUEST_SCHEMAS:
-            _hermes_root_event(root, value["binding"])
         if (root.event_id != value["root_event_id"]
                 or _digest(root.to_dict()) != value["root_event_sha256"]):
             raise RuntimeReadUnavailable("original root changed")
@@ -27645,7 +27147,6 @@ class BoundedRuntimeReadObservation:
 
     def read_session_original_request_bounded(
         self, *, read_ref: str,
-        original_principals: tuple[tuple[str, ...], ...] | None = None,
     ) -> tuple[Event, dict[str, Any]]:
         """Select immutable reference provenance without COMMIT or live state.
 
@@ -27658,8 +27159,7 @@ class BoundedRuntimeReadObservation:
             loader = _BoundedRoleResultLoader(self._connection)
             self._vm_progress.activate()
             try:
-                return self._load_session_original_request_bounded(
-                    loader, read_ref, original_principals)
+                return self._load_session_original_request_bounded(loader, read_ref)
             except sqlite3.OperationalError as exc:
                 if self._vm_progress.tripped:
                     raise RuntimeReadUnavailable("original request VM budget exceeded") from exc
@@ -27672,7 +27172,6 @@ class BoundedRuntimeReadObservation:
 
     def read_session_reply_evidence_bounded(
         self, *, read_ref: str,
-        original_principals: tuple[tuple[str, ...], ...] | None = None,
     ) -> tuple[Event, dict[str, Any], tuple[Event, ...], Event | None, Event | None]:
         """Select complete immutable reply evidence on one bounded snapshot.
 
@@ -27685,15 +27184,10 @@ class BoundedRuntimeReadObservation:
         """
         self._select()
         try:
-            from control_plane.native_continuation import (
-                HERMES_REQUEST_SCHEMAS, hermes_continuation_commit_evidence,
-            )
-
             loader = _BoundedRoleResultLoader(self._connection)
             self._vm_progress.activate()
             try:
-                event, value = self._load_session_original_request_bounded(
-                    loader, read_ref, original_principals)
+                event, value = self._load_session_original_request_bounded(loader, read_ref)
                 # One bounded metadata row retains the complete ordered ID set
                 # without consuming 256 metadata rows and 256 full Event rows.
                 # Every selected metadata/full column shares this same loader.
@@ -27726,15 +27220,6 @@ class BoundedRuntimeReadObservation:
                     row = loader.execute("SELECT * FROM events WHERE command_id=?",
                                          (prefix + event.aggregate_id,)).fetchone()
                     indexed.append(None if row is None else _event_from_row(row))
-                if type(value) is dict and value.get("schema") in HERMES_REQUEST_SCHEMAS:
-                    # The native Secretary aggregate carries its own commit
-                    # fact; the pure helper proves the aggregate Event and the
-                    # independent global command index agree.
-                    try:
-                        indexed[0] = hermes_continuation_commit_evidence(
-                            event, events, indexed[0], indexed[1])
-                    except ValueError:
-                        raise RuntimeReadUnavailable("original aggregate changed") from None
                 return event, value, events, indexed[0], indexed[1]
             except sqlite3.OperationalError as exc:
                 if self._vm_progress.tripped:
@@ -27748,7 +27233,6 @@ class BoundedRuntimeReadObservation:
 
     def read_session_live_writer_bounded(
         self, *, read_ref: str,
-        original_principals: tuple[tuple[str, ...], ...] | None = None,
     ) -> tuple[
         Event, dict[str, Any], ActiveOperatorBindingFacts, Any,
         ExecutiveDialogueSource, tuple[Event, ...],
@@ -27777,19 +27261,11 @@ class BoundedRuntimeReadObservation:
                 _validate_current_target_worker_quota,
                 job_id_from_operation_key,
             )
-            from control_plane.native_continuation import HERMES_REQUEST_SCHEMAS
 
             loader = _BoundedRoleResultLoader(self._connection)
             self._vm_progress.activate()
             try:
-                event, value = self._load_session_original_request_bounded(
-                    loader, read_ref, original_principals)
-                if type(value) is dict and value.get("schema") in HERMES_REQUEST_SCHEMAS:
-                    # A native Secretary request has no Attempt, worker or
-                    # harness writer. Refuse before every live-writer query
-                    # instead of synthesizing a legacy writer tuple.
-                    raise RuntimeReadUnavailable(
-                        "native continuation has no legacy live writer")
+                event, value = self._load_session_original_request_bounded(loader, read_ref)
                 original_facts = _current_harness_binding_source_from_snapshot(
                     self._store, loader, value["attempt_id"])
 
@@ -27896,10 +27372,6 @@ class BoundedRuntimeReadObservation:
                 _ACTOR, _EVENT, _IDENTITY, _PREFIX, _TOKEN, _continue_key,
                 _digest, _request_key, _validate_payload,
             )
-            from control_plane.native_continuation import (
-                HERMES_REQUEST_SCHEMAS, validate_hermes_continuation_request,
-                validate_hermes_continuation_request_event, _hermes_root_event,
-            )
 
             if (type(work_ref) is not str or _TOKEN.fullmatch(work_ref) is None
                     or (root_job_id is not None and
@@ -27956,50 +27428,21 @@ class BoundedRuntimeReadObservation:
                         raise RuntimeReadUnavailable("original request disappeared")
                     event = _event_from_row(row)
                     value = event.payload
-                    schema = value.get("schema") if type(value) is dict else None
-                    if schema in HERMES_REQUEST_SCHEMAS:
-                        # The native Secretary request carries no Dialogue
-                        # context, Attempt or worker. Its own closed payload
-                        # law supplies the scope the filters below apply.
-                        try:
-                            value = validate_hermes_continuation_request(value)
-                        except ValueError:
-                            raise RuntimeReadUnavailable(
-                                "original request binding changed") from None
-                        if (event.event_type != _EVENT
-                                or event.aggregate_id != _request_key(value["operation_key"])
-                                or event.command_id != _PREFIX + _request_key(value["operation_key"])
-                                or event.job_id != value["root_job_id"]
-                                or event.attempt_id is not None
-                                or event.worker_id is not None):
-                            raise RuntimeReadUnavailable("original request binding changed")
-                        candidate_work_ref = value["work_ref"]
-                    else:
-                        # The legacy continuation request keeps its own closed
-                        # payload law and its own ValueError refusals.
-                        _validate_payload(value)
-                        if (event.event_type != _EVENT
-                                or value["read_ref"] != "session-reply-" + _request_key(value["operation_key"])
-                                or event.command_id != _PREFIX + _request_key(value["operation_key"])
-                                or event.aggregate_id != _request_key(value["operation_key"])
-                                or value["request_message_key"] != _continue_key(value["operation_key"])
-                                or (event.job_id, event.attempt_id, event.worker_id) !=
-                                (value["job_id"], value["attempt_id"], value["worker_id"])):
-                            raise RuntimeReadUnavailable("original request binding changed")
-                        candidate_work_ref = value["context"]["work_ref"]
-                    if (candidate_work_ref != work_ref
+                    _validate_payload(value)
+                    if (event.event_type != _EVENT
+                            or value["read_ref"] != "session-reply-" + _request_key(value["operation_key"])
+                            or event.command_id != _PREFIX + _request_key(value["operation_key"])
+                            or event.aggregate_id != _request_key(value["operation_key"])
+                            or value["request_message_key"] != _continue_key(value["operation_key"])
+                            or (event.job_id, event.attempt_id, event.worker_id) !=
+                            (value["job_id"], value["attempt_id"], value["worker_id"])):
+                        raise RuntimeReadUnavailable("original request binding changed")
+                    if (value["context"]["work_ref"] != work_ref
                             or (root_job_id is not None and value["root_job_id"] != root_job_id)
                             or tuple(value["principal"][key] for key in _IDENTITY)
                             not in original_principals):
                         continue
                     # Foreign work/principal scope never triggers a root read.
-                    if schema in HERMES_REQUEST_SCHEMAS:
-                        try:
-                            validate_hermes_continuation_request_event(
-                                event, original_principals=original_principals)
-                        except ValueError:
-                            raise RuntimeReadUnavailable(
-                                "original request binding changed") from None
                     metadata = loader.execute(
                         "SELECT event_id,length(CAST(payload_json AS BLOB)) AS payload_bytes "
                         "FROM events WHERE job_id=? AND event_type='JOB_CREATED' "
@@ -28012,8 +27455,6 @@ class BoundedRuntimeReadObservation:
                     if root_row is None:
                         raise RuntimeReadUnavailable("original root disappeared")
                     root = _event_from_row(root_row)
-                    if schema in HERMES_REQUEST_SCHEMAS:
-                        _hermes_root_event(root, value["binding"])
                     if (root.event_id != value["root_event_id"]
                             or _digest(root.to_dict()) != value["root_event_sha256"]):
                         raise RuntimeReadUnavailable("original root changed")
@@ -28131,23 +27572,6 @@ class BoundedRuntimeReadObservation:
                         if warning is not None or not isinstance(provenance, Mapping):
                             raise RuntimeReadUnavailable("root origin strict-v2 provenance unavailable")
                         kind = "STRICT_V2_CEO"
-                    elif isinstance(payload.get("provenance"), Mapping) and payload["provenance"].get("schema") == "mastermind.ceo_direct_native_intent.v1":
-                        # The existing direct-native owner qualifies immutable
-                        # Job/source/planning material, inside this SAME bounded
-                        # read connection. Never coerce it to legacy v1 or grant
-                        # execution/continuation from its metadata.
-                        statements += 2
-                        returned_rows += 2
-                        total_bytes += sum(lengths)
-                        if (statements > BOUNDED_ROOT_ORIGIN_MAX_STATEMENTS
-                                or returned_rows > BOUNDED_ROOT_ORIGIN_MAX_ROWS
-                                or total_bytes > BOUNDED_ROOT_ORIGIN_MAX_TOTAL_BYTES):
-                            raise RuntimeReadUnavailable("direct root origin budget exceeded")
-                        direct_row = self._connection.execute("SELECT * FROM jobs WHERE job_id=?", (job.job_id,)).fetchone()
-                        material = _direct_native_provenance(self._connection, direct_row, required=True)
-                        from control_plane.project_discovery_direct_origin import validate_direct_origin
-                        provenance = validate_direct_origin(job, event, material)
-                        kind = "DIRECT_NATIVE_CEO"
                     else:
                         from control_plane.runtime_root_origin import classify_legacy_root_creation
                         classified = classify_legacy_root_creation(job, event)
@@ -28181,29 +27605,6 @@ class BoundedRuntimeReadObservation:
         try:
             result = _read_admitted_plan_bounded(
                 self._acquisition, self._vm_progress, root_job_id=root_job_id
-            )
-            return dataclasses.replace(
-                result, observation_source_identity=self._identity
-            )
-        except BaseException:
-            self._failed = True
-            raise
-
-    def read_selected_child_target_bounded(
-        self, root_job_id: str, *, child_job_ids: tuple[str, ...]
-    ) -> BoundedSelectedChildCapture:
-        """Select the admitted plan AND the host's chosen children at once.
-
-        This is the ONE coherent observation a trusted host's capture needs:
-        the same one-selection allowance, the same fixed shared budgets and
-        the same close receipt as the admitted-plan reader. It dispatches no
-        Job, mutates no Runtime row and creates no request identity.
-        """
-        self._select()
-        try:
-            result = _read_admitted_plan_bounded(
-                self._acquisition, self._vm_progress, root_job_id=root_job_id,
-                child_job_ids=child_job_ids,
             )
             return dataclasses.replace(
                 result, observation_source_identity=self._identity

@@ -1182,10 +1182,6 @@ class FixedProjectGitPublisher:
         plan_adoption_permission_stamp: Optional[Callable[..., str]] = None,
         load_plan_adoption_operation: Optional[Callable[..., Any]] = None,
         validate_plan_adoption_claim: Optional[Callable[..., bool]] = None,
-        authorize_plan_proposal: Optional[Callable[..., bool]] = None,
-        plan_proposal_permission_stamp: Optional[Callable[..., str]] = None,
-        load_plan_proposal_operation: Optional[Callable[..., Any]] = None,
-        validate_plan_proposal_claim: Optional[Callable[..., bool]] = None,
         canonical_data_macro_root: Optional[str] = None,
         canonical_data_code_commit: Optional[str] = None,
         authorize_workspace_read: Optional[Callable[..., bool]] = None,
@@ -1237,9 +1233,6 @@ class FixedProjectGitPublisher:
         self._plan_adoption = PlanAdoptionGitMode(self,
             authorize=authorize_plan_adoption, stamp=plan_adoption_permission_stamp,
             load=load_plan_adoption_operation, claim=validate_plan_adoption_claim)
-        from control_plane.project_plan_proposal_git import PlanProposalGitMode
-        self._plan_proposal = PlanProposalGitMode(self, authorize=authorize_plan_proposal,
-            stamp=plan_proposal_permission_stamp, load=load_plan_proposal_operation, claim=validate_plan_proposal_claim)
         from control_plane.project_canonical_data import CanonicalProjectDataMode
         self._canonical_data = CanonicalProjectDataMode(self, pinned_macro_root=canonical_data_macro_root,
             code_commit=canonical_data_code_commit, authorize_read=authorize_workspace_read,
@@ -1300,12 +1293,6 @@ class FixedProjectGitPublisher:
 
     def observe_canonical_project_data(self, principal, *, work_ref=None):
         return self._canonical_data.observe(principal, work_ref=work_ref)
-
-    def publish_plan_proposal(self, request, recipe, principal, *, claim):
-        return self._plan_proposal.operate(request, recipe, principal, phase="PUBLICATION", claim=claim)
-
-    def reconcile_plan_proposal(self, lookup, principal):
-        return self._plan_proposal.operate(lookup, None, principal, phase="PUBLICATION", claim=None, reconcile=True)
 
     def publish_plan_adoption(self, request, recipe, principal, *, phase, claim):
         """Distinct ADOPT action over this same fixed Git/PR transport."""
@@ -1861,8 +1848,6 @@ class FixedProjectGitPublisher:
     def _authorize_and_stamp(self, principal: Any, op: Optional[_Operation] = None) -> str:
         if op is not None and op.mode == "canonical_data":
             return self._canonical_data.permission(principal, op)
-        if op is not None and op.mode == "plan_proposal":
-            return self._plan_proposal.permission(principal, op)
         if op is not None and op.mode == "plan_adoption":
             return self._plan_adoption.permission(principal, op)
         if op is not None and op.mode == "knowledge":
@@ -1904,8 +1889,6 @@ class FixedProjectGitPublisher:
                 raise _Refusal(STATE_NOT_DISPATCHED, "ORIGIN_MISMATCH")
             if self._remote_branch_commit(op, self._binding.default_branch) != op.expected_commit:
                 raise _Refusal(STATE_NOT_DISPATCHED, "STALE_EXPECTED_COMMIT")
-            if op.mode == "plan_proposal":
-                self._plan_proposal.prewrite(op)
             if op.mode == "plan_adoption":
                 self._plan_adoption.prewrite(op)
             if op.mode == "knowledge":

@@ -22,7 +22,7 @@ describe("observed transcript over the existing qualified window", () => {
     expect(container.querySelector(".conversation-answer")?.textContent).toBe(text);
     expect(container.querySelectorAll("script,iframe,img,a")).toHaveLength(0);
     expect(screen.queryByRole("button", { name: /send|stop/i })).toBeNull();
-    expect(screen.getByText("Only these supplied replies are searched.")).toBeTruthy();
+    expect(screen.getByText(/Full history is not established/)).toBeTruthy();
   });
   it.each([
     { kind: "withheld" as const, representation: "VISIBLE_TEXT" as const },

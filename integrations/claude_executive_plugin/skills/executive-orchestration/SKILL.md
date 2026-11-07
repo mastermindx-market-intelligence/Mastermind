@@ -22,15 +22,10 @@ executive_inbox
 executive_fabric
 submit_principal_intent
 principal_intent_status
-mmx_delegate
 ```
 
 Treat any missing/extra CEO-specific or ambient modifying surface as a capability/profile mismatch
 until the current owner requalifies it. Never call `submit_ceo_intent` from the COO seat.
-
-Use `mmx_delegate` only for the exact Executive child the authenticated host already froze, under
-its canonical command reference. It never selects, creates, reviews, consumes or cancels a child,
-and an unknown command is refused rather than reselected.
 
 The user-scope MCP registration named `mastermind-executive` is a separate transport/enrollment
 owner. This plugin does not create, register, authenticate, replace, repair or retry it. If it is

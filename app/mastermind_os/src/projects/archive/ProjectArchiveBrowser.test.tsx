@@ -105,26 +105,3 @@ it("masks accumulated pages when publication revision changes even with identica
   expect(props().archived).toEqual([]); expect(props().coverage).toBeNull();
   expect(read).toHaveBeenCalledTimes(1);
 });
-
-
-it("displays the separately acquired current catalogue without widening the C archive basis", async () => {
-  const source = programs(), open = vi.fn(), read = vi.fn(async () => body());
-  const current = { state: "AVAILABLE" as const, reason: "AVAILABLE", programs: [
-    { ...source.value!.programs[0], workRef: "WS:NEW-CURRENT-DATA", title: "Current DATA" },
-  ] };
-  let allowed = true;
-  const acquired = { value: current, current: () => allowed };
-  render(<ProjectArchiveBrowser scopeKey="workspace-one" programs={source} currentCatalogue={acquired}
-    read={read} sourceGeneration={() => 1} canRead={permitted} onOpenProject={open} />);
-  expect(props().projects.map(row => row.workRef)).toEqual(["WS:NEW-CURRENT-DATA"]);
-  expect(props().projects[0].archiveStatus).toBe("UNKNOWN");
-  act(() => props().onOpenProject?.("WS:NEW-CURRENT-DATA"));
-  expect(open).toHaveBeenCalledExactlyOnceWith("WS:NEW-CURRENT-DATA");
-  fireEvent.click(screen.getByText("Archive view"));
-  await waitFor(() => expect(props().status).toBe("ready"));
-  expect(props().archived.map(row => row.work_ref)).toEqual(fixture.sample.items.map(row => row.work_ref));
-  expect(read).toHaveBeenCalledTimes(1);
-  allowed = false;
-  act(() => props().onOpenProject?.("WS:NEW-CURRENT-DATA"));
-  expect(open).toHaveBeenCalledTimes(1);
-});

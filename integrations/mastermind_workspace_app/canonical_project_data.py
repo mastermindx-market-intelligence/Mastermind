@@ -45,7 +45,7 @@ class InstalledCanonicalProjectData:
             self.identity.binding,self.identity._path,self.identity._expected,
             json.dumps(self.identity._selection,sort_keys=True,separators=(',',':')),
             collector.read_project_knowledge_catalogue,collector.read_project_knowledge_memory,
-            collector.read_project_knowledge_source,collector.read_project_plan,collector.canonical_project_data_scope,collector._collect_packet,
+            collector.read_project_knowledge_source,collector.canonical_project_data_scope,collector._collect_packet,
             collector.canonical_project_compilation_scope,
             collector._source_root,collector._macro_root,collector._code_root,collector._python,
             collector._expected_source_sha,collector._allow_synthetic_fixture)
@@ -75,10 +75,7 @@ class InstalledCanonicalProjectData:
     def _read_stamp(self,principal):return self.read.binding_digest(self._frame(principal))
     def _latest_stamp(self,principal):return self.latest.binding_digest(self._frame(principal))
     def _can_read(self,principal):
-        # _frame already checks the actual current Runtime/principal/READ gate.
-        # Do not immediately reload that identical gate a second time; each
-        # callback still obtains its own fresh check and retains no grant truth.
-        try:self._frame(principal);return True
+        try:return self.read(self._frame(principal)) is True
         except (ValueError,PermissionError,TypeError):return False
     def _can_latest(self,principal):
         try:return self.latest(self._frame(principal)) is True
@@ -133,27 +130,6 @@ class InstalledCanonicalProjectData:
                         return False
             return self.identity.qualify(binding)
         except (ValueError,PermissionError):return False
-
-    def read_plan(self,principal_frame,*,operation,selection):
-        # This fixed READ entry shares the existing opaque installed DATA owner.
-        # Newly created projects are qualified by their actual publication Event,
-        # never by a browser WorkRef or an unchanged-DATA fallback.
-        if operation != 'project_plan':raise ValueError('CANONICAL_DATA_UNAVAILABLE')
-        from common.workspace_project_plan_contract import validate_selection, validate_body
-        selected=validate_selection(selection)
-        encoded=json.dumps(principal_frame,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
-        principal=_ReadPrincipal(self,encoded)
-        view=self.view(principal,work_ref=selected['work_ref'])
-        if view is None:return None
-        try:
-            with view.capture_scope():
-                with self.collector.canonical_project_data_scope(view,work_ref=selected['work_ref']):
-                    body=validate_body(self.collector.read_project_plan(**selected))
-                witness=view.witness()
-        finally:self.collector._discard_canonical_code_capture(view)
-        generation=hashlib.sha256(json.dumps({'code':view.code_commit,'data':view.data_commit,
-            'witness':witness},sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
-        return body,view,generation
 
     def read_knowledge(self,principal_frame,*,operation,selection):
         # This method is reached only through the installed lower binding and

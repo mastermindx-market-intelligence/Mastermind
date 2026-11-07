@@ -1,11 +1,11 @@
 import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {OperationController, type PendingPointerStore} from '../orchestration/operation-controller';
-import type {SourceOperationTransport,KnowledgeSourceLookup} from '../source-operations/transport';
+import type {SourceOperationTransport} from '../source-operations/transport';
 import type {SourceOperationContextSelection} from '../source-operations/context';
 import {bindProjectKnowledgeCommandOwner, createProjectKnowledgeCommandPort,
   prepareProjectKnowledgeWrite, type PreparedProjectKnowledgeWrite} from './library/project-knowledge-port';
 import type {ProjectFileAddRequest, ProjectPreferenceSetRequest, ProjectKnowledgeSourceContext} from './library/project-knowledge-requests';
-import {decodeProjectSourceOperationStatus, type ProjectSourceAction, type ProjectSourceStatus} from './library/project-source-operation';
+import type {ProjectSourceAction, ProjectSourceStatus} from './library/project-source-operation';
 import type {KnowledgeLibrarySourceOwner} from './library/knowledge-library-contract';
 import {sameKnowledgeCodeContext,type ProjectKnowledgeCodeContext} from './library/project-data-observation';
 import type {KnowledgeEditPhase} from './library/ProjectKnowledgeEditor';
@@ -174,33 +174,16 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
     const result=await controller.recover({reconcileSource:true});
     if(current()){if(result.status==='unknown' && result.pointer.kind!=='project_source_write')setPhase('publication-held');else repaint(n=>n+1);}
   }
-  // Read only the exact original safe lookup. A lost prepare does not own a
-  // durable submit pointer yet; inspection never prepares, reserves or sends it.
-  async function inspectOriginal(lookup:KnowledgeSourceLookup) {
-    const started=scope, signal=new AbortController().signal;
-    if (!current() || lookup.work_ref!==props.workRef || lookup.action!=='add_project_file') throw Error('SOURCE_CHANGED');
-    await readContexts(signal);
-    const selected=owner(), before=selected?.context(), transport=props.transport;
-    if (!before || !transport || !selected?.canInspect(lookup.action)) throw Error('PROJECT_KNOWLEDGE_UNAVAILABLE');
-    const value=decodeProjectSourceOperationStatus(await transport.readSourceOperation(lookup,signal),{
-      action:lookup.action,workRef:lookup.work_ref,requestId:lookup.request_id,
-      requestSha256:lookup.request_sha256,principalScope:before.principalScope});
-    const after=owner()?.context();
-    if (!current(started) || !after || after.principalScope!==before.principalScope || after.generation!==before.generation) throw Error('SOURCE_CHANGED');
-    lastStatus.current={scope:started,value};repaint(n=>n+1);
-    return value;
-  }
   const renderedPrepared=prepared.current?.scope===scope?prepared.current.value:null;
-  const methods=useRef({readActions,prepare,publish,checkOriginal,startDraft,inspectOriginal,
+  const methods=useRef({readActions,prepare,publish,checkOriginal,startDraft,
     currentSource:(snapshot:ProjectKnowledgeSourceContext)=>{if(!sourceCurrent(snapshot))throw Error('SOURCE_CHANGED');return {...snapshot};}});
-  methods.current={readActions,prepare,publish,checkOriginal,startDraft,inspectOriginal,
+  methods.current={readActions,prepare,publish,checkOriginal,startDraft,
     currentSource:(snapshot:ProjectKnowledgeSourceContext)=>{if(!sourceCurrent(snapshot))throw Error('SOURCE_CHANGED');return {...snapshot};}};
   // The editor captures callback identity at open. Locale, phase and unrelated
   // source updates must not replace those callbacks or discard the typed draft.
   const stable=useMemo(()=>({
     readActions:(...args:Parameters<typeof readActions>)=>live.current.scope===scope?methods.current.readActions(...args):Promise.reject(Error('SOURCE_CHANGED')),
     startDraft:()=>live.current.scope===scope && methods.current.startDraft(),
-    inspectOriginal:(lookup:KnowledgeSourceLookup)=>live.current.scope===scope?methods.current.inspectOriginal(lookup):Promise.reject(Error('SOURCE_CHANGED')),
     prepare:(request:Request)=>live.current.scope===scope?methods.current.prepare(request):Promise.resolve(),
     checkOriginal:()=>live.current.scope===scope?methods.current.checkOriginal():Promise.resolve(),
     currentSource:(snapshot:ProjectKnowledgeSourceContext)=>{if(live.current.scope!==scope)throw Error('SOURCE_CHANGED');return methods.current.currentSource(snapshot);},

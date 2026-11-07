@@ -35,8 +35,7 @@ const facade = createFabricFacade({ async callTool(request) {
 } });
 const server = new Server({ name: 'disposable-fabric-fixture', version: '0.0.0' }, { capabilities: { tools: {} } });
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools:
-  [...names, ...(process.env.FIXTURE_UNRELATED === 'true' ? ['start_process'] : []),
-    ...(process.env.FIXTURE_ORIGINAL_COLLISION === 'true' ? ['fabric_collect_original'] : [])]
+  [...names, ...(process.env.FIXTURE_UNRELATED === 'true' ? ['start_process'] : [])]
     .map(name => ({ name, inputSchema: { type: 'object' } })) }));
 server.setRequestHandler(CallToolRequestSchema, async request => {
   const name = request.params.name;

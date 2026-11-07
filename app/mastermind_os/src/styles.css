@@ -1076,19 +1076,16 @@ main .launch-orchestrator-composer .form-actions { justify-content: flex-end; ma
   flex-shrink: 0;
 }
 
-.sidebar-new-entry { display: grid; gap: 4px; min-width: 0; }
-.sidebar-new-entry-hint { margin: 0; padding-inline: var(--sp-3); color: var(--muted); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
-
 /* Keep the original controls reachable in a short mobile drawer. */
 @media (max-width: 959px) and (max-height: 700px) {
   .shell > aside[data-open="true"] {
     padding-block: 12px;
     gap: 8px;
   }
-  .nav-top { gap: 4px; }
-  .nav-top:has(.sidebar-new-entry-hint) .nav-section-label { display: none; }
-  .nav-bottom { gap: 8px; }
-  .mission-nav > .nav-section-label { display: none; }
+  .nav-top,
+  .nav-bottom {
+    gap: 8px;
+  }
   .nav-bottom .display-preferences {
     padding: 0;
     border: 0;

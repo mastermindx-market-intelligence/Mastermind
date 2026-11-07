@@ -65,7 +65,7 @@ def run(app,tok):
     return asyncio.run(request(app,headers=[(b'host',b'workspace.example'),(b'authorization',('Bearer '+tok).encode())]))
 
 def test_exact_three_upstream_files_are_unmodified():
-    expected={'contracts.py':'18aec7d9836f3dda0eb0fd96772dbf66cd59b8be','claims.py':'4ff0c70c0ee4633ec5b41ee6fba53c948cdcad5e','jwt_verifier.py':'32d72cb27d4fbacc6a19614679e4a33c13c205e7'}
+    expected={'contracts.py':'374e55b3f294885d637b1a1fa1e8be47c6aefeab','claims.py':'2f1aaf053a136629834cf66c11491b0a7194aee2','jwt_verifier.py':'32d72cb27d4fbacc6a19614679e4a33c13c205e7'}
     for name,want in expected.items():
         b=(ROOT/'integrations/business_mcp_auth'/name).read_bytes()
         assert hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()==want

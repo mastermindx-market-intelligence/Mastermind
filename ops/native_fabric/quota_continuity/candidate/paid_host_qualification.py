@@ -391,10 +391,10 @@ def build_paid_probe(value):
     entry = source.decode()+"\nif __name__=='__main__':\n    import base64,sys\n    try:sys.stdout.buffer.write(run_bootstrap(json.loads(base64.b64decode(sys.argv[1],validate=True)),base64.b64decode(sys.argv[2],validate=True).decode()))\n    except Exception:sys.exit(78)\n"
     if request['initializer_commitment']['initialization_contract']==_module.NESTED_CONTRACT:
         _module,sources=_initializer_bundle(request['sources_sha256'])
-        encoded_sources=_canonical({name:base64.b64encode(raw).decode('ascii') for name,raw in sources.items()}).decode('ascii')
+        encoded_sources=base64.b64encode(_canonical({name:base64.b64encode(raw).decode('ascii') for name,raw in sources.items()})).decode('ascii')
         entry=(_PACKAGE_LOADER+"\nimport base64,json,sys\ntry:\n"
             +"    request=json.loads(base64.b64decode(sys.argv[1],validate=True))\n"
-            +"    encoded=json.loads("+repr(encoded_sources)+")\n"
+            +"    encoded=json.loads(base64.b64decode("+repr(encoded_sources)+",validate=True))\n"
             +"    sources={name:base64.b64decode(raw,validate=True) for name,raw in encoded.items()}\n"
             +"    module=_load_qualified_package(sources,{name:request['sources_sha256'][name] for name in sources})\n"
             +"    sys.stdout.buffer.write(module.run_bootstrap(request,base64.b64decode(sys.argv[2],validate=True).decode()))\n"

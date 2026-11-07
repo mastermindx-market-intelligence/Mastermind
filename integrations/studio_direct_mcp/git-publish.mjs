@@ -1,271 +1,9 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
-import { mkdir, mkdtemp, open, readFile, readdir, realpath as realpathDefault, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readFile, realpath as realpathDefault, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-
-// Integrated retained publisher journal: no second staged module or store.
-
-// A durable receipt inside the incumbent, registered Git worktree's private gitdir.
-// This is publisher evidence, NOT a new retry service, workspace registry, or lease.
-// Never expose disk paths, URLs, command output, or credentials through the status tool.
-const SCHEMA = 'mastermind.studio_git_publication_receipt.v1';
-const RECEIPT_DIR = 'mastermind-studio-publication-receipts';
-const SHA = /^[0-9a-f]{40}$/;
-const ACTION = /^[0-9a-f]{64}$/;
-const MAX_RECEIPTS = 256;
-const MAX_RECEIPT_BYTES = 8192;
-const STAGES = new Set(['PREPARED', 'DISPATCHING', 'TERMINAL']);
-const OUTCOMES = new Set(['APPLIED', 'NOT_APPLIED']);
-
-function hash(value) {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-function makeWire(value) {
-  const body = {...value};
-  return JSON.stringify({...body, integrity_sha256: hash(JSON.stringify(body))}) + '\n';
-}
-
-function decodeWire(bytes) {
-  if (bytes.length > MAX_RECEIPT_BYTES) throw new Error('OVERSIZE_RECEIPT');
-  const parsed = JSON.parse(bytes.toString('utf8'));
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('INVALID_RECEIPT');
-  const {integrity_sha256, ...body} = parsed;
-  if (!ACTION.test(integrity_sha256 || '') || hash(JSON.stringify(body)) !== integrity_sha256) {
-    throw new Error('TORN_OR_CHANGED_RECEIPT');
-  }
-  if (body.schema !== SCHEMA || !STAGES.has(body.stage) ||
-      !ACTION.test(body.action_ref || '') || !SHA.test(body.intended_head_sha || '') ||
-      (body.expected_remote_head_sha !== null && !SHA.test(body.expected_remote_head_sha || '')) ||
-      (body.stage === 'TERMINAL' && !OUTCOMES.has(body.terminal_outcome))) {
-    throw new Error('INVALID_RECEIPT_SCHEMA');
-  }
-  return body;
-}
-
-async function syncDirectory(dir) {
-  const fd = await open(dir, 'r');
-  try { await fd.sync(); } finally { await fd.close(); }
-}
-
-async function writeExclusive(file, wire) {
-  const fd = await open(file, 'wx', 0o600);
-  try { await fd.writeFile(wire, 'utf8'); await fd.sync(); }
-  finally { await fd.close(); }
-  await syncDirectory(path.dirname(file));
-}
-
-async function replaceAtomically(file, wire) {
-  const tmp = file + '.' + randomUUID() + '.tmp';
-  let own = false;
-  try {
-    await writeExclusive(tmp, wire);
-    own = true;
-    await rename(tmp, file);
-    own = false;
-    await syncDirectory(path.dirname(file));
-  } finally {
-    if (own) await rm(tmp, {force:true}).catch(() => {});
-  }
-}
-
-// This implementation deliberately has NO mutating reconciliation endpoint.
-// Pre-existing attempts which lack a retained original intent stay UNKNOWN.
-export async function createPublicationRecovery({git, workspacePath, operationId, branch, ref, remoteUrl}) {
-  const {stdout} = await git(workspacePath, ['rev-parse', '--absolute-git-dir']);
-  const gitdir = String(stdout || '').trim();
-  if (!path.isAbsolute(gitdir)) throw new Error('INVALID_GITDIR');
-  const identity = hash(operationId + '\0' + branch);
-  const dir = path.join(gitdir, RECEIPT_DIR, identity);
-  const remoteFingerprint = hash(remoteUrl);
-  const filename = (actionRef) => {
-    if (!ACTION.test(actionRef || '')) throw new TypeError('invalid publication action_ref');
-    return path.join(dir, actionRef + '.json');
-  };
-
-  async function read(actionRef) {
-    try {
-      const record = decodeWire(await readFile(filename(actionRef)));
-      if (record.operation_id !== operationId || record.branch !== branch ||
-          record.target_ref !== ref || record.remote_fingerprint !== remoteFingerprint ||
-          record.action_ref !== actionRef) {
-        throw new Error('RECEIPT_BINDING_CONFLICT');
-      }
-      return {record};
-    } catch (error) {
-      if (error.code === 'ENOENT') return {missing: true};
-      return {corrupt: true, error: String(error.message || error)};
-    }
-  }
-
-  async function allActionRefs() {
-    try {
-      const names = await readdir(dir);
-      if (names.length > MAX_RECEIPTS) throw new Error('RECEIPT_LIMIT_EXCEEDED');
-      if (names.some((name) => !ACTION.test(name.replace(/\.json$/, '')) || !name.endsWith('.json'))) {
-        throw new Error('UNEXPECTED_RECEIPT_ENTRY');
-      }
-      return names.map((name) => name.slice(0, -5));
-    } catch (error) {
-      if (error.code === 'ENOENT') return [];
-      throw error;
-    }
-  }
-
-  async function disposition(actionRef, remoteHead, checkAncestor = true) {
-    const found = await read(actionRef);
-    if (found.missing) return {action_ref: actionRef, outcome:'UNKNOWN', reason:'NO_MATCHING_OR_LEGACY_RECEIPT', retry_allowed:false};
-    if (found.corrupt) return {action_ref: actionRef, outcome:'UNKNOWN', reason:'INVALID_OR_TORN_RECEIPT', retry_allowed:false};
-    const r = found.record;
-    const base = {
-      action_ref: actionRef,
-      intended_head_sha: r.intended_head_sha,
-      expected_remote_head_sha: r.expected_remote_head_sha,
-      stage: r.stage,
-      generation_id: r.generation_id,
-      retry_allowed: false,
-    };
-    if (r.stage === 'TERMINAL') {
-      return {...base, outcome:r.terminal_outcome, reason:r.terminal_proof,
-        current_remote_head_sha:remoteHead};
-    }
-    // A PREPARED record is explicitly before dispatch. Another valid writer
-    // may have published identical bytes; target equality must not falsely
-    // attribute that effect to this never-proven publisher invocation.
-    if (r.stage === 'PREPARED') {
-      return {...base, outcome:'UNKNOWN', reason:'WRITER_MAY_STILL_DISPATCH',
-        current_remote_head_sha:remoteHead};
-    }
-    if (remoteHead === r.intended_head_sha) {
-      return {...base, outcome:'APPLIED', reason:'INTENDED_REMOTE_REF_OBSERVED'};
-    }
-    // A later tip equal to neither preimage nor intended head is NOT proof
-    // that a prior attempted push did not happen. Use ancestry only when all
-    // needed commit objects are locally present; never fetch or change refs.
-    if (remoteHead !== null && remoteHead !== r.expected_remote_head_sha && checkAncestor) {
-      try {
-        await git(workspacePath, ['merge-base', '--is-ancestor', r.intended_head_sha, remoteHead]);
-        return {...base, outcome:'APPLIED', reason:'INTENDED_HEAD_IS_REMOTE_ANCESTOR'};
-      } catch (error) {
-        if (error.code === 1) {
-          return {...base, outcome:'CONFLICT', reason:'REMOTE_DIVERGED_TARGET_NOT_ANCESTOR',
-            current_remote_head_sha:remoteHead};
-        }
-      }
-    }
-    return {...base, outcome:'UNKNOWN',
-      reason:r.stage === 'PREPARED' ? 'WRITER_MAY_STILL_DISPATCH' : 'DISPATCH_OUTCOME_UNPROVEN',
-      current_remote_head_sha:remoteHead};
-  }
-
-  async function status(actionRef, remoteHead) {
-    if (actionRef) return disposition(actionRef, remoteHead);
-    const refs = await allActionRefs();
-    if (refs.length === 0) return {outcome:'UNKNOWN', reason:'NO_RETAINED_PUBLICATION_RECEIPT', retry_allowed:false};
-    const states = await Promise.all(refs.map((id) => disposition(id, remoteHead)));
-    const unsafe = states.filter((s) => s.outcome !== 'APPLIED');
-    // The status without an action selector prioritizes unresolved effects,
-    // not whichever branch tip happens to be newest.
-    return unsafe[0] || states.at(-1);
-  }
-
-  async function begin({actionRef, intendedHead, expectedRemote}) {
-    if (!SHA.test(intendedHead || '') || (expectedRemote !== null && !SHA.test(expectedRemote || ''))) {
-      throw new TypeError('invalid publication commit identity');
-    }
-    const refs = await allActionRefs();
-    for (const oldRef of refs) {
-      const item = await disposition(oldRef, expectedRemote);
-      if (item.outcome !== 'APPLIED') {
-        return {blocked:true, reason:'UNRECONCILED_OR_DENIED_PUBLICATION', prior:item};
-      }
-    }
-    if (refs.includes(actionRef)) {
-      return {blocked:true, reason:'ALREADY_RECORDED_PUBLICATION', prior:await disposition(actionRef, expectedRemote)};
-    }
-    const record = {
-      schema:SCHEMA, operation_id:operationId, branch, target_ref:ref,
-      remote_fingerprint:remoteFingerprint, action_ref:actionRef,
-      intended_head_sha:intendedHead, expected_remote_head_sha:expectedRemote,
-      stage:'PREPARED', generation_id:String(process.pid) + ':' + randomUUID(),
-      created_at:new Date().toISOString(),
-    };
-    await mkdir(dir, {recursive:true, mode:0o700});
-    await writeExclusive(filename(actionRef), makeWire(record));
-    return {record};
-  }
-
-  // Distinct legacy-only forward progress. This does not claim a missing old
-  // action succeeded or failed, and never reuses its action ID. It is valid
-  // only when caller has separately qualified source custody and quiescence.
-  async function beginForward({actionRef, intendedHead, expectedRemote,
-      priorActionRef, priorIntendedHead}) {
-    if (!ACTION.test(actionRef || '') || !ACTION.test(priorActionRef || '') ||
-        actionRef === priorActionRef || !SHA.test(intendedHead || '') ||
-        !SHA.test(expectedRemote || '') || !SHA.test(priorIntendedHead || '')) {
-      throw new TypeError('invalid guarded publication recovery identity');
-    }
-    const refs = await allActionRefs();
-    if (refs.includes(actionRef)) {
-      return {blocked:true, reason:'ALREADY_RECORDED_PUBLICATION',
-        prior:await disposition(actionRef, expectedRemote)};
-    }
-    // This path is for a pre-journal old action only. A known prior journal
-    // with DISPATCHING/PREPARED still demands its exact result/owner fence;
-    // an already-terminal prior can use the ordinary current-state path.
-    if (refs.includes(priorActionRef)) {
-      return {blocked:true, reason:'PRIOR_ACTION_HAS_DURABLE_RECEIPT',
-        prior:await disposition(priorActionRef, expectedRemote)};
-    }
-    for (const oldRef of refs) {
-      const item = await disposition(oldRef, expectedRemote);
-      if (item.outcome !== 'APPLIED') {
-        return {blocked:true, reason:'OTHER_UNRECONCILED_PUBLICATION',
-          prior:item};
-      }
-    }
-    const record = {
-      schema:SCHEMA, operation_id:operationId, branch, target_ref:ref,
-      remote_fingerprint:remoteFingerprint, action_ref:actionRef,
-      intended_head_sha:intendedHead, expected_remote_head_sha:expectedRemote,
-      prior_action_ref:priorActionRef,
-      prior_intended_head_sha:priorIntendedHead,
-      recovery_mode:'LEGACY_FORWARD_ONLY',
-      stage:'PREPARED', generation_id:String(process.pid) + ':' + randomUUID(),
-      created_at:new Date().toISOString(),
-    };
-    await mkdir(dir, {recursive:true, mode:0o700});
-    await writeExclusive(filename(actionRef), makeWire(record));
-    return {record};
-  }
-
-  async function markDispatching(record) {
-    const found = await read(record.action_ref);
-    if (!found.record || found.record.stage !== 'PREPARED' ||
-        found.record.generation_id !== record.generation_id) {
-      throw new Error('PRE_DISPATCH_RECEIPT_CHANGED');
-    }
-    const next = {...record, stage:'DISPATCHING'};
-    await replaceAtomically(filename(record.action_ref), makeWire(next));
-    return next;
-  }
-
-  async function terminal(record, outcome, proof, observedRemoteHead) {
-    if (!OUTCOMES.has(outcome)) throw new TypeError('invalid terminal outcome');
-    const found = await read(record.action_ref);
-    if (!found.record || found.record.stage !== 'DISPATCHING' ||
-        found.record.generation_id !== record.generation_id) throw new Error('DISPATCH_RECEIPT_CHANGED');
-    const next = {...record, stage:'TERMINAL', terminal_outcome:outcome,
-      terminal_proof:proof, observed_remote_head_sha:observedRemoteHead,
-      completed_at:new Date().toISOString()};
-    await replaceAtomically(filename(record.action_ref), makeWire(next));
-    return next;
-  }
-
-  return Object.freeze({status, begin, beginForward, markDispatching, terminal});
-}
 
 const execFileDefault = promisify(execFileCallback);
 
@@ -296,9 +34,7 @@ export const STUDIO_GIT_PUBLISH_STATUS_TOOL = Object.freeze({
     'Read-only publication status for one existing Mastermind attended Web workspace. ' +
     'The host resolves the workspace, repository, branch and origin from the canonical mmx-workspace ' +
     'registration. The caller supplies only the operation id. Reports the current local HEAD, remote ' +
-    'branch HEAD, clean state, and an exact retained publication-action recovery outcome when available. ' +
-    'A missing or ambiguous historical receipt remains UNKNOWN and never grants retry. ' +
-    'This read-only schema has no capability to create ' +
+    'branch HEAD and whether the workspace is clean. This read-only schema has no capability to create ' +
     'a workspace, commit, push, change a ref, or accept a repository, path, branch, remote, credential, shell command or force option.',
   inputSchema: {
     type: 'object',
@@ -308,10 +44,6 @@ export const STUDIO_GIT_PUBLISH_STATUS_TOOL = Object.freeze({
         minLength: 1,
         maxLength: 256,
         pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$',
-      },
-      action_ref: {
-        type: 'string',
-        pattern: '^[0-9a-f]{64}$',
       },
     },
     required: ['operation_id'],
@@ -405,17 +137,6 @@ export const STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL = Object.freeze({
       expected_head_sha: {
         type: 'string',
         pattern: '^[0-9a-f]{40}$',
-      },
-      recovery: {
-        type: 'object',
-        description: 'Legacy lost-response recovery only: new forward-only source ref update on the SAME registered workspace/branch after external source-writer and original-process qualification. This cannot replay or settle the old action.',
-        properties: {
-          prior_action_ref: {type: 'string', pattern: '^[0-9a-f]{64}$'},
-          prior_intended_head_sha: {type: 'string', pattern: '^[0-9a-f]{40}$'},
-          expected_remote_head_sha: {type: 'string', pattern: '^[0-9a-f]{40}$'},
-        },
-        required: ['prior_action_ref', 'prior_intended_head_sha', 'expected_remote_head_sha'],
-        additionalProperties: false,
       },
     },
     required: ['operation_id', 'expected_head_sha'],
@@ -623,14 +344,6 @@ function actionRef(operationId, branch, head) {
   return createHash('sha256')
     .update('mastermind.studio_git_push_current_branch.v1\0')
     .update(operationId).update('\0').update(branch).update('\0').update(head)
-    .digest('hex');
-}
-
-function forwardRecoveryActionRef(operationId, branch, head, priorActionRef, expectedRemoteHead) {
-  return createHash('sha256')
-    .update('mastermind.studio_git_forward_recovery.v1\0')
-    .update(operationId).update('\0').update(branch).update('\0')
-    .update(head).update('\0').update(priorActionRef).update('\0').update(expectedRemoteHead)
     .digest('hex');
 }
 
@@ -1026,20 +739,12 @@ export function createGitPublisher(config, dependencies = {}) {
   }
 
   async function status(args) {
-    if (!args || typeof args !== 'object' || Array.isArray(args) ||
-        Object.keys(args).some((key) => !['operation_id', 'action_ref'].includes(key)) ||
-        (args.action_ref !== undefined && !SHA256_RE.test(args.action_ref))) {
+    if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some((key) => key !== 'operation_id')) {
       throw new TypeError('studio_git_publish_status arguments are invalid');
     }
-    const observed = await workspace(args.operation_id);
-    const recovery = await createPublicationRecovery({
-      git, workspacePath:observed.workspacePath, operationId:observed.operationId,
-      branch:observed.branch, ref:observed.ref, remoteUrl:observed.remoteUrl,
-    });
     return {
-      schema:'mastermind.studio_git_publish_status.v1',
-      ...publicStatus(observed),
-      publication_recovery:await recovery.status(args.action_ref, observed.remoteHead),
+      schema: 'mastermind.studio_git_publish_status.v1',
+      ...publicStatus(await workspace(args.operation_id)),
     };
   }
 
@@ -1382,195 +1087,134 @@ export function createGitPublisher(config, dependencies = {}) {
   }
 
   async function push(args) {
-    if (!args || typeof args !== 'object' || Array.isArray(args) ||
-        Object.keys(args).some((key) => !['operation_id', 'expected_head_sha', 'recovery'].includes(key))) {
+    if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).some((key) => !['operation_id', 'expected_head_sha'].includes(key))) {
       throw new TypeError('studio_git_push_current_branch arguments are invalid');
     }
     const operationId = validateOperationId(args.operation_id);
     const expectedHead = validateExpectedHead(args.expected_head_sha);
-    const forward = args.recovery !== undefined;
-    if (forward && (!args.recovery || typeof args.recovery !== 'object' ||
-        Array.isArray(args.recovery) || Object.keys(args.recovery).some((key) =>
-          !['prior_action_ref', 'prior_intended_head_sha', 'expected_remote_head_sha'].includes(key)))) {
-      throw new TypeError('studio_git_push_current_branch recovery arguments are invalid');
-    }
-    if (forward && (!SHA256_RE.test(args.recovery.prior_action_ref || '') ||
-        !SHA_RE.test(args.recovery.prior_intended_head_sha || '') ||
-        !SHA_RE.test(args.recovery.expected_remote_head_sha || ''))) {
-      throw new TypeError('studio_git_push_current_branch recovery identities are invalid');
-    }
     const before = await workspace(operationId);
-    const ref = forward
-      ? forwardRecoveryActionRef(operationId, before.branch, expectedHead,
-          args.recovery.prior_action_ref, args.recovery.expected_remote_head_sha)
-      : actionRef(operationId, before.branch, expectedHead);
+    const ref = actionRef(operationId, before.branch, expectedHead);
+
     if (before.localHead !== expectedHead) {
       return {
-        schema:'mastermind.studio_git_push_result.v1', status:'REFUSED',
-        effect_state:'NOT_APPLIED', code:'EXPECTED_HEAD_MISMATCH',
-        action_ref:ref, ...publicStatus(before),
+        schema: 'mastermind.studio_git_push_result.v1',
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: 'EXPECTED_HEAD_MISMATCH',
+        action_ref: ref,
+        ...publicStatus(before),
       };
     }
     if (before.remoteHead === expectedHead) {
       return {
-        schema:'mastermind.studio_git_push_result.v1', status:'OK',
-        effect_state:'APPLIED', code:'ALREADY_APPLIED',
-        action_ref:ref, push_attempted:false, ...publicStatus(before),
+        schema: 'mastermind.studio_git_push_result.v1',
+        status: 'OK',
+        effect_state: 'APPLIED',
+        code: 'ALREADY_APPLIED',
+        action_ref: ref,
+        push_attempted: false,
+        ...publicStatus(before),
       };
     }
     if (!before.clean) {
       return {
-        schema:'mastermind.studio_git_push_result.v1', status:'REFUSED',
-        effect_state:'NOT_APPLIED', code:'WORKSPACE_DIRTY',
-        action_ref:ref, ...publicStatus(before),
+        schema: 'mastermind.studio_git_push_result.v1',
+        status: 'REFUSED',
+        effect_state: 'NOT_APPLIED',
+        code: 'WORKSPACE_DIRTY',
+        action_ref: ref,
+        ...publicStatus(before),
       };
-    }
-
-    if (forward) {
-      // No attempt to infer a legacy action's outcome from a missing journal.
-      // The explicit prior identity must be the original tool's deterministic
-      // action ID for the same operation/ref and immutable intended commit.
-      const prior = args.recovery;
-      const fail = (code) => ({
-        schema:'mastermind.studio_git_push_result.v1', status:'REFUSED',
-        effect_state:'NOT_APPLIED', code, action_ref:ref, push_attempted:false,
-        retry_allowed:false, prior_action_ref:prior.prior_action_ref,
-        ...publicStatus(before), ready_to_push:false,
-      });
-      if (prior.prior_action_ref !== actionRef(operationId, before.branch, prior.prior_intended_head_sha)) {
-        return fail('RECOVERY_PRIOR_IDENTITY_MISMATCH');
-      }
-      if (before.remoteHead === null ||
-          before.remoteHead !== prior.expected_remote_head_sha) {
-        return fail('RECOVERY_REMOTE_HEAD_MISMATCH');
-      }
-      // Both ancestors must be locally present. No implicit fetch, history
-      // rewrite, branch creation, or non-fast-forward fallback is authorized.
-      if (!await gitQuiet(before.workspacePath,
-          ['merge-base', '--is-ancestor', prior.prior_intended_head_sha, expectedHead]) ||
-          !await gitQuiet(before.workspacePath,
-            ['merge-base', '--is-ancestor', before.remoteHead, expectedHead])) {
-        return fail('RECOVERY_ANCESTRY_UNVERIFIED');
-      }
-      // Reobserve the same owner/remote immediately before journaling. A race
-      // after this snapshot remains bounded by Git's non-forced ref update.
-      const fresh = await workspace(operationId, {remoteBinding:before.remoteBinding});
-      if (fresh.remoteHead !== before.remoteHead || fresh.localHead !== expectedHead ||
-          !fresh.clean) return fail('RECOVERY_STALE_PREFLIGHT');
     }
 
     const submodulePolicy = await boundedSubmodulePolicy(before.workspacePath);
     await verifyDestinationBinding(before.remoteBinding);
-    let journal;
-    let dispatch;
     try {
-      journal = await createPublicationRecovery({
-        git, workspacePath:before.workspacePath, operationId, branch:before.branch,
-        ref:before.ref, remoteUrl:before.remoteUrl,
-      });
-      // All prior actions for this exact workspace are checked before any push.
-      // A changed remote is not evidence of nonapplication of an old effect.
-      const opening = forward
-        ? await journal.beginForward({
-            actionRef:ref, intendedHead:expectedHead, expectedRemote:before.remoteHead,
-            priorActionRef:args.recovery.prior_action_ref,
-            priorIntendedHead:args.recovery.prior_intended_head_sha,
-          })
-        : await journal.begin({
-            actionRef:ref, intendedHead:expectedHead, expectedRemote:before.remoteHead,
-          });
-      if (opening.blocked) {
-        return {
-          schema:'mastermind.studio_git_push_result.v1', status:'REFUSED',
-          effect_state:'EFFECT_UNKNOWN', code:opening.reason,
-          action_ref:ref, retry_allowed:false, push_attempted:false,
-          prior_recovery:opening.prior, ...publicStatus(before),
-          ready_to_push:false,
-        };
-      }
-      // The durable DISPATCHING receipt MUST predate any external Git command.
-      // If this transition fails, the push never begins on this invocation.
-      dispatch = await journal.markDispatching(opening.record);
-    } catch {
-      return {
-        schema:'mastermind.studio_git_push_result.v1', status:'REFUSED',
-        effect_state:'NOT_APPLIED', code:'RECOVERY_RECEIPT_PRE_DISPATCH_FAILED',
-        action_ref:ref, push_attempted:false, retry_allowed:false,
-        ...publicStatus(before), ready_to_push:false,
-      };
-    }
-
-    async function saveTerminal(outcome, proof, remoteHead) {
-      try {
-        await journal.terminal(dispatch, outcome, proof, remoteHead);
-        return true;
-      } catch {
-        // A known ref disposition remains known to this caller. The durable
-        // DISPATCHING record remains fail-closed after an incomplete terminal write.
-        return false;
-      }
-    }
-
-    try {
-      await git(before.workspacePath,
-        // Never push mutable HEAD: the original fenced commit and exact ref only.
-        [...before.remoteBinding.gitArgs, 'push', '--porcelain', '--no-follow-tags',
-          '--no-force', '--no-mirror', '--recurse-submodules=' + submodulePolicy,
-          'origin', expectedHead + ':' + before.ref],
-        {timeoutMs:cfg.pushTimeoutMs});
+      await git(
+        before.workspacePath,
+        // Push the fenced commit object, never mutable HEAD. A concurrent local
+        // branch advance after precheck must not widen the authorized remote effect.
+        [...before.remoteBinding.gitArgs, 'push', '--porcelain', '--no-follow-tags', '--no-force', '--no-mirror', `--recurse-submodules=${submodulePolicy}`, 'origin', `${expectedHead}:${before.ref}`],
+        { timeoutMs: cfg.pushTimeoutMs },
+      );
     } catch (error) {
       try {
-        const afterFailure = await workspace(operationId, {remoteBinding:before.remoteBinding});
+        const afterFailure = await workspace(operationId, {remoteBinding: before.remoteBinding});
         if (afterFailure.remoteHead === expectedHead) {
-          const saved = await saveTerminal('APPLIED', 'REMOTE_EXACT_AFTER_LOST_RETURN', afterFailure.remoteHead);
           return {
-            schema:'mastermind.studio_git_push_result.v1', status:'OK',
-            effect_state:'APPLIED', code:'APPLIED_AFTER_AMBIGUOUS_PUSH_RETURN',
-            action_ref:ref, push_attempted:true, receipt_recorded:saved,
+            schema: 'mastermind.studio_git_push_result.v1',
+            status: 'OK',
+            effect_state: 'APPLIED',
+            code: 'APPLIED_AFTER_AMBIGUOUS_PUSH_RETURN',
+            action_ref: ref,
+            push_attempted: true,
             ...publicStatus(afterFailure),
           };
         }
+        // Do not turn an explicit porcelain ref rejection into EFFECT_UNKNOWN
+        // when the same pinned destination is authoritatively unchanged.
+        // This classifies the requested ref only; it does not classify the
+        // host's reason or authorize an automatic retry or carrier switch.
         if (explicitlyRejectedExactRef(error, before.ref) &&
             afterFailure.remoteHead === before.remoteHead) {
-          const saved = await saveTerminal('NOT_APPLIED', 'EXACT_REF_REJECTED_UNCHANGED', afterFailure.remoteHead);
           return {
-            schema:'mastermind.studio_git_push_result.v1', status:'REFUSED',
-            effect_state:'NOT_APPLIED', code:'REMOTE_REF_REJECTED_UNCHANGED',
-            action_ref:ref, push_attempted:true, receipt_recorded:saved,
-            retry_allowed:false, diagnostic_scope:'SAME_CARRIER_READ_ONLY',
-            rejection_reason:'UNDETERMINED', ...publicStatus(afterFailure),
-            ready_to_push:false,
+            schema: 'mastermind.studio_git_push_result.v1',
+            status: 'REFUSED',
+            effect_state: 'NOT_APPLIED',
+            code: 'REMOTE_REF_REJECTED_UNCHANGED',
+            action_ref: ref,
+            push_attempted: true,
+            retry_allowed: false,
+            diagnostic_scope: 'SAME_CARRIER_READ_ONLY',
+            rejection_reason: 'UNDETERMINED',
+            ...publicStatus(afterFailure),
+            ready_to_push: false, // A rejected write is not automatically re-admitted.
           };
         }
       } catch {
-        // Both the original effect and terminal readback remain unproven.
+        // The attempted remote write remains ambiguous. Do not replace the
+        // original effect uncertainty with a readback failure.
       }
       return {
-        schema:'mastermind.studio_git_push_result.v1', status:'UNKNOWN',
-        effect_state:'EFFECT_UNKNOWN', code:'PUSH_RESULT_UNCERTAIN',
-        action_ref:ref, push_attempted:true, retry_allowed:false,
-        operation_id:operationId, branch:before.branch,
-        local_head_sha:expectedHead,
+        schema: 'mastermind.studio_git_push_result.v1',
+        status: 'UNKNOWN',
+        effect_state: 'EFFECT_UNKNOWN',
+        code: 'PUSH_RESULT_UNCERTAIN',
+        action_ref: ref,
+        push_attempted: true,
+        operation_id: operationId,
+        branch: before.branch,
+        local_head_sha: expectedHead,
       };
     }
+
     try {
-      const after = await workspace(operationId, {remoteBinding:before.remoteBinding});
+      const after = await workspace(operationId, {remoteBinding: before.remoteBinding});
       if (after.remoteHead === expectedHead) {
-        const saved = await saveTerminal('APPLIED', 'REMOTE_EXACT_AFTER_PUSH', after.remoteHead);
         return {
-          schema:'mastermind.studio_git_push_result.v1', status:'OK',
-          effect_state:'APPLIED', code:'APPLIED', action_ref:ref,
-          push_attempted:true, receipt_recorded:saved, ...publicStatus(after),
+          schema: 'mastermind.studio_git_push_result.v1',
+          status: 'OK',
+          effect_state: 'APPLIED',
+          code: 'APPLIED',
+          action_ref: ref,
+          push_attempted: true,
+          ...publicStatus(after),
         };
       }
     } catch {
-      // A process response and no exact ref receipt are NOT sufficient for success.
+      // A successful push command followed by failed readback is still
+      // ambiguous to the caller. Never call it success without exact ref proof.
     }
     return {
-      schema:'mastermind.studio_git_push_result.v1', status:'UNKNOWN',
-      effect_state:'EFFECT_UNKNOWN', code:'POST_PUSH_READBACK_UNCERTAIN',
-      action_ref:ref, push_attempted:true, retry_allowed:false,
-      operation_id:operationId, branch:before.branch, local_head_sha:expectedHead,
+      schema: 'mastermind.studio_git_push_result.v1',
+      status: 'UNKNOWN',
+      effect_state: 'EFFECT_UNKNOWN',
+      code: 'POST_PUSH_READBACK_UNCERTAIN',
+      action_ref: ref,
+      push_attempted: true,
+      operation_id: operationId,
+      branch: before.branch,
+      local_head_sha: expectedHead,
     };
   }
 

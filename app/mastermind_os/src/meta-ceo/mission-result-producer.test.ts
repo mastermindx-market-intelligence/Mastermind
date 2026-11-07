@@ -24,8 +24,6 @@
  * built-in specifier is declared once below, inside this test file only.
  */
 import { beforeAll, describe, expect, it } from "vitest";
-// @ts-expect-error node:url is resolved by the vitest worker.
-import { fileURLToPath } from "node:url";
 
 import { decodeMissionv3, type Missionv3Document } from "../mission";
 import {
@@ -116,10 +114,10 @@ function resolveFreshGate(env: CallerEnv | undefined): FreshGate {
 }
 
 const GATE = resolveFreshGate(callerEnv);
-const COMMITTED_DIR = fileURLToPath(new URL(
+const COMMITTED_DIR = new URL(
   "./fixtures/mission-result-producer/",
   import.meta.url,
-));
+).pathname;
 
 async function realFs(): Promise<NodeFs> {
   // @ts-expect-error node:fs/promises is resolved by the vitest worker.

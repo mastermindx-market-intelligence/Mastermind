@@ -17,13 +17,12 @@ Order of operations (LOAD-BEARING, pinned by ``tests/test_secret_redaction.py``)
 
 1. exact known secrets (longest first, so a prefix of one cannot survive)
 2. control characters -> space
-3. Authorization and X-Mastermind-Workspace-Authorization bearer values
-4. JWT-shaped tokens
-5. known-prefix credentials (``sb_secret_``, ``sk-ant-``, ...)
-6. hex runs >= 32
-7. base64url-ish runs >= 32
-8. whitespace collapse to a single line
-9. hard length bound with a visible truncation marker
+3. JWT-shaped tokens
+4. known-prefix credentials (``sb_secret_``, ``sk-ant-``, ...)
+5. hex runs >= 32
+6. base64url-ish runs >= 32
+7. whitespace collapse to a single line
+8. hard length bound with a visible truncation marker
 
 Redaction MUST complete before the length bound.  Truncating first can cut a
 secret-shaped run below the 32-character match threshold, and the surviving
@@ -74,13 +73,6 @@ DEFAULT_LIMIT = 300
 _MIN_EXACT_SECRET_LEN = 8
 
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
-# Both independently issued resource bearers share the same log boundary.
-# Cover HTTP lines and quoted dict/JSON diagnostics, including short tokens.
-# A present quote separates whitespace runs; an absent quote has just one run.
-# This prevents quadratic repartitioning when an untrusted header lacks Bearer.
-_AUTHORIZATION_RE = re.compile(
-    r"(?i)(\b(?:x-mastermind-workspace-authorization|authorization)[\"']?\s*[:=](?:\s*[\"']\s*|\s*)bearer\s+)[^\s\"',}\]]+"
-)
 
 # Every JWT header is the base64url of ``{"...``, i.e. it starts with ``eyJ``.
 # Anchoring there keeps the rule from matching ordinary dotted text (hostnames,
@@ -199,7 +191,6 @@ def sanitize_external_text(
         text = text.replace(secret, REDACTION)
 
     text = _CONTROL_CHARS_RE.sub(" ", text)
-    text = _AUTHORIZATION_RE.sub(lambda match: match.group(1) + REDACTION, text)
     text = _JWT_RE.sub(REDACTION, text)
     text = _PREFIXED_SECRET_RE.sub(REDACTION, text)
     text = _HEX_SECRET_RE.sub(REDACTION, text)

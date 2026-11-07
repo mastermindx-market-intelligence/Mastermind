@@ -255,8 +255,6 @@ def test_installer_pins_host_root_and_refuses_missing_mount(
     assert not (tmp_path / "unexpected-substitution").exists()
     assert not (tmp_path / "unexpected-backtick").exists()
 
-    # The prior generation contains this test's synthetic payload; retain it.
-    env["MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT"] = str(tmp_path / "payload-after-policy-change")
     # Re-generate from a valid policy with an unavailable mount, exercising the
     # exact emitted mount literal as well as the successful path above.
     enrolled_policy.parent.mkdir(parents=True, exist_ok=True)
@@ -943,55 +941,3 @@ def test_cli_in_process_nul_publication_selector_returns_typed_no_effect(
     assert refused["error"] == "published branch is invalid"
     assert (workspace / "README.md").read_bytes() == before_bytes
     assert _git(source, "worktree", "list", "--porcelain") == before_registration
-
-
-def _disabled_fallback_member(root: Path) -> dict:
-    return {
-        "enabled": False, "mount_point": str(root.parent),
-        "root": str(root), "min_free_bytes": 100,
-        "_why": "Retained disabled fallback; this CLI grants no fallback.",
-    }
-
-
-@pytest.mark.parametrize("free,state,allowed", [(100, "READY", True), (99, "LOW_SPACE", False)])
-def test_disabled_fallback_metadata_preserves_primary_admission(
-    storage_cli, tmp_path, monkeypatch, capsys, free, state, allowed,
-):
-    import hashlib
-
-    cli, root, policy, data = storage_cli
-    fallback_root = tmp_path / "internal" / "workspaces"
-    data["internal_fallback"] = _disabled_fallback_member(fallback_root)
-    payload = json.dumps(data)
-    policy.write_text(payload)
-    monkeypatch.setattr(cli, "_storage_free_bytes", lambda _path: free)
-    code, result = _call_storage_cli(cli, capsys, "storage")
-    assert code == 0, result
-    receipt = result["receipt"]
-    assert (receipt["state"], receipt["admission_allowed"]) == (state, allowed)
-    assert receipt["workspace_root"] == str(root)
-    assert receipt["volume_uuid"] == data["volume_uuid"]
-    assert receipt["min_free_bytes"] == data["min_free_bytes"]
-    assert receipt["policy_sha256"] == hashlib.sha256(payload.encode()).hexdigest()
-    assert result["effect"] == "NOT_APPLIED"
-    assert not root.exists() and not fallback_root.exists()
-
-
-@pytest.mark.parametrize("change", [
-    {"enabled": True}, {"enabled": 0}, {"enabled": "false"}, {"enabled": None},
-    {"unknown": False}, {"mount_point": "relative"}, {"root": "/elsewhere"},
-    {"root": "/Users/example/../escape"}, {"min_free_bytes": 0},
-    {"min_free_bytes": True}, {"min_free_bytes": 2**63}, {"_why": None},
-    {"_why": ""}, {"_why": "x" * 8193},
-])
-def test_malformed_or_enabled_fallback_metadata_is_refused(storage_cli, capsys, change):
-    cli, root, policy, data = storage_cli
-    fallback = _disabled_fallback_member(Path("/Users/example/workspaces"))
-    fallback.update(change)
-    data["internal_fallback"] = fallback
-    policy.write_text(json.dumps(data))
-    code, result = _call_storage_cli(cli, capsys, "storage")
-    assert code == 2
-    assert "STORAGE_POLICY_INVALID" in result["error"]
-    assert result["effect"] == "NOT_APPLIED"
-    assert not root.exists()

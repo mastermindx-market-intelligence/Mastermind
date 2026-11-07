@@ -165,7 +165,6 @@ def test_default_policy_stays_v3_unarmed_with_unchanged_legacy_fields(current_re
         set(LEGACY_PROFILE_DIGESTS) | {
             PAID_GLM_SEALED_PROFILE_ID,
             "worker.acp.providerfree.readonly.v1",
-            "operator.appserver.readonly.docs-mcp.native-helper.sol61.v1",
         }
     )
 

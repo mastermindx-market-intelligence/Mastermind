@@ -126,39 +126,6 @@ unrelated configuration. After-manifest receipt loss is completed without
 rewriting the pair. Retain any unknown/foreign state on this original transaction;
 no blind retry, new identity, raw config edit or generic upgrade is authorized.
 
-## C1 fleet gateway Git-failure successor
-
-A retained native-pool pin stays independently enforced for the C1 seat. Its
-plan, result, native phase and bridge remain mandatory in `require_start`. The
-gateway-only transition never edits, clears or relabels a retained record, and a
-pending or unknown pin stays pending or unknown.
-
-`private_service_pin.c1_gateway_successor_manifest` derives exactly one
-forward state from the retained record itself: the retained applied manifest
-with one known gateway digest transition, from the pinned predecessor
-`17157fa5…` to the pinned successor `336de8ed…`. It returns nothing for any
-other account, for a retained manifest whose gateway is not the pinned
-predecessor, or for a retained record whose own digests do not match its plan.
-
-For a seat already on its accepted Paper v20 successor, the existing frozen
-cohort planner first derives that exact configuration/manifest pair from the
-original retained pin. The gateway substitution composes with that pair. No
-current manifest is learned as a new predecessor, and unrelated drift refuses.
-The same derivation is used by the formatter preflight, startup and pin status.
-
-`selected_applied_context` reuses the pin owner's closed transaction, intent,
-APPLIED result, selected native phase and actual bridge proof. The formatter's
-preview uses its read-only context. Apply retains the existing native publication
-lock through both gateway writes, inside the existing lifecycle lock. It never
-runs or rewrites the pin operation.
-
-`require_start` accepts that derived successor in addition to the unchanged
-applied state. It accepts nothing else: an altered configuration, an altered
-manifest, an altered plan, an altered receipt or a changed native phase all
-refuse with the existing `FUTURE_PIN_NOT_READY`. The pin's own `status` and
-`reconcile` observations report the successor as the completed applied state,
-because the pin transaction itself did not change the gateway.
-
 ## Global successor and resume
 
 Ten seats are **not atomic**. Retain explicit per-seat results and completion

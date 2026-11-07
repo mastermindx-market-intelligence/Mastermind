@@ -1,13 +1,12 @@
 /** Closed owner-observed CODE/DATA provenance. No permission, currentness,
  * clock acquisition, network, source selection or operation effect lives here. */
-export type SourceObservedAction='add_project_file'|'set_project_communication_preference'|'publish_project_proposal'|'publish_project_plan_proposal'|'ADOPT_PLAN';
 export interface CanonicalProjectDataObservation{
  readonly schema:'mastermind.canonical_project_data_observation.v1';
  readonly repository:'mastermindx-market-intelligence/macro'; readonly default_ref:string;
  readonly executable_macro_commit:string;readonly canonical_data_commit:string;
  readonly canonical_commit_at:string;readonly canonical_observed_at_ms:number;
  readonly publication_recorded_at_ms:number|null;readonly publication_time:null;
- readonly source_operation:null|Readonly<{selection:Readonly<{action:SourceObservedAction;request_id:string;work_ref:string}>;
+ readonly source_operation:null|Readonly<{selection:Readonly<{action:'add_project_file'|'set_project_communication_preference';request_id:string;work_ref:string}>;
   principal_scope:string;request_sha256:string;recipe_fingerprint_sha256:string;event_id:number;receipt_sha256:string;recorded_at_ms:number;
   sources:readonly Readonly<{repository:'macro';commit:string;path:string;content_sha256:string}>[]}>;
  readonly reader_closure_sha256:string;readonly code_config_relation:'IDENTICAL_READER_CLOSURE';readonly authority:'OBSERVATION_ONLY';
@@ -82,40 +81,18 @@ export function validateProjectDataObservation(raw:unknown,expected:{workRef?:st
    if(Object.hasOwn(value,'data_continuity'))invalid();
    const op=record(value.source_operation,['selection','principal_scope','request_sha256','recipe_fingerprint_sha256','event_id','receipt_sha256','recorded_at_ms','sources']);
    const selected=record(op.selection,['action','request_id','work_ref']);
-   const prefix=selected.action==='add_project_file'?'mmos-project-file-add-':selected.action==='set_project_communication_preference'?'mmos-project-preference-set-':selected.action==='publish_project_proposal'?'mmos-project-create-':selected.action==='publish_project_plan_proposal'?'mmos-project-plan-proposal-':selected.action==='ADOPT_PLAN'?'mmos-project-adopt-':invalid();
-   if(typeof selected.request_id!=='string'||!selected.request_id.startsWith(prefix)||!/^[0-9a-f]{40}$/.test(selected.request_id.slice(prefix.length))||selected.request_id.length!==prefix.length+40||typeof selected.work_ref!=='string'||/^WS:[A-Z0-9]+(?:-[A-Z0-9]+)*$/.exec(selected.work_ref)?.[0]!==selected.work_ref||selected.work_ref.length<5||selected.work_ref.length>67||(expected.workRef!==undefined&&selected.work_ref!==expected.workRef))invalid();
-   if(!Array.isArray(op.sources)||Object.getPrototypeOf(op.sources)!==Array.prototype)invalid();
-   const listed=(op.sources as unknown[]).length;
-   const count=selected.action==='publish_project_proposal'?1:selected.action==='ADOPT_PLAN'?(listed===2||listed===3?listed:invalid()):2;
-   if(listed!==count||Reflect.ownKeys(op.sources).length!==count+1)invalid();
+   const prefix=selected.action==='add_project_file'?'mmos-project-file-add-':selected.action==='set_project_communication_preference'?'mmos-project-preference-set-':invalid();
+   if(typeof selected.request_id!=='string'||!selected.request_id.startsWith(prefix)||!/^[0-9a-f]{40}$/.test(selected.request_id.slice(prefix.length))||selected.request_id.length!==prefix.length+40||typeof selected.work_ref!=='string'||/^WS:[A-Z0-9]+(?:-[A-Z0-9]+)*$/.exec(selected.work_ref)?.[0]!==selected.work_ref||(expected.workRef!==undefined&&selected.work_ref!==expected.workRef))invalid();
+   if(!Array.isArray(op.sources)||Object.getPrototypeOf(op.sources)!==Array.prototype||op.sources.length!==2||Reflect.ownKeys(op.sources).length!==3)invalid();
    const sources=[];
-   for(let i=0;i<count;i++){
+   for(let i=0;i<2;i++){
     const descriptor=Object.getOwnPropertyDescriptor(op.sources,String(i));if(!descriptor||!descriptor.enumerable||!('value' in descriptor))invalid();
     const source=record(descriptor.value,['repository','commit','path','content_sha256']);if(source.repository!=='macro')invalid();
     sources.push({repository:'macro' as const,commit:hex(source.commit,40),path:path(source.path,512),content_sha256:hex(source.content_sha256,64)});
    }
-   if(new Set(sources.map(entry=>entry.path)).size!==count||new Set(sources.map(entry=>entry.commit)).size!==1)invalid();
-   // Exact per-action source-path grammar. Source commits are never joined to
-   // the DATA commit, and a candidate/READY/receipt artifact is never accepted
-   // as adoption: DEC-PLAN-ADOPTION-<TAILUPPER>.md must itself be present.
-   const work=selected.work_ref.slice(3),tail=selected.request_id.slice(prefix.length);
-   if(selected.action==='publish_project_proposal'||selected.action==='publish_project_plan_proposal'){
-    const expectedPaths=new Set(['agentos/workstreams/WS-'+work+'.md']);
-    if(count===2)expectedPaths.add('research/project-plans/PLAN-'+work+'-'+tail+'.md');
-    if(sources.some(entry=>!expectedPaths.has(entry.path)))invalid();
-   }
-   else if(selected.action==='ADOPT_PLAN'){
-    const ws='agentos/workstreams/WS-'+work+'.md',decision='agentos/decisions/DEC-PLAN-ADOPTION-'+tail.toUpperCase()+'.md';
-    const paths=new Set(sources.map(entry=>entry.path));
-    if(!paths.has(ws)||!paths.has(decision))invalid();
-    for(const entry of sources){
-     if(entry.path===ws||entry.path===decision)continue;
-     const key=/^agentos\/decisions\/DEC-([A-Z0-9]+(?:-[A-Z0-9]+)*)\.md$/.exec(entry.path)?.[1];
-     if(key===undefined||key.length<2||key.length>128)invalid();
-    }
-   }
+   if(sources[0]!.path===sources[1]!.path||sources[0]!.commit!==sources[1]!.commit)invalid();
    const recorded=integer(op.recorded_at_ms);if(publication!==recorded)invalid();
-   operation={selection:{action:selected.action as SourceObservedAction,request_id:selected.request_id,work_ref:selected.work_ref},
+   operation={selection:{action:selected.action as 'add_project_file'|'set_project_communication_preference',request_id:selected.request_id,work_ref:selected.work_ref},
     principal_scope:hex(op.principal_scope,64),request_sha256:hex(op.request_sha256,64),recipe_fingerprint_sha256:hex(op.recipe_fingerprint_sha256,64),
     event_id:integer(op.event_id,1),receipt_sha256:hex(op.receipt_sha256,64),recorded_at_ms:recorded,sources};
   }

@@ -85,11 +85,6 @@ from control_plane.executive_runtime import (
     RuntimeProofError,
     StateConflict,
     _dialogue_source_from_root_creation,
-    _normalise_constraints,
-    _project_work_placement,
-    _capacity_matches_route,
-    CHILD_WORKSPACE_POLICY,
-    CHILD_WORKSPACE_POLICY_KEY,
 )
 from control_plane.executive_workspace import (
     AssignmentSealError,
@@ -1355,73 +1350,6 @@ PLANNER_ROUTING_OPTIONS_SCHEMA = "mastermind.planner_routing_options/v2"
 _PLANNER_ROUTING_MODEL_LIMIT = 16
 
 
-def _planner_pool_constraints(root: Job, member: Mapping[str, Any], capacities, registry) -> dict[str, Any]:
-    """Observe supported step limits from matching registered profiles only."""
-    paid = "paid_execution_route" in member
-    attended = "attended_route" in member
-    limits = {
-        "constraints_available": False,
-        "supported_authorities": [],
-        "allows_write_paths": False,
-        "allows_validation_commands": False,
-        "allows_coordinator": False,
-        "continuation_constraint": "ORIGINAL_REQUEST_ONLY" if attended else "ROOT_CONTINUATION_MODE",
-        "input_constraint": "SEALED_SUPPLIED_TEXT_ONLY" if paid else "ROOT_WORKSPACE",
-    }
-    try:
-        base = _normalise_constraints(root.constraints)
-        projected = _project_work_placement(base, root.constraints,
-            {key: member[key] for key in ("provider_realm", "quota_class")},
-            raw_root_constraints=root.constraints, plan_schema_version="mastermind.execution_plan/v5")
-    except (StateConflict, KeyError, TypeError, ValueError):
-        return limits
-    compatible = []
-    for worker, quota in capacities:
-        try:
-            metadata = quota.metadata
-            if not _capacity_matches_route(
-                {"worker_id": worker.worker_id, "metadata_json": json.dumps(metadata)}, projected
-            ):
-                continue
-            profile = registry.resolve(str(metadata.get("execution_profile_id") or ""))
-            if (not profile.enabled
-                    or quota.provider != worker.provider
-                    or metadata.get("adapter_id") not in (None, "", worker.worker_type)
-                    or metadata.get("execution_profile_digest") != profile.profile_digest
-                    or metadata.get("capability_policy_version") != registry.policy_version
-                    or metadata.get("capability_policy_digest") != registry.policy_digest
-                    or not is_sealed_worker_execution_surface(profile.execution_surface)
-                    or not adapter_supports_execution_surface(worker.worker_type, profile.execution_surface)):
-                continue
-            supported = set(root.requested_authorities)
-            if not profile.write_capable:
-                supported.discard("WRITE_BRANCH")
-            if paid:
-                supported &= {"READ", "RESEARCH"}
-            elif attended:
-                supported &= {"READ"}
-            if root.constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY:
-                supported &= {"READ", "RESEARCH"}
-            capabilities = set(quota.capabilities) & set(worker.capabilities)
-            needed = {"READ": "read", "RESEARCH": "research", "WRITE_BRANCH": "code", "RUN_TESTS": "tests"}
-            supported = {authority for authority in supported if needed.get(authority) in capabilities}
-            if "READ" in supported:
-                compatible.append(supported)
-        except (CapabilityPolicyError, StateConflict, KeyError, TypeError, ValueError):
-            continue
-    if not compatible:
-        return limits
-    supported = set().union(*compatible)
-    limits.update(
-        constraints_available=True,
-        supported_authorities=sorted(supported),
-        allows_write_paths="WRITE_BRANCH" in supported and bool(root.allowed_write_paths),
-        allows_validation_commands="RUN_TESTS" in supported and bool(root.validation_commands),
-        allows_coordinator=not paid,
-    )
-    return limits
-
-
 def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | None:
     """Project model-safe routing choices for one orchestration planner.
 
@@ -1468,7 +1396,6 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
         }
 
     workers = runtime.workers.list_workers()
-    registry = ExecutionCapabilityRegistry.load()
     pools: list[dict[str, Any]] = []
     for member in raw_union:
         if not isinstance(member, Mapping):
@@ -1480,13 +1407,11 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
         models: dict[str, dict[str, int]] = {}
         registered_count = 0
         available_count = 0
-        capacities = []
         for worker in workers:
             quota = runtime.workers.get_quota_class(worker.worker_id, quota_class)
             if quota is None or quota.provider != provider:
                 continue
             registered_count += 1
-            capacities.append((worker, quota))
             if quota.status.value == "AVAILABLE":
                 available_count += 1
             if not quota.model:
@@ -1511,7 +1436,6 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
                 "available_capacity_count": available_count,
                 "models": model_rows,
                 "models_truncated": len(models) > _PLANNER_ROUTING_MODEL_LIMIT,
-                **_planner_pool_constraints(root, member, capacities, registry),
             }
         )
 
@@ -1565,7 +1489,6 @@ class ExecutiveSupervisor:
         subscription_canary_binding_id: str | None = None,
         product_acceptance_macro_root: str | Path | None = None,
         product_acceptance_context_reader: Any | None = None,
-        project_input_owner: "ExecutiveSupervisor | None" = None,
     ) -> None:
         self.runtime = runtime
         self._product_acceptance_review_owner = None
@@ -1669,11 +1592,6 @@ class ExecutiveSupervisor:
         if not 0.1 <= self.validation_timeout_seconds <= 3600:
             raise SupervisorError("validation timeout must be between 0.1 and 3600 seconds")
         self.instance_id = instance_id or f"supervisor-{uuid4().hex}"
-        if project_input_owner is not None and (type(project_input_owner) is not ExecutiveSupervisor
-                or project_input_owner.runtime is not runtime or project_input_owner.instance_id != self.instance_id
-                or project_input_owner._project_input_owner is not None):
-            raise SupervisorError("project input requires the original same-service owner")
-        self._project_input_owner = project_input_owner
         self._recovered_runs: dict[str, ActiveRun] = {}
         self._recovered_attempt_ids: set[str] = set()
 
@@ -2205,20 +2123,6 @@ class ExecutiveSupervisor:
                 commission.get("verified_local_path") if commission is not None else None
             ),
         }
-        from control_plane.project_execution_admission import input_for_job, COMMISSION_PATH as PROJECT_EXECUTION_COMMISSION
-        if commission is not None and commission.get("path") == PROJECT_EXECUTION_COMMISSION:
-            project_input = input_for_job(self, job)
-            if project_input is None:
-                raise SupervisorError("project execution original input unavailable")
-            packet["project_execution_input"] = project_input
-        if _is_direct_native_job(job):
-            admitted=self.runtime.jobs.direct_native_provenance(job.job_id)
-            if 'project_planning' in admitted:
-                from control_plane.project_planning_admission import ProjectPlanningInput
-                packet['project_initial_planning_input']=ProjectPlanningInput(self).read(
-                    admitted['project_planning']).decode('utf-8',errors='strict')
-                packet['project_initial_planning_source']=admitted['project_planning']['source']
-                packet['project_initial_planning_stage']=admitted['project_planning']['stage']
         if "responsibility_intent" in job.constraints:
             from control_plane.executive_responsibility import (
                 ResponsibilityIntentError, normalize_responsibility_intent,
@@ -2332,13 +2236,6 @@ class ExecutiveSupervisor:
         spec_kwargs: dict[str, Any] = {
             "effective_grant_digest": attempt.effective_grant_digest
         } if effective_grant is not None else {}
-        if _is_direct_native_job(job):
-            from control_plane.project_planning_policy import launch_limits
-            # Legacy direct Jobs return no overrides. Typed project planning
-            # must rejoin its protected policy before the physical owner sees
-            # a LaunchSpec; missing/drifted bounds cannot fall back to defaults.
-            spec_kwargs.update(launch_limits(self.runtime,job))
-        from control_plane.project_execution_admission import workspace_base_for_job
         return spec_type(
             run_id=attempt.attempt_id,
             job_id=job.job_id,
@@ -2361,7 +2258,7 @@ class ExecutiveSupervisor:
             model=model,
             reasoning_effort=effort,
             worker_user=self.worker_user,
-            expected_base_sha=workspace_base_for_job(self, job),
+            expected_base_sha=str(job.constraints.get("base_sha") or "") or None,
             allowed_artifact_paths=tuple(
                 effective_grant["write_paths"]
                 if effective_grant is not None

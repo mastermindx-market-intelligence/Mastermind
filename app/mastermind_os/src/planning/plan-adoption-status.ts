@@ -51,7 +51,6 @@ export const SOURCE_OPERATION_STATUS_SCHEMA =
  */
 export const ORIGINAL_OPERATION_ID_PREFIXES = {
   publish_project_proposal: "mmos-project-create-",
-  publish_project_plan_proposal: "mmos-project-plan-proposal-",
   ADOPT_PLAN: "mmos-project-adopt-",
   ACCEPT_DIRECTION: "mmos-direction-accept-",
   add_project_file: "mmos-project-file-add-",

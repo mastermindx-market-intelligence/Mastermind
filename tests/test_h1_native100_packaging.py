@@ -28,7 +28,7 @@ def test_historical_four_plus_three_exact_bounded_forward_compositions():
     added_bounded={'sub.sh','native_remote.py','fabric_operator_contract.py'}
     s14_forward={'artifact_delivery.py'}
     assert set(m.GROK47_CANDIDATE_COMPOSITION_DIGESTS)==historical_four|added_bounded|s14_forward
-    assert m.GROK47_CANDIDATE_COMPOSITION_DIGESTS['artifact_delivery.py']=='6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d'
+    assert m.GROK47_CANDIDATE_COMPOSITION_DIGESTS['artifact_delivery.py']=='81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1'
     assert m.GROK47_MERGED_SOURCE_DIGESTS['artifact_delivery.py']=='447ab9d65264f46acfe5662d60e38c1f4db97198afc9113c2717109e298db9c3'
     for name,expected in m.GROK47_CANDIDATE_COMPOSITION_DIGESTS.items():
         assert hashlib.sha256((DRAFT.parent/'candidate'/name).read_bytes()).hexdigest()==expected
@@ -63,9 +63,7 @@ def test_generated_manifest_covers_actual_new_entry_and_readiness_graph(tmp_path
 
 def test_exact_new_template_publisher_is_not_old_launcher_ingress(tmp_path):
     import json,pytest
-    # This proof names the finite pre-application template transition. Its
-    # historical launcher is retained by the incumbent installer owner.
-    path=DRAFT/'preimages/native_generation_75330d.py';current=path.read_bytes()
+    path=DRAFT/'native_generation.py';current=path.read_bytes()
     added=(b'    # One vetted flat plist. Not a suffix rule and not a directory walk.\n'
            b'    if relative == "ext/host_pull_launchd.plist.template":\n'
            b'        return\n')

@@ -48,7 +48,7 @@ describe("native fixed Executive bridge", () => {
     f.notify({ generation: 4, available: true }); expect(f.transport.available()).toBe(false);
     f.notify({ generation: 5, available: true }); expect(f.transport.available()).toBe(true);
   });
-  it("maps fixed historical READ and the distinct closed native session SEND", async () => {
+  it("maps only fixed historical READ commands and never invokes a native session SEND", async () => {
     const f = await fixture(), signal = new AbortController().signal;
     const selection = { workRef: "WS:ALPHA", rootJobId: "JOB-1" };
     await f.sessionTransport.context(selection, signal);
@@ -56,21 +56,20 @@ describe("native fixed Executive bridge", () => {
     await f.sessionTransport.references!({
       work_ref: selection.workRef, root_job_id: selection.rootJobId, cursor: "YWJjZA==",
     }, signal);
-    await f.sessionTransport.send({
+    await expect(f.sessionTransport.send({
       target_ref: "fabric_attempt:"+"b".repeat(64),
       operation_key: "session-continue-"+"a".repeat(64),
-      instruction: "Explicit native continuation", stop_condition: "Return once",
-    },signal);
+      instruction: "no native SEND", stop_condition: "never",
+    },signal)).rejects.toThrow("NATIVE_SESSION_READ_ONLY");
     expect(f.invoke.mock.calls).toEqual([
       ["executive_auth_status"],
       ["executive_session_context", {selection:{work_ref:"WS:ALPHA",root_job_id:"JOB-1"}}],
       ["executive_session_reply",{operationKey:"session-continue-"+"a".repeat(64)}],
       ["executive_session_references",{selection:{work_ref:"WS:ALPHA",root_job_id:"JOB-1"},
         pageSize:16,cursor:"YWJjZA=="}],
-      ["executive_session_send",{arguments:{target_ref:"fabric_attempt:"+"b".repeat(64),operation_key:"session-continue-"+"a".repeat(64),instruction:"Explicit native continuation",stop_condition:"Return once"}}],
     ]);
     expect(f.invoke.mock.calls.map(([cmd])=>cmd)).not.toContain("executive_submit");
-    expect(f.invoke.mock.calls.filter(([cmd])=>cmd==="executive_session_send")).toHaveLength(1);
+    expect(f.invoke.mock.calls.map(([cmd])=>cmd)).not.toContain("executive_session_send");
   });
   it("rejects malformed native historical READ inputs before invoking any command", async () => {
     const f=await fixture(), signal=new AbortController().signal;
@@ -86,7 +85,7 @@ describe("native fixed Executive bridge", () => {
     },signal)).rejects.toThrow("SESSION_REFERENCES_INVALID");
     expect(f.invoke.mock.calls.map(([command])=>command)).toEqual(["executive_auth_status"]);
   });
-  it("preserves a validated backend capability without inventing one or changing its original owner",async()=>{
+  it("reduces a validated native context to READ-only while preserving its original owner",async()=>{
     const f=await fixture(),signal=new AbortController().signal;
     const selection={workRef:"WS:ALPHA",rootJobId:"JOB-1"};
     const raw={schema:"mastermind.os.executive.session_result.v1",
@@ -104,7 +103,7 @@ describe("native fixed Executive bridge", () => {
     f.invoke.mockResolvedValueOnce(raw);
     const output=await f.sessionTransport.context(selection,signal);
     expect(decodeSessionContext(output,selection)?.capabilities).toEqual({
-      send:true,reply_read:true,stop:false,
+      send:false,reply_read:true,stop:false,
     });
     expect((output as typeof raw).data.principal_scope).toBe(raw.data.principal_scope);
     expect(raw.data.capabilities.send).toBe(true); // no server payload mutation
@@ -132,7 +131,7 @@ describe("native fixed Executive bridge", () => {
           addressable:true,kind:"fabric_attempt",
           continuation_operation_key:bPointer.operationKey,
           work_ref:selection.workRef,root_job_id:selection.rootJobId},
-        capabilities:{send:false,reply_read:true,stop:false},
+        capabilities:{send:true,reply_read:true,stop:false},
       },
     };
     const aPointer={operationKey:"session-continue-"+"b".repeat(64),
@@ -176,7 +175,11 @@ describe("native fixed Executive bridge", () => {
         text:"Historical native A recovered",nextStep:"B remains pending",
         readRef:"session-reply-"+digestA,parentConsumed:false,
       });
-      expect(host.binding.port.currentTargetRef()).toBeNull();
+      await expect(f.sessionTransport.send({
+        target_ref:bPointer.targetKey,
+        operation_key:bPointer.operationKey,
+        instruction:"do not send",stop_condition:"do not send",
+      },signal)).rejects.toThrow("NATIVE_SESSION_READ_ONLY");
       expect(store.reserve).not.toHaveBeenCalled();
       expect(store.clearIfEqual).not.toHaveBeenCalled();
       expect(await store.read("c".repeat(64))).toEqual(bPointer);
@@ -325,84 +328,4 @@ it("retains only the context READ refusal code and preserves every public reject
   f.invoke.mockResolvedValueOnce({ ok: true });
   await f.transport.context(signal);
   expect(f.transport.diagnostics?.().contextReadReason).toBe("NONE");
-});
-
-describe("native Secretary selection beside qualified Fabric SEND", () => {
-  it.each([false, true])("preserves the qualified Secretary SEND capability %s on the same native route", async (send) => {
-    const f = await fixture(), signal = new AbortController().signal;
-    const selection = { workRef: "WS:ALPHA", rootJobId: "JOB-1", targetKind: "hermes_secretary" as const };
-    const target = "hermes_secretary:" + "a".repeat(64);
-    const key = "session-continue-416b8fb98b2d93a068cd6dbd4ff5516c0a75961314334810df3f5b86cf754137";
-    const raw = { schema: "mastermind.os.executive.session_result.v1",
-      operation: "context", ok: true, effect: "NONE", operation_key: null, error: null,
-      data: { schema: "mastermind.os.executive.session_context.v1",
-        principal_scope: "c".repeat(64), verified_expiry: 4102444800,
-        selection: { work_ref: selection.workRef, root_job_id: selection.rootJobId,
-          target_kind: selection.targetKind },
-        selection_state: "RESOLVED", target: { target_ref: target, generation: "a".repeat(24),
-          addressable: true, kind: "hermes_secretary", continuation_operation_key: key,
-          work_ref: selection.workRef, root_job_id: selection.rootJobId },
-        capabilities: { send, reply_read: true, stop: false } } };
-    f.invoke.mockResolvedValueOnce(raw);
-    const result = await f.sessionTransport.context(selection, signal);
-    expect(decodeSessionContext(result, selection)?.capabilities)
-      .toEqual({ send, reply_read: true, stop: false });
-    expect(raw.data.capabilities.send).toBe(send);
-    const arguments_ = { target_ref: target, operation_key: key,
-      instruction: "One native question", stop_condition: "Return once" };
-    if (send) await f.sessionTransport.send(arguments_, signal);
-    expect(f.invoke.mock.calls).toEqual([
-      ["executive_auth_status"],
-      ["executive_session_context", { selection: raw.data.selection }],
-      ...(send ? [["executive_session_send", { arguments: arguments_ }]] : []),
-    ]);
-  });
-});
-
-describe("native project execution bridge", () => {
-  const original = {operation_key: "mmos-project-execute-" + "a".repeat(40), work_ref: "WS:EXAMPLE"};
-  const context = {record_source: {repository: "mastermindx-market-intelligence/macro", commit: "b".repeat(40),
-    path: "agentos/workstreams/WS-EXAMPLE.md", content_sha256: "c".repeat(64)}, adoption: null, adoption_decision_source: null};
-  const requests = {
-    preview: {...original, operation_key: "mmos-project-preview-" + "d".repeat(40), expected_context: context},
-    submit: {...original, expected_context: context, context_sha256: "e".repeat(64),
-      execution_binding_sha256: "f".repeat(64), execution_profile: "research_only",
-      objective: "Finish the project", handoff_text: "Original private handoff", continuation_mode: "DURABLE"},
-    status: original,
-  };
-  it.each(["preview", "submit", "status"] as const)("invokes only the fixed %s command with the original closed arguments", async operation => {
-    const f = await fixture();
-    await f.transport.projectExecution!.request(operation, requests[operation], new AbortController().signal);
-    expect(f.invoke.mock.calls).toEqual([
-      ["executive_auth_status"],
-      ["executive_project_execution", {operation, arguments: requests[operation]}],
-    ]);
-  });
-  it("refuses route, source and root injection before invoking native code", async () => {
-    const f = await fixture(), signal = new AbortController().signal;
-    expect(() => f.transport.projectExecution!.request("../submit" as never, original, signal)).toThrow("PROJECT_EXECUTION_INPUT_INVALID");
-    expect(() => f.transport.projectExecution!.request("status", {...original, root_job_id: "JOB-forged"}, signal)).toThrow("PROJECT_EXECUTION_INPUT_INVALID");
-    expect(() => f.transport.projectExecution!.request("submit", {...requests.submit,
-      expected_context: {...context, record_source: {...context.record_source, path: "agentos/workstreams/WS-OTHER.md"}}}, signal))
-      .toThrow("PROJECT_EXECUTION_INPUT_INVALID");
-    expect(f.invoke.mock.calls).toEqual([["executive_auth_status"]]);
-  });
-  it.each(["preview", "submit", "status"] as const)("settles pending %s on auth replacement and never replays its late reply", async operation => {
-    const f = await fixture(), late = deferred();
-    f.invoke.mockReturnValueOnce(late.promise);
-    const request = f.transport.projectExecution!.request(operation, requests[operation], new AbortController().signal);
-    const rejected = expect(request).rejects.toThrow("EXECUTIVE_AUTH_CHANGED");
-    f.notify({generation: 4, available: true});
-    await rejected;
-    late.resolve({ok: true, data: {root_job_id: "untrusted-late"}});
-    await Promise.resolve();
-    expect(f.invoke).toHaveBeenCalledTimes(2);
-  });
-  it("counts handoff UTF8 bytes and rejects over-budget input before native dispatch", async () => {
-    const f = await fixture(), signal = new AbortController().signal;
-    await f.transport.projectExecution!.request("submit", {...requests.submit, handoff_text: "界".repeat(10922)}, signal);
-    expect(() => f.transport.projectExecution!.request("submit", {...requests.submit, handoff_text: "界".repeat(10923)}, signal))
-      .toThrow("PROJECT_EXECUTION_INPUT_INVALID");
-    expect(f.invoke).toHaveBeenCalledTimes(2);
-  });
 });

@@ -7,7 +7,6 @@ for an optional caller-owned projection boundary; it performs no I/O.
 from __future__ import annotations
 
 import dataclasses
-import json
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -279,89 +278,3 @@ def reduce_terminal_return(
         review_findings=review_findings,
         dialogue_source=material.dialogue_source,
     )
-
-
-SELECTED_CHILD_RESULT_SCHEMA = "mastermind.executive_selected_child_result/v1"
-SELECTED_CHILD_RESULT_MAX_BYTES = 32 * 1024
-_SELECTED_CHILD_RESULT_IDENTITIES = ("command_id", "job_id", "attempt_id", "root_job_id", "role")
-_SELECTED_CHILD_RESULT_DIGESTS = (
-    "result_envelope_digest", "terminal_evidence_digest", "artifact_receipt_digest",
-    "validation_receipt_digest", "effective_grant_digest",
-)
-_SELECTED_CHILD_RESULT_KEYS = frozenset((
-    "schema", "summary", "next_actions", "parent_consumed",
-    *_SELECTED_CHILD_RESULT_IDENTITIES, *_SELECTED_CHILD_RESULT_DIGESTS,
-))
-
-
-def validate_selected_child_result_capsule(value: Any, *, observation: dict[str, Any]) -> dict[str, Any]:
-    """Validate content against the same original completed observation.
-
-    This is a projection of existing sealed Runtime facts, not a read grant.
-    parent_consumed=False describes this read: it writes no acceptance or ACK.
-    The native conversation session is deliberately absent from this capsule.
-    """
-    if (type(value) is not dict or set(value) != _SELECTED_CHILD_RESULT_KEYS
-            or value["schema"] != SELECTED_CHILD_RESULT_SCHEMA
-            or value["parent_consumed"] is not False
-            or observation.get("state") != "COMPLETED"
-            or observation.get("result_status") != "RESULT"
-            or observation.get("attempt_status") != "COMPLETED"
-            or observation.get("job_status") != "COMPLETED"
-            or type(value["role"]) is not str or value["role"] not in {"work", "repair"}):
-        raise ValueError("selected child result is not an exact completed read")
-    for key in _SELECTED_CHILD_RESULT_IDENTITIES:
-        item = value[key]
-        if (type(item) is not str or not item
-                or observation.get(key) != item):
-            raise ValueError("selected child result belongs to another observation")
-    for key in _SELECTED_CHILD_RESULT_DIGESTS:
-        if type(value[key]) is not str or re.fullmatch(r"[0-9a-f]{64}", value[key]) is None:
-            raise ValueError("selected child result receipt is invalid")
-    for key in ("result_envelope_digest", "terminal_evidence_digest"):
-        if observation.get(key) != value[key]:
-            raise ValueError("selected child result receipt changed")
-    summary, actions = value["summary"], value["next_actions"]
-    if (type(summary) is not str or len(summary) > 8192 or "\x00" in summary
-            or type(actions) is not list or len(actions) > 16
-            or any(type(item) is not str or not 1 <= len(item) <= 8192 or "\x00" in item for item in actions)
-            or len(set(actions)) != len(actions)):
-        raise ValueError("selected child result content is invalid")
-    try:
-        encoded = json.dumps(value, sort_keys=True, ensure_ascii=False,
-                             separators=(",", ":"), allow_nan=False).encode("utf-8")
-    except (ValueError, TypeError, UnicodeError):
-        raise ValueError("selected child result is not canonical UTF-8") from None
-    if len(encoded) > SELECTED_CHILD_RESULT_MAX_BYTES:
-        raise ValueError("selected child result exceeds its response budget")
-    return json.loads(encoded)
-
-
-def selected_child_result_capsule(
-    candidate: TerminalReturnCandidate, *, command_id: str,
-) -> dict[str, Any] | None:
-    """Project a complete bounded synopsis, or retain metadata without slicing."""
-    if (type(candidate) is not TerminalReturnCandidate
-            or candidate.runtime_status != "COMPLETED"
-            or candidate.result_status != "RESULT" or candidate.role not in {"work", "repair"}):
-        raise ValueError("selected child completion is not qualified")
-    value = {
-        "schema": SELECTED_CHILD_RESULT_SCHEMA, "command_id": command_id,
-        "job_id": candidate.job_id, "attempt_id": candidate.attempt_id,
-        "root_job_id": candidate.root_job_id, "role": candidate.role,
-        **{key: getattr(candidate, key) for key in _SELECTED_CHILD_RESULT_DIGESTS},
-        "summary": candidate.summary, "next_actions": list(candidate.next_actions),
-        "parent_consumed": False,
-    }
-    encoded = json.dumps(value, sort_keys=True, ensure_ascii=False,
-                         separators=(",", ":"), allow_nan=False).encode("utf-8")
-    if len(encoded) > SELECTED_CHILD_RESULT_MAX_BYTES:
-        return None
-    observation = {
-        **{key: value[key] for key in _SELECTED_CHILD_RESULT_IDENTITIES},
-        "state": "COMPLETED", "result_status": "RESULT",
-        "attempt_status": "COMPLETED", "job_status": "COMPLETED",
-        "result_envelope_digest": candidate.result_envelope_digest,
-        "terminal_evidence_digest": candidate.terminal_evidence_digest,
-    }
-    return validate_selected_child_result_capsule(value, observation=observation)

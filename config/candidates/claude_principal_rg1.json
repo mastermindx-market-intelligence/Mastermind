@@ -87,12 +87,11 @@
         "executive_inbox",
         "executive_mandate",
         "executive_state",
-        "mmx_delegate",
         "principal_intent_status",
         "submit_principal_intent"
       ],
       "default_tools_approval_mode": "approve",
-      "tool_schema_digest": "5cf2a0de4a47686c545d1ee3d9c388ab4dc94c880cb0670140de2eca2e54f550"
+      "tool_schema_digest": "8d4ff58a30c02b717788b80fdfd1c5b8b35493dc11dd76cac351cde7b4509d72"
     },
     "company-dialogue-principal-mcp-v1": {
       "config_name": "mastermindCompanyDialoguePrincipal",

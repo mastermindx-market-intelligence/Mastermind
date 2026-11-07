@@ -610,17 +610,12 @@ class ApiSurfaceTests(SeamTestCase):
                     lpi.inspect_linux_process(bad)
         self.forbidden_io.assert_not_called()
 
-    def test_inspect_has_only_pid_and_the_explicit_live_option(self):
+    def test_inspect_takes_only_the_pid(self):
         signature = inspect_module.signature(lpi.inspect_linux_process)
-        self.assertEqual(list(signature.parameters), ["pid", "require_live"])
-        self.assertEqual(
-            signature.parameters["require_live"].kind,
-            inspect_module.Parameter.KEYWORD_ONLY,
-        )
-        self.assertIs(signature.parameters["require_live"].default, False)
+        self.assertEqual(list(signature.parameters), ["pid"])
         self.assertNotIn(
             inspect_module.Parameter.VAR_KEYWORD,
-            [parameter.kind for parameter in signature.parameters.values()],
+            signature.parameters.values(),
             "no keyword catch-all: no arbitrary proc root or identity input",
         )
 

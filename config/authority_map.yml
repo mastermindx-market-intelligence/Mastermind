@@ -96,18 +96,6 @@ coo_hierarchy_policy:
   review_job_attempt_limit: 1
   allowed_child_cost_classes: [default, small]
 
-# Explicit authenticated initial-project requests use the existing native
-# read-only owner. This is an authorization ceiling per original request,
-# independent of a caller asking for one attempt. Runtime's original command
-# and Attempt rows enforce it; no new budget ledger or automatic CREATE work.
-project_initial_planning_policy:
-  schema_version: 1
-  max_jobs_per_original_request: 1
-  max_attempts_per_job: 1
-  max_worker_seconds: 300
-  max_artifacts: 0
-  cancel_grace_seconds: 10
-
 # FLAGS
 # ───────────────────────────────────────────────────────────────────────────────
 flags:

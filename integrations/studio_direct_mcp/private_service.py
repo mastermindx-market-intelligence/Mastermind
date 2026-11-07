@@ -33,8 +33,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
@@ -63,21 +61,6 @@ TYPED_GIT_WORKSPACE_CLI_REL = Path(".local/bin/mmx-workspace")
 TYPED_GIT_SOURCE_REPOSITORY_REL = Path("Documents/GitHub/Mastermind")
 TYPED_GIT_BINARY = "/usr/bin/git"
 TYPED_GIT_REMOTE_URL = "https://github.com/mastermindx-market-intelligence/Mastermind.git"
-FABRIC_RELEASE_PUBLIC_PROVENANCE = "github_public_protected_v1"
-FABRIC_RELEASE_LOCAL_PROVENANCE = "local_git_v1"
-FABRIC_PUBLIC_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
-FABRIC_PUBLIC_REF = "refs/heads/master"
-FABRIC_PUBLIC_API_ROOT = "https://api.github.com/repos/" + FABRIC_PUBLIC_REPOSITORY
-FABRIC_PUBLIC_JSON_LIMIT = 1024 * 1024
-FABRIC_PUBLIC_TIMEOUT_SECONDS = 10
-FABRIC_PUBLIC_METADATA_URL_RE = re.compile(
-    re.escape(FABRIC_PUBLIC_API_ROOT)
-    + r"(?:/git/ref/heads/master|/git/(?:commits|trees)/[0-9a-f]{40})\Z"
-)
-
-
-def _fabric_git_sha(value) -> bool:
-    return type(value) is str and re.fullmatch(r"[0-9a-f]{40}", value) is not None
 # Host-owned identities; these match the existing mmx-workspace repository catalog.
 # No caller-supplied path, remote, repository or credential is admitted.
 TYPED_GIT_CLOSED_PROFILES = (
@@ -149,7 +132,6 @@ RESERVED_ACCOUNT_LABELS = frozenset(
 # Files staged from source directory. gateway.mjs is the engine library.
 STAGE_FILES = (
     "gateway.mjs",
-    "original-delivery.mjs",
     "modern-fabric-http.mjs",
     "output-budget.mjs",
     "git-publish.mjs",
@@ -168,8 +150,7 @@ STAGE_FILES = (
 # immediately preceding v0.1.6 install has every current file except the new
 # read-only fleet-status consumer; earlier generations also predate Paper,
 # output paging, and typed Git.
-LEGACY_STAGE_FILES_V8 = tuple(name for name in STAGE_FILES if name != "original-delivery.mjs")
-LEGACY_STAGE_FILES_V7 = tuple(name for name in LEGACY_STAGE_FILES_V8 if name != "modern-fabric-http.mjs")
+LEGACY_STAGE_FILES_V7 = tuple(name for name in STAGE_FILES if name != "modern-fabric-http.mjs")
 LEGACY_STAGE_FILES_V6 = tuple(name for name in LEGACY_STAGE_FILES_V7 if name not in {"commission-prepare.mjs", "commission-service.mjs"})
 LEGACY_STAGE_FILES_V5 = tuple(name for name in LEGACY_STAGE_FILES_V6 if name != "workspace-access.mjs")
 LEGACY_STAGE_FILES_V4 = tuple(name for name in LEGACY_STAGE_FILES_V5 if name != "fleet-status.mjs")
@@ -323,45 +304,10 @@ FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256 = {
     "git-publish.mjs": "badd8a554ae8230808d18a1943aa49edb7ced51391ed2cbadb358cd015d62c3a",
     "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
 }
-# Previously accepted rejection-diagnostics publisher is an exact incoming
-# predecessor only. The next target embeds the recovery journal in the single
-# already-staged git-publish.mjs, avoiding a new unsealed runtime import.
-FLEET_V10_REJECTION_PUBLISHER_PREDECESSOR_SHA256 = {
+FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256 = {
     "git-publish.mjs": "10574812f428114314a1529df2d969e52b19d2db8d4f971564a98970d93adc67",
     "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
 }
-FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256 = {
-    "git-publish.mjs": "abc3b4dc6f3c9574ebb116e28a44f42136f8d8df3f2b0ec1504668daaf46b6bc",
-    "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
-}
-
-# One closed C1 fleet-gateway Git-failure correction. This adds a gateway-only
-# successor route to the incumbent owner for the single already-enrolled
-# chatgpt1 seat. It creates no seat, installer, publisher, registry, queue,
-# service or account, and it changes no publisher module, configuration byte,
-# fleet route, scheduling cap, dependency, launcher, credential or grant.
-#
-# The predecessor is the exact installed fleet gateway (public Git object
-# f87ac012...). The successor is the deterministic compile of that exact
-# predecessor by integrations/studio_direct_mcp/fleet_git_failure_compat.py,
-# which pins one fixed complete successor hash. The classifier and the
-# typed-Git catch are byte-exact copies of the current protected gateway's own
-# regions, so the truthfulness of the classification is inherited rather than
-# re-invented here.
-C1_GIT_FAILURE_COMPAT_ACCOUNT = "chatgpt1"
-C1_GIT_FAILURE_COMPAT_GATEWAY = "gateway.mjs"
-C1_GIT_FAILURE_COMPAT_PREDECESSOR_SHA256 = (
-    "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30")
-C1_GIT_FAILURE_COMPAT_PREDECESSOR_GIT_BLOB = (
-    "f87ac012339e82fe46bce5ddc70d1d04183d1b6e")
-C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256 = (
-    "336de8ed10e7da483d46e93bd98439fd00c3e277111b39b5baa9cf0e68074674")
-C1_GIT_FAILURE_COMPAT_SUCCESSOR_GIT_BLOB = (
-    "c02bcdada5217bbc987099e90ebdce236f023b86")
-# Closed internal artifact-verification purpose for the chatgpt1 gateway
-# formatter. Not a CLI flag, config permission, registry, or native operation.
-# The literal is repeated in the native proof script below; both must match.
-C1_GATEWAY_RETAINED_PROOF_PURPOSE = "c1-gateway-preserving-formatter"
 
 # Exact sealed C2 predecessor observed for the one-seat Paper v10 -> v12 repair.
 # These are reviewed installation identity pins, never caller-selectable source or runtime paths.
@@ -463,7 +409,6 @@ C2_PAPER_V12_FILES_SHA256 = {
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
-        frozenset(LEGACY_STAGE_FILES_V8),
         frozenset(LEGACY_STAGE_FILES_V7),
         frozenset(LEGACY_STAGE_FILES_V6),
         frozenset(LEGACY_STAGE_FILES_V5),
@@ -910,12 +855,9 @@ CONTROL_BUNDLE_FILES = (
     "studio_direct_control.py",
     "private_service_status_successor.py",
     "private_service_pin.py",
-    "fleet_git_failure_compat.py",
     "private_service_pin_enrollment.py",
     "paper_v20_fleet_cohorts.py",
     "ops/native_fabric/quota_continuity/rollout/native_install.py",
-    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
-    "ops/native_fabric/quota_continuity/rollout/preimages/native_generation_75330d.py",
     "ops/native_fabric/quota_continuity/rollout/native_generation.py",
     "ops/fabric_launch/install.py",
 )
@@ -1120,24 +1062,6 @@ def _pin_enrollment_owner_module():
     return module
 
 
-def _fleet_git_failure_compat_module():
-    """Load the deterministic source compiler for the one C1 gateway successor.
-
-    The compiler is pure source code: it decides whether a byte sequence is
-    exactly the reviewed predecessor and returns the exact accepted successor
-    bytes. It never touches a host, an installed directory or a live effect.
-    """
-    if _INSTALLED_CONTROL_CONTEXT is not None:
-        return _installed_control_module(
-            "_studio_fleet_git_failure_compat", "fleet_git_failure_compat.py")
-    import importlib.util
-    path = Path(__file__).resolve().with_name("fleet_git_failure_compat.py")
-    spec = importlib.util.spec_from_file_location("_studio_fleet_git_failure_compat", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def cmd_native_pool_pin_enrollment(args):
     owner = _pin_enrollment_owner_module()
     try:
@@ -1188,18 +1112,7 @@ from pathlib import Path
 sys.path.insert(0,sys.argv[1])
 import native_install as i
 import native_generation as g
-try:
- p,payload=i.read_successor(Path(sys.argv[2]))
-except FileNotFoundError:
- # Status may read one completed historical pin after its bootstrap artifact
- # was pruned. The same retained reader is the artifact check for the closed
- # chatgpt1 gateway formatter, on both preview and apply. Generic native
- # apply/reconcile stay on the strict reader and remain refused.
- purpose=sys.argv[6] if len(sys.argv)>6 else ''
- closed=(purpose=='c1-gateway-preserving-formatter' and sys.argv[4]=='chatgpt1' and sys.argv[5] in ('preview','apply'))
- if purpose and not closed:raise
- if sys.argv[5]!='status' and not closed:raise
- p,payload=i.read_retained_successor_after_bootstrap_prune(Path(sys.argv[2]))
+p,payload=i.read_successor(Path(sys.argv[2]))
 assert p['digest']==sys.argv[3]
 store=Path(p['store']);current=g.current(store);old=p['expected_selection']
 new={'schema':g.POINTER_SCHEMA,'generation':p['target_generation'],'previous':old['generation'],'sequence':old['sequence']+1}
@@ -1209,8 +1122,8 @@ if current==old:
 elif current==new:
  i._upgrade_entries(p,complete=True);phase='SELECTED'
 elif (sys.argv[4] in (
-        'admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal',
-        'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4')
+        'admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt3',
+        'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4')
       and p['digest']=='77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7'
       and new['generation']=='28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce'
       and new['sequence']==24
@@ -1219,10 +1132,10 @@ elif (sys.argv[4] in (
       and type(current.get('sequence')) is int
       and current['sequence']>new['sequence']
       and current.get('previous') not in (None,current.get('generation'))):
- # All eight reviewed public-seat native pins share this completed immutable
- # sequence-24 successor (including the non-Paper-v20 personal profile).
- # Later native releases do not invalidate historical ingress, but only
- # these eight exact accounts admit verified forward selection.
+ # Each original seven-seat native pin shares this exact completed immutable
+ # sequence-24 successor. Later native releases do not invalidate historical
+ # ingress, but only these seven enrolled accounts may accept the verified
+ # forward selection. No other pin/generation/account gains admission.
  g.verify(store,new['generation'])
  g.verify(store,current['generation'])
  g.verify(store,current['previous'])
@@ -1233,20 +1146,10 @@ else:raise ValueError('selection_refused')
 # a sequence-26 -> sequence-27 change could masquerade as identical SELECTED.
 print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_generation'],'expected_selection':old,'pool_target':e['target'],'pool_previous':e['previous'],'pool_bridge':e['bridge'],'store':p['store'],'phase':phase,'selection':current},sort_keys=True))
 """
-    if (C1_GATEWAY_RETAINED_PROOF_PURPOSE not in code
-            or C1_GIT_FAILURE_COMPAT_ACCOUNT not in code):
-        raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
-    purpose = getattr(args, "retained_proof_purpose", None) or ""
-    if purpose and (
-            purpose != C1_GATEWAY_RETAINED_PROOF_PURPOSE
-            or args.account != C1_GIT_FAILURE_COMPAT_ACCOUNT
-            or args.operation not in ("preview", "apply")):
-        raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
     def proof():
         try:
             r = subprocess.run([sys.executable, *python_flags, "-c", code, str(rollout),
-                str(args.successor_bundle), args.successor_plan_sha256, args.account,
-                args.operation, purpose],
+                str(args.successor_bundle), args.successor_plan_sha256, args.account],
                 capture_output=True, timeout=30)
         except (OSError, subprocess.SubprocessError):
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED") from None
@@ -1562,161 +1465,6 @@ def _fleet_status_config(user_root: Path) -> dict | None:
     }
 
 
-ORIGINAL_COLLECTION_ACCOUNT = "fabric-c3-570f6f34"
-ORIGINAL_COLLECTION_SCHEMA = "mastermind.fabric_original_collection.v1"
-ORIGINAL_COLLECTION_RUNS = frozenset((
-    "fabric-app-native-drivers-j-20261105-01",
-    "fabric-app-application-process-carrier-20261105-01",
-))
-ORIGINAL_COLLECTION_FIELDS = frozenset((
-    "enabled", "schema", "pythonPath", "pythonSha256", "controlPath",
-    "controlSha256", "controlBundleDigest", "nativeStore", "nativeGeneration",
-))
-
-
-def _original_collection_profile(account, host, port, fabric_only, modern_fabric):
-    if (account != ORIGINAL_COLLECTION_ACCOUNT or host != "127.0.0.1" or port != 45280
-            or fabric_only is not True or modern_fabric is not True):
-        raise ValueError("original collection requires its existing private C3 service")
-
-
-def _original_collection_native(configuration=None, *, require_current=True):
-    """Use the incumbent sealed control and native-generation owners."""
-    context = _INSTALLED_CONTROL_CONTEXT
-    if context is None:
-        raise ValueError("original collection requires installed control closure")
-    native = _installed_control_module("_studio_original_native_generation",
-        "ops/native_fabric/quota_continuity/rollout/native_generation.py")
-    stable = Path.home() / (".claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/"
-        "handoff_kits/meta-ceo-b-2026-09-08/ext")
-    store = stable.parent / "native-code-releases"
-    selected = native.current(store) if configuration is None or require_current else None
-    digest = selected["generation"] if configuration is None else configuration.get("nativeGeneration")
-    if require_current and digest != selected["generation"]:
-        raise ValueError("original collection native selection changed")
-    root, metadata = native.verify(store, digest)
-    required = {"ext/original_delivery_collector.py", "ext/artifact_delivery.py",
-        "ext/artifact_reader.py", "ext/artifact_production.py", "ext/native_runtime_bindings.py"}
-    if metadata["stable_ext"] != str(stable) or not required.issubset(metadata["files"]):
-        raise ValueError("original collection native closure missing")
-    control = context["root"] / "private_service.py"
-    interpreter = Path(sys.executable).resolve(strict=True)
-    manifest = json.loads(_fabric_release_bytes(context["root"] / "manifest.json"))
-    expected = {"enabled": True, "schema": ORIGINAL_COLLECTION_SCHEMA,
-        "pythonPath": str(interpreter),
-        "pythonSha256": _stable_regular_file_hash(interpreter, label="original collection interpreter"),
-        "controlPath": str(control), "controlSha256": hashlib.sha256(context["files"]["private_service.py"]).hexdigest(),
-        "controlBundleDigest": manifest["bundleDigest"],
-        "nativeStore": str(store), "nativeGeneration": digest}
-    if configuration is not None and configuration != expected:
-        raise ValueError("original collection installed descriptor changed")
-    return expected, native, root, metadata
-
-
-def _original_collection_setting(args, roots, prior, fabric_only, modern_fabric):
-    requested = getattr(args, "original_collection", None)
-    if requested is not None and type(requested) is not bool:
-        raise SystemExit("invalid original collection selection")
-    previous = None
-    if prior is not None:
-        if _sha256_file(roots["config"]) != prior.get("configHash"):
-            raise SystemExit("original collection configuration changed")
-        config = json.loads(roots["config"].read_text(encoding="utf-8"))
-        previous = config.get("originalCollection")
-        if previous is not None:
-            if (type(previous) is not dict or set(previous) != ORIGINAL_COLLECTION_FIELDS
-                    or previous.get("enabled") is not True
-                    or previous.get("schema") != ORIGINAL_COLLECTION_SCHEMA
-                    or any(not _sha256_hex(previous.get(key)) for key in
-                           ("pythonSha256", "controlSha256", "controlBundleDigest", "nativeGeneration"))
-                    or any(type(previous.get(key)) is not str or not Path(previous[key]).is_absolute()
-                           or str(Path(previous[key])) != previous[key] or ".." in Path(previous[key]).parts
-                           for key in ("pythonPath", "controlPath", "nativeStore"))
-                    or config.get("backendMode") != "shared-account"
-                    or config.get("gitPublish") is not False or config.get("paperDesign") is not False
-                    or any(key in config for key in ("repositoryWorkspaces", "commissionPublication", "fleetStatus", "publicUrl"))):
-                raise SystemExit("invalid retained original collection selection")
-            _original_collection_profile(config.get("accountLabel"), config.get("host"),
-                config.get("port"), config.get("fabricOnly"), config.get("modernFabricProtocol"))
-    enabled = previous is not None if requested is None else requested
-    if not enabled:
-        return None
-    _original_collection_profile(args.account, "127.0.0.1", args.port, fabric_only, modern_fabric)
-    # Explicit opt-in is needed initially. Upgrades rebuild a fully verified
-    # descriptor under the same enrolled service; no client chooses a path.
-    descriptor, _, _, _ = _original_collection_native()
-    return descriptor
-
-
-def cmd_original_collection_helper(args):
-    """Fixed installed helper for the already-authorized gateway operation.
-
-    Its stdin contains correlation/selectors, never an identity assertion.
-    The gateway checks its actual private-channel principal before spawning.
-    Same-UID machine-owner access remains the existing trust model.
-    """
-    started = False
-    selected_run = None
-    operation = None
-    try:
-        raw = sys.stdin.buffer.read(16385)
-        if len(raw) > 16384:
-            raise ValueError("original collection input bound")
-        def unique(pairs):
-            value = {}
-            for key, item in pairs:
-                if key in value:
-                    raise ValueError("duplicate original collection field")
-                value[key] = item
-            return value
-        value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
-        required = {"configuration", "operation", "run_id"}
-        if (type(value) is not dict or not required.issubset(value)
-                or set(value) - required - {"receipt_sha256"}
-                or value["operation"] not in ("collect", "status", "result")
-                or type(value["run_id"]) is not str or value["run_id"] not in ORIGINAL_COLLECTION_RUNS
-                or (value["operation"] == "result" and not _sha256_hex(value.get("receipt_sha256")))
-                or (value["operation"] != "result" and "receipt_sha256" in value)
-                or type(value["configuration"]) is not dict
-                or set(value["configuration"]) != ORIGINAL_COLLECTION_FIELDS):
-            raise ValueError("original collection selector refused")
-        selected_run = value["run_id"]
-        operation = value["operation"]
-        _, native, root, metadata = _original_collection_native(value["configuration"],
-            require_current=value["operation"] == "collect")
-        import importlib.util
-        ext = root / "ext"
-        target = ext / "original_delivery_collector.py"
-        source = native.regular_bytes(target)
-        if native.digest(source) != metadata["files"]["ext/original_delivery_collector.py"]:
-            raise ValueError("original collector changed")
-        sys.path.insert(0, str(ext))
-        sys.dont_write_bytecode = True
-        spec = importlib.util.spec_from_file_location("original_delivery_collector", target)
-        collector = importlib.util.module_from_spec(spec)
-        if "original_delivery_collector" in sys.modules:
-            raise ValueError("original collector module conflict")
-        sys.modules["original_delivery_collector"] = collector
-        exec(compile(source, str(target), "exec"), collector.__dict__)
-        if collector.GATEWAY_ORIGINAL_RUNS != ORIGINAL_COLLECTION_RUNS:
-            raise ValueError("original collector scope differs")
-        started = True
-        result = collector._gateway_original_delivery(value["operation"], value["run_id"],
-            value.get("receipt_sha256"))
-        encoded = json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-        if len(encoded) > 16 * 1024 * 1024:
-            raise ValueError("original collection output bound")
-        sys.stdout.buffer.write(encoded + b"\n")
-        return 0
-    except (OSError,ValueError,TypeError,KeyError,AttributeError,RecursionError):
-        effect_possible = started and operation == "collect"
-        print(json.dumps({"run_id": selected_run,
-            "state": "UNKNOWN" if effect_possible else "REFUSED",
-            "effect_state": "EFFECT_UNKNOWN" if effect_possible else "NOT_APPLIED",
-            "reason": "original_collection_unconfirmed", "retry_authorized": False}))
-        return 75
-
-
 def _build_config(
     account: str,
     host: str,
@@ -1730,7 +1478,6 @@ def _build_config(
     commission_digest: str | None = None,
     fabric_only: bool = False,
     modern_fabric: bool = False,
-    original_collection: dict | None = None,
 ) -> dict:
     if type(modern_fabric) is not bool or (modern_fabric and (not fabric_only or host != "127.0.0.1")):
         raise ValueError("modern Fabric requires the closed private Fabric-only profile")
@@ -1763,13 +1510,6 @@ def _build_config(
     if modern_fabric:
         config["modernFabricProtocol"] = True
         config["backendMode"] = "shared-account"
-    if original_collection is not None:
-        _original_collection_profile(account, host, port, fabric_only, modern_fabric)
-        if (type(original_collection) is not dict or set(original_collection) != ORIGINAL_COLLECTION_FIELDS
-                or original_collection.get("enabled") is not True
-                or original_collection.get("schema") != ORIGINAL_COLLECTION_SCHEMA):
-            raise ValueError("invalid original collection descriptor")
-        config["originalCollection"] = dict(original_collection)
     if repository_workspaces:
         config["repositoryWorkspaces"] = {
             "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]
@@ -2243,7 +1983,6 @@ def _write_install(
     commission_digest: str | None = None,
     fabric_only: bool = False,
     modern_fabric: bool = False,
-    original_collection: dict | None = None,
 ) -> int:
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
@@ -2271,7 +2010,6 @@ def _write_install(
                 commission_digest=commission_digest,
                 fabric_only=fabric_only,
                 modern_fabric=modern_fabric,
-                original_collection=original_collection,
             ),
             indent=2,
             sort_keys=True,
@@ -2354,8 +2092,7 @@ def _fabric_profile_setting(args, roots: dict, prior: dict | None) -> bool:
         if "fabricOnly" in config:
             if (config["fabricOnly"] is not True or config.get("gitPublish") is not False
                     or config.get("paperDesign") is not False
-                    or "repositoryWorkspaces" in config or "commissionPublication" in config
-                    or "fleetStatus" in config):
+                    or "repositoryWorkspaces" in config or "commissionPublication" in config):
                 raise SystemExit("invalid retained Fabric-only profile")
             previous = True
         if requested and not previous:
@@ -2469,8 +2206,6 @@ def cmd_stage(args) -> int:
         source, node_abs, backend_abs, account, label, host, port, roots
     )
     fabric_only = _fabric_profile_setting(args, roots, prior)
-    modern_fabric = _modern_fabric_setting(args, roots, prior, fabric_only)
-    original_collection = _original_collection_setting(args, roots, prior, fabric_only, modern_fabric)
     # Paper remains mandatory only for a profile that actually exposes Paper.
     if not fabric_only:
         _verify_paper_runtime(_user_root())
@@ -2487,8 +2222,7 @@ def cmd_stage(args) -> int:
         repository_workspaces=_repository_workspace_setting(args, roots, prior),
         commission_digest=_commission_setting(args, roots, prior),
         fabric_only=fabric_only,
-        modern_fabric=modern_fabric,
-        original_collection=original_collection,
+        modern_fabric=_modern_fabric_setting(args, roots, prior, fabric_only),
     )
 
 def _sealed_historical_tailnet_launch_argv(
@@ -2740,16 +2474,6 @@ def _upgrade_fleet_v10_publisher_only(
         actual = hashlib.sha1(
             b"blob " + str(len(data)).encode("ascii") + b"\0" + data
         ).hexdigest()
-        if name == C1_GIT_FAILURE_COMPAT_GATEWAY:
-            # The reviewed C1 gateway-only successor is an accepted installed
-            # generation for this one seat only. No other account and no
-            # arbitrary gateway bytes are admitted.
-            accepted = {expected_blob}
-            if account == C1_GIT_FAILURE_COMPAT_ACCOUNT:
-                accepted.add(C1_GIT_FAILURE_COMPAT_SUCCESSOR_GIT_BLOB)
-            if actual not in accepted:
-                raise SystemExit("fleet publisher compatibility: preserved fleet generation changed")
-            continue
         if actual != expected_blob:
             raise SystemExit("fleet publisher compatibility: preserved fleet generation changed")
     config_path = roots["config"]
@@ -2778,11 +2502,10 @@ def _upgrade_fleet_v10_publisher_only(
             or "commissionPublication" in old_config
             or "modernFabricProtocol" in old_config):
         raise SystemExit("fleet publisher compatibility: original scoped capabilities changed")
-    # Preserve historical legacy/index-sync transition constraints. Only
-    # three exact sealed closed-profile predecessor pairs are eligible:
-    # original index-sync, merge-capable publisher and reviewed rejection-
-    # diagnostics generation. No wildcard source hashes or account expansion.
-    # The sealed manifest, not the caller, chooses the transition.
+    # Preserve historical legacy/index-sync transition constraints. The
+    # current target admits only two *exact sealed* closed-profile predecessor
+    # pairs: original index-sync and installed merge-capable publisher. The
+    # sealed manifest, not the caller, chooses the transition.
     original_publisher = old_config.get("gitPublish")
     expected_closed = _typed_git_config(user_root, closed_repositories=True)
     patch_hashes = FLEET_V10_PUBLISHER_PATCH_SHA256
@@ -2792,7 +2515,6 @@ def _upgrade_fleet_v10_publisher_only(
             for exact_pair in (
                 FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256,
                 FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256,
-                FLEET_V10_REJECTION_PUBLISHER_PREDECESSOR_SHA256,
             ))):
         patch_hashes = FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256
         preserve_config_bytes = True
@@ -2902,303 +2624,6 @@ def _upgrade_fleet_v10_publisher_only(
         "manifestSha256": _sha256_file(manifest_path),
         "gatewayAndFleetModulesPreserved": True,
         "repositoryWorkspacesPreserved": True,
-        "serviceStarted": False,
-    }, sort_keys=True))
-    return 0
-
-
-@contextmanager
-def _c1_retained_pin_state(account: str, roots: dict, *, operation="preview"):
-    """Keep the incumbent selected-pin proof through this closed transition.
-
-    The native pin owner verifies its own intent, transformation, result,
-    selected phase and bridge. Preview and apply share one retained-proof
-    purpose. Apply keeps the publication lock; preview does not. No pin
-    operation is replayed and the formatter is not relabeled as status.
-    """
-    # The incumbent fleet-status transaction owns startup while its record
-    # exists. This formatter has no authority to rewrite or replay that plan.
-    if os.path.lexists(roots["state"] / "fleet-status-module-successor"):
-        raise SystemExit("C1_FLEET_STATUS_SUCCESSOR_REQUIRES_OWNER")
-    pin = _pin_owner_module()
-    path = roots["state"] / "native-pool-pin"
-    if not os.path.lexists(path):
-        yield {"present": False, "state": "ABSENT", "applicable": False}
-        return
-    pin.directory(sys.modules[__name__], path)
-    if not os.path.lexists(path / "result.json"):
-        raise SystemExit(
-            "C1 fleet gateway compatibility: retained native-pool pin is pending")
-    with pin.selected_applied_context(
-            sys.modules[__name__], account, roots, operation=operation,
-            retained_proof_purpose=C1_GATEWAY_RETAINED_PROOF_PURPOSE) as (plan, raw):
-        current = _fabric_release_bytes(roots["config"])
-        manifest = _fabric_release_bytes(roots["manifest"])
-        original = (current == raw["config.after.json"]
-                    and manifest == raw["manifest.after.json"])
-        paper = (not original and pin._fleet_paper_v20_postpin_start(
-            sys.modules[__name__], account, roots, plan, raw, current, manifest))
-        if not (original or paper):
-            raise SystemExit(
-                "C1 fleet gateway compatibility: retained native-pool pin is not the current installed state")
-        yield {"present": True, "state": "COMPLETE", "applicable": True,
-               "planSha256": pin.plan_sha(sys.modules[__name__], plan),
-               "paperSuccessor": bool(paper)}
-
-
-def _cmd_c1_fleet_git_failure_compat(args, account: str) -> int:
-    """Dispatch the one closed chatgpt1 gateway-only transition.
-
-    The successor is compiled from the exact installed predecessor bytes, so
-    no caller-supplied source bundle reaches the installation. A read-only
-    preflight works while the service still runs; a modifying transaction
-    holds the incumbent persistent lifecycle lock inode through apply and
-    reconciliation.
-    """
-    _validate_account_label(account)
-    if account != C1_GIT_FAILURE_COMPAT_ACCOUNT:
-        raise SystemExit(
-            "C1 fleet gateway compatibility requires the enrolled chatgpt1 "
-            "owner and an exact manifest CAS")
-    label = f"com.mastermind.studio-direct-private.{account}"
-    if not os.path.isabs(args.source):
-        raise SystemExit("--source must be absolute")
-    source = Path(args.source)
-    if source.is_symlink() or not source.is_dir():
-        raise SystemExit(f"source dir invalid: {source}")
-    node_abs = _resolve_abs("--node", args.node)
-    backend_abs = _resolve_abs("--backend", args.backend)
-    port = int(args.port)
-    _validate_port(port)
-    roots = _build_runtime_roots(account)
-    if getattr(args, "publisher_preflight_only", False) is True:
-        with _c1_retained_pin_state(account, roots) as pin_state:
-            return _upgrade_c1_fleet_git_failure_compat(
-                args, source, node_abs, backend_abs, account, label, port, roots,
-                pin_state=pin_state)
-    with _c2_lifecycle_mutex(account):
-        with _c1_retained_pin_state(account, roots, operation="apply") as pin_state:
-            return _upgrade_c1_fleet_git_failure_compat(
-                args, source, node_abs, backend_abs, account, label, port, roots,
-                pin_state=pin_state)
-
-
-def _upgrade_c1_fleet_git_failure_compat(
-    args, source: Path, node_abs: Path, backend_abs: Path,
-    account: str, label: str, port: int, roots: dict, *, pin_state: dict,
-) -> int:
-    """Replace ONLY the installed C1 fleet gateway with the reviewed successor.
-
-    One closed, gateway-only transaction for the single already-enrolled
-    ``chatgpt1`` seat. The incumbent owner keeps owning installation, the
-    manifest/seal and the launchd lifecycle. This route replaces one module
-    and its manifest digest; it changes no publisher module, configuration
-    byte, fleet route, scheduling cap, dependency, package file, launcher,
-    credential or grant, and it never creates a seat, installer, publisher,
-    registry, queue or service.
-
-    The administrator supplies the exact observed manifest digest (CAS). The
-    gateway hash alone never qualifies an installation: the complete existing
-    file map, manifest/config/plist hashes, dependency seal, Node/backend
-    identity, account, port and the actual permitted publisher pair are all
-    verified first.
-    """
-    expected = getattr(args, "publisher_expected_manifest_sha256", None)
-    preview = getattr(args, "publisher_preflight_only", False)
-    if (account != C1_GIT_FAILURE_COMPAT_ACCOUNT or type(preview) is not bool
-            or not _sha256_hex(expected)
-            or getattr(args, "fabric_only", False)
-            or getattr(args, "enable_repository_workspaces", False)
-            or getattr(args, "os_commission_config_sha256", None)):
-        raise SystemExit(
-            "C1 fleet gateway compatibility requires the enrolled chatgpt1 "
-            "owner and an exact manifest CAS")
-    manifest_path = roots["manifest"]
-    config_path = roots["config"]
-    gateway_path = roots["base"] / C1_GIT_FAILURE_COMPAT_GATEWAY
-    for candidate in (manifest_path, config_path, gateway_path):
-        _assert_dest_safe(candidate)
-    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
-        raise SystemExit("C1 fleet gateway compatibility: installed manifest CAS mismatch")
-    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
-    if (prior.get("version") != MANIFEST_VERSION
-            or frozenset(prior["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
-            or not prior.get("dependencyTreeHash")
-            or prior.get("node") != str(node_abs)
-            or prior.get("backend") != str(backend_abs)
-            or prior.get("host") != "127.0.0.1"
-            or prior.get("port") != port):
-        raise SystemExit("C1 fleet gateway compatibility: original sealed identity does not match")
-    # Every preserved fleet module must still be the incumbent's exact
-    # reviewed generation. Only the gateway itself is replaced.
-    for name, expected_blob in FLEET_V10_PRESERVED_GIT_BLOBS.items():
-        if name == C1_GIT_FAILURE_COMPAT_GATEWAY:
-            continue
-        candidate = roots["base"] / name
-        _assert_dest_safe(candidate)
-        data = candidate.read_bytes()
-        actual = hashlib.sha1(
-            b"blob " + str(len(data)).encode("ascii") + b"\0" + data
-        ).hexdigest()
-        if actual != expected_blob:
-            raise SystemExit("C1 fleet gateway compatibility: preserved fleet generation changed")
-    # The installed publisher pair must be one the incumbent already accepts.
-    installed_pair = {name: prior["files"].get(name)
-                      for name in ("git-publish.mjs", "workspace-access.mjs")}
-    accepted_pairs = (
-        dict(FLEET_V10_PUBLISHER_PATCH_SHA256),
-        dict(FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256),
-        dict(FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256),
-        dict(FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256),
-        {"git-publish.mjs": FLEET_V10_PREVIOUS_CLOSED_PUBLISHER_SHA256,
-         "workspace-access.mjs": FLEET_V10_PUBLISHER_PATCH_SHA256["workspace-access.mjs"]},
-    )
-    if installed_pair not in accepted_pairs:
-        raise SystemExit("C1 fleet gateway compatibility: unrecognized prior publisher identity")
-    old_config_bytes = config_path.read_bytes()
-    old_manifest_bytes = manifest_path.read_bytes()
-    if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
-            or hashlib.sha256(old_manifest_bytes).hexdigest() != expected):
-        raise SystemExit("C1 fleet gateway compatibility: verified snapshot changed during preflight")
-    try:
-        old_config = json.loads(old_config_bytes)
-    except (UnicodeError, json.JSONDecodeError) as exc:
-        raise SystemExit("C1 fleet gateway compatibility: original config invalid") from exc
-    routes = old_config.get("fleetRouting") if type(old_config) is dict else None
-    if (type(old_config) is not dict
-            or type(routes) is not dict or routes.get("enabled") is not True
-            or not isinstance(routes.get("routes"), list) or len(routes["routes"]) < 1
-            or type(old_config.get("fleetStatus")) is not dict
-            or old_config.get("fabricOnly") is True
-            or "commissionPublication" in old_config
-            or "modernFabricProtocol" in old_config):
-        raise SystemExit("C1 fleet gateway compatibility: original scoped capabilities changed")
-    # The installed gateway must be exactly the reviewed predecessor. The
-    # compiler refuses anything else, including a preimage with one changed
-    # byte, several anchors or a preimage that is already patched.
-    installed_gateway = gateway_path.read_bytes()
-    compat = _fleet_git_failure_compat_module()
-    try:
-        compat.verify_preimage(installed_gateway)
-        successor = compat.compile_successor(installed_gateway)
-    except compat.CompatError as exc:
-        raise SystemExit(
-            "C1 fleet gateway compatibility: installed gateway is not the reviewed "
-            f"predecessor ({exc.code})") from None
-    if (hashlib.sha256(successor).hexdigest() != C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256
-            or compat.git_blob_sha1(successor) != C1_GIT_FAILURE_COMPAT_SUCCESSOR_GIT_BLOB):
-        raise SystemExit("C1 fleet gateway compatibility: compiled successor is not the pinned successor")
-    # A retained native-pool pin is qualified before anything is written. A
-    # pending, unknown or foreign pin refuses; an applied pin keeps its own
-    # records, plan, result and native phase untouched.
-    if pin_state.get("present") and not pin_state.get("applicable"):
-        raise SystemExit(
-            "C1 fleet gateway compatibility: retained native-pool pin is "
-            f"{pin_state.get('state')} and cannot be advanced")
-    future = dict(prior)
-    future["files"] = dict(prior["files"])
-    future["files"][C1_GIT_FAILURE_COMPAT_GATEWAY] = hashlib.sha256(successor).hexdigest()
-    if not _valid_manifest(future, account, label):
-        raise SystemExit("C1 fleet gateway compatibility: prospective manifest invalid")
-    target_manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
-    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
-        raise SystemExit("C1 fleet gateway compatibility: installed state changed during planning")
-    diff = compat.diff_report(installed_gateway, successor)
-    guard = compat.guard_report(successor)
-    if preview:
-        try:
-            stopped = _lifecycle_inspect(account, label, roots, require_positive=True) is None
-            blocker = None
-        except SystemExit as exc:
-            stopped = False
-            blocker = str(exc)
-        print(json.dumps({
-            "preflight": True, "effect": "NOT_APPLIED", "account": account,
-            "label": label, "port": port,
-            "originalManifestSha256": expected,
-            "targetManifestSha256": hashlib.sha256(target_manifest_bytes).hexdigest(),
-            "gatewayModule": C1_GIT_FAILURE_COMPAT_GATEWAY,
-            "preimageGatewaySha256": C1_GIT_FAILURE_COMPAT_PREDECESSOR_SHA256,
-            "preimageGatewayGitBlob": C1_GIT_FAILURE_COMPAT_PREDECESSOR_GIT_BLOB,
-            "targetGatewaySha256": C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256,
-            "targetGatewayGitBlob": C1_GIT_FAILURE_COMPAT_SUCCESSOR_GIT_BLOB,
-            "targetGatewaySize": len(successor),
-            "sourceDiff": {"hunks": diff["hunks"], "addedLines": diff["addedLines"],
-                           "removedLines": diff["removedLines"]},
-            "preservedGuard": guard,
-            "preservedFiles": sorted(prior["files"]),
-            "publisherPairPreserved": installed_pair,
-            "fleetRoutesPreserved": len(routes["routes"]),
-            "concurrencyPreserved": [old_config.get("maxPerSessionConcurrency"),
-                                     old_config.get("maxQueuedPerSession")],
-            "configBytesPreserved": True,
-            "nativePoolPin": pin_state,
-            "serviceStopped": stopped,
-            "blocker": blocker,
-            "serviceStarted": False,
-        }, sort_keys=True))
-        return 0
-    # A stopped-service prerequisite needs a positive stop proof. The generic
-    # launchd probe treats every nonzero launchctl result as absence, which is
-    # not proof that the service stopped.
-    if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
-        raise SystemExit("refusing C1 fleet gateway upgrade while service is loaded; stop first")
-    # Reconfirm every observed byte immediately before the first effect.
-    if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
-            or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]
-            or hashlib.sha256(gateway_path.read_bytes()).hexdigest()
-            != C1_GIT_FAILURE_COMPAT_PREDECESSOR_SHA256):
-        raise SystemExit("C1 fleet gateway compatibility: original installation changed")
-    old_bytes = {gateway_path: installed_gateway, manifest_path: old_manifest_bytes}
-    planned = {gateway_path: successor, manifest_path: target_manifest_bytes}
-    committed = False
-    try:
-        for target, payload in planned.items():
-            _atomic_write_bytes(target, payload)
-        committed = True
-        _verify_staged_install(account, label, roots, require_runtime_seal=True)
-    except BaseException as exc:
-        if committed:
-            raise SystemExit(
-                "C1 fleet gateway compatibility: EFFECT_UNKNOWN after manifest commit; "
-                "inspect the original service before attempting recovery"
-            ) from exc
-        try:
-            # os.replace may have succeeded even when a later fsync failed, so
-            # a return-code ledger cannot prove which file changed. Reconcile
-            # every planned path by bytes and distinguish the exact original,
-            # the exact target and any foreign or mixed bytes.
-            if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
-                raise RuntimeError("service became loaded during transaction")
-            observed = {target: target.read_bytes() for target in planned}
-            if any(observed[target] not in (old_bytes[target], planned[target])
-                   for target in planned):
-                raise RuntimeError("foreign or mixed bytes while recovering")
-            for target in reversed(tuple(planned)):
-                if observed[target] != old_bytes[target]:
-                    _atomic_write_bytes(target, old_bytes[target])
-            if (any(target.read_bytes() != old_bytes[target] for target in planned)
-                    or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
-                raise RuntimeError("rollback byte identity differs")
-            _verify_staged_install(account, label, roots, require_runtime_seal=True)
-        except BaseException as rollback_exc:
-            raise SystemExit(
-                "C1 fleet gateway compatibility: EFFECT_UNKNOWN during rollback; "
-                "do not restart or replay until the original state is reconciled"
-            ) from rollback_exc
-        raise SystemExit(
-            "C1 fleet gateway compatibility: NOT_APPLIED; original state restored") from exc
-    print(json.dumps({
-        "c1FleetGitFailureCompatibility": True, "account": account, "effect": "APPLIED",
-        "label": label, "port": port,
-        "manifestSha256": _sha256_file(manifest_path),
-        "gatewayModule": C1_GIT_FAILURE_COMPAT_GATEWAY,
-        "targetGatewaySha256": C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256,
-        "targetGatewayGitBlob": C1_GIT_FAILURE_COMPAT_SUCCESSOR_GIT_BLOB,
-        "otherFleetModulesPreserved": True,
-        "publisherPairPreserved": True,
-        "configBytesPreserved": True,
-        "nativePoolPin": pin_state,
         "serviceStarted": False,
     }, sort_keys=True))
     return 0
@@ -3724,13 +3149,6 @@ def _upgrade_c2_personal_git_timeout_only(
 @_fabric_lifecycle_serialized()
 def cmd_upgrade(args) -> int:
     account = args.account
-    # The closed C1 gateway-only route is dispatched before the generic restage
-    # refusal. It qualifies the retained native-pool pin itself, replaces one
-    # module and never restages the seat, so it is not a generic capability
-    # rebuild. Every other account and every generic upgrade keeps the
-    # existing refusal unchanged.
-    if getattr(args, "c1_fleet_git_failure_compat", False) is True:
-        return _cmd_c1_fleet_git_failure_compat(args, account)
     _pin_reject_generic_restage(account)
     _validate_account_label(account)
     label = f"com.mastermind.studio-direct-private.{account}"
@@ -3794,9 +3212,7 @@ def cmd_upgrade(args) -> int:
     # Reject only actual explicit option values, not arbitrary Mock values.
     if (getattr(args, "publisher_preflight_only", False) is True
             or type(getattr(args, "publisher_expected_manifest_sha256", None)) is str):
-        raise SystemExit(
-            "publisher preflight and CAS options require --publisher-only-fleet-v10 "
-            "or --c1-fleet-git-failure-compat")
+        raise SystemExit("publisher preflight and CAS options require --publisher-only-fleet-v10")
     if _launchd_inspect(label) is not None:
         raise SystemExit("refusing upgrade while service is running; stop first")
     prior = _verify_staged_install(
@@ -3849,8 +3265,6 @@ def cmd_upgrade(args) -> int:
         commission_digest=commission_digest,
         fabric_only=fabric_only,
         modern_fabric=_modern_fabric_setting(args, roots, prior, fabric_only),
-        original_collection=_original_collection_setting(args, roots, prior, fabric_only,
-            _modern_fabric_setting(args, roots, prior, fabric_only)),
     )
 
 
@@ -4421,7 +3835,7 @@ def _fabric_release_bytes(path: Path, *, limit: int = 2 * 1024 * 1024) -> bytes:
         os.close(fd)
 
 
-def _fabric_release_local_source(release_commit: str, expected_sha: str) -> tuple[Path, dict]:
+def _fabric_release_source(release_commit: str, expected_sha: str) -> tuple[Path, dict]:
     """Bind the sole backend path to a commit already in observed protected master.
 
     The operator refreshes the fixed source-admin repository and checks protected
@@ -4467,245 +3881,6 @@ def _fabric_release_local_source(release_commit: str, expected_sha: str) -> tupl
         raise SystemExit("Fabric release backend differs from the merged source or pinned SHA256")
     return backend, {"releaseCommit": release_commit, "backendGitBlob": blob,
                      "backendSha256": expected_sha, "observedProtectedMaster": observed}
-
-
-def _fabric_public_json_pairs(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate JSON key")
-        result[key] = value
-    return result
-
-
-class _FabricNoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-def _fabric_public_opener():
-    # An explicit empty ProxyHandler prevents environment, macOS system proxy,
-    # and proxy-credential discovery. The standard HTTPS handler retains its
-    # default certificate and hostname verification.
-    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _FabricNoRedirect())
-
-
-def _fabric_public_remaining(deadline: float) -> float:
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise SystemExit("Fabric public release: total GitHub metadata deadline exceeded")
-    return remaining
-
-
-def _fabric_public_bounded_read(url: str, deadline: float) -> None:
-    """One canonical read inside the finite child's independent lifetime."""
-    _fabric_public_remaining(deadline)
-    opener = _fabric_public_opener()
-    request = urllib.request.Request(url, headers={
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "studio-direct-mcp-public-release-provenance",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }, method="GET")
-    response = None
-    try:
-        response = opener.open(request, timeout=_fabric_public_remaining(deadline))
-        if response.status != 200:
-            raise SystemExit("Fabric public release: GitHub metadata refused")
-        # The socket timeout is a secondary inactivity guard. Both the parent's
-        # kill/wait and the child's process timer enforce the original deadline.
-        raw = response.read(FABRIC_PUBLIC_JSON_LIMIT + 1)
-        if len(raw) > FABRIC_PUBLIC_JSON_LIMIT:
-            raise SystemExit("Fabric public release: GitHub metadata too large")
-        _fabric_public_remaining(deadline)
-        sys.stdout.buffer.write(raw)
-        sys.stdout.buffer.flush()
-    except urllib.error.HTTPError as exc:
-        # HTTPError owns the response even when opener.open never returned it.
-        # Do not depend on exception destruction or include response details.
-        try:
-            exc.close()
-        finally:
-            raise SystemExit("Fabric public release: bounded GitHub metadata unavailable") from None
-    except SystemExit:
-        raise
-    except Exception:
-        raise SystemExit("Fabric public release: bounded GitHub metadata unavailable") from None
-    finally:
-        if response is not None:
-            response.close()
-
-
-def _fabric_public_child_source() -> tuple[str, str]:
-    """Capture this qualified source; never ask the child to import a path."""
-    context = _INSTALLED_CONTROL_CONTEXT
-    if context is not None:
-        path = context["root"] / "private_service.py"
-        raw = context["files"]["private_service.py"]
-    else:
-        # Genuine source execution remains supported. This is the running
-        # module's exact filename, not a caller-selected repository or module.
-        path = Path(os.path.abspath(__file__))
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
-        try:
-            before = os.fstat(fd)
-            if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
-                    or before.st_nlink != 1 or before.st_mode & 0o022
-                    or before.st_size > 2 * 1024 * 1024):
-                raise SystemExit("Fabric public release: qualified source refused")
-            with os.fdopen(fd, "rb", closefd=False) as source:
-                raw = source.read(2 * 1024 * 1024 + 1)
-            after, named = os.fstat(fd), path.lstat()
-            identity = lambda value: (value.st_dev, value.st_ino, value.st_mode,
-                                     value.st_size, value.st_mtime_ns, value.st_ctime_ns)
-            if (len(raw) > 2 * 1024 * 1024 or identity(before) != identity(after)
-                    or identity(after) != identity(named)):
-                raise SystemExit("Fabric public release: qualified source changed")
-        finally:
-            os.close(fd)
-    return str(path), raw.decode("utf-8")
-
-
-def _fabric_public_https_json_child(url: str, deadline: float) -> bytes:
-    """One finite child, captured source, closed environment and absolute TTL.
-
-    The child's process timer bounds DNS/connect/TLS/headers/body/cleanup even
-    if the parent terminates. subprocess.run also guarantees kill/wait on its
-    timeout. Local process creation itself is not separately claimed to be
-    interruptible on every platform.
-    """
-    _fabric_public_remaining(deadline)
-    source_path, source_text = _fabric_public_child_source()
-    document = json.dumps([source_path, source_text, url]).encode("utf-8")
-    # Python 3.9 on macOS has process-local monotonic origins. Translate the
-    # remaining budget to the shared POSIX clock before crossing a process.
-    child_deadline = time.clock_gettime(time.CLOCK_MONOTONIC) + _fabric_public_remaining(deadline)
-    try:
-        result = subprocess.run(
-            [sys.executable, "-I", "-S", "-B", "-c", _FABRIC_PUBLIC_READ_CHILD, str(child_deadline)],
-            input=document, capture_output=True, check=False,
-            env={"HOME": str(Path.home())},
-            timeout=_fabric_public_remaining(deadline))
-    except subprocess.TimeoutExpired:
-        raise SystemExit("Fabric public release: total GitHub metadata deadline exceeded") from None
-    except Exception:
-        raise SystemExit("Fabric public release: bounded GitHub metadata unavailable") from None
-    _fabric_public_remaining(deadline)
-    if result.returncode != 0:
-        raise SystemExit("Fabric public release: bounded GitHub metadata unavailable")
-    if len(result.stdout) > FABRIC_PUBLIC_JSON_LIMIT:
-        raise SystemExit("Fabric public release: GitHub metadata too large")
-    return result.stdout
-
-
-_FABRIC_PUBLIC_READ_CHILD = r"""
-import signal,sys,time
-remaining = float(sys.argv[1]) - time.clock_gettime(time.CLOCK_MONOTONIC)
-deadline = time.monotonic() + remaining
-if remaining <= 0:
-    raise SystemExit("Fabric public release: total GitHub metadata deadline exceeded")
-signal.signal(signal.SIGALRM, signal.SIG_DFL)
-signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGALRM})
-signal.setitimer(signal.ITIMER_REAL, remaining)
-import json,types
-canonical_source = json.loads(sys.stdin.buffer.read())
-private_service = types.ModuleType("_studio_public_provenance_child")
-private_service.__file__ = canonical_source[0]
-sys.modules[private_service.__name__] = private_service
-exec(compile(canonical_source[1], canonical_source[0], "exec"), private_service.__dict__)
-private_service._fabric_public_bounded_read(canonical_source[2], deadline)
-"""
-
-
-def _fabric_public_https_json(url: str, *, deadline: float = None) -> dict:
-    """Run one finite direct read under the qualified interpreter/source."""
-    if type(url) is not str or FABRIC_PUBLIC_METADATA_URL_RE.fullmatch(url) is None:
-        raise SystemExit("Fabric public release: non-canonical metadata URL refused")
-    if deadline is None:
-        deadline = time.monotonic() + FABRIC_PUBLIC_TIMEOUT_SECONDS
-    raw = _fabric_public_https_json_child(url, deadline)
-    if type(raw) is not bytes or len(raw) > FABRIC_PUBLIC_JSON_LIMIT:
-        raise SystemExit("Fabric public release: GitHub metadata too large")
-    try:
-        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_fabric_public_json_pairs,
-                           parse_constant=lambda value: (_ for _ in ()).throw(ValueError("non-finite JSON")))
-    except (ValueError, UnicodeError) as exc:
-        raise SystemExit("Fabric public release: strict GitHub JSON required") from exc
-    if type(value) is not dict:
-        raise SystemExit("Fabric public release: GitHub JSON object required")
-    _fabric_public_remaining(deadline)
-    return value
-
-
-def _fabric_public_provenance(release_commit: str, expected_sha: str) -> tuple[Path, dict]:
-    """Read fixed public metadata only, with one absolute deadline and no fallback."""
-    if not _fabric_git_sha(release_commit) or not _sha256_hex(expected_sha):
-        raise SystemExit("Fabric release requires an exact commit and backend SHA256")
-    deadline = time.monotonic() + FABRIC_PUBLIC_TIMEOUT_SECONDS
-    ref = _fabric_public_https_json(FABRIC_PUBLIC_API_ROOT + "/git/ref/heads/master", deadline=deadline)
-    if (ref.get("ref") != FABRIC_PUBLIC_REF or type(ref.get("object")) is not dict
-            or ref["object"].get("type") != "commit"
-            or ref["object"].get("sha") != release_commit):
-        raise SystemExit("Fabric public release: protected master does not equal requested commit")
-    commit = _fabric_public_https_json(FABRIC_PUBLIC_API_ROOT + "/git/commits/" + release_commit,
-                                       deadline=deadline)
-    if (commit.get("sha") != release_commit or type(commit.get("tree")) is not dict
-            or not _fabric_git_sha(commit["tree"].get("sha"))):
-        raise SystemExit("Fabric public release: exact commit/tree evidence required")
-    tree_sha = commit["tree"]["sha"]
-    current_sha, entry, components = tree_sha, None, FABRIC_BACKEND_SOURCE.split("/")
-    for component in components:
-        if not _fabric_git_sha(current_sha):
-            raise SystemExit("Fabric public release: every intermediate tree needs an exact Git SHA")
-        tree = _fabric_public_https_json(FABRIC_PUBLIC_API_ROOT + "/git/trees/" + current_sha,
-                                         deadline=deadline)
-        if (tree.get("sha") != current_sha or tree.get("truncated") is not False
-                or type(tree.get("tree")) is not list):
-            raise SystemExit("Fabric public release: complete exact tree required")
-        matches = [item for item in tree["tree"]
-                   if type(item) is dict and item.get("path") == component]
-        if len(matches) != 1:
-            raise SystemExit("Fabric public release: fixed backend path missing or ambiguous")
-        entry = matches[0]
-        if component != components[-1]:
-            if entry.get("type") != "tree" or entry.get("mode") != "040000":
-                raise SystemExit("Fabric public release: fixed backend parent is not a tree")
-            current_sha = entry.get("sha")
-            if not _fabric_git_sha(current_sha):
-                raise SystemExit("Fabric public release: every intermediate tree needs an exact Git SHA")
-    if (entry.get("type") != "blob" or entry.get("mode") not in ("100644", "100755")
-            or not _fabric_git_sha(entry.get("sha"))
-            or type(entry.get("size")) is not int or entry["size"] < 0):
-        raise SystemExit("Fabric public release: backend must be one regular public Git blob")
-    backend = _user_root() / FABRIC_BACKEND_RELEASES_REL / ("fabric-c3-" + release_commit) / FABRIC_BACKEND_SOURCE
-    before = backend.lstat()
-    raw = _fabric_release_bytes(backend)
-    after = backend.lstat()
-    if ((before.st_dev, before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
-            != (after.st_dev, after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
-        raise SystemExit("Fabric public release: staged backend inode changed during observation")
-    blob = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
-    if (hashlib.sha256(raw).hexdigest() != expected_sha or blob != entry["sha"]
-            or len(raw) != entry["size"]):
-        raise SystemExit("Fabric release backend differs from the public source or pinned SHA256")
-    _fabric_public_remaining(deadline)
-    return backend, {
-        "sourceProvenance": FABRIC_RELEASE_PUBLIC_PROVENANCE,
-        "repository": FABRIC_PUBLIC_REPOSITORY, "ref": FABRIC_PUBLIC_REF,
-        "releaseCommit": release_commit, "observedProtectedMaster": release_commit,
-        "commitTree": tree_sha, "backendGitBlob": entry["sha"],
-        "backendMode": entry["mode"], "backendSha256": expected_sha,
-        "backendSize": len(raw), "stagedBackendPath": str(backend),
-        "stagedBackendDevice": after.st_dev, "stagedBackendInode": after.st_ino,
-    }
-
-
-def _fabric_release_source(release_commit: str, expected_sha: str,
-                           provenance: str = FABRIC_RELEASE_LOCAL_PROVENANCE) -> tuple[Path, dict]:
-    if provenance == FABRIC_RELEASE_PUBLIC_PROVENANCE:
-        return _fabric_public_provenance(release_commit, expected_sha)
-    if provenance == FABRIC_RELEASE_LOCAL_PROVENANCE:
-        return _fabric_release_local_source(release_commit, expected_sha)
-    raise SystemExit("Fabric backend release: closed source provenance selector required")
 
 
 def _fabric_release_new(path: Path, data: bytes) -> None:
@@ -4839,8 +4014,7 @@ def cmd_fabric_backend_release(args) -> int:
             or argv[0] != prior["backend"] or type(old_config.get("childEnv")) is not dict
             or old_config["childEnv"].get("MMX_FABRIC_SDK_PACKAGE") != str(roots["base"] / "package.json")):
         raise SystemExit("Fabric backend release: original restricted profile or SDK binding differs")
-    backend, source = _fabric_release_source(args.release_commit, args.backend_sha256,
-        getattr(args, "source_provenance", FABRIC_RELEASE_LOCAL_PROVENANCE))
+    backend, source = _fabric_release_source(args.release_commit, args.backend_sha256)
     if str(backend) == prior["backend"]:
         raise SystemExit("Fabric backend release: backend already selected; no replay")
     new_config = {**old_config, "args": [str(backend), *argv[1:]]}
@@ -4858,7 +4032,6 @@ def cmd_fabric_backend_release(args) -> int:
         "originalBackend": prior["backend"], "originalBackendSha256": prior["backendHash"],
         "targetBackend": str(backend), "targetBackendSha256": args.backend_sha256,
         "releaseCommit": source["releaseCommit"], "backendGitBlob": source["backendGitBlob"],
-        "releaseProvenance": source,
         "preservedGatewayFiles": len(prior["files"]), "preservedDependencyTreeSha256": prior["dependencyTreeHash"],
         "preservedPlistSha256": prior["plistHash"], "serviceStarted": False,
         "changedConfigFields": ["args[0]"], "changedManifestFields": ["backend", "backendHash", "configHash"],
@@ -4875,9 +4048,7 @@ def cmd_fabric_backend_release(args) -> int:
         print(json.dumps({**plan, "planSha256": plan_sha, "preflight": True,
                           "effect": "NOT_APPLIED", "observedProtectedMaster": source["observedProtectedMaster"]}, sort_keys=True))
         return 0
-    if not _sha256_hex(args.expected_plan_sha256):
-        raise SystemExit("Fabric backend release: exact reviewed preview plan is required")
-    if args.expected_plan_sha256 != plan_sha:
+    if not _sha256_hex(args.expected_plan_sha256) or args.expected_plan_sha256 != plan_sha:
         raise SystemExit("Fabric backend release: exact reviewed preview plan is required")
     if _lifecycle_inspect(account, label, roots) is not None:
         raise SystemExit("refusing Fabric backend release while service is loaded; stop first")
@@ -4885,9 +4056,7 @@ def cmd_fabric_backend_release(args) -> int:
             or _fabric_release_bytes(manifest_path) != before_manifest
             or _fabric_release_bytes(config_path) != before_config):
         raise SystemExit("Fabric backend release: original runtime changed before write")
-    if _fabric_release_source(args.release_commit, args.backend_sha256,
-            getattr(args, "source_provenance", FABRIC_RELEASE_LOCAL_PROVENANCE))[1] != source:
-        raise SystemExit("Fabric backend release: protected source or staged bytes changed before write")
+    _fabric_release_source(args.release_commit, args.backend_sha256)
     if _lifecycle_inspect(account, label, roots) is not None:
         raise SystemExit("refusing Fabric backend release while service is loaded; stop first")
     _ensure_secure_dir(evidence_root)
@@ -5128,9 +4297,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="private_service")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    original = sub.add_parser("_original-collection-helper", help=argparse.SUPPRESS)
-    original.set_defaults(func=cmd_original_collection_helper)
-
     status = sub.add_parser("fleet-status-module-upgrade")
     status.add_argument("--account", choices=(
         "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt2-personal",
@@ -5170,9 +4336,6 @@ def build_parser() -> argparse.ArgumentParser:
     fabric.add_argument("--release-commit", required=True,
                         help="exact protected merged commit for the fixed Fabric backend release path")
     fabric.add_argument("--backend-sha256", required=True)
-    fabric.add_argument("--source-provenance", choices=(FABRIC_RELEASE_LOCAL_PROVENANCE,
-                        FABRIC_RELEASE_PUBLIC_PROVENANCE), default=FABRIC_RELEASE_LOCAL_PROVENANCE,
-                        help="closed release source; public mode never reads a local Git source or falls back")
     fabric.add_argument("--expected-plan-sha256",
                         help="exact plan digest returned by the reviewed read-only preview; required for apply")
     fabric.add_argument("--preflight-only", action="store_true")
@@ -5199,8 +4362,6 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--backend", required=True)
         s.add_argument("--modern-fabric-protocol", action=argparse.BooleanOptionalAction, default=None,
                        help="opt into stateless MCP for the private Fabric-only shared backend; otherwise preserve verified selection")
-        s.add_argument("--original-collection", action=argparse.BooleanOptionalAction, default=None,
-                       help="explicit fixed J/carrier collection capability for the existing modern C3 service")
         s.add_argument("--fabric-only", action="store_true", help="new Fabric-only installation; no Git, Paper or repository tools")
         s.add_argument("--os-commission-config-sha256", help="opt into the exact root-sealed OS publication grant")
         s.add_argument("--enable-repository-workspaces", action="store_true",
@@ -5215,8 +4376,6 @@ def build_parser() -> argparse.ArgumentParser:
                            help="exact sealed C2 Personal stopped-service Git command budget patch")
             s.add_argument("--publisher-only-fleet-v10", action="store_true",
                            help="preserve the exact sealed enrolled fleet v0.1.10 runtime; patch only two publisher modules")
-            s.add_argument("--c1-fleet-git-failure-compat", action="store_true",
-                           help="closed chatgpt1-only fleet gateway Git-failure successor; exact manifest CAS required")
             s.add_argument("--publisher-expected-manifest-sha256",
                            help="CAS pin for the original sealed, approved fleet manifest")
             s.add_argument("--publisher-preflight-only", action="store_true",

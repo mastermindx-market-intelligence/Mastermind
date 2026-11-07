@@ -5,7 +5,7 @@ The existing seat lifecycle and native publication locks serialize cooperative
 owners; private directories do not claim atomic CAS against an adversarial UID.
 """
 
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 import copy
 import hashlib
 import json
@@ -291,58 +291,7 @@ def state(svc, roots, raw, plan):
         return "CONFIG_ONLY"
     if c == raw["config.after.json"] and m == raw["manifest.after.json"]:
         return "COMPLETE"
-    # Derive only the accepted C1 gateway successor, optionally composed with
-    # the existing frozen Paper selection. Never learn from installed bytes.
-    successor = c1_gateway_successor_manifest(svc, plan, raw, roots=roots, current=c)
-    if successor is not None and m == successor:
-        return "COMPLETE"
     fail("FOREIGN_STATE")
-
-
-def c1_gateway_successor_manifest(svc, plan, raw, *, roots=None, current=None):
-    """Derive the one reviewed C1 gateway successor of a retained pin manifest.
-
-    The retained record is the only input. The successor is the retained
-    applied manifest with exactly one known gateway digest transition. A
-    retained record for any other account, a retained manifest whose gateway
-    is not the pinned predecessor, or a retained record whose own digests do
-    not match its plan yields None. Nothing is written, cleared or relabelled.
-    """
-    if plan.get("account") != getattr(svc, "C1_GIT_FAILURE_COMPAT_ACCOUNT", None):
-        return None
-    applied = raw.get("manifest.after.json")
-    previous = raw.get("manifest.before.json")
-    if not isinstance(applied, bytes) or not isinstance(previous, bytes):
-        return None
-    if plan.get("manifest_after") != digest(applied):
-        return None
-    if plan.get("manifest_before") != digest(previous):
-        return None
-    if current is not None and current != raw.get("config.after.json"):
-        if roots is None:
-            return None
-        paper = _fleet_paper_v20_selection(svc, plan["account"], roots, plan, raw)
-        if paper is None or current != paper["configBytes"]:
-            return None
-        applied = paper["manifestBytes"]
-    try:
-        pinned = decode(applied)
-    except SystemExit:
-        return None
-    files = pinned.get("files")
-    if (
-        type(pinned) is not dict
-        or type(files) is not dict
-        or files.get("gateway.mjs")
-        != getattr(svc, "C1_GIT_FAILURE_COMPAT_PREDECESSOR_SHA256", None)
-    ):
-        return None
-    successor = copy.deepcopy(pinned)
-    successor["files"]["gateway.mjs"] = getattr(
-        svc, "C1_GIT_FAILURE_COMPAT_SUCCESSOR_SHA256", None)
-    if not successor["files"]["gateway.mjs"]:
-        return None
-    return svc._fabric_release_json(successor)
 
 
 def static_seal(svc, args, roots, raw, current):
@@ -522,7 +471,7 @@ def _c2_paper_v20_postpin_start(svc, account, roots, plan, raw, current, manifes
     return current == config_bytes and manifest == manifest_bytes
 
 
-def _fleet_paper_v20_selection(svc, account, roots, plan, raw):
+def _fleet_paper_v20_postpin_start(svc, account, roots, plan, raw, current, manifest):
     """Compose only frozen eight-seat Paper CAS with the selected native-pool pin.
 
     The original native-pool result, selected phase and exact pool digest
@@ -530,10 +479,10 @@ def _fleet_paper_v20_selection(svc, account, roots, plan, raw):
     """
     enrolled = getattr(svc, "FLEET_V20_ENROLLED_ACCOUNTS", ())
     if account not in enrolled or account == "mastermind-os-publication":
-        return None  # The publication seat has no native-pool pin to compose.
+        return False  # The publication seat has no native-pool pin to compose.
     if any(stat.S_IMODE(roots[n].lstat().st_mode) != plan[n + "_mode"]
            for n in ("config", "manifest")):
-        return None
+        return False
 
     cohort = svc._frozen_paper_fleet_module()
     pinned = cohort.COHORTS.get(account)
@@ -541,7 +490,7 @@ def _fleet_paper_v20_selection(svc, account, roots, plan, raw):
             or plan.get("manifest_after") != pinned.get("manifest_sha256")
             or digest(raw["manifest.after.json"]) != pinned.get("manifest_sha256")
             or digest(raw["config.after.json"]) != pinned.get("config_sha256")):
-        return None
+        return False
 
     # The already accepted pure planner checks original three byte-sealed
     # resources, exact immutable predecessor, non-Paper profile and target v20.
@@ -555,85 +504,9 @@ def _fleet_paper_v20_selection(svc, account, roots, plan, raw):
             home=svc._user_root(),
         )
     except ValueError:
-        return None
-    return successor
-
-
-def _fleet_paper_v20_postpin_start(svc, account, roots, plan, raw, current, manifest):
-    successor = _fleet_paper_v20_selection(svc, account, roots, plan, raw)
-    return (successor is not None and current == successor["configBytes"]
+        return False
+    return (current == successor["configBytes"]
             and manifest == successor["manifestBytes"])
-
-
-def _c1_fleet_git_failure_postpin_start(svc, account, roots, plan, raw, current, manifest):
-    """Recognize ONLY the reviewed C1 fleet-gateway Git-failure successor.
-
-    A retained native-pool pin stays independently enforced: its own plan,
-    result, native phase and bridge remain mandatory in require_start. This
-    recognizes exactly one forward-selected successor of that retained
-    applied manifest - the same manifest with one known gateway digest
-    transition. A pending or unknown pin stays pending or unknown, and no
-    retained record is edited, cleared or relabelled.
-    """
-    if account != getattr(svc, "C1_GIT_FAILURE_COMPAT_ACCOUNT", None):
-        return False
-    if any(stat.S_IMODE(roots[n].lstat().st_mode) != plan[n + "_mode"]
-           for n in ("config", "manifest")):
-        return False
-    successor = c1_gateway_successor_manifest(svc, plan, raw, roots=roots, current=current)
-    if successor is None:
-        return False
-    return manifest == successor
-
-
-@contextmanager
-def selected_applied_context(svc, account, roots, *, operation="status",
-                             retained_proof_purpose=None):
-    """Share the incumbent selected-pin proof without replaying its operation.
-
-    An apply caller holds the same native publication lock until its own
-    enclosing gateway transaction exits. No pin record or native selection is
-    changed here; read_transaction remains the only retained-record verifier.
-
-    ``retained_proof_purpose`` is the one closed chatgpt1 gateway-formatter
-    artifact check. It is not a native operation. Generic apply stays strict.
-    """
-    closed_purpose = getattr(svc, "C1_GATEWAY_RETAINED_PROOF_PURPOSE", None)
-    closed_account = getattr(svc, "C1_GIT_FAILURE_COMPAT_ACCOUNT", None)
-    if retained_proof_purpose is not None:
-        if (retained_proof_purpose != closed_purpose
-                or account != closed_account
-                or operation not in {"preview", "apply"}):
-            fail("INPUT_REFUSED")
-    elif operation not in {"status", "apply"}:
-        fail("INPUT_REFUSED")
-    path = roots["state"] / "native-pool-pin"
-    directory(svc, path)
-    p = decode(svc._fabric_release_bytes(path / "plan.json"))
-    if (p.get("schema") != SCHEMA or p.get("account") != account
-            or p.get("uid") != os.getuid()):
-        fail("START_PLAN_REFUSED")
-    try:
-        args = type("PinStartInputs", (), {
-            "account": account,
-            "expected_manifest_sha256": p["manifest_before"],
-            "successor_bundle": p["successor_bundle"],
-            "successor_plan_sha256": p["successor_digest"],
-            "expected_plan_sha256": plan_sha(svc, p),
-            "operation": operation,
-            "retained_proof_purpose": retained_proof_purpose or "",
-        })()
-    except KeyError:
-        fail("RETAINED_PLAN_REFUSED")
-    with svc._pin_native_context(args) as binding:
-        plan, raw = read_transaction(svc, path, args, binding)
-        result = decode(svc._fabric_release_bytes(path / "result.json"))
-        if (result != {"schema": SCHEMA, "planSha256": plan_sha(svc, p), "effect": "APPLIED"}
-                or binding.get("phase") != "SELECTED"
-                or svc._stable_regular_file_hash(Path(p["pool_target"]), label="native pool")
-                != p["pool_bridge"]):
-            fail("FUTURE_PIN_NOT_READY")
-        yield plan, raw
 
 
 def require_start(svc, account, roots):
@@ -655,9 +528,25 @@ def require_start(svc, account, roots):
         "manifest_before"
     ):
         return  # untouched incumbent behavior, including its historical pin drift
-    with selected_applied_context(svc, account, roots) as (plan, raw):
+    args = type(
+        "PinStartInputs",
+        (),
+        {
+            "account": account,
+            "expected_manifest_sha256": p["manifest_before"],
+            "successor_bundle": p["successor_bundle"],
+            "successor_plan_sha256": p["successor_digest"],
+            "expected_plan_sha256": plan_sha(svc, p),
+            "operation": "status",
+        },
+    )()
+    with svc._pin_native_context(args) as binding:
+        plan, raw = read_transaction(svc, path, args, binding)
+        result = decode(svc._fabric_release_bytes(path / "result.json"))
         if (
-            not (
+            result
+            != {"schema": SCHEMA, "planSha256": plan_sha(svc, p), "effect": "APPLIED"}
+            or not (
                 (current == raw["config.after.json"]
                  and manifest == raw["manifest.after.json"]
                  and state(svc, roots, raw, plan) == "COMPLETE")
@@ -665,8 +554,11 @@ def require_start(svc, account, roots):
                     svc, account, roots, plan, raw, current, manifest)
                 or _fleet_paper_v20_postpin_start(
                     svc, account, roots, plan, raw, current, manifest)
-                or _c1_fleet_git_failure_postpin_start(
-                    svc, account, roots, plan, raw, current, manifest)
             )
+            or binding.get("phase") != "SELECTED"
+            or svc._stable_regular_file_hash(
+                Path(p["pool_target"]), label="native pool"
+            )
+            != p["pool_bridge"]
         ):
             fail("FUTURE_PIN_NOT_READY")

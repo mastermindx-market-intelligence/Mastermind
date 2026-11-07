@@ -1119,11 +1119,3 @@ describe("explicit saved-source Open",()=>{
     expect((await readSavedConversationSource(request,f.owner)).reason).toBe("INVALID_INPUT");expect(called).toBe(0);
   });
 });
-
-it("keeps all three canonical target families in one bounded saved-reference page", () => {
-  const rows = ["fabric_attempt", "hermes_secretary", "hermes_meta"].map((kind, index) =>
-    row(index + 1, {target_ref: kind + ":" + HEX(index + 301)}));
-  const page = decodeSavedConversationPage(envelope(rows), WORK);
-  expect(page?.references.map(r => r.target_ref)).toEqual(rows.map(r => r.target_ref));
-  expect(page?.references).toHaveLength(3);
-});

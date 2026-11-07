@@ -16,11 +16,11 @@ import private_service as svc
 
 ORIGINAL_SUCCESSOR = "77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7"
 REVIEWED_SEATS = (
-    "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt2-personal",
-    "chatgpt3", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9", "chatgpt4",
+    "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt3",
+    "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9", "chatgpt4",
 )
-UNENROLLED = ("mastermind-os-publication", "fabric-read", "fabric-design",
-              "chatgpt3-other", "chatgpt3-forged")
+UNENROLLED = ("chatgpt2-personal", "mastermind-os-publication",
+              "fabric-read", "fabric-design", "chatgpt3-other", "chatgpt3-forged")
 
 ORIGINAL_TARGET = "28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce"
 CURRENT_TARGET = "9eec6f73903fabfdd6d15bfe6f815f652f0946b5838cef6d40e96ca5b7e7f185"
@@ -112,13 +112,12 @@ class NativeSelectionForwardTests(unittest.TestCase):
     def set_selection(self, selected):
         (self.store / "CURRENT.json").write_text(json.dumps(selected))
 
-    def run_proof(self, account="chatgpt4", operation="status", purpose=None):
-        argv = [sys.executable, "-I", "-B", "-c", original_subprocess_proof(),
-                str(self.rollout), str(self.bundle), self.plan["digest"], account,
-                operation]
-        if purpose is not None:
-            argv.append(purpose)
-        return subprocess.run(argv, capture_output=True, timeout=8, check=False)
+    def run_proof(self, account="chatgpt4"):
+        return subprocess.run(
+            [sys.executable, "-I", "-B", "-c", original_subprocess_proof(),
+             str(self.rollout), str(self.bundle), self.plan["digest"], account],
+            capture_output=True, timeout=8, check=False,
+        )
 
     def test_reviewed_forward_selection_is_accepted_and_bound_to_pointer(self):
         response = self.run_proof()
@@ -151,14 +150,16 @@ class NativeSelectionForwardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr[-250:])
         self.assertEqual(json.loads(result.stdout)["phase"], "PREVIOUS")
 
-    def test_eight_public_pins_include_non_paper_personal_but_not_fabric_services(self):
-        # The eighth public account has its own completed native pin, not Paper v20.
-        self.assertEqual(set(REVIEWED_SEATS) - {"chatgpt2-personal"},
-                         set(svc.FLEET_V20_ENROLLED_ACCOUNTS) - {"mastermind-os-publication"})
-        self.assertEqual(set(REVIEWED_SEATS),
-                         set(svc.NATIVE_POOL_PIN_ACCOUNTS) - {"fabric-design", "fabric-read"})
+    def test_seven_seats_match_existing_paper_fleet_not_native_pool_umbrella(self):
+        # Native pool admits other services; this exception never expands to them.
+        self.assertEqual(
+            set(REVIEWED_SEATS),
+            set(svc.FLEET_V20_ENROLLED_ACCOUNTS) - {"mastermind-os-publication"},
+        )
+        self.assertTrue(set(REVIEWED_SEATS).issubset(svc.NATIVE_POOL_PIN_ACCOUNTS))
+        self.assertNotEqual(set(REVIEWED_SEATS), set(svc.NATIVE_POOL_PIN_ACCOUNTS))
 
-    def test_all_eight_exact_original_seats_admit_selected_forward_pin(self):
+    def test_all_seven_exact_original_seats_admit_selected_forward_pin(self):
         for account in REVIEWED_SEATS:
             with self.subTest(account=account):
                 response = self.run_proof(account)
@@ -172,7 +173,7 @@ class NativeSelectionForwardTests(unittest.TestCase):
             with self.subTest(account=account):
                 self.assertNotEqual(self.run_proof(account).returncode, 0)
 
-    def test_newer_sequence_27_remains_admissible_for_all_eight(self):
+    def test_newer_sequence_27_remains_admissible_for_all_seven(self):
         newer = dict(self.forward, sequence=27)
         self.set_selection(newer)
         for account in REVIEWED_SEATS:
@@ -226,59 +227,6 @@ class NativeSelectionForwardTests(unittest.TestCase):
     def test_changed_original_bridge_refuses(self):
         (self.root / "pool").write_bytes(b"FOREIGN_ENTRY")
         self.assertNotEqual(self.run_proof().returncode, 0)
-
-    def test_pruned_original_receipts_never_authorize_native_apply(self):
-        # Production isolates the frozen retained-proof helper behind status.
-        module = self.rollout / "native_install.py"
-        source = module.read_text()
-        old = ("def read_successor(bundle):\n"
-               " return json.loads((bundle/'PLAN.json').read_text()), {}\n")
-        replacement = (
-            "def read_successor(bundle):\n"
-            " raise FileNotFoundError('historical bootstrap artifact pruned')\n"
-            "def read_retained_successor_after_bootstrap_prune(bundle):\n"
-            " return json.loads((bundle/'PLAN.json').read_text()), {}\n"
-        )
-        self.assertEqual(source.count(old), 1)
-        module.write_text(source.replace(old, replacement))
-        self.assertEqual(self.run_proof("chatgpt2-personal", "status").returncode, 0)
-        self.assertNotEqual(self.run_proof("chatgpt2-personal", "apply").returncode, 0)
-        self.assertNotEqual(self.run_proof("chatgpt2-personal", "reconcile").returncode, 0)
-        self.assertNotEqual(self.run_proof("fabric-design", "status").returncode, 0)
-
-    def test_closed_formatter_purpose_shares_preview_and_apply_proof(self):
-        module = self.rollout / "native_install.py"
-        source = module.read_text()
-        old = ("def read_successor(bundle):\n"
-               " return json.loads((bundle/'PLAN.json').read_text()), {}\n")
-        replacement = (
-            "def read_successor(bundle):\n"
-            " raise FileNotFoundError('historical bootstrap artifact pruned')\n"
-            "def read_retained_successor_after_bootstrap_prune(bundle):\n"
-            " return json.loads((bundle/'PLAN.json').read_text()), {}\n"
-        )
-        self.assertEqual(source.count(old), 1)
-        module.write_text(source.replace(old, replacement))
-        purpose = svc.C1_GATEWAY_RETAINED_PROOF_PURPOSE
-        self.assertIn(purpose, original_subprocess_proof())
-        preview = self.run_proof("chatgpt1", "preview", purpose)
-        apply = self.run_proof("chatgpt1", "apply", purpose)
-        self.assertEqual(preview.returncode, 0, preview.stderr[-250:])
-        self.assertEqual(apply.returncode, 0, apply.stderr[-250:])
-        preview_proof = json.loads(preview.stdout)
-        apply_proof = json.loads(apply.stdout)
-        self.assertEqual(preview_proof, apply_proof)
-        self.assertEqual(preview_proof["phase"], "SELECTED")
-        self.assertEqual(preview_proof["selection"], self.forward)
-        self.assertNotEqual(self.run_proof("chatgpt1", "apply").returncode, 0)
-        self.assertNotEqual(self.run_proof("chatgpt1", "reconcile", purpose).returncode, 0)
-        self.assertNotEqual(self.run_proof("chatgpt1", "status", purpose).returncode, 0)
-        self.assertNotEqual(self.run_proof("chatgpt4", "apply", purpose).returncode, 0)
-        self.assertNotEqual(self.run_proof("chatgpt1", "apply", "foreign-purpose").returncode, 0)
-        self.assertNotEqual(self.run_proof("chatgpt1", "preview", "foreign-purpose").returncode, 0)
-        self.set_selection(dict(self.forward, previous=CURRENT_TARGET))
-        self.assertNotEqual(self.run_proof("chatgpt1", "preview", purpose).returncode, 0)
-        self.assertNotEqual(self.run_proof("chatgpt1", "apply", purpose).returncode, 0)
 
     def test_no_extra_native_or_installer_files_created(self):
         original = sorted(x.relative_to(self.root) for x in self.root.rglob("*")

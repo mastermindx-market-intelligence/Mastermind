@@ -45,8 +45,7 @@ const WORK_REF_PATTERN = /^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/;
 const READ_REF_PATTERN = /^session-reply-[0-9a-f]{64}$/;
 const OPERATION_KEY_PATTERN = /^session-continue-[0-9a-f]{64}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
-/** The closed canonical target-prefix union: a mixed page stays readable. */
-const TARGET_REF_PATTERN = /^(?:fabric_attempt|hermes_secretary|hermes_meta):[0-9a-f]{64}$/;
+const TARGET_REF_PATTERN = /^fabric_attempt:[0-9a-f]{64}$/;
 const CURSOR_PATTERN = /^[A-Za-z0-9_=-]{1,2048}$/;
 const ROOT_JOB_PATTERN = /^JOB-[0-9]{1,9}$/;
 /** Real-calendar UTC stamp: ISO 8601 extended, offset strictly Z or +00:00. */

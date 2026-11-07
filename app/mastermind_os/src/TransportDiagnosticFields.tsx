@@ -1,5 +1,3 @@
-import { useEffect, useRef, useState } from "react";
-import type { NativeExecutiveObservation } from "./native-executive-observation";
 import type {
   DiagnosticHostKind,
   DiagnosticPhase,
@@ -48,30 +46,8 @@ export function TransportDiagnosticFields(props: {
   programsPhase: DiagnosticPhase;
   programsReason?: DiagnosticReadReason;
   locale: string;
-  refreshNativeDiagnostics?: (request: { signal: AbortSignal }) => Promise<NativeExecutiveObservation>;
 }) {
   const zh = props.locale === "zh-CN";
-  const [local, setLocal] = useState<{reader: typeof props.refreshNativeDiagnostics; phase: "pending" | "ready" | "unavailable"; value?: NativeExecutiveObservation} | null>(null);
-  const active = useRef<AbortController | null>(null);
-  const latest = useRef(props.refreshNativeDiagnostics);
-  latest.current = props.refreshNativeDiagnostics;
-  useEffect(() => () => { active.current?.abort(); }, [props.refreshNativeDiagnostics]);
-  const observed = local?.reader === props.refreshNativeDiagnostics ? local : null;
-  const refresh = async () => {
-    const reader = props.refreshNativeDiagnostics;
-    if (!reader || observed?.phase === "pending") return;
-    active.current?.abort();
-    const controller = new AbortController(); active.current = controller;
-    setLocal({ reader, phase: "pending" });
-    try {
-      const value = await reader({ signal: controller.signal });
-      if (!controller.signal.aborted && latest.current === reader && active.current === controller)
-        setLocal({ reader, phase: "ready", value });
-    } catch {
-      if (!controller.signal.aborted && latest.current === reader && active.current === controller)
-        setLocal({ reader, phase: "unavailable" });
-    }
-  };
   const d: MissionDiagnosticSnapshot | null = decodeMissionDiagnostics(
     props.snapshot,
   );
@@ -124,18 +100,7 @@ export function TransportDiagnosticFields(props: {
       code: isDiagnosticReadReason(props.programsReason) ? props.programsReason : "UNKNOWN",
     },
   ];
-  const native = observed?.phase === "ready" ? observed.value : undefined;
-  const closed = (value: unknown, allowed: readonly string[]) => typeof value === "string" && allowed.includes(value) ? value : "UNKNOWN";
-  if (native) rows.push(
-    {term: zh ? "最近本地原生观察" : "Last local native observation", code: native.wire === "v1" ? "LAST_EXPLICIT_LOCAL_READ" : "LEGACY_METADATA"},
-    {term: zh ? "本地 Executive 配置" : "Local Executive configured", code: booleanCode(typeof native.configured === "boolean" ? native.configured : null, zh)},
-    {term: zh ? "本地 Executive 可用性" : "Local Executive availability", code: booleanCode(typeof native.available === "boolean" ? native.available : null, zh)},
-    {term: zh ? "本地 Executive 原因" : "Local Executive reason", code: closed(native.reason, ["UNCONFIGURED","NOT_ESTABLISHED","AUTHORIZING","EXCHANGING","AVAILABLE","EXPIRED","AUTHORIZATION_REFUSED","TOKEN_EXCHANGE_FAILED","TOKEN_RESPONSE_INVALID","AUTH_BROWSER_UNAVAILABLE","AUTH_TRANSACTION_EXPIRED","GENERATION_EXHAUSTED"])},
-    {term: zh ? "本地 Executive 代次" : "Local Executive generation", code: Number.isSafeInteger(native.generation) && native.generation >= 0 ? String(native.generation) : "UNKNOWN"},
-    {term: zh ? "最近原生 Projects 读取" : "Last native Projects read", code: closed(native.programsRead?.phase, ["NOT_OBSERVED","PENDING","READY","AUTH_UNAVAILABLE","HTTP_FAILURE","NETWORK_FAILURE","TIMEOUT","BODY_FAILURE","INVALID_RESPONSE"])},
-    {term: zh ? "最近 Projects HTTP 状态" : "Last Projects HTTP status", code: typeof native.programsRead?.httpStatus === "number" && Number.isInteger(native.programsRead.httpStatus) && native.programsRead.httpStatus >= 100 && native.programsRead.httpStatus <= 599 ? String(native.programsRead.httpStatus) : "UNKNOWN"},
-  );
-  return (<>
+  return (
     <dl className="muted">
       {rows.map((row) => (
         <div key={row.term}>
@@ -146,13 +111,5 @@ export function TransportDiagnosticFields(props: {
         </div>
       ))}
     </dl>
-    {props.refreshNativeDiagnostics ? <div>
-      <button type="button" disabled={observed?.phase === "pending"} onClick={() => { void refresh(); }}>
-        {zh ? "刷新本地原生诊断" : "Refresh local native diagnostics"}
-      </button>
-      <p className="muted">{zh ? "仅查看本地状态；不会登录或刷新项目。" : "Reads local status only. It does not sign in or refresh projects."}</p>
-      <p role="status">{observed?.phase === "pending" ? (zh ? "正在读取本地状态。" : "Reading local status.") : observed?.phase === "unavailable" ? (zh ? "无法读取本地诊断。" : "Local diagnostics unavailable.") : null}</p>
-    </div> : null}
-  </>);
-
+  );
 }

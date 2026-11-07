@@ -10,8 +10,7 @@ import { startGateway, resolveConfig, setLogSink, fabricRequestLogFields } from 
 import { startPrivateGateway } from './private-tunnel-gateway.mjs';
 
 const profile = { host: '127.0.0.1', port: 0, accountLabel: 'fabric-test',
-  fabricOnly: true, gitPublish: false, paperDesign: false,
-  backendMode: 'shared-account', modernFabricProtocol: true,
+  fabricOnly: true, backendMode: 'shared-account', modernFabricProtocol: true,
   command: process.execPath, args: [fileURLToPath(new URL('./fixtures/modern-fabric-backend.mjs', import.meta.url))],
   requestTimeoutMs: 3000 };
 const metadata = { [PROTOCOL_VERSION_META_KEY]: '2026-07-28',

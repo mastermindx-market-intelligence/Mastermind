@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { normalizeSelection, type MissionSelection, type ProgramCard } from "../../mission";
+import { normalizeSelection, type MissionSelection } from "../../mission";
 import type { OfficeProjection } from "../../meta-ceo/projection";
 import type { ProjectArchiveRead } from "./project-archive";
 import { acceptArchivePage, nextArchiveCursor, type ArchiveCursor, type AvailableArchive } from "./project-archive-continuation";
@@ -10,8 +10,6 @@ export interface ProjectArchiveBrowserProps {
   /** Actual existing workspace/auth identity. A reset key, never a grant. */
   scopeKey: string;
   programs: OfficeProjection["programs"];
-  /** Separate current C/N list. Never changes the C archive query/basis. */
-  currentCatalogue?: { value: {state: "AVAILABLE" | "UNAVAILABLE" | "PENDING"; programs: readonly ProgramCard[]; reason: string}; current(): boolean };
   read?: (request: { signal: AbortSignal }) => Promise<ProjectArchiveRead>;
   readPage?: (request: ArchiveCursor & { signal: AbortSignal }) => Promise<ProjectArchiveRead>;
   sourceGeneration?: () => number;
@@ -25,7 +23,7 @@ export interface ProjectArchiveBrowserProps {
 }
 
 /** Read-only catalogue join. Archive inspection never enters Mission/current. */
-export function ProjectArchiveBrowser({ scopeKey, programs, currentCatalogue, read, readPage, sourceGeneration, canRead, onOpenProject, onNavigateMission, newProjectControl, locale = "en" }: ProjectArchiveBrowserProps) {
+export function ProjectArchiveBrowser({ scopeKey, programs, read, readPage, sourceGeneration, canRead, onOpenProject, onNavigateMission, newProjectControl, locale = "en" }: ProjectArchiveBrowserProps) {
   const zh = locale === "zh-CN";
   const cards = programs.value?.state === "AVAILABLE" ? programs.value.programs : null;
   const qualified = programs.source.state === "CURRENT" && programs.source.ref && programs.source.revision && programs.source.observed_at &&
@@ -86,15 +84,9 @@ export function ProjectArchiveBrowser({ scopeKey, programs, currentCatalogue, re
       }
     }
   };
-  const currentCatalogueIsCurrent = () => {
-    try { return !!currentCatalogue && currentCatalogue.value.state === "AVAILABLE" && currentCatalogue.current() === true; }
-    catch { return false; }
-  };
-  const displayCards = currentCatalogue ? currentCatalogueIsCurrent() ? currentCatalogue.value.programs : null : cards;
-  const projectsPermitted = currentCatalogue ? currentCatalogueIsCurrent() : permitted;
   const archiveRefs = new Set(archived.map(row => row.work_ref));
   const checked = new Set(checkedRefs);
-  const projectRows = projectsPermitted && displayCards ? displayCards.filter(row => !archiveRefs.has(row.workRef)).map(row => ({
+  const projectRows = permitted && cards ? cards.filter(row => !archiveRefs.has(row.workRef)).map(row => ({
     workRef: row.workRef, title: row.title, nextAction: row.nextActionWithheld ? null : row.nextAction, state: row.state,
     archiveStatus: checked.has(row.workRef) ? "NOT_DECLARED" as const : "UNKNOWN" as const,
     openable: !!onOpenProject || (checked.has(row.workRef) && row.rootState === "RESOLVED" && row.rootCandidates.length === 1 && row.rootCandidates[0] === row.rootJobId && !!onNavigateMission),
@@ -103,8 +95,8 @@ export function ProjectArchiveBrowser({ scopeKey, programs, currentCatalogue, re
     if (isCurrent() && (ref === null || archived.some(row => row.work_ref === ref))) setInspected(ref);
   };
   const openProject = (ref: string) => {
-    if (!(currentCatalogue ? currentCatalogueIsCurrent() : isCurrent()) || archiveRefs.has(ref)) return;
-    const row = displayCards?.find(card => card.workRef === ref);
+    if (!isCurrent() || archiveRefs.has(ref)) return;
+    const row = cards?.find(card => card.workRef === ref);
     if (row && onOpenProject) { onOpenProject(ref); return; }
     if (!checked.has(ref) || !row || row.rootState !== "RESOLVED" || row.rootCandidates.length !== 1 || row.rootCandidates[0] !== row.rootJobId) return;
     const selected = normalizeSelection({ workRef: row.workRef, rootJobId: row.rootJobId });

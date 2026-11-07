@@ -77,7 +77,6 @@ async def _gateway_fixture(
     *,
     allowed_operations: set[str] | frozenset[str] = frozenset({"status"}),
     allowed_worker_ids: set[str] | frozenset[str] = frozenset({"WORKER-001"}),
-    server_san: str = "DNS:localhost",
 ) -> _GatewayFixture:
     ca_key, ca_cert, _ = _certificate_fixture(
         tmp_path,
@@ -90,7 +89,7 @@ async def _gateway_fixture(
         tmp_path,
         name="gateway-server",
         common_name="localhost",
-        san=server_san,
+        san="DNS:localhost",
         issuer_key=ca_key,
         issuer_cert=ca_cert,
     )
@@ -471,15 +470,7 @@ async def test_gateway_restart_has_no_history_or_state(tmp_path: Path) -> None:
             "broker_call",
             "_ssl_context",
             "_host_observer",
-            "_secretary_forwarder",
-            "_secretary_host_binding_sha256",
-            "_meta_forwarder",
-            "_meta_host_binding_sha256",
         }
-        assert replacement._meta_forwarder is None
-        assert replacement._meta_host_binding_sha256 is None
-        assert replacement._secretary_forwarder is None
-        assert replacement._secretary_host_binding_sha256 is None
         assert replacement._host_observer is None
         fixture.gateway = replacement
         fixture.server = await replacement.start_server()

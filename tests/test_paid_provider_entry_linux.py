@@ -583,11 +583,7 @@ def test_actual_compiled_c_executor_model_and_original_result(tmp_path,monkeypat
 def test_compiled_fixture_data_assembles_against_real_wire_and_compilers(tmp_path,monkeypatch):
     """Cross-platform shape check, explicitly NOT Linux execution/Root proof."""
     account=SimpleNamespace(pw_uid=os.getuid(),pw_gid=os.getgid(),pw_name='fixture-user',pw_dir=str(tmp_path/'home'))
-    # Darwin inherits the temporary parent's group even without a setgid bit.
-    # Give this disposable root the fixture account's real group before both
-    # capture and config files are created; keep the wire identity checks.
-    os.chown(tmp_path,-1,account.pw_gid)
-    lanes=Path(account.pw_dir)/'lanes';lanes.mkdir(parents=True,mode=0o700)
+    lanes=Path(account.pw_dir)/'lanes';lanes.mkdir(parents=True)
     config=tmp_path/'config.json'
     bindir=tmp_path/'bin';bindir.mkdir();image=bindir/'python3.12';image.write_bytes(b'fixture-image-not-executed');image.chmod(0o755)
     system=bindir/'python3';system.symlink_to(image)

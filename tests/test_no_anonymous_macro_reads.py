@@ -103,24 +103,6 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
         "This constant is not a clone, fetch, or anonymous read; mismatches "
         "must fail closed."
     ),
-    ("app/mastermind_os/src/fixtures/project-journey-source-issued-388205.json",
-     "https://github.com/mastermindx-market-intelligence/macro"): (
-        "DEC:B1-MACRO-PRIVATE-CUTOVER -- unchanged signed source-issued CREATE/PLAN "
-        "fixture: four proposal URL DATA values ending /pull/401 or /pull/402; "
-        "JSON only, consumed by inert NativeClient tests, no clone/fetch/read."
-    ),
-    ("app/mastermind_os/src/fixtures/plan-adoption-installed-journey.json",
-     "https://github.com/mastermindx-market-intelligence/macro"): (
-        "DEC:B1-MACRO-PRIVATE-CUTOVER -- unchanged signed installed ADOPT fixture: "
-        "two original proposal URL DATA values /pull/401 and /pull/402; JSON only, "
-        "consumed by inert App tests, no anonymous acquisition."
-    ),
-    ("app/mastermind_os/src/fixtures/knowledge-memory-source.json",
-     "https://github.com/mastermindx-market-intelligence/macro"): (
-        "DEC:B1-MACRO-PRIVATE-CUTOVER -- unchanged source-issued Memory fixture "
-        "contains one proposal URL DATA value /pull/403, never an acquisition; "
-        "the actual App uses its qualified source operation, not this URL for reads."
-    ),
 }
 
 # PR #2055: fixed pull-request URL DATA and closed URL validators, not remote
@@ -155,19 +137,6 @@ _INERT_PR_LINK_DATA_LINES: dict[str, frozenset[str]] = {
     )),
     'app/mastermind_os/src/planning/plan-adoption-status.ts': frozenset((
         '"https://github.com/mastermindx-market-intelligence/macro/pull/";',
-    )),
-    'app/mastermind_os/src/planning/plan-adoption-status.test.ts': frozenset((
-        'url: "https://github.com/mastermindx-market-intelligence/macro/pull/417",',
-        'url: "https://github.com/mastermindx-market-intelligence/macro/pull/418",',
-        'url: "https://github.com/mastermindx-market-intelligence/macro/pull/417/",',
-    )),
-    'app/mastermind_os/src/fixtures/project-draft-files-source-issued.json': frozenset((
-        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"',
-        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"',
-    )),
-    'app/mastermind_os/src/fixtures/native-wire/source-file-6cb8.json': frozenset((
-        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/401"',
-        '"url": "https://github.com/mastermindx-market-intelligence/macro/pull/402"',
     )),
     'common/workspace_source_operation_contract.py': frozenset((
         '_PR_URL_PREFIX = "https://github.com/mastermindx-market-intelligence/macro/pull/"',
@@ -304,10 +273,10 @@ def test_allowlist_entry_is_visible_and_still_matches():
     The fourth is an opt-in Studio publisher's fixed remote identity, not a
     clone/fetch. Each exception remains keyed by exact file and matched text so none silently
     covers drift in another file."""
-    assert len(_ALLOWLIST) == 7, (
-        f"expected exactly seven allowlist entries (production _REMOTE, its direct "
-        f"test constant, the workspace-origin fixture, Studio publisher, and three inert "
-        f"source-issued proposal fixtures), found "
+    assert len(_ALLOWLIST) == 4, (
+        f"expected exactly four allowlist entries (production _REMOTE, its direct "
+        f"test constant, the workspace-origin fixture, and Studio publisher "
+        f"remote identity), found "
         f"{len(_ALLOWLIST)}: {list(_ALLOWLIST)}")
     for (rel, matched), reason in _ALLOWLIST.items():
         path = _ROOT / rel

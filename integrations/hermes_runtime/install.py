@@ -42,10 +42,9 @@ def pinned_fetch_commands(dest: Path) -> list[list[str]]:
     ]
 
 
-def assert_checkout_sha(source: Path, *, native_environment: dict | None = None) -> None:
+def assert_checkout_sha(source: Path) -> None:
     proc = subprocess.run(
         ["git", "-C", str(source), "rev-parse", "HEAD"],
-        **({"env": native_environment} if native_environment is not None else {}),
         capture_output=True,
         text=True,
         check=False,
@@ -81,30 +80,16 @@ def install(
     fetch: bool = False,
     python_executable: str | None = None,
     hermes_config_renderer: Callable[[RuntimeProfile], str] | None = None,
-    native_installation: dict | None = None,
 ) -> dict:
     if fetch == bool(upstream_source):
         raise RuntimeRefusal("UPSTREAM_SOURCE_REQUIRED")
     profile = load_profile(profile_path, state_dir=state_dir, secrets_file=secrets_file)
-    native = None
-    if profile.gateway_backend == "native-session-authority":
-        from ops.executive_os.release_manifest import _hermes_native_gateway, ReleaseManifestError
-        try:
-            native = _hermes_native_gateway(native_installation, role=profile.role)
-        except (ReleaseManifestError, TypeError, ValueError):
-            raise RuntimeRefusal("NATIVE_INSTALLATION_REQUIRED") from None
-        if (fetch or upstream_source is None
-                or upstream_source.resolve() != Path(native["vendor_root"])):
-            raise RuntimeRefusal("NATIVE_VENDOR_SELECTION_MISMATCH")
-    elif native_installation is not None:
-        raise RuntimeRefusal("NATIVE_INSTALLATION_NOT_SELECTED")
     _assert_secrets_outside_state(profile.secrets_file, state_dir)
     # Touch the secrets file for mode and ownership before creating state.
     load_secrets(profile.secrets_file)
     unit_dir = assert_systemd_user_dir(systemd_user_dir)
     assert_outside_repository(unit_dir, label="SYSTEMD_USER_DIR")
-    bin_path = (repo_root() / "integrations/hermes_runtime/native/hermes"
-                if native is not None else _hermes_bin(hermes_bin))
+    bin_path = _hermes_bin(hermes_bin)
     if state_dir.exists():
         if state_dir.is_symlink() or not state_dir.is_dir():
             raise RuntimeRefusal("STATE_DIR_SYMLINK_REFUSED")
@@ -118,28 +103,14 @@ def install(
     release.mkdir(mode=0o700)
     previous = os.readlink(state_dir / "current") if (state_dir / "current").is_symlink() else None
     try:
-        if native is not None:
-            vendor = Path(native["vendor_root"])
-            from .native_gateway_entry import native_git_environment
-            git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-            git_env.update(native_git_environment(vendor))
-            assert_checkout_sha(vendor, native_environment=git_env)
-            clean = subprocess.run(["git", "-C", str(vendor), "status", "--porcelain=v1",
-                                    "--untracked-files=all"], env=git_env, capture_output=True,
-                                   check=False, timeout=30)
-            if clean.returncode or clean.stdout:
-                raise RuntimeRefusal("NATIVE_VENDOR_CHECKOUT_DIRTY")
-            os.symlink(vendor, release / "upstream")
-            upstream_attested = True
-        elif fetch:
+        if fetch:
             fetch_pinned_upstream(release / "upstream")
             upstream_attested = True
         else:
             assert upstream_source is not None
             _copy_upstream(upstream_source, release / "upstream")
             upstream_attested = False
-        _write_release(profile, release, bin_path, upstream_attested, hermes_config_renderer,
-                       native_installation=native)
+        _write_release(profile, release, bin_path, upstream_attested, hermes_config_renderer)
         _switch_current(state_dir, release_id)
         unit = _install_unit(profile, unit_dir, python_executable or sys.executable)
         _write_manifest(profile, unit_dir, unit)
@@ -273,15 +244,10 @@ def _write_release(
     bin_path: Path,
     upstream_attested: bool,
     hermes_config_renderer: Callable[[RuntimeProfile], str] | None = None,
-    *, native_installation: dict | None = None,
 ) -> None:
     home = release / "hermes-home"
     role_dir = home / "profiles" / profile.role
     role_dir.mkdir(parents=True, mode=0o700)
-    consumer = (native_installation or {}).get("executive_consumer")
-    if native_installation is not None and hermes_config_renderer is None:
-        from integrations.hermes_harness.native_byok import expected_native_config
-        hermes_config_renderer = lambda profile: expected_native_config(profile, consumer)
     config = (
         hermes_config_renderer(profile)
         if hermes_config_renderer is not None
@@ -289,14 +255,7 @@ def _write_release(
     )
     if not isinstance(config, str) or len(config.encode("utf-8")) > 64 * 1024:
         raise RuntimeRefusal("NATIVE_CONFIG_INVALID")
-    if native_installation is not None:
-        from integrations.hermes_harness.native_byok import expected_native_config
-        if config != expected_native_config(profile, consumer):
-            raise RuntimeRefusal("NATIVE_GATEWAY_CONFIG_MISMATCH")
     _atomic_write(role_dir / "config.yaml", config.encode("utf-8"), 0o600)
-    plugin_digest = None
-    if consumer is not None:
-        plugin_digest = _install_consumer_plugin(role_dir, consumer)
     soul = _soul_bytes(profile.role)
     _atomic_write(role_dir / "SOUL.md", soul, 0o600)
     dumped = dump_profile(profile)
@@ -317,35 +276,7 @@ def _write_release(
         "upstream_attested": upstream_attested,
         "secrets_recorded": False,
     }
-    if native_installation is not None:
-        receipt.update(native_gateway=native_installation,
-                       native_launcher_sha256=hashlib_sha256(bin_path.read_bytes()),
-                       native_adapter_sha256=hashlib_sha256(
-                           (repo_root() / "integrations/hermes_runtime/native_gateway_entry.py").read_bytes()))
-        if plugin_digest is not None:
-            # Source package equality only. The held release capability,
-            # never role-home ownership, authenticates it before import.
-            receipt.update(native_consumer_plugin_sha256=plugin_digest)
     _atomic_write(release / "install-receipt.json", _json(receipt), 0o600)
-
-
-def _install_consumer_plugin(role_dir: Path, consumer: dict) -> str:
-    """Record the source package; never copy executable code into role custody.
-
-    The held release owner qualifies these same bytes again before any native
-    discovery/import. A source digest in this receipt alone grants no load.
-    """
-    from integrations.hermes_harness.native_executive_consumer import (
-        CONSUMER_PLUGIN_NAME, plugin_package_digest)
-    target = role_dir / "plugins" / CONSUMER_PLUGIN_NAME
-    if os.path.lexists(target):
-        raise RuntimeRefusal("NATIVE_CONSUMER_ROLE_PACKAGE_FORBIDDEN")
-    source = repo_root() / "integrations/hermes_harness" / CONSUMER_PLUGIN_NAME
-    observed = plugin_package_digest(source)
-    if observed != consumer["plugin"]["digest"]:
-        raise RuntimeRefusal("NATIVE_CONSUMER_PLUGIN_SOURCE_MISMATCH")
-    return observed
-
 
 
 def _soul_bytes(role: str) -> bytes:

@@ -100,9 +100,7 @@ const COMMITTED_ACTIONS = new Set(["POSTED", "RECOVERED", "DUPLICATE"]);
 /** Closed installed attention state; it is not worker/result evidence. */
 const ATTENTION_VALUES = new Set(["UNAVAILABLE", "EFFECT_UNKNOWN"]);
 
-const TARGET_REF_RE = /^(?:fabric_attempt|hermes_secretary|hermes_meta):[0-9a-f]{64}$/;
-const FABRIC_TARGET_REF_RE = /^fabric_attempt:[0-9a-f]{64}$/;
-const HERMES_TARGET_REF_RE = /^(?:hermes_secretary|hermes_meta):[0-9a-f]{64}$/;
+const TARGET_REF_RE = /^fabric_attempt:[0-9a-f]{64}$/;
 const GENERATION_RE = /^[0-9a-f]{24}$/;
 const OPERATION_KEY_RE = /^session-continue-[0-9a-f]{64}$/;
 /** Protected os_transport.principal_scope returns SHA-256.hexdigest(); opaque to this consumer. */
@@ -119,371 +117,6 @@ const REPLY_TEXT_BOUND = 8192;
 const PAYLOAD_KEYS = new Set([
   "instruction", "stop_condition", "work_ref", "root_job_id",
 ]);
-
-// ── Closed session selection vocabulary ───────────────────────────────────────
-
-/** The closed canonical target kinds of the selected-session surface. */
-export type ExecutiveSessionTargetKind = "fabric_attempt" | "hermes_secretary" | "hermes_meta";
-export const EXECUTIVE_SESSION_TARGET_KINDS: readonly ExecutiveSessionTargetKind[] = [
-  "fabric_attempt",
-  "hermes_secretary",
-  "hermes_meta",
-];
-
-/**
- * Session-specific selection. The general {@link MissionSelection} is
- * unchanged: this adds only the closed target kind.  An omitted kind keeps
- * the incumbent fabric_attempt behaviour, and the kind participates in every
- * selection comparison, snapshot and await fence.
- */
-export interface ExecutiveSessionSelection extends MissionSelection {
-  readonly targetKind?: ExecutiveSessionTargetKind;
-}
-
-/**
- * The normalized internal kind of one session selection.  An omitted kind is
- * the incumbent fabric_attempt kind; a null, unsupported or non-string kind
- * is refused rather than guessed.
- */
-export function sessionTargetKind(
-  selection: { readonly targetKind?: unknown } | null | undefined,
-): ExecutiveSessionTargetKind | null {
-  if (!selection) return null;
-  const raw = selection.targetKind;
-  if (raw === undefined) return "fabric_attempt";
-  if (typeof raw !== "string") return null;
-  return (EXECUTIVE_SESSION_TARGET_KINDS as readonly string[]).includes(raw)
-    ? (raw as ExecutiveSessionTargetKind)
-    : null;
-}
-
-/** Two selections are equal only under the same normalized kind. */
-export function sameSessionSelection(
-  a: ExecutiveSessionSelection | null | undefined,
-  b: ExecutiveSessionSelection | null | undefined,
-): boolean {
-  if (!a || !b) return false;
-  const kindA = sessionTargetKind(a);
-  const kindB = sessionTargetKind(b);
-  if (kindA === null || kindB === null || kindA !== kindB) return false;
-  return a.workRef === b.workRef && a.rootJobId === b.rootJobId;
-}
-
-/**
- * The exact wire selection of one session selection.  The legacy pair is
- * carried verbatim for the incumbent fabric target; an explicit Secretary
- * target adds the closed `target_kind` key and nothing else.
- */
-export function sessionSelectionWire(selection: ExecutiveSessionSelection): {
-  readonly work_ref: string;
-  readonly root_job_id: string;
-  readonly target_kind?: ExecutiveSessionTargetKind;
-} {
-  const kind = sessionTargetKind(selection) ?? "fabric_attempt";
-  if (kind === "fabric_attempt") {
-    return { work_ref: selection.workRef, root_job_id: selection.rootJobId };
-  }
-  return {
-    work_ref: selection.workRef,
-    root_job_id: selection.rootJobId,
-    target_kind: kind,
-  };
-}
-
-/**
- * The exact internal session selection.  The general {@link MissionSelection}
- * stays unchanged; this accepts the same pair plus the optional closed target
- * kind and refuses a null, unsupported or extra key.
- */
-export function normalizeExecutiveSessionSelection(
-  value: unknown,
-): ExecutiveSessionSelection | null {
-  if (!isPlainObject(value)) return null;
-  const keys = Object.keys(value);
-  if (keys.length < 2 || keys.length > 3) return null;
-  if (!keys.every((key) =>
-    key === "workRef" || key === "rootJobId" || key === "targetKind")) {
-    return null;
-  }
-  if (!validWorkRef(value.workRef) || !validRootJobId(value.rootJobId)) return null;
-  const kind = sessionTargetKind(value as { targetKind?: unknown });
-  if (kind === null) return null;
-  return {
-    workRef: value.workRef as string,
-    rootJobId: value.rootJobId as string,
-    targetKind: kind,
-  };
-}
-
-// ── Closed native public result vocabulary ────────────────────────────────────
-
-export const HERMES_RESULT_SCHEMA =
-  "mastermind.session_bridge.hermes_secretary_result.v1";
-export const HERMES_META_RESULT_SCHEMA =
-  "mastermind.session_bridge.hermes_meta_result.v1";
-export type HermesNativeTargetKind = "hermes_secretary" | "hermes_meta";
-/** Closed producer domains. The result schema and target must select one family. */
-const HERMES_FAMILIES = Object.freeze({
-  hermes_secretary: Object.freeze({
-    resultSchema: HERMES_RESULT_SCHEMA,
-    operationSchema: "mastermind.session_bridge.hermes_secretary_operation.v1",
-  }),
-  hermes_meta: Object.freeze({
-    resultSchema: HERMES_META_RESULT_SCHEMA,
-    operationSchema: "mastermind.session_bridge.hermes_meta_operation.v1",
-  }),
-});
-function hermesTargetKind(targetRef: string): HermesNativeTargetKind | null {
-  if (!HERMES_TARGET_REF_RE.test(targetRef)) return null;
-  return targetRef.startsWith("hermes_meta:") ? "hermes_meta" : "hermes_secretary";
-}
-const HERMES_RESULT_KEYS = [
-  "schema", "target_ref", "operation_key", "read_ref", "request_ref",
-  "request_revision", "native_input_sha256", "commit_started", "native_status",
-  "admission", "answer", "successful", "parent_consumed",
-] as const;
-const HERMES_ADMISSION_KEYS = [
-  "admission_id", "sequence", "status", "outcome", "authority_epoch",
-  "execution_generation",
-] as const;
-const NATIVE_STATUS_VALUES = new Set([
-  "OBSERVED", "ADMITTED", "NOT_SUBMITTED", "REFUSED", "EFFECT_UNKNOWN", "UNAVAILABLE",
-]);
-const ADMISSION_STATUS_VALUES = new Set(["queued", "started", "unknown", "terminal"]);
-const NATIVE_ID_RE = /^[^\u0000-\u001f\u007f]{1,1024}$/u;
-const NATIVE_TEXT_RE = /^[^\u0000-\u001f\u007f]{0,1024}$/u;
-const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
-/** The installed public result budget; the canonical ASCII JSON is measured. */
-export const MAX_PUBLIC_RESULT_BYTES = 23 * 1024;
-const MAX_NATIVE_ANSWER_BYTES = 64 * 1024;
-
-export interface HermesSecretaryAdmission {
-  readonly admission_id: string;
-  readonly sequence: number;
-  readonly status: "queued" | "started" | "unknown" | "terminal";
-  readonly outcome: string | null;
-  readonly authority_epoch: number;
-  readonly execution_generation: number | null;
-}
-
-/** The exact closed native public result of the Secretary producer. */
-export interface HermesSecretaryPublicResult {
-  readonly schema: typeof HERMES_RESULT_SCHEMA;
-  readonly target_ref: string;
-  readonly operation_key: string;
-  readonly read_ref: string;
-  readonly request_ref: string;
-  readonly request_revision: string;
-  readonly native_input_sha256: string;
-  readonly commit_started: boolean;
-  readonly native_status:
-    | "OBSERVED" | "ADMITTED" | "NOT_SUBMITTED" | "REFUSED"
-    | "EFFECT_UNKNOWN" | "UNAVAILABLE" | null;
-  readonly admission: HermesSecretaryAdmission | null;
-  readonly answer: string | null;
-  readonly successful: boolean | null;
-  readonly parent_consumed: false;
-}
-
-/** Meta has the same closed fields and its own literal producer schema. */
-export interface HermesMetaPublicResult extends Omit<HermesSecretaryPublicResult, "schema"> {
-  readonly schema: typeof HERMES_META_RESULT_SCHEMA;
-}
-export type HermesNativePublicResult = HermesSecretaryPublicResult | HermesMetaPublicResult;
-
-/**
- * The byte length of one JSON document as the producer's canonical ASCII
- * JSON measures it.  Python's `ensure_ascii=True` escapes every character
- * outside the printable ASCII range as `\uXXXX`; a UTF-16 surrogate pair is
- * therefore two escapes.  The UTF-8 length alone is not the installed budget.
- */
-export function canonicalAsciiLength(value: unknown): number {
-  let json: string;
-  try {
-    const encoded = JSON.stringify(value);
-    if (typeof encoded !== "string") return Number.POSITIVE_INFINITY;
-    json = encoded;
-  } catch {
-    return Number.POSITIVE_INFINITY;
-  }
-  let length = 0;
-  for (let index = 0; index < json.length; index += 1) {
-    length += json.charCodeAt(index) < 0x7f ? 1 : 6;
-  }
-  return length;
-}
-
-function hasLoneSurrogate(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code >= 0xd800 && code <= 0xdbff) {
-      const next = index + 1 < value.length ? value.charCodeAt(index + 1) : 0;
-      if (next < 0xdc00 || next > 0xdfff) return true;
-      index += 1;
-    } else if (code >= 0xdc00 && code <= 0xdfff) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function sha256Hex(material: string): Promise<string | null> {
-  const subtle = globalThis.crypto?.subtle;
-  if (!subtle) return Promise.resolve(null);
-  return subtle
-    .digest("SHA-256", new TextEncoder().encode(material))
-    .then((digest) =>
-      [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join(""),
-    )
-    .catch(() => null);
-}
-
-/**
- * The exact native continuation key of one Secretary target.  It reproduces
- * the producer's own derivation so a result can be joined to its target; it
- * never mints a target, a session or an operation.
- */
-export async function hermesOperationKeyBound(
-  targetRef: string,
-  operationKey: string,
-): Promise<boolean> {
-  const kind = hermesTargetKind(targetRef);
-  if (kind === null || !OPERATION_KEY_RE.test(operationKey)) return false;
-  const material =
-    '{"schema":"' + HERMES_FAMILIES[kind].operationSchema + '","target_ref":"' +
-    targetRef + '"}';
-  const hex = await sha256Hex(material);
-  if (hex === null) return false;
-  return operationKey === "session-continue-" + hex;
-}
-
-function validAdmission(value: unknown): value is HermesSecretaryAdmission {
-  if (!isPlainObject(value) || !exactKeys(value, HERMES_ADMISSION_KEYS)) return false;
-  if (typeof value.admission_id !== "string" || hasLoneSurrogate(value.admission_id) ||
-      !NATIVE_ID_RE.test(value.admission_id)) {
-    return false;
-  }
-  if (typeof value.sequence !== "number" || !Number.isSafeInteger(value.sequence) ||
-      value.sequence < 1) {
-    return false;
-  }
-  if (typeof value.status !== "string" ||
-      !ADMISSION_STATUS_VALUES.has(value.status)) {
-    return false;
-  }
-  if (value.outcome !== null &&
-      (typeof value.outcome !== "string" || hasLoneSurrogate(value.outcome) ||
-        !NATIVE_TEXT_RE.test(value.outcome))) {
-    return false;
-  }
-  if (typeof value.authority_epoch !== "number" ||
-      !Number.isSafeInteger(value.authority_epoch) || value.authority_epoch < 1) {
-    return false;
-  }
-  if (value.execution_generation !== null &&
-      (typeof value.execution_generation !== "number" ||
-        !Number.isSafeInteger(value.execution_generation) ||
-        value.execution_generation < 0)) {
-    return false;
-  }
-  return true;
-}
-
-function validNativeAnswer(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  if (hasLoneSurrogate(value)) return false;
-  if (new TextEncoder().encode(value).length > MAX_NATIVE_ANSWER_BYTES) return false;
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code < 32 && code !== 10 && code !== 13 && code !== 9) return false;
-  }
-  return true;
-}
-
-/**
- * Decode and validate one native public result against the exact closed
- * contract: thirteen keys, the joined original request references, the
- * producer's own operation-key derivation and the installed ASCII budget.
- * A malformed, foreign or oversize frame is refused; it is never repaired.
- */
-export async function decodeHermesPublicResult(
-  raw: unknown,
-): Promise<HermesNativePublicResult | null> {
-  if (!isPlainObject(raw) || !exactKeys(raw, HERMES_RESULT_KEYS)) return null;
-  const schema = raw.schema;
-  if (schema !== HERMES_RESULT_SCHEMA && schema !== HERMES_META_RESULT_SCHEMA) return null;
-  const targetRef = raw.target_ref;
-  const operationKey = raw.operation_key;
-  const readRef = raw.read_ref;
-  const requestRef = raw.request_ref;
-  const requestRevision = raw.request_revision;
-  const nativeInput = raw.native_input_sha256;
-  const commitStarted = raw.commit_started;
-  const status = raw.native_status;
-  const rawAdmission = raw.admission;
-  const admission = isPlainObject(rawAdmission)
-    ? Object.freeze({ ...rawAdmission })
-    : rawAdmission;
-  const answer = raw.answer;
-  const successful = raw.successful;
-  if (typeof targetRef !== "string") return null;
-  const kind = hermesTargetKind(targetRef);
-  if (kind === null || HERMES_FAMILIES[kind].resultSchema !== schema) return null;
-  if (typeof operationKey !== "string" || !OPERATION_KEY_RE.test(operationKey)) return null;
-  if (typeof readRef !== "string" || typeof requestRef !== "string") return null;
-  if (typeof requestRevision !== "string" || !SHA256_HEX_RE.test(requestRevision)) return null;
-  if (typeof nativeInput !== "string" || !SHA256_HEX_RE.test(nativeInput)) return null;
-  if (typeof commitStarted !== "boolean" || raw.parent_consumed !== false) return null;
-  if (status !== null && (typeof status !== "string" || !NATIVE_STATUS_VALUES.has(status))) {
-    return null;
-  }
-  if (!commitStarted &&
-      (status !== null || admission !== null || answer !== null || successful !== null)) {
-    return null;
-  }
-  if (status === "ADMITTED" || status === "OBSERVED") {
-    if (!validAdmission(admission)) return null;
-  } else if (admission !== null) {
-    return null;
-  }
-  if (answer !== null) {
-    if (status !== "OBSERVED") return null;
-    if (!validAdmission(admission) || admission.status !== "terminal") return null;
-    if (typeof successful !== "boolean") return null;
-    if (!validNativeAnswer(answer)) return null;
-  } else if (successful !== null) {
-    return null;
-  }
-  // Capture and measure the complete validated frame before asynchronous
-  // hashing. Callers cannot change the admitted shape or budget during await.
-  const frame: HermesNativePublicResult = Object.freeze({
-    schema,
-    target_ref: targetRef,
-    operation_key: operationKey,
-    read_ref: readRef,
-    request_ref: requestRef,
-    request_revision: requestRevision,
-    native_input_sha256: nativeInput,
-    commit_started: commitStarted,
-    native_status: status as HermesNativePublicResult["native_status"],
-    admission: admission === null
-      ? null
-      : Object.freeze({ ...admission } as HermesSecretaryAdmission),
-    answer: answer as string | null,
-    successful: successful as boolean | null,
-    parent_consumed: false as const,
-  });
-  if (canonicalAsciiLength(frame) > MAX_PUBLIC_RESULT_BYTES) return null;
-  if (!(await hermesOperationKeyBound(frame.target_ref, frame.operation_key))) return null;
-  if (!(await originalRequestRefsBound(frame.operation_key, frame.read_ref, frame.request_ref))) return null;
-  return frame;
-}
-
-function hermesEnvelopeEffect(result: HermesNativePublicResult): string {
-  if (!result.commit_started) return "NONE";
-  return result.native_status === "ADMITTED" || result.native_status === "OBSERVED"
-    ? "CONTINUATION_COMMITTED" : "UNKNOWN";
-}
 
 // ── Small validation helpers ──────────────────────────────────────────────────
 
@@ -520,35 +153,6 @@ function validSelection(v: unknown): v is { work_ref: string; root_job_id: strin
     validWorkRef(v.work_ref) &&
     validRootJobId(v.root_job_id)
   );
-}
-
-/**
- * The exact closed echo of one requested selection.  The legacy pair and the
- * explicit three-key variant are the only accepted shapes; a null kind, an
- * unsupported kind or any extra key is refused rather than normalized.
- */
-function decodeSelectionEcho(value: unknown): {
-  workRef: string; rootJobId: string; targetKind: ExecutiveSessionTargetKind;
-} | null {
-  if (!isPlainObject(value)) return null;
-  const keys = Object.keys(value);
-  const hasKind = keys.includes("target_kind");
-  if (keys.length !== (hasKind ? 3 : 2)) return null;
-  if (!keys.every((key) =>
-    key === "work_ref" || key === "root_job_id" || key === "target_kind")) {
-    return null;
-  }
-  if (!validWorkRef(value.work_ref) || !validRootJobId(value.root_job_id)) return null;
-  const kind = hasKind ? value.target_kind : "fabric_attempt";
-  if (typeof kind !== "string" ||
-      !(EXECUTIVE_SESSION_TARGET_KINDS as readonly string[]).includes(kind)) {
-    return null;
-  }
-  return {
-    workRef: value.work_ref,
-    rootJobId: value.root_job_id,
-    targetKind: kind as ExecutiveSessionTargetKind,
-  };
 }
 
 function validPointerShape(p: OperationPointer): boolean {
@@ -664,12 +268,12 @@ async function originalRequestRefsBound(
 
 // ── Validated projections ─────────────────────────────────────────────────────
 
-/** Exact seven-field canonical target row of either closed kind. */
+/** Exact seven-field canonical fabric_attempt target row. */
 export interface SessionTargetRow {
   readonly target_ref: string;
   readonly generation: string;
   readonly addressable: true;
-  readonly kind: ExecutiveSessionTargetKind;
+  readonly kind: "fabric_attempt";
   readonly continuation_operation_key: string;
   readonly work_ref: string;
   readonly root_job_id: string;
@@ -687,7 +291,7 @@ export type SessionSelectionState = "RESOLVED" | "UNAVAILABLE" | "AMBIGUOUS";
 export interface VerifiedSessionState {
   readonly principalScope: string;
   readonly expiresAtMs: number;
-  readonly selection: ExecutiveSessionSelection;
+  readonly selection: MissionSelection;
   readonly selectionState: SessionSelectionState;
   readonly target: SessionTargetRow | null;
   readonly capabilities: SessionCapabilities;
@@ -695,25 +299,19 @@ export interface VerifiedSessionState {
 
 function validTargetRow(v: unknown): v is SessionTargetRow {
   if (!isPlainObject(v) || !exactKeys(v, TARGET_KEYS)) return false;
-  if (
-    !isString(v.target_ref) ||
-    !TARGET_REF_RE.test(v.target_ref) ||
-    !isString(v.generation) ||
-    !GENERATION_RE.test(v.generation) ||
-    v.addressable !== true ||
-    !isString(v.continuation_operation_key) ||
-    !OPERATION_KEY_RE.test(v.continuation_operation_key) ||
-    !validWorkRef(v.work_ref) ||
-    !validRootJobId(v.root_job_id)
-  ) {
-    return false;
-  }
-  // The kind, the target prefix, the generation and the projected key must all
-  // agree with one another before the row can be joined to a selection.
-  const prefix = v.target_ref.slice(0, v.target_ref.indexOf(":") + 1);
-  if (v.kind !== prefix.slice(0, -1)) return false;
-  if (v.generation !== v.target_ref.slice(prefix.length, prefix.length + 24)) return false;
-  return true;
+  return (
+    isString(v.target_ref) &&
+    TARGET_REF_RE.test(v.target_ref) &&
+    isString(v.generation) &&
+    GENERATION_RE.test(v.generation) &&
+    v.generation === v.target_ref.slice("fabric_attempt:".length, "fabric_attempt:".length + 24) &&
+    v.addressable === true &&
+    v.kind === "fabric_attempt" &&
+    isString(v.continuation_operation_key) &&
+    OPERATION_KEY_RE.test(v.continuation_operation_key) &&
+    validWorkRef(v.work_ref) &&
+    validRootJobId(v.root_job_id)
+  );
 }
 
 function validCapabilities(v: unknown): v is SessionCapabilities {
@@ -734,7 +332,7 @@ function validCapabilities(v: unknown): v is SessionCapabilities {
  */
 export function decodeSessionContext(
   raw: unknown,
-  selection: ExecutiveSessionSelection,
+  selection: MissionSelection,
 ): VerifiedSessionState | null {
   const envelope = decodeEnvelope(raw, "context");
   if (!envelope || envelope.ok !== true) return null;
@@ -753,14 +351,10 @@ export function decodeSessionContext(
   ) {
     return null;
   }
-  const wantedKind = sessionTargetKind(selection);
-  if (wantedKind === null) return null;
-  const echoed = decodeSelectionEcho(data.selection);
-  if (!echoed) return null;
+  if (!validSelection(data.selection)) return null;
   if (
-    echoed.workRef !== selection.workRef ||
-    echoed.rootJobId !== selection.rootJobId ||
-    echoed.targetKind !== wantedKind
+    data.selection.work_ref !== selection.workRef ||
+    data.selection.root_job_id !== selection.rootJobId
   ) {
     return null;
   }
@@ -773,8 +367,7 @@ export function decodeSessionContext(
     if (!validTargetRow(data.target)) return null;
     if (
       data.target.work_ref !== selection.workRef ||
-      data.target.root_job_id !== selection.rootJobId ||
-      data.target.kind !== wantedKind
+      data.target.root_job_id !== selection.rootJobId
     ) {
       return null;
     }
@@ -812,50 +405,9 @@ export interface QualifiedSessionAnswer {
   readonly readRef: string;
   readonly parentConsumed: false;
 }
-
-/**
- * The explicit Secretary answer variant.  The incumbent fabric answer object
- * is unchanged; this carries the actual native text, the actual native
- * success flag, the original read reference and no invented next step.
- */
-export interface QualifiedHermesSessionAnswer {
-  readonly kind: "hermes_secretary";
-  readonly text: string;
-  readonly successful: boolean;
-  readonly readRef: string;
-  readonly parentConsumed: false;
-  readonly nextStep: null;
-}
-
-export interface QualifiedMetaSessionAnswer extends Omit<QualifiedHermesSessionAnswer, "kind"> {
-  readonly kind: "hermes_meta";
-}
-export type QualifiedSessionAnswerValue =
-  | QualifiedSessionAnswer | QualifiedHermesSessionAnswer | QualifiedMetaSessionAnswer;
-
-/** The variant of one qualified answer, for equality and presentation. */
-export function qualifiedAnswerVariant(
-  answer: QualifiedSessionAnswerValue,
-): ExecutiveSessionTargetKind {
-  const kind = (answer as { readonly kind?: unknown }).kind;
-  return kind === "hermes_secretary" || kind === "hermes_meta" ? kind : "fabric_attempt";
-}
-
 export interface QualifiedSessionAnswerRead {
   readonly receipt: EffectReceipt;
-  readonly answer: QualifiedSessionAnswerValue | null;
-  /** The validated native public result of a native original operation. */
-  readonly nativeResult?: HermesNativePublicResult | null;
-}
-
-/**
- * The one qualified SEND result: the closed receipt and, for a native
- * target, the validated native public result that carries the actual phase.
- * The receipt never carries the producer's own reason.
- */
-export interface QualifiedSessionDispatch {
-  readonly receipt: EffectReceipt;
-  readonly nativeResult: HermesNativePublicResult | null;
+  readonly answer: QualifiedSessionAnswer | null;
 }
 
 export interface ExecutiveSessionTransport {
@@ -863,7 +415,7 @@ export interface ExecutiveSessionTransport {
   authGeneration(): number;
   available(): boolean;
   subscribe(listener: () => void): () => void;
-  context(selection: ExecutiveSessionSelection, signal: AbortSignal): Promise<unknown>;
+  context(selection: MissionSelection, signal: AbortSignal): Promise<unknown>;
   send(args: SessionSendArguments, signal: AbortSignal): Promise<unknown>;
   reply(args: SessionReplyArguments, signal: AbortSignal): Promise<unknown>;
   /** Separate project-history READ. The root selector is deliberately absent;
@@ -894,7 +446,7 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
   private readonly _transport: ExecutiveSessionTransport;
   private readonly _session: () => VerifiedSessionState | null;
   private readonly _owner: () => OwnerContext | null;
-  private readonly _captured = new WeakMap<CommandIntent["payload"], { scope: string; generation: string; auth: number; kind: ExecutiveSessionTargetKind }>();
+  private readonly _captured = new WeakMap<CommandIntent["payload"], { scope: string; generation: string; auth: number }>();
 
   constructor(
     transport: ExecutiveSessionTransport,
@@ -944,8 +496,6 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
     }
     const owner = this._owner();
     if (!owner) return null;
-    const kind = sessionTargetKind(session.selection);
-    if (kind === null || kind !== session.target.kind) return null;
     const intent: CommandIntent = Object.freeze({
       kind: "message",
       targetKey: session.target.target_ref,
@@ -956,12 +506,7 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
         root_job_id: session.selection.rootJobId,
       }),
     });
-    this._captured.set(intent.payload, {
-      scope: owner.principalScope,
-      generation: owner.generation,
-      auth: this._transport.authGeneration(),
-      kind,
-    });
+    this._captured.set(intent.payload, { scope: owner.principalScope, generation: owner.generation, auth: this._transport.authGeneration() });
     return intent;
   }
 
@@ -969,15 +514,8 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
     const captured = this._captured.get(intent.payload);
     if (!captured) return true;
     const owner = this._owner();
-    if (!owner || owner.principalScope !== captured.scope ||
-        owner.generation !== captured.generation ||
-        this._transport.authGeneration() !== captured.auth) {
-      return true;
-    }
-    // The selected kind is part of the captured identity: a kind change
-    // between capture and use is a drift even when the pair is unchanged.
-    const session = this._session();
-    return !session || sessionTargetKind(session.selection) !== captured.kind;
+    return !owner || owner.principalScope !== captured.scope || owner.generation !== captured.generation ||
+      this._transport.authGeneration() !== captured.auth;
   }
 
   makeStopIntent(_sessionKey?: string): CommandIntent | null {
@@ -1024,24 +562,10 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
     intent: CommandIntent,
     signal: AbortSignal,
   ): Promise<EffectReceipt> {
-    return (await this.submitQualified(pointer, intent, signal)).receipt;
-  }
-
-  /**
-   * The one SEND.  It performs exactly one private send call and returns the
-   * closed receipt together with the validated native public result when the
-   * target is a Secretary target.  A caller that only needs the receipt uses
-   * {@link submit}, which delegates here; no caller may make a second send.
-   */
-  async submitQualified(
-    pointer: OperationPointer,
-    intent: CommandIntent,
-    signal: AbortSignal,
-  ): Promise<QualifiedSessionDispatch> {
     // Pre-send validation: every refusal below happens before the send call
     // and is scoped to this invocation only.
     if (!validPointerShape(pointer)) {
-      return { receipt: this._receipt(pointer, "refused", "MALFORMED_POINTER"), nativeResult: null };
+      return this._receipt(pointer, "refused", "MALFORMED_POINTER");
     }
     const decoded = this._decodePayload(intent.payload);
     if (
@@ -1050,28 +574,25 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
       !isString(intent.targetKey) ||
       intent.targetKey !== pointer.targetKey
     ) {
-      return { receipt: this._receipt(pointer, "refused", "INVALID_PAYLOAD"), nativeResult: null };
+      return this._receipt(pointer, "refused", "INVALID_PAYLOAD");
     }
     const session = this._session();
     const owner = this._owner();
-    const kind = session ? sessionTargetKind(session.selection) : null;
     if (
       !owner ||
       !session ||
-      kind === null ||
       session.selectionState !== "RESOLVED" ||
       !session.capabilities.send ||
       !session.target ||
-      session.target.kind !== kind ||
       decoded.workRef !== session.selection.workRef ||
       decoded.rootJobId !== session.selection.rootJobId ||
       pointer.targetKey !== session.target.target_ref ||
       pointer.operationKey !== session.target.continuation_operation_key
     ) {
-      return { receipt: this._receipt(pointer, "refused", "SESSION_UNAVAILABLE"), nativeResult: null };
+      return this._receipt(pointer, "refused", "SESSION_UNAVAILABLE");
     }
     if (signal.aborted) {
-      return { receipt: this._receipt(pointer, "unknown", "TRANSPORT_ERROR"), nativeResult: null };
+      return this._receipt(pointer, "unknown", "TRANSPORT_ERROR");
     }
 
     // Fence snapshot: exact owner, auth generation, selection and target
@@ -1093,17 +614,17 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
     try {
       raw = await this._transport.send(args, signal);
     } catch {
-      return { receipt: this._receipt(pointer, "unknown", "TRANSPORT_ERROR"), nativeResult: null };
+      return this._receipt(pointer, "unknown", "TRANSPORT_ERROR");
     }
     if (this._drifted(scope, generation, authGeneration, selection, targetRef, targetGeneration) ||
         signal.aborted) {
-      return { receipt: this._receipt(pointer, "unknown", "EPOCH_CHANGED"), nativeResult: null };
+      return this._receipt(pointer, "unknown", "EPOCH_CHANGED");
     }
-    const mapped = await this._mapSend(pointer, raw);
+    const receipt = await this._mapSend(pointer, raw);
     if (signal.aborted || this._drifted(scope, generation, authGeneration, selection, targetRef, targetGeneration)) {
-      return { receipt: this._receipt(pointer, "unknown", "EPOCH_CHANGED"), nativeResult: null };
+      return this._receipt(pointer, "unknown", "EPOCH_CHANGED");
     }
-    return mapped;
+    return receipt;
   }
 
   /** Legacy command-port observation retains its exact receipt-only shape. */
@@ -1119,7 +640,7 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
     signal: AbortSignal,
   ): Promise<QualifiedSessionAnswerRead> {
     const withhold = (reason: PortReason): QualifiedSessionAnswerRead =>
-      ({ receipt: this._receipt(pointer, "unknown", reason), answer: null, nativeResult: null });
+      ({ receipt: this._receipt(pointer, "unknown", reason), answer: null });
     if (!validPointerShape(pointer)) {
       return withhold("MALFORMED_POINTER");
     }
@@ -1170,7 +691,7 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
       return withhold("MALFORMED_RECEIPT");
     }
     if (typeof frameBefore !== "string") return withhold("MALFORMED_RECEIPT");
-    const mapped = await this._mapReply(pointer, raw);
+    const receipt = await this._mapReply(pointer, raw);
     const finalOwner = this._owner();
     if (signal.aborted || !finalOwner || finalOwner.principalScope !== scope ||
         finalOwner.generation !== generation || this._transport.authGeneration() !== authGeneration) {
@@ -1184,13 +705,22 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
     // Strict native correlation and bounded text were already proven by
     // _mapReply on THIS one fixed reply frame. Never publish any reply
     // fields on an unknown, foreign or malformed receipt.
-    if (mapped.receipt.disposition !== "accepted" || !mapped.answer) {
-      return { receipt: mapped.receipt, answer: null, nativeResult: mapped.nativeResult };
+    if (receipt.disposition !== "accepted") {
+      return { receipt, answer: null };
+    }
+    const data = decodeEnvelope(raw, "reply")?.data;
+    if (!isPlainObject(data) ||
+        !boundedText(data.text, REPLY_TEXT_BOUND) ||
+        !boundedText(data.next_step, REPLY_TEXT_BOUND) ||
+        !isString(data.read_ref) || data.parent_consumed !== false) {
+      return withhold("MALFORMED_RECEIPT");
     }
     return {
-      receipt: mapped.receipt,
-      answer: mapped.answer,
-      nativeResult: mapped.nativeResult,
+      receipt,
+      answer: Object.freeze({
+        text: data.text, nextStep: data.next_step,
+        readRef: data.read_ref, parentConsumed: false as const,
+      }),
     };
   }
 
@@ -1224,7 +754,7 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
     scope: string,
     generation: string,
     authGeneration: number,
-    selection: ExecutiveSessionSelection,
+    selection: MissionSelection,
     targetRef: string,
     targetGeneration: string,
   ): boolean {
@@ -1239,9 +769,10 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
     if (this._transport.authGeneration() !== authGeneration) return true;
     const session = this._session();
     if (!session) return true;
-    // The normalized kind is part of the selection identity: a kind change
-    // during the await is a drift even when the work/root pair is unchanged.
-    if (!sameSessionSelection(session.selection, selection)) {
+    if (
+      session.selection.workRef !== selection.workRef ||
+      session.selection.rootJobId !== selection.rootJobId
+    ) {
       return true;
     }
     if (
@@ -1256,49 +787,41 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
   private async _mapSend(
     pointer: OperationPointer,
     raw: unknown,
-  ): Promise<QualifiedSessionDispatch> {
+  ): Promise<EffectReceipt> {
     const envelope = decodeEnvelope(raw, "send");
-    if (!envelope) {
-      return { receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"), nativeResult: null };
-    }
+    if (!envelope) return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     if (envelope.ok !== true) {
       // effect NONE is the exact pre-send refusal of THIS invocation; every
       // other failure outcome (including UNKNOWN) retains the pointer.
       if (envelope.effect === "NONE" && validErrorShape(envelope.error) &&
           envelope.data === null &&
           (envelope.operationKey === null || envelope.operationKey === pointer.operationKey)) {
-        return {
-          receipt: this._receipt(
-            pointer,
-            "refused",
-            envelope.error.code === "invalid_input" ? "INVALID_PAYLOAD" : "REFUSED",
-          ),
-          nativeResult: null,
-        };
+        return this._receipt(
+          pointer,
+          "refused",
+          envelope.error.code === "invalid_input" ? "INVALID_PAYLOAD" : "REFUSED",
+        );
       }
       if (envelope.effect === "UNKNOWN") {
-        return { receipt: this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT"), nativeResult: null };
+        return this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT");
       }
-      return { receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"), nativeResult: null };
-    }
-    if (envelope.operationKey !== pointer.operationKey) {
-      return { receipt: this._receipt(pointer, "unknown", "RECEIPT_MISMATCH"), nativeResult: null };
-    }
-    if (envelope.error !== null) {
-      return { receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"), nativeResult: null };
-    }
-    if (typeof pointer.targetKey === "string" && HERMES_TARGET_REF_RE.test(pointer.targetKey)) {
-      return this._mapNativeSend(pointer, envelope);
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
     if (envelope.effect !== "CONTINUATION_COMMITTED") {
-      return { receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"), nativeResult: null };
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (envelope.operationKey !== pointer.operationKey) {
+      return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
+    }
+    if (envelope.error !== null) {
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
     const data = envelope.data as Record<string, unknown>;
     if (!isPlainObject(data) || !exactKeys(data, SEND_DATA_KEYS)) {
-      return { receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"), nativeResult: null };
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
     if (data.target_ref !== pointer.targetKey || data.reply_committed !== true) {
-      return { receipt: this._receipt(pointer, "unknown", "RECEIPT_MISMATCH"), nativeResult: null };
+      return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
     }
     const attentionOk =
       isPlainObject(data.attention) && exactKeys(data.attention, ["state"]) &&
@@ -1308,11 +831,11 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
       !BOUNDED_ID_RE.test(data.read_ref) ||
       !attentionOk
     ) {
-      return { receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"), nativeResult: null };
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
     const carrier = data.carrier;
     if (!isPlainObject(carrier) || !exactKeys(carrier, CARRIER_KEYS)) {
-      return { receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"), nativeResult: null };
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
     if (
       carrier.reply_committed !== true ||
@@ -1324,97 +847,39 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
       !isString(carrier.thread_ts) ||
       !THREAD_TS_RE.test(carrier.thread_ts)
     ) {
-      return { receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"), nativeResult: null };
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
     if (!(await continueMessageKeyBound(pointer.operationKey, carrier.message_key))) {
-      return { receipt: this._receipt(pointer, "unknown", "RECEIPT_MISMATCH"), nativeResult: null };
+      return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
     }
     // Commit proves only the canonical continuation effect. Attention data is
     // retained verbatim and never upgrades or downgrades the receipt.
-    return { receipt: this._receipt(pointer, "accepted", "ACCEPTED"), nativeResult: null };
-  }
-
-  /**
-   * The closed native SEND mapping.  A recorded but uncommitted request is
-   * evidence that a request exists; it is never a pre-send refusal of this
-   * invocation.  A committed request with a qualified admission proves that
-   * admission only.  Every other committed phase, and every malformed,
-   * foreign or oversize frame, stays UNKNOWN on the original pointer.
-   */
-  private async _mapNativeSend(
-    pointer: OperationPointer,
-    envelope: { readonly effect: string; readonly data: unknown },
-  ): Promise<QualifiedSessionDispatch> {
-    const effect = envelope.effect;
-    const nativeResult = await decodeHermesPublicResult(envelope.data);
-    if (!nativeResult || effect !== hermesEnvelopeEffect(nativeResult)) {
-      return { receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"), nativeResult: null };
-    }
-    if (nativeResult.operation_key !== pointer.operationKey ||
-        nativeResult.target_ref !== pointer.targetKey) {
-      return { receipt: this._receipt(pointer, "unknown", "RECEIPT_MISMATCH"), nativeResult: null };
-    }
-    if (!nativeResult.commit_started) {
-      // The request was recorded and no native effect exists yet.  The pointer
-      // stays retained and the actual phase is shown from the native result.
-      return { receipt: this._receipt(pointer, "accepted", "ACCEPTED"), nativeResult };
-    }
-    if (nativeResult.native_status === "ADMITTED" || nativeResult.native_status === "OBSERVED") {
-      return { receipt: this._receipt(pointer, "accepted", "ACCEPTED"), nativeResult };
-    }
-    return { receipt: this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT"), nativeResult };
+    return this._receipt(pointer, "accepted", "ACCEPTED");
   }
 
   private async _mapReply(
     pointer: OperationPointer,
     raw: unknown,
-  ): Promise<{
-    receipt: EffectReceipt;
-    answer: QualifiedSessionAnswerValue | null;
-    nativeResult: HermesNativePublicResult | null;
-  }> {
+  ): Promise<EffectReceipt> {
     const envelope = decodeEnvelope(raw, "reply");
-    if (!envelope) {
-      return {
-        receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"),
-        answer: null, nativeResult: null,
-      };
-    }
+    if (!envelope) return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     // Every reply failure remains UNKNOWN on the original pointer; it is
     // NEVER cleared, whatever effect label the envelope carries.
     if (envelope.ok !== true) {
-      return {
-        receipt: this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT"),
-        answer: null, nativeResult: null,
-      };
-    }
-    if (envelope.operationKey !== pointer.operationKey) {
-      return {
-        receipt: this._receipt(pointer, "unknown", "RECEIPT_MISMATCH"),
-        answer: null, nativeResult: null,
-      };
-    }
-    if (envelope.error !== null) {
-      return {
-        receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"),
-        answer: null, nativeResult: null,
-      };
-    }
-    if (typeof pointer.targetKey === "string" && HERMES_TARGET_REF_RE.test(pointer.targetKey)) {
-      return this._mapNativeReply(pointer, envelope);
+      return this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT");
     }
     if (envelope.effect !== "CONTINUATION_COMMITTED") {
-      return {
-        receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"),
-        answer: null, nativeResult: null,
-      };
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (envelope.operationKey !== pointer.operationKey) {
+      return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
+    }
+    if (envelope.error !== null) {
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
     const data = envelope.data as Record<string, unknown>;
     if (!isPlainObject(data) || !exactKeys(data, REPLY_KEYS)) {
-      return {
-        receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"),
-        answer: null, nativeResult: null,
-      };
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
     if (
       data.schema !== NATIVE_REPLY_SCHEMA ||
@@ -1423,10 +888,7 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
       data.parent_consumed !== false ||
       data.operation_key !== pointer.operationKey
     ) {
-      return {
-        receipt: this._receipt(pointer, "unknown", "RECEIPT_MISMATCH"),
-        answer: null, nativeResult: null,
-      };
+      return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
     }
     if (
       !isString(data.read_ref) || !BOUNDED_ID_RE.test(data.read_ref) ||
@@ -1439,76 +901,14 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
       !boundedText(data.next_step, REPLY_TEXT_BOUND) ||
       JSON.stringify(data).replace(/[\u007f-\uffff]/g, c => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")).length > 16384
     ) {
-      return {
-        receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"),
-        answer: null, nativeResult: null,
-      };
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
     if (!(await continueMessageKeyBound(pointer.operationKey, data.in_reply_to)) ||
         !(await continueMessageKeyBound(pointer.operationKey, data.message_key, true)) ||
         !(await originalRequestRefsBound(pointer.operationKey, data.read_ref, data.request_ref))) {
-      return {
-        receipt: this._receipt(pointer, "unknown", "RECEIPT_MISMATCH"),
-        answer: null, nativeResult: null,
-      };
+      return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
     }
-    return {
-      receipt: this._receipt(pointer, "accepted", "ACCEPTED"),
-      answer: Object.freeze({
-        text: data.text as string, nextStep: data.next_step as string,
-        readRef: data.read_ref as string, parentConsumed: false as const,
-      }),
-      nativeResult: null,
-    };
-  }
-
-  /**
-   * The closed native reply mapping.  Only a qualified terminal answer is an
-   * accepted result; every other committed phase is evidence of an
-   * unresolved outcome and keeps the original pointer retained.
-   */
-  private async _mapNativeReply(
-    pointer: OperationPointer,
-    envelope: { readonly effect: string; readonly data: unknown },
-  ): Promise<{
-    receipt: EffectReceipt;
-    answer: QualifiedSessionAnswerValue | null;
-    nativeResult: HermesNativePublicResult | null;
-  }> {
-    const effect = envelope.effect;
-    const nativeResult = await decodeHermesPublicResult(envelope.data);
-    if (!nativeResult || effect !== hermesEnvelopeEffect(nativeResult)) {
-      return {
-        receipt: this._receipt(pointer, "unknown", "MALFORMED_RECEIPT"),
-        answer: null, nativeResult: null,
-      };
-    }
-    if (nativeResult.operation_key !== pointer.operationKey ||
-        nativeResult.target_ref !== pointer.targetKey) {
-      return {
-        receipt: this._receipt(pointer, "unknown", "RECEIPT_MISMATCH"),
-        answer: null, nativeResult: null,
-      };
-    }
-    if (nativeResult.answer === null || nativeResult.successful === null) {
-      return {
-        receipt: this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT"),
-        answer: null, nativeResult,
-      };
-    }
-    return {
-      receipt: this._receipt(pointer, "accepted", "ACCEPTED"),
-      answer: Object.freeze({
-        kind: nativeResult.schema === HERMES_META_RESULT_SCHEMA
-          ? "hermes_meta" as const : "hermes_secretary" as const,
-        text: nativeResult.answer,
-        successful: nativeResult.successful,
-        readRef: nativeResult.read_ref,
-        parentConsumed: false as const,
-        nextStep: null,
-      }),
-      nativeResult,
-    };
+    return this._receipt(pointer, "accepted", "ACCEPTED");
   }
 
   private _receipt(
@@ -1554,8 +954,8 @@ export interface ExecutiveSessionBindingHandle {
 export interface ExecutiveSessionBindingDependencies {
   readonly transport: ExecutiveSessionTransport;
   readonly store: PendingPointerStore;
-  /** Currently selected Mission and closed target kind, owned by the host. */
-  readonly selection: () => ExecutiveSessionSelection | null;
+  /** Currently selected Mission, owned by the host; never parsed here. */
+  readonly selection: () => MissionSelection | null;
   /** Explicit synchronous owner condition; captured once when the UI creates an intent. */
   readonly stopCondition: () => unknown;
   clock?: () => number;
@@ -1605,7 +1005,7 @@ export function createExecutiveSessionBinding(
     const current = deps.selection();
     return !disposed && verified !== null && now() < verified.expiresAtMs &&
       verifiedAuthGeneration === transport.authGeneration() && transport.available() &&
-      sameSessionSelection(current, verified.selection)
+      current?.workRef === verified.selection.workRef && current?.rootJobId === verified.selection.rootJobId
       ? verified : null;
   };
 
@@ -1621,15 +1021,7 @@ export function createExecutiveSessionBinding(
     if (disposed || !transport.available()) return;
     const selected = deps.selection();
     if (!selected) return;
-    const kind = sessionTargetKind(selected);
-    if (kind === null) return;
-    // The incumbent fabric selection keeps its exact pair shape; only an
-    // explicit native target carries the extra closed key.
-    const selection = Object.freeze(
-      kind === "fabric_attempt"
-        ? { workRef: selected.workRef, rootJobId: selected.rootJobId }
-        : { workRef: selected.workRef, rootJobId: selected.rootJobId, targetKind: kind },
-    );
+    const selection = Object.freeze({ ...selected });
     const capturedEpoch = epoch;
     const authGeneration = transport.authGeneration();
     const signal = boundary.signal;
@@ -1644,7 +1036,11 @@ export function createExecutiveSessionBinding(
         return;
       }
       const current = deps.selection();
-      if (!current || !sameSessionSelection(current, selection)) {
+      if (
+        !current ||
+        current.workRef !== selection.workRef ||
+        current.rootJobId !== selection.rootJobId
+      ) {
         return;
       }
       // The authenticated envelope is the sole source of the principal scope;

@@ -23,16 +23,7 @@ def test_only_exact_reviewed_file_and_spelling_qualifies(path):
          '_mastermind_worker', '0o644', '_mastermind_worker'] if path ==
         'ops/executive_os/autonomy_control.py' else
         ['_mastermind_operator_canary', '0o700'] if path ==
-        'control_plane/codex_operator_adapter.py' else
-        ['430', '512', '401', '403', '409', '503', '503', '503', '503'] if path ==
-        'app/mastermind_os/src-tauri/src/auth.rs' else
-        # Exact protected installer60fb9e55 retains these17 findings unchanged;
-        # only the newly reviewed initial directory-mode token is masked.
-        ['_mastermind_exec', '_mastermind_exec', '_mastermind_worker',
-         '_mastermind_worker', '_mastermind_ops', '_mastermind_ops',
-         '_mastermind_ops', '_mastermind_ops', '452', '457',
-         '_mastermind_worker', '_mastermind_worker', '452', '432', '457',
-         '432', '432'] if path == 'ops/executive_os/install.sh' else [])
+        'control_plane/codex_operator_adapter.py' else [])
     assert scan(text, path) == expected
     assert reviewed_literal_spans('unreviewed/'+path, text) == ()
 
@@ -43,26 +34,16 @@ def test_changed_or_extended_file_cannot_reuse_review(path):
     changed = text+'\nnew_peer_uid = 471\n'
     assert reviewed_literal_spans(path, changed) == ()
     assert '471' in scan(changed, path)
-    record = REVIEWED_FILES[path]
-    if record['sites']:
-        line, start, end, _, spelling = record['sites'][0]
-        lines = text.splitlines(keepends=True)
-        assert lines[line-1][start:end] == spelling
-        lines[line-1] = lines[line-1][:start]+'0'+lines[line-1][end:]
-        mutated = ''.join(lines)
-    else:
-        line, start, end, _, spelling = record['utf8_sites'][0]
-        lines = text.encode('utf-8').splitlines(keepends=True)
-        assert lines[line-1][start:end] == spelling.encode('ascii')
-        lines[line-1] = lines[line-1][:start]+b'0'+lines[line-1][end:]
-        mutated = b''.join(lines).decode('utf-8')
-    assert reviewed_literal_spans(path, mutated) == ()
+    line, start, end, _, spelling = REVIEWED_FILES[path]['sites'][0]
+    lines = text.splitlines(keepends=True)
+    assert lines[line-1][start:end] == spelling
+    lines[line-1] = lines[line-1][:start]+'0'+lines[line-1][end:]
+    assert reviewed_literal_spans(path, ''.join(lines)) == ()
 
 
 @pytest.mark.parametrize('path', [
     'ops/executive_os/bootstrap-host.sh',
     'integrations/session_bridge/original_validator_compat/artifact_delivery.py.base',
-    'research/fabric_glm_account_admission_20261014/BASELINE.xml',
 ])
 def test_non_python_review_still_requires_exact_diff_postimage(path):
     from tests.test_ceo_submit_armed_composition import _scan_added_identity_diff
@@ -70,86 +51,3 @@ def test_non_python_review_still_requires_exact_diff_postimage(path):
     diff = f'+++ b/{path}\n@@ -0,0 +1,1 @@\n+different source\n'
     with pytest.raises(AssertionError, match='diff/postimage line mismatch'):
         _scan_added_identity_diff(diff, source_postimages={path: text})
-
-
-_FROZEN_GLM_DURATIONS = (
-    ("research/fabric_glm_account_admission_20261014/baseline.quota_remote.py",
-     (22, 10, 13, "int"), "FRESH_S = 600", "new_peer_uid = 600"),
-    ("research/fabric_glm_account_admission_20261014/quota_remote.py",
-     (22, 10, 13, "int"), "FRESH_S = 600", "new_peer_uid = 600"),
-    ("research/fabric_glm_account_admission_20261014/BASELINE.xml",
-     (19, 46, 49, "int"), "ttl=600", "uid=600"),
-)
-
-
-@pytest.mark.parametrize("path,site,duration,identity", _FROZEN_GLM_DURATIONS)
-def test_frozen_glm_duration_requires_complete_matching_postimage(
-    path, site, duration, identity,
-):
-    from tests.test_ceo_submit_armed_composition import (
-        _d8_frozen_source_diff, _scan_added_identity_diff,
-    )
-    text = (Path(__file__).parents[1] / path).read_text()
-    diff = _d8_frozen_source_diff(path, text)
-    assert reviewed_literal_spans(path, text) == (site,)
-    assert _scan_added_identity_diff(diff, source_postimages={path: text}) == []
-    assert "600" in _scan_added_identity_diff(diff)
-    # A complete source pin cannot bless diff lines from another postimage.
-    changed = text.replace(duration, identity, 1)
-    assert changed != text
-    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
-        _scan_added_identity_diff(diff, source_postimages={path: changed})
-
-
-@pytest.mark.parametrize("path,site,duration,identity", _FROZEN_GLM_DURATIONS)
-def test_frozen_glm_duration_cannot_change_into_an_identity(
-    path, site, duration, identity,
-):
-    text = (Path(__file__).parents[1] / path).read_text()
-    changed = text.replace(duration, identity, 1)
-    assert changed != text
-    assert reviewed_literal_spans(path, changed) == ()
-    assert "600" in scan(changed, path)
-
-
-@pytest.mark.parametrize("path,site,duration,identity", _FROZEN_GLM_DURATIONS)
-@pytest.mark.parametrize("suffix,finding", [
-    ("\nnew_peer_uid = 471\n", "471"),
-    ('\nnew_account = "_mastermind_account"\n', "_mastermind_account"),
-])
-def test_frozen_glm_duration_does_not_exempt_extra_identity(
-    path, site, duration, identity, suffix, finding,
-):
-    text = (Path(__file__).parents[1] / path).read_text()
-    changed = text + suffix
-    assert reviewed_literal_spans(path, changed) == ()
-    findings = scan(changed, path)
-    assert "600" in findings
-    assert finding in findings
-
-
-@pytest.mark.parametrize("path,site,duration,identity", _FROZEN_GLM_DURATIONS)
-def test_frozen_glm_duration_requires_its_exact_registered_pin(
-    monkeypatch, path, site, duration, identity,
-):
-    text = (Path(__file__).parents[1] / path).read_text()
-    monkeypatch.delitem(REVIEWED_FILES, path)
-    assert reviewed_literal_spans(path, text) == ()
-    assert "600" in scan(text, path)
-
-
-@pytest.mark.parametrize("path,site,duration,identity", _FROZEN_GLM_DURATIONS)
-@pytest.mark.parametrize("with_identity", [False, True])
-def test_frozen_glm_duration_real_committed_git_collector(
-    tmp_path, monkeypatch, path, site, duration, identity, with_identity,
-):
-    from tests import test_ceo_submit_armed_composition as guard
-    content = (Path(__file__).parents[1] / path).read_text()
-    if with_identity:
-        content += "\nnew_peer_uid = 471\n"
-        assert "471" in scan(content, path)
-    # Reuse the incumbent disposable Git fixture and real collector. It commits
-    # exact postimages and invokes the owning topology guard through git diff/show.
-    guard.test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
-        tmp_path, monkeypatch, path, content, with_identity,
-    )

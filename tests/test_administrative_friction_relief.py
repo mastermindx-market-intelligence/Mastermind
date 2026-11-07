@@ -82,13 +82,13 @@ def test_pre_dispatch_platform_refusal_is_recoverable_without_effect_confusion()
     source = text("docs/sol_skills/ACTIVE_EXECUTION.md")
     for phrase in (
         "A platform refusal is action-scoped until evidence proves otherwise",
-        "Verify the original typed receipt and dispatch",
+        "before tool dispatch",
         "TOOL_DEGRADED / EFFECT_NONE",
-        'Diagnose and repair technical failures within grants',
+        'one bounded same-carrier reshaping after exact-target reread',
         "do not enter an identical third loop",
-        '`EFFECT_UNKNOWN` must be reconciled at the original target',
-        'only a permitted missing suffix may continue on the same carrier',
-        'Preserve acknowledged chunk prefixes',
+        'Possible dispatch means reconcile `EFFECT_UNKNOWN`, never replay/failover',
+        'continue only a permitted missing suffix on the same carrier',
+        'never overwrite known-good bytes after refusal',
     ):
         assert phrase in source
 
@@ -230,7 +230,7 @@ def test_effect_absence_never_grants_permission_to_evade_a_denial(path):
     source = text(path)
     assert "EFFECT_NONE is not retry permission" in source
     assert "first explicit safety or permission denial ends retry" in source
-    assert ("Diagnose and repair technical failures within grants" if path.endswith("ACTIVE_EXECUTION.md") else "permitted technical recovery") in source
+    assert "permitted technical" in source
 
 def test_legacy_original_writer_note_does_not_override_current_assignment():
     for rel in ("AGENTS.md", "CLAUDE.md", "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md"):
@@ -239,8 +239,7 @@ def test_legacy_original_writer_note_does_not_override_current_assignment():
         assert "current" in source and "recovery" in source
         assert "lease" in source or "custody" in source
     kernel = text("docs/sol_skills/BOOTSTRAP_KERNEL.md")
-    assert 'Assigned session owns recovery, not old chats/authors/roles' in kernel
-    assert 'No dead-chat handback' in kernel
+    assert 'Current assigned receiver owns recovery even if a handoff says "original writer"' in kernel
 
 
 def test_web_scenarios_distinguish_ghost_parent_from_real_sticky_effect():
@@ -276,8 +275,7 @@ def test_handoff_writer_never_disclaims_to_ghost_parent():
         assert "When writing a handoff, name a safe next action" in source
         assert "original parent" in source
     kernel = text("docs/sol_skills/BOOTSTRAP_KERNEL.md")
-    assert "HANDOFF_SOURCE_LINK_V1: full brief in GitHub" in kernel
-    assert "Delivery != pickup/START" in kernel
+    assert "Handoffs name an executable successor action" in kernel
     import json
     cases = json.loads((ROOT / "tests/fixtures/web_ceo_skill_cases.json").read_text())["cases"]
     case = next(c for c in cases if c["id"] == "ceo-handoff-writer-no-ghost-receiver")

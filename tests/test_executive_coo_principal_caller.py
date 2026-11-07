@@ -111,10 +111,9 @@ def test_change_during_owner_read_is_closed(rsa_key, tmp_path, fault):
     refused(call(app, token))
 
 
-def test_new_helper_does_not_expand_the_seven_tool_surface():
+def test_new_helper_does_not_expand_the_six_tool_surface():
     assert COO_TOOL_NAMES == ("executive_mandate", "executive_state", "executive_inbox",
-        "executive_fabric", "submit_principal_intent", "principal_intent_status",
-        "mmx_delegate")
+        "executive_fabric", "submit_principal_intent", "principal_intent_status")
 
 
 def test_token_expiring_during_owner_read_cannot_return_caller_facts(rsa_key, tmp_path):

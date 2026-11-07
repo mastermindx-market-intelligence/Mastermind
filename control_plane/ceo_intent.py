@@ -108,7 +108,6 @@ RECEIPT_SCHEMA_DIRECT = "mastermind.ceo_direct_native_receipt.v1"
 RECEIPT_SCHEMA_SERVICE = "mastermind.executive_service_intent_receipt.v1"
 RECEIPT_SCHEMA_PRINCIPAL = "mastermind.executive_principal_intent_receipt.v1"
 _DIALOGUE_SOURCE_UNSET = object()
-_PROJECT_EXECUTION_SOURCE_UNSET = object()
 _FRONTIER_SELECTION_UNSET = object()
 
 #: Namespace for the durable event ``command_id``.  The prefix keeps CEO intent
@@ -737,7 +736,7 @@ def validate_intent(payload: Any) -> dict[str, Any]:
     elif schema == INTENT_SCHEMA_V2:
         _exact_keys(raw, "intent", _V2_REQUIRED_KEYS, _V2_OPTIONAL_KEYS)
     elif schema == INTENT_SCHEMA_DIRECT:
-        _exact_keys(raw, "intent", _V2_REQUIRED_KEYS | {"workstream"}, frozenset({"project_planning_sha256"}))
+        _exact_keys(raw, "intent", _V2_REQUIRED_KEYS | {"workstream"}, frozenset())
     elif schema == INTENT_SCHEMA_SERVICE:
         _exact_keys(raw, "intent", _SERVICE_REQUIRED_KEYS, _SERVICE_OPTIONAL_KEYS)
     elif schema == INTENT_SCHEMA_PRINCIPAL:
@@ -772,9 +771,6 @@ def validate_intent(payload: Any) -> dict[str, Any]:
                 or contract.get("constraints")):
             raise CeoIntentError("direct native intent requires its exact read-only contract")
         intent.update(intent_kind="direct_native_readonly", business_impact="routine")
-        if "project_planning_sha256" in raw:
-            intent["project_planning_sha256"] = _text(raw["project_planning_sha256"],
-                "intent.project_planning_sha256", pattern=_FINGERPRINT_RE, max_chars=64)
     if schema == INTENT_SCHEMA_V2:
         intent_kind = _text(
             raw["intent_kind"], "intent.intent_kind", max_chars=64
@@ -1019,8 +1015,6 @@ def _provenance(intent: Mapping[str, Any], fingerprint: str, *, principal_reques
     }
     if "workstream" in intent:
         value["workstream"] = intent["workstream"]
-    if "project_planning_sha256" in intent:
-        value["project_planning_sha256"] = intent["project_planning_sha256"]
     if intent["schema"] == INTENT_SCHEMA_SERVICE:
         # Typed service evidence, read off the VALIDATED envelope and stamped
         # beside the shared base fields.  These are EVIDENCE, never a grant: the
@@ -1140,17 +1134,7 @@ def _receipt_from_event(
             raise CeoIntentError(
                 f"intent {intent_id!r} does not resolve to its strict v2 aggregation root"
             )
-        from control_plane.project_execution_admission import read_source as read_project_execution_source
-        try:
-            read_project_execution_source(runtime, job)
-        except StateConflict as exc:
-            raise CeoIntentError("project execution original record is invalid") from exc
         durable_source = provenance.get("dialogue_source")
-        from control_plane.fresh_conversation_admission import read_creation_restriction
-        try:
-            read_creation_restriction(runtime, job)
-        except StateConflict as exc:
-            raise CeoIntentError("fresh conversation creation record is invalid") from exc
         durable_source_digest = provenance.get("dialogue_source_digest")
         if durable_source is None:
             if durable_source_digest is not None:
@@ -1295,24 +1279,6 @@ def _require_workspace(intent: Mapping[str, Any], workspace_root: Path | None) -
         )
 
 
-def _notify_fresh_admission(fresh_admission_observer,job,command_id,created):
-    if fresh_admission_observer is not None:
-        try:
-            if created is None or created.get("job_id") != job.job_id:
-                raise ValueError("canonical root creation source is unavailable")
-            observed = fresh_admission_observer(job.job_id, command_id)
-            if observed is not None:
-                if inspect.iscoroutine(observed):
-                    observed.close()
-                raise ValueError("fresh admission observer returned a value")
-        except Exception as exc:
-            # Do not classify a post-commit observation failure as a zero-Job
-            # refusal, swallow it as a concurrent duplicate, or run a worker.
-            raise _FreshAdmissionObserverFailed(
-                "fresh admission observation failed; reconcile the original operation"
-            ) from exc
-
-
 def submit_intent(
     runtime: Any,
     payload: Any,
@@ -1327,8 +1293,6 @@ def submit_intent(
     principal_admission_guard: Any = None,
     fresh_admission_observer: Any = None,
     direct_admission: Any = None,
-    fresh_conversation_source: Any = None,
-    project_execution_source: Any = _PROJECT_EXECUTION_SOURCE_UNSET,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -1364,29 +1328,12 @@ def submit_intent(
     # path must provide the canonical fresh mission/binding/effect guard.
     # This sink adds no auth service, deployment, dispatch, or worker lifecycle.
     intent = validate_intent(payload)
-    if project_execution_source is not _PROJECT_EXECUTION_SOURCE_UNSET:
-        from control_plane.project_execution_admission import ProjectExecutionSource
-        if (type(project_execution_source) is not ProjectExecutionSource
-                or intent["schema"] != INTENT_SCHEMA_V2 or fresh_conversation_source is not None):
-            raise CeoIntentError("PROJECT_EXECUTION_SOURCE_REQUIRED")
-        project_execution_source.check_intent(intent)
-    if fresh_conversation_source is not None:
-        from control_plane.fresh_conversation_admission import FreshConversationCreationSource
-        if type(fresh_conversation_source) is not FreshConversationCreationSource or intent["schema"] != INTENT_SCHEMA_V2:
-            raise CeoIntentError("FRESH_CONVERSATION_SOURCE_REQUIRED")
-        fresh_conversation_source.check_intent(intent)
     if intent["schema"] == INTENT_SCHEMA_DIRECT:
         from control_plane import direct_native_execution as direct
         if type(direct_admission) is not direct.DirectNativeAdmission:
             raise CeoIntentError("direct native host admission is not composed")
-        if fresh_admission_observer is not None and (not callable(fresh_admission_observer)
-                or inspect.iscoroutinefunction(fresh_admission_observer)):
-            raise CeoIntentError("fresh native admission observer must be synchronous")
         try:
             direct_admission.check()
-            expected_planning = direct_admission._project_planning
-            if intent.get("project_planning_sha256") != (None if expected_planning is None else direct.digest(expected_planning)):
-                raise CeoIntentError("project planning fingerprint differs from private admission")
             _require_workspace(intent,Path(workspace_root) if workspace_root else None)
             fingerprint=intent_fingerprint(intent)
             command=command_id_for(intent["intent_id"])
@@ -1406,9 +1353,7 @@ def submit_intent(
                 if actual != direct.admission_material(direct_admission):
                     raise CeoIntentConflict("direct native admission identity changed")
                 return _receipt_from_event(runtime,existing,intent_id=intent["intent_id"],fingerprint=fingerprint)
-            created=runtime.store.find_event_by_command_id(command)
-            _notify_fresh_admission(fresh_admission_observer,job,command,created)
-            return build_receipt(job,intent=intent,fingerprint=fingerprint,duplicate=False,created_at_ms=int(created["created_at_ms"]))
+            return build_receipt(job,intent=intent,fingerprint=fingerprint,duplicate=False,created_at_ms=int(runtime.store.find_event_by_command_id(command)["created_at_ms"]))
         except CeoIntentError:
             raise
         except (ValueError,StateConflict) as exc:
@@ -1438,9 +1383,6 @@ def submit_intent(
 
     existing = runtime.store.find_event_by_command_id(command_id)
     if existing is not None:
-        if project_execution_source is not _PROJECT_EXECUTION_SOURCE_UNSET:
-            from control_plane.project_execution_admission import require_same_source
-            require_same_source(runtime, existing["job_id"], project_execution_source)
         return _receipt_from_event(
             runtime,
             existing,
@@ -1470,9 +1412,6 @@ def submit_intent(
                 execution_binding=execution_binding,
                 dialogue_source=effective_dialogue_source,
                 frontier_selection=effective_selection,
-                _fresh_conversation_source=fresh_conversation_source,
-                _project_execution_source=(None if project_execution_source is _PROJECT_EXECUTION_SOURCE_UNSET
-                    else project_execution_source),
             )
         else:
             if effective_selection is not None:
@@ -1541,9 +1480,6 @@ def submit_intent(
         # the winner's receipt; otherwise the refusal is real and is re-raised.
         settled = runtime.store.find_event_by_command_id(command_id)
         if settled is not None:
-            if project_execution_source is not _PROJECT_EXECUTION_SOURCE_UNSET:
-                from control_plane.project_execution_admission import require_same_source
-                require_same_source(runtime, settled["job_id"], project_execution_source)
             return _receipt_from_event(
                 runtime,
                 settled,
@@ -1556,7 +1492,21 @@ def submit_intent(
         raise CeoIntentError(str(exc)) from exc
 
     created = runtime.store.find_event_by_command_id(command_id)
-    _notify_fresh_admission(fresh_admission_observer,job,command_id,created)
+    if fresh_admission_observer is not None:
+        try:
+            if created is None or created.get("job_id") != job.job_id:
+                raise ValueError("canonical root creation source is unavailable")
+            observed = fresh_admission_observer(job.job_id, command_id)
+            if observed is not None:
+                if inspect.iscoroutine(observed):
+                    observed.close()
+                raise ValueError("fresh admission observer returned a value")
+        except Exception as exc:
+            # Do not classify a post-commit observation failure as a zero-Job
+            # refusal, swallow it as a concurrent duplicate, or run a worker.
+            raise _FreshAdmissionObserverFailed(
+                "fresh admission observation failed; reconcile the original operation"
+            ) from exc
     return build_receipt(
         job,
         intent=intent,

@@ -2665,14 +2665,7 @@ def api_shadow_books() -> JSONResponse:
                          for p in shadow_books.POLICIES],
         })
     except Exception as exc:  # noqa: BLE001
-        _log.warning("shadow books read failed: %s", type(exc).__name__)
-        return JSONResponse({
-            "read_status": "unavailable",
-            "error": "shadow_books_unavailable",
-            "leaderboard": None,
-            "books": None,
-            "policies": None,
-        })
+        return JSONResponse({"leaderboard": [], "books": {}, "policies": [], "error": str(exc)})
 
 
 @router.get("/api/predictions")
@@ -2688,13 +2681,7 @@ def api_predictions() -> JSONResponse:
         from portfolio import predictions
         return JSONResponse(predictions.summary(_date.today().isoformat()))
     except Exception as exc:  # noqa: BLE001
-        _log.warning("predictions read failed: %s", type(exc).__name__)
-        return JSONResponse({
-            "read_status": "unavailable",
-            "error": "predictions_unavailable",
-            "coverage": None,
-            "scorecard": None,
-        })
+        return JSONResponse({"coverage": {}, "scorecard": {}, "error": str(exc)})
 
 
 @router.get("/api/rejections")
@@ -2736,13 +2723,7 @@ def api_student() -> JSONResponse:
         out["top_predicted"] = student.predict(top=12)
         return JSONResponse(out)
     except Exception as exc:  # noqa: BLE001
-        _log.warning("student model read failed: %s", type(exc).__name__)
-        return JSONResponse({
-            "read_status": "unavailable",
-            "status": "unavailable",
-            "top_predicted": None,
-            "error": "student_unavailable",
-        })
+        return JSONResponse({"status": "building", "top_predicted": [], "error": str(exc)})
 
 
 @router.get("/api/distill")
@@ -2756,13 +2737,7 @@ def api_distill() -> JSONResponse:
         out["top_predicted"] = distill.predict(top=12)
         return JSONResponse(out)
     except Exception as exc:  # noqa: BLE001
-        _log.warning("distill model read failed: %s", type(exc).__name__)
-        return JSONResponse({
-            "read_status": "unavailable",
-            "status": "unavailable",
-            "top_predicted": None,
-            "error": "distill_unavailable",
-        })
+        return JSONResponse({"status": "building", "top_predicted": [], "error": str(exc)})
 
 
 @router.get("/api/interim_marks")
@@ -2789,12 +2764,7 @@ def api_engine_backtest() -> JSONResponse:
         from loop import engine_backtest
         return JSONResponse(engine_backtest.load())
     except Exception as exc:  # noqa: BLE001
-        _log.warning("engine backtest read failed: %s", type(exc).__name__)
-        return JSONResponse({
-            "read_status": "unavailable",
-            "status": "unavailable",
-            "error": "engine_backtest_unavailable",
-        })
+        return JSONResponse({"status": "unavailable", "error": str(exc)})
 
 
 @router.get("/api/factor_zoo")
@@ -2808,12 +2778,7 @@ def api_factor_zoo() -> JSONResponse:
         from loop import factor_zoo
         return JSONResponse(factor_zoo.load())
     except Exception as exc:  # noqa: BLE001
-        _log.warning("factor zoo read failed: %s", type(exc).__name__)
-        return JSONResponse({
-            "read_status": "unavailable",
-            "status": "unavailable",
-            "error": "factor_zoo_unavailable",
-        })
+        return JSONResponse({"status": "unavailable", "error": str(exc)})
 
 
 @router.get("/api/fundamentals")
@@ -2826,12 +2791,7 @@ def api_fundamentals() -> JSONResponse:
         from loop import fundamentals
         return JSONResponse(fundamentals.load())
     except Exception as exc:  # noqa: BLE001
-        _log.warning("fundamentals read failed: %s", type(exc).__name__)
-        return JSONResponse({
-            "read_status": "unavailable",
-            "status": "unavailable",
-            "error": "fundamentals_unavailable",
-        })
+        return JSONResponse({"status": "unavailable", "error": str(exc)})
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -3448,10 +3408,13 @@ def api_desk_watchlist(book: str = "flagship") -> JSONResponse:
         # fall back to the append-log latest() for any parked name not yet in the snapshot so the
         # surface is never thinner than before (back-compatible).
         state_by_ticker = {}
-        for s in (watchlist.state_rows() or []):
-            t = (s.get("ticker") or "").upper()
-            if t:
-                state_by_ticker[t] = s
+        try:
+            for s in (watchlist.state_rows() or []):
+                t = (s.get("ticker") or "").upper()
+                if t:
+                    state_by_ticker[t] = s
+        except Exception:  # noqa: BLE001
+            state_by_ticker = {}
         rows = []
         for r in (watchlist.latest() or []):
             t = (r.get("ticker") or "").upper()
@@ -3475,9 +3438,7 @@ def api_desk_watchlist(book: str = "flagship") -> JSONResponse:
                              "last_review": str(s.get("last_review") or "")[:10] or None})
         return JSONResponse({"book": book, "watchlist": rows[:120]})
     except Exception as exc:  # noqa: BLE001
-        _log.warning("desk_watchlist_unavailable: %s", type(exc).__name__)
-        return JSONResponse({"status": "unavailable", "book": book,
-                             "watchlist": None, "error": "desk_watchlist_unavailable"})
+        return JSONResponse({"book": book, "watchlist": [], "error": str(exc)})
 
 
 @router.get("/api/desk/scorecard")
@@ -3701,18 +3662,13 @@ def api_scheduler() -> JSONResponse:
     Returns per-job records: id, next_run_time, last_started, last_finished, last_skipped,
     last_status, last_severity.  Reads the run_events JSONL tail and the live APScheduler
     instance.  Auth-gated via the same app-level middleware as all other /api/* routes.
-    Failed reads return a closed unavailable state; a successful read may have no job rows.
+    Never 500s — degrades to an empty list on any failure.
     """
     try:
         from app.scheduler import scheduler_health
-        return JSONResponse({"scheduler_status": "available", "jobs": scheduler_health()})
+        return JSONResponse({"jobs": scheduler_health()})
     except Exception as exc:  # noqa: BLE001 — operator endpoint; must never raise
-        _log.warning("scheduler health read failed: %s", type(exc).__name__)
-        return JSONResponse({
-            "scheduler_status": "unavailable",
-            "jobs": None,
-            "error": "scheduler_health_unavailable",
-        })
+        return JSONResponse({"jobs": [], "note": f"Scheduler health unavailable: {exc}"})
 
 
 @router.get("/api/provenance")

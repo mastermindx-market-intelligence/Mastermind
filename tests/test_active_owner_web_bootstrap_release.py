@@ -24,34 +24,30 @@ def test_project_block_fits_both_real_limits_and_has_exact_unique_rules():
         assert sum(line.startswith(number + " ") for line in block.splitlines()) == 1
 
 
-
 def test_accepted_macro_merge_rule_can_fit_when_composed_with_this_kernel():
-    # The accepted Macro opt-in remains governed by the release workflow;
-    # the compact Project must retain the pointer and never bulk-arm PRs.
+    # Protected #1999 added this real source-law rule on master after the
+    # original candidate. A passing standalone 8k check is insufficient:
+    # the integrated Project fence must still fit after the accepted rule.
     block = _project_block()
-    for guard in (
-        "9A. ONE-PASS DELIVERY:",
-        "docs/DELIVERY_WORKFLOW.md",
-        "Never bulk-arm/clear other holds",
-        "Native review != GitHub APPROVED",
-        "No denied-effect/EFFECT_UNKNOWN carrier swap",
-    ):
-        assert guard in block, f"accepted release guard missing: {guard}"
+    macro_rule = "9A. Macro `merge-on-green`: docs/DELIVERY_WORKFLOW.md. Never bulk-arm."
+    assert macro_rule in block, "retain accepted #1999 Macro rule"
     assert len(block.encode("utf-8")) <= 8000
+    assert "Native child != GitHub APPROVED." in block
+    assert "denied/EFFECT_UNKNOWN reroute." in block
 
 
 def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():
     block = _project_block()
     for phrase in (
-        "Assigned session owns recovery",
-        "not old chats/authors/roles",
-        "No dead-chat handback",
-        "HANDOFF_SOURCE_LINK_V1",
-        "Native CRITICAL keeps actual distinct review",
-        "no blanket independent technical/source review",
-        "Explicit safety/permission denial ends that action",
+        "Archived",
+        "Current assigned receiver owns recovery",
+        "Archived chats/PR authors aren't live owners",
+        "Handoffs name an executable successor action",
+        "Native CRITICAL tier: one distinct review",
+        "never native Sol labor",
+        "First explicit safety/permission denial",
         "EFFECT_UNKNOWN",
-        "never self-approve/self-merge/falsify/bypass",
+        "Never self-approve/bypass protection",
     ):
         assert phrase in block
 
@@ -59,15 +55,16 @@ def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():
 def test_formal_review_eligibility_and_handoff_remain_inside_fence():
     block = _project_block()
     for phrase in (
-        "6A. No named reviewer seat absent binding rule",
-        "Verify login, authors/coauthors, head and prior reviews",
-        "No impersonation/duplicate/uncertain review",
+        "6A. No named-seat lock absent binding rule",
+        "independent of PR authors/committers/coauthors",
+        "No impersonation, self-approval, duplicate or denied/EFFECT_UNKNOWN reroute",
         "HANDOFF_SOURCE_LINK_V1",
-        "Delivery != pickup/START",
+        "Delivery != PICKUP_ACK/START",
         "<@U0BTCHX8HMF>",
         "Never DM.",
     ):
         assert phrase in block
+
 
 def test_project_installation_needs_editor_readback_and_behavioral_canary():
     instructions = ACCOUNT.read_text(encoding="utf-8")

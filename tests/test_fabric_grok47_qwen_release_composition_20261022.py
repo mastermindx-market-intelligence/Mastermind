@@ -39,10 +39,8 @@ QWEN = ("bailian_keys.py", "lease_broker.py",
         "glm_host_account_probe.py", "glm_host_account_source.py")
 HISTORICAL_FORWARD_NAMES = ("pick.py", "remote_sub.sh", "remote_sub_exec.py", "remote_sub_helpers.py")
 LONG_HORIZON_FORWARD_NAMES = ("fabric_operator_contract.py", "native_remote.py", "sub.sh")
-# Current delivery forward composes S14 with the exact reviewed advertised
-# recovery. The historical nine-source Grok map stays unchanged below.
 S14_FORWARD_DIGESTS = {
-    "artifact_delivery.py": "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d",
+    "artifact_delivery.py": "81749610b8afd7151dbadb4cbcedbef853fc18ad9de9364fd3b2b1d747d535b1",
 }
 FORWARD_NAMES = HISTORICAL_FORWARD_NAMES + LONG_HORIZON_FORWARD_NAMES + tuple(S14_FORWARD_DIGESTS)
 BASE_ONLY_OVERLAY_NAMES = ("fabric_operator_client.py",)
@@ -58,10 +56,10 @@ PROTECTED_QWEN_SOURCE_DIGESTS = {
 }
 
 # Keep the exact historical Qwen map above. The restrictive context-reader
-# join and the composed application-turn/fair-share broker each have one exact
-# forward digest; remaining Qwen payloads retain their original bytes.
+# join and fair-share queue repair advance as explicit candidate bytes; the
+# other Qwen payloads remain exact.
 REVIEWED_QWEN_FORWARD_DIGESTS = {
-    "lease_broker.py": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
+    "lease_broker.py": "598d9b905b71897275a0617d143f3280bc802fbd6c375bed9848d222564e1488",
     "glm_host_account_source.py": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
 }
 

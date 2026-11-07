@@ -164,7 +164,7 @@ class WorkerResponsibilityContinuityContractTests(unittest.TestCase):
                 self.assertIn(phrase, reconcile)
         self.assertIn('a requested reviewer, a historical author or a disabled runtime service', cold)
         self.assertIn("a requested login alone is not an enforced approval", clients)
-        self.assertIn("requested reviewer does not prove approval required", kernel.lower())
+        self.assertIn("requested reviewer != required approval", kernel.lower())
         block = kernel.split("## Approved Project instruction text", 1)[1].split("```text\n", 1)[1].split("\n```", 1)[0]
         self.assertLessEqual(len(block.encode("utf-8")), 8000)
 

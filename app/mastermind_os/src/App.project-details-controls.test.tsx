@@ -74,16 +74,7 @@ async function setup({ permitted = true, pending = false } = {}) {
   const view = mount(); await open();
   return { invoke, store, launch, view, mount, open, notify, finish };
 }
-/** The Project details navigator keeps every owner mounted but hidden until
- * its overview button is chosen; switching owners first returns through
- * "Back to project details". Choosing a section reads nothing by itself. */
-function chooseSection(name: string) {
-  const back = screen.queryByRole("button", { name: /Back to project details/ });
-  if (back) fireEvent.click(back);
-  fireEvent.click(screen.getByRole("button", { name }));
-}
 async function readInstruction() {
-  chooseSection("Standing instructions");
   fireEvent.click(screen.getByRole("button", { name: "Read instructions" }));
   fireEvent.click(await screen.findByRole("button", { name: /Review instruction:/ }));
   fireEvent.click(screen.getByRole("button", { name: "Check instruction status" }));
@@ -95,19 +86,14 @@ async function enablePause() {
 }
 it("mounts both accepted controls visibly with zero automatic I/O and independent rootless reads", async () => {
   const e = await setup();
-  chooseSection("Standing instructions");
   expect(screen.getByRole("region", { name: "Standing instructions" })).toBeTruthy();
-  chooseSection("Project permissions");
   expect(screen.getByRole("region", { name: "Project permissions" })).toBeTruthy();
-  chooseSection("Work controls");
   expect(screen.getByRole("region", { name: "New work" })).toBeTruthy();
   expect(e.invoke.mock.calls.filter(([name]) => /instruction|access|admission/.test(name))).toHaveLength(0);
-  chooseSection("Project permissions");
   fireEvent.click(screen.getByRole("button", { name: "Read current access" }));
   await screen.findByText("You can read this project’s information.");
   expect(e.invoke.mock.calls.filter(([name]) => name === "read_project_access")).toHaveLength(1);
   expect(e.invoke.mock.calls.filter(([name]) => /instruction|admission/.test(name))).toHaveLength(0);
-  chooseSection("Standing instructions");
   fireEvent.click(screen.getByRole("button", { name: "Read instructions" }));
   await screen.findByRole("button", { name: /Review instruction:/ });
   expect(e.invoke.mock.calls.filter(([name]) => name === "read_project_instructions")).toHaveLength(1);
@@ -116,7 +102,6 @@ it("mounts both accepted controls visibly with zero automatic I/O and independen
 });
 it("keeps effective permissions view-only and never borrows a project grant for instruction Pause", async () => {
   const e = await setup({ permitted: false });
-  chooseSection("Project permissions");
   fireEvent.click(screen.getByRole("button", { name: "Read current access" }));
   await screen.findByText("You can read this project’s information.");
   expect(within(screen.getByRole("region", { name: "Project permissions" })).queryByRole("button", { name: /edit|grant|pause|resume/i })).toBeNull();

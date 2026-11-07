@@ -88,10 +88,9 @@ export type LaunchConfiguration = LaunchBindingConfig | LaunchEnrollmentConfig;
 
 /** Resolve one exact enrollment; only an omitted legacy selection uses the default. */
 export function resolveLaunchBinding(
-  config: LaunchConfiguration | null,
+  config: LaunchConfiguration,
   workstreamRef?: string,
 ): LaunchBindingConfig | null {
-  if (config === null) return null;
   if (workstreamRef !== undefined && (typeof workstreamRef !== "string" || !validWorkstream(workstreamRef))) return null;
   if ("bindings" in config) {
     return config.bindings.find(binding =>
@@ -114,7 +113,7 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     return !!owner && this.directJobs.has(JSON.stringify([owner.principalScope,owner.generation,selection.workRef,selection.rootJobId]));
   }
   constructor(
-    private readonly config: LaunchConfiguration | null,
+    private readonly config: LaunchConfiguration,
     private readonly client: ExecutiveToolClient,
     private readonly owner: () => OwnerContext | null,
   ) {}
@@ -133,7 +132,6 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
 
   prepare(intent: CommandIntent): OperationPointer {
     if (intent.kind !== "launch") throw new Error("INVALID_KIND");
-    if (this.config === null) throw new Error(COMMAND_ROUTE_UNAVAILABLE);
     const ctx = this.owner();
     if (!ctx) throw new Error("INVALID_PAYLOAD");
     const form = formFromPayload(intent.payload);
@@ -161,8 +159,6 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     intent: CommandIntent,
     signal: AbortSignal,
   ): Promise<EffectReceipt> {
-    // A removed catalog closes new legacy submits; original status reads remain available.
-    if (this.config === null) return this._receipt(pointer, "refused", COMMAND_ROUTE_UNAVAILABLE);
     if (pointer.operationKey !== intent.payload.operation_key) {
       return this._receipt(pointer, "refused", "MALFORMED_POINTER");
     }
@@ -350,8 +346,32 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
       }
       data = envelope.data;
     }
-    const receipt = decodeExecutiveLaunchReceipt(pointer, data);
-    if (receipt.disposition === "accepted" && isPlainObject(data)) {
+    if (!isPlainObject(data)) {
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (typeof data.intent_id !== "string") {
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (data.intent_id !== intentIdForOperationKey(pointer.operationKey)) {
+      return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
+    }
+    if (!validPointerTargetKey(pointer.targetKey)) {
+      return this._receipt(pointer, "unknown", "MALFORMED_POINTER");
+    }
+    const schemaOk =
+      typeof data.schema === "string" && RECEIPT_SCHEMAS.has(data.schema);
+    if (!schemaOk || data.accepted !== true || data.dispatched !== false) {
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (data.schema === DIRECT_RECEIPT_SCHEMA && !validDirectReceipt(data, pointer.targetKey)) {
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (typeof data.job_id !== "string") {
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
+    if (!JOB_RE.test(data.job_id)) {
+      return this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT");
+    }
     if(data.schema===DIRECT_RECEIPT_SCHEMA) {
       const owner=this.owner();
       if(owner) {
@@ -359,8 +379,10 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
         this.directJobs.add(JSON.stringify([owner.principalScope,owner.generation,pointer.targetKey,data.job_id]));
       }
     }
-    }
-    return receipt;
+    return this._receipt(pointer, "accepted", "ACCEPTED", {
+      workRef: pointer.targetKey,
+      rootJobId: data.job_id,
+    });
   }
 
   /**
@@ -443,7 +465,7 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
 }
 
 export function createExecutiveLaunchBinding(
-  config: LaunchConfiguration | null,
+  config: LaunchConfiguration,
   client: ExecutiveToolClient,
   viewSource: ExecutiveLaunchViewSource,
   direct?: { port: FiniteCommandPort; capability: Omit<NonNullable<OrchestratorCommandBinding["directNative"]>, "isDirectSelection"> },
@@ -466,7 +488,7 @@ export function createExecutiveLaunchBinding(
         projects: selected?.projects ?? [],
         profiles: selected?.profiles ?? [],
         ...(selected?.frontierModels !== undefined ? { frontierModels: selected.frontierModels } : {}),
-        ...(config && "bindings" in config ? {
+        ...("bindings" in config ? {
           defaultWorkstream: config.defaultWorkstream,
           workstreams: config.bindings.map(binding => ({
             ref: binding.workstream, label: binding.label,
@@ -666,44 +688,4 @@ function isJsonValue(value: unknown): boolean {
 
 function sameJson(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
-}
-
-/** Canonical accepted-root decoder shared by authenticated launch transports. */
-export function decodeExecutiveLaunchReceipt(pointer: OperationPointer, data: unknown): EffectReceipt {
-    if (!isPlainObject(data)) {
-      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (typeof data.intent_id !== "string") {
-      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (data.intent_id !== intentIdForOperationKey(pointer.operationKey)) {
-      return launchReceipt(pointer, "unknown", "RECEIPT_MISMATCH");
-    }
-    if (!validPointerTargetKey(pointer.targetKey)) {
-      return launchReceipt(pointer, "unknown", "MALFORMED_POINTER");
-    }
-    const schemaOk =
-      typeof data.schema === "string" && RECEIPT_SCHEMAS.has(data.schema);
-    if (!schemaOk || data.accepted !== true || data.dispatched !== false) {
-      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (data.schema === DIRECT_RECEIPT_SCHEMA && !validDirectReceipt(data, pointer.targetKey)) {
-      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (typeof data.job_id !== "string") {
-      return launchReceipt(pointer, "unknown", "MALFORMED_RECEIPT");
-    }
-    if (!JOB_RE.test(data.job_id)) {
-      return launchReceipt(pointer, "unknown", "UNKNOWN_RECEIPT");
-    }
-    return launchReceipt(pointer, "accepted", "ACCEPTED", {
-      workRef: pointer.targetKey,
-      rootJobId: data.job_id,
-    });
-
-}
-function launchReceipt(pointer: OperationPointer, disposition: EffectReceipt["disposition"], reason: string,
-  missionSelection?: {workRef: string; rootJobId: string}): EffectReceipt {
-  return {operationKey:pointer.operationKey,kind:"launch",targetKey:pointer.targetKey,disposition,reason,
-    ...(missionSelection ? {missionSelection} : {})};
 }

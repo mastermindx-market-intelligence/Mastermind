@@ -24,10 +24,6 @@ if TYPE_CHECKING:
 SCHEMA = "mastermind.fabric_attended_route/v1"
 FINITE_DEFINITION_DIR = '/Library/Application Support/MastermindExecutive/config/fabric-minimax-finite-01'
 FINITE_SOCKET_PATH = '/var/run/mastermind-executive/fabric-minimax-finite-01.sock'
-RETIRED_FINITE_FIELD = 'retired_finite_composition'
-RETIRED_FINITE_SCHEMA = 'mastermind.executive_retired_finite_composition/v1'
-FINITE_SELECTION_FIELDS = frozenset({'fabric_bridge_armed', 'fabric_bindings_path',
-    'fabric_bindings_sha256', 'fabric_attended_probe', 'native_capacity_v2'})
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 _KEYS = frozenset({
@@ -112,43 +108,6 @@ def installed_control_placements(raw):
         qualification=AttendedQualification(
             'fabric-parent-native-operator-proof-01a11e90-v1',
             '36678c742b06b0ce04aa2b6acc46cb8aba9eba82c322ca960611e2cbb2580f56')),)
-
-
-def retired_finite_selection(raw):
-    """Validate inactive provenance; never supply an execution placement.
-
-    The protected retirement predecessor is joined separately by the Root
-    acceptance/config owner. A running Control can validate this inert shape
-    without gaining access to that Root-only archive.
-    """
-    if RETIRED_FINITE_FIELD not in raw:
-        return None
-    value = raw[RETIRED_FINITE_FIELD]
-    if (set(raw) & FINITE_SELECTION_FIELDS or type(value) is not dict
-            or set(value) != {'schema_version', 'transaction_id', 'release_sha',
-                             'predecessor_sha256', 'selection'}
-            or value['schema_version'] != RETIRED_FINITE_SCHEMA
-            or type(value['transaction_id']) is not str
-            or re.fullmatch(r'autonomy-[0-9a-f]{12}', value['transaction_id']) is None
-            or type(value['release_sha']) is not str
-            or re.fullmatch(r'[0-9a-f]{40}', value['release_sha']) is None
-            or type(value['predecessor_sha256']) is not str
-            or _DIGEST.fullmatch(value['predecessor_sha256']) is None):
-        raise ValueError('retired finite provenance is malformed or active')
-    selected = value['selection']
-    if (type(selected) is not dict or set(selected) not in (
-            FINITE_SELECTION_FIELDS, FINITE_SELECTION_FIELDS - {'native_capacity_v2'})
-            or selected.get('fabric_bridge_armed') is not False
-            or selected.get('fabric_bindings_path') != FINITE_DEFINITION_DIR + '/bindings.json'
-            or selected.get('fabric_attended_probe') != {
-                'worker_config_path': FINITE_DEFINITION_DIR + '/worker.json'}):
-        raise ValueError('retired provenance must retain the exact fixed finite selection')
-    from scripts.executive_os_phase1c import ServiceError, _validate_fabric_bridge_config
-    try:
-        _validate_fabric_bridge_config(selected)
-    except ServiceError as exc:
-        raise ValueError(str(exc)) from None
-    return selected
 
 
 def normalize_attended_route(value: Any) -> dict[str, str]:

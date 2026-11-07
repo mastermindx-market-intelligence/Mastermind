@@ -53,7 +53,7 @@ import {
 
 // ── Frozen UI-local contract types ────────────────────────────────────────────
 
-export type OperationKind = "launch" | "message" | "stop" | "consume" | "project_pause" | "project_resume" | "project_create" | "project_adopt" | "direction_accept" | "project_source_write" | "instruction_pause" | "conversation_create" | "conversation_consume" | "conversation_turn";
+export type OperationKind = "launch" | "message" | "stop" | "consume" | "project_pause" | "project_resume" | "project_create" | "project_adopt" | "direction_accept" | "project_source_write" | "instruction_pause";
 
 export interface CommandIntent {
   readonly kind: OperationKind;
@@ -262,7 +262,7 @@ export interface UnknownState {
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
-const VALID_KINDS: ReadonlySet<string> = new Set(["launch", "message", "stop", "consume", "project_pause", "project_resume", "project_create", "project_adopt", "direction_accept", "project_source_write", "instruction_pause", "conversation_create", "conversation_consume", "conversation_turn"]);
+const VALID_KINDS: ReadonlySet<string> = new Set(["launch", "message", "stop", "consume", "project_pause", "project_resume", "project_create", "project_adopt", "direction_accept", "project_source_write", "instruction_pause"]);
 
 /**
  * Closed set of source kinds for which an explicit

@@ -171,11 +171,7 @@ test('configured gateway exposes typed Git tools with exact truthful annotations
     assert.equal(push.annotations.destructiveHint, true);
     assert.equal(push.annotations.idempotentHint, true);
     assert.equal(push.annotations.openWorldHint, true);
-    assert.deepEqual(Object.keys(push.inputSchema.properties).sort(), ['expected_head_sha', 'operation_id', 'recovery']);
-    assert.equal(push.inputSchema.required.includes('recovery'), false);
-    assert.equal(push.inputSchema.properties.recovery.additionalProperties, false);
-    assert.deepEqual(push.inputSchema.properties.recovery.required,
-      ['prior_action_ref', 'prior_intended_head_sha', 'expected_remote_head_sha']);
+    assert.deepEqual(Object.keys(push.inputSchema.properties).sort(), ['expected_head_sha', 'operation_id']);
     const directivePattern =
       /required workflow|always\b|never (use|call|invoke)|only correct tool|must use|do not use|prefer this|critical rule/i;
     for (const tool of [status, commit, push]) {

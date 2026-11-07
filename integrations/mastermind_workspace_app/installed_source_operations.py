@@ -33,31 +33,6 @@ class InstalledWorkspaceSourceOperations:
         self._permissions = WorkspaceSourceOperationContextFactory(policy=policy,load_bindings=load_bindings)
         self._runtime_guard = runtime_guard
         self._compiler = collector.project_knowledge_recipe_reader(macro_root=collector._macro_root)
-        from integrations.mastermind_workspace_app.project_journey_recipes import InstalledProjectJourneyRecipes
-        self._journey = InstalledProjectJourneyRecipes(collector)
-        # Private nominal read-source recognition only; issued once, by the
-        # actual installed constructor, through the integration helper.
-        from integrations.mastermind_workspace_app.installed_read_provider_binding import install_installed_read_source
-        install_installed_read_source(self)
-
-    def canonical_data_owner(self, runtime):
-        """Same installed owner construction for READ and source operations.
-
-        READ needs no writable Supervisor/private-input owner. No owner cache,
-        config copy, registry or grant is created here.
-        """
-        if type(runtime) is not Runtime or self._runtime_guard(runtime) is not True:
-            raise PermissionError('SOURCE_OPERATION_UNAVAILABLE')
-        from integrations.mastermind_workspace_app.canonical_project_data import InstalledCanonicalProjectData
-        return InstalledCanonicalProjectData(collector=self._collector, policy=self._permissions.policy,
-            load_bindings=self._permissions._load_bindings, git_identity=self._git,
-            events=SourceOperationEvents(runtime.store), runtime_guard=lambda:self._runtime_guard(runtime))
-
-    def read_bindings(self, runtime):
-        """One actual DATA owner issues the two fixed READ bindings together."""
-        from integrations.mastermind_workspace_app.project_discovery import InstalledProjectDiscovery
-        data = self.canonical_data_owner(runtime)
-        return data.installed_binding(), InstalledProjectDiscovery(data).installed_binding()
 
     def __call__(self, runtime, supervisor):
         if type(runtime) is not Runtime:
@@ -77,28 +52,18 @@ class InstalledWorkspaceSourceOperations:
         # status does not acquire Git credentials, Macro or private contents;
         # the actual Git identity owner requalifies before each Git/API read
         # or effect when publication/reconciliation invokes it.
-        data = self.canonical_data_owner(runtime)
-        events = data.events
+        events = SourceOperationEvents(runtime.store)
         private = ProjectSourceOriginalInput(primary)
         contexts = self._permissions
         event_adapter = KnowledgePublisherEvents(events=events,contexts=contexts)
+        from integrations.mastermind_workspace_app.canonical_project_data import InstalledCanonicalProjectData
+        data = InstalledCanonicalProjectData(collector=self._collector,policy=contexts.policy,
+            load_bindings=contexts._load_bindings,git_identity=self._git,events=events,
+            runtime_guard=lambda:self._runtime_guard(runtime))
         owner = ProjectKnowledgeSourceOwner(events=events,private_inputs=private,permission_factory=contexts,
             adapter=ProjectKnowledgeRecipeAdapter(self._compiler),publisher_events=event_adapter,
             publisher_binding=self._git.binding,qualify_publisher=data.qualify_publisher,pr_owner=self._git)
-        from integrations.mastermind_workspace_app.project_journey_recipes import InstalledProjectCreationRecipeAdapter
-        from integrations.mastermind_workspace_app.project_creation_service import ProjectCreationSourceOwner
-        create = ProjectCreationSourceOwner(events=events,private_inputs=private,permission_factory=contexts,
-            adapter=InstalledProjectCreationRecipeAdapter(self._journey),publisher_binding=self._git.binding,
-            qualify_publisher=data.qualify_publisher,pr_owner=self._git)
-        from integrations.mastermind_workspace_app.installed_project_plan_proposal import build_installed_project_plan_proposal
-        proposal = build_installed_project_plan_proposal(events=events,private_inputs=private,
-            contexts=contexts,journey=self._journey,data=data,git_identity=self._git)
-        from integrations.mastermind_workspace_app.installed_plan_adoption import build_plan_adoption_owner
-        adoption = build_plan_adoption_owner(collector=self._collector,data=data,
-            events=events,private_inputs=private,contexts=contexts,git_identity=self._git)
-        service = WorkspaceSourceOperationService(create_owner=create,knowledge_owner=owner,
-            plan_proposal_owner=proposal,adoption_owner=adoption,
-            journey_recipes=self._journey,host_supervisor=host,
+        service = WorkspaceSourceOperationService(knowledge_owner=owner,host_supervisor=host,
             runtime_guard=lambda: self._runtime_guard(runtime),canonical_data_source=data)
         if self._runtime_guard(runtime) is not True:
             raise PermissionError('SOURCE_OPERATION_UNAVAILABLE')

@@ -34,9 +34,6 @@ def _pages(info: dict) -> list[dict]:
     raw = info.get("pages")
     if not isinstance(raw, list) or not raw:
         raise bridge.Refusal("PAGES_UNAVAILABLE")
-    if (info.get("truncated") is True or ("pageCount" in info and (
-            type(info["pageCount"]) is not int or info["pageCount"] != len(raw)))):
-        raise bridge.Refusal("PAGE_LIST_INCOMPLETE")
     pages = []
     for page in raw:
         if not isinstance(page, dict) or page.get("type") != "page":
@@ -53,59 +50,20 @@ def _pages(info: dict) -> list[dict]:
 
 def _tokens_hash(info: dict):
     hashes = info.get("contentHash")
-    if isinstance(hashes, dict) and isinstance(hashes.get("tokens"), str) and hashes["tokens"]:
+    if isinstance(hashes, dict) and isinstance(hashes.get("tokens"), str):
         return hashes["tokens"]
     return None
 
 
-def _basic_read(file_id: str, page_id: str | None = None, *,
-                warnings: list[dict] | None = None) -> dict:
-    arguments = {"fileId": file_id}
-    if page_id is not None:
-        arguments["pageId"] = page_id
-    response = bridge.execute("read", tool="get_basic_info", arguments=arguments)
-    raw = response.get("result") if isinstance(response, dict) else None
-    if (not isinstance(response, dict) or response.get("state") != "OBSERVED"
-            or not isinstance(raw, dict) or ("isError" in raw and raw["isError"] is not False)):
-        raise bridge.Refusal("DOCUMENT_UNAVAILABLE")
-    # An explicitly truncated envelope is a partial observation. Refuse it
-    # before normalization, as the JSX reader refuses its own envelope flags.
-    if (raw.get("truncated") is True or response.get("truncated") is True
-            or not isinstance(raw.get("content"), list) or raw.get("structuredContent") is not None):
-        raise bridge.Refusal("DOCUMENT_SCHEMA_UNVERIFIED")
-    # Explicit reads must use the requested tool result, not the separately
-    # captured active-file/page snapshot in response.document.
-    info = bridge.basic_object(raw)
-    if info.get("fileId") != file_id:
-        raise bridge.Refusal("FILE_ID_MISMATCH")
-    for block in raw.get("content", []):
-        if not isinstance(block, dict) or block.get("type") != "text":
-            raise bridge.Refusal("DOCUMENT_SCHEMA_UNVERIFIED")
-        text = block.get("text")
-        if not isinstance(text, str):
-            raise bridge.Refusal("DOCUMENT_SCHEMA_UNVERIFIED")
-        if text.startswith("Warning: ") and text[9:].strip():
-            if warnings is not None:
-                warnings.append({"file_id": file_id, "page_id": page_id, "text": text})
-            continue
-        value = bridge.load_json(text)
-        if not isinstance(value, dict):
-            raise bridge.Refusal("DOCUMENT_SCHEMA_UNVERIFIED")
-        ids = [value[key] for key in ("fileId", "documentId") if key in value]
-        if isinstance(value.get("file"), dict) and "id" in value["file"]:
-            ids.append(value["file"]["id"])
-        if any(identity != file_id for identity in ids):
-            raise bridge.Refusal("FILE_ID_MISMATCH")
-    return info
-
-
-def _read(file_id: str, *, reader: Callable[[str], dict] | None = None,
-          warnings: list[dict] | None = None) -> dict:
+def _read(file_id: str, *, reader: Callable[[str], dict] | None = None) -> dict:
     file_id = _require_file_id(file_id)
     if reader is not None:
         info = reader(file_id)
     else:
-        info = _basic_read(file_id, warnings=warnings)
+        result = bridge.execute("read", tool="get_basic_info", arguments={"fileId": file_id})
+        if result.get("state") != "OBSERVED":
+            raise bridge.Refusal("DOCUMENT_UNAVAILABLE")
+        info = (result.get("document") or {}).get("basic_info")
     if not isinstance(info, dict) or info.get("fileId") != file_id:
         raise bridge.Refusal("FILE_ID_MISMATCH")
     if not isinstance(info.get("fileName"), str) or not info["fileName"]:
@@ -115,12 +73,23 @@ def _read(file_id: str, *, reader: Callable[[str], dict] | None = None,
 
 
 def _read_native_page(file_id: str, page: dict, *,
-                      page_reader: Callable[[str, str], dict] | None = None,
-                      warnings: list[dict] | None = None) -> dict:
+                      page_reader: Callable[[str, str], dict] | None = None) -> dict:
     """Exact-page structural census, not complete style/asset equivalence."""
     page_id = page["id"]
     if page_reader is None:
-        info = _basic_read(file_id, page_id, warnings=warnings)
+        result = bridge.execute("read", tool="get_basic_info", arguments={
+            "fileId": file_id, "pageId": page_id,
+        })
+        if result.get("state") != "OBSERVED":
+            raise bridge.Refusal("NATIVE_PAGE_READ_UNAVAILABLE")
+        # The document snapshot intentionally describes the active page,
+        # even when the read result is for an explicitly requested page.
+        # Census MUST use the actual tool result or it will silently check
+        # the wrong page (and miss incomplete clones).
+        raw = result.get("result")
+        if not isinstance(raw, dict) or raw.get("isError") is True:
+            raise bridge.Refusal("NATIVE_PAGE_READ_UNAVAILABLE")
+        info = bridge.basic_object(raw)
     else:
         info = page_reader(file_id, page_id)
     if (not isinstance(info, dict) or info.get("fileId") != file_id
@@ -175,13 +144,7 @@ def make_plan(source_id: str, clone_id: str, keep_ids: list[str],
         raise bridge.Refusal("KEEP_PAGE_IDS_REQUIRED")
     if len(keep_ids) != len(set(keep_ids)):
         raise bridge.Refusal("DUPLICATE_KEEP_PAGE_IDS")
-    warnings = []
-    source = _read(source_id, reader=reader, warnings=warnings)
-    if warnings:
-        raise bridge.Refusal("NATIVE_READ_WARNING_REQUIRES_REVIEW")
-    clone = _read(clone_id, reader=reader, warnings=warnings)
-    if warnings:
-        raise bridge.Refusal("NATIVE_READ_WARNING_REQUIRES_REVIEW")
+    source, clone = _read(source_id, reader=reader), _read(clone_id, reader=reader)
     source_pages, clone_pages = _pages(source), _pages(clone)
     if source_pages != clone_pages:
         raise bridge.Refusal("CLONE_PAGE_LIST_MISMATCH",
@@ -206,10 +169,8 @@ def make_plan(source_id: str, clone_id: str, keep_ids: list[str],
     retained_census = []
     retained_artboard_ids = set()
     for page in kept_pages:
-        source_native = _read_native_page(source_id, page, page_reader=page_reader, warnings=warnings)
-        clone_native = _read_native_page(clone_id, page, page_reader=page_reader, warnings=warnings)
-        if warnings:
-            raise bridge.Refusal("NATIVE_READ_WARNING_REQUIRES_REVIEW")
+        source_native = _read_native_page(source_id, page, page_reader=page_reader)
+        clone_native = _read_native_page(clone_id, page, page_reader=page_reader)
         if source_native != clone_native:
             raise bridge.Refusal("RETAINED_PAGE_NATIVE_STRUCTURE_MISMATCH",
                                  "Do not prune a stale or structurally divergent clone.")
@@ -254,112 +215,25 @@ def make_plan(source_id: str, clone_id: str, keep_ids: list[str],
     }
 
 
-def _parse_jsx_observation(result: dict, file_id: str, node_id: str) -> dict:
-    """Validate the observed header / warnings / JSX grammar, without actuation.
-
-    The optional warning is NOT JSX and is never discarded. An exact-file
-    header and the exported root's first id attribute bind the content to the
-    requested artboard. This checks the known export envelope, not JSX syntax
-    completeness, a native document revision, or restoration fidelity.
-    """
-    _require_file_id(file_id)
-    _jsx_ids([node_id])
-    if not isinstance(result, dict) or result.get("state") != "OBSERVED":
-        raise bridge.Refusal("JSX_READ_UNAVAILABLE")
-    raw = result.get("result")
-    if not isinstance(raw, dict) or ("isError" in raw and raw["isError"] is not False):
-        raise bridge.Refusal("JSX_READ_UNAVAILABLE")
-    # No structured JSX response is in the observed vendor contract. Do not
-    # silently prefer one representation when a second may contradict it.
-    blocks = raw.get("content")
-    if (raw.get("structuredContent") is not None or raw.get("truncated") is True
-            or result.get("truncated") is True or not isinstance(blocks, list)
-            or not 2 <= len(blocks) <= 32
-            or any(not isinstance(x, dict) or x.get("type") != "text"
-                   or not isinstance(x.get("text"), str) for x in blocks)):
-        raise bridge.Refusal("JSX_SCHEMA_UNVERIFIED")
-    header = bridge.load_json(blocks[0]["text"])
-    if (not isinstance(header, dict)
-            or set(header) - {"file", "fileId", "documentId", "contentHash"}
-            or not isinstance(header.get("file"), dict)
-            or set(header["file"]) != {"id", "name"}
-            or not isinstance(header["file"].get("name"), str)
-            or not header["file"]["name"]
-            or ("contentHash" in header and not isinstance(header["contentHash"], dict))):
-        raise bridge.Refusal("JSX_SCHEMA_UNVERIFIED")
-    ids = [header["file"].get("id")]
-    ids.extend(header[key] for key in ("fileId", "documentId") if key in header)
-    if any(value != file_id for value in ids):
-        raise bridge.Refusal("JSX_FILE_ID_MISMATCH")
-    warnings = [x["text"] for x in blocks[1:-1]]
-    if any(not text.startswith("Warning: ") or not text[9:].strip() for text in warnings):
-        raise bridge.Refusal("JSX_SCHEMA_UNVERIFIED")
-    body = blocks[-1]["text"]
-    root = re.match(r"\s*\(\s*<([A-Za-z][A-Za-z0-9:_-]*)\s+id=([\"'])([^\"']+)\2(?=\s|/?>)", body)
-    if root is None or root.group(3) != node_id:
-        raise bridge.Refusal("JSX_ROOT_ID_MISMATCH")
-    # Do not accept a second root id hidden after the expected first one.
-    # Skip quoted strings and style expressions so descendant IDs and text
-    # inside CSS values cannot masquerade as root attributes.
-    cursor, depth, quote, escaped = root.end(), 0, None, False
-    while cursor < len(body):
-        char = body[cursor]
-        if quote is not None:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == quote:
-                quote = None
-        elif char in "\"'`":
-            quote = char
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            if depth == 0:
-                raise bridge.Refusal("JSX_SCHEMA_UNVERIFIED")
-            depth -= 1
-        elif depth == 0:
-            if char == ">":
-                break
-            if char == "<" or (body[cursor - 1].isspace()
-                               and re.match(r"id\s*=", body[cursor:])):
-                raise bridge.Refusal("JSX_ROOT_ID_MISMATCH")
-        cursor += 1
-    if cursor == len(body):
-        raise bridge.Refusal("JSX_SCHEMA_UNVERIFIED")
-    # Every observed Paper artboard export closes its root and parentheses.
-    # A truncated prefix must not become parity evidence.
-    if not re.search(r"</" + re.escape(root.group(1)) + r">\s*\)\s*\Z", body):
-        raise bridge.Refusal("JSX_SCHEMA_UNVERIFIED")
-    return {"file_id": file_id, "node_id": node_id,
-            "body": body, "warnings": warnings}
-
-
-def _read_jsx_observation(file_id: str, node_id: str) -> dict:
-    _require_file_id(file_id)
-    _jsx_ids([node_id])
-    result = bridge.execute("read", tool="get_jsx", arguments={
-        "fileId": file_id, "nodeId": node_id,
-        "format": "inline-styles", "includeNodeIds": True,
-        "includeRootPositioning": False,
-    })
-    return _parse_jsx_observation(result, file_id, node_id)
-
-
 def _read_jsx(file_id: str, node_id: str, *,
               reader: Callable[[str, str], str] | None = None) -> str:
     if reader is not None:
         body = reader(file_id, node_id)
     else:
-        observation = _read_jsx_observation(file_id, node_id)
-        if observation["warnings"]:
-            # Reading a warning successfully cannot turn an oversized source
-            # into CLONE_PRUNE_PLAN_READY. The read-only compare path below
-            # retains useful evidence while plan/verify stay fail-closed.
-            raise bridge.Refusal("JSX_WARNING_REQUIRES_REVIEW",
-                                 "Native warning retained; no prune readiness from this response.")
-        body = observation["body"]
+        result = bridge.execute("read", tool="get_jsx", arguments={
+            "fileId": file_id, "nodeId": node_id,
+            "format": "inline-styles", "includeNodeIds": True,
+        })
+        raw = result.get("result") or {}
+        if result.get("state") != "OBSERVED" or raw.get("isError"):
+            raise bridge.Refusal("JSX_READ_UNAVAILABLE")
+        blocks = [x.get("text") for x in raw.get("content", [])
+                  if isinstance(x, dict) and x.get("type") == "text"]
+        # Paper emits an identity/header record and a separate JSX body.
+        # Never compare two identical tool-error messages as design proof.
+        if len(blocks) != 2 or not isinstance(blocks[1], str):
+            raise bridge.Refusal("JSX_SCHEMA_UNVERIFIED")
+        body = blocks[1]
     if not isinstance(body, str) or not body.lstrip().startswith("(") or "<" not in body:
         raise bridge.Refusal("JSX_SCHEMA_UNVERIFIED")
     return body
@@ -392,13 +266,7 @@ def verify_plan(plan: dict, *, reader: Callable[[str], dict] | None = None,
             or keep != [p["id"] for p in expected_kept]
             or removed != expected_removed):
         raise bridge.Refusal("PLAN_PAGE_TARGET_MISMATCH")
-    warnings = []
-    source = _read(source_id, reader=reader, warnings=warnings)
-    if warnings:
-        raise bridge.Refusal("NATIVE_READ_WARNING_REQUIRES_REVIEW")
-    clone = _read(clone_id, reader=reader, warnings=warnings)
-    if warnings:
-        raise bridge.Refusal("NATIVE_READ_WARNING_REQUIRES_REVIEW")
+    source, clone = _read(source_id, reader=reader), _read(clone_id, reader=reader)
     if _pages(source) != originals or source["fileName"] != plan.get("source_file_name"):
         raise bridge.Refusal("SOURCE_CHANGED", "Source file must remain unchanged.")
     if _pages(clone) != expected_kept or clone["fileName"] != plan.get("clone_file_name"):
@@ -418,10 +286,8 @@ def verify_plan(plan: dict, *, reader: Callable[[str], dict] | None = None,
                 != [p["id"] for p in expected_kept]):
         raise bridge.Refusal("NATIVE_PAGE_CENSUS_PLAN_INVALID")
     for page, baseline in zip(expected_kept, retained_census):
-        current_source = _read_native_page(source_id, page, page_reader=page_reader, warnings=warnings)
-        current_clone = _read_native_page(clone_id, page, page_reader=page_reader, warnings=warnings)
-        if warnings:
-            raise bridge.Refusal("NATIVE_READ_WARNING_REQUIRES_REVIEW")
+        current_source = _read_native_page(source_id, page, page_reader=page_reader)
+        current_clone = _read_native_page(clone_id, page, page_reader=page_reader)
         if bridge.digest(current_source) != baseline["native_metadata_sha256"]:
             raise bridge.Refusal("SOURCE_NATIVE_PAGE_DRIFT")
         if bridge.digest(current_clone) != baseline["native_metadata_sha256"]:
@@ -474,104 +340,6 @@ def verify_plan(plan: dict, *, reader: Callable[[str], dict] | None = None,
     }
 
 
-def compare_file_pair(source_id: str, clone_id: str, *,
-                      page_ids: list[str] | None = None,
-                      evidence_node_ids: list[str] | None = None,
-                      reader: Callable[[str], dict] | None = None,
-                      page_reader: Callable[[str, str], dict] | None = None) -> dict:
-    """Compare an unpruned pair, with explicit scope and no resource actions.
-
-    Page lists are compared for both whole files. By default native metadata
-    is read for every shared page; --page-id narrows that expensive census.
-    JSX remains explicitly selected, never implied by matching node counts.
-    Observations are non-atomic and establish neither restore nor authority.
-    """
-    source_id, clone_id = _require_file_id(source_id), _require_file_id(clone_id)
-    if source_id == clone_id:
-        raise bridge.Refusal("SOURCE_EQUALS_CLONE")
-    nodes = _jsx_ids(evidence_node_ids)
-    warnings = []
-    source = _read(source_id, reader=reader, warnings=warnings)
-    clone = _read(clone_id, reader=reader, warnings=warnings)
-    source_pages, clone_pages = _pages(source), _pages(clone)
-    source_map = {p["id"]: p for p in source_pages}
-    clone_map = {p["id"]: p for p in clone_pages}
-    common = [p["id"] for p in source_pages if p["id"] in clone_map]
-    if page_ids is None:
-        selected = common
-    elif (not isinstance(page_ids, list) or not page_ids
-          or any(not isinstance(p, str) or p not in common for p in page_ids)
-          or len(set(page_ids)) != len(page_ids)):
-        raise bridge.Refusal("COMPARISON_PAGE_SCOPE_INVALID")
-    else:
-        selected = [p for p in common if p in page_ids]
-    missing = [p for p in source_map if p not in clone_map]
-    extra = [p for p in clone_map if p not in source_map]
-    page_results, shared_boards, all_boards = [], set(), set()
-    for page_id in selected:
-        before = _read_native_page(source_id, source_map[page_id],
-                                   page_reader=page_reader, warnings=warnings)
-        after = _read_native_page(clone_id, clone_map[page_id],
-                                  page_reader=page_reader, warnings=warnings)
-        src_boards = {b["id"] for b in before["artboards"]}
-        dst_boards = {b["id"] for b in after["artboards"]}
-        if all_boards & (src_boards | dst_boards):
-            raise bridge.Refusal("CROSS_PAGE_ARTBOARD_ID_AMBIGUOUS")
-        shared_boards.update(src_boards & dst_boards)
-        all_boards.update(src_boards | dst_boards)
-        page_results.append({"page_id": page_id, "native_metadata_equal": before == after,
-                             "source": before, "candidate": after})
-    if any(node not in shared_boards for node in nodes):
-        raise bridge.Refusal("JSX_TARGET_OUTSIDE_SHARED_COMPARISON_SCOPE")
-    jsx_results = []
-    for node in nodes:
-        before = _read_jsx_observation(source_id, node)
-        after = _read_jsx_observation(clone_id, node)
-        for observed in (before, after):
-            warnings.extend({"file_id": observed["file_id"], "node_id": node, "text": warning}
-                            for warning in observed["warnings"])
-        jsx_results.append({"node_id": node, "exact_jsx_equal": before["body"] == after["body"],
-                            "source_jsx_sha256": bridge.digest(before["body"]),
-                            "candidate_jsx_sha256": bridge.digest(after["body"]),
-                            "digest_encoding": "bridge.canonical_json_string_utf8",
-                            "source_characters": len(before["body"]),
-                            "candidate_characters": len(after["body"])})
-    # Recheck only what this observation window can honestly establish. An
-    # unchanged token/page-list hash is not an immutable native revision.
-    for file_id, initial in ((source_id, source), (clone_id, clone)):
-        current = _read(file_id, reader=reader, warnings=warnings)
-        if (_pages(current) != _pages(initial) or _tokens_hash(current) != _tokens_hash(initial)
-                or current["fileName"] != initial["fileName"]):
-            raise bridge.Refusal("FILE_METADATA_DRIFT_DURING_COMPARE")
-    token_available = _tokens_hash(source) is not None and _tokens_hash(clone) is not None
-    token_equal = token_available and _tokens_hash(source) == _tokens_hash(clone)
-    metadata_equal = source_pages == clone_pages
-    divergence = (not metadata_equal or (token_available and not token_equal)
-                  or any(not row["native_metadata_equal"] for row in page_results)
-                  or any(not row["exact_jsx_equal"] for row in jsx_results))
-    full_census = not missing and not extra and set(selected) == set(source_map)
-    return {
-        "schema": "mastermind.paper_native_pair_observation.v1",
-        "state": ("OBSERVED_SCOPE_DIVERGENCE" if divergence else
-                  "OBSERVED_SCOPE_PARITY" if token_available else "OBSERVED_SCOPE_INCOMPLETE"),
-        "source_file_id": source_id, "candidate_file_id": clone_id,
-        "source_page_count": len(source_pages), "candidate_page_count": len(clone_pages),
-        "missing_source_page_ids": missing, "unexpected_candidate_page_ids": extra,
-        "ordered_page_metadata_equal": metadata_equal,
-        "token_hash_equal": token_equal if token_available else None,
-        "native_page_scope_ids": selected, "native_page_comparisons": page_results,
-        "selected_artboard_jsx_comparisons": jsx_results,
-        "complete_file_native_census_observed": full_census,
-        "all_artboards_jsx_compared": full_census and set(nodes) == all_boards,
-        "warnings": warnings,
-        "file_list_token_stability_observed": True,
-        "atomic_native_revision_bound": False,
-        "native_restore_verified": False,
-        "resource_actions_authorized": False,
-        "paper_mutations": 0,
-    }
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
@@ -584,28 +352,17 @@ def main() -> int:
     verify = sub.add_parser("verify")
     verify.add_argument("--plan", type=Path, required=True)
     verify.add_argument("--verify-node-id", action="append", default=[])
-    compare = sub.add_parser("compare", help="Read-only unpruned-pair comparison; never a prune plan")
-    compare.add_argument("--source-file-id", required=True)
-    compare.add_argument("--clone-file-id", required=True)
-    compare.add_argument("--page-id", action="append")
-    compare.add_argument("--verify-node-id", action="append", default=[])
     args = parser.parse_args()
     try:
         if args.action == "plan":
             receipt = make_plan(args.source_file_id, args.clone_file_id,
                                 args.keep_page_id, args.operation_id,
                                 evidence_node_ids=args.verify_node_id)
-        elif args.action == "verify":
+        else:
             receipt = verify_plan(bridge.load_json(args.plan.read_bytes()),
                                   evidence_node_ids=args.verify_node_id)
-        else:
-            receipt = compare_file_pair(args.source_file_id, args.clone_file_id,
-                                        page_ids=args.page_id,
-                                        evidence_node_ids=args.verify_node_id)
         print(json.dumps(receipt, sort_keys=True, indent=2))
-        if receipt.get("state") == "OBSERVED_SCOPE_DIVERGENCE":
-            return 3
-        return 4 if receipt.get("state") == "OBSERVED_SCOPE_INCOMPLETE" else 0
+        return 0
     except (bridge.Refusal, OSError) as exc:
         state = exc.code if isinstance(exc, bridge.Refusal) else "PLAN_FILE_UNAVAILABLE"
         print(json.dumps({"state": state, "retry_allowed": False}))

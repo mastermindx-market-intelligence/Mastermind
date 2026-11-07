@@ -3,19 +3,9 @@
 This publisher labels configuration observations; it never attests installed
 source, credentials, service health or model use. The host observer separately
 requires its installation owner's source/runtime/unit/current-process proof.
-
-One private optional in-process dependency, ``custody_observer``, lets the
-main supervisor measure *itself* and publish the v2 status document that
-carries the closed custody witness.  The dependency is a plain callable
-supplied by the caller at construction time: it is not a CLI flag, an
-environment variable, a serialized callback, a model output or a separately
-configured field, and no witness is ever read from configuration.  With the
-dependency supplied the publisher emits v2 only; without it the incumbent v1
-diagnostic document is unchanged.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -25,8 +15,7 @@ import sys
 import time
 
 from common.hermes_role_status_contract import (
-    ROLES, STATUS_SCHEMA, STATUS_SCHEMA_V2, STATUS_SCHEMA_V3, RoleStatusError, encode_status_text,
-    encode_status_v2_text, encode_status_v3_text, validate_custody, validate_gateway_listener,
+    ROLES, STATUS_SCHEMA, encode_status_text,
 )
 from integrations.hermes_harness.metadata import role_metadata
 
@@ -77,8 +66,6 @@ class RoleStatusPublisher:
     invocation_id: str
     process_pid: int
     notify_socket: str
-    custody_observer: Callable[[], Mapping[str, object]] | None = None
-    listener_observer: Callable[[], Mapping[str, object]] | None = None
 
     def __post_init__(self):
         if (self.role not in ROLES or not isinstance(self.state_dir, Path)
@@ -90,51 +77,6 @@ class RoleStatusPublisher:
                 or type(self.process_pid) is not int or self.process_pid <= 0):
             raise _context_refusal()
         _notification_address(self.notify_socket)
-        if self.custody_observer is not None and not callable(self.custody_observer):
-            raise _context_refusal()
-        if self.listener_observer is not None and (
-                self.custody_observer is None or not callable(self.listener_observer)):
-            raise _context_refusal()
-
-    def _custody_status_text(self, wall_ms: int, monotonic_ms: int) -> str:
-        """One v2 status: fresh custody around fresh metadata, read twice.
-
-        The callback measures the supervisor itself; the publisher only
-        validates what it returns.  The two custody reads bracket the fresh
-        metadata read, and they must be identical: a drifting or missing
-        witness sends nothing at all.
-
-        Each validated result is detached before comparing measured values.
-        Reusing a mutable mapping cannot hide drift. The callback still owns
-        fresh measurement on every call; a copied value is not that proof.
-        """
-        observer = self.custody_observer
-        if observer is None:
-            raise RoleStatusError()
-        first = validate_custody(observer())
-        if first["pid"] != self.process_pid:
-            raise RoleStatusError()
-        listener = (None if self.listener_observer is None
-                    else validate_gateway_listener(self.listener_observer(), role=self.role))
-        metadata = role_metadata(self.state_dir, self.role)
-        if (self.listener_observer is not None
-                and listener != validate_gateway_listener(self.listener_observer(), role=self.role)):
-            raise RoleStatusError()
-        second = validate_custody(observer())
-        if first != second or second["pid"] != self.process_pid:
-            raise RoleStatusError()
-        document = {
-            "schema": STATUS_SCHEMA_V2, "role": self.role,
-            "host_boot_id": self.host_boot_id, "invocation_id": self.invocation_id,
-            "implementation_sha": self.implementation_sha,
-            "observed_at_ms": wall_ms, "observed_monotonic_ms": monotonic_ms,
-            "metadata": metadata,
-            "custody": first,
-        }
-        if listener is not None:
-            document.update(schema=STATUS_SCHEMA_V3, gateway_listener=listener)
-            return encode_status_v3_text(document)
-        return encode_status_v2_text(document)
 
     def publish(self) -> bool:
         """One new read and bounded datagram; local send is not PID1 acceptance."""
@@ -145,17 +87,14 @@ class RoleStatusPublisher:
             # re-date old metadata as though it had just been acquired.
             wall_ms = time.time_ns() // 1_000_000
             monotonic_ms = time.monotonic_ns() // 1_000_000
-            if self.custody_observer is None:
-                metadata = role_metadata(self.state_dir, self.role)
-                text = encode_status_text({
-                    "schema": STATUS_SCHEMA, "role": self.role,
-                    "host_boot_id": self.host_boot_id, "invocation_id": self.invocation_id,
-                    "implementation_sha": self.implementation_sha,
-                    "observed_at_ms": wall_ms, "observed_monotonic_ms": monotonic_ms,
-                    "metadata": metadata,
-                })
-            else:
-                text = self._custody_status_text(wall_ms, monotonic_ms)
+            metadata = role_metadata(self.state_dir, self.role)
+            text = encode_status_text({
+                "schema": STATUS_SCHEMA, "role": self.role,
+                "host_boot_id": self.host_boot_id, "invocation_id": self.invocation_id,
+                "implementation_sha": self.implementation_sha,
+                "observed_at_ms": wall_ms, "observed_monotonic_ms": monotonic_ms,
+                "metadata": metadata,
+            })
             payload = ("STATUS=" + text).encode("ascii")
             with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as channel:
                 channel.set_inheritable(False)
@@ -167,18 +106,12 @@ class RoleStatusPublisher:
             return False
 
 
-def publisher_from_process(profile: RuntimeProfile,
-                           custody_observer: Callable[[], Mapping[str, object]] | None = None
-                           ) -> RoleStatusPublisher | None:
+def publisher_from_process(profile: RuntimeProfile) -> RoleStatusPublisher | None:
     """Optional unit label plus actual process context, never source admission.
 
     The caller must already have passed the existing root-cgroup, role-network,
     credential-isolation and TCP-policy guards. It calls this before secrets.
     Missing optional label performs no boot read, metadata read or send.
-
-    ``custody_observer`` is the private in-process measurement dependency of
-    the main supervisor.  When it is absent the publisher publishes the
-    incumbent v1 diagnostic document and never v2.
     """
     implementation = os.environ.get(IMPLEMENTATION_ENV)
     if implementation is None:
@@ -196,5 +129,4 @@ def publisher_from_process(profile: RuntimeProfile,
     if manager_pid is not None and manager_pid != str(pid):
         raise _context_refusal()
     return RoleStatusPublisher(profile.role, profile.state_dir, implementation,
-                               _read_boot_id(), invocation, pid, address,
-                               custody_observer=custody_observer)
+                               _read_boot_id(), invocation, pid, address)

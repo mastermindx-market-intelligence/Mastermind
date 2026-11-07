@@ -26,9 +26,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install the audited YAML parser and pinned test runner
-        run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.2' 'pytest==9.1.1'
+      - name: Install only the audited YAML parser
+        run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
       - name: Compile the runtime package
         run: python -m compileall -q integrations/hermes_runtime
       - name: Run runtime acceptance tests
-        run: python -m pytest -q integrations/hermes_runtime/tests
+        run: python -m unittest discover -v -s integrations/hermes_runtime/tests -p 'test_*.py'

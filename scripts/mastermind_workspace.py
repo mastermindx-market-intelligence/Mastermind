@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import fcntl
-from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -20,7 +18,6 @@ import shlex
 import stat
 import subprocess
 import sys
-import tempfile
 import uuid
 from pathlib import Path
 from xml.parsers.expat import ExpatError
@@ -144,16 +141,14 @@ def _installed_repository_bindings() -> dict[str, object]:
     return _parse_repository_bindings(os.environ.get(_REPOSITORY_CONFIG_ENV, ""))
 
 
-def _read_installed_launcher(
-    launcher: Path | None,
-) -> tuple[bytes | None, dict[str, int] | None]:
-    """Read one trusted wrapper snapshot without executing or following it."""
+def _retained_installer_bindings(launcher: Path | None) -> dict[str, object]:
+    """Read the prior wrapper's literal; never execute/source an old shell file."""
     if launcher is None:
-        return None, None
+        return {}
     descriptor = -1
     try:
         if not launcher.exists() and not launcher.is_symlink():
-            return None, None
+            return {}
         descriptor = os.open(launcher, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
                              | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
         before = os.fstat(descriptor)
@@ -164,285 +159,31 @@ def _read_installed_launcher(
         raw = os.read(descriptor, before.st_size + 1)
         after = os.fstat(descriptor)
         named = launcher.lstat()
-        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink",
-                  "st_size", "st_mtime_ns", "st_ctime_ns")
+        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
         if len(raw) != before.st_size or any(getattr(before, key) != getattr(item, key)
                 for item in (after, named) for key in fields):
             raise ValueError("prior launcher changed while reading")
         text = raw.decode("utf-8")
         if not text.startswith("#!/bin/sh\n") or "mastermind_workspace.py" not in text:
             raise ValueError("prior launcher is not a workspace wrapper")
-        return raw, {key: getattr(before, key) for key in fields}
+        marker = "export " + _REPOSITORY_CONFIG_ENV + "="
+        lines = [line for line in text.splitlines() if line.startswith(marker)]
+        if not lines:
+            return {}  # The exact pre-repository wrapper remains compatible.
+        if len(lines) != 1:
+            raise ValueError("prior wrapper has ambiguous bindings")
+        values = shlex.split(lines[0], posix=True)
+        if len(values) != 2 or values[0] != "export" or not values[1].startswith(_REPOSITORY_CONFIG_ENV + "="):
+            raise ValueError("prior wrapper binding is not a shell literal")
+        retained = _parse_repository_bindings(values[1].split("=", 1)[1])
+        if not retained:
+            raise ValueError("prior wrapper has an empty repository binding")
+        return retained
     except (OSError, ValueError, UnicodeError) as exc:
         raise WorkspaceError("REPOSITORY_BINDING_INVALID: prior installed bindings cannot be preserved safely") from exc
     finally:
         if descriptor >= 0:
             os.close(descriptor)
-
-
-def _launcher_bindings_from_text(text: str) -> dict[str, object]:
-    marker = "export " + _REPOSITORY_CONFIG_ENV + "="
-    lines = [line for line in text.splitlines() if line.startswith(marker)]
-    if not lines:
-        return {}  # The exact pre-repository wrapper remains compatible.
-    if len(lines) != 1:
-        raise ValueError("prior wrapper has ambiguous bindings")
-    values = shlex.split(lines[0], posix=True)
-    if len(values) != 2 or values[0] != "export" or not values[1].startswith(_REPOSITORY_CONFIG_ENV + "="):
-        raise ValueError("prior wrapper binding is not a shell literal")
-    retained = _parse_repository_bindings(values[1].split("=", 1)[1])
-    if not retained:
-        raise ValueError("prior wrapper has an empty repository binding")
-    return retained
-
-
-def _retained_installer_bindings(launcher: Path | None) -> dict[str, object]:
-    """Read the prior wrapper's literal; never execute/source an old shell file."""
-    raw, _identity = _read_installed_launcher(launcher)
-    if raw is None:
-        return {}
-    try:
-        return _launcher_bindings_from_text(raw.decode("utf-8"))
-    except (ValueError, UnicodeError) as exc:
-        raise WorkspaceError("REPOSITORY_BINDING_INVALID: prior installed bindings cannot be preserved safely") from exc
-
-
-def installation_launcher_snapshot(launcher: Path) -> dict[str, object]:
-    """Fence selector publication with the same verified bytes and file identity."""
-    raw, identity = _read_installed_launcher(launcher)
-    if raw is None:
-        return {"exists": False}
-    return {"exists": True, "sha256": hashlib.sha256(raw).hexdigest(), "identity": identity}
-
-
-def _shell_literal(value: str) -> str:
-    return "'" + value.replace("'", "'\\''") + "'"
-
-
-def _launcher_payload_selectors(text: str) -> dict[str, tuple[str, str]]:
-    interpreters = {
-        "$MASTERMIND_PYTHON": '"$MASTERMIND_PYTHON"',
-        "/opt/homebrew/bin/python3": "/opt/homebrew/bin/python3",
-        "python3": "python3",
-    }
-    rows: dict[str, tuple[str, str]] = {}
-    for line in text.splitlines(keepends=True):
-        if not line.lstrip().startswith("exec "):
-            continue
-        words = shlex.split(line.strip(), posix=True)
-        if (len(words) != 4 or words[0] != "exec" or words[1] not in interpreters
-                or words[1] in rows or words[3] != "$@"):
-            raise ValueError("unsupported or duplicate payload selector")
-        path = Path(words[2])
-        if (not path.is_absolute() or ".." in path.parts
-                or path.name != "mastermind_workspace.py" or path.parent.name != "scripts"):
-            raise ValueError("payload reference is outside the installed structure")
-        indent = line[:len(line) - len(line.lstrip())]
-        expected = (indent + "exec " + interpreters[words[1]] + " "
-                    + _shell_literal(words[2]) + ' "$@"'
-                    + ("\n" if line.endswith("\n") else ""))
-        if line != expected:
-            raise ValueError("payload selector is not the supported shell literal")
-        rows[words[1]] = (line, words[2])
-    if set(rows) != set(interpreters) or len({row[1] for row in rows.values()}) != 1:
-        raise ValueError("three selectors must name one payload generation")
-    return rows
-
-
-def _pool_preserving_launcher(previous: bytes, generated: bytes) -> bytes:
-    """Upgrade payload references only; the incumbent router keeps placement."""
-    old_text, new_text = previous.decode("utf-8"), generated.decode("utf-8")
-    if "mmx_workspace_router.py" not in old_text and "pool_selection" not in old_text:
-        return generated
-    try:
-        old_bindings = _launcher_bindings_from_text(old_text)
-        if not old_bindings or old_bindings != _launcher_bindings_from_text(new_text):
-            raise ValueError("pool upgrade cannot change repository bindings")
-        old_rows = _launcher_payload_selectors(old_text)
-        _validate_pool_launcher(old_text, old_rows)
-        new_rows = _launcher_payload_selectors(new_text)
-        result = old_text
-        for interpreter, (line, old_path) in old_rows.items():
-            new_path = new_rows[interpreter][1]
-            changed = line.replace(_shell_literal(old_path), _shell_literal(new_path), 1)
-            if result.count(line) != 1:
-                raise ValueError("payload selector is ambiguous")
-            result = result.replace(line, changed, 1)
-        return result.encode("utf-8")
-    except (ValueError, UnicodeError) as exc:
-        raise WorkspaceError("LAUNCHER_UPGRADE_REFUSED: incumbent pool routing cannot be preserved safely") from exc
-
-
-def _validate_pool_launcher(text: str, selectors: dict[str, tuple[str, str]]) -> None:
-    """Recognize the enrolled router wrapper, without executing its shell."""
-    commands = [line.strip() for line in text.splitlines()
-                if line.strip() and not line.lstrip().startswith("#")]
-    if len(commands) != 14:
-        raise ValueError("pool wrapper has unexpected or overriding commands")
-    assignment = commands[1]
-    prefix, suffix = 'pool_selection="$(', ')" || exit 66'
-    if not assignment.startswith(prefix) or not assignment.endswith(suffix):
-        raise ValueError("pool router invocation is not the supported form")
-    invocation = assignment[len(prefix):-len(suffix)]
-    words = shlex.split(invocation, posix=True)
-    router = Path.home() / ".local/lib/mastermind/worktree-storage/mmx_workspace_router.py"
-    if (len(words) != 3 or words[0] not in {"/usr/bin/python3", "/opt/homebrew/bin/python3"}
-            or words[1] != str(router) or words[2] != "$@" or not invocation.endswith('"$@"')):
-        raise ValueError("pool router identity or argument forwarding changed")
-    source = shlex.split(commands[5], posix=True)
-    bindings = _launcher_bindings_from_text(text)
-    expected_source = "MASTERMIND_SOURCE_REPO=" + bindings["mastermind"]["source_repository"]
-    if source != ["export", expected_source]:
-        raise ValueError("pool source export disagrees with its repository binding")
-    expected = [
-        "set -eu", assignment,
-        'case "$pool_selection" in *\'|\'*) ;; *) echo \'pool router returned no volume\' >&2; exit 66;; esac',
-        'export MASTERMIND_AGENT_WORKSPACE_ROOT="' + "$" + '{pool_selection%%|*}"',
-        'export MASTERMIND_WORKSPACE_STORAGE_POLICY="' + "$" + '{pool_selection#*|}"',
-        commands[5], commands[6],
-        'if [ -n "' + "$" + '{MASTERMIND_PYTHON:-}" ]; then',
-        selectors["$MASTERMIND_PYTHON"][0].strip(),
-        "elif [ -x /opt/homebrew/bin/python3 ]; then",
-        selectors["/opt/homebrew/bin/python3"][0].strip(),
-        "else", selectors["python3"][0].strip(), "fi",
-    ]
-    if (commands != expected
-            or not commands[6].startswith("export " + _REPOSITORY_CONFIG_ENV + "=")):
-        raise ValueError("pool routing exports or conditional selectors changed")
-
-
-@contextmanager
-def _installation_publication_lock(target: Path):
-    """One bounded installer lock; no queue, retry loop or separate owner state."""
-    lock = target.with_name(target.name + ".install.lock")
-    descriptor = -1
-    held = False
-    try:
-        descriptor = os.open(
-            lock, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_CLOEXEC", 0), 0o600,
-        )
-        observed = os.fstat(descriptor)
-        named = lock.lstat()
-        if (not stat.S_ISREG(observed.st_mode) or observed.st_uid != os.geteuid()
-                or observed.st_nlink != 1 or observed.st_size != 0
-                or stat.S_IMODE(observed.st_mode) & 0o077
-                or (observed.st_dev, observed.st_ino) != (named.st_dev, named.st_ino)):
-            raise WorkspaceError("LAUNCHER_INSTALL_LOCK_INVALID: installer lock identity is unsafe")
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise WorkspaceError("LAUNCHER_INSTALL_BUSY: another installer holds publication") from exc
-        held = True
-        named = lock.lstat()
-        if (observed.st_dev, observed.st_ino) != (named.st_dev, named.st_ino):
-            raise WorkspaceError("LAUNCHER_INSTALL_LOCK_INVALID: installer lock was replaced")
-        yield
-    finally:
-        if descriptor >= 0:
-            if held:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
-    # Keep the zero-byte lock inode stable across installs; unlinking it races waiters.
-
-
-def _prepare_installation_payload(source: Path, payload: Path) -> None:
-    """Stage the existing inventory once; selected generations are never rewritten."""
-    relatives = [
-        "scripts/mastermind_workspace.py", "control_plane/executive_workspace.py",
-        "control_plane/__init__.py",
-    ] + sorted(str(path.relative_to(source)) for path in (source / "common").glob("*.py"))
-    if "common/__init__.py" not in relatives:
-        raise WorkspaceError("PAYLOAD_INVALID: the accepted payload inventory is incomplete")
-    expected = {
-        relative: ((source / relative).read_bytes(),
-                   0o755 if relative == "scripts/mastermind_workspace.py" else 0o644)
-        for relative in relatives
-    }
-    payload.parent.mkdir(parents=True, exist_ok=True)
-    created = False
-    try:
-        payload.mkdir()
-        created = True
-    except FileExistsError:
-        pass
-    if payload.is_symlink() or not payload.is_dir():
-        raise WorkspaceError("PAYLOAD_INVALID: payload generation is not a direct directory")
-    if created:
-        for directory in ("scripts", "control_plane", "common"):
-            (payload / directory).mkdir()
-        for relative, (content, mode) in expected.items():
-            with (payload / relative).open("xb") as stream:
-                os.fchmod(stream.fileno(), mode)
-                stream.write(content)
-    try:
-        for directory in ("scripts", "control_plane", "common"):
-            path = payload / directory
-            if path.is_symlink() or not path.is_dir():
-                raise ValueError("payload directory is indirect or missing")
-        actual = {str(path.relative_to(payload)) for path in payload.rglob("*.py")}
-        if actual != set(expected):
-            raise ValueError("payload inventory differs from accepted source")
-        for relative, (content, mode) in expected.items():
-            path = payload / relative
-            info = path.lstat()
-            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-                    or info.st_uid not in {0, os.geteuid()}
-                    or stat.S_IMODE(info.st_mode) != mode or path.read_bytes() != content):
-                raise ValueError("payload bytes or mode differ from accepted source")
-    except (OSError, ValueError) as exc:
-        raise WorkspaceError("PAYLOAD_MISMATCH: retain the generation and reconcile; do not overwrite it") from exc
-
-
-def publish_installation_launcher(
-    target: Path, generated: Path, expected_snapshot: dict[str, object],
-    *, source: Path | None = None, payload: Path | None = None,
-) -> None:
-    """Serialize payload qualification and selector publication through one owner."""
-    if (source is None) != (payload is None):
-        raise WorkspaceError("PAYLOAD_INVALID: source and generation must be supplied together")
-    with _installation_publication_lock(target):
-        if installation_launcher_snapshot(target) != expected_snapshot:
-            raise WorkspaceError("LAUNCHER_CHANGED: installation preimage is no longer current")
-        if source is not None:
-            _prepare_installation_payload(source, payload)
-        _publish_installation_launcher_unlocked(target, generated, expected_snapshot)
-
-
-def _publish_installation_launcher_unlocked(
-    target: Path, generated: Path, expected_snapshot: dict[str, object],
-) -> None:
-    """Publish one fenced selector; never roll back over a newer writer."""
-    if installation_launcher_snapshot(target) != expected_snapshot:
-        raise WorkspaceError("LAUNCHER_CHANGED: installation preimage is no longer current")
-    previous, _identity = _read_installed_launcher(target)
-    candidate, _candidate_identity = _read_installed_launcher(generated)
-    if candidate is None:
-        raise WorkspaceError("LAUNCHER_UPGRADE_REFUSED: generated launcher is missing")
-    if previous is not None:
-        candidate = _pool_preserving_launcher(previous, candidate)
-    if candidate == previous:
-        return
-    descriptor, temporary = tempfile.mkstemp(prefix=target.name + ".", dir=target.parent)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            os.fchmod(stream.fileno(), 0o755)
-            stream.write(candidate)
-            stream.flush()
-            os.fsync(stream.fileno())
-        if installation_launcher_snapshot(target) != expected_snapshot:
-            raise WorkspaceError("LAUNCHER_CHANGED: installation preimage is no longer current")
-        os.replace(temporary, target)
-        temporary = None
-        try:
-            readback, _identity = _read_installed_launcher(target)
-            if readback != candidate:
-                raise ValueError("installed bytes differ")
-        except (OSError, ValueError, WorkspaceError) as exc:
-            raise WorkspaceError("LAUNCHER_PUBLICATION_UNKNOWN: reconcile the installed selector before retry") from exc
-    finally:
-        if temporary is not None:
-            os.unlink(temporary)
 
 
 def _selected_repository(alias: str, *, explicit: bool) -> Path:
@@ -512,8 +253,7 @@ def installation_repository_bindings(
 _STORAGE_POLICY_FIELDS = frozenset(
     {"version", "mount_point", "volume_uuid", "root", "min_free_bytes"}
 )
-_STORAGE_POLICY_METADATA_FIELDS = frozenset({"_why", "_pool_note", "overflow_volumes", "internal_fallback"})
-_STORAGE_DISABLED_FALLBACK_FIELDS = frozenset({"enabled", "mount_point", "root", "min_free_bytes", "_why"})
+_STORAGE_POLICY_METADATA_FIELDS = frozenset({"_why", "_pool_note", "overflow_volumes"})
 _STORAGE_POLICY_MAX_BYTES = 16 * 1024
 _STORAGE_POLICY_MAX_RATIONALE_BYTES = 8 * 1024
 _STORAGE_POLICY_MAX_OVERFLOW_VOLUMES = 8
@@ -601,29 +341,6 @@ def _read_storage_policy(path: Path) -> tuple[dict[str, object], str]:
                 minimum = member["min_free_bytes"]
                 if type(minimum) is not int or not 0 <= minimum < 2**63:
                     raise ValueError("invalid overflow storage floor")
-        if "internal_fallback" in data:
-            # The existing host storage owner may retain a disabled fallback.
-            # This metadata never selects storage or grants an internal fallback.
-            fallback = data["internal_fallback"]
-            if (type(fallback) is not dict or set(fallback) != _STORAGE_DISABLED_FALLBACK_FIELDS
-                    or fallback["enabled"] is not False):
-                raise ValueError("internal fallback metadata must be closed and disabled")
-            for key in ("mount_point", "root"):
-                value = fallback[key]
-                if (type(value) is not str or len(value.encode("utf-8")) > 4096
-                        or any(char in value for char in ("\x00", "\n", "\r"))
-                        or not Path(value).is_absolute() or ".." in Path(value).parts):
-                    raise ValueError("invalid disabled fallback path")
-            mount, root = Path(fallback["mount_point"]), Path(fallback["root"])
-            if root == mount or not root.is_relative_to(mount):
-                raise ValueError("disabled fallback root escapes its declared mount")
-            minimum = fallback["min_free_bytes"]
-            if type(minimum) is not int or not 0 < minimum < 2**63:
-                raise ValueError("invalid disabled fallback floor")
-            rationale = fallback["_why"]
-            if (type(rationale) is not str or not rationale
-                    or len(rationale.encode("utf-8")) > _STORAGE_POLICY_MAX_RATIONALE_BYTES):
-                raise ValueError("invalid disabled fallback rationale")
         if type(data["version"]) is not int or data["version"] != 1:
             raise ValueError("unsupported policy version")
         minimum = data["min_free_bytes"]

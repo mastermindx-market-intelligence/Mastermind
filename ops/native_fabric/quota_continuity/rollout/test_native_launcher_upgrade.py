@@ -17,7 +17,6 @@ from unittest import mock
 _active = False
 _expected = False
 _unexpected = []
-_loopback_network = None
 _home = Path(pwd.getpwuid(os.getuid()).pw_dir)
 _private = tuple(str(_home / name) for name in
                  ('.glm', '.bailian', '.minimax', '.qwen', '.claude/projects',
@@ -28,51 +27,11 @@ class FixtureBoundaryError(AssertionError):
     pass
 
 
-def _allowed_loopback_event(event, args):
-    """Only the two registered, numeric-loopback HTTP fixture endpoints."""
-    scope = _loopback_network
-    if scope is None:
-        return False
-    if event == 'socket.__new__':
-        return (len(args) == 4 and args[1] == socket.AF_INET
-                and args[2] == socket.SOCK_STREAM and args[3] in (0, socket.IPPROTO_TCP))
-    if event in ('socket.bind', 'socket.connect'):
-        sock, address = args
-        return (sock.family == socket.AF_INET and sock.type == socket.SOCK_STREAM
-                and isinstance(address, tuple) and len(address) == 2
-                and address[0] == '127.0.0.1' and type(address[1]) is int
-                and (address[1] == 0 if event == 'socket.bind'
-                     else address[1] in scope['ports']))
-    if event == 'socket.getaddrinfo':
-        host, port, family, kind, protocol = args
-        return (host == '127.0.0.1' and type(port) is int and port in scope['ports']
-                and family in (0, socket.AF_INET) and kind in (0, socket.SOCK_STREAM)
-                and protocol in (0, socket.IPPROTO_TCP))
-    if event == 'urllib.Request':
-        return len(args) == 4 and args[0] in scope['post_urls'] and args[3] == 'POST'
-    return False
-
-
-@contextlib.contextmanager
-def numeric_loopback_network():
-    """Opt in after installation; process and private-owner guards stay active."""
-    global _loopback_network
-    assert _active and _loopback_network is None
-    scope = {'ports': set(), 'post_urls': set()}
-    _loopback_network = scope
-    try:
-        yield scope
-    finally:
-        _loopback_network = None
-
-
 def _audit(event, args):
     if not _active:
         return
     kind = None
     if event.startswith('socket.') or event == 'urllib.Request':
-        if _allowed_loopback_event(event, args):
-            return
         kind = 'network'
     elif event in ('subprocess.Popen', 'os.system', 'os.posix_spawn'):
         kind = 'process'
@@ -105,57 +64,6 @@ def _cleanup(temp):
     temp.cleanup()
 
 
-APPLICATION_PREIMAGES = {
-    # Retained f7 candidate bytes keep both historical95/102 transitions exact.
-    'ext/quota_circuit.py': ('rollout/preimages/quota_circuit_b119865.py', 28768,
-        '0962d638a0a5655a71ea7a6eeb83088ad60af30f4a26e9c5bc47a92c3ab77945'),
-    'ext/lease_broker.py': ('rollout/preimages/lease_broker_f1059fe.py', 73321,
-        'a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406'),
-    'ext/go_lease_capability.py': ('source/go_lease_capability.py', 9456,
-        '9f350698ba94d64fedc3f64ebffce993840d7ee3376b46254756d58bdb78c66a'),
-    'ext/go_lease_gateway.py': ('source/go_lease_gateway.py', 4513,
-        '7b1e1d48933218135771c770a1d25c994aa0332bc6bc8461c5b9d625ef8a7658'),
-}
-
-
-def verify_current_stage(output):
-    """Qualify the current107 build before restoring any historical bytes."""
-    native = Path(builder.__file__).parent.parent
-    manifest_raw = (output / 'native-manifest.json').read_bytes()
-    inventory_raw = (output / 'native-source-inventory.json').read_bytes()
-    baseline_raw = (native / 'rollout/native-manifest.json').read_bytes()
-    baseline_inventory_raw = (native / 'rollout/native-source-inventory.json').read_bytes()
-    manifest = json.loads(manifest_raw)
-    inventory = json.loads(inventory_raw)
-    if (manifest_raw != baseline_raw or inventory_raw != baseline_inventory_raw
-            or len(manifest) != 107
-            or set(manifest) != {'ext/' + name for name in builder.BASE_FILES | builder.ADDITIONS} | {'pool'}
-            or set(inventory['files']) != set(manifest)
-            or inventory['native_code_files'] != len(manifest)):
-        raise AssertionError('current application source closure differs')
-    for name, wanted in manifest.items():
-        data = (output / 'native-code-stage' / name).read_bytes()
-        row = inventory['files'][name]
-        source = (native / row['source']).read_bytes()
-        if (g.digest(data) != wanted or row['sha256'] != wanted
-                or row['bytes'] != len(data) or source != data):
-            raise AssertionError('current captured source differs: ' + name)
-        if name in APPLICATION_PREIMAGES:
-            candidate = 'candidate/' + name.split('/')[1]
-            if row['source'] != candidate or (native / candidate).read_bytes() != data:
-                raise AssertionError('current application candidate differs: ' + name)
-    return manifest
-
-
-def restore_application_preimages(stage, manifest):
-    native = Path(builder.__file__).parent.parent
-    for name, (relative, size, expected) in APPLICATION_PREIMAGES.items():
-        raw = (native / relative).read_bytes()
-        if len(raw) != size or g.digest(raw) != expected or manifest[name] != expected:
-            raise AssertionError('historical application preimage differs: ' + name)
-        (stage / name).write_bytes(raw)
-
-
 class PairedLauncherUpgrade(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -168,7 +76,9 @@ class PairedLauncherUpgrade(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()):
                 builder.main()
             current_manifest = (cls.built / 'native-manifest.json').read_bytes()
-            cls.manifest = verify_current_stage(cls.built)
+            if current_manifest != (Path(builder.__file__).parent / 'native-manifest.json').read_bytes():
+                raise AssertionError('current builder differs from protected manifest')
+            cls.manifest = json.loads(current_manifest)
             # Rebuild the original finite paired epoch, never relabel the
             # current H1/daemon generation as the historical95 target. The
             # snapshot contains only changed public code plus its whole95 map.
@@ -181,8 +91,7 @@ class PairedLauncherUpgrade(unittest.TestCase):
             old = retained['manifest']
             removed = set(retained['removed_current_members']) | {
                 'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py',
-                'ext/participant_binding.py', 'ext/fabric_participant_owner.py',
-                'ext/original_advertised_artifact.py'}
+                'ext/participant_binding.py', 'ext/fabric_participant_owner.py'}
             if (retained['schema'] != 'mastermind.test_native_paired_historical95/v1'
                     or set(cls.manifest) - set(old) != removed or set(old) - set(cls.manifest)
                     or len(old) != 95 or retained['historical_manifest_sha256'] != installer.UPGRADE_MANIFEST):
@@ -278,10 +187,6 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 # Protected899ac broker blob b39e1fbcebe88513ee9c1dd756c56a9c68ff72b1.
                 # Historical95 retains its pinned bytes; CURRENT fair-share stays unchanged.
                 'ext/lease_broker.py': fixture.with_name('native-lease-broker-pre-fair-share-899ac3a9.py.txt'),
-                # Protected49c2 predecessor, retained as data after the held
-                # process qualifier changed CURRENT. Never relabel old95.
-                'ext/linux_process_identity.py': (
-                    fixture.parent / 'native_historical_payloads/linux_process_identity.py.txt'),
             }
             for name, predecessor in baseline_sources.items():
                 original = predecessor.read_bytes()
@@ -339,27 +244,6 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 if g.digest(raw) != old[name]:
                     raise AssertionError('long-horizon historical inverse unqualified: '+name)
                 target.write_bytes(raw)
-            restore_application_preimages(cls.built / 'native-code-stage', old)
-            # A new current-generation census implementation must never be
-            # relabeled as the immutable historical paired-upgrade payload.
-            # Restore the exact old lane runtime from a byte-pinned fixture.
-            historic_path = (Path(__file__).resolve().parents[4] /
-                'tests/fixtures/native-historical-lane-runtime-61350902.json')
-            historic_raw = historic_path.read_bytes()
-            if g.digest(historic_raw) != '1d658364949b3089ecb35b1ca6f3f8ac79970de1ab44dcc17dd6198a1f1eb3c0':
-                raise AssertionError('historical lane runtime fixture changed')
-            historic = json.loads(historic_raw)
-            original_runtime = zlib.decompress(
-                base64.b64decode(historic['zlib_base64'], validate=True)
-            )
-            if (historic['schema'] != 'mastermind.native_historical_lane_runtime.v1'
-                    or historic['original_sha256'] != old['ext/lane_runtime.py']
-                    or historic['original_bytes'] != len(original_runtime)
-                    or g.digest(original_runtime) != old['ext/lane_runtime.py']):
-                raise AssertionError('historical lane runtime preimage unqualified')
-            (cls.built / 'native-code-stage/ext/lane_runtime.py').write_bytes(
-                original_runtime
-            )
             cls.manifest = old
             for name,wanted in cls.manifest.items():
                 if g.digest((cls.built / 'native-code-stage' / name).read_bytes()) != wanted:
@@ -392,7 +276,7 @@ class PairedLauncherUpgrade(unittest.TestCase):
         # remains exactly the historical 8bc -> d044 transition. Restore only
         # that closed three-line addition in a disposable module, not a pin.
         original_g = g
-        epoch_raw = installer._HISTORICAL_LAUNCHER.read_bytes()
+        epoch_raw = Path(g.__file__).read_bytes()
         added = (b'    # One vetted flat plist. Not a suffix rule and not a directory walk.\n'
                  b'    if relative == "ext/host_pull_launchd.plist.template":\n'
                  b'        return\n')

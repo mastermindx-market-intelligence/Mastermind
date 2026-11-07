@@ -644,41 +644,8 @@ def record_outcome(
         return False
 
 
-def read_recent(pool: Optional[str] = None, limit: int = 100, *, strict: bool = False) -> list:
-    """Return recent owner records; strict readers require a complete snapshot.
-
-    The application picker uses strict=True. Missing, malformed, incomplete or
-    concurrently changing history cannot masquerade as an empty quality sample.
-    Existing worker/statistics callers retain their best-effort behavior.
-    """
-    if strict:
-        if type(limit) is not int or not 1 <= limit <= 10000:
-            raise ValueError("invalid strict ledger limit")
-        def identity(info):
-            return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
-                    info.st_ctime_ns, info.st_mode, info.st_uid)
-        with _strict_open(LEDGER_PATH, os.O_RDONLY, "r") as handle:
-            before = os.fstat(handle.fileno())
-            if before.st_size > ACCEPTANCE_MAX_BYTES:
-                raise ValueError("ledger exceeds bound")
-            raw = handle.buffer.read(ACCEPTANCE_MAX_BYTES + 1)
-            if (len(raw) != before.st_size or len(raw) > ACCEPTANCE_MAX_BYTES
-                    or raw and not raw.endswith(b"\n")):
-                raise ValueError("incomplete ledger snapshot")
-            records = []
-            for line in raw.splitlines():
-                if len(line) > ACCEPTANCE_MAX_LINE_BYTES:
-                    raise ValueError("ledger row exceeds bound")
-                if not line.strip():
-                    continue
-                rec = _strict_json(line.decode("utf-8"))
-                if pool is None or rec.get("pool") == pool:
-                    records.append(rec)
-            _strict_identity(handle, LEDGER_PATH)
-            if (identity(os.fstat(handle.fileno())) != identity(before)
-                    or identity(os.lstat(LEDGER_PATH)) != identity(before)):
-                raise ValueError("ledger changed during projection")
-        return records[-limit:]
+def read_recent(pool: Optional[str] = None, limit: int = 100) -> list:
+    """Return the last `limit` records, optionally filtered by pool."""
     records = []
     if not os.path.exists(LEDGER_PATH):
         return records

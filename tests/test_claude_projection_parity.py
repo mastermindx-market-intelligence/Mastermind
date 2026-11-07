@@ -134,23 +134,6 @@ def test_new_company_mcp_profile_is_explicitly_deferred_for_every_claude_surface
         assert "projection" not in entry
 
 
-
-def test_sol61_native_helper_is_explicitly_deferred_for_every_claude_surface(manifest):
-    profile_id = "operator.appserver.readonly.docs-mcp.native-helper.sol61.v1"
-    registry = ExecutionCapabilityRegistry.load(ROOT / checker.POLICY, source_root=ROOT)
-    profile = registry.resolve(profile_id)
-    assert profile.execution_surface == "codex-app-server"
-    assert profile.native_helper.default_model == "gpt-6.1-sol"
-    assert profile.native_helper.default_reasoning_effort == "xhigh"
-    row = manifest["profiles"][profile_id]
-    assert row["profile_digest"] == profile.profile_digest
-    assert row["package_generation_digests"] == {}
-    assert set(row["surfaces"]) == set(checker.SURFACES)
-    for entry in row["surfaces"].values():
-        assert entry["status"] == "deferred"
-        assert "surface/native-helper/resource admission" in entry["reason"]
-        assert "projection" not in entry
-
 def test_deferral_cannot_retain_a_stale_projection(manifest):
     manifest["profiles"][PROFILE]["surfaces"]["cli"]["status"] = "deferred"
     with pytest.raises(checker.ParityError, match="fields"):

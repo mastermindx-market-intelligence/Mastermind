@@ -281,31 +281,3 @@ it('keeps the real v5 durable pointer after a refused observational POST and per
  expect(await reopened.read(scope)).toBeNull();expect(observer).toHaveBeenCalledTimes(1);expect(read).toHaveBeenCalledTimes(1);
  expect(prepare).not.toHaveBeenCalled();expect(submit).not.toHaveBeenCalled();
 });
-
-describe("project execution original pointer",()=>{
-  const project:OperationPointer={kind:"launch",targetKey:"WS:NEW-PROJECT",operationKey:"mmos-project-execute-"+"c".repeat(40)};
-  it("reserves, reopens and reconciles only the original lookup in the incumbent database",async()=>{
-    const factory=new IDBFactory(),store=createIndexedDbPendingPointerStore(factory);
-    expect(await store.reserve(scope,project)).toEqual({reserved:true});
-    expect(await raw(factory)).toEqual({v:12,...project});
-    const reopened=createIndexedDbPendingPointerStore(factory);
-    expect(await reopened.read(scope)).toEqual(project);
-    expect(await reopened.read(otherScope)).toBeNull();
-    const other={...project,operationKey:"mmos-project-execute-"+"d".repeat(40)};
-    expect(await reopened.reserve(scope,other)).toEqual({reserved:false,pointer:project});
-    expect(await reopened.clearIfEqual(scope,other)).toBe(false);
-    expect(await reopened.clearIfEqual(scope,project)).toBe(true);
-    expect(await reopened.read(scope)).toBeNull();
-  });
-  it.each([1,9,11])("does not reinterpret a project execution key as legacy record v%s",async(v)=>{
-    const factory=new IDBFactory(),store=createIndexedDbPendingPointerStore(factory);
-    await raw(factory,{v,...project});
-    await expect(store.read(scope)).rejects.toThrow(ERR.CORRUPT_RECORD);
-    expect(await raw(factory)).toEqual({v,...project});
-  });
-  it.each(["WS:lower-case","WS:A","WS:NEW-PROJECT\n","project-initial-planning.v1:WS:NEW-PROJECT"])("refuses a foreign target grammar %s",async(targetKey)=>{
-    const store=createIndexedDbPendingPointerStore(new IDBFactory());
-    await expect(store.reserve(scope,{...project,targetKey})).rejects.toThrow(ERR.INVALID_POINTER);
-    expect(await store.read(scope)).toBeNull();
-  });
-});

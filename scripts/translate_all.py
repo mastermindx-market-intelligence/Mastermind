@@ -1,13 +1,13 @@
 """Batch cache-warmer for EN->Simplified-Chinese translations.
 
 Usage:
-    python3 scripts/translate_all.py
+    cd /Users/chriswong/Documents/Cluade/Mastermind
+    ANTHROPIC_API_KEY=<key> python3 scripts/translate_all.py
 
 Loads latest.json + all research notes/papers + the decision log + the run log, calls
 translate_book() + translate_notes() + translate_papers() + translate_decisions() +
 translate_runs() to warm the translation cache at data/brain/translations.json.
-Uses the configured eligible Fabric subscription mode or the existing native
-subscription bridge. Translation never enables a metered API-key fallback.
+Requires ANTHROPIC_API_KEY in the environment (or already set in .env).
 """
 from __future__ import annotations
 
@@ -29,9 +29,12 @@ except ImportError:
 
 
 def main() -> None:
-    from brain.translate import translation_ready
-    if not translation_ready():
-        print("ERROR: The selected translation subscription provider is unavailable.")
+    # Translation routes through the SUBSCRIPTION cli bridge (CLAUDE_CODE_OAUTH_TOKEN),
+    # not a metered ANTHROPIC_API_KEY — verify the bridge is reachable instead.
+    from brain import cli_bridge
+    if not cli_bridge.available():
+        print("ERROR: Claude CLI/SDK not available — translation needs the subscription bridge "
+              "(CLAUDE_CODE_OAUTH_TOKEN). Check your .env / `claude` install.")
         sys.exit(1)
 
     from brain.translate import (

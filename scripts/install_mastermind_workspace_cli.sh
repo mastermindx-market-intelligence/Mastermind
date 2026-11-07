@@ -43,33 +43,33 @@ if spec is None or spec.loader is None:
     raise SystemExit("cannot load workspace installation profile")
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
-launcher = Path(sys.argv[4])
-launcher_snapshot = module.installation_launcher_snapshot(launcher)
 profile = module.installation_storage_profile(home)
 repositories = module.installation_repository_bindings(source, arguments.repository_source, installed_launcher=Path(sys.argv[4]))
-if module.installation_launcher_snapshot(launcher) != launcher_snapshot:
-    raise SystemExit("workspace launcher changed during installation preflight")
 for key in ("root", "mount_point", "policy_path"):
     value = profile[key]
     if "\n" in value or "\r" in value:
         raise SystemExit("workspace installation profile contains a newline")
     print(value)
 print(json.dumps(repositories, sort_keys=True, separators=(",", ":")))
-print(json.dumps(launcher_snapshot, sort_keys=True, separators=(",", ":")))
 PY
 )"
 workspace_root="$(printf '%s\n' "$profile_output" | /usr/bin/sed -n '1p')"
 workspace_mount="$(printf '%s\n' "$profile_output" | /usr/bin/sed -n '2p')"
 storage_policy="$(printf '%s\n' "$profile_output" | /usr/bin/sed -n '3p')"
 repository_bindings="$(printf '%s\n' "$profile_output" | /usr/bin/sed -n '4p')"
-launcher_snapshot="$(printf '%s\n' "$profile_output" | /usr/bin/sed -n '5p')"
 if [ -z "$workspace_root" ]; then
   echo "workspace installation profile did not return a root" >&2
   exit 2
 fi
 
 payload_root="${MASTERMIND_WORKSPACE_CLI_PAYLOAD_ROOT:-$HOME/.local/share/mastermind/workspace-cli/$release_sha}"
-mkdir -p "$(dirname "$target")"
+mkdir -p "$(dirname "$target")" "$payload_root/scripts" "$payload_root/control_plane" "$payload_root/common"
+cp "$repo/scripts/mastermind_workspace.py" "$payload_root/scripts/mastermind_workspace.py"
+cp "$repo/control_plane/executive_workspace.py" "$payload_root/control_plane/executive_workspace.py"
+cp "$repo/control_plane/__init__.py" "$payload_root/control_plane/__init__.py"
+cp "$repo/common/"*.py "$payload_root/common/"
+chmod 0755 "$payload_root/scripts/mastermind_workspace.py"
+chmod 0644 "$payload_root/control_plane/executive_workspace.py" "$payload_root/control_plane/__init__.py" "$payload_root/common/"*.py
 
 # Emit path values as POSIX shell literals, including embedded apostrophes.
 shell_quote() {
@@ -84,9 +84,7 @@ quoted_policy="$(shell_quote "$storage_policy")"
 quoted_repositories="$(shell_quote "$repository_bindings")"
 quoted_payload="$(shell_quote "$payload_root/scripts/mastermind_workspace.py")"
 
-wrapper_tmp="$(mktemp "$target.tmp.XXXXXXXX")"
-trap 'rm -f "$wrapper_tmp"' 0
-trap 'exit 1' 1 2 15
+wrapper_tmp="$target.tmp.$$"
 cat > "$wrapper_tmp" <<EOF
 #!/bin/sh
 set -eu
@@ -111,20 +109,5 @@ else
 fi
 EOF
 chmod 0755 "$wrapper_tmp"
-"$profile_python" - "$repo/scripts/mastermind_workspace.py" "$target" "$wrapper_tmp" "$launcher_snapshot" "$repo" "$payload_root" <<'PY'
-import importlib.util
-import json
-import sys
-from pathlib import Path
-
-spec = importlib.util.spec_from_file_location("mastermind_workspace_install_publish", Path(sys.argv[1]))
-if spec is None or spec.loader is None:
-    raise SystemExit("cannot load workspace installation publisher")
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-module.publish_installation_launcher(
-    Path(sys.argv[2]), Path(sys.argv[3]), json.loads(sys.argv[4]),
-    source=Path(sys.argv[5]), payload=Path(sys.argv[6]),
-)
-PY
+mv "$wrapper_tmp" "$target"
 printf '%s\n' "$target"

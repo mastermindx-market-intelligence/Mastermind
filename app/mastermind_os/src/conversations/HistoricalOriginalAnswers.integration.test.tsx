@@ -8,8 +8,6 @@ import { HistoricalOriginalAnswers } from "./HistoricalOriginalAnswers";
 import { createOsExecutiveSessionHost } from "../orchestration/os-executive-session-host";
 import { createIndexedDbSessionPendingPointerStore } from "../orchestration/indexeddb-session-pending-pointer-store";
 import type { ExecutiveSessionTransport } from "../orchestration/executive-session-command-port";
-import secretaryFixture from "../fixtures/native-hermes-session-send-producer.json";
-import metaFixture from "../fixtures/native-hermes-meta-session-send-producer.json";
 
 const WS = "WS:ALPHA", ROOT = "JOB-1", SCOPE = "c".repeat(64);
 const TARGET = "fabric_attempt:"+"a".repeat(64);
@@ -101,65 +99,4 @@ it("opens historical A with the mounted native qualifier, without consuming dura
     expect(transport.reply).toHaveBeenCalledWith(
       {operation_key:OP_A},expect.any(AbortSignal));
   } finally { host.dispose(); }
-});
-
-it("opens a mixed Fabric/Secretary/Meta page without clearing the retained Secretary operation", async () => {
-  const nodeCrypto = await import("node:crypto" as string);
-  vi.stubGlobal("crypto", nodeCrypto.webcrypto);
-  const selected = {workRef: metaFixture.selection.work_ref,
-    rootJobId: metaFixture.selection.root_job_id, targetKind: "hermes_meta" as const};
-  const scope = metaFixture.context.data.principal_scope;
-  const idb = new IDBFactory(), store = createIndexedDbSessionPendingPointerStore(idb);
-  const pendingB = {kind: "message" as const,
-    operationKey: secretaryFixture.arguments.operation_key,
-    targetKey: secretaryFixture.arguments.target_ref};
-  expect((await store.reserve(scope, pendingB)).reserved).toBe(true);
-  const nativeRows = [secretaryFixture, metaFixture].map((source, index) => ({
-    read_ref: source.reply.data.read_ref, operation_key: source.reply.data.operation_key,
-    request_ref: source.reply.data.request_ref, request_revision: source.reply.data.request_revision,
-    target_ref: source.reply.data.target_ref, request_event_id: 4 - index,
-    requested_at: "2026-10-18T00:00:00Z", work_ref: selected.workRef,
-    root_job_id: selected.rootJobId, reference_only: true,
-  }));
-  const rows = [{...row, work_ref: selected.workRef, root_job_id: selected.rootJobId}, ...nativeRows];
-  const replies = new Map<string, unknown>([
-    [OP_A, native], [secretaryFixture.arguments.operation_key, secretaryFixture.reply],
-    [metaFixture.arguments.operation_key, metaFixture.reply],
-  ]);
-  const transport: ExecutiveSessionTransport = {
-    authGeneration: () => 1, available: () => true, subscribe: () => () => {},
-    context: vi.fn(async () => metaFixture.context),
-    references: vi.fn(async () => envelope("references", {
-      schema: "mastermind.session_reply_references.v1", status: "COMPLETE",
-      references: rows, next_cursor: null, high_water: 5,
-    })),
-    reply: vi.fn(async ({operation_key}) => replies.get(operation_key)),
-    send: vi.fn(async () => {throw Error("HISTORY MUST NOT SEND");}),
-  };
-  const host = createOsExecutiveSessionHost(transport, store);
-  try {
-    await host.ready; await host.refresh(selected);
-    const owner = host.binding.port.context()!;
-    const props = {binding: host.binding, selection: selected,
-      principalScope: owner.principalScope, generation: owner.generation,
-      selectionSeq: 1, authRevision: 1, activeReadRef: null};
-    const first = render(<HistoricalOriginalAnswers {...props}/>);
-    await screen.findAllByRole("button", {name: /Open original request/});
-    const answers = [nativeData.text, secretaryFixture.reply.data.answer, metaFixture.reply.data.answer];
-    for (let index = 0; index < rows.length; index++) {
-      fireEvent.click(screen.getAllByRole("button", {name: /Open original request/})[index]);
-      await screen.findByText(answers[index]);
-      expect(await store.read(scope)).toEqual(pendingB);
-    }
-    first.unmount();
-    const reloaded = createIndexedDbSessionPendingPointerStore(idb);
-    render(<HistoricalOriginalAnswers {...props}/>);
-    fireEvent.click((await screen.findAllByRole("button", {name: /Open original request/}))[2]);
-    await screen.findByText(metaFixture.reply.data.answer);
-    expect(await reloaded.read(scope)).toEqual(pendingB);
-    expect(transport.send).not.toHaveBeenCalled();
-    expect(transport.reply).toHaveBeenCalledTimes(4);
-    expect(transport.reply).toHaveBeenLastCalledWith(
-      {operation_key: metaFixture.arguments.operation_key}, expect.any(AbortSignal));
-  } finally {host.dispose();}
 });

@@ -2920,7 +2920,7 @@ def test_validation_identity_failure_retires_owned_tasks_and_preserves_error(
 
 
 def test_validation_uses_private_codex_home_without_requiring_provider_auth(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     adapter, spec, _workspace_path, _run_dir = _fixture(tmp_path)
     (adapter.codex_home / "auth.json").unlink()
@@ -2931,38 +2931,13 @@ def test_validation_uses_private_codex_home_without_requiring_provider_auth(
     ):
         asyncio.run(adapter.start(spec))
 
-    # Keep the real validation child alive until its original identity has
-    # actually been captured. A fast /usr/bin/true can exit before that read.
-    # The finite FIFO is test data; no identity or production check is mocked.
-    barrier = tmp_path / "validation-identity.fifo"
-    os.mkfifo(barrier, 0o600)
-    barrier_fd = os.open(barrier, os.O_RDWR | os.O_NONBLOCK)
-    real_identity = adapter.inspector.identity
-    captured = []
-    def capture_then_release(pid):
-        identity = real_identity(pid)
-        if not captured:
-            assert os.write(barrier_fd, b"1") == 1
-            captured.append((pid, identity))
-        return identity
-    monkeypatch.setattr(adapter.inspector, "identity", capture_then_release)
-    child = (
-        "import os,select,sys; "
-        "fd=os.open(sys.argv[1],os.O_RDONLY|os.O_NONBLOCK); "
-        "ready=select.select([fd],[],[],4)[0]; "
-        "sys.exit(0 if ready and os.read(fd,1)==b'1' else 70)"
-    )
-    try:
-        receipt = asyncio.run(
-            adapter.run_validation_argv(
-                spec,
-                (sys.executable, "-I", "-S", "-B", "-c", child, str(barrier)),
-                timeout_seconds=5,
-            )
+    receipt = asyncio.run(
+        adapter.run_validation_argv(
+            spec,
+            ("/usr/bin/true",),
+            timeout_seconds=5,
         )
-    finally:
-        os.close(barrier_fd)
-    assert len(captured) == 1
+    )
     assert receipt.exit_code == 0
     assert receipt.error is None
     assert receipt.timed_out is False

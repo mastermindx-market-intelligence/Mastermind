@@ -2509,20 +2509,6 @@ class InstalledBootPacketCollector:
         return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
                                     project_plan_request=work_ref)
 
-    def read_project_discovery(self, *, work_ref: str, observed_at_ms: int, timeout: float = 15.0):
-        """One exact current-DATA WS compiled by the pinned canonical owner."""
-        from common.workspace_project_plan_contract import validate_selection
-        validate_selection({'work_ref': work_ref})
-        bound = _CANONICAL_PROJECT_DATA.get()
-        if (bound is None or bound[0] is not self or bound[2] != work_ref
-                or type(observed_at_ms) is not int
-                or bound[1].witness()['canonical_observed_at_ms'] != observed_at_ms
-                or type(timeout) not in (int, float) or not 0 < timeout <= 15
-                or self._expected_source_sha is None):
-            raise ValueError('CANONICAL_DATA_UNAVAILABLE')
-        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
-            project_discovery_request=(work_ref, observed_at_ms))
-
     def project_archive_reader(self, *, macro_root: Path):
         from control_plane.agentos_project_archive import AgentOsProjectArchiveReader, _SOURCE_ROOT
         from control_plane.installed_project_read_binding import _issue_installed_project_read
@@ -2759,22 +2745,16 @@ class InstalledBootPacketCollector:
                         project_archive_request: tuple | None = None,
                         project_knowledge_recipe_request: tuple | None = None,
                         project_knowledge_request: tuple | None = None,
-                        project_instructions_request: str | None = None,
-                        project_discovery_request: tuple | None = None) -> Any:
-        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request, project_archive_request, project_knowledge_recipe_request, project_knowledge_request, project_instructions_request, project_discovery_request)) > 1:
+                        project_instructions_request: str | None = None) -> Any:
+        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request, project_archive_request, project_knowledge_recipe_request, project_knowledge_request, project_instructions_request)) > 1:
             raise ValueError("ambiguous installed source read")
         bound_data = _CANONICAL_PROJECT_DATA.get()
         data_view = None
-        if project_discovery_request is not None and bound_data is None:
-            raise ValueError('CANONICAL_DATA_UNAVAILABLE')
         if bound_data is not None:
             if (bound_data[0] is not self or self._allow_synthetic_fixture
-                    or (project_knowledge_request is None and project_knowledge_recipe_request is None
-                        and project_plan_request is None and project_discovery_request is None)):
+                    or (project_knowledge_request is None and project_knowledge_recipe_request is None)):
                 raise ValueError("CANONICAL_DATA_UNAVAILABLE")
             selected_work = (project_knowledge_request[1]["work_ref"] if project_knowledge_request is not None
-                             else project_plan_request if project_plan_request is not None
-                             else project_discovery_request[0] if project_discovery_request is not None
                              else project_knowledge_recipe_request[1]["request"].get("work_ref"))
             if selected_work != bound_data[2]:
                 raise ValueError("CANONICAL_DATA_UNAVAILABLE")
@@ -2896,12 +2876,6 @@ class InstalledBootPacketCollector:
                         "--work-ref", project_plan_request,
                         "--continuity",
                         "--timeout", f"{inner_timeout:g}"]
-            if project_discovery_request is not None:
-                argv = [os.fspath(self._python), '-I', '-B',
-                    os.fspath(self._code_root / 'scripts' / 'agentos_project_discovery_entry.py'),
-                    '--macro-root', os.fspath(packet_macro_root), '--expected-macro-sha', expected_packet_macro_sha,
-                    '--work-ref', project_discovery_request[0], '--observed-at-ms', str(project_discovery_request[1]),
-                    '--timeout', f'{inner_timeout:g}']
             if project_journal_request is not None:
                 argv = [os.fspath(self._python), "-I", "-B",
                         os.fspath(self._code_root / "scripts" / "agentos_project_journal_entry.py"),
@@ -2949,7 +2923,7 @@ class InstalledBootPacketCollector:
                 argv.extend(["--code-root", os.fspath(self._macro_root), "--code-commit", data_view.code_commit])
             output_limit = (131072 if project_archive_request is not None else
                             65536 if project_direction_request is not None else
-                            262144 if acceptance_request is not None or project_plan_request is not None or project_journal_request is not None or project_discovery_request is not None
+                            262144 if acceptance_request is not None or project_plan_request is not None or project_journal_request is not None
                             else ceo_boot_packet.DEFAULT_MAX_OUTPUT_BYTES)
             if project_instructions_request is not None:
                 output_limit = 32768
@@ -3092,22 +3066,6 @@ class InstalledBootPacketCollector:
                         raise ValueError("project journal availability invalid")
                 except (ValueError, TypeError, KeyError, RecursionError):
                     raise GatewayError("backend_unavailable", "installed project journal source unavailable") from None
-            elif project_discovery_request is not None:
-                from common.project_discovery_contract import validate_record
-                try:
-                    def unique_discovery_object(pairs):
-                        result = {}
-                        for key, value in pairs:
-                            if key in result: raise ValueError('PROJECT_DISCOVERY_UNAVAILABLE')
-                            result[key] = value
-                        return result
-                    packet = validate_record(json.loads(stdout, object_pairs_hook=unique_discovery_object),
-                        work_ref=project_discovery_request[0], code_commit=pre_macro_sha,
-                        data_commit=expected_packet_macro_sha)
-                    if packet['observed_at_ms'] != project_discovery_request[1]:
-                        raise ValueError('PROJECT_DISCOVERY_UNAVAILABLE')
-                except (ValueError, TypeError, KeyError, RecursionError):
-                    raise GatewayError('backend_unavailable', 'installed project discovery unavailable') from None
             elif project_plan_request is not None:
                 from common.workspace_project_plan_contract import BODY_SCHEMAS, validate_source, validate_body
                 try:
@@ -3254,7 +3212,7 @@ class InstalledBootPacketCollector:
                 or post_macro_seal != pre_macro_seal
             ):
                 raise GatewayError("backend_unavailable", "installed source changed during boot-packet read")
-            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None and project_archive_request is None and project_knowledge_recipe_request is None and project_knowledge_request is None and project_instructions_request is None and project_discovery_request is None:
+            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None and project_archive_request is None and project_knowledge_recipe_request is None and project_knowledge_request is None and project_instructions_request is None:
                 packet = _project_macro_identity(
                     packet, materialized_root=packet_macro_root, canonical_root=self._macro_root,
                 )

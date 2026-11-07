@@ -43,10 +43,6 @@ QUALIFIED_MODEL_ROUTES = {
 QUALIFIED_VISION_ROUTE = {"provider": "zai", "model": "glm-5.3-flash"}
 
 GATEWAY_TOKEN_ENV = "HERMES_GATEWAY_TOKEN"
-SECRETARY_CONVERSATION_TOKEN_ENV = "HERMES_SECRETARY_CONVERSATION_TOKEN"
-SECRETARY_PATH = "/api/secretary/v1"
-SECRETARY_ROLE_REQUEST_SCHEMA = "mastermind.hermes_secretary_role_request/v1"
-SECRETARY_ROLE_RESPONSE_SCHEMA = "mastermind.hermes_secretary_role_response/v1"
 DASHBOARD_USERNAME_ENV = "HERMES_DASHBOARD_BASIC_AUTH_USERNAME"
 DASHBOARD_PASSWORD_ENV = "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD"
 # Always passed to the Hermes child when present. WP2 registers provider
@@ -59,48 +55,3 @@ DEFAULT_CHILD_SECRET_ENV = frozenset({
 CONFIG_EXIT = 78
 POLICY_EXIT = 2
 IO_EXIT = 3
-
-
-# Closed role contracts selected only from an already qualified profile or held
-# installation row. These constants configure no listener and admit no session.
-from dataclasses import dataclass
-from types import MappingProxyType
-
-
-@dataclass(frozen=True)
-class NativeConversationContract:
-    role: str
-    kind: str
-    token_env: str
-    path: str
-    request_schema: str
-    response_schema: str
-    native_verb: str
-    native_schema: str
-    enrollment_schema: str
-    enrollment_result_schema: str
-
-
-_CONVERSATION_CONTRACTS = MappingProxyType({
-    "mmsecretary": NativeConversationContract(
-        "mmsecretary", "hermes_secretary", SECRETARY_CONVERSATION_TOKEN_ENV,
-        SECRETARY_PATH, SECRETARY_ROLE_REQUEST_SCHEMA, SECRETARY_ROLE_RESPONSE_SCHEMA,
-        "mastermind-secretary-v1", "mastermind.hermes_secretary_native_control/v1",
-        "mastermind.hermes_secretary_session_enrollment/v1",
-        "mastermind.hermes_secretary_enrollment_result/v1"),
-    "mmmeta": NativeConversationContract(
-        "mmmeta", "hermes_meta", "HERMES_META_CONVERSATION_TOKEN",
-        "/api/meta/v1", "mastermind.hermes_meta_role_request/v1",
-        "mastermind.hermes_meta_role_response/v1", "mastermind-meta-v1",
-        "mastermind.hermes_meta_native_control/v1",
-        "mastermind.hermes_meta_session_enrollment/v1",
-        "mastermind.hermes_meta_enrollment_result/v1"),
-})
-
-
-def conversation_contract(role: str) -> NativeConversationContract:
-    """Select one exact owned role; request data cannot define a contract."""
-    from .errors import RuntimeRefusal
-    if type(role) is not str or role not in _CONVERSATION_CONTRACTS:
-        raise RuntimeRefusal("NATIVE_CONVERSATION_ROLE_INVALID")
-    return _CONVERSATION_CONTRACTS[role]

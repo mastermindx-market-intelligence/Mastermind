@@ -29,14 +29,12 @@ short_socket_root=auth.short_socket_root
 # Execute the current composed controller (source recovery def1/7ab included).
 # Its accepted instruction_pause addition changes only the two closed kind lists;
 # the actual original Launch submit/GET recovery below must remain unchanged.
-# Accepted closed conversation kinds and canonical DATA readers extend the
-# imported modules; the original Launch/recovery behavior remains qualified below.
+# mission.ts includes the accepted optional CCR observation key; no Launch
+# action or permission is derived from that ignored observation metadata.
 EXTRA_PINS={
- 'orchestration/operation-controller.ts':'d4ea763ac7ad11902356afce2cdfda5c35457036d8caa53d3157925a9f1b4849',
- 'mission.ts':'07e7ed5815788ee839aa2becdbd806443923f2249172de7997cae3770deb1c44',
- 'workspace-contract.ts':'dece354a0c3744af41cf36e435cd8edee1f2247a0f7b07cef1974cc47d2990d5',
- 'project-discovery.ts':'a4d539f729a9918585499c4c23fc169ed13439f102bf6554d5a2bcc284788742',
- 'knowledge/library/project-data-observation.ts':'f6401f32f9dbff8af0f5f235bd0d21bde03d060a0c9e8943ca16dd3c048e676b',
+ 'orchestration/operation-controller.ts':'5c49a7d571f700bb231784fbbbe8ba9af83f313756b299ac43f891094f23dd03',
+ 'mission.ts':'e6beede84b865f7d317c7120211a6ccccf296f88433bdf04614edbc4ee74d7be',
+ 'workspace-contract.ts':'14992cfc81dbc577cf50ba7198285b21652bb25eb5cc6c0efc53954e33ef11b1',
 }
 
 
@@ -49,20 +47,12 @@ import fs from 'node:fs';import path from 'node:path';import {pathToFileURL} fro
 const i=JSON.parse(fs.readFileSync(0,'utf8'));
 const {sourceTransformer}=await import(pathToFileURL(path.resolve(i.source,'../../../tests/typescript_transform.mjs')));
 const transformSource=await sourceTransformer(i.source);
-for(const [name,file,replacements] of [
- ['operation-controller','orchestration/operation-controller.ts',[['../mission','./mission.mjs']]],
- ['mission','mission.ts',[['./workspace-contract','./workspace-contract.mjs']]],
- ['workspace-contract','workspace-contract.ts',[['./project-discovery','./project-discovery.mjs']]],
- ['project-discovery','project-discovery.ts',[
-   ['./orchestration/operation-key','./operation-key.mjs'],
-   ['./knowledge/library/project-data-observation','./project-data-observation.mjs']]],
- ['project-data-observation','knowledge/library/project-data-observation.ts',[]]]){
+for(const [name,file,oldPath,newPath] of [
+ ['operation-controller','orchestration/operation-controller.ts','"../mission"','"./mission.mjs"'],
+ ['mission','mission.ts','"./workspace-contract"','"./workspace-contract.mjs"'],
+ ['workspace-contract','workspace-contract.ts',null,null]]){
  let code=transformSource(file,fs.readFileSync(path.join(i.source,file),'utf8'));
- for(const [oldPath,newPath] of replacements){
-  const quoted=[JSON.stringify(oldPath),"'"+oldPath+"'"].filter(value=>code.includes(value));
-  if(quoted.length!==1||code.split(quoted[0]).length!==2)throw Error('dependency drift');
-  code=code.replace(quoted[0],JSON.stringify(newPath));
- }
+ if(oldPath){if(!code.includes(oldPath))throw Error('dependency drift');code=code.replace(oldPath,newPath);}
  fs.writeFileSync(path.join(i.scratch,name+'.mjs'),code);
 }
 '''

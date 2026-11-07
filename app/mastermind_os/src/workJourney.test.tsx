@@ -362,7 +362,7 @@ describe("ProjectWorkDetail", () => {
       level: 3,
       name: "Acceptance",
     }).parentElement as HTMLElement;
-    expect(within(acceptance).getByText("Acceptance not supplied")).toBeTruthy();
+    expect(within(acceptance).getByText("NOT_PROJECTED")).toBeTruthy();
     const release = screen.getByRole("heading", {
       level: 3,
       name: "Release",
@@ -394,9 +394,9 @@ describe("ProjectWorkDetail", () => {
       level: 3,
       name: "Acceptance",
     }).parentElement as HTMLElement;
-    expect(within(review).getByText("Changes requested")).toBeTruthy();
+    expect(within(review).getByText("reject")).toBeTruthy();
     expect(within(review).queryByText("ACCEPTED")).toBeNull();
-    expect(within(acceptance).getByText("Accepted")).toBeTruthy();
+    expect(within(acceptance).getByText("ACCEPTED")).toBeTruthy();
     expect(
       screen.getByText("Accepted by chairman on revision 7"),
     ).toBeTruthy();
@@ -461,7 +461,7 @@ describe("ProjectWorkDetail", () => {
         generation={1}
       />,
     );
-    expect(screen.getByText("Some source information is missing or may be out of date.")).toBeTruthy();
+    expect(screen.getByText(/Source read state: PARTIAL/)).toBeTruthy();
   });
 
   it("localizes work copy to zh-CN", () => {
@@ -481,16 +481,6 @@ describe("ProjectWorkDetail", () => {
     ).toBeTruthy();
     expect(screen.getByText("未建立；未提供发布证明。")).toBeTruthy();
   });
-  it.each([EN,ZH])("keeps raw Work states only in closed source details in %s",locale=>{
-    const doc=makeDoc({dispatchState:"UNKNOWN",verdict:"NOT_YET",acceptanceState:"NOT_PROJECTED",readState:"PARTIAL"});
-    const before=JSON.stringify(doc);const {container}=render(<ProjectWorkDetail document={doc} selection={BASE_SELECTION} locale={locale} generation={1}/>);
-    const primary=container.querySelector("header")!.textContent!+container.querySelector(".mm-work-journey__facts")!.textContent!;
-    expect(primary).not.toMatch(/UNKNOWN|NOT_YET|NOT_PROJECTED|PARTIAL/);
-    const source=screen.getByText(locale===EN?"Work source details":"工作来源详情").closest("details")!;
-    expect(source.open).toBe(false);for(const code of ["UNKNOWN","NOT_YET","NOT_PROJECTED","PARTIAL"])expect(source.textContent).toContain(code);
-    expect(JSON.stringify(doc)).toBe(before);
-  });
-
 });
 
 describe("ProjectEvidence", () => {

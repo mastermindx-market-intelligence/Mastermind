@@ -182,7 +182,7 @@ describe("explicit retained activity component", () => {
     render(<RetainedActivityInspector selection={selected} read={source}
       sourceGeneration={() => 1} canRead={() => true} />);
     fireEvent.click(screen.getByRole("button", { name: "Inspect retained activity" }));
-    expect(await screen.findByText(/These activity records are unavailable/)).toBeTruthy();
+    expect(await screen.findByText(/No authorized activity available/)).toBeTruthy();
     expect(screen.queryByText(/candidate recorded:/)).toBeNull();
   });
 });

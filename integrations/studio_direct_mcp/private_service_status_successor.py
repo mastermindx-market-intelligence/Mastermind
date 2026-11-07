@@ -61,35 +61,6 @@ POST_MANIFEST_CANONICAL_SHA256 = {
 
 
 
-# Four already-installed, independently accepted Paper-v20 successors.
-# These are additional EXACT predecessors, never replacements for the
-# original eight frozen public fleet status cohorts.
-PAPER_V20_PREDECESSOR_MANIFEST_SHA256 = {
-    "chatgpt1": "fe8163d4cd3c59e5f38cecf3d1e12677cc61577a122b5922c57a3b94c5aa04f3",
-    "chatgpt2-business": "c1004dbcaa671d6bcd32f661fa93ebeeccf076349efd2fd978091bb9b39b042e",
-    "chatgpt3": "4a4f588afed01ffd5ce1e04a15ceae3a3cc6afe9b502529c699c0d3f35e2bee5",
-    "chatgpt4": "06fd20cb3f50e0e7f909506e90773c80c228556eff8e7aba6bdb6085dcfc7de8",
-}
-PAPER_V20_PREDECESSOR_CONFIG_SHA256 = {
-    "chatgpt1": "0a3414c7b933ef5427c2a1d3ddac5907506564e96cea3272e9c26ab25f9e2b13",
-    "chatgpt2-business": "3e35f142d33df31778c762d2976172deb805399ade7a23e6eba8dd7e979a40d9",
-    "chatgpt3": "6cb88bcac8da263ff24fcae613c1b9198161e91e45b00e215271786c89d49e34",
-    "chatgpt4": "f06dc822015fc11f34d7e1142bdf1b016cb985af701ba929f33b313ff3a570df",
-}
-PAPER_V20_POST_MANIFEST_RAW_SHA256 = {
-    "chatgpt1": "a2757ff50fcbc6e11a9b643148a57f9e4c474e1779e930e496eabe755233f77a",
-    "chatgpt2-business": "a5bc8a3d0b111cdf10c65300e6d4da6419602f18f0ff4dab410b0c4b25097a43",
-    "chatgpt3": "fdc5b49c1abac046c571dc8121718740e39e643a7ea46e115719022708f82fa5",
-    "chatgpt4": "c440f2ba4c0bdfbba3aff86303a483e3ab42a1093f330ba9e3fd6c6f923783b4",
-}
-PAPER_V20_POST_MANIFEST_CANONICAL_SHA256 = {
-    "chatgpt1": "b39de3e64ccb8da3feea8e72980471cb12b3446a09347317a02deaf01b79ee28",
-    "chatgpt2-business": "41cdb6675b437bb5dd564898a0b6aaff80ce8896ccbaaa0dcebb0bc0c40c82c5",
-    "chatgpt3": "ee8af9547caef5ab3e5d0ccaa80a631c4918c1f6dbb86072b20f9afa47d3c9a1",
-    "chatgpt4": "d6f2abd26a14a7ce9a04a1f9ff4c272c8542498e3b5737b00c4098b5346ef817",
-}
-
-
 class SourceRefused(ValueError):
     """Qualification failed, no file/process/manifest effect permitted."""
 
@@ -144,22 +115,6 @@ class Preview:
         }
 
 
-def _cohort_pin(account, observed_manifest_sha256):
-    """Select only an original or already-approved Paper v20 exact manifest."""
-    if type(account) is not str or account not in PREDECESSOR_MANIFEST_SHA256:
-        raise SourceRefused("ACCOUNT_UNQUALIFIED")
-    if observed_manifest_sha256 == PREDECESSOR_MANIFEST_SHA256[account]:
-        return (PREDECESSOR_MANIFEST_SHA256[account],
-                POST_MANIFEST_RAW_SHA256[account],
-                POST_MANIFEST_CANONICAL_SHA256[account], False)
-    if (account in PAPER_V20_PREDECESSOR_MANIFEST_SHA256
-            and observed_manifest_sha256 == PAPER_V20_PREDECESSOR_MANIFEST_SHA256[account]):
-        return (PAPER_V20_PREDECESSOR_MANIFEST_SHA256[account],
-                PAPER_V20_POST_MANIFEST_RAW_SHA256[account],
-                PAPER_V20_POST_MANIFEST_CANONICAL_SHA256[account], True)
-    raise SourceRefused("PREDECESSOR_MANIFEST_CHANGED")
-
-
 def qualify_exact_predecessor(account, *, manifest_bytes, config_bytes,
                               module_before_bytes, source_module_bytes):
     """Pure exact observed cohort projection, not authority to modify a seat.
@@ -168,14 +123,14 @@ def qualify_exact_predecessor(account, *, manifest_bytes, config_bytes,
     selected pin and any later Paper/C4 enrollment; this routine never
     accepts a caller-provided authentication flag or modifies files.
     """
+    if not isinstance(account, str) or account not in PREDECESSOR_MANIFEST_SHA256:
+        raise SourceRefused("ACCOUNT_UNQUALIFIED")
     strict_bytes(config_bytes)
     old = strict_bytes(module_before_bytes)
     future = strict_bytes(source_module_bytes)
     raw = strict_bytes(manifest_bytes)
-    before_digest, expected_post_raw, expected_post_canonical, paper_v20 = (
-        _cohort_pin(account, digest(raw)))
-    if paper_v20 and digest(config_bytes) != PAPER_V20_PREDECESSOR_CONFIG_SHA256[account]:
-        raise SourceRefused("PAPER_V20_CONFIG_CHANGED")
+    if digest(raw) != PREDECESSOR_MANIFEST_SHA256[account]:
+        raise SourceRefused("PREDECESSOR_MANIFEST_CHANGED")
     if digest(old) != LEGACY_MODULE_SHA256[account]:
         raise SourceRefused("PREDECESSOR_MODULE_CHANGED")
     if digest(future) != TARGET_SOURCE_SHA256:
@@ -195,8 +150,8 @@ def qualify_exact_predecessor(account, *, manifest_bytes, config_bytes,
     canonical = digest(json.dumps(
         projected, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8"))
-    if (digest(updated) != expected_post_raw
-            or canonical != expected_post_canonical):
+    if (digest(updated) != POST_MANIFEST_RAW_SHA256[account]
+            or canonical != POST_MANIFEST_CANONICAL_SHA256[account]):
         raise SourceRefused("TARGET_COHORT_NOT_SEALED")
     if updated == raw:
         raise SourceRefused("NO_SOURCE_DELTA")
@@ -375,50 +330,6 @@ def _original_pin(svc, account, roots):
     return original_pin_sha
 
 
-def _require_paper_v20_origin(svc, account, roots, original_status_manifest):
-    """Bind a later accepted Paper cohort to the ORIGINAL private-service owner.
-
-    The original native pin/enrollment is separately authenticated by
-    _original_pin and _static_state. Recompute the exact existing Paper v20
-    selector from the retained original pre-v20 account files and plist;
-    never accept a model-supplied Paper marker or a config-only resemblance.
-    """
-    _, _, _, paper_v20 = _cohort_pin(account, digest(original_status_manifest))
-    if not paper_v20:
-        return
-    selected = svc._frozen_paper_fleet_module()
-    if account not in PAPER_V20_PREDECESSOR_MANIFEST_SHA256:
-        fail("PAPER_V20_ACCOUNT_UNQUALIFIED")
-    if account == "chatgpt4":
-        origin = roots["state"] / "native-pool-pin-enrollment"
-        manifest_name, config_name = "manifest.after", "config.after"
-    else:
-        origin = roots["state"] / "native-pool-pin"
-        manifest_name, config_name = "manifest.after.json", "config.after.json"
-    # Use the installed owner's stable no-follow bounded readers, not path
-    # reinterpretation or a new Paper installer.
-    earlier_manifest = svc._fabric_release_bytes(origin / manifest_name, limit=65536)
-    earlier_config = svc._fabric_release_bytes(origin / config_name, limit=65536)
-    plist = svc._fabric_release_bytes(roots["plist"], limit=65536)
-    try:
-        candidate = selected.plan_selection(
-            account, manifest_bytes=earlier_manifest,
-            config_bytes=earlier_config, plist_bytes=plist,
-            home=svc._user_root())
-    except ValueError:
-        fail("PAPER_V20_ORIGIN_UNQUALIFIED")
-    if (original_status_manifest != candidate["manifestBytes"]
-            or svc._fabric_release_bytes(roots["config"], limit=65536)
-               != candidate["configBytes"]
-            or digest(candidate["manifestBytes"])
-               != PAPER_V20_PREDECESSOR_MANIFEST_SHA256[account]
-            or digest(candidate["configBytes"])
-               != PAPER_V20_PREDECESSOR_CONFIG_SHA256[account]
-            or manifest_from(earlier_manifest)["files"]
-               != manifest_from(original_status_manifest)["files"]):
-        fail("PAPER_V20_ORIGIN_CHANGED")
-
-
 def _static_state(svc, account, roots, plan, raw):
     """Verify selected original bytes and the only three allowed write states."""
     if set(x.name for x in (roots["state"] / TRANSACTION).iterdir()) - FILE_NAMES:
@@ -468,9 +379,7 @@ def _source_plan(svc, args, roots):
     account = args.account
     if account not in PREDECESSOR_MANIFEST_SHA256:
         fail("ACCOUNT_NOT_ENROLLED")
-    try:
-        _cohort_pin(account, args.expected_manifest_sha256)
-    except SourceRefused:
+    if args.expected_manifest_sha256 != PREDECESSOR_MANIFEST_SHA256[account]:
         fail("PREDECESSOR_CAS_INVALID")
     current = svc._verify_staged_install(
         account, "com.mastermind.studio-direct-private." + account,
@@ -482,8 +391,6 @@ def _source_plan(svc, args, roots):
         "module.before": svc._fabric_release_bytes(roots["base"] / MODULE),
         "manifest.before": svc._fabric_release_bytes(roots["manifest"]),
     }
-    pin_plan = _original_pin(svc, account, roots)
-    _require_paper_v20_origin(svc, account, roots, original["manifest.before"])
     future = qualify_exact_predecessor(
         account,
         manifest_bytes=original["manifest.before"],
@@ -496,6 +403,7 @@ def _source_plan(svc, args, roots):
     if (stat.S_IMODE(mp.st_mode) not in (0o400, 0o600)
             or stat.S_IMODE(md.st_mode) not in (0o400, 0o600)):
         fail("ORIGINAL_MODE_INVALID")
+    pin_plan = _original_pin(svc, account, roots)
     plan = {
         "schema": SCHEMA, "generation": SOURCE_GENERATION,
         "account": account, "uid": os.getuid(),
@@ -653,13 +561,11 @@ def _retained(svc, account, roots, path):
     if files - FILE_NAMES or not FILE_NAMES - {"result.json"} <= files:
         fail("TRANSACTION_INCOMPLETE")
     plan = json.loads(svc._fabric_release_bytes(path / "plan.json"))
-    cohort_before, cohort_after, _, _ = _cohort_pin(
-        account, plan.get("manifestBeforeSha256"))
     if (plan.get("schema") != SCHEMA or plan.get("account") != account
             or plan.get("uid") != os.getuid()
-            or plan.get("manifestBeforeSha256") != cohort_before
+            or plan.get("manifestBeforeSha256") != PREDECESSOR_MANIFEST_SHA256[account]
             or plan.get("moduleBeforeSha256") != LEGACY_MODULE_SHA256[account]
-            or plan.get("manifestAfterSha256") != cohort_after
+            or plan.get("manifestAfterSha256") != POST_MANIFEST_RAW_SHA256[account]
             or plan.get("moduleAfterSha256") != TARGET_SOURCE_SHA256
             or plan.get("generation") != SOURCE_GENERATION
             or plan.get("manifestMode") not in (0o400, 0o600)
@@ -672,7 +578,6 @@ def _retained(svc, account, roots, path):
         fail("INTENT_CHANGED")
     raw = {f: svc._fabric_release_bytes(path / f) for f in (
         "manifest.before", "manifest.after", "module.before", "module.after")}
-    _require_paper_v20_origin(svc, account, roots, raw["manifest.before"])
     before = qualify_exact_predecessor(
         account, manifest_bytes=raw["manifest.before"],
         config_bytes=svc._fabric_release_bytes(roots["config"]),

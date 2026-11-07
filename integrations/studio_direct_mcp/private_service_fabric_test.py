@@ -90,36 +90,5 @@ class FabricProfileTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 service._fabric_profile_setting(SimpleNamespace(), {'config': config}, {'configHash':'0'*64})
 
-
-    def test_fabric_only_rejects_machine_fleet_inventory_even_when_installed(self):
-        """Keep host inventory on the original Studio capability owner."""
-        fleet = {"enabled": True, "launcherPath": "/owned/control/launcher",
-                 "launcherSha256": "b" * 64, "timeoutMs": 5000}
-        with mock.patch.object(service, '_fleet_status_config', return_value=fleet):
-            fabric = self.config(fabric_only=True)
-            normal = self.config()
-        self.assertNotIn('fleetStatus', fabric)
-        self.assertEqual(normal.get('fleetStatus'), fleet)
-        self.assertIs(fabric['fabricOnly'], True)
-        self.assertIs(fabric['gitPublish'], False)
-        self.assertIs(fabric['paperDesign'], False)
-
-    def test_restage_refuses_insecure_retained_fabric_fleet_config(self):
-        with tempfile.TemporaryDirectory() as raw:
-            path = Path(raw) / 'config.json'
-            clean = {'fabricOnly': True, 'gitPublish': False, 'paperDesign': False}
-            for value in (None, False, {}, {'enabled': False}, 'disabled',
-                          {'enabled': True, 'launcherPath': '/owner/fleet'}):
-                with self.subTest(fleetStatus=value):
-                    path.write_text(json.dumps({**clean, 'fleetStatus': value}))
-                    prior = {'configHash': service._sha256_file(path)}
-                    with self.assertRaisesRegex(SystemExit, 'invalid retained Fabric-only profile'):
-                        service._fabric_profile_setting(
-                            SimpleNamespace(fabric_only=False), {'config': path}, prior)
-            path.write_text(json.dumps(clean))
-            prior = {'configHash': service._sha256_file(path)}
-            self.assertIs(service._fabric_profile_setting(
-                SimpleNamespace(fabric_only=False), {'config': path}, prior), True)
-
 if __name__ == '__main__':
     unittest.main()

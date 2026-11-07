@@ -244,39 +244,6 @@ and the exact preview plan; apply requires the original service to be unloaded.
 It updates only `config.args[0]` and the corresponding three manifest fields,
 preserving the gateway bundle, private SDK, account, tunnel, port and selected
 protocol. The generic `upgrade` retains its same-backend-path requirement.
-For an independently authorized public-source release, the closed selector
-`--source-provenance github_public_protected_v1` reads only unauthenticated,
-certificate-verified GitHub metadata for the canonical
-`mastermindx-market-intelligence/Mastermind` `refs/heads/master`; it never reads or
-falls back to the legacy local-Git source. The observed protected commit must equal
-the requested release commit, and the fixed tree path must be a regular blob.
-The already staged backend is verified against that blob identity, SHA256, size,
-physical file and inode without downloading or executing it. Provenance and staged
-identity are included in the reviewed plan and revalidated before mutation. Metadata
-is strict JSON with duplicate-key rejection and a 1MiB ceiling. One fixed absolute
-ten-second deadline covers the whole connection/TLS/header/body sequence and all five
-fixed metadata documents; every document gets only the remaining time. The finite
-child executes captured qualified source bytes with a controlled module identity,
-never a pathname import or adjacent/tagged bytecode cache. Installed execution uses
-the existing sealed Control capture. A process timer gives the child its own
-absolute lifetime even if its parent exits. The remaining budget crosses processes
-using POSIX CLOCK_MONOTONIC, avoiding Python 3.9 macOS process-local clock origins;
-the child also clears an inherited blocked alarm signal. The parent's `subprocess.run(remaining)`
-also kills/waits on timeout. Checks after JSON parsing and final provenance validation
-refuse late results before intent/config/manifest writes. Process creation itself is
-not claimed separately interruptible. The child receives only the verified owner
-HOME; ambient proxy, CA override, keylog and Python environment settings are absent.
-Explicit `ProxyHandler({})` disables system proxy discovery while retaining standard
-TLS certificate and hostname verification. HTTPError-owned responses are explicitly
-closed before a constant refusal; there is no redirect, retry or persistent reader. Only
-`/git/ref/heads/master`, `/git/commits/<40 lowercase hex>` and
-`/git/trees/<40 lowercase hex>` under the canonical API root can reach transport;
-intermediate tree SHAs are checked before URL construction. Redirects, alternate
-authorities, dot/encoded separators, extra path components, query/fragment, and wrong
-SHA types are refused before transport construction. Apply's second observation still
-refuses changed protected refs or staged inode/bytes before any transaction mutation.
-The default `local_git_v1` remains available only for separately authorized local-Git
-contexts.
 The operator separately reconciles existing controllers, then stops and starts
 this original service through the same owner. See
 `ops/native_fabric/quota_continuity/README.md` for native evidence, retention and
@@ -364,54 +331,3 @@ In ChatGPT, the supported private connection flow is **Plugins -> Add custom MCP
 Publication, protected merge, host installation, tunnel readiness, plugin creation, individual account installation, tool snapshot exposure and native invocation are separate evidence. A passing local test or successful creation does not prove adoption across all six Web accounts. The final native acceptance requires this tool catalog, one admitted bounded worker, retained result consumption and explicit verified acceptance from the connected Web session. No Web turn is a daemon; unattended return requires its existing real owner and return path.
 
 Official connection references: https://developers.openai.com/api/docs/guides/secure-mcp-tunnels and https://developers.openai.com/plugins/deploy/connect-chatgpt .
-# Fixed original collection on the existing modern C3 service
-
-The source supports an explicit, default-off `--original-collection` selection
-in the existing `private_service stage` / `upgrade` owner. It is limited to
-`fabric-c3-570f6f34` on `127.0.0.1:45280`, with `modernFabricProtocol`,
-`fabricOnly`, and the shared-account backend. It does not enroll the older C3
-service or any other Studio account. The gateway's actual private-tunnel
-principal authorizes these operations; arguments, headers, `_meta`, root labels
-and helper stdin are never identity assertions.
-
-The only source-qualified runs are
-`fabric-app-native-drivers-j-20261105-01` and
-`fabric-app-application-process-carrier-20261105-01`. The local tools accept
-`run_id` only, except that result reading also requires `receipt_sha256`:
-
-* `fabric_collect_original` retains one collection operation in the existing
-  `BackendOwner` and uses the native collector's exclusive destination fence.
-* `fabric_original_collection_status` reads that destination without transport.
-  Missing or partial evidence is not permission to repeat collection.
-* `fabric_original_collection_result` verifies a COMPLETE receipt and its files,
-  decodes UTF-8 without replacement, and uses the existing output pager.
-
-Native CLI callers still require genuine native caller context. The internal
-installed-control helper has only the two closed run selectors; it verifies the
-sealed control bundle, interpreter, native generation and collector dependencies
-before importing the collector. Its stdin supplies correlation, not authority.
-The trust boundary remains the enrolled machine owner, not isolation against a
-same-UID adversary. HTTP disconnects do not cancel or release collection work.
-An owned helper timeout preserves uncertainty and the original destination; it
-never cancels an original worker or settles a lease.
-
-The receipt retains `acceptance: NOT_RECORDED`, unknown controller/settlement
-state and the historical false producer-authentication flags. Current collection
-authorization does not manufacture historical producer or model authentication.
-Metabolism, the refused old A-core artifact, other existing rows and future runs
-are excluded from this gateway entry.
-
-## Publication and activation sequence
-
-This is source support, not an installed-capability claim. The release owner
-must build and install the full native collector generation and the current
-control bundle, then use the normal C3 stage/upgrade/config-seal path with the
-explicit opt-in. The verified same-owner opt-in is preserved by ordinary
-upgrades; `--no-original-collection` removes it. The prior 13-member gateway
-fileset and every older cohort retain their exact membership.
-
-After source and installed-closure proof, the root release owner performs the
-existing service start and same-app tool metadata publication/readback. A
-`fabric-backend-release` transaction updates only backend arguments and hashes;
-it cannot publish the new gateway module or collection configuration. C1's
-native pin and gateway compatibility paths remain their existing owners.

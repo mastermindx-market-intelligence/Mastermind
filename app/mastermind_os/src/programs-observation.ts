@@ -4,8 +4,6 @@ import { decodeOwnerObservation, decodeProgramsEnvelope, type OwnerObservation }
 export interface ProgramsObservation {
   availability: "AVAILABLE" | "UNAVAILABLE";
   controlRoom: unknown | null;
-  /** Separate canonical N list input; controlRoom keeps its genuine C identity. */
-  programsInput?: unknown;
   observation: OwnerObservation | null;
   reasonCodes: readonly string[];
 }
@@ -33,13 +31,9 @@ export function decodeProgramsObservation(value: unknown): ProgramsObservation {
     reason_codes: string[];
   };
   const unavailable = envelope.availability === "UNAVAILABLE";
-  const composition = controlRoom && typeof controlRoom === "object" && "schema" in controlRoom
-    && controlRoom.schema === "mastermind.programs_source_composition.v1" && "control_room" in controlRoom
-    ? controlRoom : null;
   return {
-    ...(composition && !unavailable ? { programsInput: controlRoom } : {}),
     availability: envelope.availability,
-    controlRoom: unavailable ? null : composition ? composition.control_room : controlRoom,
+    controlRoom: unavailable ? null : controlRoom,
     observation: unavailable ? null : decodeOwnerObservation(envelope.source_observation, null),
     reasonCodes: [...envelope.reason_codes],
   };

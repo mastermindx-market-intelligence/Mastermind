@@ -43,7 +43,7 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource', 'selected_child_target'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource'}):
         raise ValueError('installed MCP configuration fields differ')
     if type(raw.get('reply_events_armed',False)) is not bool:
         raise ValueError('event receiver selection must be boolean')
@@ -78,7 +78,6 @@ def validate_document(raw):
     build_os_commission_client(raw)
     validate_optional_mounts(raw)
     build_installed_principal_ruling_target(raw)
-    build_installed_selected_child_target(raw)
     return raw
 
 
@@ -128,20 +127,16 @@ def validate_public_mcp_resource(raw):
     """Opt-in public MCP audience: this gateway process serves /mcp for it alone.
 
     Absent keeps the installed behavior unchanged. Present, the value must be the
-    exact public resource on Web-CEO v3, optionally with its explicit COO
-    receiver. Release control and every other profile refuse it. A process that offers this
+    exact public resource on the plain Web-CEO v3 composition; the COO wrappers,
+    release control and every other profile refuse it. A process that offers this
     audience at /mcp offers no other one there (the OS audience stays on its own
     transport routes), so the tunnel entrypoint needs its own gateway instance.
     """
     if 'public_mcp_resource' not in raw:
         return None
-    coo = raw.get('coo')
-    malformed_coo = 'coo' in raw and (
-        type(coo) is not dict or not {'policy', 'binding'} <= set(coo)
-        or set(coo) - {'policy', 'binding', 'missions'})
     if (raw.get('executive_mcp_profile') != 'web_ceo_v3'
             or raw['public_mcp_resource'] != PUBLIC_MCP_RESOURCE
-            or 'principal_ruling_target' in raw or malformed_coo):
+            or {'coo', 'principal_ruling_target'} & set(raw)):
         raise ValueError(
             'public MCP resource must be the exact public audience on the plain v3 profile'
         )
@@ -262,13 +257,9 @@ def validate_optional_mounts(raw):
             _jwks_cache_contract, load_app_policies,
         )
         base = load_app_policies(raw['policies'])
-        # Only the explicit public v3 receiver selects this separate resource.
-        # Keep the primary pair intact for the other installed transports.
-        receiver = build_public_policies(raw, base,
-            build_additional_policies(raw, base)) or base
         coo = policies['coo']
-        if (coo.resource_metadata_url != receiver.read.resource_metadata_url
-                or _jwks_cache_contract(coo) != _jwks_cache_contract(receiver.read)):
+        if (coo.resource_metadata_url != base.read.resource_metadata_url
+                or _jwks_cache_contract(coo) != _jwks_cache_contract(base.read)):
             raise ValueError('COO policy must share the Executive resource and JWKS authority')
         if coo.policy_id in {base.read.policy_id, base.submit.policy_id}:
             raise ValueError('COO policy ID must be distinct from CEO policies')
@@ -527,17 +518,14 @@ def build_optional_apps(raw, source, config_path, sink):
                 policy=policies['workspace'], load_bindings=legacy_workspace_loader, action=operation)[0]
             for operation in OPERATIONS
         }
-        workspace_config = WorkspaceAppConfig(authenticator=authenticators['workspace'],
+        app = create_workspace_app(WorkspaceAppConfig(authenticator=authenticators['workspace'],
             now=lambda: int(time.time()), authorize_principal=gate,
             authorize_discovery=discovery_gate, authorize_actions=action_gates,
             project_admission_load_bindings=workspace_project_bindings_loader,
             source_operation_context=WorkspaceSourceOperationContextFactory(
                 policy=policies['workspace'], load_bindings=workspace_project_bindings_loader),
-            client=CeoIngressWorkspaceClient(raw['ceo_ingress_socket_path']))
-        app = create_workspace_app(workspace_config)
-        mounts['workspace_app'] = AuditedWorkspaceApp(app, verifiers['workspace'],
-            authenticator=authenticators['workspace'],authorize_principal=gate,
-            fresh_workspace_config=workspace_config)
+            client=CeoIngressWorkspaceClient(raw['ceo_ingress_socket_path'])))
+        mounts['workspace_app'] = AuditedWorkspaceApp(app, verifiers['workspace'])
     if 'steward' in raw:
         from integrations.mastermind_steward_app.installed import (
             LiveWindowProfilesConfig, build_installed_steward_app_with_profiles)
@@ -581,36 +569,17 @@ class PolicyAuditSink:
             sink.close()
 
 
-def build_installed_coo_settings(raw, source, config_path, executive, *, expected_uid=None):
+def build_installed_coo_settings(raw, source, config_path, executive):
     """Use the canonical App-peer fact transport; never open Runtime in MCP."""
     if not raw.get('coo', {}).get('missions'):
         return None
     validate_document(raw)
     from integrations.mastermind_executive_app.coo import CooAppSettings
     from integrations.mastermind_executive_app.coo_installed import CooFactsClient
-    public_mcp = executive.public_policies is not None
-    if public_mcp and raw.get('executive_mcp_profile') != 'web_ceo_v3':
-        raise ValueError('public COO requires the installed Web-CEO v3 profile')
     client = CooFactsClient(raw['ceo_ingress_socket_path'])
-    settings = dict(executive=executive, policy=optional_policies(raw)['coo'],
-        public_mcp=public_mcp,
+    return CooAppSettings(executive=executive, policy=optional_policies(raw)['coo'],
         load_binding=current_projection_loader(config_path, source, raw, 'coo', 'binding'),
         authority_provider=client.authority, mission_provider=client.mission)
-    publication = build_installed_selected_child_target(raw)
-    if publication is not None:
-        # One frozen publication, read through the SHARED generation-bound
-        # reader. The block is not a rotatable projection: a replaced, relinked
-        # or rewritten installation refuses instead of silently retargeting a
-        # running App, and nothing here rebuilds a target from a model
-        # argument. The Control source reads the same publication through the
-        # very same reader, so both installed consumers prove one generation.
-        uid = raw['service_uid'] if expected_uid is None else expected_uid
-        reader = fixed_selected_child_target_reader(
-            config_path, source, raw, expected_uid=uid)
-        if reader is None:
-            raise ValueError('installed selected child target is unavailable')
-        settings['selected_child_target'] = reader()
-    return CooAppSettings(**settings)
 
 
 def build_installed_principal_ruling_target(raw):
@@ -635,133 +604,6 @@ def build_installed_principal_ruling_target(raw):
             if type(row) is dict and row.get('work_ref') == selected.work_ref]) != 1):
         raise ValueError('principal ruling requires the exact installed COO mission')
     return selected
-
-
-def build_installed_selected_child_target(raw):
-    """The frozen selected-child publication and its exact installed mission.
-
-    Absence preserves every installed route and every existing document.
-    A present publication is a closed projection whose material digest is
-    over exactly the frozen coordinates, and it must name exactly one
-    installed COO mission: the installed mission is the host's own
-    association, never a supplied selector.
-    """
-    if 'selected_child_target' not in raw:
-        return None
-    from control_plane.coo_principal_host import validate_selected_child_target
-    publication = validate_selected_child_target(raw['selected_child_target'])
-    missions = raw.get('coo', {}).get('missions', [])
-    if len([row for row in missions
-            if type(row) is dict and row.get('work_ref') == publication['work_ref']]) != 1:
-        raise ValueError('selected child target requires the exact installed COO mission')
-    return publication
-
-
-def build_selected_child_target(publication, currentness_guard):
-    """Construct the selected-child target from one qualified publication.
-
-    The published material is reconstructed into the target's own frozen
-    children, and the target's own material digest must equal the published
-    digest. The guard proves the FIXED publication and its legitimate
-    read/source identity; it never reruns dispatch eligibility, recomputes
-    an ordinal, requires the original child to remain unclaimed or calls
-    the dialogue guard merely to read the original command.
-    """
-    from integrations.hermes_delegate.executive import (
-        ExecutiveChildSelection, ExecutiveSelectedChild, ExecutiveSelectedChildTarget,
-    )
-    children = []
-    for item in publication['children']:
-        selection = ExecutiveChildSelection(
-            root_job_id=item['root_job_id'],
-            parent_job_id=item['parent_job_id'],
-            job_id=item['job_id'],
-            plan_attempt_id=item['plan_attempt_id'],
-            plan_digest=item['plan_digest'],
-            plan_step_id=item['plan_step_id'],
-            repair_round=item['repair_round'],
-            expected_current_attempt_id=item['expected_current_attempt_id'],
-        )
-        children.append(ExecutiveSelectedChild(
-            selection=selection, attempt_ordinal=item['attempt_ordinal']))
-    target = ExecutiveSelectedChildTarget(
-        work_ref=publication['work_ref'], children=tuple(children),
-        currentness_guard=currentness_guard)
-    digest = getattr(target, 'material_digest', None)
-    observed = digest() if callable(digest) else digest
-    if type(observed) is not str or observed != publication['material_digest']:
-        raise ValueError('installed selected child target differs from its publication')
-    return target
-
-
-def fixed_selected_child_target_reader(config_path, source, initial, *, expected_uid):
-    """Bind the frozen selected-child publication to one file generation.
-
-    This is the SHARED owner of the selected-child currentness proof. The
-    installed App settings and the installed Control source both read their
-    frozen publication through THIS reader, so one generation is proven in
-    one place instead of twice with two different laws.
-
-    It is deliberately not a rotatable registry. A replacement, an ABA
-    write, a relink, a symlink or a fork requires fresh host qualification,
-    even when the document returns to its old bytes. The guard proves the
-    FIXED publication and its legitimate read/source identity; it never
-    reruns fresh dispatch eligibility, recomputes an ordinal, requires the
-    original child to remain unclaimed, or calls the dialogue guard merely
-    to read the original command.
-
-    Only the selected-child target is narrowed this way. Every other
-    rotatable projection keeps its incumbent ``current_projection_loader``.
-    """
-    path, source = Path(config_path), Path(source)
-    publication = build_installed_selected_child_target(initial)
-    if publication is None:
-        return None
-    pid = os.getpid()
-
-    def identity(info):
-        return (info.st_dev, info.st_ino, info.st_mode, info.st_uid,
-                info.st_gid)
-
-    def file_identity(info):
-        return (*identity(info), info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
-
-    def observe():
-        if os.getpid() != pid or os.geteuid() != expected_uid:
-            raise ValueError('installed selected child target reader is not this identity')
-        require_sealed_path(source, directory=True)
-        require_sealed_path(path)
-        nodes = tuple(dict.fromkeys((source, *source.parents, *path.parents)))
-        namespace = tuple(identity(node.lstat()) for node in nodes)
-        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC), "rb") as handle:
-            before = os.fstat(handle.fileno())
-            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
-                raise ValueError('installed selected child target is not one sealed object')
-            contents = handle.read()
-            after = os.fstat(handle.fileno())
-            require_sealed_path(source, directory=True)
-            require_sealed_path(path)
-            if (file_identity(before) != file_identity(after)
-                    or file_identity(after) != file_identity(path.lstat())
-                    or namespace != tuple(identity(node.lstat()) for node in nodes)):
-                raise ValueError('installed selected child target changed during the read')
-        current = validate_document(json.loads(contents))
-        if current != initial or source.name != current['release_sha']:
-            raise ValueError('installed selected child target changed')
-        return namespace, file_identity(after), hashlib.sha256(contents).digest()
-
-    generation = observe()
-
-    def currentness_guard():
-        if observe() != generation:
-            raise ValueError('installed selected child target changed')
-
-    target = build_selected_child_target(publication, currentness_guard)
-
-    def read():
-        currentness_guard()
-        return target
-    return read
 
 
 def main(argv=None):

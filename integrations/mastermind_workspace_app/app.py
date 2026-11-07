@@ -63,7 +63,6 @@ _PROJECT_DIRECTION_ROUTE = "/workspace/project-direction/current"
 _PROJECT_ARCHIVE_ROUTE = "/workspace/projects/archive/current"
 _AUTONOMY_ROUTE = "/workspace/autonomy/current"
 _RESOURCE_CAPACITY_ROUTE = "/workspace/resources/capacity/current"
-_HOST_OBSERVATION_ROUTE = "/workspace/resources/host-observation/current"
 _ACTIVITY_ROUTE = "/workspace/operator/activity/current"
 _FABRIC_CATALOG_ROUTE = "/workspace/fabric/catalog/current"
 _FABRIC_STATUS_ROUTE = "/workspace/fabric/status/current"
@@ -1669,7 +1668,6 @@ class _RawPathFence:
 
     #: Starlette also binds HEAD for GET routes; the exact map refuses it.
     _READ_ROUTES = (
-        "/workspace/native-draft-identity/current",
         _PROGRAMS_ROUTE,
         _WORK_ROUTE,
         _MISSION_ROUTE,
@@ -1687,7 +1685,6 @@ class _RawPathFence:
         _AUTONOMY_ROUTE,
         _ACTIVITY_ROUTE,
         _RESOURCE_CAPACITY_ROUTE,
-        _HOST_OBSERVATION_ROUTE,
         _FABRIC_CATALOG_ROUTE,
         _FABRIC_STATUS_ROUTE,
         _BYOK_ROLES_ROUTE,
@@ -1799,10 +1796,6 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def plan_endpoint(request: Request) -> JSONResponse:
         return await plan_current(request, config=config)
 
-    async def native_draft_identity_endpoint(request: Request):
-        from .native_draft_identity import native_draft_identity_current
-        return await native_draft_identity_current(request, config=config)
-
     async def project_access_endpoint(request: Request):
         from http import HTTPStatus
         from integrations.mastermind_workspace_app.project_access import project_access_current
@@ -1855,10 +1848,6 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def autonomy_endpoint(request: Request) -> JSONResponse:
         return await autonomy_current(request, config=config)
 
-    async def host_observation_endpoint(request: Request) -> Response:
-        from .host_observation import host_observation_current
-        return await host_observation_current(request, config=config)
-
     async def resource_capacity_endpoint(request: Request) -> JSONResponse:
         return await resource_capacity_current(request, config=config)
 
@@ -1885,7 +1874,6 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     routes = [
         Route(_BYOK_ROLES_ROUTE, byok_roles_endpoint, methods=["GET"]),
         Route("/workspace/source-operation/context", source_operation_context_endpoint, methods=["GET"]),
-        Route("/workspace/source-operation/options", source_operation_endpoint("options"), methods=["GET"]),
         Route("/workspace/source-operation/operation", source_operation_endpoint("read"), methods=["GET"]),
         Route("/workspace/source-operation/prepare", source_operation_endpoint("prepare"), methods=["POST"]),
         Route("/workspace/source-operation/submit", source_operation_endpoint("submit"), methods=["POST"]),
@@ -1900,7 +1888,6 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_MISSION_RESULT_ROUTE, mission_result_endpoint, methods=["GET"]),
         Route(_RESULT_REFERENCES_ROUTE, result_references_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
-        Route("/workspace/native-draft-identity/current", native_draft_identity_endpoint, methods=["GET"]),
         Route("/workspace/project-access/current", project_access_endpoint, methods=["GET"]),
         Route("/workspace/project-instructions/current", project_instructions_endpoint, methods=["GET"]),
         Route(_PROJECT_PLAN_ROUTE, project_plan_endpoint, methods=["GET"]),
@@ -1922,7 +1909,6 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
 
         Route(_ACTIVITY_ROUTE, activity_endpoint, methods=["GET"]),
         Route(_RESOURCE_CAPACITY_ROUTE, resource_capacity_endpoint, methods=["GET"]),
-        Route(_HOST_OBSERVATION_ROUTE, host_observation_endpoint, methods=["GET"]),
         Route(_FABRIC_CATALOG_ROUTE, fabric_catalog_endpoint, methods=["GET"]),
         Route(_FABRIC_STATUS_ROUTE, fabric_status_endpoint, methods=["GET"]),
         Route(_CCR_STATE_ROUTE, ccr_state_endpoint, methods=["GET"]),

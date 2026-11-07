@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { OperationPointer } from "../orchestration/operation-controller";
-import {
-  qualifiedAnswerVariant,
-  type QualifiedSessionAnswerValue,
-} from "../orchestration/executive-session-command-port";
+import type { QualifiedSessionAnswer } from "../orchestration/executive-session-command-port";
 import type { QualifiedConversationReply } from "./ConversationWindow";
 
 /**
@@ -36,27 +33,16 @@ function identityMatches(a: QualifiedAnswerOwner, b: QualifiedAnswerOwner | null
     a.authRevision === b.authRevision;
 }
 
-/**
- * The same answer means the same original operation, the same variant, the
- * same text, the same read reference and the same actual outcome.  A
- * Secretary answer and a fabric answer are never the same answer even when
- * their text coincides, and a failed Secretary result is a valid original
- * result rather than a rejection.
- */
 function sameAnswer(a: QualifiedConversationReply, pointer: OperationPointer,
-                    answer: QualifiedSessionAnswerValue): boolean {
-  if (a.pointer.operationKey !== pointer.operationKey ||
-      a.pointer.targetKey !== pointer.targetKey || a.pointer.kind !== pointer.kind) return false;
-  if (qualifiedAnswerVariant(a.answer) !== qualifiedAnswerVariant(answer)) return false;
-  if (a.answer.text !== answer.text) return false;
-  if (a.answer.readRef !== answer.readRef) return false;
-  if (a.answer.parentConsumed !== false || answer.parentConsumed !== false) return false;
-  if (qualifiedAnswerVariant(answer) !== "fabric_attempt") {
-    const nativeA = a.answer as { readonly successful: boolean };
-    const nativeB = answer as { readonly successful: boolean };
-    return nativeA.successful === nativeB.successful;
-  }
-  return a.answer.nextStep === (answer as { readonly nextStep: string }).nextStep;
+                    answer: QualifiedSessionAnswer): boolean {
+  return a.pointer.operationKey === pointer.operationKey &&
+    a.pointer.targetKey === pointer.targetKey &&
+    a.pointer.kind === pointer.kind &&
+    a.answer.text === answer.text &&
+    a.answer.nextStep === answer.nextStep &&
+    a.answer.readRef === answer.readRef &&
+    a.answer.parentConsumed === false &&
+    answer.parentConsumed === false;
 }
 
 export function useQualifiedOriginalAnswer() {
@@ -108,7 +94,7 @@ export function useQualifiedOriginalAnswer() {
     identityMatches(owner, current.current) && current.current?.active === true;
 
   const stage = (owner: QualifiedAnswerOwner,
-                 pointer: OperationPointer, answer: QualifiedSessionAnswerValue): Promise<boolean> => {
+                 pointer: OperationPointer, answer: QualifiedSessionAnswer): Promise<boolean> => {
     if (!matches(owner) || pointer.kind !== "message" || answer.parentConsumed !== false) {
       return Promise.resolve(false);
     }

@@ -23,13 +23,6 @@ from ops.executive_os.remote_worker_gateway import RemoteWorkerGateway
 from ops.executive_os.remote_worker_gateway_config import (
     FABRIC_BROKER_TARGET,
     WORKER_BROKER_TARGET,
-    HOST_OBSERVATION_GATEWAY_CONFIG_SCHEMA,
-    SECRETARY_GATEWAY_CONFIG_SCHEMA, CONVERSATION_GATEWAY_CONFIG_SCHEMA,
-    HermesSecretaryGatewayConfig, HermesConversationGatewayConfig,
-    HermesSecretaryConversationBinding, HermesMetaConversationBinding,
-    GatewayConfig,
-    HostObservationGatewayConfig,
-    HermesRoleMetadataReadBinding,
     RemoteWorkerGatewayConfig,
 )
 from ops.executive_os.remote_assignment_control import AssignmentControlBinding
@@ -40,9 +33,6 @@ DEFAULT_GATEWAY_ROOT = Path("/Library/Application Support/MastermindExecutive/re
 DEFAULT_BROKER_SOCKET_ROOT = Path("/var/run/mastermind-executive")
 DARWIN_FABRIC_SOCKET_ROOT = Path("/private/var/run/mastermind-executive")
 LINUX_GATEWAY_ROOT = Path("/etc/mastermind-executive")
-LINUX_HOST_OBSERVATION_ROOT = LINUX_GATEWAY_ROOT / "remote-worker-gateway"
-LINUX_HOST_OBSERVATION_CONFIG = LINUX_HOST_OBSERVATION_ROOT / "host-observation.json"
-LINUX_SECRETARY_CONVERSATION_CONFIG = LINUX_HOST_OBSERVATION_ROOT / "secretary-conversation.json"
 LINUX_BROKER_SOCKET_ROOT = Path("/run")
 MAX_CONFIG_BYTES = 64 * 1024
 MAX_TLS_FILE_BYTES = 1024 * 1024
@@ -66,11 +56,6 @@ CONFIG_FIELDS = frozenset(
         "max_frame_bytes",
     }
 )
-HOST_OBSERVATION_CONFIG_FIELDS = (
-    CONFIG_FIELDS - {"broker_socket_path", "allowed_worker_ids", "allowed_operations"}
-) | {"profile", "hermes_role_metadata_read"}
-SECRETARY_GATEWAY_CONFIG_FIELDS = HOST_OBSERVATION_CONFIG_FIELDS | {"hermes_secretary_conversation"}
-CONVERSATION_GATEWAY_CONFIG_FIELDS = SECRETARY_GATEWAY_CONFIG_FIELDS | {"hermes_meta_conversation"}
 
 
 class RemoteWorkerGatewayServiceError(ValueError):
@@ -256,8 +241,6 @@ def _closed_json(raw: bytes) -> dict[str, Any]:
         | {"assignment_control", "broker_target", "expected_broker_peer_uid"},
     )
     loader_fields += tuple(fields | {"hermes_role_metadata_read"} for fields in loader_fields)
-    loader_fields += (HOST_OBSERVATION_CONFIG_FIELDS, SECRETARY_GATEWAY_CONFIG_FIELDS,
-                      CONVERSATION_GATEWAY_CONFIG_FIELDS)
     if type(value) is not dict or set(value) not in loader_fields:
         _refuse("GATEWAY_CONFIG_INVALID")
     return value
@@ -274,7 +257,7 @@ def _sorted_unique_strings(value: object, *, code: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _canonical_config(config: GatewayConfig) -> bytes:
+def _canonical_config(config: RemoteWorkerGatewayConfig) -> bytes:
     value = {
         "schema": config.schema,
         "host_ref": config.host_ref,
@@ -284,142 +267,22 @@ def _canonical_config(config: GatewayConfig) -> bytes:
         "key_path": os.fspath(config.key_path),
         "ca_path": os.fspath(config.ca_path),
         "expected_control_fingerprint": config.expected_control_fingerprint,
+        "broker_socket_path": os.fspath(config.broker_socket_path),
+        "allowed_worker_ids": sorted(config.allowed_worker_ids),
+        "allowed_operations": sorted(config.allowed_operations),
         "request_timeout_seconds": float(config.request_timeout_seconds),
         "max_frame_bytes": config.max_frame_bytes,
     }
-    if type(config) in (HostObservationGatewayConfig, HermesSecretaryGatewayConfig,
-                        HermesConversationGatewayConfig):
-        value["profile"] = config.profile
-        if type(config) in (HermesSecretaryGatewayConfig, HermesConversationGatewayConfig):
-            value["hermes_secretary_conversation"] = config.hermes_secretary_conversation.to_wire()
-        if type(config) is HermesConversationGatewayConfig:
-            value["hermes_meta_conversation"] = config.hermes_meta_conversation.to_wire()
-    else:
-        value.update(
-            broker_socket_path=os.fspath(config.broker_socket_path),
-            allowed_worker_ids=sorted(config.allowed_worker_ids),
-            allowed_operations=sorted(config.allowed_operations),
-        )
-        if config.assignment_control is not None:
-            value["assignment_control"] = config.assignment_control.to_wire()
-        if config.broker_target == FABRIC_BROKER_TARGET:
-            # The legacy configuration's canonical bytes remain unchanged.
-            value["broker_target"] = config.broker_target
-            value["expected_broker_peer_uid"] = config.expected_broker_peer_uid
+    if config.assignment_control is not None:
+        value["assignment_control"] = config.assignment_control.to_wire()
+    if config.broker_target == FABRIC_BROKER_TARGET:
+        # Only the explicit Fabric target carries these fields, so every
+        # existing default-target digest stays byte-identical.
+        value["broker_target"] = config.broker_target
+        value["expected_broker_peer_uid"] = config.expected_broker_peer_uid
     if config.hermes_role_metadata_read is not None:
         value["hermes_role_metadata_read"] = config.hermes_role_metadata_read.to_wire()
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
-
-
-def _trusted_observation_ancestors(root: Path) -> None:
-    """Qualify the shared namespace without changing its traversable mode."""
-    try:
-        for parent in root.parents:
-            info = parent.lstat()
-            if (not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
-                    or info.st_uid != 0 or stat.S_IMODE(info.st_mode) & 0o022):
-                _refuse("GATEWAY_DIRECTORY_INVALID")
-    except OSError:
-        raise RemoteWorkerGatewayServiceError("GATEWAY_DIRECTORY_INVALID") from None
-
-
-def _qualified_tls_paths(document, *, root, expected_owner_uid, expected_group_gid):
-    tls_paths = {
-        key: _safe_absolute(document[key], code="GATEWAY_TLS_PATH_INVALID")
-        for key in ("certificate_path", "key_path", "ca_path")
-    }
-    for tls_path in tls_paths.values():
-        _within(tls_path, root, code="GATEWAY_PATH_ESCAPE")
-        _secure_regular_file(
-            tls_path, root=root, expected_owner_uid=expected_owner_uid,
-            expected_group_gid=expected_group_gid, max_bytes=MAX_TLS_FILE_BYTES, read_bytes=False,
-        )
-    return tls_paths
-
-
-def _request_limits(document):
-    port, frame, timeout = (document.get(key) for key in
-                            ("listen_port", "max_frame_bytes", "request_timeout_seconds"))
-    if (type(port) is not int or not 1 <= port <= 65535
-            or type(frame) is not int or type(timeout) not in (int, float)):
-        _refuse("GATEWAY_CONFIG_INVALID")
-    return port, frame, timeout
-
-
-def decode_host_observation_gateway_config(raw: bytes, *, expected_group_gid: int) -> HostObservationGatewayConfig:
-    """Qualify inert installation input against the one fixed Linux TLS root.
-
-    The enroller owns the input file's custody. The running entrypoint still
-    accepts this profile only at LINUX_HOST_OBSERVATION_CONFIG.
-    """
-    if (sys.platform != "linux" or type(expected_group_gid) is not int
-            or expected_group_gid < 0 or type(raw) is not bytes or not 0 < len(raw) <= MAX_CONFIG_BYTES):
-        _refuse("GATEWAY_CONFIG_INVALID")
-    document = _closed_json(raw)
-    if set(document) != HOST_OBSERVATION_CONFIG_FIELDS:
-        _refuse("GATEWAY_CONFIG_INVALID")
-    _trusted_observation_ancestors(LINUX_HOST_OBSERVATION_ROOT)
-    paths = _qualified_tls_paths(document, root=LINUX_HOST_OBSERVATION_ROOT,
-                                 expected_owner_uid=0, expected_group_gid=expected_group_gid)
-    port, frame, timeout = _request_limits(document)
-    try:
-        return HostObservationGatewayConfig(
-            schema=document["schema"], profile=document["profile"],
-            host_ref=document["host_ref"], listen_host=document["listen_host"],
-            listen_port=port, expected_control_fingerprint=document["expected_control_fingerprint"],
-            hermes_role_metadata_read=HermesRoleMetadataReadBinding.from_wire(document["hermes_role_metadata_read"]),
-            request_timeout_seconds=float(timeout), max_frame_bytes=frame, **paths,
-        )
-    except (KeyError, TypeError, ValueError):
-        raise RemoteWorkerGatewayServiceError("GATEWAY_CONFIG_INVALID") from None
-
-
-def _decode_conversation_gateway_config(raw: bytes, *, expected_group_gid: int, dual: bool):
-    """Qualify the closed Secretary profile in the existing fixed Linux namespace."""
-    if (type(dual) is not bool or sys.platform != "linux" or type(expected_group_gid) is not int
-            or expected_group_gid < 0 or type(raw) is not bytes or not 0 < len(raw) <= MAX_CONFIG_BYTES):
-        _refuse("GATEWAY_CONFIG_INVALID")
-    document = _closed_json(raw)
-    fields = CONVERSATION_GATEWAY_CONFIG_FIELDS if dual else SECRETARY_GATEWAY_CONFIG_FIELDS
-    if set(document) != fields:
-        _refuse("GATEWAY_CONFIG_INVALID")
-    _trusted_observation_ancestors(LINUX_HOST_OBSERVATION_ROOT)
-    paths = _qualified_tls_paths(document, root=LINUX_HOST_OBSERVATION_ROOT,
-                                 expected_owner_uid=0, expected_group_gid=expected_group_gid)
-    port, frame, timeout = _request_limits(document)
-    try:
-        binding = HermesSecretaryConversationBinding.from_wire(document["hermes_secretary_conversation"])
-        _secure_regular_file(
-            binding.credential_path, root=LINUX_HOST_OBSERVATION_ROOT, expected_owner_uid=0,
-            expected_group_gid=expected_group_gid, max_bytes=257, read_bytes=False,
-        )
-        extra = {}
-        if dual:
-            meta = HermesMetaConversationBinding.from_wire(document["hermes_meta_conversation"])
-            _secure_regular_file(
-                meta.credential_path, root=LINUX_HOST_OBSERVATION_ROOT, expected_owner_uid=0,
-                expected_group_gid=expected_group_gid, max_bytes=257, read_bytes=False,
-            )
-            extra["hermes_meta_conversation"] = meta
-        config_type = HermesConversationGatewayConfig if dual else HermesSecretaryGatewayConfig
-        return config_type(
-            schema=document["schema"], profile=document["profile"],
-            host_ref=document["host_ref"], listen_host=document["listen_host"],
-            listen_port=port, expected_control_fingerprint=document["expected_control_fingerprint"],
-            hermes_role_metadata_read=HermesRoleMetadataReadBinding.from_wire(document["hermes_role_metadata_read"]),
-            hermes_secretary_conversation=binding,
-            request_timeout_seconds=float(timeout), max_frame_bytes=frame, **paths, **extra,
-        )
-    except (KeyError, TypeError, ValueError):
-        raise RemoteWorkerGatewayServiceError("GATEWAY_CONFIG_INVALID") from None
-
-
-def decode_secretary_gateway_config(raw: bytes, *, expected_group_gid: int) -> HermesSecretaryGatewayConfig:
-    return _decode_conversation_gateway_config(raw, expected_group_gid=expected_group_gid, dual=False)
-
-
-def decode_conversation_gateway_config(raw: bytes, *, expected_group_gid: int) -> HermesConversationGatewayConfig:
-    return _decode_conversation_gateway_config(raw, expected_group_gid=expected_group_gid, dual=True)
 
 
 def load_remote_worker_gateway_config(
@@ -429,21 +292,13 @@ def load_remote_worker_gateway_config(
     broker_socket_root: Path | str | None = None,
     expected_owner_uid: int = 0,
     expected_group_gid: int | None = None,
-) -> GatewayConfig:
+) -> RemoteWorkerGatewayConfig:
     """Read one immutable root-owned local gateway configuration."""
 
     # Match the existing Linux installer's systemd configuration. Selecting
     # the platform namespace is not a fallback to a caller-selected root.
-    config_path = _safe_absolute(path, code="GATEWAY_CONFIG_INVALID")
-    explicit_root = allowed_root is not None
-    observation_path = sys.platform == "linux" and config_path == LINUX_HOST_OBSERVATION_CONFIG
-    secretary_path = sys.platform == "linux" and config_path == LINUX_SECRETARY_CONVERSATION_CONFIG
     if allowed_root is None:
-        if observation_path or secretary_path:
-            allowed_root = LINUX_HOST_OBSERVATION_ROOT
-            _trusted_observation_ancestors(allowed_root)
-        else:
-            allowed_root = LINUX_GATEWAY_ROOT if sys.platform == "linux" else DEFAULT_GATEWAY_ROOT
+        allowed_root = LINUX_GATEWAY_ROOT if sys.platform == "linux" else DEFAULT_GATEWAY_ROOT
     default_socket_root = broker_socket_root is None
     if default_socket_root:
         broker_socket_root = (LINUX_BROKER_SOCKET_ROOT if sys.platform == "linux"
@@ -458,6 +313,7 @@ def load_remote_worker_gateway_config(
     socket_root = _safe_absolute(
         broker_socket_root, code="GATEWAY_BROKER_SOCKET_INVALID"
     )
+    config_path = _safe_absolute(path, code="GATEWAY_CONFIG_INVALID")
     _within(config_path, root, code="GATEWAY_PATH_ESCAPE")
     raw = _secure_regular_file(
         config_path,
@@ -468,26 +324,6 @@ def load_remote_worker_gateway_config(
         read_bytes=True,
     )
     document = _closed_json(raw)
-    conversation_profile = document.get("schema") in (
-        SECRETARY_GATEWAY_CONFIG_SCHEMA, CONVERSATION_GATEWAY_CONFIG_SCHEMA)
-    if conversation_profile and (not secretary_path or explicit_root or not default_socket_root
-                                  or expected_owner_uid != 0):
-        _refuse("GATEWAY_CONFIG_INVALID")
-    if secretary_path and not conversation_profile:
-        _refuse("GATEWAY_CONFIG_INVALID")
-    if conversation_profile:
-        decoder = (decode_conversation_gateway_config
-                   if document["schema"] == CONVERSATION_GATEWAY_CONFIG_SCHEMA
-                   else decode_secretary_gateway_config)
-        return decoder(raw, expected_group_gid=expected_group_gid)
-    observation_only = document.get("schema") == HOST_OBSERVATION_GATEWAY_CONFIG_SCHEMA
-    if observation_only and (not observation_path or explicit_root or not default_socket_root
-                             or expected_owner_uid != 0):
-        _refuse("GATEWAY_CONFIG_INVALID")
-    if observation_path and not observation_only:
-        _refuse("GATEWAY_CONFIG_INVALID")
-    if observation_only:
-        return decode_host_observation_gateway_config(raw, expected_group_gid=expected_group_gid)
     if (default_socket_root and sys.platform == 'darwin'
             and document.get('broker_target') == FABRIC_BROKER_TARGET):
         # This new target requires a canonical root-installed endpoint. Keep
@@ -502,14 +338,24 @@ def load_remote_worker_gateway_config(
         "key_path",
         "ca_path",
         "expected_control_fingerprint",
+        "broker_socket_path",
     ):
         if type(document.get(key)) is not str:
             _refuse("GATEWAY_CONFIG_INVALID")
-    tls_paths = _qualified_tls_paths(document, root=root, expected_owner_uid=expected_owner_uid,
-                                     expected_group_gid=expected_group_gid)
-    listen_port, frame_bytes, timeout = _request_limits(document)
-    if type(document.get("broker_socket_path")) is not str:
-        _refuse("GATEWAY_CONFIG_INVALID")
+    tls_paths = {
+        key: _safe_absolute(document[key], code="GATEWAY_TLS_PATH_INVALID")
+        for key in ("certificate_path", "key_path", "ca_path")
+    }
+    for tls_path in tls_paths.values():
+        _within(tls_path, root, code="GATEWAY_PATH_ESCAPE")
+        _secure_regular_file(
+            tls_path,
+            root=root,
+            expected_owner_uid=expected_owner_uid,
+            expected_group_gid=expected_group_gid,
+            max_bytes=MAX_TLS_FILE_BYTES,
+            read_bytes=False,
+        )
     broker_socket = _safe_absolute(
         document["broker_socket_path"], code="GATEWAY_BROKER_SOCKET_INVALID"
     )
@@ -524,6 +370,17 @@ def load_remote_worker_gateway_config(
     operations = _sorted_unique_strings(
         document.get("allowed_operations"), code="GATEWAY_CONFIG_INVALID"
     )
+    listen_port = document.get("listen_port")
+    frame_bytes = document.get("max_frame_bytes")
+    timeout = document.get("request_timeout_seconds")
+    if (
+        type(listen_port) is not int
+        or not 1 <= listen_port <= 65535
+        or type(frame_bytes) is not int
+    ):
+        _refuse("GATEWAY_CONFIG_INVALID")
+    if type(timeout) not in (int, float) or isinstance(timeout, bool):
+        _refuse("GATEWAY_CONFIG_INVALID")
     if "broker_target" in document or "expected_broker_peer_uid" in document:
         # The optional broker endpoint fields are paired: never accept one alone.
         if "broker_target" not in document or "expected_broker_peer_uid" not in document:
@@ -534,6 +391,8 @@ def load_remote_worker_gateway_config(
         if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid <= 0:
             _refuse("GATEWAY_CONFIG_INVALID")
     try:
+        from ops.executive_os.remote_worker_gateway_config import HermesRoleMetadataReadBinding
+
         return RemoteWorkerGatewayConfig(
             schema=document["schema"],
             host_ref=document["host_ref"],
@@ -559,10 +418,9 @@ def load_remote_worker_gateway_config(
         raise RemoteWorkerGatewayServiceError("GATEWAY_CONFIG_INVALID") from None
 
 
-def remote_worker_gateway_config_digest(config: GatewayConfig) -> str:
-    if type(config) not in (RemoteWorkerGatewayConfig, HostObservationGatewayConfig,
-                            HermesSecretaryGatewayConfig, HermesConversationGatewayConfig):
-        raise TypeError("config must be a closed gateway profile")
+def remote_worker_gateway_config_digest(config: RemoteWorkerGatewayConfig) -> str:
+    if not isinstance(config, RemoteWorkerGatewayConfig):
+        raise TypeError("config must be RemoteWorkerGatewayConfig")
     return hashlib.sha256(_canonical_config(config)).hexdigest()
 
 
@@ -750,35 +608,17 @@ def _broker_socket_identity(path: Path) -> tuple[int, int, int, int, int]:
 
 
 async def serve_remote_worker_gateway(
-    config: GatewayConfig,
+    config: RemoteWorkerGatewayConfig,
     *,
-    gateway_factory: Callable[[GatewayConfig], Any] = RemoteWorkerGateway,
+    gateway_factory: Callable[[RemoteWorkerGatewayConfig], Any] = RemoteWorkerGateway,
     shutdown_waiter: Callable[[], Awaitable[None]] = wait_for_gateway_shutdown,
 ) -> None:
-    if type(config) not in (RemoteWorkerGatewayConfig, HostObservationGatewayConfig,
-                            HermesSecretaryGatewayConfig, HermesConversationGatewayConfig):
-        raise TypeError("config must be a closed gateway profile")
-    observation_only = type(config) is not RemoteWorkerGatewayConfig
-    fabric = not observation_only and config.broker_target == FABRIC_BROKER_TARGET
-    if not observation_only:
-        endpoint_identity = _fabric_socket_identity if fabric else _broker_socket_identity
-        broker_identity = endpoint_identity(config.broker_socket_path)
+    if not isinstance(config, RemoteWorkerGatewayConfig):
+        raise TypeError("config must be RemoteWorkerGatewayConfig")
+    fabric = config.broker_target == FABRIC_BROKER_TARGET
+    endpoint_identity = _fabric_socket_identity if fabric else _broker_socket_identity
+    broker_identity = endpoint_identity(config.broker_socket_path)
     gateway = gateway_factory(config)
-    if type(config) in (HermesSecretaryGatewayConfig, HermesConversationGatewayConfig):
-        from ops.executive_os.hermes_secretary_forwarder import HermesSecretaryForwarder, HermesMetaForwarder
-        gateway._secretary_forwarder = HermesSecretaryForwarder(
-            config.hermes_secretary_conversation, expected_group_gid=os.getegid(),
-            timeout_seconds=min(10.0, float(config.request_timeout_seconds)),
-        )
-        gateway._secretary_host_binding_sha256 = remote_worker_gateway_config_digest(config)
-        if type(config) is HermesConversationGatewayConfig:
-            gateway._meta_forwarder = HermesMetaForwarder(
-                config.hermes_meta_conversation, expected_group_gid=os.getegid(),
-                timeout_seconds=min(10.0, float(config.request_timeout_seconds)),
-            )
-            if gateway._secretary_forwarder.has_same_credential(gateway._meta_forwarder):
-                _refuse("GATEWAY_CONVERSATION_CREDENTIAL_ALIAS")
-            gateway._meta_host_binding_sha256 = gateway._secretary_host_binding_sha256
     if config.hermes_role_metadata_read is not None:
         from ops.executive_os.hermes_role_metadata_observer import HermesRoleMetadataObserver
 
@@ -786,9 +626,9 @@ async def serve_remote_worker_gateway(
             host_binding_sha256=remote_worker_gateway_config_digest(config),
             implementation_sha=config.hermes_role_metadata_read.implementation_sha,
         )
-    if not observation_only and endpoint_identity(config.broker_socket_path) != broker_identity:
+    if endpoint_identity(config.broker_socket_path) != broker_identity:
         _refuse("GATEWAY_BROKER_SOCKET_INVALID")
-    if not observation_only and not fabric:
+    if not fabric:
         try:
             broker_status = await asyncio.wait_for(
                 gateway.broker_call("status", {}),
@@ -811,7 +651,7 @@ async def serve_remote_worker_gateway(
         await server.wait_closed()
 
 
-def run_remote_worker_gateway_service(config: GatewayConfig) -> None:
+def run_remote_worker_gateway_service(config: RemoteWorkerGatewayConfig) -> None:
     asyncio.run(serve_remote_worker_gateway(config))
 
 

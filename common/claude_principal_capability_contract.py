@@ -11,14 +11,13 @@ EXECUTIVE_COO_MCP_URL = "http://127.0.0.1:8444/mcp"
 EXECUTIVE_COO_MCP_SERVER_IDENTITY = "mastermind-executive-coo"
 EXECUTIVE_COO_MCP_SERVER_VERSION = "1.0.0"
 EXECUTIVE_COO_MCP_TOOL_SCHEMA_DIGEST = (
-    "5cf2a0de4a47686c545d1ee3d9c388ab4dc94c880cb0670140de2eca2e54f550"
+    "8d4ff58a30c02b717788b80fdfd1c5b8b35493dc11dd76cac351cde7b4509d72"
 )
 EXECUTIVE_COO_MCP_ENABLED_TOOLS = (
     "executive_fabric",
     "executive_inbox",
     "executive_mandate",
     "executive_state",
-    "mmx_delegate",
     "principal_intent_status",
     "submit_principal_intent",
 )

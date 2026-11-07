@@ -33,7 +33,6 @@ async function setup(hold=false) {
   render(<App/>);fireEvent.click(screen.getByRole("button",{name:"Projects"}));
   fireEvent.click(await screen.findByRole("button",{name:"Open project Direction test programme"}));
   fireEvent.click(screen.getByRole("button",{name:"Project details"}));
-  fireEvent.click(screen.getByRole("button",{name:"Direction",exact:true}));
   return {invoke,read,notify,finish};
 }
 it("reads the actual Direction owner body explicitly through the real host for a rootless project",async()=>{
