@@ -587,3 +587,10 @@ The original queue entry was removed by the GitHub merge-queue bot at08:45:46 (e
 The actual composed source was paired with exact Macro9eb5cb6b28b510ea9e2bf05ae9040528523339df in isolated source fixtures. The first export omitted scripts/translate_all.py and retained22 passes/one error. Adding that exact staged-tree input (blob117dc03971230945fcf50816447f7e6a2e651a5a) resolved the fixture gap. The complete23-case translation suite then passed, exit0, log SHA256 ea509ad0367a2a748ffd43b65f9a68042344e1be3ecea84774c6b5a9c831dd0b. Failed and successful exports are separate receipts in review_evidence/fabric_admission/protected-translation-20261107.json.
 
 The repaired native sources and manifest are unchanged from0a41; its retained installed APPLICATION generation constraint remains binding. No installed Codex or provider was invoked. New exact-head hosted CI and the normal protected queue remain required; the prior removed queue request is not treated as an active effect.
+
+
+## 2026-11-07: no-replay CI settlement boundary
+
+Required CI run `42359846449`, shard4 job `128365751637`, exposed an inherited race in `test_signed_consumed_parent_second_turn_original_read_and_no_replay`: its duplicate-turn event snapshot preceded the original dispatcher appending `JOB_COMPLETED` for `JOB-002`. The duplicate returned the correct original result; the test already awaited that original task later. The same test and turn owner bytes exist in protected `064a08b2c6360ece12999f1d7f2d712062ea0636` and the passing workspace-release shard.
+
+Moved the existing bounded original-task wait before the event snapshot. Full event-log equality and the exact two native turns remain required; no production path or assertion was loosened. The complete12-case turn file passed with zero failures/errors/skips. Evidence: `review_evidence/fabric_admission/turn-settlement-ci-20261107.json`. The native manifest remains the previously qualified WORKER107 identity and must not replace the larger APPLICATION installed generation.
