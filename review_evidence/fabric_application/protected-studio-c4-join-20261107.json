@@ -1,0 +1,92 @@
+{
+  "schema": "mastermind.fabric_application.protected_studio_join.v1",
+  "observed_at": "2026-11-07T17:12:55.799333+00:00",
+  "parents": {
+    "prior_application": "bd119dfd25db6e9b5b48ab461407faf29cb0725d",
+    "protected_master": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c"
+  },
+  "production_decisions": [
+    "Retain the protected bounded publisher inventory and exact C4 pin enrollment together with the existing original-J preserving recovery implementation.",
+    "Keep the entire qualified native application payload unchanged."
+  ],
+  "test_conflict": {
+    "path": "integrations/studio_direct_mcp/private_service_status_successor_test.py",
+    "resolution": "Disjoint exact test-definition union; all definitions from both qualified parents retained; AST and affected real tests verified.",
+    "composition_receipt": {
+      "path": "integrations/studio_direct_mcp/private_service_status_successor_test.py",
+      "blobs": {
+        "base": "7891d8fb30bf410cf674a9ca2fedd038ba212449",
+        "ours": "78f26cf980d8cce4892acd8b6d637ba3b1770748",
+        "protected": "45dba3c1240b1f71275915229568f5dfce29be0e"
+      },
+      "resolution": [
+        {
+          "kind": "disjoint_qualified_tests",
+          "application_definitions": 1,
+          "protected_definitions": 2
+        }
+      ],
+      "sha256": "7e6d256478eb766429fc8f019e4a887ac6114091f84cfd088c6784d502d28d73",
+      "source_bodies_emitted": false
+    }
+  },
+  "test_dependency": {
+    "path": "integrations/studio_direct_mcp/git-publish.test.mjs",
+    "change": "An explicit STUDIO_DIRECT_TEST_GIT_BINARY selects the fixture Git executable; existing default /usr/bin/git and all behavioral assertions remain.",
+    "qualification_binary": "/opt/homebrew/bin/git",
+    "qualification_version": "2.55.0",
+    "initial_result": {
+      "cases": 142,
+      "passed": 103,
+      "failed": 39,
+      "reason": "The fixture used Apple Git2.39.5, which does not implement the empty remote URL-list reset required by the inherited protected publisher."
+    },
+    "production_limit": "This is not a runtime configuration migration. Existing sealed profiles selecting older Apple Git retain the separate publisher compatibility issue; destination guards are not weakened."
+  },
+  "qualification": {
+    "python": {
+      "kind": "python",
+      "returncode": 0,
+      "seconds": 34.3697243751958,
+      "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/studio-c4-python-v9.log",
+      "log_sha256": "b6f67812907fdb7c4fe2f6942bad8e68b427ced8cebe2c115ce983e8ec0660cc",
+      "junit": {
+        "tests": 456,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "node": {
+      "returncode": 0,
+      "seconds": 56.953,
+      "git": "/opt/homebrew/bin/git",
+      "git_version": "git version 2.55.0",
+      "node": "/usr/local/bin/node",
+      "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/studio-c4-node-supported-git-v10.xml",
+      "log_sha256": "20f4c0b103e911e91b504159fdb44b97e5fe466bdad7bcfc1cb6148b16df6109",
+      "source_sha256": "b490bd02fa56739f2b6a7e278cf8858f393c862117902e6c401bce331b9a176b",
+      "source_change": "Test-only explicit Git dependency selection; default and production destination guard unchanged.",
+      "cases": {
+        "total": 142,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "failures": []
+    }
+  },
+  "native_proof_reuse": {
+    "unchanged_from": "bd119dfd25db6e9b5b48ab461407faf29cb0725d",
+    "source_report": "review_evidence/fabric_application/protected-host-portfolio-join-20261107.json",
+    "new_native_build_claim": false
+  },
+  "production_claims": {
+    "deployed": false,
+    "selected_generation": false,
+    "j_collected": false,
+    "grants_issued": false,
+    "accepted": false
+  },
+  "newer_protected_base_observed": "528ce4ee2720a47abed002919d7555d7d2f4d76a"
+}
