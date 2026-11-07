@@ -1,0 +1,786 @@
+{
+  "schema": "hermes-thin-native-uat-v1",
+  "sourceHead": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "observation": {
+    "at": "2026-11-07T08:55:03.718Z",
+    "pid": 80261,
+    "signedIn": "Signed in",
+    "build": {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        1
+      ],
+      "role": "AXGroup",
+      "name": null,
+      "value": "",
+      "enabled": true,
+      "children": [
+        {
+          "path": [
+            0,
+            0,
+            0,
+            0,
+            2,
+            1,
+            0
+          ],
+          "role": "AXDisclosureTriangle",
+          "name": "Build details",
+          "value": true,
+          "enabled": true,
+          "children": [
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                1,
+                0,
+                0
+              ],
+              "role": "AXStaticText",
+              "name": "Build details",
+              "value": "Build details",
+              "enabled": true,
+              "children": []
+            }
+          ]
+        },
+        {
+          "path": [
+            0,
+            0,
+            0,
+            0,
+            2,
+            1,
+            1
+          ],
+          "role": "AXList",
+          "name": null,
+          "value": "",
+          "enabled": true,
+          "children": [
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                1,
+                1,
+                0
+              ],
+              "role": "AXGroup",
+              "name": null,
+              "value": "",
+              "enabled": true,
+              "children": [
+                {
+                  "path": [
+                    0,
+                    0,
+                    0,
+                    0,
+                    2,
+                    1,
+                    1,
+                    0,
+                    0
+                  ],
+                  "role": "AXStaticText",
+                  "name": "Version",
+                  "value": "Version",
+                  "enabled": true,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                1,
+                1,
+                1
+              ],
+              "role": "AXGroup",
+              "name": null,
+              "value": "",
+              "enabled": true,
+              "children": [
+                {
+                  "path": [
+                    0,
+                    0,
+                    0,
+                    0,
+                    2,
+                    1,
+                    1,
+                    1,
+                    0
+                  ],
+                  "role": "AXStaticText",
+                  "name": "0.1.0",
+                  "value": "0.1.0",
+                  "enabled": true,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                1,
+                1,
+                2
+              ],
+              "role": "AXGroup",
+              "name": null,
+              "value": "",
+              "enabled": true,
+              "children": [
+                {
+                  "path": [
+                    0,
+                    0,
+                    0,
+                    0,
+                    2,
+                    1,
+                    1,
+                    2,
+                    0
+                  ],
+                  "role": "AXStaticText",
+                  "name": "Source revision",
+                  "value": "Source revision",
+                  "enabled": true,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                1,
+                1,
+                3
+              ],
+              "role": "AXGroup",
+              "name": null,
+              "value": "",
+              "enabled": true,
+              "children": [
+                {
+                  "path": [
+                    0,
+                    0,
+                    0,
+                    0,
+                    2,
+                    1,
+                    1,
+                    3,
+                    0
+                  ],
+                  "role": "AXGroup",
+                  "name": null,
+                  "value": "",
+                  "enabled": true,
+                  "children": [
+                    {
+                      "path": [
+                        0,
+                        0,
+                        0,
+                        0,
+                        2,
+                        1,
+                        1,
+                        3,
+                        0,
+                        0
+                      ],
+                      "role": "AXStaticText",
+                      "name": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+                      "value": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+                      "enabled": true,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                1,
+                1,
+                4
+              ],
+              "role": "AXGroup",
+              "name": null,
+              "value": "",
+              "enabled": true,
+              "children": [
+                {
+                  "path": [
+                    0,
+                    0,
+                    0,
+                    0,
+                    2,
+                    1,
+                    1,
+                    4,
+                    0
+                  ],
+                  "role": "AXStaticText",
+                  "name": "Build identity",
+                  "value": "Build identity",
+                  "enabled": true,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                1,
+                1,
+                5
+              ],
+              "role": "AXGroup",
+              "name": null,
+              "value": "",
+              "enabled": true,
+              "children": [
+                {
+                  "path": [
+                    0,
+                    0,
+                    0,
+                    0,
+                    2,
+                    1,
+                    1,
+                    5,
+                    0
+                  ],
+                  "role": "AXGroup",
+                  "name": null,
+                  "value": "",
+                  "enabled": true,
+                  "children": [
+                    {
+                      "path": [
+                        0,
+                        0,
+                        0,
+                        0,
+                        2,
+                        1,
+                        1,
+                        5,
+                        0,
+                        0
+                      ],
+                      "role": "AXStaticText",
+                      "name": "hermes-thin-native-1f431c6c4087-20261107-pro-05",
+                      "value": "hermes-thin-native-1f431c6c4087-20261107-pro-05",
+                      "enabled": true,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                1,
+                1,
+                6
+              ],
+              "role": "AXGroup",
+              "name": null,
+              "value": "",
+              "enabled": true,
+              "children": [
+                {
+                  "path": [
+                    0,
+                    0,
+                    0,
+                    0,
+                    2,
+                    1,
+                    1,
+                    6,
+                    0
+                  ],
+                  "role": "AXStaticText",
+                  "name": "Native client reference",
+                  "value": "Native client reference",
+                  "enabled": true,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                1,
+                1,
+                7
+              ],
+              "role": "AXGroup",
+              "name": null,
+              "value": "",
+              "enabled": true,
+              "children": [
+                {
+                  "path": [
+                    0,
+                    0,
+                    0,
+                    0,
+                    2,
+                    1,
+                    1,
+                    7,
+                    0
+                  ],
+                  "role": "AXGroup",
+                  "name": null,
+                  "value": "",
+                  "enabled": true,
+                  "children": [
+                    {
+                      "path": [
+                        0,
+                        0,
+                        0,
+                        0,
+                        2,
+                        1,
+                        1,
+                        7,
+                        0,
+                        0
+                      ],
+                      "role": "AXStaticText",
+                      "name": "native-client:v1:47cabc2a4fe992f317c895bb619d0fcf64b49f1e03d9992781d1dca7c77cb423",
+                      "value": "native-client:v1:47cabc2a4fe992f317c895bb619d0fcf64b49f1e03d9992781d1dca7c77cb423",
+                      "enabled": true,
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                1,
+                1,
+                8
+              ],
+              "role": "AXGroup",
+              "name": null,
+              "value": "",
+              "enabled": true,
+              "children": [
+                {
+                  "path": [
+                    0,
+                    0,
+                    0,
+                    0,
+                    2,
+                    1,
+                    1,
+                    8,
+                    0
+                  ],
+                  "role": "AXStaticText",
+                  "name": "Transport",
+                  "value": "Transport",
+                  "enabled": true,
+                  "children": []
+                }
+              ]
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                2,
+                1,
+                1,
+                9
+              ],
+              "role": "AXGroup",
+              "name": null,
+              "value": "",
+              "enabled": true,
+              "children": [
+                {
+                  "path": [
+                    0,
+                    0,
+                    0,
+                    0,
+                    2,
+                    1,
+                    1,
+                    9,
+                    0
+                  ],
+                  "role": "AXStaticText",
+                  "name": "CONFIGURED / BUILT_NOT_PROVEN",
+                  "value": "CONFIGURED / BUILT_NOT_PROVEN",
+                  "enabled": true,
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "navigation": {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        8
+      ],
+      "role": "AXGroup",
+      "name": null,
+      "value": "",
+      "enabled": true,
+      "children": [
+        {
+          "path": [
+            0,
+            0,
+            0,
+            0,
+            1,
+            8,
+            0
+          ],
+          "role": "AXDisclosureTriangle",
+          "name": "Advanced",
+          "value": true,
+          "enabled": true,
+          "children": [
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                0,
+                0
+              ],
+              "role": "AXStaticText",
+              "name": "Advanced",
+              "value": "Advanced",
+              "enabled": true,
+              "children": []
+            }
+          ]
+        },
+        {
+          "path": [
+            0,
+            0,
+            0,
+            0,
+            1,
+            8,
+            1
+          ],
+          "role": "AXGroup",
+          "name": "Mission navigation",
+          "value": "",
+          "enabled": true,
+          "children": [
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                0
+              ],
+              "role": "AXButton",
+              "name": "Sources",
+              "value": null,
+              "enabled": true,
+              "children": []
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                1
+              ],
+              "role": "AXButton",
+              "name": "Tools",
+              "value": null,
+              "enabled": true,
+              "children": []
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                2
+              ],
+              "role": "AXButton",
+              "name": "Meta-CEO",
+              "value": null,
+              "enabled": true,
+              "children": []
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                3
+              ],
+              "role": "AXButton",
+              "name": "Work queue",
+              "value": null,
+              "enabled": true,
+              "children": []
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                4
+              ],
+              "role": "AXButton",
+              "name": "Programs workspace",
+              "value": null,
+              "enabled": true,
+              "children": []
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                5
+              ],
+              "role": "AXButton",
+              "name": "Control Room workspace",
+              "value": null,
+              "enabled": true,
+              "children": []
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                6
+              ],
+              "role": "AXButton",
+              "name": "Session Estate",
+              "value": null,
+              "enabled": true,
+              "children": []
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                7
+              ],
+              "role": "AXButton",
+              "name": "Fleet & Capacity workspace",
+              "value": null,
+              "enabled": true,
+              "children": []
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                8
+              ],
+              "role": "AXButton",
+              "name": "Mission Workspace",
+              "value": null,
+              "enabled": true,
+              "children": []
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                9
+              ],
+              "role": "AXButton",
+              "name": "Conversation",
+              "value": null,
+              "enabled": true,
+              "children": []
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                10
+              ],
+              "role": "AXButton",
+              "name": "Activity",
+              "value": null,
+              "enabled": true,
+              "children": []
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                11
+              ],
+              "role": "AXButton",
+              "name": "Connections",
+              "value": null,
+              "enabled": true,
+              "children": []
+            },
+            {
+              "path": [
+                0,
+                0,
+                0,
+                0,
+                1,
+                8,
+                1,
+                12
+              ],
+              "role": "AXButton",
+              "name": "Evidence",
+              "value": null,
+              "enabled": true,
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "signInPressAt": "2026-11-07T08:50:35.489Z",
+  "credentialCeremonyActor": "not_attributed"
+}

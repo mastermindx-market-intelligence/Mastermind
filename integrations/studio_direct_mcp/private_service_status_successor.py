@@ -421,6 +421,12 @@ def _require_paper_v20_origin(svc, account, roots, original_status_manifest):
 
 def _static_state(svc, account, roots, plan, raw):
     """Verify selected original bytes and the only three allowed write states."""
+    if (account == "chatgpt4" and os.path.lexists(
+            roots["state"] / "native-pool-pin-enrollment-publisher")):
+        if svc._pin_enrollment_owner_module().c4_publisher_postimage(
+                svc, account, roots, plan, raw):
+            return "COMMITTED"
+        fail("FOREIGN_STATE")
     if set(x.name for x in (roots["state"] / TRANSACTION).iterdir()) - FILE_NAMES:
         fail("FOREIGN_TRANSACTION")
     current_config = svc._fabric_release_bytes(roots["config"])
@@ -711,6 +717,10 @@ def _stopped(svc, account, roots):
 
 def require_start(svc, account, roots):
     """Only a completed original-owner status successor may start."""
+    if (account == "chatgpt4" and os.path.lexists(
+            roots["state"] / "native-pool-pin-enrollment-publisher")):
+        return svc._pin_enrollment_owner_module().c4_publisher_postimage(
+            svc, account, roots, durable=True)
     path = roots["state"] / TRANSACTION
     if not os.path.lexists(path):
         return False

@@ -61,9 +61,12 @@ describe("project execution through the existing command owner",()=>{
       validation:{git_diff_check:true}},context,preview)!;
     expect(build.payload.allowed_write_paths).toEqual(["app/example"]);
   });
-  it("retains only the pointer after a lost reply and recovers the same root without resubmit",async()=>{
+  it.each(["refused","context_changed","effect_unknown"])("retains the original pointer through a lost reply and %s status until recovery",async code=>{
+    let statusReads=0;
     const f=setup((operation,args)=>{
       if(operation==="submit") throw Error("lost response");
+      if(statusReads++===0) return {schema:"mastermind.project_execution_private_result.v1",operation,ok:false,data:null,
+        error:{code,message:"Project execution is unavailable for this request"}};
       return accepted("status",args);
     });
     let saved:OperationPointer|null=null;
@@ -77,11 +80,15 @@ describe("project execution through the existing command owner",()=>{
     expect(saved).toEqual(f.port.prepare(f.intent()));
     expect(Object.keys(saved!)).toEqual(["kind","targetKey","operationKey"]);
     const reopened=new OperationController(f.port,store);
+    const held=await reopened.recover();
+    expect(held.status).toBe("unknown");
+    expect(saved).toEqual(f.port.prepare(f.intent()));
     const recovered=await reopened.recover();
     expect(JSON.stringify(recovered)).toContain("JOB-001");
     expect(saved).toBeNull();
-    expect(f.request.mock.calls.map(c=>c[0])).toEqual(["submit","status"]);
-    expect(f.request.mock.calls[1][1]).toEqual({operation_key:f.intent().payload.operation_key,work_ref:"WS:ONE"});
+    expect(f.request.mock.calls.map(c=>c[0])).toEqual(["submit","status","status"]);
+    for(const call of f.request.mock.calls.slice(1))
+      expect(call[1]).toEqual({operation_key:f.intent().payload.operation_key,work_ref:"WS:ONE"});
   });
   it.each(["operation_conflict","effect_unknown","refused","previous_workspace_unavailable"])("keeps ambiguous effects distinct from pre-effect %s",async code=>{
     const f=setup(operation=>({schema:"mastermind.project_execution_private_result.v1",operation,ok:false,data:null,

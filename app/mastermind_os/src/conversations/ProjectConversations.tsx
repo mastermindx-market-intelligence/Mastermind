@@ -42,16 +42,18 @@ export function ProjectConversations(props:ProjectConversationsProps){
   useLayoutEffect(()=>{pending.current?.abort();setSnapshot(null);setConversation(null);setFreshWindow(null);setPhase('idle');},[props.owner,props.workRef]);
   useEffect(()=>props.owner?.subscribe(()=>{setConversation(null);setFreshWindow(null);changed(value=>value+1);}),[props.owner]);
   useEffect(()=>()=>pending.current?.abort(),[]);
+  function back(){pending.current?.abort();setConversation(null);setFreshWindow(null);setPhase('ready');focusAfter.current='list';}
+  // Listen before focusing the reader; a focus handler may immediately send Escape.
+  useLayoutEffect(()=>{if(!readerOpen)return;const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();back();}};
+    window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape);},[readerOpen]);
   useLayoutEffect(()=>{
-    if(focusAfter.current==='reader'&&readerOpen&&visible){heading.current?.focus();focusAfter.current=null;}
+    // Consume the intent before focus handlers can request a return to the list.
+    if(focusAfter.current==='reader'&&readerOpen&&visible){focusAfter.current=null;heading.current?.focus();}
     else if(focusAfter.current==='list'&&!readerOpen){
-      const restored=openReference.current?rowButtons.current.get(openReference.current):null;
-      if(restored?.isConnected)restored.focus();else if(openButton.current?.isConnected)openButton.current.focus();else heading.current?.focus();focusAfter.current=null;
+      focusAfter.current=null;const restored=openReference.current?rowButtons.current.get(openReference.current):null;
+      if(restored?.isConnected)restored.focus();else if(openButton.current?.isConnected)openButton.current.focus();else heading.current?.focus();
     }
   },[readerOpen,visible]);
-  function back(){pending.current?.abort();setConversation(null);setFreshWindow(null);setPhase('ready');focusAfter.current='list';}
-  useEffect(()=>{if(!readerOpen)return;const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();back();}};
-    window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape);},[readerOpen]);
   async function read(cursor?:string){
     const owner=live.current.owner,work=live.current.workRef;
     if(!owner||(cursor&&(!current(snapshot)||snapshot?.page?.next_cursor!==cursor)))return;
