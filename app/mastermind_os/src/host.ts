@@ -1,3 +1,4 @@
+import { decodeCompanyPriorities, type CompanyPrioritiesOwner } from "./meta-ceo/company-priorities";
 import { decodeNativeExecutiveObservation, type NativeExecutiveObservation } from "./native-executive-observation";
 import {hostObservationHostMethods,hostObservationPublicSelection,type HostObservationRawMethods,type HostObservationHostMethods} from "./resources/host-observation-host";
 import {freshConversationArguments, freshConversationNeedsWorkspace, type FreshConversationTransport} from "./orchestration/fresh-conversation-transport";
@@ -227,6 +228,7 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   /** Same fixed Programs acquisition, retaining its collection owner receipt. */
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
+  readonly companyPriorities?: CompanyPrioritiesOwner;
   readResult?: MissionResultRead;
   /** Mounted only when the raw method and the client invalidation generation both exist. */
   readMissionResult?(request: ResultSelection & { signal: AbortSignal }): Promise<MissionResultDocument>;
@@ -447,6 +449,21 @@ export function bindMissionHost(
   }):undefined;
   const command = completeOrchestratorCommandBinding(commandBinding);
   return {
+    ...(client.executive?.companyPriorities ? {companyPriorities: {
+      generation: () => client.executive!.authGeneration(),
+      available: () => client.executive!.available(),
+      subscribe: (listener:()=>void) => client.executive!.subscribe(listener),
+      read: async (signal:AbortSignal) => {
+        const owner=client.executive!, read=owner.companyPriorities!, generation=owner.authGeneration(), started=epoch;
+        const current=()=>!signal.aborted && epoch===started && client.executive===owner && owner.companyPriorities===read && owner.authGeneration()===generation && owner.available();
+        if(!current())throw new Error("COMPANY_READ_UNAVAILABLE");
+        const raw=await read.call(owner,signal);
+        if(!current())throw new Error("READ_CANCELLED");
+        const value=decodeCompanyPriorities(raw);
+        if(!current())throw new Error("READ_CANCELLED");
+        return value;
+      },
+    }} : {}),
     ...(client.nativeDraftRecovery ? { nativeDraftRecovery: client.nativeDraftRecovery } : {}),
     ...(client.terminalSharing ? { terminalSharing: client.terminalSharing } : {}),
     ...(client.openTerminalBriefs ? {

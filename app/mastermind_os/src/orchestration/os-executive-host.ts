@@ -18,6 +18,7 @@ export interface OsExecutiveTransport {
   available(): boolean;
   subscribe(listener: () => void): () => void;
   context(signal: AbortSignal): Promise<unknown>;
+  companyPriorities?(signal: AbortSignal): Promise<unknown>;
   submit(arguments_: Readonly<Record<string, unknown>>, signal: AbortSignal): Promise<unknown>;
   status(arguments_: { readonly intent_id: string }, signal: AbortSignal): Promise<unknown>;
   /** Observer-only closed diagnostics; a snapshot read performs no native call. */
