@@ -639,20 +639,65 @@ async def get_quote(args):
       "never a position size.",
       {"type": "object", "properties": {"top": {"type": "integer"}}})
 async def get_daily_briefing(args):
-    top = int(args.get("top") or 20)
-    b = (_read_json(_V / "site" / "intelligence" / "briefing.json")
-         or _read_json(_V / "data" / "intelligence" / "briefing.json"))
-    if b:
-        return _json({"as_of": b.get("as_of"), "macro_context": b.get("macro_context"),
-                      "n_actionable": b.get("n_actionable"), "n_divergences": b.get("n_divergences"),
-                      "priority_queue": (b.get("priority_queue") or [])[:top],
-                      "divergences": b.get("divergences"), "how_to_use": b.get("how_to_use")})
-    # not published yet — compose a live briefing from the per-engine intake funnel
-    from brain import intake
-    q = intake.build(limit=top)
-    return _json({"as_of": q.get("as_of"), "macro_context": q.get("macro_context"),
-                  "priority_queue": q.get("candidates"),
-                  "note": "Composed live from the dashboard signal engines (briefing.json not built yet)."})
+    failed_sources = ["briefing"]
+    try:
+        top = int(args.get("top") or 20)
+        briefing, briefing_failed = _read_first_nonempty_mapping_checked((
+            _V / "site" / "intelligence" / "briefing.json",
+            _V / "data" / "intelligence" / "briefing.json",
+        ))
+        if briefing is not None:
+            queue_raw = briefing.get("priority_queue")
+            divergences_raw = briefing.get("divergences")
+            queue_failed = not isinstance(queue_raw, list)
+            divergences_failed = divergences_raw is not None and not isinstance(divergences_raw, list)
+            source_failed = briefing_failed or queue_failed or divergences_failed
+            payload = {
+                "as_of": briefing.get("as_of"),
+                "macro_context": briefing.get("macro_context"),
+                "n_actionable": briefing.get("n_actionable"),
+                "n_divergences": briefing.get("n_divergences"),
+                "priority_queue": None if queue_failed else queue_raw[:top],
+                "divergences": None if divergences_failed else divergences_raw,
+                "how_to_use": briefing.get("how_to_use"),
+            }
+            if source_failed:
+                payload["read_status"] = "partial"
+                payload["failed_sources"] = ["briefing"]
+                payload["note"] = "Published briefing evidence is incomplete; missing fields are unknown."
+            return _json(payload)
+
+        # Missing publication permits a live briefing; a failed artifact remains visible.
+        failed_sources = (["briefing"] if briefing_failed else []) + ["intake"]
+        from brain import intake
+
+        live = intake.build(limit=top)
+        if not isinstance(live, dict):
+            raise TypeError("intake briefing is not a mapping")
+        candidates = live.get("candidates")
+        if not isinstance(candidates, list):
+            raise TypeError("intake candidates are not a list")
+        payload = {
+            "as_of": live.get("as_of"),
+            "macro_context": live.get("macro_context"),
+            "priority_queue": candidates,
+            "note": "Composed live from the dashboard signal engines (briefing.json not built yet).",
+        }
+        if "note" in live:
+            payload["intake_note"] = live["note"]
+        if briefing_failed:
+            payload["read_status"] = "partial"
+            payload["failed_sources"] = ["briefing"]
+        return _json(payload)
+    except Exception:  # noqa: BLE001 - setup, composition and serialization share one boundary
+        return _json({
+            "as_of": None,
+            "macro_context": None,
+            "priority_queue": None,
+            "read_status": "unavailable",
+            "error": "daily_briefing_unavailable",
+            "failed_sources": failed_sources,
+        })
 
 
 @tool("get_intel_hub",
@@ -667,29 +712,97 @@ async def get_daily_briefing(args):
       "sector heat. The richest single pull; context-only, never sizes.",
       {"type": "object", "properties": {"ticker": {"type": "string"}, "top": {"type": "integer"}}})
 async def get_intel_hub(args):
-    h = (_read_json(_V / "site" / "intel_hub" / "hub.json")
-         or _read_json(_V / "data" / "intel_hub" / "hub.json"))
-    if not h:
-        return _ok("intel hub not built yet (site/intel_hub/hub.json absent — ships in the daily build).")
-    t = (args.get("ticker") or "").upper()
-    if t:
-        d = next((x for x in (h.get("command") or []) if (x.get("ticker") or "").upper() == t), None)
-        if not d:
-            return _ok(f"{t} not in the intel-hub command (no cross-desk signal today).")
-        return _json({"ticker": t, **d, "macro_context": h.get("macro_context"),
-                      "note": "Full 5-desk dossier. The flags name the setup; track the falsifier."})
-    top = int(args.get("top") or 15)
+    try:
+        ticker = args.get("ticker")
+        if ticker is None:
+            ticker = ""
+        if not isinstance(ticker, str) or (ticker and not ticker.strip()):
+            raise TypeError("intel-hub ticker is not a usable string")
+        t = ticker.upper()
+        hub, hub_failed = _read_first_nonempty_mapping_checked((
+            _V / "site" / "intel_hub" / "hub.json",
+            _V / "data" / "intel_hub" / "hub.json",
+        ))
+        if hub is None:
+            if hub_failed:
+                raise ValueError("intel-hub artifact is unavailable")
+            return _ok("intel hub not built yet (site/intel_hub/hub.json absent — ships in the daily build).")
 
-    def _slim(d):
-        return {k: d.get(k) for k in ("ticker", "name", "composite_conviction", "lean", "n_confirm",
-                "n_dissent", "flags", "read", "peers", "sectors", "falsifier") if k in d}
-    return _json({"as_of": h.get("as_of"), "macro_context": h.get("macro_context"),
-                  "desks": h.get("desks"), "counts": h.get("counts"),
-                  "n_actionable": h.get("n_actionable"),
-                  "command": [_slim(d) for d in (h.get("command") or [])[:top]],
-                  "divergence_alerts": h.get("divergence_alerts"),
-                  "sector_heat": (h.get("sector_heat") or [])[:8],
-                  "how_to_use": h.get("how_to_use")})
+        command_raw = hub.get("command")
+        sector_raw = hub.get("sector_heat")
+        command_field_failed = not isinstance(command_raw, list)
+        sector_field_failed = sector_raw is not None and not isinstance(sector_raw, list)
+        command_rows = []
+        row_failed = False
+        for row in [] if command_field_failed else command_raw:
+            row_ticker = row.get("ticker") if isinstance(row, dict) else None
+            if not isinstance(row_ticker, str) or not row_ticker.strip():
+                row_failed = True
+                continue
+            command_rows.append(row)
+        sector_rows = [] if sector_field_failed else list(sector_raw or [])
+        sector_row_failed = any(not isinstance(row, dict) for row in sector_rows)
+        sector_rows = [row for row in sector_rows if isinstance(row, dict)]
+        evidence_failed = hub_failed or command_field_failed or sector_field_failed or row_failed or sector_row_failed
+
+        if t:
+            dossier = next(
+                (row for row in command_rows if row["ticker"].upper() == t),
+                None,
+            )
+            if dossier is None and evidence_failed:
+                return _json({
+                    "ticker": t,
+                    "dossier": None,
+                    "macro_context": hub.get("macro_context"),
+                    "read_status": "partial",
+                    "failed_sources": ["intel_hub"],
+                    "note": "Intel-hub evidence is incomplete; ticker absence cannot be confirmed.",
+                })
+            if dossier is None:
+                return _ok(f"{t} not in the intel-hub command (no cross-desk signal today).")
+            payload = {
+                "ticker": t,
+                **dossier,
+                "macro_context": hub.get("macro_context"),
+                "note": "Full 5-desk dossier. The flags name the setup; track the falsifier.",
+            }
+            if evidence_failed:
+                payload["read_status"] = "partial"
+                payload["failed_sources"] = ["intel_hub"]
+            return _json(payload)
+
+        top = int(args.get("top") or 15)
+
+        def _slim(row):
+            return {key: row.get(key) for key in (
+                "ticker", "name", "composite_conviction", "lean", "n_confirm",
+                "n_dissent", "flags", "read", "peers", "sectors", "falsifier",
+            ) if key in row}
+
+        payload = {
+            "as_of": hub.get("as_of"),
+            "macro_context": hub.get("macro_context"),
+            "desks": hub.get("desks"),
+            "counts": hub.get("counts"),
+            "n_actionable": hub.get("n_actionable"),
+            "command": None if command_field_failed else [_slim(row) for row in command_rows[:top]],
+            "divergence_alerts": hub.get("divergence_alerts"),
+            "sector_heat": None if sector_field_failed else sector_rows[:8],
+            "how_to_use": hub.get("how_to_use"),
+        }
+        if evidence_failed:
+            payload["read_status"] = "partial"
+            payload["failed_sources"] = ["intel_hub"]
+            payload["note"] = "Intel-hub evidence is incomplete; missing rows/fields are unknown."
+        return _json(payload)
+    except Exception:  # noqa: BLE001 - malformed inputs and unavailable evidence stay closed
+        return _json({
+            "read_status": "unavailable",
+            "error": "intel_hub_unavailable",
+            "failed_sources": ["intel_hub"],
+            "command": None,
+        })
 
 
 @tool("get_intake_candidates",
