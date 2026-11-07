@@ -1,4 +1,5 @@
 {
+  "application_acceptance_frontier": "application-acceptance-frontier-20261107.md",
   "ci": {
     "a884_component_steps": {
       "Verify closed application transport in isolated root fixtures": "SUCCESS",
@@ -35,6 +36,11 @@
     "head": "c71cc56c3631183efed8eccdb6a6c5060b1050a5",
     "incorporated": true,
     "return": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6710374623"
+  },
+  "completed_publication_source": {
+    "head": "67b8dd5db8775d90c1545365929f42b6d90c37aa",
+    "receipt": "final-handoff-source.json",
+    "tree": "21a7b056a8da8e596ff4a208bf87fe1ba1ba295e"
   },
   "current_final_join": {
     "completed_hermes_incorporated": "c71cc56c3631183efed8eccdb6a6c5060b1050a5",
@@ -177,6 +183,13 @@
   "qualified_merge_commit": "ab4732a81e7101d137f6fe31dea2f17f8a536e1d",
   "qualified_merge_tree": "55a7e822a6a99bacc40db128a268c5af988bc8f0",
   "release_registry_equal_entries": 70,
+  "reported_native_generation_update": {
+    "fresh_selector_cas_observation": false,
+    "generation": "205b8321c22858b568fe37b7f11b861ee9aeed9c6615bd47847d986b14dfea08",
+    "observed_at": "2026-11-07T17:30:10Z",
+    "sequence": 36,
+    "source_comment": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6710686251"
+  },
   "schema": "mastermind.h6-current-source-composition.v1",
   "selected": false,
   "studio_fixture_pair_changed": false,

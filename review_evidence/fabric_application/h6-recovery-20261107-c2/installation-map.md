@@ -360,3 +360,24 @@ Original A–D acceptance remains open. PLAN_NOT_ORG_LINKED remains explicit.
 Next action: finish committed evidence guard and current-head CI, deliver this exact
 source through the existing #2175/#983 return, and reconcile actual adoption plus
 runtime/product inputs through their current owners. MISSION_COMPLETE=false.
+
+
+### Final completed-source return prepared
+
+Source 67b8dd5db8775d90c1545365929f42b6d90c37aa also incorporates completed
+Hermes ce625f44bb200b04df9590e9b07df3eae55102f3 with true two-parent history.
+Only the finished historical H1 packaging fixture, exact readiness token control
+and retained proof were added; native production and the coupled worker/backend
+remain byte-identical to their qualified inputs. Five changed-path cases passed.
+
+The committed evidence guard initially found one observed host UID in the original
+readiness receipt. The receipt stayed unchanged; an exact hash/token record fixed
+that finding. All seven repaired guard/drift cases passed on 5b76ba0d. The final
+resulting-head guard and hosted CI are separate delivery receipts. Failure and
+repair logs remain retained. See final-handoff-source.json.
+
+The account-owner return is reconciled in application-acceptance-frontier-20261107.md.
+Reported native sequence 36 supersedes the old sequence-35 planning observation;
+no fresh selector CAS is claimed here. Worker/J receipts do not create APPLICATION
+grants. The non-Go issuer/envelope and product journey remain open. H6 continues
+its original common-fence/whole-operation contract; H3 is still unselectable.

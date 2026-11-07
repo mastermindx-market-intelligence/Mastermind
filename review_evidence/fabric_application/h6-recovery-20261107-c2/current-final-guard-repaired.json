@@ -1,0 +1,28 @@
+{
+  "schema": "mastermind.h6.current_repaired_guard.v1",
+  "head": "5b76ba0d0a3d5cdbd93b514050d26946ba0cc890",
+  "command": [
+    "/private/tmp/h6-h5-python-3kmykvgs/venv/bin/python",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "--tb=short",
+    "--basetemp=/tmp/h6-current-repaired-guard-drdmgj77/pytest",
+    "--junitxml=/tmp/h6-current-repaired-guard-drdmgj77/tests.xml",
+    "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults",
+    "tests/test_hermes_fabric_native_identity_review.py",
+    "tests/test_executive_fabric_release_identity_review.py::test_only_exact_reviewed_file_and_spelling_qualifies[review_evidence/fabric_application/h6-recovery-20261107-c2/current-join-native.xml]",
+    "tests/test_executive_fabric_release_identity_review.py::test_changed_or_extended_file_cannot_reuse_review[review_evidence/fabric_application/h6-recovery-20261107-c2/current-join-native.xml]",
+    "tests/test_executive_fabric_release_identity_review.py::test_only_exact_reviewed_file_and_spelling_qualifies[review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json]",
+    "tests/test_executive_fabric_release_identity_review.py::test_changed_or_extended_file_cannot_reuse_review[review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json]"
+  ],
+  "rc": 0,
+  "seconds": 48.208,
+  "cases": 7,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "log_sha256": "83a1593c5b5783693fe3006d1f6597bcb4f3a5968f23b59481ee09a0477f910a",
+  "xml_sha256": "4bfebcea6df2fb81e9ba5e362e9aa0ccd2496d0333d5706cc82cf62f94f37ed3"
+}

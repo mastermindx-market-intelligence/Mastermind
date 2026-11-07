@@ -1,0 +1,31 @@
+{
+  "schema": "mastermind.h6.final_handoff_source.v1",
+  "source_head": "67b8dd5db8775d90c1545365929f42b6d90c37aa",
+  "source_tree": "21a7b056a8da8e596ff4a208bf87fe1ba1ba295e",
+  "source_parents": [
+    "5b76ba0d0a3d5cdbd93b514050d26946ba0cc890",
+    "ce625f44bb200b04df9590e9b07df3eae55102f3"
+  ],
+  "incorporated_original_head": "0d8174951141b1790e6121e13202e4036d1bdc20",
+  "incorporated_completed_hermes": "ce625f44bb200b04df9590e9b07df3eae55102f3",
+  "native_production_equal_cfc": true,
+  "coupled_worker_backend_equal_ce625": true,
+  "native_component_proofs": "completed-current-composition.json",
+  "guard_failure_and_repair": "current-final-guard-reconciliation.json",
+  "completed_hermes_join_proof": "completed-hermes-join.json",
+  "account_acceptance_frontier": "application-acceptance-frontier-20261107.md",
+  "registry_effective_records": 101,
+  "readiness_receipt_unchanged": true,
+  "resulting_head_ci": "Separate original GitHub Actions receipt required after publication",
+  "original_final_carriers": [
+    "Mastermind#2175",
+    "macro#10740"
+  ],
+  "h3_selectable": false,
+  "installed": false,
+  "provider_calls": false,
+  "grants_created": false,
+  "original_J_replayed": false,
+  "mission_complete": false,
+  "next_h6_contract": "Existing-owner common fence, beginning with bounded writer census and exact helper/launcher closure; preserve all original effects"
+}

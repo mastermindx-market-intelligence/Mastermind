@@ -22,5 +22,12 @@
     "current-final-guard-first.log",
     "current-final-guard-first.xml"
   ],
-  "repair_result": "NOT_YET_RUN"
+  "repair_result": {
+    "head": "5b76ba0d0a3d5cdbd93b514050d26946ba0cc890",
+    "cases": 7,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "receipt": "current-final-guard-repaired.json"
+  }
 }

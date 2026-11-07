@@ -1,0 +1,24 @@
+{
+  "schema": "mastermind.h6.ce_join_qualification.v1",
+  "head": "67b8dd5db8775d90c1545365929f42b6d90c37aa",
+  "command": [
+    "/private/tmp/h6-h5-python-3kmykvgs/venv/bin/python",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "--tb=short",
+    "--basetemp=/tmp/h6-ce-join-proof-dzwox87u/pytest",
+    "--junitxml=/tmp/h6-ce-join-proof-dzwox87u/tests.xml",
+    "tests/test_h1_native100_packaging.py",
+    "tests/test_executive_fabric_release_identity_review.py::test_non_python_review_still_requires_exact_diff_postimage[review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json]"
+  ],
+  "rc": 0,
+  "seconds": 1.602,
+  "cases": 5,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "log_sha256": "4d2df7a96ce4a667da3ccf295f2d16c728a65ed0e861a3baa919f7bb469b02b5",
+  "xml_sha256": "e262ab67e8784039bd748ef685082770db8a25b03e5fe3bd305ff044f491fa54"
+}
