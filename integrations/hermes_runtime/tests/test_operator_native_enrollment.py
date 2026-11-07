@@ -185,7 +185,7 @@ def test_actual_command_enrolls_original_once_and_reopens_existing(enrollment_co
     assert world.state.qualifications >= 7 and world.state.checks > 0
 
 
-@pytest.mark.parametrize("version", [1, 4])
+@pytest.mark.parametrize("version", [1, 5])
 def test_disarmed_or_unknown_recipe_refuses_before_native_import(enrollment_command, version):
     world = enrollment_command()
     world.launch.recipe["schema"] = f"mastermind.hermes_native_gateway_installation/v{version}"
@@ -278,3 +278,4 @@ def test_command_cannot_enroll_the_other_role(enrollment_command, role):
     with pytest.raises(RuntimeRefusal, match="NATIVE_ENROLLMENT_INSTALLATION_REQUIRED"):
         operation(world.path, world.binary, native_launch=world.launch)
     assert world.state.qualifications == world.state.inspections == world.state.creations == 0
+

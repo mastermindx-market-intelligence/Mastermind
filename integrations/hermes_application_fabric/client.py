@@ -16,7 +16,7 @@ import math
 from types import SimpleNamespace
 from typing import Callable
 
-from .codec import ID, json_bytes, to_hermes_response, to_owner_request, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES
+from .codec import ID, json_bytes, to_hermes_response, to_owner_request, MAX_REQUEST_BYTES, MAX_RESULT_BYTES
 from .errors import HermesFabricError
 from .structured import prepare_structured_request
 
@@ -331,7 +331,7 @@ class HermesApplicationClient:
                 payload = structured.consume(payload)
             if observation is not None:
                 payload["application_observation"] = observation
-            json_bytes(payload, MAX_RESPONSE_BYTES)
+            json_bytes(payload, MAX_RESULT_BYTES)
         except HermesFabricError:
             # The provider may have completed even when its output is unusable.
             # The original owner still holds the real usage/terminal evidence.
