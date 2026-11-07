@@ -15,7 +15,10 @@
  * current principal and grant at submission/status time.
  */
 
+import {canonicalJson} from './operation-key';
+import {validateDiscoveryCorrectionTarget,type DiscoveryCorrectionTarget} from '../knowledge/library/project-discovery-correction';
 const SOURCE_WRITE_TARGET_PREFIX = 'project-source-write.v1:';
+const CORRECTION_TARGET_PREFIX = 'project-source-write.v2:';
 const SOURCE_WRITE_TARGET_MAX_LENGTH = 2048;
 const WORK_REF_PREFIX = 'WS:';
 const WORK_REF_KEY_MIN_LENGTH = 2;
@@ -27,16 +30,18 @@ const PROJECT_SOURCE_WRITE_TARGET_ACTIONS = [
 ] as const;
 
 export type ProjectSourceWriteTargetAction =
-  (typeof PROJECT_SOURCE_WRITE_TARGET_ACTIONS)[number];
+  (typeof PROJECT_SOURCE_WRITE_TARGET_ACTIONS)[number] | 'correct_project_discovery';
+type LegacyAction = (typeof PROJECT_SOURCE_WRITE_TARGET_ACTIONS)[number];
 
-export interface ProjectSourceWriteTarget {
-  readonly action: ProjectSourceWriteTargetAction;
+interface LegacyProjectSourceWriteTarget {
+  readonly action: LegacyAction;
   readonly work_ref: string;
   readonly source_commit: string;
   readonly base_revision: string;
   readonly request_sha256: string;
   readonly expected_preference_revision: string | null;
 }
+export type ProjectSourceWriteTarget = LegacyProjectSourceWriteTarget | DiscoveryCorrectionTarget;
 
 /** Canonical JSON key order: lexicographically sorted field names. */
 const TARGET_FIELD_NAMES = [
@@ -58,7 +63,7 @@ const UPPER_KEBAB_KEY = /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
 
 /** Fixed lookup key shapes, paired one to one with the two actions. */
 const OPERATION_KEY_PATTERNS: Readonly<
-  Record<ProjectSourceWriteTargetAction, RegExp>
+  Record<LegacyAction, RegExp>
 > = {
   add_project_file: /^mmos-project-file-add-[0-9a-f]{40}$/,
   set_project_communication_preference: /^mmos-project-preference-set-[0-9a-f]{40}$/,
@@ -161,7 +166,7 @@ function readExpectedPreferenceRevision(
   return { ok: true, value: read.value };
 }
 
-function isTargetAction(value: string): value is ProjectSourceWriteTargetAction {
+function isTargetAction(value: string): value is LegacyAction {
   return (PROJECT_SOURCE_WRITE_TARGET_ACTIONS as readonly string[]).includes(value);
 }
 
@@ -176,7 +181,7 @@ function isCanonicalWorkRef(value: string): boolean {
   return fullMatch(UPPER_KEBAB_KEY, key);
 }
 
-function toTarget(record: Record<string, unknown>): ProjectSourceWriteTarget | null {
+function toTarget(record: Record<string, unknown>): LegacyProjectSourceWriteTarget | null {
   const action = readStringField(record, 'action');
   if (!action.ok || !isTargetAction(action.value)) {
     return null;
@@ -274,6 +279,11 @@ function parseTargetString(value: string): ProjectSourceWriteTarget | null {
   if (value.length > SOURCE_WRITE_TARGET_MAX_LENGTH) {
     return null;
   }
+  if (value.startsWith(CORRECTION_TARGET_PREFIX)) {
+    const body=value.slice(CORRECTION_TARGET_PREFIX.length);
+    const target=validateDiscoveryCorrectionTarget(JSON.parse(body));
+    return canonicalJson(target)===body?target:null;
+  }
   if (!value.startsWith(SOURCE_WRITE_TARGET_PREFIX)) {
     return null;
   }
@@ -322,6 +332,7 @@ export function parseProjectSourceWriteTarget(
     if (typeof value === 'string') {
       return parseTargetString(value);
     }
+    try {return validateDiscoveryCorrectionTarget(value);} catch { /* Original v1 remains exact. */ }
     const record = toTargetRecord(value);
     if (record === null) {
       return null;
@@ -339,6 +350,11 @@ export function parseProjectSourceWriteTarget(
  */
 export function serializeProjectSourceWriteTarget(value: unknown): string | null {
   try {
+    try {
+      const target=validateDiscoveryCorrectionTarget(value);
+      const serialized=CORRECTION_TARGET_PREFIX+canonicalJson(target);
+      return serialized.length<=SOURCE_WRITE_TARGET_MAX_LENGTH?serialized:null;
+    } catch { /* Original v1 remains exact. */ }
     const record = toTargetRecord(value);
     if (record === null) {
       return null;
@@ -373,6 +389,10 @@ export function projectSourceWriteKeyMatches(
   target: ProjectSourceWriteTarget,
 ): boolean {
   try {
+    const correction=parseProjectSourceWriteTarget(target);
+    if (correction?.action==='correct_project_discovery') {
+      return typeof operationKey==='string'&&fullMatch(/^mmos-project-discovery-correct-[0-9a-f]{40}$/,operationKey);
+    }
     const record = toTargetRecord(target);
     if (record === null) {
       return false;

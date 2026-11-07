@@ -17,6 +17,7 @@ from common.workspace_source_operation_wire import (
     FRAME_SCHEMA, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES, validate_frame, operation_request_limit)
 from control_plane.workspace_owned_task import await_owned
 from integrations.mastermind_workspace_app.contract import principal_frame
+from common import workspace_discovery_correction_contract as correction
 
 
 def _unique(pairs):
@@ -44,7 +45,7 @@ def _preview(body, request, scope):
     validate_witness(body["preview_witness"])
     if body["preview_witness"]["recipe_fingerprint_sha256"] != body["recipe_fingerprint_sha256"]:
         raise ValueError()
-    if selected["action"] in {"add_project_file", "set_project_communication_preference"}:
+    if selected["action"] in {"add_project_file", "set_project_communication_preference", correction.ACTION}:
         _knowledge_preview(body["preview"], request["request"], selected, scope)
         return body
     if selected["action"] == "ADOPT_PLAN":
@@ -83,6 +84,22 @@ def _knowledge_preview(preview, request, selected, scope):
             or preview["work_ref"] != request.get("work_ref") or preview["source_commit"] != request.get("source_commit")):
         raise ValueError()
     ws_path = "agentos/workstreams/WS-" + selected["work_ref"][3:] + ".md"
+    if selected["action"] == correction.ACTION:
+        if preview["change"] != correction.preview_change(request, scope):
+            raise ValueError()
+        expected = correction.expected_preimages(request, scope)
+        images = preview["postimages"]
+        if (type(images) is not list or len(images) != 3
+                or any(type(image) is not dict for image in images)
+                or {image.get("path") for image in images} != set(expected)):
+            raise ValueError()
+        for image in images:
+            if (set(image) != {"path", "content_sha256", "expected_preimage_sha256"}
+                    or image["expected_preimage_sha256"] != expected[image["path"]]
+                    or type(image["content_sha256"]) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", image["content_sha256"]) is None):
+                raise ValueError()
+        return
     if selected["action"] == "add_project_file":
         file = request["file"]
         change = {"kind": "FILE_ADD", "display_name": file["display_name"],
@@ -129,8 +146,8 @@ async def source_operation_http(request, *, config, operation):
             if len({k for k, _ in pairs}) != len(pairs): raise ValueError()
             value = dict(pairs)
             if "schema" in value: raise ValueError()
-            if value.get("action") in {"add_project_file", "set_project_communication_preference"}:
-                if value.get("expected_preference_revision") == "null": value["expected_preference_revision"] = None
+            if value.get("action") in {"add_project_file", "set_project_communication_preference", correction.ACTION}:
+                if value.get("action") != correction.ACTION and value.get("expected_preference_revision") == "null": value["expected_preference_revision"] = None
             elif operation != "options": value["schema"] = "mastermind.workspace_source_operation_lookup.v1"
         else:
             if request.scope.get("query_string"): raise ValueError()
@@ -154,7 +171,7 @@ async def source_operation_http(request, *, config, operation):
         scope = permission.principal_scope
         latest_gate = None
         latest_stamp = None
-        if action in {"add_project_file", "set_project_communication_preference"} and operation in {"prepare", "submit"}:
+        if action in {"add_project_file", "set_project_communication_preference", correction.ACTION} and operation in {"prepare", "submit"}:
             from integrations.mastermind_workspace_app.project_authoring_grant import workspace_project_authorizers
             latest_gate, _ = workspace_project_authorizers(policy=factory.policy,
                 load_bindings=factory._load_bindings,action="read_latest_project_data")

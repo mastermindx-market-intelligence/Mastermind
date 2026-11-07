@@ -37,9 +37,20 @@ per-call environment (the caller's own environment is never mutated), and the
 capture reuses the captured ``scripts/agentos.py`` parser and checkers and the
 captured ``scripts/project_knowledge_recipes.py`` compiler (module identity
 isolated and restored) instead of inferring law from local copies.  Budgets
-are UTF-8 byte budgets: 4 MiB cumulative Git output within 15 seconds, code
-blobs 1 MiB each, workstream 128 KiB, one decision record 16 KiB, one project
-file 32 KiB, and the whole canonical capture at most 524288 bytes.
+are UTF-8 byte budgets: 4 MiB cumulative Git output within 15 seconds for
+the original file/preference actions. Discovery correction uses that same
+bounded runner with a 32 MiB allowance for its complete four-directory
+reference capture (at most 4096 ordinary direct Markdown records). Each
+reference/code blob is at most 1 MiB; workstream 128 KiB, preference decision
+16 KiB, project file/discovery 32 KiB. The canonical retained capture remains
+at most 524288 bytes: correction retains the original WS/DSC bodies, evidence
+date and complete reference-closure receipt, not the entire reference store.
+
+Correction returns exactly OLD DSC, deterministic absent NEW DSC and selected
+WS. Its scope comes from the actual captured canonical parser. Restoration
+uses the original bodies, closure and code identity without rereading today's
+reference graph. Installed source/materialization qualification remains with
+the incumbent facade; this internal reader does not certify host symlinks.
 
 These functions are INTERNAL source capture, not caller authorization and not
 publication.  They never write, upload, fetch, or infer a principal relation;
@@ -66,6 +77,7 @@ import sys
 import time
 import types
 from pathlib import Path
+from common import workspace_discovery_correction_contract as correction
 
 __all__ = [
     "compile_project_knowledge_recipe",
@@ -96,6 +108,8 @@ _CODE_LIMIT = 1048576
 _WS_LIMIT = 131072
 _DECISION_LIMIT = 16384
 _FILE_LIMIT = 32768
+_DISCOVERY_LIMIT = 32768
+_REFERENCE_BUDGET = 32 * 1048576
 _TIMEOUT_MAX = 15.0
 
 _SHA40 = re.compile(r"[0-9a-f]{40}")
@@ -258,6 +272,9 @@ def _validate_request(request):
     elif schema == PREFERENCE_SET_REQUEST_SCHEMA:
         keys, prefix = _PREFERENCE_KEYS, _PREFERENCE_REQUEST_ID_PREFIX
         mode = "preference"
+    elif schema == correction.REQUEST_SCHEMA:
+        correction.validate_request(request)
+        return "correction", request["work_ref"], request["work_ref"][3:]
     else:
         raise ValueError(_REJECT)
     if set(request) != set(keys):
@@ -302,16 +319,19 @@ def _validate_bindings(actor_ref, permission_binding_digest, decision_date):
     _validate_decision_date(decision_date)
 
 
-def _validate_snapshot(initial_snapshot, decision_date):
+def _validate_snapshot(initial_snapshot, decision_date, mode="preference"):
     """The retained private snapshot is bodies plus the retained date only."""
-    if type(initial_snapshot) is not dict or set(initial_snapshot) != set(_SNAPSHOT_KEYS):
+    keys = ({"workstream_text", "discovery_text", "reference_closure", "decision_date"}
+            if mode == "correction" else _SNAPSHOT_KEYS)
+    if type(initial_snapshot) is not dict or set(initial_snapshot) != set(keys):
         raise ValueError(_REJECT)
     workstream_text = _validate_bounded_text(
         initial_snapshot["workstream_text"], limit=_WS_LIMIT
     )
-    decision_text = initial_snapshot["decision_text"]
+    decision_text = initial_snapshot["discovery_text" if mode == "correction" else "decision_text"]
     if decision_text is not None:
-        decision_text = _validate_bounded_text(decision_text, limit=_DECISION_LIMIT)
+        decision_text = _validate_bounded_text(decision_text,
+            limit=_DISCOVERY_LIMIT if mode == "correction" else _DECISION_LIMIT)
     if initial_snapshot["decision_date"] != decision_date:
         raise ValueError(_REJECT)
     return workstream_text, decision_text
@@ -361,11 +381,12 @@ class _Session:
         self.expected_head = expected_macro_sha
         self.deadline = time.monotonic() + timeout
         self.consumed = 0
+        self.budget = _TOTAL_BUDGET
         self._peer = None
         self._runner = runner
         self.commands = []
 
-    def git(self, *args, limit=262144):
+    def git(self, *args, limit=262144, input_bytes=None):
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
             raise ValueError(_REJECT)
@@ -386,6 +407,7 @@ class _Session:
                 timeout=remaining,
                 max_bytes=limit,
                 env=_git_env(),
+                **({"input_bytes": input_bytes} if input_bytes is not None else {}),
             )
         except (OSError, ValueError, TypeError):
             raise ValueError(_REJECT) from None
@@ -400,7 +422,7 @@ class _Session:
             raise ValueError(_REJECT)
         value = result["stdout"]
         self.consumed += _ulen(value)
-        if self.consumed + (self._peer.consumed if self._peer is not None else 0) > _TOTAL_BUDGET:
+        if self.consumed + (self._peer.consumed if self._peer is not None else 0) > self.budget:
             raise ValueError(_REJECT)
         return value
 
@@ -513,7 +535,7 @@ def _file_target(actor_ref, request, key):
     return "agentos/project-files/WS-" + key + "/" + file_id + "." + ext, file_id
 
 
-def _build_recipe(session, compiler_module, mode, request, ws_text, decision_text, decision_date, actor_ref, permission_binding_digest):
+def _build_recipe(session, compiler_module, mode, request, ws_text, decision_text, decision_date, actor_ref, permission_binding_digest, reference_closure=None):
     """Execute the ACTUAL captured compiler bytes; the caller can never pass
     a module, callback, compiler or code body - code comes only from the two
     fixed Git blobs."""
@@ -533,6 +555,12 @@ def _build_recipe(session, compiler_module, mode, request, ws_text, decision_tex
                         workstream_text=ws_text,
                         existing_file_text=None,
                     )
+                elif mode == "correction":
+                    recipe = compiler_module.build_project_discovery_correct(
+                        request, actor_ref=actor_ref, permission_binding_digest=permission_binding_digest,
+                        captured_commit=session.commit, workstream_text=ws_text,
+                        discovery_text=decision_text, decision_date=decision_date,
+                        reference_closure=reference_closure)
                 else:
                     recipe = compiler_module.build_project_preference_set(
                         request,
@@ -567,11 +595,13 @@ def _validate_recipe(session, parser_module, recipe, mode, request, key, ws_text
         or _SHA64.fullmatch(recipe["permission_binding_digest"]) is None
     ):
         raise ValueError(_REJECT)
-    expected_action = _ACTION_FILE_ADD if mode == "file_add" else _ACTION_PREFERENCE_SET
+    expected_action = correction.RECIPE_ACTION if mode == "correction" else _ACTION_FILE_ADD if mode == "file_add" else _ACTION_PREFERENCE_SET
     if recipe["action"] != expected_action:
         raise ValueError(_REJECT)
     postimages = recipe["postimages"]
-    if type(postimages) is not list or len(postimages) != 2:
+    count = 3 if mode == "correction" else 2
+    if (type(postimages) is not list or len(postimages) != count
+            or len({image.get("path") for image in postimages if type(image) is dict}) != count):
         raise ValueError(_REJECT)
     ws_post = None
     record_post = None
@@ -595,14 +625,14 @@ def _validate_recipe(session, parser_module, recipe, mode, request, key, ws_text
             limit, expected_preimage = _WS_LIMIT, _sha256_hex(ws_text)
             ws_post = image
         elif path == media_path:
-            limit, expected_preimage = _FILE_LIMIT, None
+            limit, expected_preimage = _DISCOVERY_LIMIT if mode == "correction" else _FILE_LIMIT, None
         else:
-            limit = _DECISION_LIMIT
+            limit = _DISCOVERY_LIMIT if mode == "correction" else _DECISION_LIMIT
             expected_preimage = None if decision_text is None else _sha256_hex(decision_text)
             record_post = image
         if _ulen(content) > limit or image["expected_preimage_sha256"] != expected_preimage:
             raise ValueError(_REJECT)
-    if ws_post is None or (mode == "preference") != (record_post is not None):
+    if ws_post is None or (mode in {"preference", "correction"}) != (record_post is not None):
         raise ValueError(_REJECT)
     # Re-validate the emitted records with the SAME captured parser, at their
     # canonical paths so the parser's own filename checks apply.
@@ -611,7 +641,14 @@ def _validate_recipe(session, parser_module, recipe, mode, request, key, ws_text
         raise ValueError(_REJECT)
     if record.get("key") != key:
         raise ValueError(_REJECT)
-    if record_post is not None:
+    if mode == "correction":
+        for image in postimages:
+            if image["path"] == ws_path:
+                continue
+            record, _body = _parse_record(parser_module, image["content_utf8"])
+            if _hard(parser_module.check_discovery(record, session.root / image["path"])):
+                raise ValueError(_REJECT)
+    elif record_post is not None:
         record, _body = _parse_record(parser_module, record_post["content_utf8"])
         if _hard(parser_module.check_decision(record, session.root / record_post["path"])):
             raise ValueError(_REJECT)
@@ -693,6 +730,84 @@ def _capture_code(session):
     }
 
 
+def _capture_discovery_references(session, parser_module, request, actor_ref, parser_sha):
+    """Complete direct-record inventory and one bounded original Git batch.
+
+    The canonical loader reads direct *.md members of these four directories.
+    No bundle sample, worktree path, shell grep, lazy fetch or partial scan can
+    establish correction scope. The retained compact conclusion remains private
+    original-input material; its digest is not a freestanding authority token.
+    """
+    folders = {"workstreams": "WS", "decisions": "DEC", "discoveries": "DSC", "handoffs": "HND"}
+    for directory in ["agentos", *("agentos/" + name for name in folders)]:
+        membership = session.git("ls-tree", "-z", session.commit, "--", directory, limit=_CODE_LIMIT)
+        if membership and re.fullmatch(r"040000 tree [0-9a-f]{40}\t" + re.escape(directory) + "\0", membership) is None:
+            raise ValueError(_REJECT)
+    listing = session.git("ls-tree", "-r", "-z", session.commit, "--",
+        *("agentos/" + name for name in folders), limit=_CODE_LIMIT)
+    entries, counts = [], {prefix: 0 for prefix in folders.values()}
+    for item in listing.split("\0"):
+        if not item:
+            continue
+        try:
+            metadata, path = item.split("\t", 1)
+            mode, kind, blob = metadata.split(" ")
+        except ValueError:
+            raise ValueError(_REJECT) from None
+        parts = path.split("/")
+        if len(parts) != 3 or parts[0] != "agentos" or parts[1] not in folders or not parts[2].endswith(".md"):
+            continue  # not a direct record consumed by this exact canonical loader.
+        if mode != "100644" or kind != "blob" or _SHA40.fullmatch(blob) is None:
+            raise ValueError(_REJECT)
+        prefix = folders[parts[1]]
+        if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*\.md", parts[2])
+                or (prefix != "HND" and not parts[2].startswith(prefix + "-"))):
+            raise ValueError(_REJECT)
+        entries.append({"path": path, "mode": mode, "git_blob_sha": blob})
+        counts[prefix] += 1
+    entries.sort(key=lambda item: item["path"])
+    if (not 2 <= len(entries) <= 4096 or len({item["path"] for item in entries}) != len(entries)):
+        raise ValueError(_REJECT)
+    raw = session.git("cat-file", "--batch", limit=_REFERENCE_BUDGET,
+        input_bytes=("\n".join(item["git_blob_sha"] for item in entries) + "\n").encode("ascii")).encode("utf-8")
+    records, cursor = {}, 0
+    try:
+        for entry in entries:
+            end = raw.index(b"\n", cursor)
+            header = raw[cursor:end].decode("ascii").split(" ")
+            if (len(header) != 3 or header[:2] != [entry["git_blob_sha"], "blob"]
+                    or not header[2].isdigit() or not 0 < int(header[2]) <= _CODE_LIMIT):
+                raise ValueError(_REJECT)
+            size = int(header[2]); start = end + 1; finish = start + size
+            if finish >= len(raw) or raw[finish:finish+1] != b"\n":
+                raise ValueError(_REJECT)
+            content = raw[start:finish]; cursor = finish + 1
+            if hashlib.sha1(b"blob " + str(size).encode("ascii") + b"\0" + content).hexdigest() != entry["git_blob_sha"]:
+                raise ValueError(_REJECT)
+            record = parser_module.parse_project_discovery_reference_text(content.decode("utf-8"))
+            path = Path(entry["path"]); prefix = folders[path.parent.name]
+            key = path.stem if prefix == "HND" else record.get("key")
+            if (type(key) is not str or not key or (prefix != "HND" and path.stem != prefix + "-" + key)
+                    or prefix + "/" + key in records):
+                raise ValueError(_REJECT)
+            records[prefix + "/" + key] = record
+        if cursor != len(raw):
+            raise ValueError(_REJECT)
+        new = correction.replacement_ref(request, actor_ref[len("workspace:"):])
+        lineage = parser_module.qualify_project_discovery_correction(records,
+            work_ref=request["work_ref"], discovery_ref=request["discovery_ref"], replacement_ref=new)
+    except Exception:
+        raise ValueError(_REJECT) from None
+    if time.monotonic() >= session.deadline:
+        raise ValueError(_REJECT)
+    return {"schema": "agentos.project_discovery_reference_closure.v1",
+        "source_commit": session.commit, "parser_content_sha256": parser_sha,
+        "work_ref": request["work_ref"], "discovery_ref": request["discovery_ref"],
+        "replacement_ref": new, "coverage": "COMPLETE", "member_counts": counts,
+        "record_manifest_sha256": _sha256_hex(_canonical(entries)), "lineage": lineage,
+        "referring_work_refs": [request["work_ref"]], "replacement_absent": True}, records
+
+
 def compile_project_knowledge_recipe(
     *,
     macro_root,
@@ -715,6 +830,8 @@ def compile_project_knowledge_recipe(
         raise ValueError(_REJECT)
     session = _open_session(macro_root, expected_macro_sha, runner, timeout)
     code_session = _code_session(session, code_root, code_commit, runner, timeout)
+    if mode == "correction":
+        session.budget = code_session.budget = _REFERENCE_BUDGET
     code = _capture_code(code_session)
     ws_path = "agentos/workstreams/WS-" + key + ".md"
     ws_text = _record_preimage(session, ws_path, _WS_LIMIT)
@@ -723,12 +840,21 @@ def compile_project_knowledge_recipe(
     decision_text = None
     decision_path = "agentos/decisions/DEC-PROJECT-COMMUNICATION-PREFERENCE-" + key + ".md"
     media_path = None
+    reference_closure = None
+    reference_records = None
     if mode == "file_add":
         media_path, _file_id = _file_target(actor_ref, request, key)
         membership = session.member(media_path)
         if membership is not None:
             # Any existing actual entry at the derived path is already
             # recorded or conflicting; it is never overwritten here.
+            raise ValueError(_REJECT)
+    elif mode == "correction":
+        decision_path, media_path, _ = correction.expected_paths(request, actor_ref[len("workspace:"):])
+        decision_text = _record_preimage(session, decision_path, _DISCOVERY_LIMIT)
+        if decision_text is None or _sha256_hex(decision_text) != request["expected_discovery_revision"]:
+            raise ValueError(_REJECT)
+        if session.member(media_path) is not None:
             raise ValueError(_REJECT)
     else:
         decision_text = _record_preimage(session, decision_path, _DECISION_LIMIT)
@@ -744,29 +870,48 @@ def compile_project_knowledge_recipe(
             raise ValueError(_REJECT)
         if decision_text is not None:
             decision_record, _body = _parse_record(parser_module, decision_text)
-            if _hard(parser_module.check_decision(decision_record, session.root / decision_path)):
+            checker = parser_module.check_discovery if mode == "correction" else parser_module.check_decision
+            if _hard(checker(decision_record, session.root / decision_path)):
                 raise ValueError(_REJECT)
+        if mode == "correction":
+            reference_closure, reference_records = _capture_discovery_references(
+                session, parser_module, request, actor_ref, code["parser_sha"])
         if not _heads_current(session, code_session):
             raise ValueError(_REJECT)
         with _module_session(COMPILER_MODULE_ID, code_session.root / COMPILER_PATH, code["compiler_text"]) as compiler_module:
             recipe = _build_recipe(
                 session, compiler_module, mode, request, ws_text, decision_text,
                 decision_date, actor_ref, permission_binding_digest,
+                reference_closure,
             )
         _validate_recipe(
             session, parser_module, recipe, mode, request, key, ws_text,
             decision_text, ws_path, decision_path, media_path,
         )
+        if mode == "correction":
+            for image in recipe["postimages"]:
+                record, _ = _parse_record(parser_module, image["content_utf8"])
+                prefix = "WS" if image["path"] == ws_path else "DSC"
+                reference_records[prefix + "/" + record["key"]] = record
+            try:
+                lineage = parser_module.qualify_project_discovery_correction(reference_records,
+                    work_ref=request["work_ref"], discovery_ref=reference_closure["replacement_ref"], replacement_ref=None)
+                if lineage != reference_closure["lineage"] + [reference_closure["replacement_ref"]]:
+                    raise ValueError(_REJECT)
+            except Exception:
+                raise ValueError(_REJECT) from None
     if not _heads_current(session, code_session):
         raise ValueError(_REJECT)
     return _assemble(
         session,
         recipe,
-        {
+        ({"workstream_text": ws_text, "discovery_text": decision_text,
+          "reference_closure": reference_closure, "decision_date": decision_date}
+         if mode == "correction" else {
             "workstream_text": ws_text,
             "decision_text": decision_text,
             "decision_date": decision_date,
-        },
+        }),
         _binding(code_session, code["compiler_sha"], code["parser_sha"]),
     )
 
@@ -790,10 +935,11 @@ def restore_project_knowledge_recipe(
     decision, or source-goal read, no rebase and no re-clock: the retained
     bodies and retained date are the preimages, and the code is always the
     actual Git blobs hash-qualified against the recorded binding."""
-    if type(initial_snapshot) is not dict or set(initial_snapshot) != set(_SNAPSHOT_KEYS):
+    mode, _work_ref, key = _validate_request(request)
+    keys = {"workstream_text", "discovery_text", "reference_closure", "decision_date"} if mode == "correction" else _SNAPSHOT_KEYS
+    if type(initial_snapshot) is not dict or set(initial_snapshot) != set(keys):
         raise ValueError(_REJECT)
     _validate_bindings(actor_ref, permission_binding_digest, initial_snapshot["decision_date"])
-    mode, _work_ref, key = _validate_request(request)
     recorded_commit = request["source_commit"]
     try:
         recorded_code = source_binding["compiler"]["commit"]
@@ -805,7 +951,7 @@ def restore_project_knowledge_recipe(
         source_binding, recorded_code,
         {"compiler": COMPILER_PATH, "owner": PARSER_PATH},
     )
-    ws_text, decision_text = _validate_snapshot(initial_snapshot, initial_snapshot["decision_date"])
+    ws_text, decision_text = _validate_snapshot(initial_snapshot, initial_snapshot["decision_date"], mode)
     session = _open_session(macro_root, expected_macro_sha, runner, timeout)
     # The installed collector brackets today's HEAD; code and preimages belong
     # to the exact retained original. No today's record/helper substitution.
@@ -819,6 +965,10 @@ def restore_project_knowledge_recipe(
     code = _capture_code(code_session)
     if code["compiler_sha"] != expected["compiler"] or code["parser_sha"] != expected["owner"]:
         raise ValueError(_REJECT)
+    reference_closure = initial_snapshot.get("reference_closure")
+    if mode == "correction" and (type(reference_closure) is not dict
+            or reference_closure.get("parser_content_sha256") != code["parser_sha"]):
+        raise ValueError(_REJECT)
     ws_path = "agentos/workstreams/WS-" + key + ".md"
     decision_path = "agentos/decisions/DEC-PROJECT-COMMUNICATION-PREFERENCE-" + key + ".md"
     with _module_session(PARSER_MODULE_ID, code_session.root / PARSER_PATH, code["parser_text"]) as parser_module:
@@ -828,10 +978,13 @@ def restore_project_knowledge_recipe(
             recipe = _build_recipe(
                 session, compiler_module, mode, request, ws_text, decision_text,
                 initial_snapshot["decision_date"], actor_ref, permission_binding_digest,
+                reference_closure,
             )
         media_path = None
         if mode == "file_add":
             media_path, _file_id = _file_target(actor_ref, request, key)
+        elif mode == "correction":
+            decision_path, media_path, _ = correction.expected_paths(request, actor_ref[len("workspace:"):])
         _validate_recipe(
             session, parser_module, recipe, mode, request, key, ws_text,
             decision_text, ws_path, decision_path, media_path,
@@ -841,10 +994,12 @@ def restore_project_knowledge_recipe(
     return _assemble(
         session,
         recipe,
-        {
+        ({"workstream_text": ws_text, "discovery_text": decision_text,
+          "reference_closure": reference_closure, "decision_date": initial_snapshot["decision_date"]}
+         if mode == "correction" else {
             "workstream_text": ws_text,
             "decision_text": decision_text,
             "decision_date": initial_snapshot["decision_date"],
-        },
+        }),
         _binding(code_session, code["compiler_sha"], code["parser_sha"]),
     )

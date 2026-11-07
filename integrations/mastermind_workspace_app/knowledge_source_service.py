@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
+from common import workspace_discovery_correction_contract as correction
 
 from common.workspace_source_operation_contract import validate_lookup
 from control_plane.project_source_original_input import ProjectSourceOriginalInput
@@ -22,7 +23,7 @@ from integrations.mastermind_workspace_app.source_operation_principal import sou
 from integrations.mastermind_workspace_app.knowledge_recipe_adapter import ProjectKnowledgeRecipeAdapter, _detach
 from integrations.mastermind_workspace_app.knowledge_publisher_events import KnowledgePublisherEvents
 
-_ACTIONS = frozenset({"add_project_file", "set_project_communication_preference"})
+_ACTIONS = frozenset({"add_project_file", "set_project_communication_preference", correction.ACTION})
 
 
 def _canonical(value):
@@ -120,7 +121,9 @@ class ProjectKnowledgeSourceOwner:
         if not permission.check():
             raise PermissionError("SOURCE_OPERATION_UNAUTHORIZED")
         recipe = self._adapter.recipe(prepared)
-        change = ({"kind": "FILE_ADD", "display_name": request["file"]["display_name"],
+        change = (correction.preview_change(request, permission.principal_scope)
+                  if binding["action"] == correction.ACTION else
+                  {"kind": "FILE_ADD", "display_name": request["file"]["display_name"],
                    "size_bytes": len(request["file"]["content_utf8"].encode("utf-8"))}
                   if binding["action"] == "add_project_file" else
                   {"kind": "COMMUNICATION_PREFERENCE", "value": request["value"]})
@@ -193,7 +196,8 @@ class ProjectKnowledgeSourceOwner:
                 raise SourceOperationConflict()
             actual = sorted((item["path"], item["content_sha256"]) for item in source["postimages"])
             expected = sorted((item["path"], item["content_sha256"]) for item in original["publication_binding"]["postimages"])
-            if actual != expected or len(actual) != 2 or proposal is not None:
+            count = 3 if selected["action"] == correction.ACTION else 2
+            if actual != expected or len(actual) != count or proposal is not None:
                 raise SourceOperationConflict()
             sources = [{"repository": "macro", "commit": source["commit"], **item} for item in source["postimages"]]
         elif result.get("state") != "PROPOSAL_PUBLISHED":

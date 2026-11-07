@@ -81,7 +81,7 @@ class WorkspaceSourceOperationService:
                 raise ValueError("SAME_S19_PREPARATION_REQUIRED")
         elif value["action"] == "ADOPT_PLAN":
             owner = self._adoption
-        elif value["action"] in {"add_project_file", "set_project_communication_preference"}:
+        elif value["action"] in {"add_project_file", "set_project_communication_preference", "correct_project_discovery"}:
             owner = self._knowledge
         else:
             owner = None

@@ -14,7 +14,7 @@ from integrations.mastermind_workspace_app.source_operation_principal import (
 from integrations.mastermind_workspace_app.project_authoring_grant import workspace_project_authorizers
 
 _ACTIONS = frozenset({"publish_project_proposal", "publish_project_plan_proposal", "ADOPT_PLAN", "ACCEPT_DIRECTION",
-                      "add_project_file", "set_project_communication_preference"})
+                      "add_project_file", "set_project_communication_preference", "correct_project_discovery"})
 
 
 class WorkspaceSourceOperationContextFactory:

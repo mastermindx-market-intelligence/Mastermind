@@ -20,6 +20,7 @@
  * principal and grant at submission/status time.
  */
 
+import {discoveryReplacementRef,validDiscoveryReference} from './project-discovery-correction';
 export const PROJECT_SOURCE_OPERATION_INVALID = 'project_source_operation_invalid';
 
 export const PROJECT_SOURCE_CONTEXT_SCHEMA =
@@ -30,11 +31,13 @@ export const PROJECT_SOURCE_STATUS_SCHEMA =
 export const PROJECT_SOURCE_ACTION_ADD_FILE = 'add_project_file';
 export const PROJECT_SOURCE_ACTION_SET_PREFERENCE =
   'set_project_communication_preference';
+export const PROJECT_SOURCE_ACTION_CORRECT_DISCOVERY = 'correct_project_discovery';
 
 /** The two closed frontend source-write actions decoded by this module. */
 export const PROJECT_SOURCE_ACTIONS = [
   PROJECT_SOURCE_ACTION_ADD_FILE,
   PROJECT_SOURCE_ACTION_SET_PREFERENCE,
+  PROJECT_SOURCE_ACTION_CORRECT_DISCOVERY,
 ] as const;
 
 export type ProjectSourceAction = (typeof PROJECT_SOURCE_ACTIONS)[number];
@@ -240,6 +243,7 @@ const REQUEST_ID_PATTERNS: Readonly<
 > = {
   add_project_file: /^mmos-project-file-add-[0-9a-f]{40}$/,
   set_project_communication_preference: /^mmos-project-preference-set-[0-9a-f]{40}$/,
+  correct_project_discovery: /^mmos-project-discovery-correct-[0-9a-f]{40}$/,
 };
 
 const BRANCH_FORBIDDEN_CHARS = ' ~^:?*[';
@@ -913,6 +917,15 @@ export function decodeProjectSourceOperationStatus(
     receipt,
     advance,
   );
+  if(action==='correct_project_discovery'&&receipt?.kind==='SOURCE_OBSERVED'){
+    const sources=receipt.sources,paths=new Set(sources.map(source=>source.path));
+    const replacement=discoveryReplacementRef({request_id:requestId,work_ref:workRef},principalScope);
+    if(sources.length!==3||paths.size!==3||new Set(sources.map(source=>source.commit)).size!==1
+      ||sources.some(source=>source.repository!=='macro')||!paths.delete('agentos/workstreams/WS-'+workRef.slice(3)+'.md')
+      ||!paths.delete('agentos/discoveries/DSC-'+replacement.slice(4)+'.md'))invalid();
+    const old=[...paths][0]!,prefix='agentos/discoveries/DSC-';
+    if(!old.startsWith(prefix)||!old.endsWith('.md')||!validDiscoveryReference('DSC:'+old.slice(prefix.length,-3)))invalid();
+  }
 
   const status: ProjectSourceStatus = {
     schema,

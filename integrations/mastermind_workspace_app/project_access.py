@@ -23,7 +23,7 @@ def permission_snapshot(*,policy,load_bindings,read_authorize,principal,work_ref
     actual_stamp=permission_stamp(read_authorize,principal)
     if (read_authorize(principal) is not True or observed_read(principal) is not True or actual_stamp is None
             or permission_stamp(observed_read,principal)!=actual_stamp):raise ValueError('access_denied')
-    if validated['schema'] not in {grants.SCHEMA,grants.SCHEMA_V5}:
+    if validated['schema'] not in {grants.SCHEMA,grants.SCHEMA_V5,grants.SCHEMA_V6}:
         return {'declaration':'NOT_DECLARED','grants':None},workspace.digest({'read':actual_stamp,'declaration':'NOT_DECLARED'})
     matches=[slot for slot in validated['profiles'].values() if slot['enabled'] and slot['binding'] is not None
         and all(slot['binding'][key]==who[key] for key in PRINCIPAL_KEYS)]
@@ -32,7 +32,7 @@ def permission_snapshot(*,policy,load_bindings,read_authorize,principal,work_ref
     # Actual owner predicates observe this same immutable source capture.
     # A fresh second capture and current READ recheck precede publication.
     fields=grants.project_action_fields(validated['schema'])
-    actions=wire.V5_ACTIONS if validated['schema']==grants.SCHEMA_V5 else wire.ACTIONS
+    actions=wire.V6_ACTIONS if validated['schema']==grants.SCHEMA_V6 else wire.V5_ACTIONS if validated['schema']==grants.SCHEMA_V5 else wire.ACTIONS
     for action in actions:
         field=fields[action]
         scope='WORKSPACE' if action in {grants.PROJECT_AUTHOR_ACTION,grants.LATEST_DATA_READ_ACTION} else 'INSTRUCTION' if action==grants.INSTRUCTION_SUSPEND_ACTION else 'PROJECT'
@@ -49,7 +49,7 @@ def permission_snapshot(*,policy,load_bindings,read_authorize,principal,work_ref
             'instruction_ref':ref if allowed else None,'supply':'SUPPLIED' if allowed else 'NOT_SUPPLIED'})
         stamps.append((action,stamp))
     facts={'declaration':'SUPPLIED','grants':rows}
-    if validated['schema']==grants.SCHEMA_V5:facts['grant_schema']=grants.SCHEMA_V5
+    if validated['schema'] in {grants.SCHEMA_V5,grants.SCHEMA_V6}:facts['grant_schema']=validated['schema']
     return facts,workspace.digest({'read':actual_stamp,'schema':validated['schema'],'own_slot':slot,'stamps':stamps})
 
 
@@ -87,7 +87,7 @@ async def project_access_current(request,*,config,load_bindings):
         if stamp!=after_stamp or before!=after:
             body=wire.unavailable(selected,'SOURCE_CHANGED')
         elif source['availability']=='AVAILABLE':
-            body=wire.validate_body({'schema':wire.SCHEMA_V2 if 'grant_schema' in after else wire.SCHEMA,'selection':selected,'availability':'AVAILABLE','source':source['source'],
+            body=wire.validate_body({'schema':wire.SCHEMA_V3 if after.get('grant_schema')==grants.SCHEMA_V6 else wire.SCHEMA_V2 if 'grant_schema' in after else wire.SCHEMA,'selection':selected,'availability':'AVAILABLE','source':source['source'],
                 'membership':{'workspace_read':'QUALIFIED'},**after,'reason_codes':[]},selected)
     except Exception:
         try:capture()

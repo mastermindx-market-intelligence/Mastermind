@@ -22,6 +22,10 @@
  */
 
 /** Maximum accepted file size in bytes (read and validated before decoding). */
+import {DISCOVERY_CORRECTION_SCHEMA, validateDiscoveryCorrectionRequest, type ProjectDiscoveryCorrectionRequest} from './project-discovery-correction';
+export type {ProjectDiscoveryCorrectionRequest} from './project-discovery-correction';
+export type ProjectKnowledgeRequest = ProjectFileAddRequest | ProjectPreferenceSetRequest | ProjectDiscoveryCorrectionRequest;
+
 export const MAX_FILE_BYTES = 32768;
 
 /** Maximum communication preference literal size in UTF-8 bytes. */
@@ -619,6 +623,9 @@ function validatePublicRequestCopy(request: unknown): Record<string, unknown> {
     reject('INVALID_REQUEST_ID', 'public request must be a plain closed data object');
   }
   const schema = readStringField(request, 'schema', 'INVALID_REQUEST_ID');
+  if (schema === DISCOVERY_CORRECTION_SCHEMA) {
+    return {...validateDiscoveryCorrectionRequest(request)};
+  }
   if (schema === FILE_REQUEST_SCHEMA) {
     requireExactKeys(
       request,
@@ -742,7 +749,7 @@ function validateBaseRevisionField(request: Record<string, unknown>): string {
  * is rejected before any serialization.
  */
 export function canonicalPublicRequest(
-  request: ProjectFileAddRequest | ProjectPreferenceSetRequest,
+  request: ProjectKnowledgeRequest,
 ): string {
   const validated = validatePublicRequestCopy(request);
   return canonicalJson(validated);
@@ -756,7 +763,7 @@ export function canonicalPublicRequest(
  * source-currency fence applies here.
  */
 export async function publicRequestSha256(
-  request: ProjectFileAddRequest | ProjectPreferenceSetRequest,
+  request: ProjectKnowledgeRequest,
 ): Promise<string> {
   const canonical = canonicalPublicRequest(request);
   const subtle: Crypto['subtle'] | undefined =

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from common import workspace_discovery_correction_contract as correction
 from datetime import date
 
 from control_plane.installed_project_knowledge_compiler import InstalledProjectKnowledgeCompiler
@@ -19,6 +20,7 @@ _REPO = "mastermindx-market-intelligence/macro"
 _ACTIONS = {
     "mastermind.project_file_add_request.v1": ("add_project_file", "project_file_add"),
     "mastermind.project_preference_set_request.v1": ("set_project_communication_preference", "project_preference_set"),
+    correction.REQUEST_SCHEMA: (correction.ACTION, correction.RECIPE_ACTION),
 }
 _PRIVATE_SCHEMA = "mastermind.project_source_original_input.v1"
 _REF_PATHS = {"compiler": "scripts/project_knowledge_recipes.py", "owner": "scripts/agentos.py"}
@@ -159,7 +161,9 @@ class ProjectKnowledgeRecipeAdapter:
         recipe, snapshot, refs = (captured[key] for key in ("recipe", "initial_snapshot", "source_binding"))
         _keys(recipe, {"schema", "state", "action", "work_ref", "request_id", "request_fingerprint",
                        "captured_commit", "permission_binding_digest", "postimages"})
-        _keys(snapshot, {"workstream_text", "decision_text", "decision_date"})
+        correction_mode = request["schema"] == correction.REQUEST_SCHEMA
+        _keys(snapshot, {"workstream_text", "discovery_text", "reference_closure", "decision_date"}
+              if correction_mode else {"workstream_text", "decision_text", "decision_date"})
         _keys(refs, _REF_PATHS)
         action, recipe_action = _ACTIONS[request["schema"]]
         if (recipe["schema"] != "mastermind.project_knowledge_recipe.v1" or recipe["state"] != "DRAFT_ONLY"
@@ -180,10 +184,27 @@ class ProjectKnowledgeRecipeAdapter:
                 _fail()
             _hex(ref["commit"], 40); _hex(ref["content_sha256"], 64)
         images = recipe["postimages"]
-        if type(images) is not list or len(images) != 2:
+        if type(images) is not list or len(images) != (3 if correction_mode else 2):
             _fail()
         key = request["work_ref"][3:]
         ws_path = "agentos/workstreams/WS-" + key + ".md"
+        if correction_mode:
+            correction.validate_request(request)
+            preimages = correction.expected_preimages(request, actor["principal_scope"])
+            if (_sha(snapshot["discovery_text"]) != request["expected_discovery_revision"]
+                    or type(snapshot["reference_closure"]) is not dict
+                    or snapshot["reference_closure"].get("parser_content_sha256") != refs["owner"]["content_sha256"]):
+                _fail()
+            if {image.get("path") for image in images if type(image) is dict} != set(preimages):
+                _fail()
+            for image in images:
+                _keys(image, {"path", "content_utf8", "content_sha256", "expected_preimage_sha256"})
+                if (_sha(image["content_utf8"]) != image["content_sha256"]
+                        or image["expected_preimage_sha256"] != preimages[image["path"]]):
+                    _fail()
+            payload = {"schema": _PRIVATE_SCHEMA, "action": action, "request": request, "actor": actor,
+                       "initial_snapshot": snapshot, "source_binding": refs}
+            return PreparedProjectKnowledge(self._owner, payload, recipe)
         if action == "add_project_file":
             if snapshot["decision_text"] is not None:
                 _fail()
