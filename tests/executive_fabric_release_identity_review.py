@@ -120,7 +120,7 @@ REVIEWED_FILES = {
         "sha256": "b8921960e7e46a472b536895b5a6491096627d1c8fd58ea0baf283ff34accc07",
         "sites": ((31, 18, 21, "int", "600"),),
     },
-    'integrations/session_bridge/bound_launch_capture/runtime/lane_runtime.py': {'sha256': 'cfb18bd9381fae4af1d13a257a8fa5986d903571f64b2aa5dc900439759e9b91',
+    'integrations/session_bridge/bound_launch_capture/runtime/lane_runtime.py': {'sha256': '764d140d598734d3607f697bea911c873d72ede08331308347d45a8f9451a996',
                                                                               'sites': ((1277,
                                                                                          50,
                                                                                          55,

@@ -444,3 +444,114 @@ actual selected closure, exact registry/target/key policy and producer identity,
 then consume only that original invocation's detached result. Lost or ambiguous
 response is not permission to replay. No normal refresh or hook execution is
 implied by this capability.
+
+
+## 2026-11-07: original-artifact and admission-load repairs
+
+Operation: `fabric-admission-integrity-20261107-sol-001`, isolated attended Web
+workspace, based on protected `615146aac6a1b0c0933bc9b815517a2fd285ed4a`.
+Governing source pin remains compatible
+`e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46`.
+This continues P3/P7 of the existing
+[Hermes/Fabric convergence plan](../../../../docs/superpowers/plans/2026-10-24-meta-ceo-open-harness-convergence-masterplan.md).
+Direct principal implementation is the bounded `CRITICAL_PATH_SHORTCUT` join;
+this Web session has no verified authenticated native root/parent binding for
+paid worker admission. Adapter availability is not worker-start proof.
+
+Two reproduced defects are repaired through their existing owners:
+
+- A request interruption after packet fsync and before descriptor publication
+  left the original run occupied, while status returned `NOT_FOUND`. The
+  original reader now checks the same fixed packet/result artifacts used by
+  the request duplicate guard. Retained or unreadable evidence returns existing
+  `STATUS_UNREADABLE` / `ARTIFACT_UNVERIFIED` vocabulary. It supplies no root
+  attestation, result contents, execution-absence proof or replay authority.
+  Truly absent artifacts still return `NOT_FOUND`.
+- Both the current native lane and the packaged attended backend sampled live
+  load before waiting for the physical admission lock. They now take the
+  default sample under that lock immediately before the existing admission
+  decision. Explicit fixture load, slot limits, resource floors, original lease
+  custody and release protocol are preserved.
+
+### Exact source and closure
+
+| Current source | SHA256 |
+| --- | --- |
+| Native `fabric_task.py` | `1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68` |
+| Native `lane_runtime.py` | `b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b` |
+| Packaged attended `lane_runtime.py` | `764d140d598734d3607f697bea911c873d72ede08331308347d45a8f9451a996` |
+
+The native builder accepts the repaired members only as one complete successor
+of parent manifest
+`815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347`.
+It checks the entire captured parent closure, not independently allowlisted
+member combinations. Historical validation uses a temporary inverse view;
+emitted manifests and inventories retain the actual repaired hashes.
+Historical inputs and their transformation pins are unchanged.
+
+| Built variant | Members | Manifest SHA256 |
+| --- | ---: | --- |
+| Native base | 107 | `8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6` |
+| Existing Go application extension | 109 | `2ef78df1ba17579339e3d86733bfb48343f5bba156e9a16108f31b7539acf571` |
+| Existing HTTP extension | 112 | `efb5ffc514dbd9a2fa3df44aab9e869ef544e36d4fbbb1b0651713c0ee1404fd` |
+
+Native forward fixture:
+`tests/fixtures/fabric-native-admission-integrity-20261107.patch`,
+SHA256 `68c1abf049ee9e4c04fc749eebb9a4b99ba71a71c22945e0f5d02bc8fe107753`.
+Packaged forward fixture:
+`tests/fixtures/fabric-bound-admission-load-20261107.patch`,
+SHA256 `d42895edd9d2e8507e402ab7a98a854486f5d7b466e2735da219180514a18cc0`.
+Both reconstruct the exact prior bytes in reverse and the current bytes forward.
+The packaged provenance records its distinct parent. Its existing identity
+literal locations and spellings are unchanged; the current whole-file source
+pin is qualified by the identity suite.
+
+### Observed qualification
+
+- Original packet crash test failed before the repair with `NOT_FOUND`.
+- Separate-process load tests failed against both original runtime copies:
+  after waiting for the lock, they admitted using the stale `0.0` sample.
+- Native request, physical admission and exact identity qualification:
+  **204 passed, 8 subtests passed**. The admission cases cover rising and falling
+  load while locked, the explicit-load seam, and two contenders for one slot.
+  The winner remains held until both admission decisions are observed.
+- Native generation qualification: **83 passed**, including real 107/109/112
+  builds, exact forward/reverse source reconstruction, retained historical
+  generations, and partial/foreign/backdated/changed-parent rejection.
+- Existing MCP facade suite: **70 passed**. Two fresh backend instances both
+  refuse the orphan original run after a status read; neither dispatches.
+- The broader security-composition run on the M2 was **35 passed, 32 failed**.
+  The first failure was the existing sparse-donor Git observation refusing as
+  unqualified; this run is not green and its cause is not inferred as a repaired
+  behavior. Required hosted Linux checks remain owed.
+- `git diff --check` passes. No provider, live worker or host admission is
+  established by these inert fixtures.
+
+### Existing application carrier consumption
+
+[PR #2175](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175)
+remains the APPLICATION final carrier; its captured head for this analysis is
+`39f4b50bcb3840f5b254dbcd753f3f1f5fc8a7cf`. This independent native repair does not
+replace or modify that operation's branch/workspace, nor absorb the separate
+policy-publisher change in #2182.
+
+At #2175's next integration boundary, consume this complete protected successor
+on that original branch. Preserve its five-member APPLICATION cohort and
+original historical parent. Its whole-manifest base check must explicitly
+compose the exact two-member repair successor; merely merging leaf bytes,
+repinning historical inputs, or allowing arbitrary "current" hashes is invalid.
+Regenerate the actual final inventory and rerun its 107/109/112 and mixed-cohort
+qualification against the resulting head.
+
+### Acceptance still owed
+
+Protected merge and installation are separate. Rebuild from the merged source,
+then use the existing immutable-generation publisher/selector and exact fresh
+predecessor comparison. Preserve live writers, retained unknown effects and
+all operation-specific holds. Observe the installed selected generation and
+the original reader/physical admission behavior before claiming runtime repair.
+The packaged attended backend retains its existing enrollment boundary.
+
+These repairs neither establish a measured 99% useful-task SLO nor guarantee
+that a host can never fill. They prevent two concrete unsafe decisions while
+preserving finite capacity and conservative recovery.
