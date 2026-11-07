@@ -243,7 +243,7 @@ def test_repair_input_revalidates_sealed_prompt_before_provider_start(tmp_path, 
     assert state["envelope"]["summary"].encode() in original
 
 
-def test_repair_consumes_exact_retained_findings_and_keeps_original_launch(tmp_path, monkeypatch):
+def _completed_paid_native_repair(tmp_path, monkeypatch):
     import asyncio
     import hashlib
     import json
@@ -344,3 +344,8 @@ def test_repair_consumes_exact_retained_findings_and_keeps_original_launch(tmp_p
     recovered = binding.recover_launch_spec(OrchestrationLaunchSpec)
     assert recovered.prompt.encode() == sealed and recovered.run_id == original.attempt_id
     assert reopened.attempts.list_attempts() == attempts and adapter.start_count == 1
+    return state, repair, retained
+
+
+def test_repair_consumes_exact_retained_findings_and_keeps_original_launch(tmp_path, monkeypatch):
+    _completed_paid_native_repair(tmp_path, monkeypatch)

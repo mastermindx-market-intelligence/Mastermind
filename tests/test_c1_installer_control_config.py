@@ -322,3 +322,45 @@ def test_older_schema_does_not_receive_new_optional_fields(tmp_path: Path) -> No
     schema.write_text(text)
     value = _render_default_control_config(tmp_path, release_root=release)
     assert set(SAFE_OPTIONAL_DEFAULTS).isdisjoint(value)
+
+
+@pytest.mark.parametrize("field,member,replacement", [
+    ("control_uid", None, 450.0),
+    ("worker_uid", None, 451.0),
+    ("ceo_ingress_peer_uid", None, 452.0),
+    ("dialogue_observation_peer_uid", None, 457.0),
+    ("allowed_peer_uids", None, [450.0, 501]),
+    ("dialogue_bridge_armed", None, 0),
+    ("dialogue_wake_retry_policy", "reenable_on_binding_rotation", 1),
+    ("dialogue_wake_retry_policy", "armed", 0),
+])
+def test_installer_refuses_type_coercion_before_replacing_control(
+    tmp_path: Path, field: str, member: str | None, replacement: object,
+) -> None:
+    """Exercise the actual embedded generator, never the privileged installer.
+
+    These values compare equal in Python but violate the incumbent Control
+    loader's integer/boolean contract. Neither source nor prior target may move.
+    """
+    import copy
+
+    valid = _render_default_control_config(tmp_path)
+    changed = copy.deepcopy(valid)
+    if member is None:
+        changed[field] = replacement
+    else:
+        changed[field][member] = replacement
+    assert changed == valid
+    assert json.dumps(changed, sort_keys=True) != json.dumps(valid, sort_keys=True)
+    source = tmp_path / "wrong-type-control.json"
+    source.write_text(json.dumps(changed), encoding="utf-8")
+    source_before = source.read_bytes()
+    destination = tmp_path / "control.json"
+    before = destination.read_bytes()
+    completed, actual_destination = _run_default_control_config(tmp_path, source=source)
+
+    assert completed.returncode != 0
+    assert f"control config {field} differs from the reviewed host policy" in completed.stderr
+    assert actual_destination == destination and destination.read_bytes() == before
+    assert source.read_bytes() == source_before
+    assert list(tmp_path.glob(".control.json.*.tmp")) == []

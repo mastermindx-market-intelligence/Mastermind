@@ -1995,7 +1995,16 @@ if missing or unknown:
         f"control config schema drift; missing={sorted(missing)}, unknown={sorted(unknown)}"
     )
 for key, expected_value in expected.items():
-    if value.get(key) != expected_value:
+    # Python equality aliases booleans/integers and integers/floats, including
+    # nested policy fields. Preserve the Control loader's JSON type boundary
+    # before replacing the config; matching host values must also match types.
+    try:
+        matches = json.dumps(value.get(key), sort_keys=True, allow_nan=False) == (
+            json.dumps(expected_value, sort_keys=True, allow_nan=False)
+        )
+    except (TypeError, ValueError):
+        matches = False
+    if not matches:
         raise SystemExit(f"control config {key} differs from the reviewed host policy")
 blocked = re.compile(
     r"(?i)(password|credential|lease[_-]?token|api[_-]?key|access[_-]?token|secret_value)"

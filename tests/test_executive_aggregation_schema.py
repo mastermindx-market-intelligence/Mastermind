@@ -595,3 +595,58 @@ def test_real_v1_handoff_survives_restart_with_current_default_policy_v2(tmp_pat
         restarted._validate_aggregation_schema(job=same_job, attempt=same_attempt,
             effective_grant=same_grant, schema_path=retained_path)
     assert restarted.adapter.start_calls == []
+
+
+@pytest.mark.parametrize("fault", ["cancel_after_seal", "input_unavailable", "prompt_drift"])
+def test_parent_result_input_revalidates_after_sealing_before_start(tmp_path, monkeypatch, fault):
+    import control_plane.executive_supervisor as owner
+    from control_plane.executive_runtime import RuntimeProofError
+
+    runtime, root, handoff = _real_handoff(tmp_path)
+    adapter = _CountingAdapter()
+    supervisor = ExecutiveSupervisor(
+        runtime, adapter, runs_root=tmp_path / "runs", inspector=SimpleNamespace(),
+        require_complete_launch_attestation=False,
+    )
+    sealed = []
+    write = owner._write_private_recovery_prompt
+    def seal_then_correct(path, prompt):
+        write(path, prompt)
+        sealed.append((path, path.read_bytes()))
+        if fault == "cancel_after_seal":
+            job = runtime.jobs.get_job(root.job_id)
+            attempt = runtime.attempts.get_attempt(job.current_attempt_id)
+            runtime.jobs.cancel_job(
+                root.job_id, expected_attempt_id=attempt.attempt_id,
+                expected_fence_generation=attempt.fence_generation,
+            )
+    monkeypatch.setattr(owner, "_write_private_recovery_prompt", seal_then_correct)
+    read = type(runtime).validated_role_completion
+    def unavailable_after_seal(selected_owner, job_id, *, expected_attempt_id):
+        if sealed and selected_owner is runtime and fault == "input_unavailable":
+            raise RuntimeProofError("PRIVATE_PARENT_RESULT_MUST_NOT_ESCAPE")
+        return read(selected_owner, job_id, expected_attempt_id=expected_attempt_id)
+    monkeypatch.setattr(type(runtime), "validated_role_completion", unavailable_after_seal)
+    render = supervisor._prompt
+    def changed_prompt(*args, **kwargs):
+        result = render(*args, **kwargs)
+        return result + "\nPRIVATE_PARENT_PROMPT_DRIFT" if sealed and fault == "prompt_drift" else result
+    monkeypatch.setattr(supervisor, "_prompt", changed_prompt)
+    monkeypatch.setattr(supervisor, "_seal_terminal_assignment", lambda **_kwargs: None)
+    monkeypatch.setattr(supervisor, "_fail_claim", lambda *_args: None)
+    message = ("aggregation input changed after sealing" if fault == "prompt_drift"
+               else "aggregation result input is unavailable")
+    with pytest.raises(SupervisorError, match="^" + message + "$"):
+        asyncio.run(supervisor.start_cycle_job(
+            root.job_id, command_id=f"coo-cycle:{root.job_id}:dispatch:{root.job_id}:attempt:1",
+        ))
+    assert adapter.start_calls == [] and len(sealed) == 1
+    path, original = sealed[0]
+    assert path.read_bytes() == original and b"PRIVATE_PARENT_PROMPT_DRIFT" not in original
+    assert b"aggregation_result_inputs" in original
+    if fault == "cancel_after_seal":
+        assert runtime.jobs.get_job(root.job_id).status.value == "CANCEL_REQUESTED"
+    revision = handoff["revisions"][0]
+    assert read(runtime, revision["current_job_id"],
+                expected_attempt_id=revision["current_attempt_id"]).role_result_digest == (
+                    revision["current_result_digest"])
