@@ -18,7 +18,7 @@ def test_exact_evaluation_site_boundaries(name,monkeypatch):
     assert reviewed_literal_spans(name,source)
     assert reviewed_literal_spans(name+'.unqualified',source)==()
     assert reviewed_literal_spans(name,source+'\n# changed bytes\n')==()
-    wrong=copy.deepcopy(record);wrong['sites'][0][1]+=1
+    wrong=copy.deepcopy(record);wrong['sites']=[list(site) for site in wrong['sites']];wrong['sites'][0][1]+=1
     monkeypatch.setitem(REVIEWED_FILES,name,wrong)
     assert reviewed_literal_spans(name,source)==()
     # Even a matching replacement body hash cannot mask an unrecorded identity.
