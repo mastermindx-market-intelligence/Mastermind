@@ -200,7 +200,7 @@ class CeoIngressWorkspaceClient:
                     try:
                         writer.close()
                         await asyncio.wait_for(writer.wait_closed(), timeout=min(1.0, timeout))
-                    except (Exception, asyncio.CancelledError):
+                    except Exception:
                         pass
                 else:
                     writer.close()
