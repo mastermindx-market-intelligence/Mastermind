@@ -95,3 +95,32 @@ admitted through their original owners, share one physical-account capacity
 ledger across aliases, honor its configured ceiling, and retain original
 request/lease identity through interruption. This preview implementation alone
 does not establish that outcome.
+
+
+## Composed native proof
+
+The actual installed Hermes owner/loader, tool registry, command dispatcher and
+MCP client passed on the implementation at
+`27dbfa14ed572da5eecad7fc8d8f6a00747ec94c`.
+Evidence: `integrations/hermes_omh/qualification/capacity_route_receipt.json`.
+The native tool **and** slash command returned
+`ROUTE_PREVIEW_NOT_ADMITTED`; the real capacity owner returned a non-reserving
+preview, and forced-pool/cross-profile requests refused. The native guarded
+process made zero network connection attempts. No provider inference,
+reservation, admission, worker dispatch or production profile edit occurred.
+
+The implementation plugin is SHA-256
+`e72da67dfb64314c849c8b44b44c25e7707e3576f003df7a3ccabf3326a2cb70`.
+The receipt also binds the final qualification harness SHA-256; the harness was
+corrected to use Hermes' own `hermes_yaml`, preserve its bounded connection
+timeout and acquire the incumbent per-profile plugin manager. This removed a
+test-only second-manager collision without changing plugin behavior or the
+Hermes dependency environment. The earlier failed harness attempts are not
+counted as successful qualification.
+
+The route observed during this proof is a time-local preview, not an execution
+or model-quality endorsement. In particular, the earlier paid worker's
+MiniMax-M3 launch failure is retained; a successful preview does not erase it.
+Protected PR: [#2196](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2196).
+Protected merge and installed production command readback remain separate from
+this isolated-profile native proof.

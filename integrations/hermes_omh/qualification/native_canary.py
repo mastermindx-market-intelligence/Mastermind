@@ -30,13 +30,16 @@ def main():
     module=importlib.util.module_from_spec(spec);sys.modules[spec.name]=module;spec.loader.exec_module(module)
     capacity=None
     if a.capacity_config:
-        import yaml
+        import hermes_yaml as yaml
         original=yaml.safe_load(Path(a.capacity_config).read_text())
         capacity=original.get('mcp_servers',{}).get('mastermind-fabric-capacity')
         if type(capacity) is not dict or capacity.get('enabled') is not True:
             raise AssertionError('Existing read-only capacity server is not enabled')
-        if set(capacity)-{'command','args','enabled'}:
+        if set(capacity)-{'command','args','enabled','connect_timeout'}:
             raise AssertionError('Canary does not copy credential, trust or unknown server configuration')
+        if ('connect_timeout' in capacity and
+                (type(capacity['connect_timeout']) not in (int,float) or not 1<=capacity['connect_timeout']<=60)):
+            raise AssertionError('Invalid existing capacity connection timeout')
         if (capacity.get('command')!='/opt/homebrew/bin/python3'
                 or capacity.get('args')!=['/Users/chriswong/.hermes/bridges/fabric_capacity_mcp.py']):
             raise AssertionError('Canary supports only the observed existing M2 read-only bridge')
@@ -47,7 +50,7 @@ def main():
         raise RuntimeError('No network is permitted in native qualification')
     socket.socket.connect=deny_connect
     try:
-        from hermes_cli.plugins import PluginManager
+        from hermes_cli.plugins import get_plugin_manager
         from tools.registry import registry
         with tempfile.TemporaryDirectory(prefix='mmx-omh-native-canary-') as rawhome:
             home=Path(rawhome).resolve();os.environ['HERMES_HOME']=str(home)
@@ -64,7 +67,7 @@ def main():
                                  entries={'mastermind-omh':dict(mcp_allowlist=['mastermind-fabric-capacity'])}),
                     mcp_servers={'mastermind-fabric-capacity':capacity}))
             (home/'config.yaml').write_text(config)
-            manager=PluginManager(scope_key=str(home))
+            manager=get_plugin_manager()
             manager.discover_and_load()
             entry=registry.snapshot_registration('mmx_omh',scope=str(home))
             if entry is None:raise AssertionError('Native loader did not register mmx_omh')
@@ -108,6 +111,12 @@ def main():
             command_advice=json.loads(invoke_plugin_command(command,'quick Inspect a Python bug and write a regression test',session_id='mmx-omh-canary-session',platform='cli'))
             assert command_status['state']=='LOCAL_BRIDGE_READY'
             assert command_advice['state']=='RECOMMENDED_NOT_ADMITTED'
+            command_route=None
+            if route is not None:
+                command_route=json.loads(invoke_plugin_command(command,
+                    'route census C1_ROUTINE_BOUNDED quick Inspect the existing capacity routing contracts',
+                    session_id='mmx-omh-canary-session',platform='cli'))
+                assert command_route['state']=='ROUTE_PREVIEW_NOT_ADMITTED'
             from hermes_cli.plugins_activation import activation_summaries
             activations=[x for x in activation_summaries(manager) if x['name']=='mastermind-omh']
             assert len(activations)==1 and 'mmx-omh' in activations[0]['activated_now']['gateway_commands']
@@ -119,7 +128,8 @@ def main():
             assert (home/'config.yaml').read_text()==config
             assert not blocked
             print(json.dumps({'schema':'mastermind.hermes_omh.native_canary/v1',
-                'source_commit':a.release_commit,'plugin_sha256':hashlib.sha256((source/'__init__.py').read_bytes()).hexdigest(),
+                'source_commit':a.release_commit,'canary_sha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                'plugin_sha256':hashlib.sha256((source/'__init__.py').read_bytes()).hexdigest(),
                 'source_files_sha256':hashlib.sha256(json.dumps(descriptor['source_files'],sort_keys=True).encode()).hexdigest(),
                 'native_loader':'PluginManager.discover_and_load','native_dispatch':'ToolRegistry.dispatch','native_command_dispatch':'invoke_plugin_command',
                 'live_command':'mmx-omh','live_command_status':command_status['state'],
@@ -132,6 +142,7 @@ def main():
                 'capacity_preview':route['capacity_preview'] if route else None,
                 'routing_requirements':route['routing_requirements'] if route else None,
                 'routing_state':route['state'] if route else None,
+                'live_command_routing_state':command_route['state'] if command_route else None,
                 'forced_pool':'REFUSED' if route else None,
                 'cross_profile':'REFUSED','profile_config_unchanged':True,'blocked_network_attempts':len(blocked),
                 'production_profile_changed':False,'provider_called':False,'admitted':False,'dispatched':False},sort_keys=True))
