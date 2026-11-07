@@ -64,7 +64,7 @@ These are observations at their recorded times, not lasting reservations. Later 
 | MemTotal fake procfs + actual adapter mapping | original candidate measured-total case failed; candidate repair three tests passed; five existing disk telemetry tests passed |
 | Existing native review-stage build | passed; exactly two manifest entries changed; original preimages unchanged |
 | Compiled Chromium synthetic browser | passed at 1440×1100 and 390×844; no page errors; no horizontal page overflow; sign-out removes the hardware region |
-| Native Rust Fleet selection | initial invocation stopped at the required missing build-identity environment; explicit committed-head qualification is the next local step |
+| Native Rust Fleet selection | 2 passed on committed source `fde4c5108527a3ce3706dfcb7f53abdc404adb9a`, with explicit `MM_SOURCE_REVISION` and nonproduction build identity; the earlier invocation lacked those required inputs |
 
 [Browser receipt](browser-receipt.json), [reproducer](prove_browser.py), [desktop fixture](fleet-desktop-synthetic.png), [mobile fixture](fleet-mobile-synthetic.png).
 The separate fixture entry never enters the default production entry. No real authentication, installed host, cleanup or restart is represented by the screenshots.
@@ -85,6 +85,56 @@ Recovery stays on [#1887](https://github.com/mastermindx-market-intelligence/Mas
 
 - `s5-observer-parser-fixtures-20261107-c2-01`: response digest `4e03f1ed12c2ea71fae8334ac6a4e8f882482c0be8d71beeda8003c4cee9de81`; consumed and accepted after parent regression proof.
 - `s5-linux-memtotal-fixture-20261107-c2-01`: response digest `a8762876e1d3a24c48ddf3abb7937b36a1df6ffb026653335a01f2c5b1162acd`; consumed in full and accepted after candidate-only parent qualification. The parent retained source preimages and tightened zero-total handling.
-- Recovery-ledger and storage-inventory fixture proposals remain on their original S5 run IDs while in progress; their delivery is not an installed outcome.
+- The first recovery-ledger and storage-inventory proposals returned but are not accepted for integration. Parent adjudication identified effect-uncertainty, first-party health, concurrency and durability gaps. Refined bounded proposals use `s5-recovery-serialized-effects-20261107-c2-01` and `s5-storage-pre-effect-holds-20261107-c2-01`; their original results remain preserved. Delivery is not installed acceptance.
 
 S3 alone consumes qualified placement facts. S0/S6 retain the app integration owners. No second collector, registry, scheduler, watchdog, lease ledger or publication controller was introduced.
+
+
+## Current Ubuntu owner observations and elapsed timer evidence
+
+[ubuntu-readonly-observations.json](ubuntu-readonly-observations.json) records two
+read-only observations of the original #2007/#2008/#1632 maintenance surfaces.
+The same-UID existing bus, installed file owner/mode/inode/digests, effective unit
+paths and empty drop-in lists were observed. No service was manually started,
+no maintenance executable was invoked, and no raw maintenance log was read.
+[observe_ubuntu_units.py](observe_ubuntu_units.py) is the bounded observation code;
+it is evidence of this read, not another installed collector or controller.
+
+| Host | Latest observation UTC, 2026-11-07 | Available GiB | Existing floor GiB | Timer | Latest oneshot exit |
+| --- | --- | ---: | ---: | --- | ---: |
+| Ubuntu1 | 07:05:34 | 63.051 | 75 | enabled / active / waiting | 0 |
+| Ubuntu2 | 07:05:29 | 137.979 | 75 | enabled / active / waiting | 0 |
+| Ubuntu3 | 07:05:30 | 139.591 | 75 | enabled / active / waiting | 1 |
+| Ubuntu4 | 07:05:32 | 864.053 | 75 | enabled / active / waiting | 0 |
+| Ubuntu0 | no current observation returned | unverified | historical 75 | current state unverified | unverified |
+
+All four observed installed scripts still have SHA256
+`3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3`.
+The observed service and timer hashes match the original November 3 receipts.
+Each timer's trigger advanced during 252.587–264.679 seconds of actual elapsed
+observation. Those are naturally scheduled executions, not a manually induced
+cleanup or death/recovery exercise. Exit 0 does not establish pressure recovery:
+Ubuntu1 remains below its configured reserve. No byte change is attributed to
+this session; measured reclaimed bytes are zero.
+
+Ubuntu0's two metadata-read processes completed with rc0 but no returned stdout.
+The second used unbuffered output as the one bounded diagnostic. This is an
+observation gap with unproven cause, not evidence of a general host outage or a
+permission denial. No further unchanged probe was repeated. Its prior installed
+receipt remains historical evidence only.
+
+The original #2007 branch still resolves to
+`e339c3b7da77c0fb1087656fc89150f955db9613`, while its PR projection reports
+`0e20d9b2eaba16219495e4a9489d4e2ae88900fc`. That publication mismatch remains held.
+These new read-only observations do not retry, rehome or clear the original
+publication effect, provider/account denials, Ubuntu2 unknown-work holds or
+Ubuntu4 qualification-only restrictions.
+
+The local Fleet source merge is `fde4c5108527a3ce3706dfcb7f53abdc404adb9a`, with
+parents `aadb658f4dcd0b09b70db52c8673384dfb24a816` and
+`5f8c13da926011fb5fdc8cea21287b532ac968db`. The scoped diff check is clean. An
+initial whole-merge whitespace check stopped before committing on existing
+upstream whitespace; it was replaced by the correct comparison to the merged
+upstream base. The successful commit separately reported Git's existing
+automatic-repack permission failure at another worktree index. That auxiliary
+operation was not repaired or replayed and no other writer's files were touched.

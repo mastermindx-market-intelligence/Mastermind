@@ -1,0 +1,774 @@
+{
+  "schema": "mastermind.s5_ubuntu_readonly_observation.v1",
+  "root_id": "01a1b498-2e4c-746b-bdea-77b474c900c4",
+  "source_pin": "5f8c13da926011fb5fdc8cea21287b532ac968db",
+  "original_carriers": [
+    2007,
+    2008,
+    1632
+  ],
+  "operation": "read installed metadata and existing same-UID systemd properties",
+  "manual_effects": {
+    "installation": 0,
+    "service_start": 0,
+    "cleanup": 0,
+    "permission_change": 0,
+    "reclaimed_bytes": 0
+  },
+  "limits": [
+    "No raw maintenance log was read.",
+    "Natural timer triggers establish existing unit execution, not cleanup outcome or provider/placement admission.",
+    "Owner/mode/inode/hash observations do not establish hostile-path confinement."
+  ],
+  "first_observations": [
+    {
+      "effect_state": "NOT_APPLIED",
+      "files": {
+        ".config/mastermind/fabric-storage-reserve.json": {
+          "inode": 35939867,
+          "internal_floor_gib": 75,
+          "mode": "0o600",
+          "sha256": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.service": {
+          "inode": 30458307,
+          "mode": "0o644",
+          "sha256": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.timer": {
+          "inode": 30458447,
+          "mode": "0o644",
+          "sha256": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": {
+          "inode": 30933000,
+          "mode": "0o755",
+          "sha256": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        }
+      },
+      "filesystems": {
+        "/": {
+          "available_bytes": 67910541312,
+          "free_bytes": 96918347776,
+          "total_bytes": 1425647083520
+        },
+        "/home/longr": {
+          "available_bytes": 67910541312,
+          "free_bytes": 96918347776,
+          "total_bytes": 1425647083520
+        }
+      },
+      "home": "/home/longr",
+      "host": "mastermind-pc",
+      "observed_at": "2026-11-07T07:01:21.895383+00:00",
+      "reclaimed_bytes": 0,
+      "same_uid_bus_verified": true,
+      "uid": 1000,
+      "units": {
+        "mastermind-linux-hygiene.service": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "inactive",
+            "DropInPaths": "",
+            "ExecMainCode": "1",
+            "ExecMainExitTimestamp": "Fri 2026-11-06 22:02:31 PST",
+            "ExecMainStartTimestamp": "Fri 2026-11-06 22:02:31 PST",
+            "ExecMainStatus": "0",
+            "ExecStart": "{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /home/longr/.local/lib/mastermind/storage-cleanup/linux_hygiene.py --apply-safe-caches ; ignore_errors=no ; start_time=[Fri 2026-11-06 22:02:31 PST] ; stop_time=[Fri 2026-11-06 22:02:31 PST] ; pid=1922169 ; code=exited ; status=0 }",
+            "FragmentPath": "/home/longr/.config/systemd/user/mastermind-linux-hygiene.service",
+            "NRestarts": "0",
+            "Result": "success",
+            "SubState": "dead",
+            "UnitFileState": "static"
+          },
+          "rc": 0
+        },
+        "mastermind-linux-hygiene.timer": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "active",
+            "DropInPaths": "",
+            "FragmentPath": "/home/longr/.config/systemd/user/mastermind-linux-hygiene.timer",
+            "LastTriggerUSec": "Fri 2026-11-06 22:02:31 PST",
+            "NextElapseUSecRealtime": "Fri 2026-11-06 23:02:40 PST",
+            "SubState": "waiting",
+            "Unit": "mastermind-linux-hygiene.service",
+            "UnitFileState": "enabled"
+          },
+          "rc": 0
+        }
+      },
+      "user": "longr",
+      "fabric_host": "ubuntu1"
+    },
+    {
+      "effect_state": "NOT_APPLIED",
+      "files": {
+        ".config/mastermind/fabric-storage-reserve.json": {
+          "inode": 27957804,
+          "internal_floor_gib": 75,
+          "mode": "0o600",
+          "sha256": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.service": {
+          "inode": 24564688,
+          "mode": "0o644",
+          "sha256": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.timer": {
+          "inode": 24564690,
+          "mode": "0o644",
+          "sha256": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": {
+          "inode": 29391784,
+          "mode": "0o755",
+          "sha256": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        }
+      },
+      "filesystems": {
+        "/": {
+          "available_bytes": 148486057984,
+          "free_bytes": 167996551168,
+          "total_bytes": 958234603520
+        },
+        "/home/ubuntu2": {
+          "available_bytes": 148486057984,
+          "free_bytes": 167996551168,
+          "total_bytes": 958234603520
+        }
+      },
+      "home": "/home/ubuntu2",
+      "host": "ubuntu2",
+      "observed_at": "2026-11-07T07:01:09.520726+00:00",
+      "reclaimed_bytes": 0,
+      "same_uid_bus_verified": true,
+      "uid": 1000,
+      "units": {
+        "mastermind-linux-hygiene.service": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "inactive",
+            "DropInPaths": "",
+            "ExecMainCode": "1",
+            "ExecMainExitTimestamp": "Fri 2026-11-06 22:00:53 PST",
+            "ExecMainStartTimestamp": "Fri 2026-11-06 22:00:53 PST",
+            "ExecMainStatus": "0",
+            "ExecStart": "{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /home/ubuntu2/.local/lib/mastermind/storage-cleanup/linux_hygiene.py --apply-safe-caches ; ignore_errors=no ; start_time=[Fri 2026-11-06 22:00:53 PST] ; stop_time=[Fri 2026-11-06 22:00:53 PST] ; pid=2873560 ; code=exited ; status=0 }",
+            "FragmentPath": "/home/ubuntu2/.config/systemd/user/mastermind-linux-hygiene.service",
+            "NRestarts": "0",
+            "Result": "success",
+            "SubState": "dead",
+            "UnitFileState": "static"
+          },
+          "rc": 0
+        },
+        "mastermind-linux-hygiene.timer": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "active",
+            "DropInPaths": "",
+            "FragmentPath": "/home/ubuntu2/.config/systemd/user/mastermind-linux-hygiene.timer",
+            "LastTriggerUSec": "Fri 2026-11-06 22:00:53 PST",
+            "NextElapseUSecRealtime": "Fri 2026-11-06 23:02:05 PST",
+            "SubState": "waiting",
+            "Unit": "mastermind-linux-hygiene.service",
+            "UnitFileState": "enabled"
+          },
+          "rc": 0
+        }
+      },
+      "user": "ubuntu2",
+      "fabric_host": "ubuntu2"
+    },
+    {
+      "effect_state": "NOT_APPLIED",
+      "files": {
+        ".config/mastermind/fabric-storage-reserve.json": {
+          "inode": 43674654,
+          "internal_floor_gib": 75,
+          "mode": "0o600",
+          "sha256": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.service": {
+          "inode": 35677633,
+          "mode": "0o644",
+          "sha256": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.timer": {
+          "inode": 35677634,
+          "mode": "0o644",
+          "sha256": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": {
+          "inode": 37111660,
+          "mode": "0o755",
+          "sha256": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        }
+      },
+      "filesystems": {
+        "/": {
+          "available_bytes": 149885280256,
+          "free_bytes": 169883553792,
+          "total_bytes": 982240026624
+        },
+        "/home/ubuntu3": {
+          "available_bytes": 149885280256,
+          "free_bytes": 169883553792,
+          "total_bytes": 982240026624
+        }
+      },
+      "home": "/home/ubuntu3",
+      "host": "ubuntu3-MS-7E61",
+      "observed_at": "2026-11-07T07:01:17.294580+00:00",
+      "reclaimed_bytes": 0,
+      "same_uid_bus_verified": true,
+      "uid": 1000,
+      "units": {
+        "mastermind-linux-hygiene.service": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "failed",
+            "DropInPaths": "",
+            "ExecMainCode": "1",
+            "ExecMainExitTimestamp": "Fri 2026-11-06 22:01:27 PST",
+            "ExecMainStartTimestamp": "Fri 2026-11-06 22:01:27 PST",
+            "ExecMainStatus": "1",
+            "ExecStart": "{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /home/ubuntu3/.local/lib/mastermind/storage-cleanup/linux_hygiene.py --apply-safe-caches ; ignore_errors=no ; start_time=[Fri 2026-11-06 22:01:27 PST] ; stop_time=[Fri 2026-11-06 22:01:27 PST] ; pid=1658862 ; code=exited ; status=1 }",
+            "FragmentPath": "/home/ubuntu3/.config/systemd/user/mastermind-linux-hygiene.service",
+            "NRestarts": "0",
+            "Result": "exit-code",
+            "SubState": "failed",
+            "UnitFileState": "static"
+          },
+          "rc": 0
+        },
+        "mastermind-linux-hygiene.timer": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "active",
+            "DropInPaths": "",
+            "FragmentPath": "/home/ubuntu3/.config/systemd/user/mastermind-linux-hygiene.timer",
+            "LastTriggerUSec": "Fri 2026-11-06 22:01:27 PST",
+            "NextElapseUSecRealtime": "Fri 2026-11-06 23:01:53 PST",
+            "SubState": "waiting",
+            "Unit": "mastermind-linux-hygiene.service",
+            "UnitFileState": "enabled"
+          },
+          "rc": 0
+        }
+      },
+      "user": "ubuntu3",
+      "fabric_host": "ubuntu3"
+    },
+    {
+      "effect_state": "NOT_APPLIED",
+      "files": {
+        ".config/mastermind/fabric-storage-reserve.json": {
+          "inode": 18227900,
+          "internal_floor_gib": 75,
+          "mode": "0o600",
+          "sha256": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.service": {
+          "inode": 17701264,
+          "mode": "0o644",
+          "sha256": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.timer": {
+          "inode": 17701540,
+          "mode": "0o644",
+          "sha256": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": {
+          "inode": 18227907,
+          "mode": "0o644",
+          "sha256": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        }
+      },
+      "filesystems": {
+        "/": {
+          "available_bytes": 927769710592,
+          "free_bytes": 978940481536,
+          "total_bytes": 1005867986944
+        },
+        "/home/ubuntu4": {
+          "available_bytes": 927769710592,
+          "free_bytes": 978940481536,
+          "total_bytes": 1005867986944
+        }
+      },
+      "home": "/home/ubuntu4",
+      "host": "ubuntu4-MS-7E61",
+      "observed_at": "2026-11-07T07:01:07.971400+00:00",
+      "reclaimed_bytes": 0,
+      "same_uid_bus_verified": true,
+      "uid": 1000,
+      "units": {
+        "mastermind-linux-hygiene.service": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "inactive",
+            "DropInPaths": "",
+            "ExecMainCode": "1",
+            "ExecMainExitTimestamp": "Fri 2026-11-06 22:00:32 PST",
+            "ExecMainStartTimestamp": "Fri 2026-11-06 22:00:32 PST",
+            "ExecMainStatus": "0",
+            "ExecStart": "{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /home/ubuntu4/.local/lib/mastermind/storage-cleanup/linux_hygiene.py --apply-safe-caches ; ignore_errors=no ; start_time=[Fri 2026-11-06 22:00:32 PST] ; stop_time=[Fri 2026-11-06 22:00:32 PST] ; pid=16668 ; code=exited ; status=0 }",
+            "FragmentPath": "/home/ubuntu4/.config/systemd/user/mastermind-linux-hygiene.service",
+            "NRestarts": "0",
+            "Result": "success",
+            "SubState": "dead",
+            "UnitFileState": "static"
+          },
+          "rc": 0
+        },
+        "mastermind-linux-hygiene.timer": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "active",
+            "DropInPaths": "",
+            "FragmentPath": "/home/ubuntu4/.config/systemd/user/mastermind-linux-hygiene.timer",
+            "LastTriggerUSec": "Fri 2026-11-06 22:00:32 PST",
+            "NextElapseUSecRealtime": "Fri 2026-11-06 23:02:36 PST",
+            "SubState": "waiting",
+            "Unit": "mastermind-linux-hygiene.service",
+            "UnitFileState": "enabled"
+          },
+          "rc": 0
+        }
+      },
+      "user": "ubuntu4",
+      "fabric_host": "ubuntu4"
+    }
+  ],
+  "second_observations": [
+    {
+      "effect_state": "NOT_APPLIED",
+      "files": {
+        ".config/mastermind/fabric-storage-reserve.json": {
+          "inode": 35939867,
+          "internal_floor_gib": 75,
+          "mode": "0o600",
+          "sha256": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.service": {
+          "inode": 30458307,
+          "mode": "0o644",
+          "sha256": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.timer": {
+          "inode": 30458447,
+          "mode": "0o644",
+          "sha256": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": {
+          "inode": 30933000,
+          "mode": "0o755",
+          "sha256": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        }
+      },
+      "filesystems": {
+        "/": {
+          "available_bytes": 67700162560,
+          "free_bytes": 96707969024,
+          "total_bytes": 1425647083520
+        },
+        "/home/longr": {
+          "available_bytes": 67700162560,
+          "free_bytes": 96707969024,
+          "total_bytes": 1425647083520
+        }
+      },
+      "home": "/home/longr",
+      "host": "mastermind-pc",
+      "observed_at": "2026-11-07T07:05:34.482795+00:00",
+      "reclaimed_bytes": 0,
+      "same_uid_bus_verified": true,
+      "uid": 1000,
+      "units": {
+        "mastermind-linux-hygiene.service": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "inactive",
+            "DropInPaths": "",
+            "ExecMainCode": "1",
+            "ExecMainExitTimestamp": "Fri 2026-11-06 23:03:31 PST",
+            "ExecMainStartTimestamp": "Fri 2026-11-06 23:03:31 PST",
+            "ExecMainStatus": "0",
+            "ExecStart": "{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /home/longr/.local/lib/mastermind/storage-cleanup/linux_hygiene.py --apply-safe-caches ; ignore_errors=no ; start_time=[Fri 2026-11-06 23:03:31 PST] ; stop_time=[Fri 2026-11-06 23:03:31 PST] ; pid=1935456 ; code=exited ; status=0 }",
+            "FragmentPath": "/home/longr/.config/systemd/user/mastermind-linux-hygiene.service",
+            "NRestarts": "0",
+            "Result": "success",
+            "SubState": "dead",
+            "UnitFileState": "static"
+          },
+          "rc": 0
+        },
+        "mastermind-linux-hygiene.timer": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "active",
+            "DropInPaths": "",
+            "FragmentPath": "/home/longr/.config/systemd/user/mastermind-linux-hygiene.timer",
+            "LastTriggerUSec": "Fri 2026-11-06 23:03:31 PST",
+            "NextElapseUSecRealtime": "Sat 2026-11-07 00:00:37 PST",
+            "SubState": "waiting",
+            "Unit": "mastermind-linux-hygiene.service",
+            "UnitFileState": "enabled"
+          },
+          "rc": 0
+        }
+      },
+      "user": "longr",
+      "fabric_host": "ubuntu1"
+    },
+    {
+      "effect_state": "NOT_APPLIED",
+      "files": {
+        ".config/mastermind/fabric-storage-reserve.json": {
+          "inode": 27957804,
+          "internal_floor_gib": 75,
+          "mode": "0o600",
+          "sha256": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.service": {
+          "inode": 24564688,
+          "mode": "0o644",
+          "sha256": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.timer": {
+          "inode": 24564690,
+          "mode": "0o644",
+          "sha256": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": {
+          "inode": 29391784,
+          "mode": "0o755",
+          "sha256": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        }
+      },
+      "filesystems": {
+        "/": {
+          "available_bytes": 148153937920,
+          "free_bytes": 167664431104,
+          "total_bytes": 958234603520
+        },
+        "/home/ubuntu2": {
+          "available_bytes": 148153937920,
+          "free_bytes": 167664431104,
+          "total_bytes": 958234603520
+        }
+      },
+      "home": "/home/ubuntu2",
+      "host": "ubuntu2",
+      "observed_at": "2026-11-07T07:05:29.144183+00:00",
+      "reclaimed_bytes": 0,
+      "same_uid_bus_verified": true,
+      "uid": 1000,
+      "units": {
+        "mastermind-linux-hygiene.service": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "inactive",
+            "DropInPaths": "",
+            "ExecMainCode": "1",
+            "ExecMainExitTimestamp": "Fri 2026-11-06 23:02:53 PST",
+            "ExecMainStartTimestamp": "Fri 2026-11-06 23:02:53 PST",
+            "ExecMainStatus": "0",
+            "ExecStart": "{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /home/ubuntu2/.local/lib/mastermind/storage-cleanup/linux_hygiene.py --apply-safe-caches ; ignore_errors=no ; start_time=[Fri 2026-11-06 23:02:53 PST] ; stop_time=[Fri 2026-11-06 23:02:53 PST] ; pid=2902443 ; code=exited ; status=0 }",
+            "FragmentPath": "/home/ubuntu2/.config/systemd/user/mastermind-linux-hygiene.service",
+            "NRestarts": "0",
+            "Result": "success",
+            "SubState": "dead",
+            "UnitFileState": "static"
+          },
+          "rc": 0
+        },
+        "mastermind-linux-hygiene.timer": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "active",
+            "DropInPaths": "",
+            "FragmentPath": "/home/ubuntu2/.config/systemd/user/mastermind-linux-hygiene.timer",
+            "LastTriggerUSec": "Fri 2026-11-06 23:02:53 PST",
+            "NextElapseUSecRealtime": "Sat 2026-11-07 00:00:36 PST",
+            "SubState": "waiting",
+            "Unit": "mastermind-linux-hygiene.service",
+            "UnitFileState": "enabled"
+          },
+          "rc": 0
+        }
+      },
+      "user": "ubuntu2",
+      "fabric_host": "ubuntu2"
+    },
+    {
+      "effect_state": "NOT_APPLIED",
+      "files": {
+        ".config/mastermind/fabric-storage-reserve.json": {
+          "inode": 43674654,
+          "internal_floor_gib": 75,
+          "mode": "0o600",
+          "sha256": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.service": {
+          "inode": 35677633,
+          "mode": "0o644",
+          "sha256": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.timer": {
+          "inode": 35677634,
+          "mode": "0o644",
+          "sha256": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": {
+          "inode": 37111660,
+          "mode": "0o755",
+          "sha256": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        }
+      },
+      "filesystems": {
+        "/": {
+          "available_bytes": 149885222912,
+          "free_bytes": 169883496448,
+          "total_bytes": 982240026624
+        },
+        "/home/ubuntu3": {
+          "available_bytes": 149885222912,
+          "free_bytes": 169883496448,
+          "total_bytes": 982240026624
+        }
+      },
+      "home": "/home/ubuntu3",
+      "host": "ubuntu3-MS-7E61",
+      "observed_at": "2026-11-07T07:05:30.862596+00:00",
+      "reclaimed_bytes": 0,
+      "same_uid_bus_verified": true,
+      "uid": 1000,
+      "units": {
+        "mastermind-linux-hygiene.service": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "failed",
+            "DropInPaths": "",
+            "ExecMainCode": "1",
+            "ExecMainExitTimestamp": "Fri 2026-11-06 23:01:53 PST",
+            "ExecMainStartTimestamp": "Fri 2026-11-06 23:01:53 PST",
+            "ExecMainStatus": "1",
+            "ExecStart": "{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /home/ubuntu3/.local/lib/mastermind/storage-cleanup/linux_hygiene.py --apply-safe-caches ; ignore_errors=no ; start_time=[Fri 2026-11-06 23:01:53 PST] ; stop_time=[Fri 2026-11-06 23:01:53 PST] ; pid=1661589 ; code=exited ; status=1 }",
+            "FragmentPath": "/home/ubuntu3/.config/systemd/user/mastermind-linux-hygiene.service",
+            "NRestarts": "0",
+            "Result": "exit-code",
+            "SubState": "failed",
+            "UnitFileState": "static"
+          },
+          "rc": 0
+        },
+        "mastermind-linux-hygiene.timer": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "active",
+            "DropInPaths": "",
+            "FragmentPath": "/home/ubuntu3/.config/systemd/user/mastermind-linux-hygiene.timer",
+            "LastTriggerUSec": "Fri 2026-11-06 23:01:53 PST",
+            "NextElapseUSecRealtime": "Sat 2026-11-07 00:02:06 PST",
+            "SubState": "waiting",
+            "Unit": "mastermind-linux-hygiene.service",
+            "UnitFileState": "enabled"
+          },
+          "rc": 0
+        }
+      },
+      "user": "ubuntu3",
+      "fabric_host": "ubuntu3"
+    },
+    {
+      "effect_state": "NOT_APPLIED",
+      "files": {
+        ".config/mastermind/fabric-storage-reserve.json": {
+          "inode": 18227900,
+          "internal_floor_gib": 75,
+          "mode": "0o600",
+          "sha256": "9e4dc81b57d804ddd717829a09c1b1fd398de47dcfc908dc23029df486e65f59",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.service": {
+          "inode": 17701264,
+          "mode": "0o644",
+          "sha256": "6045337141d4b57911584ee39e0ffb972395bf546304419d26fe1a2e04f05bde",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".config/systemd/user/mastermind-linux-hygiene.timer": {
+          "inode": 17701540,
+          "mode": "0o644",
+          "sha256": "60c382d2152fb96096655bd607f57b243e3afed1c31554d815427676b5770867",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        },
+        ".local/lib/mastermind/storage-cleanup/linux_hygiene.py": {
+          "inode": 18227907,
+          "mode": "0o644",
+          "sha256": "3f676c0075478029e5857f0a95cd4ba9ae0dba9221eab312b034f88bca2502e3",
+          "uid": 1000,
+          "owner_uid_and_no_group_other_write": true
+        }
+      },
+      "filesystems": {
+        "/": {
+          "available_bytes": 927769681920,
+          "free_bytes": 978940452864,
+          "total_bytes": 1005867986944
+        },
+        "/home/ubuntu4": {
+          "available_bytes": 927769681920,
+          "free_bytes": 978940452864,
+          "total_bytes": 1005867986944
+        }
+      },
+      "home": "/home/ubuntu4",
+      "host": "ubuntu4-MS-7E61",
+      "observed_at": "2026-11-07T07:05:32.650984+00:00",
+      "reclaimed_bytes": 0,
+      "same_uid_bus_verified": true,
+      "uid": 1000,
+      "units": {
+        "mastermind-linux-hygiene.service": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "inactive",
+            "DropInPaths": "",
+            "ExecMainCode": "1",
+            "ExecMainExitTimestamp": "Fri 2026-11-06 23:03:32 PST",
+            "ExecMainStartTimestamp": "Fri 2026-11-06 23:03:32 PST",
+            "ExecMainStatus": "0",
+            "ExecStart": "{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 /home/ubuntu4/.local/lib/mastermind/storage-cleanup/linux_hygiene.py --apply-safe-caches ; ignore_errors=no ; start_time=[Fri 2026-11-06 23:03:32 PST] ; stop_time=[Fri 2026-11-06 23:03:32 PST] ; pid=19607 ; code=exited ; status=0 }",
+            "FragmentPath": "/home/ubuntu4/.config/systemd/user/mastermind-linux-hygiene.service",
+            "NRestarts": "0",
+            "Result": "success",
+            "SubState": "dead",
+            "UnitFileState": "static"
+          },
+          "rc": 0
+        },
+        "mastermind-linux-hygiene.timer": {
+          "diagnostic": "",
+          "properties": {
+            "ActiveState": "active",
+            "DropInPaths": "",
+            "FragmentPath": "/home/ubuntu4/.config/systemd/user/mastermind-linux-hygiene.timer",
+            "LastTriggerUSec": "Fri 2026-11-06 23:03:32 PST",
+            "NextElapseUSecRealtime": "Sat 2026-11-07 00:02:25 PST",
+            "SubState": "waiting",
+            "Unit": "mastermind-linux-hygiene.service",
+            "UnitFileState": "enabled"
+          },
+          "rc": 0
+        }
+      },
+      "user": "ubuntu4",
+      "fabric_host": "ubuntu4"
+    }
+  ],
+  "elapsed_observation": [
+    {
+      "host": "ubuntu1",
+      "seconds": 252.587,
+      "prior_trigger": "Fri 2026-11-06 22:02:31 PST",
+      "current_trigger": "Fri 2026-11-06 23:03:31 PST",
+      "trigger_advanced": true
+    },
+    {
+      "host": "ubuntu2",
+      "seconds": 259.624,
+      "prior_trigger": "Fri 2026-11-06 22:00:53 PST",
+      "current_trigger": "Fri 2026-11-06 23:02:53 PST",
+      "trigger_advanced": true
+    },
+    {
+      "host": "ubuntu3",
+      "seconds": 253.568,
+      "prior_trigger": "Fri 2026-11-06 22:01:27 PST",
+      "current_trigger": "Fri 2026-11-06 23:01:53 PST",
+      "trigger_advanced": true
+    },
+    {
+      "host": "ubuntu4",
+      "seconds": 264.679,
+      "prior_trigger": "Fri 2026-11-06 22:00:32 PST",
+      "current_trigger": "Fri 2026-11-06 23:03:32 PST",
+      "trigger_advanced": true
+    }
+  ],
+  "ubuntu0": {
+    "state": "CURRENT_OBSERVATION_UNVERIFIED",
+    "reason": "Two read-only host probes returned no stdout; first process completed rc0 with no retained output; bounded unbuffered diagnostic also yielded no initial observation. No outage/permission cause inferred.",
+    "prior_installed_source_evidence": "docs/evidence/2026-11-03-fabric-ubuntu-reliability/maintenance-receipts.json",
+    "no_further_replay": true
+  },
+  "publication": {
+    "pr": 2007,
+    "branch_head": "e339c3b7da77c0fb1087656fc89150f955db9613",
+    "pr_head": "0e20d9b2eaba16219495e4a9489d4e2ae88900fc",
+    "state": "HELD_BRANCH_PR_PROJECTION_MISMATCH",
+    "mutation": false
+  }
+}
