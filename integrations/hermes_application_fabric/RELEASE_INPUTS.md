@@ -6,14 +6,23 @@ credential, routing registry or permission to replay an original effect.
 
 ## Composed source
 
-The complete primary/native/attended contribution is #2186. Its published
-fbf1d57e892b17350dd8600e5f62fb5a8967c79b test merge
-d845c89934da3338fd3e821601e7d7cd5de8a4b7 into original APPLICATION
-84ef19e38c2dcb5d4ba3017812e9c13cd1f9ae2c passed all eight focused jobs
-and 385 enrollment cases with zero failures, errors or skips. The shared
-original paired gate passed 222 cases, including 30 AUTO text/chat cases.
-Combined general CI separately retained one original Studio helper-preflight
-failure; focused success is not general-CI or release acceptance.
+The complete primary/native/attended contribution is #2186. Published head
+322b0ec3556ca9db390a95480d57efd244dfd2bc, tested as merge
+719e73591513186dd12bc246dd0a4a1f62931e5f into original APPLICATION
+da2db3909544137ca8b0602304a9b574b18f5277, passed all eight primary jobs in
+[run42381637919](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42381637919).
+The original paired gate passed222 cases across nine groups. Its unchanged
+Studio migration target passed both baseline and observed execution; the full
+diagnostic suite failed43 historical Git-fixture checks because its checkout
+lacked the original corpus anchor. This workflow now acquires that same
+immutable anchor and full event history. The repaired complete diagnostic,
+general CI and this successor's qualification remain separate evidence.
+
+The385-case enrollment gate also passed on322 in1250.88s in
+[job128430305067](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42381637833/job/128430305067).
+The earlier c821 receipt remains attributed to
+[run42376517671](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42376517671).
+Focused success is not general-CI, source-release or live-account acceptance.
 
 The attended contribution a664a288a3791bda3ea2b43af08278f1d8fb0d9b
 from #2166 is incorporated. Its older 81-case receipt remains historical.
@@ -26,13 +35,50 @@ connections or standard SDK constructions against Macrofff0025 and the 15-file
 pinned2bd patch. The prior106-case dcb proof and original fbf results remain
 historical. Current-head hosted results require their corresponding receipt.
 
+The earlier100/85/66 contexts and their322/c164 execution remain historical.
+The incorporated12efe current-owner context and a577 proposal retain separate
+source contracts; the attended AUTO composition uses its explicitfff contract.
+
 The original APPLICATION handler/Broker qualification preserves all nine
 secretary fixed/AUTO/exact conversation, limit and unknown-effect cases and
 adds those same three cases for the distinct attended service. This uses the
-original Macro factory/workload declarations and a disposable attended grant;
-it does not qualify a real account, install a service or authenticate a live
-attended host. The separate patched-gateway suite covers native route/admission
-projection. The shared paired gate still consumes its original CI-owned pin.
+original Macro factory/workload declarations and a disposable attended grant.
+The successor adds the same three cases for meta fixed/AUTO/exact, yielding21
+cases in each of two explicitly distinct contexts: original a577 with fixture
+source-flag overrides, and the exact proposed source support without those
+overrides. The original-a577 context passed all21 cases on composed d7/173b224,
+in job128439397143. Its proposal preparation then failed at Git archive before
+patch application; that underlying cause remains unproved because stderr was
+not surfaced. The successor exports verified local committed blobs instead,
+with three passing Git boundary tests and the same pre/postimage checks.
+Hosted proposal383+21 proof then passed on90fb/2d9acf5 in job128444807247,
+with no support-flag override; the original-a57721 context passed too. Exact
+receipts are in review_evidence/hermes_primary/source-support-hosted-20261107.json.
+Neither context qualifies a real account, installs a service or
+authenticates a live attended host. The separate patched-gateway suite covers
+native route/admission projection. The shared paired gate still consumes its
+original CI-owned pin.
+
+The current-source context consumes original Macro #10740 at
+12efe39a6b6e2f6d19f3a9893f978c55d4656681. That head joins qualified a43 support
+with the original cd2 CI repair, and the original carrier's adoption is directly
+read back. Its complete engine/lib/config/test trees equal a43. The actual
+21-case native execution remains attributed to Brain559/a43; it passed without
+a proposal replay or source-flag overrides. The current workflow separately
+qualifies the resulting pinned carrier and its own Mastermind candidate.
+
+The qualifier verifies committed postimages and unchanged owner inputs, exports
+only regular local Git blobs, and consumes the actual support flags without
+applying a patch. Adapter and native owner must be the same clean candidate.
+Historical a577 fixture/proposal contexts retain their own checkout and exact
+contract. Source support does not enroll a live service; current-head delivery,
+installation and authenticated provider acceptance remain separate.
+
+The repaired Studio diagnostic passed all848 discovery cases on d7/173b224,
+plus the baseline and observed isolated target. That actual receipt supports
+retaining the proven immutable-anchor/full-history input during composition
+with the original552 continuation's independently supplied fixture acquisition.
+Only one acquisition path is used; no original assertion or guard is changed.
 
 | Input | Exact identity / owner |
 | --- | --- |
@@ -40,7 +86,8 @@ projection. The shared paired gate still consumes its original CI-owned pin.
 | Original primary runtime predecessor | 08b8daf9 digest1ae0d896; its installed69-case proof is retained but does not qualify the two amended current runtime files |
 | APPLICATION factory/client | Contribution to original Macro#10740 at fff0025e10de394c6a297c7878518513f1dbe633, preserving current12efe and original dcb histories; client SHA2560817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e remains unchanged |
 | Attended owner declarations | Fixed and AUTO source descriptors are supported in fff0025; factory SHA25656996272225840ff7adefb95d8949c871cb91b1a578bbbf981ee8b8480454df8; original workload and service identity are preserved |
-| Attended owner qualification | Macro#10832 at83aa7e16bfe0bd1f07d373e2e42aca69e5e8da20, parentc164; three-file test/workflow/evidence contribution, no production/configuration change; hosted126 and local197 cases passed |
+| Historical Hermes source proposal | Exact four-file a577 proposal in qualification/application_owner_support/; patch SHA2569ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d. Its postimages are incorporated through a43 into original12efe; historical383+21 proposal proof is retained |
+| Attended owner qualification | Currentfff source workflow245 passed, zero failures/errors/skips. Earlier12efe219 and historical#10832 hosted126/local197 retain their source identities and original CI-authority refusal |
 | Native APPLICATION installer/entry | Original #2175 plus qualified v9 contribution in #2186; current Go ingress/account/service publishers remain authoritative |
 | Role Hermes ABI | Qualified upstream1c0cd667 and installed2bd378ed; existing held role installation and source closure |
 | Attended Hermes ABI | Exact upstream2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19 plus the reviewed core patch in hermes_core/ |
@@ -87,6 +134,11 @@ qualified=true and application_allowed=true, with metadata reads still false.
 The shipped application mode map remains empty. No enrolled attended capability,
 runtime service record, principal/grant or credential is created by those flags.
 
+The historical a577 proposal changes only its five existing source-support flags
+and tests; its383 cases and original12efe219-case context remain retained.
+The composedfff source adds attended AUTO with the same existing identity and
+uses its own immutable contract rather than reapplying or relabeling that patch.
+
 The attended factory therefore remains closed until its original owners
 qualify and enroll the actual service. It cannot borrow a Brain, secretary,
 meta-CEO or worker credential. Attended AUTO uses the same service identity with
@@ -110,8 +162,10 @@ The original H4 contribution at `f008b67333ecf627270a7d8378720f1f034864ce`
 supplies `qualification/qualify_live_preimages.py`, its dated host receipt,
 the versioned read-only capacity bridge, and their complete seven-test closure.
 Those published additions are adopted unchanged. The bridge's existing installed
-postimage and prepared MCP lifecycle action remain with their original owner;
-source composition does not call for another installation or reload.
+postimage remains with its original owner. The later c79 diagnostic return
+records successful default-profile checks and a marketing profile_mismatch;
+global reload was stopped before SEND. Source composition does not clear that
+stop or call for another installation, reload or cross-profile replay.
 
 The [original activation inputs](../../review_evidence/hermes_h4/ACTIVATION_INPUTS.md)
 and [profile mapping](../../review_evidence/hermes_h4/profile-mapping-20261107.json)
@@ -173,3 +227,11 @@ package, early model-provider entry, managed picker, multi-home PM support and
 sealed Macro projection. Its 17-file attended runtime digest is distinct from
 the existing 11-file role publication. The complete installation and proof
 manifest is recorded in `review_evidence/hermes_primary/attended-installed-source-qualification-20261107.json`.
+
+## Published v10 source join and CI fixture qualification
+
+The contribution joins published original `72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0` with the committed-current owner and worker hardening source. It preserves the eight-role routed enrollment implementation, its foreign-module refusal, and both existing fixture-isolation boundaries. The original current-pair receipt now uses structured source references; the superseded URL-line exception is removed. Metadata cases retain the published finite scheduling budget and exact response/upstream-call checks.
+
+The actual joined participant, primary/retained enrollment, fresh-family, anonymous-read guard and metadata suites passed **244 cases in one process**, with zero failures, errors or skips. Five focused exact-identity cases also passed; the historical shared-relay receipt remains byte-for-byte intact and its one observed host-identity token is qualified only through the existing exact source/site registry. Full source and token drift continue to refuse. Detailed source identities and retained failed iterations remain in `review_evidence/fabric_application/hermes-committed-owner-proof-20261107.json`.
+
+The earlier nine-job hosted inference success is bound to `559989d`; it is not relabeled as a successor hosted or installed result. The active protected-base/H6 source composition remains on original PR #2175. Runtime and provider acceptance boundaries above remain in force.

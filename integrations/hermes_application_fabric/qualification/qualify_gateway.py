@@ -91,6 +91,7 @@ def main():
         raise RuntimeError("Use the qualified APPLICATION YAML dependency")
     print(json.dumps({"candidate": args.candidate, "hermes": actual,
         "owner": "fff0025e10de394c6a297c7878518513f1dbe633", "owner_source_verified": True,
+        "owner_verification_scope": "client_and_factory_bytes",
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
         "pyyaml": yaml.__version__,
         "mode": "pinned-native-host-patch-loopback-fixture", "live_provider_acceptance": False}), flush=True)

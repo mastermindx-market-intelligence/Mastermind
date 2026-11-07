@@ -779,10 +779,7 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # The installer exclusively creates the gateway audit parent with this private
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
-REVIEWED_FILES['ops/executive_os/install.sh'] = {
-    'sha256': '91736e2ca23c4fa9457cb9470971c48130a83758b8ff18814a05e67e8b43942d',
-    'sites': ((1668, 26, 31, 'int', '0o700'),),
-}
+REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '40c4b86eba715a405242474513b51f26c461fbe3535f3983aa29b2b67e69ce94', 'sites': ((1700, 26, 31, 'int', '0o700'),)}
 
 
 # Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
@@ -836,9 +833,39 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 # Full-source or token-site drift restores the ordinary identity guard.
 REVIEWED_FILES[
     "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
-] = {
-    "sha256": "d2b5b955bcd625c12f71096295107e25ca560eca89687ae36247a89e5d48af2b",
-    "sites": ((346, 37, 40, 'int', '409'),),
+] = {'sha256': '192ff0bf4321f0006cb34ba68dd4d648da3a3825dccc8cd731f220f61e793f32', 'sites': ((367, 37, 40, 'int', '409'),)}
+
+# Original H4 f008 receipts record the existing Darwin host's ownership.
+# These are observed identities, not runtime defaults, service enrollment or
+# authorization. Preserve the receipts byte-for-byte. Only these fifteen
+# typed integer tokens in the two exact files are reviewed; any byte or path
+# drift restores the original identity guard for the complete receipt.
+REVIEWED_FILES["review_evidence/hermes_h4/profile-mapping-20261107.json"] = {
+    "sha256": "6df7896d56bc9b2098914fb945e314369d360f9f87f7d2f5d1d414f796aded53",
+    "sites": (),
+    "utf8_sites": (
+        (20, 20, 23, "int", "501"),
+        (47, 20, 23, "int", "501"),
+        (70, 20, 23, "int", "501"),
+    ),
+}
+REVIEWED_FILES["review_evidence/hermes_h4/native-preimage-qualification-20261107.json"] = {
+    "sha256": "eaa5796f0000713bc83e6fac6962a40b7c367cf311022bf81452334ed83bfdee",
+    "sites": (),
+    "utf8_sites": (
+        (29, 18, 21, "int", "501"),
+        (42, 18, 21, "int", "501"),
+        (55, 18, 21, "int", "501"),
+        (68, 18, 21, "int", "501"),
+        (85, 18, 21, "int", "501"),
+        (98, 18, 21, "int", "501"),
+        (111, 18, 21, "int", "501"),
+        (128, 18, 21, "int", "501"),
+        (141, 18, 21, "int", "501"),
+        (154, 18, 21, "int", "501"),
+        (167, 18, 21, "int", "501"),
+        (180, 18, 21, "int", "501"),
+    ),
 }
 
 # Exact HTTPS port excluded by the disposable Chisel fixture.
@@ -849,3 +876,17 @@ REVIEWED_FILES[
     "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
     "sites": ((27, 26, 29, "int", "443"),),
 }
+
+# Retained source qualification records the observed proof parent UID only.
+# It grants no runtime identity or enrollment. Exact bytes and the sole complete
+# UTF-8 integer token are required; drift restores the ordinary identity guard.
+REVIEWED_FILES["review_evidence/fabric_application/shared-relay-source-qualification-20261107.json"] = {
+    "sha256": "3629a7a963e9621aa1b190c1b946c6a3d8a1277caaa3ffac6dd129a4c984b5b3",
+    "sites": (),
+    "utf8_sites": ((296, 26, 29, "int", "501"),),
+}
+
+# The sealed verifier ModuleType label is a Python module identity, never an OS
+# account, principal or service. This exact source/string site alone is reviewed;
+# any full-source or token drift restores the ordinary identity guard.
+REVIEWED_FILES["integrations/hermes_application_fabric/source_context.py"] = {'sha256': 'e44e24c39ca09ece5a857aee5f92c207ce386a4a75bf5eac588cac87be4fd36d', 'sites': ((378, 36, 73, 'str', '"_mastermind_attended_native_sources"'),)}

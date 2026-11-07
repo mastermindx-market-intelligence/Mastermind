@@ -39,6 +39,14 @@ It verifies the existing native install record and the closed runtime file diges
 before starting that checker, and rechecks after its return. Both the backend
 blob and plugin pin must come from the same selected protected release.
 
+The backend starts this fixed checker with Python `-I -B`. The checker loads
+its private `__init__.py`, `native.py` and `native_evidence.py` directly from
+those named source files, without sibling-package discovery or cached bytecode.
+Its private package has an empty discovery path; the required modules retain
+normal module identities and are registered before their source executes.
+The native source and committed dependency environment keep their existing
+explicit loading path. These checks do not install or activate the plugin.
+
 The closed runtime file projection consists of `__init__.py`, `plugin.yaml`,
 `native.py`, `facade_port.py`, `hermes_mcp_client.py`, `native_session.py`,
 `native_evidence.py` and `enrollment_check.py`. `package_fingerprint()` in

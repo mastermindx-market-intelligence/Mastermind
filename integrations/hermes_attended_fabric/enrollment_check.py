@@ -1,12 +1,32 @@
 """Bounded read-only native enrollment/evidence check for the existing facade."""
 from __future__ import annotations
 
-import importlib
 import importlib.util
 import json
 import site
 import sys
 from pathlib import Path
+
+
+def _source_module(name: str, path: Path, *, package: bool = False):
+    """Execute this named source file without package discovery or cached code."""
+    source = path.read_bytes()
+    spec = importlib.util.spec_from_file_location(
+        name, path, submodule_search_locations=[] if package else None)
+    if spec is None:
+        raise ValueError()
+    if package:
+        # The spec factory populates an empty package-location list itself.
+        spec.submodule_search_locations = []
+    module = importlib.util.module_from_spec(spec)
+    # Dataclasses and relative imports need the normal module identity before
+    # source execution. The private package has no discovery search path.
+    sys.modules[name] = module
+    if "." in name:
+        parent, _, member = name.rpartition(".")
+        setattr(sys.modules[parent], member, module)
+    exec(compile(source, str(path), "exec"), module.__dict__)
+    return module
 
 
 def main() -> int:
@@ -34,15 +54,10 @@ def main() -> int:
         # integrations package. Load only this fixed installed package, without
         # invoking its register() entry point or ambient package discovery.
         name = "_mmx_attended_fabric_evidence"
-        spec = importlib.util.spec_from_file_location(
-            name, installed / "__init__.py",
-            submodule_search_locations=[str(installed)])
-        if spec is None or spec.loader is None:
-            raise ValueError()
-        package = importlib.util.module_from_spec(spec)
-        sys.modules[name] = package
-        spec.loader.exec_module(package)
-        evidence = importlib.import_module(name + ".native_evidence")
+        _source_module(name, installed / "__init__.py", package=True)
+        _source_module(name + ".native", installed / "native.py")
+        evidence = _source_module(
+            name + ".native_evidence", installed / "native_evidence.py")
         raw = sys.stdin.buffer.read(65537)
         if len(raw) > 65536:
             raise ValueError()
