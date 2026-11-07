@@ -488,8 +488,12 @@ class NativeRuntime:
                     count = integer(db.get_resume_message_count(row["id"]))
                     if self.owned_history(db, owner)[1] != receipt:
                         raise BridgeRefusal("NATIVE_HISTORY_CHANGED")
-                    result.append({"id": identifier(owner), "title": display(row.get("title") or "", 512),
-                                   "running": None, "messageCount": count})
+                    result.append({
+                        "id": identifier(owner),
+                        "title": display(row.get("title") or "", 512),
+                        "running": None,
+                        "messageCount": count,
+                    })
                     if len(result) == 50:
                         break
                 if len(result) == 50 or len(rows) < 200:
