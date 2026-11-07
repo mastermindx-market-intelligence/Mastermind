@@ -183,3 +183,32 @@ def test_legacy_workspace_read_does_not_require_an_unrelated_hierarchy_policy(
         result = workspace.call(owner)
         assert result["result"]["availability"] == "AVAILABLE"
         assert owner["namespace"].entries == owner["namespace"].exits
+
+
+@pytest.mark.parametrize("count", [2, 15])
+def test_v5_root_plan_reaches_existing_autonomy_policy_consumer(
+        mixed, tmp_path, monkeypatch, count):
+    import asyncio
+    from tests import test_workspace_autonomy_policy_adapter as autonomy
+    from control_plane.workspace_autonomy_policy_adapter import read_autonomy_policy
+
+    e = mixed
+    _admit(e, count)
+    with _owner(e, tmp_path, monkeypatch) as owner:
+        authorize, _ = autonomy.authorizer()
+        existing = workspace.service(owner, authorize)
+        before = owner["namespace"].entries
+        response = asyncio.run(read_autonomy_policy(existing, autonomy.frame(owner)))
+        body = response["result"]
+        assert response["ok"] and body["availability"] == "AVAILABLE", body["reason_codes"]
+        policy = er.CooCyclePolicy.load(version=2)
+        assert body["selection"] == owner["selection"]
+        assert body["policy"]["scope"] == "ADMITTED_ROOT"
+        assert body["policy"]["policy_sha"] == policy.policy_sha256
+        assert body["policy"]["source_sha256"] == policy.source_sha256
+        assert body["policy"]["limits"] == policy.to_dict()
+        assert body["source_observation"]["state"] == "SAME"
+        assert body["source_observation"]["runtime"]["state"] == "SAME"
+        assert owner["namespace"].entries == before + 1 == owner["namespace"].exits
+        assert not owner["namespace"].active
+        assert len(e.runtime.attempts.list_attempts()) == 1

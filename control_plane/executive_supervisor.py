@@ -3089,6 +3089,10 @@ class ExecutiveSupervisor:
             **({"exact_target": target} if target is not None else {}),
         )
 
+    def _current_prompt_matches(self, job: Job, original: str, current: str) -> bool:
+        """Compare freshly validated input facts without replacing sealed bytes."""
+        return original == current
+
     async def _start_claimed_job(
         self, job_id: str, lease: AttemptLease, *,
         exact_target: ExactWorkerClaimTarget | None = None,
@@ -3132,11 +3136,17 @@ class ExecutiveSupervisor:
                     else None
                 ),
             )
+            original_prompt = spec.prompt
             spec = self._enrich_spec_with_canary_claim(spec, job)
             if paid_supervisor.is_paid_adapter(self.adapter):
                 spec = await self.adapter.prepare_paid_launch_spec(spec, lease=lease)
             elif self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
                 spec = await self.adapter.prepare_attended_launch_spec(spec, lease=lease)
+            # Currentness comparison may accommodate a fresh read receipt,
+            # but no preparation may replace the original repair/parent bytes.
+            if (job.orchestration_role in {"repair", "aggregation"}
+                    and spec.prompt != original_prompt):
+                raise SupervisorError(f"{job.orchestration_role} input changed after sealing")
             recovery_prompt_path = schema_path.parent / "worker-prompt.txt"
             _write_private_recovery_prompt(recovery_prompt_path, spec.prompt)
             if exact_target is not None:
@@ -3166,7 +3176,7 @@ class ExecutiveSupervisor:
                         if verified_commission is not None else None
                     ),
                 )
-                if current_prompt != spec.prompt:
+                if not self._current_prompt_matches(job, original_prompt, current_prompt):
                     raise SupervisorError(f"{job.orchestration_role} input changed after sealing")
             # All fresh branches use the incumbent Runtime lease fence, even
             # ordinary native children with no target or review-input suffix.
