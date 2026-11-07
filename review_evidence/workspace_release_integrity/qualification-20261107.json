@@ -1,0 +1,152 @@
+{
+  "at": "2026-11-07T09:24:46.437028+00:00",
+  "compatible_governing_pin": "e63d8acaebe0d3cee1ce7cfb8d85294bf0c57f46",
+  "complete_run_per_module": {
+    "tests.test_executive_workspace": {
+      "failures": 8,
+      "tests": 69
+    },
+    "tests.test_executive_workspace_mount": {
+      "failures": 14,
+      "tests": 76
+    },
+    "tests.test_linked_workspace_release_integrity": {
+      "failures": 0,
+      "tests": 20
+    },
+    "tests.test_mastermind_workspace_cli": {
+      "failures": 0,
+      "tests": 104
+    },
+    "tests.test_mastermind_workspace_repositories": {
+      "failures": 0,
+      "tests": 59
+    }
+  },
+  "limitations": [
+    "No global filesystem exclusion is claimed; caller terminal/live-writer custody remains required.",
+    "Native Git unlock/remove may still enumerate worktrees; no constant-time or guaranteed latency claim.",
+    "Failures after the first attempted native mutation are EFFECT_UNKNOWN, even when the original lock is restored; no replay authority."
+  ],
+  "next_installed_boundary": "Use the existing immutable launcher publisher after protected delivery. Preserve the enrolled pool router; do not replace it with a single-root launcher. Reconcile the original Macro operation before one qualified release attempt.",
+  "no_live_source_release_or_installation": true,
+  "operation": "workspace-release-integrity-20261107-sol-001",
+  "qualification": {
+    "before_fix": {
+      "exit": 1,
+      "log_sha256": "7f0b6bd8e95e928ef78059f288448d465bc25724eec4e9a8d10b8155c8c28464",
+      "production_source_unchanged": true,
+      "seconds": 17.221,
+      "test_file_sha256": "fe5c3690c3e80300de24c6ecd5d05198e17ddf095511151960d6cccd53fd780b"
+    },
+    "complete_focused_run": {
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "/tmp/mmx-release-integrity-pytest-s8k_ufj4",
+        "--junitxml=/tmp/mmx-release-integrity-focused.xml",
+        "tests/test_linked_workspace_release_integrity.py",
+        "tests/test_executive_workspace.py",
+        "tests/test_mastermind_workspace_cli.py",
+        "tests/test_mastermind_workspace_repositories.py",
+        "tests/test_executive_workspace_mount.py"
+      ],
+      "exit": 1,
+      "junit_sha256": "a78862da23a7ceb049ae439389535290c8ba680b8ddfc6dcb39c47668215be2d",
+      "live_workspace_effects": "NONE; temporary test repositories only",
+      "log_sha256": "53c881c7223e278fd25f2c5ce3c3d8ba010c2bdf59817bef9274fb7eb6daff71",
+      "seconds": 206.589,
+      "source_base": "5199647e89166d163392905574097b2cfa16ca5b",
+      "source_sha256": {
+        "control_plane/executive_workspace.py": "263043a18f65585bd7ebbe75f0c2367289e2b98f38bce7d3e2502845edd6c281",
+        "scripts/mastermind_workspace.py": "d0924b3c15ba55b309d359f762af1d20e8da5ef91fc4c44137be77a9d02fca79",
+        "tests/test_linked_workspace_release_integrity.py": "029a85110d0a214707b276ee2da0210d7326ca223d0bd213b9f1f2029443122c",
+        "tests/test_mastermind_workspace_cli.py": "a31117cbea481224950281bf13eee35c7b4ccb4e8d395403caf8f7404a8cc91b"
+      },
+      "totals": {
+        "errors": 0,
+        "failures": 22,
+        "skipped": 0,
+        "tests": 328
+      }
+    },
+    "exact_environment_followup": {
+      "command": [
+        "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        "/tmp/mmx-release-exact-proof-3k1jks3z/pytest",
+        "--junitxml=/tmp/mmx-release-exact-env-followup.xml",
+        "tests/test_executive_workspace.py::test_terminal_assignment_seal_fails_closed_for_unowned_or_world_boundary",
+        "tests/test_executive_workspace.py::test_assignment_seal_rejects_replacement_before_chmod",
+        "tests/test_executive_workspace.py::test_assignment_seal_malformed_snapshot_has_no_effect[label]",
+        "tests/test_executive_workspace.py::test_assignment_seal_malformed_snapshot_has_no_effect[path]",
+        "tests/test_executive_workspace.py::test_assignment_seal_malformed_snapshot_has_no_effect[bool_inode]",
+        "tests/test_executive_workspace.py::test_assignment_seal_malformed_snapshot_has_no_effect[missing]",
+        "tests/test_executive_workspace.py::test_assignment_seal_refuses_path_swap_around_pinned_fd[open]",
+        "tests/test_executive_workspace.py::test_assignment_seal_refuses_path_swap_around_pinned_fd[chmod]",
+        "tests/test_executive_workspace_mount.py::test_actual_outer_dispatch_and_path_fence",
+        "tests/test_executive_workspace_mount.py::test_absent_mounts_keep_legacy_closed",
+        "tests/test_executive_workspace_mount.py::test_byok_fixed_route_uses_existing_outer_fence",
+        "tests/test_executive_workspace_mount.py::test_asset_manifest_and_callback_headers[legacy]",
+        "tests/test_executive_workspace_mount.py::test_asset_manifest_and_callback_headers[noir]",
+        "tests/test_executive_workspace_mount.py::test_outer_lifespan_drains_optional_owners",
+        "tests/test_executive_workspace_mount.py::test_concrete_optional_factories_and_public_projection",
+        "tests/test_executive_workspace_mount.py::test_public_mount_transport_fence_precedes_dispatch[legacy]",
+        "tests/test_executive_workspace_mount.py::test_public_mount_transport_fence_precedes_dispatch[noir]",
+        "tests/test_executive_workspace_mount.py::test_selected_profile_keeps_optional_mount_absence[legacy]",
+        "tests/test_executive_workspace_mount.py::test_selected_profile_keeps_optional_mount_absence[web_ceo_v2]",
+        "tests/test_executive_workspace_mount.py::test_selected_profile_keeps_workspace_dispatch[legacy]",
+        "tests/test_executive_workspace_mount.py::test_selected_profile_keeps_workspace_dispatch[web_ceo_v2]",
+        "tests/test_executive_workspace_mount.py::test_public_mount_trusts_only_loopback_forwarded_scheme"
+      ],
+      "corrected_environment": {
+        "child_umask": "0022",
+        "dependency_declared_in": "pyproject.toml",
+        "lowlevel_Server_list_tools": true,
+        "mcp": "1.28.1"
+      },
+      "exit": 0,
+      "junit_sha256": "3c563be2251ff9c0e2c4c2a9ddafdb91c94b3458c5084866e9b8126ccef70ba1",
+      "log_sha256": "e2289c230135b682d66e48107f8caab30f5b37878e8daf2e9fb92df9aebb1375",
+      "prior_environment": {
+        "lowlevel_Server_list_tools": false,
+        "mcp": "2.3.0",
+        "umask": "0077"
+      },
+      "production_source_or_installed_environment_changed": false,
+      "proof_interpreter": "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+      "seconds": 9.909,
+      "setup_log_sha256": "84c61cf90813692b7c32b8eae4e6223cb228d01190da148c54f764f5bd5f0202",
+      "source_base": "5199647e89166d163392905574097b2cfa16ca5b",
+      "totals": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 22
+      }
+    },
+    "first_fix": {
+      "exit": 0,
+      "log_sha256": "4d2df7a96ce4a667da3ccf295f2d16c728a65ed0e861a3baa919f7bb469b02b5",
+      "seconds": 10.129
+    }
+  },
+  "runtime_observation": {
+    "effect": "NOT_APPLIED",
+    "failure": "read-only git worktree list --porcelain exceeded60seconds before unlock/removal",
+    "original_operation": "fabric-app-scoped-fixture-pin-20261107-sol-001",
+    "original_workspace_preserved": true
+  },
+  "self_review": "Diff and actual Git2.50.1 native selection checked; unique raw suffix selection, original-target registration identity, every untracked file, recoverability and original conditional lock restoration remain fenced. Native mutation primitives are unchanged and non-force.",
+  "source_base": "5199647e89166d163392905574097b2cfa16ca5b"
+}

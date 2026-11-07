@@ -1,0 +1,86 @@
+{
+  "schema": "mastermind.hermes_workspace_oauth_privacy_patch.v1",
+  "repository": "https://github.com/NousResearch/hermes-agent",
+  "qualified_source_commits": [
+    "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
+  ],
+  "patch_sha256": "1d1df9a1fde6654d1690715e52ed10524c6b1b4d9af24b406243324d212146ce",
+  "license": "MIT",
+  "license_file": "UPSTREAM_LICENSE",
+  "installed": false,
+  "proof_scope": "Exact fixed two-resource OAuth and unchanged diagnostic-privacy source derivation; no host or account authorization",
+  "files": {
+    "agent/agent_init.py": {
+      "before_bytes": 126617,
+      "before_git_blob": "1d2d7f302e41c0f83f32fe628a3d308f6fdc5bca",
+      "before_sha256": "040c74ad19dc27c7886bf32d2e60a251a44b5b0efc95425c461b2b3b322cbcc0",
+      "after_bytes": 126495,
+      "after_git_blob": "b62a9fe0cf03a003ea0882e3281f40053bbf3bf2",
+      "after_sha256": "eea2233a2b6cd536fca891dc3436a8dd55c1e69f0ad54a5aa6cf8fa58a3c7e08"
+    },
+    "agent/memory_caller_scope.py": {
+      "before_bytes": 7600,
+      "before_git_blob": "a05d2de55d3df2d8913a23f457779f49527d29d7",
+      "before_sha256": "98e96ae63394a0e80d3b0b235c59a520184d64b76006f73e8954f9a71e7a7d88",
+      "after_bytes": 7497,
+      "after_git_blob": "a48df847b4c59268613256e32252545c523ee62a",
+      "after_sha256": "e8924a95d756f0235071a0276763bffdaa7fdf5cef68eda589f7f46939a872a6"
+    },
+    "agent/redact.py": {
+      "before_bytes": 71327,
+      "before_git_blob": "7529bf76bc1933b1ac2fcdcd2e4e22f75d6c4741",
+      "before_sha256": "cea25df8139675b600eca448f70756bfa9ad22f537abf4f123d01bcbfc71e563",
+      "after_bytes": 71367,
+      "after_git_blob": "e7edf41b78091bf5f2d0dff9bbf66bc1f306182c",
+      "after_sha256": "d52ac54e1107b404c0882432a2e06b114d298f4ccd33ec16deffc0544074d935"
+    },
+    "hermes_cli/mcp_config.py": {
+      "before_bytes": 49006,
+      "before_git_blob": "3bb246863c39569492b5718c8f65a1a0cce07c05",
+      "before_sha256": "bd017489bfbb2769f73572ed6627b67e61838d8af162bf3072cc664d9a31f696",
+      "after_bytes": 50348,
+      "after_git_blob": "81dc49d91512f09ba5278c9b859e8a9a0d07c0af",
+      "after_sha256": "0970c0cd3ed94a3a3986a5364c697b6b64006844b383707ea12998bd0084e70c"
+    },
+    "tools/mcp_oauth_manager.py": {
+      "before_bytes": 27510,
+      "before_git_blob": "3399d06c2160091237b90e23ebbf53addb708758",
+      "before_sha256": "6ff9697153ecd267464c57b1890edbd4b6259ec65cea5cce03feba5261ae1469",
+      "after_bytes": 47235,
+      "after_git_blob": "8f799fbc9716f859a10891e04f4de04d3184e47e",
+      "after_sha256": "b1b611725cb1f873c2b9c715eab8591ea56d8ca0c61cd832224f5ed0a21624ae"
+    },
+    "tools/mcp_oauth_provider.py": {
+      "before_bytes": 34983,
+      "before_git_blob": "545c5b071d25e4a230fd3d0af29f76901608a503",
+      "before_sha256": "d502124bb36ad9ed09429b5abf86bdf2878373b8c3700ab82a69d22a568c9ffa",
+      "after_bytes": 36617,
+      "after_git_blob": "efed2a1c8db5eab7089cbf78ef24a1bb856d6fa5",
+      "after_sha256": "f79aa231c90de8e483a4cb02c4c51d1cc9ba4a8838872e718b92784fcb3181b8"
+    },
+    "tools/mcp_tool_errors.py": {
+      "before_bytes": 28793,
+      "before_git_blob": "0d48a0c941c4c088ff85f631fccd9f7947cc5ff2",
+      "before_sha256": "7f9a13601314b420119b7b633e48be69117827a784c1c980fddeb80e08ef95a8",
+      "after_bytes": 29634,
+      "after_git_blob": "64d2e9b684d7b3e7d02023fd1fb948042e690bc0",
+      "after_sha256": "e71abeb9e97b0d1e97c976c709dd2fa2ccb71822626184e976dad0838d9c3c28"
+    },
+    "tools/mcp_tool_server_run.py": {
+      "before_bytes": 34743,
+      "before_git_blob": "10141145c39a3cc9f0c262e9db0485e71e4106dd",
+      "before_sha256": "fc05e142e0dedc888e9dfe78c8044cfe4a55de874799c31ffd17d47b4c5fb712",
+      "after_bytes": 35034,
+      "after_git_blob": "5c585e053b787db0d03bc36265933203d3d20a85",
+      "after_sha256": "89a93742b9344fa351f6b3a931a3daf5787f2d7abba6ec52695a6c52c2e37b5e"
+    },
+    "tools/mcp_tool_transport.py": {
+      "before_bytes": 46904,
+      "before_git_blob": "32a70d2869df7d7bea88d273792ea2b7afb815f5",
+      "before_sha256": "d28d6c11688142f179b59d52774e9c56dbad560011bdd737d5a3a8cfc57568d9",
+      "after_bytes": 48957,
+      "after_git_blob": "41cee40eb59a4b903f17900e2713244fe51b4285",
+      "after_sha256": "51443ff396278a8c1088b5141146f3ba53cec340b90ac04a1263c18e3ecbb8ec"
+    }
+  }
+}

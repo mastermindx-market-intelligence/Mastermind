@@ -172,16 +172,20 @@ def _write_json(path: Path, value: Any) -> None:
 
 
 def _read_jsonl(path: Path) -> list[dict]:
-    """Read JSONL, failing closed for lesson trace ledgers only.
+    """Read JSONL, failing closed for canonical trace and context-request ledgers.
 
-    Context-request history intentionally keeps its older best-effort semantics.  Presentation and
-    application rows are settlement lineage, so an existing malformed row is failed evidence rather
-    than an invitation to reason from a thinner ledger.
+    Existing malformed or unreadable canonical history is failed evidence rather than an
+    invitation to reason from a thinner ledger. Unrelated JSONL keeps best-effort semantics.
     """
     strict = path.name in _STRICT_ATOMIC_JSONL_NAMES
-    if not path.exists():
-        return []
     try:
+        if strict:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return []
+        elif not path.exists():
+            return []
         lines = path.read_text(encoding="utf-8").splitlines()
     except Exception:
         if strict:
@@ -206,7 +210,7 @@ def _read_jsonl(path: Path) -> list[dict]:
     return rows
 
 
-def _fsync_parent(path: Path) -> None:
+def _fsync_parent(path: Path, *, strict: bool = False) -> None:
     try:
         dir_fd = os.open(path.parent, os.O_RDONLY)
         try:
@@ -214,13 +218,14 @@ def _fsync_parent(path: Path) -> None:
         finally:
             os.close(dir_fd)
     except OSError:
-        pass
+        if strict:
+            raise
 
 
 def _replace_atomic_jsonl(path: Path, rows: list[dict]) -> None:
     """Atomically publish one complete canonical JSONL ledger."""
     if not all(isinstance(value, dict) for value in rows):
-        raise ValueError("lesson trace rows must be mappings")
+        raise ValueError("canonical JSONL rows must be mappings")
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = "".join(
         json.dumps(value, default=str, ensure_ascii=False) + "\n"
@@ -242,7 +247,7 @@ def _replace_atomic_jsonl(path: Path, rows: list[dict]) -> None:
             os.fsync(tmp.fileno())
         os.replace(tmp_name, path)
         tmp_name = None
-        _fsync_parent(path)
+        _fsync_parent(path, strict=True)
     finally:
         if tmp_name:
             try:

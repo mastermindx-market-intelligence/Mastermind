@@ -6,7 +6,8 @@ out. This module checks those thresholds and records the moment one is NEWLY cro
 per crossing — so a persistent alert can surface on the dashboard.
 
 It rides the DAILY BUILD (bot.phase2 calls check_and_record at the end), which is the always-on
-heartbeat — no Claude session, no 7-day-expiring cron. Cheap reads only (no panel loads); never raises.
+heartbeat — no Claude session, no 7-day-expiring cron. Cheap reads only (no panel loads).
+Unavailable persistence is reported without claiming a durable new crossing.
 
 Watched thresholds:
   calibration_forge / calibration_sentinel  — agent left cold-start (n >= MIN_N) → confidence self-corrects
@@ -20,7 +21,7 @@ import json
 import os
 import tempfile
 import threading
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import date
 from pathlib import Path
 
@@ -50,10 +51,28 @@ def _load(p: Path) -> dict:
 
 def _read_alert_rows() -> list[dict]:
     """Canonical readiness evidence; missing is empty, malformed is unavailable."""
-    if not _ALERTS.exists():
-        return []
+    try:
+        payload = _ALERTS.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # Classify absence only after the read failed. An existing directory entry,
+        # including a dangling link or a newly appeared file, is unavailable evidence.
+        try:
+            _ALERTS.lstat()
+        except FileNotFoundError:
+            # Missing parents are legitimate first-run state only when the nearest
+            # existing ancestor is a directory, not a dangling or unreadable link.
+            for parent in _ALERTS.parents:
+                try:
+                    parent.lstat()
+                except FileNotFoundError:
+                    continue
+                if not parent.is_dir():
+                    raise OSError("readiness alert ancestor is unavailable")
+                return []
+            raise
+        raise
     rows: list[dict] = []
-    for line in _ALERTS.read_text(encoding="utf-8").splitlines():
+    for line in payload.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -65,14 +84,11 @@ def _read_alert_rows() -> list[dict]:
 
 
 def _fsync_parent(path: Path) -> None:
+    fd = os.open(path.parent, os.O_RDONLY)
     try:
-        fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-    except OSError:
-        pass
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _atomic_write(path: Path, payload: str) -> None:
@@ -181,11 +197,24 @@ def check_and_record(asof: str | None = None) -> dict:
 
     The alert ledger is canonical durable evidence. ``readiness_state.json`` is only a projection
     and is rebuilt from that ledger, so a lost state write cannot duplicate a crossing later.
+    An initial check with no crossed flags or existing history leaves alert/state files absent,
+    but may create its serialization lock.
     """
     asof = str(asof or date.today().isoformat())[:10]
     st = status()
     flags = st["flags"]
-    with _readiness_lock():
+    with ExitStack() as locks:
+        try:
+            locks.enter_context(_readiness_lock())
+        except Exception:
+            return {
+                "new": [],
+                "flags": flags,
+                "pending_new": [key for key, value in flags.items() if value],
+                "persistence_status": "unavailable",
+                "error": "readiness_lock_unavailable",
+            }
+
         try:
             rows = _read_alert_rows()
         except Exception:

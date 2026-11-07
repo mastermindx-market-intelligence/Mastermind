@@ -1,0 +1,55 @@
+{
+  "schema": "mastermind.deepseek_asset_profile.verification.v1",
+  "protected_base": "dce821e0d9d67b67b3053290e42fb2ac0bbcdcc1",
+  "accepted_profiles": [
+    3,
+    9,
+    13
+  ],
+  "new_profile_required_additions": [
+    "assets/SourceMarkdown-<hash>.js",
+    "assets/SourceMarkdown-<hash>.css",
+    "third-party/deepseek-client-dependency-NOTICES.txt",
+    "third-party/deepseek-harness-LICENSE.txt"
+  ],
+  "test_environment": {
+    "python": "3.12.10",
+    "sdk_lock": "requirements/executive-mcp-macos-arm64-py312.lock",
+    "mcp": "1.28.1"
+  },
+  "baseline": {
+    "actual_build_files": 13,
+    "observed_refusal": "fixed OS asset set required",
+    "new_tests_product_regressions": 3,
+    "initial_default_python_missing_sdk_cases": 2
+  },
+  "focused_cases": 58,
+  "owner_suite": {
+    "tests": 391,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "entry_ast_outside_asset_builder_unchanged": true,
+  "unchanged_existing_owner_sha256": {
+    "integrations/executive_mcp/server.py": "1e6bc3afc35a5019ea64dd5f0af2df32876b8f7f25def4d13c186502f6040156",
+    "ops/executive_os/os_release_assets.py": "3749c5458039308760a19c0a05573380676f6d3c8a9ee2eb6153e69dfe8b297c",
+    "ops/executive_os/os_public_edge.py": "7e09d65f0c89fd0fe95b43f384d08def88bf66f593484e1c38f6e7c2fea387c0",
+    "ops/executive_os/os_public_edge_transition.py": "da8c261687f5c8a52df613d9ea0614354fa83c26d96cc8244d3c5923fff7ab93",
+    "ops/executive_os/install.sh": "cae4a5a8487183eced2cf16351c101e398e4234f84f33f430051508069cf4d79"
+  },
+  "changed_source_sha256": {
+    "integrations/mastermind_executive_app/os_assets.py": "4e9292176aff259591e59f1e9027c654cbefa99c8cc20c25f9154c27c837168e",
+    "ops/executive_os/executive_mcp_entry.py": "2f24b3b8ec829742f63478310abf10c1a9bf3f13a8610cb8858a090560a0ffee",
+    "ops/executive_os/OS_WEB_ASSETS.md": "001e134f19ab1b5cb7c0c7b6bdbf6479873839f91d5abcf602327bdf79ea2d42",
+    "tests/test_deepseek_os_asset_layout.py": "98d7cbc0630bf532d4cefbfee5cfad6b589387fa75f7706d0afe3c10509e6bdb"
+  },
+  "actual_compiled_files_served": 13,
+  "actual_compiled_byte_total": 1359499,
+  "exact_current_bridge_compatibility": "b5be33f9e126d0513132201009da0dd50c16f6b9",
+  "bridge_hunk_check": "PASS_TEMPORARY_INDEX_NO_BRANCH_WRITE",
+  "installed": false,
+  "published": false,
+  "root_or_service_mutations": 0,
+  "authenticated_session_roundtrip": false
+}

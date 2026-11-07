@@ -43,7 +43,9 @@ def _trading_days_between(start: date, end: date) -> int:
 
 def _load_jsonl(path: Path) -> list[dict]:
     """Strict canonical JSONL read; missing file is the only empty-state shortcut."""
-    if not path.exists():
+    try:
+        path.lstat()
+    except FileNotFoundError:
         return []
     rows: list[dict] = []
     for line in path.read_text(encoding="utf-8").splitlines():

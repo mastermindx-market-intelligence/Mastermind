@@ -51,6 +51,7 @@ def test_corrupt_outcome_ledger_is_failed_evidence_not_silently_dropped(tmp_path
 def test_corrupt_alert_ledger_is_failed_evidence_not_empty_input(tmp_path, monkeypatch):
     hro, alerts, _ = _wire(tmp_path, monkeypatch)
     alerts.write_text(json.dumps(_alert("good")) + "\n{broken\n")
+    monkeypatch.setattr(hro, "_grade_outcome", lambda *_args, **_kwargs: (100.0, 105.0, False))
 
     with pytest.raises(Exception):
         hro.append_outcomes(today=date(2026, 9, 17))
@@ -125,36 +126,114 @@ def test_missing_forward_price_remains_legitimate_noop(tmp_path, monkeypatch):
 
 def test_outcome_lock_serializes_independent_processes(tmp_path, monkeypatch):
     """The canonical lock is process-visible, not only protected by the local RLock."""
+    import fcntl
     import multiprocessing as mp
-    import time
 
     hro, _, _ = _wire(tmp_path, monkeypatch)
     ctx = mp.get_context("fork")
     entered = ctx.Event()
+    attempting = ctx.Event()
     release = ctx.Event()
+    contended = ctx.Value("b", False)
     acquired_after_release = ctx.Value("b", False)
 
     def holder():
         with hro._outcomes_lock():
             entered.set()
-            release.wait(timeout=5)
+            assert release.wait(timeout=5)
 
     def waiter():
-        entered.wait(timeout=5)
+        assert entered.wait(timeout=5)
+        # Prove this independently scheduled process observed the actual held
+        # OS lock before checking that the owning context waits for release.
+        with hro._lock_path().open("a+", encoding="utf-8") as probe:
+            try:
+                fcntl.flock(probe.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                contended.value = True
+            else:
+                fcntl.flock(probe.fileno(), fcntl.LOCK_UN)
+        attempting.set()
         with hro._outcomes_lock():
             acquired_after_release.value = release.is_set()
 
     first = ctx.Process(target=holder)
     second = ctx.Process(target=waiter)
-    first.start()
-    assert entered.wait(timeout=5)
-    second.start()
-    time.sleep(0.15)
-    assert second.is_alive(), "second process should be blocked on the held file lock"
-    release.set()
-    first.join(timeout=5)
-    second.join(timeout=5)
+    try:
+        first.start()
+        assert entered.wait(timeout=5)
+        second.start()
+        assert attempting.wait(timeout=5), "waiter must reach the actual lock"
+        assert bool(contended.value), "independent process must observe the held OS lock"
+        assert second.is_alive(), "second process should be blocked on the held file lock"
+        assert first.pid != second.pid and os.getpid() not in (first.pid, second.pid)
+    finally:
+        release.set()
+        for process in (first, second):
+            if process.pid is not None:
+                process.join(timeout=5)
+                if process.is_alive():
+                    process.terminate()
+                    process.join(timeout=5)
 
     assert first.exitcode == 0
     assert second.exitcode == 0
     assert bool(acquired_after_release.value) is True
+
+
+@pytest.mark.parametrize("ledger", ["alerts", "outcomes"])
+def test_dangling_canonical_ledger_is_not_absent(tmp_path, monkeypatch, ledger):
+    hro, alerts, outcomes = _wire(tmp_path, monkeypatch)
+    _write_jsonl(alerts, [_alert()])
+    missing = tmp_path / "missing-ledger.jsonl"
+    target = alerts if ledger == "alerts" else outcomes
+    if target.exists():
+        target.unlink()
+    target.symlink_to(missing)
+    monkeypatch.setattr(hro, "_grade_outcome", lambda *_args, **_kwargs: (100.0, 105.0, False))
+
+    with pytest.raises(FileNotFoundError):
+        hro.append_outcomes(today=date(2026, 9, 17))
+
+    assert target.is_symlink()
+    assert target.readlink() == missing
+    assert not missing.exists()
+    if ledger == "alerts":
+        assert not outcomes.exists()
+
+
+def test_real_bar_grading_publishes_complete_row_and_keeps_first(tmp_path, monkeypatch):
+    hro, alerts, outcomes = _wire(tmp_path, monkeypatch)
+    alert = dict(_alert(), ts="2026-08-03")
+    _write_jsonl(alerts, [alert])
+    dates = ["2026-08-03", "2026-08-04", "2026-08-05",
+             "2026-08-06", "2026-08-07", "2026-08-10"]
+    closes = [100.0, 101.0, 102.0, 103.0, 104.0, 110.0]
+    calls = []
+
+    def series(ticker, vendor_root=None):
+        calls.append(ticker)
+        return dates, closes
+
+    monkeypatch.setattr(hro, "_get_ohlcv_series", series)
+
+    assert hro.append_outcomes(today=date(2026, 8, 31)) == 1
+    assert calls == ["AAPL"]
+    rows = [json.loads(line) for line in outcomes.read_text().splitlines()]
+    assert rows == [{
+        "alert_id": "alert-1",
+        "ticker": "AAPL",
+        "role": "monitor",
+        "alert_date": "2026-08-03",
+        "horizon": 5,
+        "fwd_return_pct": 10.0,
+        "ref_close": 100.0,
+        "fwd_close": 110.0,
+        "graded_at": "2026-08-31",
+    }]
+    first_bytes = outcomes.read_bytes()
+    closes[-1] = 999.0
+
+    assert hro.append_outcomes(today=date(2026, 9, 1)) == 0
+    assert outcomes.read_bytes() == first_bytes
+    assert calls == ["AAPL"], "already graded outcomes must not be repriced"
