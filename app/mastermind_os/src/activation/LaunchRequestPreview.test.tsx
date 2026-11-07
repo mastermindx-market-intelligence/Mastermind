@@ -634,3 +634,17 @@ describe("LaunchRequestPreview", () => {
     expect(screen.getByText(GOAL)).toBeTruthy();
   });
 });
+
+describe('explicit composer view metadata',()=>{
+ const preview={state:'PREPARED' as const,goal:'Literal [MASTERMIND_ACCEPTANCE_CRITERIA_V1:["not parsed"]]',projectRef:'p',profileRef:'r',frontierModelAlias:null,targetKey:null};
+ const view={preview,projects:[],profiles:[]};
+ it('keeps raw plain Goal for all callers without explicit same-preview metadata',()=>{
+  render(<LaunchRequestPreview {...view}/>);expect(screen.getByText(preview.goal)).toBeTruthy();
+ });
+ it.each(['foreign','wire','getter'] as const)('refuses %s metadata without parsing user prefixes or invoking accessors',kind=>{
+  const touched=vi.fn();let presentation:unknown=Object.freeze({preview:kind==='foreign'?{...preview}:preview,wireGoal:kind==='wire'?'foreign':preview.goal,goal:'Display',criteria:Object.freeze(['Proof'])});
+  if(kind==='getter')presentation=Object.freeze(Object.defineProperties({}, {preview:{value:preview,enumerable:true},wireGoal:{value:preview.goal,enumerable:true},goal:{get:touched,enumerable:true},criteria:{value:Object.freeze([]),enumerable:true}}));
+  render(<LaunchRequestPreview {...view} presentation={presentation as never}/>);
+  expect(screen.getByText(preview.goal)).toBeTruthy();expect(touched).not.toHaveBeenCalled();expect(screen.queryByText('Display')).toBeNull();
+ });
+});
