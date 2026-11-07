@@ -833,6 +833,9 @@ def original_pin_record(svc, account, roots, binding, *, before):
                 svc, account, roots, plan, raw, current, manifest)
             or _c1_fleet_git_failure_postpin_start(
                 svc, account, roots, plan, raw, current, manifest)
+            or svc._fleet_status_successor_owner_module().historical_pair(
+                svc, account, roots, original_plan=plan, original_raw=raw,
+                config_bytes=current, manifest_bytes=manifest)
         ):
             fail_forward("ORIGINAL_REFUSED")
     except (OSError, ValueError, KeyError, TypeError, SystemExit):
