@@ -904,6 +904,16 @@ class OsStaticApp:
                     or not 0 < len(value[0]) <= 4 * 1024 * 1024 or value[1] != expected.get(path)):
                 raise ValueError("fixed OS asset bytes and MIME required")
         self._assets = dict(assets)
+        from integrations.deepseek_harness.embedding import qualified_chat_origin
+        chat_origin = qualified_chat_origin(assets["/os/"][0])
+        self._headers = dict(_OS_RESPONSE_HEADERS)
+        if chat_origin is not None:
+            # The exact origin comes from the existing sealed/hash-verified
+            # index. Never authorize wildcard frames or request-supplied URLs.
+            self._headers["Content-Security-Policy"] = self._headers["Content-Security-Policy"].replace(
+                f"frame-src 'self' {_OS_AUTH0_ORIGIN};",
+                f"frame-src 'self' {_OS_AUTH0_ORIGIN} {chat_origin};",
+            )
         self.paths = frozenset((*self._assets, "/os/", "/os/auth/callback"))
 
     @staticmethod
@@ -949,7 +959,7 @@ class OsStaticApp:
             return
         key = "/os/" if path == "/os/auth/callback" else path
         body, mime = self._assets[key]
-        policy_headers = _OS_CALLBACK_RESPONSE_HEADERS if path == "/os/auth/callback" else _OS_RESPONSE_HEADERS
+        policy_headers = _OS_CALLBACK_RESPONSE_HEADERS if path == "/os/auth/callback" else self._headers
         headers = {**policy_headers, "Content-Type": mime}
         await Response(body, headers=headers)(scope, receive, send)
 

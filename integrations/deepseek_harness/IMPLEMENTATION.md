@@ -69,3 +69,63 @@ dark/light layouts. Required hosted checks remain release gates. Record exact ch
 source, commands/results, provider/runtime observations and remaining original-scope
 obligations here at material milestones. An isolated fixture or merged source alone is
 not production completion.
+
+## 2026-11-07 implementation milestone
+
+Implemented source on this branch:
+
+- Full DeepSeek application consumer under the existing Conversations destination,
+  with preserved Project conversations, keyboard tabs, EN/ZH presentation, existing
+  guarded project navigation and authentication-generation remount.
+- Original Cordis company plugin using the pinned donor's actual module loader,
+  snapshot store and supported slots. Searchable projects, shared locale/theme and
+  Noir tokens; native chat/session/workspace owners remain intact.
+- Exact-origin/source/nonce/generation company presentation bridge, including
+  revocation and reload behavior. No token, provider grant or command is forwarded.
+- One sealed-index build input for both the frame URL and exact Executive CSP.
+  A missing qualified install retains the existing journey. Configured native
+  builds explicitly refuse the unqualified web host.
+- Closed 12/14-file release profiles for the current OS sign-in image, repairing
+  the previously unsealable actual 12-file production build.
+
+Observed verification:
+
+| Check | Result |
+| --- | --- |
+| OS typecheck | Passed |
+| Targeted OS integration and bridge suite | 14 passed |
+| Final frame/native-copy/source-link component check | 4 passed |
+| Production OS build, default and configured fixture | Passed |
+| Current actual build through closed asset manifest | 12 files; sign-in image included |
+| Python embedding and asset-layout suite | 74 passed |
+| Compiled plugin through actual pinned Cordis SlotRegistry and renderer | 1 passed; project rendering, appearance and revocation |
+| Full pinned donor web boot with compiled plugin | Authenticated local HTTP 200; plugin and native boot present |
+| Local donor after preview | Clean at accepted pin; owned preview stopped; original port closed |
+
+The configured origin in tests is a fixture, not a live installation. Native
+rendering uses the actual donor renderer with explicit test theme/locale services.
+The local app boot uses the existing credential-clearing launcher and no provider.
+The observed deployed browser remains the previous signed-out build; no
+production upgrade, signed-in acceptance or useful provider reply is claimed.
+
+Current live blockers are specific. Executive V3 session targets returned an
+empty list, and the installed Executive reader returned backend_unavailable on
+2026-11-07. Control, Codex worker and MCP launchd services are running against
+release `b4a5a8925c6c1412dac67ba296cf65ee81c4d4c8`; that release still declares
+ACP `implemented=False`. The currently accepted paid GLM profile is one sealed
+model-only request with `stream=false`, not a native history/tool/stream loop.
+The next source investigation is the native session/admission adapter, retaining
+one turn execution owner and existing ACP/MCP identity/cancellation contracts.
+
+Original paid Fabric operation `deepseek-mmos-multiturn-20261106-c2-r1` (root
+`deepseek-mastermind-chat-20261106-c2`, controller PID 27072) has no verified
+START or return. Its latest status is ACTIVE_OR_WAITING / UNVERIFIED with
+CONTROLLER_RETURN_UNCONFIRMED and retry_authorized=false. It owns only the
+separately assigned fresh-conversation paths. Do not duplicate or rehome it;
+reconcile the original controller/result before consuming or replacing its work.
+This does not qualify as durable execution running or as completed DSH chat.
+
+Next: publish this concrete UI integration, resolve required CI at its exact head,
+and continue the existing native Send/admission source and installed route. Final
+acceptance still requires an admitted useful response, same-conversation follow-up,
+stop/reconnect behavior and the signed-in deployed desktop/mobile journey.

@@ -81,6 +81,8 @@ import { useQualifiedOriginalAnswer } from "./conversations/useQualifiedOriginal
 import type { QualifiedSessionAnswer } from "./orchestration/executive-session-command-port";
 import { useObservedConversation } from "./conversations/useObservedConversation";
 import { ConversationsList } from "./conversations/ConversationsList";
+import { DeepSeekConversations } from "./conversations/deepseek/DeepSeekConversations";
+import type { ConversationProjectLocator } from "./conversations/conversation-list-contract";
 import { composeConversationsList, isListedCurrentConversation, isListedConversationProject } from "./conversations/conversation-list-source";
 import { captureConversationListOwner, conversationListOwnerCurrent, type ConversationListOwnerCapture } from "./conversations/conversation-list-owner";
 import { useConversationListNavigation } from "./conversations/useConversationListNavigation";
@@ -5117,7 +5119,21 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       return true;
     } catch { return false; }
   } : undefined;
-  const conversationListPanel = <ConversationsList model={conversationListModel} locale={locale} theme={theme}
+  const openConversationProject = (locator: ConversationProjectLocator): boolean => {
+      const latest = conversationListSnapshot.current;
+      if (latest.catalogueOwner !== catalogueListOwner.current || !conversationListOwnerCurrent(latest.catalogueOwner, false) ||
+          !isListedConversationProject(latest.model, locator) || latest.index.state !== "AVAILABLE" ||
+          latest.index.programs.filter(card => card.workRef === locator.workRef).length !== 1) return false;
+      const row = latest.model.projects.find(item => item.locator.workRef === locator.workRef);
+      if (!row) return false;
+      conversationNavigation.rememberProject(locator.workRef, row.key);
+      setCatalogueProject({workRef: locator.workRef, authRevision, epoch: latest.epoch});
+      setProjectTab("More"); setActive("Projects"); return true;
+  };
+  const conversationListPanel = <DeepSeekConversations model={conversationListModel} signedIn={signedIn}
+    authGeneration={authRevision} locale={locale} theme={theme} selectedProject={selection?.workRef}
+    onOpenProject={openConversationProject} onNewConversation={freshHost?.freshConversation ? openFreshConversation : undefined}>
+    <ConversationsList model={conversationListModel} locale={locale} theme={theme}
     onNewConversation={freshHost?.freshConversation ? openFreshConversation : undefined}
     onOpenSessionRequests={openSessionRequests}
     query={conversationNavigation.query} onQueryChange={conversationNavigation.changeQuery}
@@ -5132,23 +5148,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       if (!row) return false;
       conversationNavigation.showCurrentDetail(row.key); return true;
     }}
-    onOpenProject={locator => {
-      const latest = conversationListSnapshot.current;
-      if (latest.catalogueOwner !== catalogueListOwner.current || !conversationListOwnerCurrent(latest.catalogueOwner, false) ||
-          !isListedConversationProject(latest.model, locator) || latest.index.state !== "AVAILABLE" ||
-          latest.index.programs.filter(card => card.workRef === locator.workRef).length !== 1) return false;
-      const row = latest.model.projects.find(item => item.locator.workRef === locator.workRef);
-      if (!row) return false;
-      conversationNavigation.rememberProject(locator.workRef, row.key);
-      setCatalogueProject({workRef: locator.workRef, authRevision, epoch: latest.epoch});
-      setProjectTab("More"); setActive("Projects"); return true;
-    }}
+    onOpenProject={openConversationProject}
     onOpenMetaCeo={() => setActive("Meta-CEO")} onSourcesAndAccess={() => setActive("Sources")}
     onRefresh={() => {
       const owner = captureListReadOwner(retainedResultHost);
       if (!owner || owner.hostGeneration !== retainedHostGeneration || !conversationListOwnerCurrent(owner, false)) return;
       setProgramRevision(n => n + 1);setWindowRevision(n => n + 1);
-    }} />;
+    }} /></DeepSeekConversations>;
   const currentConversationPanel = (
       <>
         <ConversationWindow

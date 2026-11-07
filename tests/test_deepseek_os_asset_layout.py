@@ -183,3 +183,15 @@ def test_license_mime_cannot_be_relabelled_executable(tmp_path):
         ((dist / item["path"]).read_bytes(), item["mime"]) for item in manifest["files"]}
     with pytest.raises(ValueError):
         OsStaticApp(assets)
+
+
+@pytest.mark.parametrize("predecessor", [LICENSED, CLIENT])
+def test_current_auth_entry_release_is_a_complete_closed_profile(tmp_path, predecessor):
+    names = predecessor + ["assets/private-entry-entry.jpg"]
+    dist = make_dist(tmp_path, names)
+    assert os_asset_mimes(names)["assets/private-entry-entry.jpg"] == "image/jpeg"
+    manifest = build_os_asset_manifest(tmp_path)
+    assert len(manifest["files"]) == len(names)
+    assert "/os/assets/private-entry-entry.jpg" in asset_routes(manifest)
+    with pytest.raises(ValueError):
+        os_asset_mimes(predecessor + ["assets/unqualified-image.jpg"])

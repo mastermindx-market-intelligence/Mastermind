@@ -1,6 +1,11 @@
 # DeepSeek Harness full-application adoption: developer pilot
 
-**State: SOURCE PILOT — not installed into Mastermind OS, not Executive-authorized.**
+**State: full-app OS consumer and company plugin implemented; local donor boot and native plugin rendering verified. Governed provider chat and production installation remain open.**
+
+See [company plugin implementation and build](company_plugin/README.md) and
+[delivery evidence and continuation](IMPLEMENTATION.md). The existing local launcher
+and earlier pilot evidence below remain applicable; the external donor volume was
+available again and its original pinned checkout was verified clean on 2026-11-07.
 
 The integration target is the **complete DeepSeek application**, not just React components. Upstream pin: [DeepSeek Harness @687f282](https://github.com/deepseek-ai/deepseek-harness/tree/687f282e8625c6b8d11ff58211a90524be2e4317), MIT license. Keep its license and notices when distributing.
 
