@@ -858,3 +858,12 @@ REVIEWED_FILES[
     "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
     "sites": ((27, 26, 29, "int", "443"),),
 }
+
+# Retained protected readiness qualification records the actual proof-host UID.
+# This is evidence, not a runtime default or grant. The one complete UTF-8 token
+# requires this exact full postimage; any byte/path drift restores the guard.
+REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json'] = {
+    'sha256': 'ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33',
+    'sites': (),
+    'utf8_sites': ((61, 13, 16, 'int', '501'),),
+}
