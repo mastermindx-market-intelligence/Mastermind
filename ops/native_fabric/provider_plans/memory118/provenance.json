@@ -1,5 +1,5 @@
 {
-  "accepted_common_component": "eae4163be37bccce2a1fd3838499450517bab71c",
+  "accepted_common_component": "a56edb9477cc9cf9f2abe4a39a1b5b2d3b97c1c2",
   "accepted_memory_source_commit": "79fc0bec64c774d3034791af8b4b9507bea96b7c",
   "additions": [
     "ext/fabric_memory_view.py",
@@ -78,11 +78,17 @@
       "after": "eda0fa2df123f94325b4f10b5ac6b92182521f3898ed54a5afacb05047721e3b",
       "before": "ff909ac6fb0a734ce0ea1aa78c2b04e992c170e5be413c1b7778e6ffd7c7907e"
     },
+    "ext/remote_sub_exec.py": {
+      "after": "e13c81475023fdd1e79fdbed87f5e7e5ac4356da345d07c725b36d2e92298f83",
+      "before": "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea"
+    },
     "ext/run_observation_delivery.py": {
       "after": "5bfb779d4492a62901f1fdf9e24d18ed7900c973f26eb889bc75ab9e84df801f",
       "before": "c18ab07723b42a8dece4c072256ad161384508f65bac44bbb9781948710f675b"
     }
   },
+  "current_executor_review": "9e3beebe488266978fd7efe4935d54dc8920fe18c7b3b676326e0640ad151eb1",
+  "current_executor_root_acceptance": "8567bea9e1d2e494c19358adb872e935a3846f72dbf2b75745aa808bc0569b0f",
   "incumbent_lease_reader_unchanged": true,
   "installed_authority_claimed": false,
   "native_parent": "01a19fff-121a-7643-bb9e-13f6e6d460cc",

@@ -232,7 +232,7 @@
     "ext/qwen_exec.sh": "acb5477907820c9c29908f6675a785e5b8999dbfd21aba8d60ca972213b4fa58",
     "ext/recovery_artifacts.py": "c67db5c395403b34b2095380fd5f68dcc547c01fcce1ae85c6e78accbd8ad28f",
     "ext/remote_sub.sh": "8a8491882608f73db58b596b02bd37955eebcd4670bcb8bb2d2ac6a0fa659f63",
-    "ext/remote_sub_exec.py": "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea",
+    "ext/remote_sub_exec.py": "e13c81475023fdd1e79fdbed87f5e7e5ac4356da345d07c725b36d2e92298f83",
     "ext/remote_sub_helpers.py": "cacbb576e82c57d625143610b858714dc37135acf28a82ccb9aec297c49bff2a",
     "ext/run_observation.py": "cbe4b0b4db3783e44d9cc442ab973996e8b5102c178ab61e172bfd0aae7accfb",
     "ext/run_observation_delivery.py": "5bfb779d4492a62901f1fdf9e24d18ed7900c973f26eb889bc75ab9e84df801f",
@@ -261,6 +261,12 @@
       "before": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
       "patch": "patches/pick_remote_plan_modes.forward.patch",
       "patch_sha256": "7da90e717876c1a965b9c146298577723b733ea5e5ccec163c6269fa89e919a2"
+    },
+    "ext/remote_sub_exec.py": {
+      "after": "e13c81475023fdd1e79fdbed87f5e7e5ac4356da345d07c725b36d2e92298f83",
+      "before": "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea",
+      "patch": "maintenance_guard/remote_sub_exec.py.patch",
+      "patch_sha256": "32fca97c9865ace943b2bc76fcdda30e7d0f93d6fcfee9c7b31e02d2d7bb4809"
     }
   },
   "source_map": {

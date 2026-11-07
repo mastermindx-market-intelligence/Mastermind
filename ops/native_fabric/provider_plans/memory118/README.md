@@ -6,9 +6,9 @@ not read CURRENT, select a generation, issue a grant, dispatch, or install.
 The base descriptor in tests is explicit inert data, never an installed receipt.
 
 The target has118 payloads. Every116 member remains. Against the original116,
-the seven Memory members change, the separately accepted picker correction also
-changes, and two Memory helpers are added. Against RuntimePath's accepted
-combined116, exactly seven members change and two are added. The nine
+the seven Memory members change, the separately accepted picker and current-executor corrections also
+change, and two Memory helpers are added. Against RuntimePath's accepted
+combined116 (including the one-command sparse-index advice suppression), exactly seven members change and two are added. The nine
 application/provider-only members are retained. The old107/109 manifest and
 preimages remain historical source proof, not this profile's base.
 
@@ -45,3 +45,8 @@ The source profile is prospective. Current publication/protected reconciliation,
 Root adoption, actual installed owner/current grants and all study/science
 acceptance remain separate. Existing accepted Macro/native four-case paired
 source evidence is retained at its scope; no live/private/provider study was run.
+
+The current executor stays on its bb036 lineage and receives only reviewed
+a56’s fixed Git tuple append (postimagee13). The historical4a whole executor
+is never substituted. All other current application/executor definitions remain
+exact; this source fix alone does not establish installed worker adoption.

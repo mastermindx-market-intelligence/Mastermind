@@ -43,11 +43,11 @@ def test_exact116_to118_retains_every_incumbent_member(current_source, joined):
     base, final = profile["base_files"], profile["files"]
     assert len(base) == 116 and len(final) == 118
     assert set(final) - set(base) == ADDITIONS and set(base) <= set(final)
-    assert {name for name in base if base[name] != final[name]} == EXACT_REPLACEMENTS | {"ext/pick.py"}
+    assert {name for name in base if base[name] != final[name]} == EXACT_REPLACEMENTS | {"ext/pick.py", "ext/remote_sub_exec.py"}
     assert base == json.loads((current_source / "FILES.json").read_text())
     for name, expected in final.items():
         assert sha((joined / name).read_bytes()) == expected
-    assert set(profile["patches"]) == {"ext/fabric_task.py", "ext/lease_broker.py", "ext/pick.py"}
+    assert set(profile["patches"]) == {"ext/fabric_task.py", "ext/lease_broker.py", "ext/pick.py", "ext/remote_sub_exec.py"}
     assert set(profile["source_map"]) == (EXACT_REPLACEMENTS | ADDITIONS) - set(profile["patches"])
     assert not (joined / "CURRENT.json").exists() and not (joined / "ext/broker").exists()
 

@@ -331,6 +331,12 @@ jobs:
               echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
             '
 
+      - name: Prepare fixed test diagnostics
+        run: |
+          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
+          chmod 0700 "$diagnostic_dir"
+          printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
+
       - name: Verify native application admission and dispatch custody
         if: matrix.index == 0
         run: |
@@ -346,12 +352,14 @@ jobs:
           ):
               suite.addTests(unittest.defaultTestLoader.discover(
                   "ops/native_fabric/quota_continuity/tests", pattern=pattern))
-          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          from scripts.ci_native_preflight import unittest_runner
+          result = unittest_runner(verbosity=2).run(suite)
           raise SystemExit(not result.wasSuccessful())
           PYTEST
           native_rollout_test_root="$(mktemp -d "$HOME/mmx-native-rollout.XXXXXX")"
           trap 'rm -rf "$native_rollout_test_root"' EXIT
           NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -m pytest -q -o addopts= --noconftest \
+            -p scripts.ci_native_preflight \
             --junitxml="$native_rollout_test_root/native-proof.xml" \
             ops/native_fabric/quota_continuity/tests/test_go_native_stage.py \
             ops/native_fabric/quota_continuity/tests/test_go_native_release.py \
@@ -451,12 +459,6 @@ jobs:
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
             -p test_fabric_chat_browser.py -v
 
-      - name: Prepare fixed test diagnostics
-        run: |
-          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
-          chmod 0700 "$diagnostic_dir"
-          printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
-
       # No shard JOB is skipped. Existing non-pytest security gates always
       # execute; only a previously green, same-SHA native merge-group proof
       # may avoid re-executing the identical pytest module suite on a push.
@@ -483,7 +485,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ci-fixed-diagnostics-${{ matrix.index }}
-          path: ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+          path: |
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-unit/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-rollout/ci-fixed-diagnostics.json
           if-no-files-found: warn
           retention-days: 3
           compression-level: 0
