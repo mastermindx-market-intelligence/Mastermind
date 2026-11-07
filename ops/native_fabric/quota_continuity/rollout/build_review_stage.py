@@ -239,6 +239,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
     """
+    manifest = normalize_application_carrier_base_manifest(manifest)
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -497,6 +498,60 @@ def compose_go_stage(root, output, manifest, files, component):
             "installed_preimage_sha256": None, "bytes": len(raw)}
 
 
+
+# One complete APPLICATION carrier successor of the exact qualified 107-file
+# base. Historical Grok and native cohort guards remain unchanged below.
+APPLICATION_CARRIER_DIGESTS = {
+    "native_remote.py": "f94689bbbf5f567b6d27e64965379ad4992a188b452d5bc593f41e925ebc411a",
+    "remote_sub_exec.py": "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea",
+    "remote_sub.sh": "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
+    "remote_sub_helpers.py": "cacbb576e82c57d625143610b858714dc37135acf28a82ccb9aec297c49bff2a",
+    "support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822"
+}
+APPLICATION_CARRIER_PREIMAGES = {
+    "native_remote.py": "2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6",
+    "remote_sub_exec.py": "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db",
+    "remote_sub.sh": "0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c",
+    "remote_sub_helpers.py": "f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93",
+    "support_bundle.py": "212df1af82652235ea10c9cabe95400aa40f8e819c6d5ef4c15666dbbfca3a4b"
+}
+APPLICATION_CARRIER_BASE_SHA256 = "e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4"
+
+
+def application_carrier_candidate_cohort(root):
+    observed = {name: sha((root / "candidate" / name).read_bytes())
+                for name in APPLICATION_CARRIER_DIGESTS}
+    present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
+               if observed[name] == expected}
+    if present and observed != APPLICATION_CARRIER_DIGESTS:
+        raise ValueError("application carrier candidate cohort is incomplete")
+    return bool(present)
+
+
+def normalize_application_carrier_base_manifest(manifest):
+    """Validate the complete new base; return a temporary historical view.
+
+    The caller's manifest and published generation keep their actual hashes.
+    A historical namespace cannot be relabeled as an APPLICATION generation.
+    """
+    if type(manifest) is not dict:
+        return manifest
+    present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
+               if manifest.get("ext/" + name) == expected}
+    if not present:
+        return manifest
+    if any(manifest.get("ext/" + name) != expected
+           for name, expected in APPLICATION_CARRIER_DIGESTS.items()):
+        raise ValueError("application carrier manifest cohort is incomplete")
+    historical = dict(manifest)
+    historical.update({"ext/" + name: expected
+                       for name, expected in APPLICATION_CARRIER_PREIMAGES.items()})
+    identity = sha((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode())
+    if identity != APPLICATION_CARRIER_BASE_SHA256:
+        raise ValueError("application carrier cannot relabel a prior or mixed native base")
+    return historical
+
+
 def main():
     draft = Path(__file__).resolve().parent
     root = draft.parent
@@ -520,8 +575,14 @@ def main():
     (stage / "ext").mkdir(parents=True, exist_ok=True)
     manifest = {}
     files = {}
+    application_carrier = application_carrier_candidate_cohort(root)
     for name in sorted(BASE_FILES | ADDITIONS):
-        if name in GROK47_MERGED_SOURCE_DIGESTS:
+        if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
+            source = root / "candidate" / name
+            raw = source.read_bytes()
+            if sha(raw) != APPLICATION_CARRIER_DIGESTS[name]:
+                raise ValueError("application carrier source changed during build")
+        elif name in GROK47_MERGED_SOURCE_DIGESTS:
             source = root.parent / "grok47" / "overlay" / name
             if source.is_symlink() or not source.is_file():
                 raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
@@ -554,7 +615,7 @@ def main():
         relative = "ext/" + name
         (stage / relative).write_bytes(raw)
         manifest[relative] = sha(raw)
-        source_ref = ("../grok47/overlay/" + name if name in GROK47_MERGED_SOURCE_DIGESTS
+        source_ref = ("../grok47/overlay/" + name if not (application_carrier and name in APPLICATION_CARRIER_DIGESTS) and name in GROK47_MERGED_SOURCE_DIGESTS
                       and name not in GROK47_CANDIDATE_COMPOSITION_DIGESTS
                       else str(source.relative_to(root)))
         files[relative] = {"source": source_ref, "sha256": sha(raw),
@@ -586,6 +647,7 @@ def main():
             if (name not in {'LICENSE','METADATA'} and not (name.startswith('yaml/') and name.endswith('.py'))
                     or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
                 raise ValueError('qualified pure YAML member differs')
+    normalize_application_carrier_base_manifest(manifest)
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)

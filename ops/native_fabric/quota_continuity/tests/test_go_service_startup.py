@@ -11,7 +11,7 @@ import pytest
 from test_go_native_stage import builds, native_stage, ROOT, g, installer, loaded_entry
 from test_go_native_install import go_owner
 from test_native_launcher_successor_transition import source_owners, owner
-from test_go_service_enrollment import service_owner, prepare, unchanged_ingress, selected_purpose
+from test_go_service_enrollment import service_owner, prepare, unchanged_ingress, selected_purpose, reseal_modified_entry_for_disposable_fixtures
 
 
 def environment(monkeypatch, case):

@@ -291,6 +291,14 @@ _APPLICATION_TOKEN = re.compile(r"^app1\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$")
 _APPLICATION_DOMAIN = b"mastermind.go.application-lease-capability/v1\x00"
 _APPLICATION_HTTP_TOKEN = re.compile(r"^app2\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$")
 _APPLICATION_HTTP_DOMAIN = b"mastermind.bailian.application-lease-capability/v2\x00"
+NATIVE_APPLICATION_KIND = "native_cli_operation_v1"
+NATIVE_APPLICATION_POOLS = frozenset({
+    "codex-native", "claude-native", "glm", "minimax", "grok", "cursor", "ocfree",
+})
+_APPLICATION_NATIVE_TOKEN = re.compile(r"^app3\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$")
+_APPLICATION_NATIVE_DOMAIN = b"mastermind.native.application-lease-capability/v3\x00"
+_APPLICATION_DISPATCH_TOKEN = re.compile(r"^appd1\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$")
+_APPLICATION_DISPATCH_DOMAIN = b"mastermind.native.application-prepared-dispatch/v1\x00"
 _APPLICATION_FIELDS = frozenset({
     "v", "purpose", "lease_id", "root", "pool", "account", "model", "principal_id", "host",
     "workload", "turn_id", "grant_digest", "issued_at", "expires_at", "lease_generation",
@@ -300,13 +308,17 @@ _APPLICATION_FIELDS = frozenset({
 def _validate_application_claims(claims):
     if not isinstance(claims, dict):
         raise CapabilityError("invalid application capability")
+    native = type(claims.get("pool")) is str and claims["pool"] in NATIVE_APPLICATION_POOLS
     http = claims.get("pool") == "bailian"
-    fields = _APPLICATION_FIELDS | {"recipe_digest"} if http else _APPLICATION_FIELDS
+    fields = (_APPLICATION_FIELDS | {"recipe_digest", "transport_kind"} if native else
+              _APPLICATION_FIELDS | {"recipe_digest"} if http else _APPLICATION_FIELDS)
     if (set(claims) != fields
-            or type(claims["v"]) is not int or claims["v"] != (2 if http else 1)
-            or claims["purpose"] != "APPLICATION" or claims["pool"] != ("bailian" if http else "go")):
+            or type(claims["v"]) is not int or claims["v"] != (3 if native else 2 if http else 1)
+            or claims["purpose"] != "APPLICATION"
+            or not native and claims["pool"] != ("bailian" if http else "go")
+            or native and claims["transport_kind"] != NATIVE_APPLICATION_KIND):
         raise CapabilityError("invalid application capability")
-    if http and (not isinstance(claims["recipe_digest"], str)
+    if (http or native) and (not isinstance(claims["recipe_digest"], str)
             or re.fullmatch(r"[0-9a-f]{64}", claims["recipe_digest"]) is None):
         raise CapabilityError("invalid application capability")
     for key in ("lease_id", "root", "pool", "account", "principal_id", "host", "workload", "turn_id"):
@@ -343,7 +355,10 @@ def _validate_application_binding(lease, turn, claims, now, *, recovery_only=Fal
         for key in ("principal_id", "turn_id", "workload", "grant_digest"):
             if turn[key] != claims[key]:
                 raise CapabilityError("application lease unavailable")
-        if claims["pool"] == "bailian" and turn["recipe_digest"] != claims["recipe_digest"]:
+        native = claims["v"] == 3
+        if ((claims["pool"] == "bailian" or native) and turn["recipe_digest"] != claims["recipe_digest"]
+                or native and turn.get("transport_kind") != NATIVE_APPLICATION_KIND
+                or not native and turn.get("transport_kind") is not None):
             raise CapabilityError("application lease unavailable")
         _timestamp(lease["granted_at"], "application lease")
         _finite_number(lease["ttl"], "application lease")
@@ -372,11 +387,13 @@ def mint_application(signing_key, lease, turn, *, now):
                   "lease_generation": lease["granted_at"]}
         if turn["pool"] == "bailian":
             claims.update(v=2, recipe_digest=turn["recipe_digest"])
+        elif turn.get("transport_kind") == NATIVE_APPLICATION_KIND:
+            claims.update(v=3, recipe_digest=turn["recipe_digest"], transport_kind=NATIVE_APPLICATION_KIND)
         _validate_application_claims(claims)
         _validate_application_binding(lease, turn, claims, now)
         raw = _canonical_json_bytes(claims)
-        domain = _APPLICATION_HTTP_DOMAIN if claims["v"] == 2 else _APPLICATION_DOMAIN
-        prefix = b"app2." if claims["v"] == 2 else b"app1."
+        domain = {1: _APPLICATION_DOMAIN, 2: _APPLICATION_HTTP_DOMAIN, 3: _APPLICATION_NATIVE_DOMAIN}[claims["v"]]
+        prefix = {1: b"app1.", 2: b"app2.", 3: b"app3."}[claims["v"]]
         signature = hmac.new(signing_key, domain + raw, hashlib.sha256).digest()
         token = prefix + _base64url_encode(raw) + b"." + _base64url_encode(signature)
         if len(token) > _MAX_TOKEN_LENGTH:
@@ -391,10 +408,12 @@ def authorize_application(token, signing_key, lease_lookup, turn_lookup, *, prin
     _validate_key(signing_key)
     _validate_now(now)
     if (type(recovery_only) is not bool or not isinstance(token, str) or len(token) > _MAX_TOKEN_LENGTH
-            or expected_pool not in ("go", "bailian")):
+            or type(expected_pool) is not str
+            or expected_pool not in ({"go", "bailian"} | NATIVE_APPLICATION_POOLS)):
         raise CapabilityError("invalid application capability")
-    pattern = _APPLICATION_TOKEN if expected_pool == "go" else _APPLICATION_HTTP_TOKEN
-    domain = _APPLICATION_DOMAIN if expected_pool == "go" else _APPLICATION_HTTP_DOMAIN
+    native = expected_pool in NATIVE_APPLICATION_POOLS
+    pattern = _APPLICATION_NATIVE_TOKEN if native else _APPLICATION_TOKEN if expected_pool == "go" else _APPLICATION_HTTP_TOKEN
+    domain = _APPLICATION_NATIVE_DOMAIN if native else _APPLICATION_DOMAIN if expected_pool == "go" else _APPLICATION_HTTP_DOMAIN
     match = pattern.fullmatch(token)
     if match is None:
         raise CapabilityError("invalid application capability")
@@ -420,3 +439,95 @@ def authorize_application(token, signing_key, lease_lookup, turn_lookup, *, prin
     # dispatch permission, even if the original execution authority has expired.
     _validate_application_binding(lease, turn, claims, now, recovery_only=recovery_only)
     return dict(claims)
+
+
+_APPLICATION_DISPATCH_EXTRA_FIELDS = frozenset({
+    "kind", "request_id", "dispatch_id", "request_digest", "invocation_digest",
+    "physical_host", "source_generation", "support_generation",
+})
+
+
+def _native_dispatch_claims(lease, turn, request, now):
+    """Claims derive only from the actual committed owner rows, never a dict flag."""
+    from lease_broker import _application_native_invocation
+    invocation, _ = _application_native_invocation(request, turn)
+    claims = {"v": 3, "purpose": "APPLICATION", "lease_id": turn["lease_id"],
+        "root": turn["admission_root"], "pool": turn["pool"], "account": turn["account"],
+        "model": turn["model"], "principal_id": turn["principal_id"], "host": turn["caller_host"],
+        "workload": turn["workload"], "turn_id": turn["turn_id"], "grant_digest": turn["grant_digest"],
+        "issued_at": request["created_at"], "expires_at": turn["expires_at"],
+        "lease_generation": turn["created_at"], "recipe_digest": turn["recipe_digest"],
+        "transport_kind": NATIVE_APPLICATION_KIND}
+    _validate_application_claims(claims)
+    _validate_application_binding(lease, turn, claims, now)
+    if (request["state"] != "pending" or now < request["created_at"]
+            or request["terminal_receipt"] is not None or request["unknown_reason"] is not None
+            or now >= claims["expires_at"]):
+        raise CapabilityError("native dispatch unavailable")
+    claims.update(kind="native_prepared_dispatch_v1", request_id=request["request_id"],
+        dispatch_id=request["dispatch_id"], request_digest=request["request_digest"],
+        invocation_digest=request["invocation_digest"],
+        **{key: invocation["commitment"][key] for key in ("physical_host", "source_generation", "support_generation")})
+    return claims
+
+
+def mint_native_dispatch(signing_key, lease, turn, request, *, now):
+    """Same signer, separate purpose. Only the one positive prepare calls this.
+
+    A token authenticates the original committed permit; it is not a second
+    one-shot ledger. The original carrier retains invocation/process custody.
+    """
+    _validate_key(signing_key)
+    _validate_now(now)
+    try:
+        claims = _native_dispatch_claims(lease, turn, request, now)
+        raw = _canonical_json_bytes(claims)
+        mac = hmac.new(signing_key, _APPLICATION_DISPATCH_DOMAIN + raw, hashlib.sha256).digest()
+        token = b"appd1." + _base64url_encode(raw) + b"." + _base64url_encode(mac)
+        if len(token) > _MAX_TOKEN_LENGTH:
+            raise CapabilityError("native dispatch unavailable")
+        return token.decode("ascii")
+    except (KeyError, TypeError, ValueError, OverflowError, RecursionError):
+        raise CapabilityError("native dispatch unavailable") from None
+
+
+def authorize_native_dispatch(token, signing_key, lease_lookup, turn_lookup, request_lookup, *,
+                              principal_id, caller_host, turn_id, request_id, invocation, now):
+    """Validate committed native custody without consulting mutable grants.
+
+    This has no recovery-only mode. Expired, unknown or terminal operations
+    cannot regain launch permission through capability verification.
+    """
+    _validate_key(signing_key)
+    _validate_now(now)
+    try:
+        if type(token) is not str or len(token) > _MAX_TOKEN_LENGTH:
+            raise CapabilityError("native dispatch unavailable")
+        match = _APPLICATION_DISPATCH_TOKEN.fullmatch(token)
+        if match is None:
+            raise CapabilityError("native dispatch unavailable")
+        encoded, mac_text = (value.encode("ascii") for value in match.groups())
+        raw, mac = _base64url_decode(encoded), _base64url_decode(mac_text)
+        if (encoded != _base64url_encode(raw) or mac_text != _base64url_encode(mac)
+                or len(mac) != 32 or not hmac.compare_digest(mac,
+                    hmac.new(signing_key, _APPLICATION_DISPATCH_DOMAIN + raw, hashlib.sha256).digest())):
+            raise CapabilityError("native dispatch unavailable")
+        claims = _parse_payload(raw)
+        if (set(claims) != _APPLICATION_FIELDS | {"recipe_digest", "transport_kind"} | _APPLICATION_DISPATCH_EXTRA_FIELDS
+                or claims["kind"] != "native_prepared_dispatch_v1" or raw != _canonical_json_bytes(claims)
+                or any(claims[key] != value for key, value in (("principal_id", principal_id),
+                    ("host", caller_host), ("turn_id", turn_id), ("request_id", request_id)))):
+            raise CapabilityError("native dispatch unavailable")
+        lease = lease_lookup(claims["lease_id"])
+        turn = turn_lookup(principal_id, turn_id)
+        request = request_lookup(principal_id, turn_id, request_id)
+        expected = _native_dispatch_claims(lease, turn, request, now)
+        if claims != expected:
+            raise CapabilityError("native dispatch unavailable")
+        frozen = json.loads(request["invocation_json"])
+        frozen["invocation_digest"] = request["invocation_digest"]
+        if type(invocation) is not dict or _canonical_json_bytes(invocation) != _canonical_json_bytes(frozen):
+            raise CapabilityError("native dispatch unavailable")
+        return dict(claims)
+    except Exception:
+        raise CapabilityError("native dispatch unavailable") from None

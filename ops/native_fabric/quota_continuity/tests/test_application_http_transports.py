@@ -1068,13 +1068,17 @@ class UnqualifiedJoinTest(unittest.TestCase):
         self.accounts.write_text(json.dumps(self.document))
 
     def test_the_broker_refuses_unjoined_or_unauthenticated_pool_requests(self):
-        for pool, model in (("minimax", "MiniMax-M3"), ("bailian", "qwen3.8-max")):
+        # Native MiniMax is a recognized pool, but naming it cannot replace
+        # the required authenticated service identity and registered recipe.
+        for pool, model, expected in (
+                ("minimax", "MiniMax-M3", "invalid_identity"),
+                ("bailian", "qwen3.8-max", "invalid_identity"),
+                ("unregistered-pool", "fixture-model", "unsupported_application_pool")):
             with self.assertRaises(lease_broker.ApplicationAdmissionError) as caught:
                 self.broker.begin_application_turn(
                     principal_id="macro", caller_host="vps", workload="site_interactive",
                     turn_id="turn-1", pool=pool, model=model)
-            self.assertEqual(caught.exception.code,
-                "unsupported_application_pool" if pool == "minimax" else "invalid_identity")
+            self.assertEqual(caught.exception.code, expected)
         with self.broker._conn() as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM leases").fetchone()[0], 0)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM application_turns").fetchone()[0], 0)
