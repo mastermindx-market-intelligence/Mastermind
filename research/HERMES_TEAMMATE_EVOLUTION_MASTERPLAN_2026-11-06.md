@@ -1899,3 +1899,44 @@ The exact branch/master comparison shares five paths: `app/mastermind_os/src-tau
 Original Ubuntu1/root C26 diagnostic PermissionError remains closed and unretried. The original runtime operation remains `meta-ceo-byok-followon-parent-20261106-c35-01` at `/Volumes/Mastermind 2/agent-workspaces/web/meta-ceo-byok-followon-parent-20261106-c35-01`. C3 is source qualification only. Neither denied local AF_UNIX case was retried. Paid Fabric and Outcome Learning #398/#409 holds remain. No alternate runtime, account, admission, watcher, daemon, delivery or queue was introduced.
 
 Full mission acceptance still requires original-carrier installed proof of effective auth/model/isolation/effects/cleanup, governed memory/correction feedback, held-out efficacy and promotion/rollback, vault/browser/computer/fleet journeys, interruption/restart/endurance and original-owner recovery. Healthy safe source work continues; this milestone is not a mission closeout.
+
+
+## 44. Source convergence completed; attended native EVAL consumer is the next implementation
+
+Status: **MORE_WORK_EXISTS — MISSION_COMPLETE=false**. This is a source milestone, not installed production acceptance.
+
+### Original discovery carrier
+
+The original discovery PR [#2217](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2217) now points to **9353ce08dc37cb1e0d30ec9c6831dc0613db27c7**, tree **ba7bbb23c120b04f672e9cccf215da4fcc612737**, parents **5bba402b3de999cbcb48d8d36728c40749946637** and **3f79e30ae184dc991102f6044f7c74f677a86040**. The GitHub-created tree exactly matches an actual three-way merge in the isolated C3 source worktree.
+
+Four overlapping production files composed without manual changes. The sole conflict was the exact-source review table. The composed auth.rs SHA256 is **57b58e9fa3bca82cb9185e590ab360bb0cf89bc214bec2f60d41cc5413908609**, preserving the same three fixture HTTP 503 operands at lines 3678/3683/3687. Accepted Company priorities, exact read-owner authentication, bounded installed-read peer settlement, and all discovery correction/currentness/recovery boundaries remain intact.
+
+The composed tree passed TypeScript typecheck, **37 UI**, **11 backend Python**, and **five Rust** cases. The initial Rust invocation lacked required build metadata and stopped before tests; the properly configured source-test invocation passed. Production D8 selected **80 source files with no findings**. Whitespace checks passed. These are source/test receipts, not live UI/runtime acceptance.
+
+The current GitHub readback showed OPEN / Ready / MERGEABLE, no preexisting auto-merge or queue entry, no mandatory approver count, and required strict `test`. The original release request was armed once with match-head 9353 and read back as auto-merge enabled **2026-11-07T18:23:40Z**. It is not claimed merged or queued. New hosted workflows include CI **42400966739**, runtime **42400966857**, harness **42400966844**, OAuth **42400966817**, OS **42400967013**; current outcomes must be read from those original workflows.
+
+Protected master later advanced to **2541a68e9240ca3fb5c1fda7b68e1df8984c973b**. Its two commits change bot evidence truth and two tests only. No overlapping source path or protected law changed; compatible law pin **66780ab7e3e9fdbfd40713bb5791fb1888529f7c** remains usable.
+
+### Original native EVAL carrier
+
+PR [#2234](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234) now points to **72693bea15fac45873d69483280c6e911f3ba3c9**, tree **0b4973b2538e04a1cb0bf52ca1f99cdef0b3e0dc**, parents original publisher **10bae87a03acadd6ce218ff69c62727335ec6468** and discovery **9353ce08dc37cb1e0d30ec9c6831dc0613db27c7**. The same original API tree/commit/CAS carrier was used. No alternate publication or runtime carrier exists.
+
+Actual Git merge exposed two observer conflicts from accepted transport's squash ancestry. Full-file checks proved discovery9353 observer bytes equal original accepted transport72e; retaining EVAL postimages therefore preserves all accepted behavior plus selected-input fences. The original private control auto-composed byte-identical10bae. The review-table conflict was resolved record-by-record: current discovery auth, EVAL control, new input mode, and nonconflicting EVAL enrollment pins. No scanner relaxation or blanket exception. Production D8 on **44 changed source files** found no identity/evidence issue. The frozen embedded guard.patch retains its necessary unified-diff context spaces and exact qualified digest; all other source whitespace checks passed.
+
+The independent GitHub tree equals the actual source merge tree. The 20-file native publisher implementation, fourteen-file MIT derivation, marker v1 historical semantics, and invalid v2 evidence boundary from section43 are unchanged. Current protected/synthetic-merge CI remains owed. Keep this PR Draft; no release request has been made.
+
+### Next connected source work
+
+Principal inspection found the EVAL selection/publication APIs are implemented and source-tested, but have no non-test attended consumer. Merely adding CLI arguments would be insufficient: the existing held release entry also selects a closed command set. Implement through that original entry and original enrollment-style held owner qualification.
+
+Use separate attended submit/read/publish operations. Submit must consume the existing frozen enrollment, actual serving capability descriptor, exact current target and closed selection, then issue one original native admission. Publish must retain the original session/submission/input digest, recover the original admission ID and binding, and publish only an eligible terminal attempt through the existing private owner. No waiting daemon, replay queue, new run identity, caller-supplied observations, or alternative Harness2 runner.
+
+An actual recovery gap must be repaired: when the submit reply is lost and the row is later retired, the no-admission-ID lookup currently consults live admissions only. Use the original terminal identity/tombstone read and the same historical binding check; absence or mismatch never permits resubmission.
+
+After that, the next independent source contributions are authentic delivered-source inventory through the original Agent OS compiler/read/provider/native observation, and original tool-effect receipts through existing tool dispatch/result owners. Aggregate source hashes cannot be invented into per-record digests; omitted accounting references cannot be called delivered content. Missing live auth/environment/cleanup evidence remains missing.
+
+### Holds, effects and next action
+
+The Ubuntu1/root C26 permission denial remains closed and unretried. C3 remains source validation only. Both denied local AF_UNIX cases and original paid Fabric refusals remain excluded/unretried. Original runtime carrier **meta-ceo-byok-followon-parent-20261106-c35-01** and path **/Volumes/Mastermind 2/agent-workspaces/web/meta-ceo-byok-followon-parent-20261106-c35-01** remain unchanged. Outcome Learning **#398/#409** stays held. No live inference, new profile/account, fleet activation, browser login, daemon, watcher, or Slack handoff occurred.
+
+Next action: implement the held-entry attended EVAL consumer and original retired-admission recovery on the same #2234 branch; verify with the actual pinned native bodies and exact current source gates. Reconcile original #2217 CI/queue as it advances. Runtime acceptance later requires restoration/reconciliation of the original administrative connection; no source or CI claim substitutes for installed proof.
