@@ -1,6 +1,7 @@
 //! The native client owns OAuth transactions and bearer tokens. The webview
 //! receives fixed read results and sanitized state, never credential material.
 pub mod host_observation;
+pub mod hermes_native;
 mod draft_continuity;
 mod transport_diagnostics;
 use transport_diagnostics::{ExecutiveObservation, ExecutiveReason, ProgramsRead};

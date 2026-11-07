@@ -6,6 +6,7 @@ import { ProgrammeDirection, type ProgrammeDirectionProps } from "../direction/P
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
 import { ByokRolesPanel } from "./ByokRolesPanel";
+import { HermesNativePanel } from "../hermes-native/HermesNativePanel";
 import type { ByokRoleView } from "./byok-role-view";
 import { registerUnsavedNavigationHold } from "../auth-navigation-guard";
 import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
@@ -235,6 +236,7 @@ export function MetaCeoOffice({
     </section>}
 
     <ByokRolesPanel locale={locale} observation={byokObservation} />
+    <HermesNativePanel key={`hermes:${projection.context.authGeneration}`} locale={locale} />
     <div className="office-byok-refresh">
       <button type="button" disabled={!canRefreshByok || !onRefreshByok} onClick={onRefreshByok}>
         {t("Refresh configuration")}

@@ -263,3 +263,13 @@ P0 current #1717 owner/source/collision reconciliation
 - [Incumbent DSH PR #1717](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1717) and [harness convergence #687](https://github.com/mastermindx-market-intelligence/Mastermind/pull/687).
 
 **No code line copied from an unlicensed Grok Bot/Dot release.**
+
+
+## 2026-11-06 thin-native-first release amendment
+
+The current Chairman directs the installed M2 Hermes thin runtime into Mastermind OS first,
+then advanced upgrades. This continues this original program and its R2 outcome. See the
+source-owned task tree and architectural boundary in [THIN_NATIVE_OS](../../hermes/THIN_NATIVE_OS.md)
+(THIN-1 through THIN-3, then ADV-1/ADV-2). Existing native company integration #2120,
+#2134, #2147 and H24 work remain intact. Native desktop integration is the first useful
+release slice, not proof of remote web or unattended company execution.
