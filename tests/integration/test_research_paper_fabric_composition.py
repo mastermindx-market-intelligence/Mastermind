@@ -105,6 +105,7 @@ class SavedPaperApplicationTests(unittest.TestCase):
             self.assertEqual(operation["input"]["paper"], self.paper)
             self.assertFalse(self.document()["recommend"])
             self.assertFalse(R.latest_for("NVDA")["confirmed"])
+            self.assertFalse(R.latest_for("NVDA", strict=True)["confirmed"])
             self.assertEqual(operation["filing"]["note"]["name"], self.note.name)
         self.native.on_upstream = upstream
         result = self.redigest()
@@ -120,6 +121,7 @@ class SavedPaperApplicationTests(unittest.TestCase):
         self.assertEqual([path.resolve() for path in R._NOTES.glob("*.md")], [self.note.resolve()])
         self.assertEqual(self.note.read_text(), R._paper_note_body(paper))
         self.assertEqual(R.latest_for("NVDA"), paper)
+        self.assertEqual(R.latest_for("NVDA", strict=True), paper)
         self.assertNotIn(R._REDI_KEY, paper)
         turn = self.native.rows("application_turns")[0]
         self.assertEqual((turn["principal_id"], turn["workload"]), ("macro_portfolio_fabric", "portfolio_analysis"))

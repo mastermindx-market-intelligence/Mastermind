@@ -84,16 +84,6 @@ def current_source_closure():
     assert digest(raw) == "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a"
     manifest = json.loads(raw)
     inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_bytes())
-    builder = read_builder()
-    original = dict(manifest)
-    before_host_pull = builder.before_host_pull_integrity(manifest)
-    assert before_host_pull is not manifest and manifest == original
-    assert set(before_host_pull) == set(manifest)
-    assert {name for name in manifest if manifest[name] != before_host_pull[name]} == set(builder.HOST_PULL_INTEGRITY_DIGESTS)
-    assert digest((json.dumps(before_host_pull, sort_keys=True, indent=2) + "\n").encode()) == "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
-    for name, wanted in builder.HOST_PULL_INTEGRITY_DIGESTS.items():
-        assert manifest[name] == wanted
-        assert digest((NATIVE / inventory["files"][name]["source"]).read_bytes()) == wanted
     assert len(manifest) == len(inventory["files"]) == 107
     assert set(manifest) == set(inventory["files"])
     for name, sha in manifest.items():

@@ -742,7 +742,7 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
 # C1 composed-source audit retains the original Programs observation context.
 # Only full-source binding and absolute positions move; no release grant.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'b0b93acb01efd5765dd3b170464c7bbecf3b4bc81ee9503fb130402ce735c0d6', 'sites': ((3645, 68, 71, 'int', '503'), (3650, 69, 72, 'int', '503'), (3654, 67, 70, 'int', '503'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '3fcdab496225a384bf231b215e7e4426fb29985df8160e71f252233e6b297e3a', 'sites': ((3646, 68, 71, 'int', '503'), (3651, 69, 72, 'int', '503'), (3655, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}
@@ -980,6 +980,15 @@ REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/curre
               (31, 52008, 52027, 'str', '_mastermind_account'),
               (31, 52305, 52324, 'str', '_mastermind_account'),
               (31, 52333, 52352, 'str', '_mastermind_account')),
+}
+
+# Retained protected readiness qualification records the actual proof-host UID.
+# This is evidence, not a runtime default or grant. The one complete UTF-8 token
+# requires this exact full postimage; any byte/path drift restores the guard.
+REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json'] = {
+    'sha256': 'ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33',
+    'sites': (),
+    'utf8_sites': ((61, 13, 16, 'int', '501'),),
 }
 
 # Retained protected readiness qualification records the actual proof-host UID.

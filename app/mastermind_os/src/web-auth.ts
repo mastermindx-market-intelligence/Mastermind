@@ -1142,7 +1142,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     });
   }
   async function executivePost(
-    route: "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | `project-execution/${ProjectExecutionOperation}` | typeof FRESH_CONVERSATION_PATHS[keyof typeof FRESH_CONVERSATION_PATHS] | typeof PROJECT_CONVERSATION_READ_PATHS[keyof typeof PROJECT_CONVERSATION_READ_PATHS],
+    route: "company-priorities" | "context" | "submit" | "status" | "session/context" | "session/history-context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction" | `project-planning/${PlanningOperation}` | `project-execution/${ProjectExecutionOperation}` | typeof FRESH_CONVERSATION_PATHS[keyof typeof FRESH_CONVERSATION_PATHS] | typeof PROJECT_CONVERSATION_READ_PATHS[keyof typeof PROJECT_CONVERSATION_READ_PATHS],
     arguments_: unknown,
     signal: AbortSignal,
   ) {
@@ -1158,7 +1158,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       token.executiveSend !== true)
       throw new Error("EXECUTIVE_SEND_SCOPE_REQUIRED");
     const direct = route.startsWith("direct-native/");
-    const body = JSON.stringify(route === "context" ? {} : (route === "session/context" || route === "session/history-context" || direct) ? arguments_ : { arguments: arguments_ });
+    const body = JSON.stringify((route === "context" || route === "company-priorities") ? {} : (route === "session/context" || route === "session/history-context" || direct) ? arguments_ : { arguments: arguments_ });
     if (new TextEncoder().encode(body).length > (direct ? 4096 : 65_536)) throw new Error("EXECUTIVE_INPUT_TOO_LARGE");
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -1229,6 +1229,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       available: () => configured && executiveResource !== null && valid("executive"),
       subscribe(listener) { executiveListeners.add(listener); return () => { executiveListeners.delete(listener); }; },
       context: (signal) => executivePost("context", null, signal),
+      companyPriorities: (signal) => executivePost("company-priorities", null, signal),
       submit: (arguments_, signal) => executivePost("submit", arguments_, signal),
       status: (arguments_, signal) => executivePost("status", { intent_id: arguments_.intent_id }, signal),
       projectPlanning: { request: (operation,arguments_,signal) =>

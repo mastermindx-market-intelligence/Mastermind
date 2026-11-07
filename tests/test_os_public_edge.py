@@ -106,6 +106,7 @@ def test_authenticated_native_and_control_room_routes_are_exact_and_method_scope
         "/os/executive/direct-native/result",
         "/os/executive/direct-native/consume",
         "/os/executive/direct-native/correction",
+        "/os/executive/company-priorities",
     }
     assert set(GET_ROUTES) == set(INCUMBENT_GET_ROUTES) | expected_get
     assert set(POST_ROUTES) == set(INCUMBENT_POST_ROUTES) | expected_post
