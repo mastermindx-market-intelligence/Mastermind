@@ -1,3 +1,4 @@
+import {CompanyPrioritiesRead} from "./meta-ceo/CompanyPrioritiesRead";
 import {ProjectDetailsNavigator} from './projects/ProjectDetailsNavigator';
 import {RetainedResultContent} from './activity/RetainedResultContent';
 import {PlanAdoptionWorkflow} from "./planning/PlanAdoptionWorkflow";
@@ -5368,6 +5369,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           workRead={officeWorkRead}
           onInspectWork={() => {if (officeWorkFrame.current?.current()) setActive("Work");}}
           projectJournal={officeProjectJournal}
+          companyPriorities={<CompanyPrioritiesRead host={window.MastermindMissionHost} locale={locale}/>}
           onOpenProjects={() => { setProjectTab(null); setActive("Projects"); }}
           selectedProject={projectWorkRef && currentProjectCards.length === 1 ? {
             title: currentProjectCards[0].title || projectWorkRef,

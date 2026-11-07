@@ -26,7 +26,7 @@ from brain import client, cli_bridge, fabric_inference, thinking_log
 
 MODEL = "composition-text-model"
 PROXY_TOKEN = "synthetic-composition-proxy-token"
-GATEWAY_BLOB = "9404753b3571e6eb6887c414cab0648c00197023"
+GATEWAY_BLOB = "50295bb81abaaf6949f8b61be2f6aef8a60b1b76"
 
 
 class DispatcherTests(unittest.TestCase):

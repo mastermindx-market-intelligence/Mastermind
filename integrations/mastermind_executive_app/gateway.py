@@ -968,9 +968,14 @@ class CeoIngressReadGateway:
             "review_triggers",
         }
         if type(value) is not dict or set(value) not in (
-            legacy_keys, legacy_keys | extension_keys
+            legacy_keys, legacy_keys | extension_keys,
+            legacy_keys | extension_keys | {"authored_orientation"},
         ):
             return False
+        if "authored_orientation" in value:
+            from control_plane.company_orientation import validate
+            try: validate(value["authored_orientation"])
+            except (ValueError, TypeError): return False
         receipts = receipts or {}
         consumed = consumed if consumed is not None else set()
         if (

@@ -743,7 +743,9 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # 2026-11-07 attended source check: native Hermes composition and exact pending
 # auth-timer expiry move these unchanged three operands. Preserve whole-file and
 # exact-token qualification; this supplies no runtime or formal release approval.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '2842f2dc712cb1b8718a2dfcba592bb390c153d4666b73c3a797f0d67380b499', 'sites': ((3613, 68, 71, 'int', '503'), (3618, 69, 72, 'int', '503'), (3622, 67, 70, 'int', '503'))}
+# Accepted Office READ adds only one module declaration; all prior bytes and
+# three HTTP-status operands are exact Root6a. Source-only pin, no runtime grant.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'ddbeb7e61ad3112edd798bddc47c35a3bd2deeea41d426e0bec1555f0475499e', 'sites': ((3614, 68, 71, 'int', '503'), (3619, 69, 72, 'int', '503'), (3623, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}
@@ -913,4 +915,13 @@ REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-jo
 REVIEWED_FILES["integrations/hermes_application_fabric/qualification/qualify_attended_configuration.py"] = {
     "sha256": "96dbbd9572b9323e2f1da20882b2170b21932e119d4768925ca030d50399bf92",
     "sites": ((105, 39, 42, "int", "450"), (132, 27, 30, "int", "450")),
+}
+
+# Exact observed native preimage metadata records the proof-host UID only.
+# These immutable evidence tokens create no account, runtime default or grant.
+# Full-source or token drift restores the ordinary guard.
+REVIEWED_FILES['review_evidence/hermes_primary/attended-native-preimages-20-files-20261107.json'] = {
+    "sha256": '7b5af848fa6bdc47b178b73fc027a46c34f897e2a9bade655b9dec09af6d1a12',
+    "sites": (),
+    "utf8_sites": ((39, 18, 21, 'int', '501'), (52, 18, 21, 'int', '501'), (65, 18, 21, 'int', '501'), (78, 18, 21, 'int', '501'), (91, 18, 21, 'int', '501'), (104, 18, 21, 'int', '501'), (121, 18, 21, 'int', '501'), (134, 18, 21, 'int', '501'), (147, 18, 21, 'int', '501'), (160, 18, 21, 'int', '501'), (173, 18, 21, 'int', '501'), (186, 18, 21, 'int', '501'), (199, 18, 21, 'int', '501'), (212, 18, 21, 'int', '501'), (229, 18, 21, 'int', '501'), (242, 18, 21, 'int', '501'), (263, 18, 21, 'int', '501'), (276, 18, 21, 'int', '501'), (289, 18, 21, 'int', '501'), (302, 18, 21, 'int', '501'), (319, 18, 21, 'int', '501')),
 }
