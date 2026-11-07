@@ -12,6 +12,13 @@
 .shell > main:has(.office-chat-workspace[data-view="chat"]) > .workspace-header h2 { font-size: 13px; line-height: 20px; }
 .shell > main:has(.office-chat-workspace[data-view="chat"]) > .build-details { display: none; }
 .hermes-chat-header { margin-bottom: 0; }
+.native-chat-entry { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 24px; min-height: 60dvh; max-width: 680px; margin: 0 auto; text-align: center; }
+.native-chat-entry-mark { display: grid; place-items: center; width: 48px; height: 48px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); color: var(--brass); font-size: 24px; }
+.native-chat-entry h2 { font: 500 28px/36px var(--font-display); margin: 24px 0 12px; letter-spacing: -.02em; }
+.native-chat-entry p { max-width: 440px; color: var(--muted); font-size: 14px; line-height: 24px; }
+.native-chat-entry button { margin-top: 16px; padding: 12px 20px; border: 1px solid var(--border); background: var(--raised); border-radius: 12px; color: var(--text); font: 500 13px/20px var(--font-ui); cursor: pointer; }
+.native-chat-entry button:disabled { opacity: .5; cursor: default; }
+.native-chat-entry .native-chat-entry-note { margin-top: 16px; font-size: 11px; color: var(--faint); }
 @media (max-width: 600px) {
   .office-chat-tabs { padding-inline: 16px; }
   .shell > main:has(.office-chat-workspace[data-view="chat"]) > .workspace-header { padding-inline: 16px; }

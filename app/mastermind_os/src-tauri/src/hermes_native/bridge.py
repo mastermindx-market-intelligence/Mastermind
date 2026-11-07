@@ -754,7 +754,8 @@ class NativeRuntime:
             if count < len(visible[-100:]) or self.owned_history(db, owner)[1] != receipt:
                 raise BridgeRefusal("NATIVE_HISTORY_CHANGED")
             result = {"id": identifier(owner), "storedId": identifier(row["id"]),
-                "title": display(row.get("title") or "", 512), "requestedModel": display(row.get("model") or "", 160),
+                "title": display(row.get("title") or "", 512),
+                "requestedModel": display(row.get("model") or "", 160),
                 "canSend": False, "toolAccess": "UNQUALIFIED", "sendCheckRequired": True,
                 "running": None, "executionGeneration": integer(logical.get("runtime_generation")),
                 "messageCount": count, "messages": visible[-100:],

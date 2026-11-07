@@ -2,7 +2,8 @@
 import type { NativePendingOperation } from "./pending-pointer";
 import type { NativeLiveFrame, NativeLiveTarget } from "./live-stream";
 export type NativeOperation =
-  | { operation: "status" | "list" | "recover" | "stop" }
+  | { operation: "status" | "list" | "recover" }
+  | { operation: "stop"; sessionId: string; requestId: string }
   | { operation: "create"; role: "meta-ceo" | "secretary"; requestId: string }
   | { operation: "read"; sessionId: string }
   | { operation: "send"; sessionId: string; requestId: string; text: string }

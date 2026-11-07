@@ -102,3 +102,32 @@ then compose only pinned upstream commits for installed real-path proof. Preserv
 active #2180 packaging/UI and #2177 native-reader writers. No merge, deployment,
 provider call, or replacement of their installed candidate is authorized by a test
 pass alone. The Chairman's requested product outcome remains open.
+
+
+## Checkpoint 2 qualification in progress
+
+The admitted Mac source workspace is `/Volumes/Mastermind 2/agent-workspaces/web/os-fluid-chat-20261107-c2`, created by the incumbent workspace helper at f2da65acbf6955430bd2aea2f9ca55297b0d32f7. Initial acquire failed before application because its Git source lacked the new commit; fetching the exact published commit resolved this. No original writer checkout or running app was changed.
+
+`cargo check --locked` passed at f2da65ac (53.81 seconds, 14 existing warnings), using a compile-only identity. No app was launched. Current entire Hermes frontend suite: 75 tests passed. Current native bridge/stream suites: 51 tests passed. Subsequent changes below need their own final check.
+
+A refreshed #2180 source head ad3487fab3b16c8ed9c6a221a8160fdfc0cbbf79 identified a material S1 Stop race: another view can settle A and admit B in the same session before a stale button is clicked. This candidate now binds Stop to the displayed request/session tuple before atomic cancellation reservation. A changed durable target is refused without invoking or reserving cancellation. New regression coverage proves B remains untouched. This is required before consuming the older S1 patch; its earlier test results alone do not establish safety.
+
+The DeepSeek native delta opens/focuses only the fixed complete application in `deepseek-chat`, with an explicit local-main caller check. It enumerates every application command under the Tauri AppManifest ACL; only the local main webview receives the application permission set. Remote views receive no capabilities. Navigation stays on the exact HTTPS chat origin, popups are denied, and the existing auth owner closes the private view when generation/sign-in changes. The existing local CSP and #2177 native iframe rejection remain intact. Generated-resolver tests and Mac compile remain required before release.
+
+DeepSeek window creation is not connection/provider proof. The public route is still a candidate and the existing app must issue its private launch authentication into that webview's origin. No token is embedded, copied into source, logged, or stored by this native entry; no alternate auth broker or provider client was added. Source remains unaccepted for production until that existing deployment/login path is qualified.
+
+The original #2180 packaged UI now has an exact interactive sign-in gate: candidate486 signed out, and its next browser sign-in did not complete. Original new-conversation request9fbc8f4abb944ab1a170b4990e59f729 committed to its native session but its UI recovery remains held. Do not alter its pending pointer or replay its creation. The current commission has made no provider send or stop call and has not replaced that running app.
+
+
+### Source checkpoint 2 verification update
+
+- Production TypeScript/Vite build passed after the native entry and Stop-target fixes.
+- All native Python OS suites passed: 59 tests (bridge, history, stream).
+- Command inventory/capability tests passed: 2 tests.
+- The shared dev fixture renders the actual Hermes panel with explicit fixture event controls, never a fake provider or production entry point. `dev/hermes-chat.html` is not included in the production build.
+- Visual verification remains open: the connected browser extension lacks its originating browser context; the separate cloud browser cannot reach the scratch loopback server. A shared-file preview was rejected by the cloud browser URL security policy (only HTTP/HTTPS permitted). That action was stopped; no bypass or alternate file-protocol route was used. No rendered acceptance or smoothness measurement is claimed.
+- The source-only DeepSeek native view and generated ACL tests still require their next exact-head Mac compile/test. The public app installation and its existing private launch/sign-in path remain separate, unproven dependencies.
+
+The company workspace key now retains the incumbent auth/selection/session/binding lifecycle and excludes routine source revision changes. A focused render regression passed: drafts survive tab changes and source refresh, company drafts reset on selection change, and native drafts clear on auth change. DeepSeek auth withdrawal hides and force-destroys its view; failed destruction retains the original generation fence and cannot refocus/reuse it under new authority. This closes an ignored-close-result privacy gap before qualification.
+
+The latest inspected DeepSeek source is b4bb540aa8248ae1408daa6dc4ff6af749659797. Its native read port provides bounded read projections over an already-owned socket pair, not a private-launch/authentication capability. The accepted deployment owns the private launch cookie ceremony; this branch will not scrape private service logs, add a broker, or repurpose that read port.

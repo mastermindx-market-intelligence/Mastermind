@@ -12,6 +12,8 @@ mod terminal_public_config;
 mod terminal_request_handoff;
 mod terminal_session;
 mod terminal_sharing_navigation;
+#[cfg(test)]
+mod native_chat_acl_tests;
 use sha2::{Digest, Sha256};
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -102,6 +104,7 @@ fn main() {
             terminal_session::read_terminal_sharing_requests,
             terminal_sharing_navigation::open_terminal_sharing_request,
             auth::auth_status,
+            auth::deepseek_native::open_deepseek_chat,
             auth::hermes_native::hermes_native,
             auth::hermes_native::hermes_native_observe,
             auth::hermes_native::hermes_native_unobserve,

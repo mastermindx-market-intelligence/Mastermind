@@ -77,6 +77,13 @@ export function HermesNativePanel({ locale, port = nativeHermesPort, visible = t
       if ("sessionId" in request && result.receipt && result.receipt.sessionId !== request.sessionId) throw new Error("NATIVE_RESPONSE_INVALID");
       if (request.operation === "receipt" && result.receipt && result.receipt.id !== request.admissionId) throw new Error("NATIVE_RESPONSE_INVALID");
       if (result.pendingOperation !== undefined) {
+        const next = result.pendingOperation;
+        if (next && request.operation !== "send" && request.operation !== "create" &&
+          (!originalHeld || next.kind !== originalHeld.kind || next.requestId !== originalHeld.requestId ||
+            next.kind === "send" && originalHeld.kind === "send" && next.sessionId !== originalHeld.sessionId)) {
+          setReceipt(undefined); setLive(undefined); setPendingText(undefined);
+          submittedDraft.current = null; pendingProjection.current = false;
+        }
         heldRef.current = result.pendingOperation; setHeld(result.pendingOperation);
         if (result.pendingOperation && result.state === "READY") {
           stopAutomatic.current = true; setNotice("EFFECT_UNKNOWN");
@@ -97,7 +104,10 @@ export function HermesNativePanel({ locale, port = nativeHermesPort, visible = t
         }
       }
       if (result.sessions) setHistory(result.sessions);
-      if (result.receipt) setReceipt(result.receipt);
+      const crossedPending = result.pendingOperation && originalHeld &&
+        (result.pendingOperation.kind !== originalHeld.kind || result.pendingOperation.requestId !== originalHeld.requestId) &&
+        result.requestId !== result.pendingOperation.requestId;
+      if (result.receipt && !crossedPending) setReceipt(result.receipt);
       if (result.state === "OPENED") { setReceipt(undefined); setDraft(""); setPendingText(undefined); submittedDraft.current = null; pendingProjection.current = false; pollCount.current = 0; stopAutomatic.current = false; }
       if (result.state === "ADMITTED") {
         const acceptedDraft = request.operation === "send" ? { requestId: request.requestId, text: request.text }
@@ -220,11 +230,13 @@ export function HermesNativePanel({ locale, port = nativeHermesPort, visible = t
     await perform({ operation: "read", sessionId: target });
   };
   const stopOriginal = async () => {
-    const original = heldRef.current;
-    if (original?.kind !== "send" || original.stopReserved || stopAttempt.current === original.requestId || inFlight.current) return;
+    const original = held;
+    const current = heldRef.current;
+    if (original?.kind !== "send" || current?.kind !== "send" || original.requestId !== current.requestId ||
+      original.sessionId !== current.sessionId || original.stopReserved || stopAttempt.current === original.requestId || inFlight.current) return;
     stopAttempt.current = original.requestId;
     stopAutomatic.current = true;
-    const result = await perform({ operation: "stop" });
+    const result = await perform({ operation: "stop", sessionId: original.sessionId, requestId: original.requestId });
     if (result?.receipt?.status === "terminal") {
       await perform({ operation: "read", sessionId: result.receipt.sessionId });
     }

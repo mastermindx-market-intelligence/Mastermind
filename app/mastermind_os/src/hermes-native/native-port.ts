@@ -149,6 +149,13 @@ export function createNativeHermesPort(input: {
             retryAllowed: false, code: "NATIVE_STOP_UNAVAILABLE", pendingOperation: original };
         }
         if (request.operation === "stop" && original?.kind === "send" && pointer) {
+          // Bind the click to the displayed original before reserving cancellation.
+          // Another view may have settled A and admitted B in this same session.
+          if (original.requestId !== request.requestId || original.sessionId !== request.sessionId) {
+            return { schema: "mastermind.hermes_native_view.v1", state: "REFUSED", operation: "stop",
+              authGeneration: context.generation, capabilities: [], delegation: "NOT_ENABLED",
+              retryAllowed: false, code: "NATIVE_STOP_TARGET_CHANGED", pendingOperation: original };
+          }
           if (original.stopReserved || !input.store.reserveNativeStop) {
             return { schema: "mastermind.hermes_native_view.v1", state: "EFFECT_UNKNOWN", operation: "stop",
               authGeneration: context.generation, capabilities: [], delegation: "NOT_ENABLED",
