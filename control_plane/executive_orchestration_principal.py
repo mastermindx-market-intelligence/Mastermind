@@ -108,6 +108,7 @@ def _integer(value: Any, *, name: str, positive: bool = False) -> int:
 
 _HOME_KEYS = frozenset({"path", "device", "inode", "uid", "gid", "mode"})
 _PROCESS_KEYS = frozenset({"pid", "pgid", "process_start_identity", "boot_id"})
+_EXECUTION_PROCESS_KEYS = _PROCESS_KEYS | {"unique_id", "pidversion"}
 _OBSERVATION_KEYS = frozenset(
     {
         "schema_version",
@@ -148,8 +149,13 @@ def validate_provider_home_identity(value: Any) -> dict[str, Any]:
 
 
 def validate_process_identity(value: Any) -> dict[str, Any]:
-    raw = _closed(value, name="process_identity", keys=_PROCESS_KEYS)
-    return {
+    keys = (
+        _EXECUTION_PROCESS_KEYS
+        if isinstance(value, Mapping) and set(value) == _EXECUTION_PROCESS_KEYS
+        else _PROCESS_KEYS
+    )
+    raw = _closed(value, name="process_identity", keys=keys)
+    result = {
         "pid": _integer(raw["pid"], name="process_identity.pid", positive=True),
         "pgid": _integer(raw["pgid"], name="process_identity.pgid", positive=True),
         "process_start_identity": _text(
@@ -157,6 +163,16 @@ def validate_process_identity(value: Any) -> dict[str, Any]:
         ),
         "boot_id": _text(raw["boot_id"], name="process_identity.boot_id"),
     }
+    if keys == _EXECUTION_PROCESS_KEYS:
+        for key in ("unique_id", "pidversion"):
+            result[key] = _integer(raw[key], name=f"process_identity.{key}", positive=True)
+    return result
+
+
+def base_process_identity(value: Any) -> dict[str, Any]:
+    """Validate either closed evidence shape and project the stable wire fields."""
+    validated = validate_process_identity(value)
+    return {key: validated[key] for key in ("pid", "pgid", "process_start_identity", "boot_id")}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -310,5 +326,6 @@ __all__ = [
     "validate_digest",
     "validate_placement_snapshot",
     "validate_process_identity",
+    "base_process_identity",
     "validate_provider_home_identity",
 ]

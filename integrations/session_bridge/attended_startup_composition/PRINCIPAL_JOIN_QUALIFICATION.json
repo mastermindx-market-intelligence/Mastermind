@@ -1,0 +1,34 @@
+{
+  "base": "f11635eb239cf501fbeb9f1ce09f9061b3fa4850",
+  "created_at": "2026-10-13T23:22:19.874909+00:00",
+  "files": {
+    "control_plane/executive_fabric_adapter.py": "cbf4d229a6e06104e1ac0e42b33fdd94d72cf1acb41c91756945b7a748f7f162",
+    "control_plane/fabric_attended_canary.py": "5cdd9d7925a28624e032c276399581e36c8ebf94ee072da38fcfaa898280e4fb",
+    "tests/test_attended_principal_join.py": "b1c4965661db9a347a8368d9e95c829e29c26f0551ff9539b7e0166c6a683b27",
+    "tests/test_fabric_attended_probe_join.py": "fd3af3e68d027d6d9a4a1bd5fe4cc4d203dbfcfa412f71c9f6a42edac0ea7d94"
+  },
+  "limits": [
+    "Definition/provenance and current Runtime physical join are fixture issuers in principal tests.",
+    "Commissioned retention test uses fixture snapshot and physical resolution.",
+    "No new actual-wire parser, host admission, remote producer, credential, lease or provider proof claimed.",
+    "Existing Darwin/same-host probe remains; no arbitrary Ubuntu eligibility.",
+    "Published PR1391 e1f61048 release is unchanged; this successor remains local until normal integration."
+  ],
+  "schema": "mastermind.source_qualification/v1",
+  "scope": "Finite attended worker principal before probe, START and recovery sealing",
+  "source_review": {
+    "decision": "PASS",
+    "reviewer": "/root/native_activation_adjudication",
+    "scope": "Only immutable worker_user/shared_run_gid binding from the existing protected worker definition; same Attempt and physical route; preserve Control local group and original recovery bytes"
+  },
+  "status": "REVIEWED_SOURCE_ONLY_UNINSTALLED",
+  "verification": {
+    "baseline": "ATTENDED_PRINCIPAL_BASE_VALID.xml: one real principal mismatch failure, four additional mocked invalid-definition boundary failures, one drift pass. Earlier ATTENDED_PRINCIPAL_BASE.xml used a mismatched fixture and is not product red evidence.",
+    "errors": 0,
+    "failures": 0,
+    "final_report": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/ATTENDED_PRINCIPAL_FINAL.xml",
+    "passed": 112,
+    "sha256": "12e058413c7677d35b8391240e26b81bee5bc46dd98e6fce284e4eb480741d7a",
+    "skips": 0
+  }
+}

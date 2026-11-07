@@ -1,0 +1,26 @@
+[
+  {
+    "path": "/Users/chriswong/.codex/AGENTS.md",
+    "changed": true,
+    "before_sha256": "387cb998ad10a2e8ece4e64e73cdb060ec4d59e9d44973cf0e35f934656f6d15",
+    "after_sha256": "6c4833eb413a5f097b7664597bacd2e88a58f1903b4552759f195d4f524484cb",
+    "before_bytes": 15639,
+    "after_bytes": 13094,
+    "backup": "/Users/chriswong/.local/state/mastermind/instruction-backups/execution-friction-20261011/4ea1dd2fecb5549f-387cb998ad10a2e8ece4e64e73cdb060ec4d59e9d44973cf0e35f934656f6d15.md",
+    "host": "m2studio",
+    "profile": "codex",
+    "source_brief_sha256": "9d64c5dd7589c127a32dab00a1ae5452d4c8a82f7a8a8422b774b584a08096e3"
+  },
+  {
+    "path": "/Users/chriswong/.claude/CLAUDE.md",
+    "changed": true,
+    "before_sha256": "8632710f6674015915861e993b58585fc1480934d4e6938614c407f39923db1e",
+    "after_sha256": "4383f7b851cc8baeec8c64d7b570ac6a0a5594461a313776ae0d68ba78cdb126",
+    "before_bytes": 18034,
+    "after_bytes": 13154,
+    "backup": "/Users/chriswong/.local/state/mastermind/instruction-backups/execution-friction-20261011/aa4815bb969cbbf4-8632710f6674015915861e993b58585fc1480934d4e6938614c407f39923db1e.md",
+    "host": "m2studio",
+    "profile": "claude",
+    "source_brief_sha256": "9d64c5dd7589c127a32dab00a1ae5452d4c8a82f7a8a8422b774b584a08096e3"
+  }
+]

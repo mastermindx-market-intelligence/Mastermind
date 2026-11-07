@@ -1,0 +1,775 @@
+--- a/ext/pick.py
++++ b/ext/pick.py
+@@ -235,7 +235,7 @@
+     import math
+     try:
+         import quota_remote
+-        states = quota_remote.read_provider("minimax")
++        states = quota_remote.read_provider("minimax", allow_remote=False)
+         freshness = float(quota_remote.FRESH_S)
+     except Exception:
+         return None
+@@ -285,7 +285,7 @@
+         if HERE not in sys.path:
+             sys.path.insert(0, HERE)
+         import quota_remote
+-        rows = quota_remote.glm_accounts_state()
++        rows = quota_remote.glm_accounts_state(allow_remote=False)
+     except Exception:
+         return None
+     now = datetime.now(timezone.utc)
+@@ -1490,7 +1490,9 @@
+         if HERE not in sys.path:
+             sys.path.insert(0, HERE)
+         import pool_ledger
+-        return pool_ledger.glm_burn()
++        # Advisory ranking reads cache and local usage only; never refreshes a
++        # remote quota or writes the GLM window state. Broker still grants.
++        return pool_ledger.glm_burn(read_remote=False, write_state=False)
+     except Exception:
+         return None
+ 
+@@ -1501,7 +1503,7 @@
+         return str((burn or {}).get("state") or "")
+     try:
+         import quota_remote
+-        remote_states = quota_remote.read_provider("glm")
++        remote_states = quota_remote.read_provider("glm", allow_remote=False)
+         fresh_remote = any(
+             state.source == "PROVIDER_AUTHORITATIVE"
+             and quota_remote._age_seconds(state, quota_remote._utc_now().timestamp()) <= quota_remote.FRESH_S
+--- a/ext/quota_remote.py
++++ b/ext/quota_remote.py
+@@ -397,6 +397,41 @@
+     return state
+ 
+ 
++def _advisory_fresh_states(states: Iterable[ProviderQuotaState],
++                           now_ts: float) -> List[ProviderQuotaState]:
++    """Advisory cache authority requires a real, nonfuture, dated observation.
++
++    A recently refreshed cache does not renew an old provider measurement.
++    Fail closed on unknown/stale/malformed observations, without writing or
++    making provider requests. Normal quota refresh behavior remains intact.
++    """
++    accepted = []
++    for state in states:
++        if state.source != "PROVIDER_AUTHORITATIVE":
++            continue
++        observed = _iso(state.observed_at)
++        if not observed:
++            continue
++        try:
++            stamp = datetime.fromisoformat(observed[:-1] + "+00:00").timestamp()
++            age = now_ts - stamp
++            if 0.0 <= age <= FRESH_S:
++                # A recent observation belongs to its measured window, not to
++                # the new allowance after that window's reset. Unknown remains
++                # unknown; never refresh or synthesize post-reset capacity here.
++                if state.reset_at is not None:
++                    reset = _iso(state.reset_at)
++                    if not reset:
++                        continue
++                    reset_ts = datetime.fromisoformat(reset[:-1] + "+00:00").timestamp()
++                    if reset_ts <= now_ts:
++                        continue
++                accepted.append(state)
++        except (OSError, OverflowError, ValueError, TypeError):
++            continue
++    return accepted
++
++
+ def _cache_states(entry: Any, reason: str,
+                   keep_authoritative: bool = False) -> List[ProviderQuotaState]:
+     rows = entry.get("states") if isinstance(entry, dict) else None
+@@ -436,7 +471,11 @@
+ 
+ def read_provider(provider: str, force: bool = False,
+                   now_ts: Optional[float] = None,
+-                  cache_path: Optional[str] = None) -> List[ProviderQuotaState]:
++                  cache_path: Optional[str] = None,
++                  *, allow_remote: bool = True) -> List[ProviderQuotaState]:
++    """Cache-only advisory mode cannot refresh remote quotas or write cache."""
++    if type(allow_remote) is not bool or (force and not allow_remote):
++        raise ValueError("quota_refresh_mode_conflict")
+     provider = provider.lower()
+     if provider not in {"glm", "minimax", "bailian"}:
+         raise ValueError("unknown provider")
+@@ -462,7 +501,13 @@
+                 not force and refreshed_at
+                 and now - refreshed_at < REFRESH_INTERVAL_S
+             ):
++                if not allow_remote:
++                    if not 0 <= now - refreshed_at < REFRESH_INTERVAL_S:
++                        return []
++                    return _advisory_fresh_states(cached_states, now)
+                 return [state for state in cached_states if state is not None]
++            if not allow_remote:
++                return []
+             try:
+                 live = READERS["glm"]()
+                 cache = _load_cache(path)
+@@ -484,6 +529,7 @@
+                 return []
+         per_account = glm_accounts_state(
+             now_ts=now, cache_path=path, force=force,
++            allow_remote=allow_remote,
+         )
+         flat: List[ProviderQuotaState] = []
+         for entry in per_account:
+@@ -494,7 +540,13 @@
+     refreshed_at = float((entry or {}).get("refreshed_at") or 0) if isinstance(entry, dict) else 0.0
+     cached_states = _cache_states(entry, "cached", keep_authoritative=True)
+     if not force and refreshed_at and now - refreshed_at < REFRESH_INTERVAL_S:
++        if not allow_remote:
++            if not 0 <= now - refreshed_at < REFRESH_INTERVAL_S:
++                return []
++            return _advisory_fresh_states(cached_states, now)
+         return [state for state in cached_states if state is not None]
++    if not allow_remote and provider != "bailian":
++        return []
+     live: List[ProviderQuotaState]
+     if provider == "bailian":
+         try:
+@@ -580,9 +632,11 @@
+     now_ts: Optional[float] = None,
+     cache_path: Optional[str] = None,
+     force: bool = False,
++    *, allow_remote: bool = True,
+ ) -> List[Dict[str, Any]]:
+     """Per-account GLM quota state (W4-G9).
+ 
++    With allow_remote=False, never calls _live_glm or writes quota state.
+     Returns one entry per account in ``glm_keys.accounts()``:
+ 
+         {
+@@ -597,6 +651,8 @@
+     falls back to ``_live_glm(name, key)`` and writes the result back.
+     Stale-cache entries are preserved on live-read failure.
+     """
++    if type(allow_remote) is not bool or (force and not allow_remote):
++        raise ValueError("quota_refresh_mode_conflict")
+     now = _utc_now().timestamp() if now_ts is None else float(now_ts)
+     path = cache_path or CACHE_PATH
+     cache = _load_cache(path)
+@@ -637,11 +693,20 @@
+         )
+         if fresh_cache:
+             cached_states = _cache_states(cached, "cached", keep_authoritative=True)
+-            states = list(cached_states)
++            states = (_advisory_fresh_states(cached_states, now)
++                      if not allow_remote else list(cached_states))
++            if not allow_remote and not 0 <= cached_age < REFRESH_INTERVAL_S:
++                states = []
+             if states:
+                 source = states[0].source
+                 observed_at = states[0].observed_at
+ 
++        if not states and not allow_remote:
++            out.append({
++                "name": name, "states": [], "source": "UNKNOWN",
++                "observed_at": None, "error": "cached_quota_unavailable",
++            })
++            continue
+         if not states:
+             try:
+                 states = _live_glm(name, key)
+@@ -712,7 +777,8 @@
+                        local_estimate: Optional[Dict[str, Any]] = None,
+                        cache_path: Optional[str] = None,
+                        fallback_reader: Optional[Callable[[Optional[float]], Dict[str, Any]]] = None,
+-                       read_remote: bool = True) -> Dict[str, Any]:
++                       read_remote: bool = True,
++                       *, allow_remote: bool = True) -> Dict[str, Any]:
+     """R29 GLM quota decision (W4-G9 multi-account).
+ 
+     State rules:
+@@ -737,6 +803,7 @@
+             # logic drives both code paths.
+             flat = read_provider(
+                 "glm", now_ts=now, cache_path=cache_path,
++                allow_remote=allow_remote,
+             )
+             if flat:
+                 per_account = [{
+@@ -748,7 +815,27 @@
+                 }]
+         else:
+             # W4-G9 multi-account path.
+-            per_account = glm_accounts_state(now_ts=now, cache_path=cache_path)
++            per_account = glm_accounts_state(
++                now_ts=now, cache_path=cache_path, allow_remote=allow_remote,
++            )
++
++    if not allow_remote and per_account:
++        # It is not authoritative to park a whole multi-account GLM pool
++        # when even one account or required quota window is unobserved.
++        def _complete_observed_account(entry: Dict[str, Any]) -> bool:
++            if entry.get("source") != "PROVIDER_AUTHORITATIVE":
++                return False
++            states = entry.get("states") or []
++            for window in ("5h", "weekly"):
++                state = next((item for item in states if item.window == window), None)
++                if state is None:
++                    return False
++                remaining = _num(state.remaining_pct)
++                if remaining is None or not 0.0 <= remaining <= 100.0:
++                    return False
++            return True
++        if not all(_complete_observed_account(entry) for entry in per_account):
++            per_account = []
+ 
+     if not per_account or all(not entry.get("states") for entry in per_account):
+         if local_estimate is None and fallback_reader is not None:
+--- a/ext/pool_ledger.py
++++ b/ext/pool_ledger.py
+@@ -1134,7 +1134,9 @@
+ 
+ 
+ def glm_burn(records: Optional[List[dict]] = None,
+-             now: Any = None) -> Dict[str, Any]:
++             now: Any = None, *,
++             read_remote: bool = True,
++             write_state: bool = True) -> Dict[str, Any]:
+     """GLM credit burn over anchored 5 h and weekly windows (R26/R29).
+ 
+     state: FILL below the R29 pro-rata target, SPILL at ≥ 90 % of the
+@@ -1209,7 +1211,8 @@
+                     "five_h_reset_utc": _iso_utc(five_reset),
+                     "anchor_source": anchor_source,
+                 })
+-                _write_glm_window_state(window_state)
++                if write_state:
++                    _write_glm_window_state(window_state)
+                 break
+         five_start = five_reset.timestamp() - 5 * 3600.0
+         if anchor_source == "rolling":
+@@ -1282,6 +1285,7 @@
+         remote_decision = quota_remote.glm_quota_decision(
+             now_ts=now_ts,
+             local_estimate=None,
++            allow_remote=read_remote,
+             fallback_reader=lambda _now: {
+                 "state": (
+                     "PARKED" if week * calibration_factor >= 0.95 * cap_week
+--- a/ext/tests/conftest.py
++++ b/ext/tests/conftest.py
+@@ -180,3 +180,28 @@
+     if pool_ledger is not None:
+         monkeypatch.setattr(pool_ledger, "LEDGER_PATH", ledger_path)
+     yield ledger_path
++
++
++# Four legacy priority-ordering cases require an enabled controller Grok
++# broker. Their purpose is routing order, not provider permission; local
++# accounts may legitimately report zero capacity. Simulate only that exact
++# readiness input while retaining fail-closed tests for real broker denial.
++@pytest.fixture(autouse=True)
++def _v5_grok_controller_affinity_fixture(request, monkeypatch):
++    named = {
++        "test_glm_credit_promo_balances_judgment_to_non_glm_above_target",
++        "test_glm_credit_promo_burn_down_urgency_still_wins_for_judgment",
++        "test_r31_grok_promoted_first_for_judgment",
++        "test_r31_urgent_grok_takes_review_classes",
++    }
++    if request.node.name not in named:
++        yield
++        return
++    import pick
++    original = pick._pool_cap
++    def cap(pool, task_class=None):
++        if pool == "grok":
++            return 17
++        return original(pool, task_class)
++    monkeypatch.setattr(pick, "_pool_cap", cap)
++    yield
+--- a/ext/tests/test_pick_policy.py
++++ b/ext/tests/test_pick_policy.py
+@@ -413,7 +413,7 @@
+ def test_explicit_glm_escalation_respects_disabled_host_route(monkeypatch):
+     _glm_on(monkeypatch)
+     monkeypatch.setattr(
+-        pick, "_eligible_host_routes", lambda host: {"minimax": ("host", "minimax")}
++        pick, "_eligible_host_routes", lambda host, **_kw: {"minimax": ("host", "minimax")}
+     )
+     line = pick.format_pick(
+         "build", host="host", task_complexity="C2_COMPLEX_BOUNDED",
+--- a/ext/tests/test_r31_glm_burn_down.py
++++ b/ext/tests/test_r31_glm_burn_down.py
+@@ -199,7 +199,7 @@
+ def test_minimax_requires_observation_and_grok_keeps_legacy_policy(monkeypatch):
+     monkeypatch.setattr(pick, "_weekly_remaining_pct", lambda p: None)
+     assert pick._burn_down_remaining_pct_r31("minimax") is None
+-    assert pick._burn_down_remaining_pct_r31("grok") == 100.0
++    assert pick._burn_down_remaining_pct_r31("grok") is None
+     assert pick._burn_down_remaining_pct_r31("glm") is None
+ 
+ 
+--- a/ext/tests/test_minimax_provider_window.py
++++ b/ext/tests/test_minimax_provider_window.py
+@@ -30,7 +30,9 @@
+     monkeypatch.setattr(quota_remote, "FRESH_S", 600)
+     calls = []
+     states = []
+-    def read(provider):
++    def read(provider, **kwargs):
++        # Quota observations remain readable; ranking is now cache-only.
++        assert kwargs == {"allow_remote": False}
+         calls.append(provider)
+         return states
+     monkeypatch.setattr(quota_remote, "read_provider", read)
+@@ -54,7 +56,7 @@
+     {"observed_at": None}, {"observed_at": "bad"},
+     {"observed_at": NOW.replace(tzinfo=None).isoformat()},
+     {"observed_at": (NOW + timedelta(seconds=1)).isoformat()},
+-    {"observed_at": (NOW - timedelta(seconds=601)).isoformat()},
++    {"observed_at": (NOW - timedelta(seconds=quota_remote.FRESH_S + 1)).isoformat()},
+ ])
+ def test_invalid_observation_cannot_promote(observed, change):
+     states, _ = observed
+@@ -113,7 +115,8 @@
+     states, _ = observed
+     states.append(row(observed_at=(NOW - timedelta(seconds=600)).isoformat()))
+     assert pick._minimax_burn_down_window() == (1.0, 90.0)
+-    def failed(_):
++    def failed(_, **kwargs):
++        assert kwargs == {"allow_remote": False}
+         raise RuntimeError("offline")
+     monkeypatch.setattr(quota_remote, "read_provider", failed)
+     assert pick._minimax_burn_down_window() is None
+--- a/ext/tests/test_host_aware_pick.py
++++ b/ext/tests/test_host_aware_pick.py
+@@ -97,14 +97,19 @@
+     assert pick.format_pick('census', host='target').startswith('POOL=minimax ')
+ 
+ 
+-@pytest.mark.parametrize('modes,expected', [
+-    (('glm-codex', 'glm'), 'glm-codex'), (('glm',), 'glm'),
+-])
+-def test_glm_adapter_identity_is_reported(env, modes, expected):
+-    env(modes=modes)
++def test_glm_codex_adapter_identity_is_reported(env):
++    env(modes=('glm-codex', 'glm'))
+     result = pick.format_pick('census', host='target', pool='glm-flash')
+     assert result.startswith('POOL=glm ')
+-    assert result.endswith('HOST=target MODE='+expected)
++    assert result.endswith('HOST=target MODE=glm-codex')
++
++
++def test_glm_only_host_without_observed_account_refuses(env):
++    # New account-aware GLM mode is not the codex adapter: without a
++    # qualified on-host account observation, it must reject a synthetic host.
++    env(modes=('glm',))
++    result = pick.format_pick('census', host='target', pool='glm-flash')
++    assert result.startswith('NONE reason=no eligible remote mode')
+ 
+ 
+ def test_fallback_cannot_escape_go_host(env, monkeypatch):
+--- /dev/null
++++ b/ext/tests/test_router_quota_nonblocking.py
+@@ -0,0 +1,136 @@
++"""Offline routing quota observation: no on-pick provider GET or refresh writes."""
++from __future__ import annotations
++from dataclasses import asdict
++from datetime import datetime, timedelta, timezone
++from pathlib import Path
++import json
++from unittest.mock import patch
++
++import pytest
++import quota_remote as qr
++import pick
++
++
++NOW = datetime(2026, 10, 12, 4, 31, tzinfo=timezone.utc)
++NOW_TS = NOW.timestamp()
++
++
++def state(provider, observed_at=NOW, reset_hours=9):
++    return qr.ProviderQuotaState(
++        provider=provider, window="weekly", used=10.0, cap=100.0,
++        remaining_pct=90.0,
++        reset_at=(NOW + timedelta(hours=reset_hours)).isoformat().replace("+00:00", "Z"),
++        source="PROVIDER_AUTHORITATIVE",
++        observed_at=observed_at.isoformat().replace("+00:00", "Z"),
++        confidence=1.0, detail="synthetic fixture no provider call",
++    )
++
++
++def cache(tmp_path, refreshed_at=NOW_TS - 1, old=False):
++    p = tmp_path / "quota.json"
++    st = state("minimax", NOW - timedelta(minutes=40) if old else NOW)
++    gl = state("glm", NOW - timedelta(minutes=40) if old else NOW)
++    p.write_text(json.dumps({
++        "minimax": {"refreshed_at": refreshed_at, "states": [asdict(st)]},
++        "glm": {"accounts": {"synthetic": {
++            "refreshed_at": refreshed_at, "states": [asdict(gl)]
++        }}},
++    }))
++    return p
++
++
++def guard_external(monkeypatch):
++    def block(*a, **k):
++        raise AssertionError("ADVISORY_ROUTE_CALLED_PROVIDER_NETWORK")
++    monkeypatch.setattr(qr, "READERS", {"minimax": block, "glm": block})
++    monkeypatch.setattr(qr, "_live_glm", block)
++    monkeypatch.setattr(qr, "_glm_accounts_dict", lambda: {"synthetic": {"api_key": "not-real"}})
++    monkeypatch.setattr(qr, "_atomic_write", block)
++
++
++def test_cached_minimax_observation_without_network_or_writes(monkeypatch, tmp_path):
++    path = cache(tmp_path)
++    before = path.read_bytes()
++    guard_external(monkeypatch)
++    rows = qr.read_provider("minimax", now_ts=NOW_TS, cache_path=str(path),
++                            allow_remote=False)
++    assert [(v.source, v.remaining_pct) for v in rows] == [("PROVIDER_AUTHORITATIVE", 90.0)]
++    assert path.read_bytes() == before
++
++
++@pytest.mark.parametrize("age", [qr.REFRESH_INTERVAL_S, qr.REFRESH_INTERVAL_S + 2, 1800])
++def test_minimax_stale_unknown_no_refresh(monkeypatch, tmp_path, age):
++    path = cache(tmp_path, refreshed_at=NOW_TS-age)
++    before = path.read_bytes()
++    guard_external(monkeypatch)
++    assert qr.read_provider("minimax", now_ts=NOW_TS, cache_path=str(path),
++                            allow_remote=False) == []
++    assert path.read_bytes() == before
++
++
++def test_glm_three_account_cold_cache_is_unknown_without_provider(monkeypatch, tmp_path):
++    path = tmp_path / "missing-cache.json"
++    guard_external(monkeypatch)
++    monkeypatch.setattr(qr, "_glm_accounts_dict", lambda: {
++        n: {"api_key": "not-real"} for n in ("a","b","c")
++    })
++    rows = qr.glm_accounts_state(now_ts=NOW_TS, cache_path=str(path), allow_remote=False)
++    assert len(rows) == 3
++    assert all(r["source"] == "UNKNOWN" and r["states"] == [] for r in rows)
++    assert not path.exists()
++
++
++def test_glm_cached_observation_no_refresh(monkeypatch, tmp_path):
++    path = cache(tmp_path)
++    before = path.read_bytes()
++    guard_external(monkeypatch)
++    rows = qr.glm_accounts_state(now_ts=NOW_TS, cache_path=str(path), allow_remote=False)
++    assert len(rows) == 1
++    assert rows[0]["source"] == "PROVIDER_AUTHORITATIVE"
++    assert rows[0]["states"][0].remaining_pct == 90.0
++    assert path.read_bytes() == before
++
++
++def test_glm_stale_cache_unknown(monkeypatch, tmp_path):
++    path = cache(tmp_path, refreshed_at=NOW_TS-(qr.FRESH_S+301))
++    before = path.read_bytes()
++    guard_external(monkeypatch)
++    rows = qr.glm_accounts_state(now_ts=NOW_TS, cache_path=str(path), allow_remote=False)
++    assert rows[0]["source"] == "UNKNOWN" and not rows[0]["states"]
++    assert path.read_bytes() == before
++
++
++def test_incompatible_force_network_flags_refused(tmp_path):
++    with pytest.raises(ValueError, match="quota_refresh_mode_conflict"):
++        qr.read_provider("minimax",force=True,allow_remote=False,
++                         now_ts=NOW_TS,cache_path=str(tmp_path/"x"))
++    with pytest.raises(ValueError, match="quota_refresh_mode_conflict"):
++        qr.glm_accounts_state(force=True,allow_remote=False,
++                              now_ts=NOW_TS,cache_path=str(tmp_path/"x"))
++
++
++def test_picker_advisory_callers_require_cached_only(monkeypatch):
++    calls = []
++    def minimal(provider, **kw):
++        calls.append((provider,kw.get("allow_remote")))
++        return []
++    def glms(**kw):
++        calls.append(("glm",kw.get("allow_remote")))
++        return []
++    monkeypatch.setattr(qr, "read_provider", minimal)
++    monkeypatch.setattr(qr, "glm_accounts_state", glms)
++    monkeypatch.setattr(pick, "_glm_burn_snapshot", lambda: None)
++    assert pick._minimax_burn_down_window() is None
++    assert pick._glm_account_weekly_windows() is None
++    assert pick._glm_meter_state() == ""
++    assert calls == [("minimax", False), ("glm", False), ("glm", False)]
++
++
++def test_picker_cold_stale_quota_never_promotes_as_authoritative(monkeypatch, tmp_path):
++    path=cache(tmp_path,refreshed_at=NOW_TS-(qr.FRESH_S+1),old=True)
++    guard_external(monkeypatch)
++    with patch.object(qr, "CACHE_PATH", str(path)), patch.object(qr,"_utc_now",lambda:NOW):
++        assert pick._minimax_burn_down_window() is None
++        assert pick._glm_account_weekly_windows() is None
++        assert pick.burn_down_urgent("minimax") is False
++        assert pick.burn_down_urgent("glm") is False
+--- /dev/null
++++ b/ext/tests/test_router_quota_nonblocking_v2.py
+@@ -0,0 +1,100 @@
++"""V2: GLM meter read path must be cache-only and mutation-free for picker."""
++from __future__ import annotations
++from dataclasses import asdict
++from datetime import datetime,timezone,timedelta
++import json
++from unittest.mock import patch
++
++import pytest
++import quota_remote as qr
++import pool_ledger
++import pick
++
++# The legacy shared conftest deliberately stubs glm_quota_decision to UNKNOWN
++# for non-quota modules; restore this exact function only inside cache tests.
++REAL_GLM_DECISION = qr.glm_quota_decision
++
++T=datetime(2026,10,12,4,42,tzinfo=timezone.utc)
++TS=T.timestamp()
++
++def row(window,used,rem):
++    return qr.ProviderQuotaState(
++        provider='glm',window=window,used=used,cap=100.0,
++        remaining_pct=rem, reset_at=(T+timedelta(hours=5)).isoformat().replace('+00:00','Z'),
++        source='PROVIDER_AUTHORITATIVE',observed_at=T.isoformat().replace('+00:00','Z'),
++        confidence=1.0,detail='test-no-network'
++    )
++
++def blockers(monkeypatch):
++    def block(*a,**kw):raise AssertionError('METER_NETWORK_OR_WRITE_FORBIDDEN')
++    monkeypatch.setattr(qr,'_live_glm',block)
++    monkeypatch.setattr(qr,'_atomic_write',block)
++    monkeypatch.setattr(pool_ledger,'_write_glm_window_state',block)
++    return block
++
++def test_explicit_cached_glm_quota_decision_never_fetches_or_mutates(monkeypatch,tmp_path):
++    path=tmp_path/'q.json'
++    path.write_text(json.dumps({'glm':{'accounts':{'synthetic':{
++       'refreshed_at':TS-1,'states':[asdict(row('5h',10,90)),asdict(row('weekly',10,90))]
++    }}}}))
++    before=path.read_bytes()
++    blockers(monkeypatch)
++    monkeypatch.setattr(qr,'glm_quota_decision',REAL_GLM_DECISION)
++    monkeypatch.setattr(qr,'_glm_accounts_dict',lambda:{'synthetic':{'api_key':'unused'}})
++    with patch.object(qr,'_utc_now',return_value=T):
++        result=qr.glm_quota_decision(now_ts=TS,cache_path=str(path),allow_remote=False)
++    assert result['source']=='PROVIDER_AUTHORITATIVE'
++    assert result['state'] in {'OK','FILL'}
++    assert path.read_bytes()==before
++
++@pytest.mark.parametrize('cache_offset',[qr.REFRESH_INTERVAL_S,900])
++def test_expired_cache_never_causes_network_or_fake_authority(monkeypatch,tmp_path,cache_offset):
++    path=tmp_path/'q.json'
++    path.write_text(json.dumps({'glm':{'accounts':{'synthetic':{
++       'refreshed_at':TS-cache_offset,'states':[asdict(row('5h',10,90))]
++    }}}}))
++    before=path.read_bytes()
++    blockers(monkeypatch)
++    monkeypatch.setattr(qr,'glm_quota_decision',REAL_GLM_DECISION)
++    monkeypatch.setattr(qr,'_glm_accounts_dict',lambda:{'synthetic':{'api_key':'unused'}})
++    with patch.object(qr,'_utc_now',return_value=T):
++        result=qr.glm_quota_decision(now_ts=TS,cache_path=str(path),allow_remote=False)
++    assert result['source']!='PROVIDER_AUTHORITATIVE'
++    assert path.read_bytes()==before
++
++def test_ledger_burn_advisory_disables_quota_io_and_window_writes(monkeypatch):
++    blockers(monkeypatch)
++    calls=[]
++    def decision(**kw):
++        calls.append(kw)
++        return {'state':'UNKNOWN','source':'UNKNOWN'}
++    monkeypatch.setattr(qr,'glm_quota_decision',decision)
++    # Expired state forces the usual rollover branch, which must not publish.
++    monkeypatch.setattr(pool_ledger,'_load_glm_window_state',lambda:{
++       'five_h_reset_utc':'2026-10-11T23:00:00Z',
++       'five_h_anchor_utc':'2026-10-11T18:00:00Z',
++       'anchor_source':'dashboard'
++    })
++    with patch.object(pool_ledger,'_now_ts',return_value=TS):
++        snap=pool_ledger.glm_burn(read_remote=False,write_state=False)
++    assert calls and calls[0].get('allow_remote') is False
++    assert isinstance(snap,dict) and 'state' in snap
++
++def test_picker_burn_snapshot_passes_cache_and_read_only_flags(monkeypatch):
++    calls=[]
++    def burn(**kwargs):
++        calls.append(kwargs)
++        return {'state':'OK','source':'UNKNOWN'}
++    monkeypatch.setattr(pool_ledger,'glm_burn',burn)
++    r=pick._glm_burn_snapshot()
++    assert r is not None and r['state']=='OK'
++    assert calls==[{'read_remote':False,'write_state':False}]
++
++def test_advisory_meter_no_provider_no_write_on_empty_cache(monkeypatch,tmp_path):
++    blockers(monkeypatch)
++    monkeypatch.setattr(qr,'CACHE_PATH',str(tmp_path/'missing.json'))
++    monkeypatch.setattr(qr,'_glm_accounts_dict',lambda:{'synthetic':{'api_key':'unused'}})
++    monkeypatch.setattr(pool_ledger,'_load_glm_window_state',lambda:{})
++    snap=pool_ledger.glm_burn(read_remote=False,write_state=False)
++    assert snap['state'] in {'FILL','OK','SPILL','PARKED','UNKNOWN'}
++    assert not (tmp_path/'missing.json').exists()
+--- /dev/null
++++ b/ext/tests/test_advisory_quota_freshness_v3.py
+@@ -0,0 +1,82 @@
++"""Provider-authoritative quota cache freshness under pure advisory selection."""
++from __future__ import annotations
++from dataclasses import asdict
++from datetime import datetime,timedelta,timezone
++import json
++from unittest.mock import patch
++import pytest
++import quota_remote as qr
++
++T=datetime(2026,10,13,18,8,0,tzinfo=timezone.utc)
++TS=T.timestamp()
++
++def quota(provider, observed):
++    return qr.ProviderQuotaState(provider=provider,window='weekly',used=15.0,
++        cap=100.0,remaining_pct=85.0,
++        reset_at=(T+timedelta(days=3)).isoformat().replace('+00:00','Z'),
++        source='PROVIDER_AUTHORITATIVE',
++        observed_at=observed.isoformat().replace('+00:00','Z'),
++        confidence=1.0,detail='synthetic')
++
++def no_network(monkeypatch):
++    def forbidden(*a,**kw):raise AssertionError('NETWORK_OR_CACHE_WRITE_FORBIDDEN')
++    monkeypatch.setattr(qr, '_atomic_write', forbidden)
++    monkeypatch.setattr(qr, '_live_glm', forbidden)
++    monkeypatch.setattr(qr, 'READERS', {'minimax':forbidden,'glm':forbidden})
++
++@pytest.mark.parametrize('age_s,should_pass', [
++    (0,True),(qr.FRESH_S,True),(qr.FRESH_S+1,False),
++    (-1,False),(-300,False),(86400,False),
++])
++def test_minimax_cache_observation_age_is_authoritative_only(monkeypatch,tmp_path,age_s,should_pass):
++    no_network(monkeypatch)
++    path=tmp_path/'q.json'
++    path.write_text(json.dumps({'minimax':{
++        'refreshed_at':TS-1,
++        'states':[asdict(quota('minimax',T-timedelta(seconds=age_s)))]}}))
++    before=path.read_bytes()
++    result=qr.read_provider('minimax',now_ts=TS,cache_path=str(path),allow_remote=False)
++    assert bool(result) is should_pass
++    assert path.read_bytes()==before
++
++@pytest.mark.parametrize('refreshed_delta',[1, 300, 86400])
++def test_future_refreshed_cache_never_confers_authority(monkeypatch,tmp_path,refreshed_delta):
++    no_network(monkeypatch)
++    path=tmp_path/'q.json'
++    path.write_text(json.dumps({'minimax':{
++        'refreshed_at':TS+refreshed_delta,
++        'states':[asdict(quota('minimax',T))]}}))
++    assert qr.read_provider('minimax',now_ts=TS,cache_path=str(path),allow_remote=False)==[]
++
++@pytest.mark.parametrize('age_s,should_pass', [
++    (0,True),(qr.FRESH_S,True),(qr.FRESH_S+1,False),(-120,False),
++])
++def test_glm_advisory_cache_observation_age(monkeypatch,tmp_path,age_s,should_pass):
++    no_network(monkeypatch)
++    monkeypatch.setattr(qr,'_glm_accounts_dict',lambda:{'a':{'api_key':'synthetic'}})
++    path=tmp_path/'q.json'
++    path.write_text(json.dumps({'glm':{'accounts':{'a':{
++        'refreshed_at':TS-1,
++        'states':[asdict(quota('glm',T-timedelta(seconds=age_s)))]
++    }}}}))
++    raw=path.read_bytes()
++    rows=qr.glm_accounts_state(now_ts=TS,cache_path=str(path),allow_remote=False)
++    assert len(rows)==1
++    assert bool(rows[0]['states']) is should_pass
++    assert rows[0]['source']==('PROVIDER_AUTHORITATIVE' if should_pass else 'UNKNOWN')
++    assert path.read_bytes()==raw
++
++def test_aging_one_glm_account_does_not_promote_its_old_reading(monkeypatch,tmp_path):
++    no_network(monkeypatch)
++    monkeypatch.setattr(qr,'_glm_accounts_dict',lambda:{
++        'a':{'api_key':'synthetic'},'b':{'api_key':'synthetic'}})
++    path=tmp_path/'q.json'
++    path.write_text(json.dumps({'glm':{'accounts':{
++       'a':{'refreshed_at':TS-1,'states':[asdict(quota('glm',T-timedelta(seconds=1000)))]},
++       'b':{'refreshed_at':TS-1,'states':[asdict(quota('glm',T))]}
++    }}}))
++    with patch.object(qr,'_utc_now',return_value=T):
++        rows=qr.glm_accounts_state(now_ts=TS,cache_path=str(path),allow_remote=False)
++    assert [(v['name'],v['source']) for v in rows]==[
++        ('a','UNKNOWN'),('b','PROVIDER_AUTHORITATIVE')]
++    assert not rows[0]['states'] and len(rows[1]['states'])==1
+--- /dev/null
++++ b/ext/tests/test_advisory_glm_partial_unknown_v4.py
+@@ -0,0 +1,78 @@
++"""Advisory GLM pool-wide exhaustion requires ALL accounts to be known.
++
++Tests are synthetic cache reads; no live provider call, broker grant, task
++dispatch, cache publication, or mutable host source.
++"""
++from dataclasses import asdict
++from datetime import datetime,timedelta,timezone
++from pathlib import Path
++import json
++import pytest
++import quota_remote as qr
++
++NOW=datetime(2026,10,13,19,0,tzinfo=timezone.utc)
++TS=NOW.timestamp()
++REAL_DECISION=qr.glm_quota_decision
++
++def entry(window,rem,shift=0):
++    return asdict(qr.ProviderQuotaState(
++      provider='glm',window=window,
++      used=(None if rem is None else 100.0-rem),cap=100.0,remaining_pct=rem,
++      reset_at=(NOW+timedelta(hours=2)).isoformat().replace('+00:00','Z'),
++      source='PROVIDER_AUTHORITATIVE',
++      observed_at=(NOW+timedelta(seconds=shift)).isoformat().replace('+00:00','Z'),
++      confidence=1.0,detail='synthetic-no-network'))
++
++def rows(kind):
++    full=[entry('5h',2.0),entry('weekly',2.0)]
++    other={
++       'missing':[],
++       'stale':[entry('5h',2.0,-(qr.FRESH_S+301)),entry('weekly',2.0,-(qr.FRESH_S+301))],
++       'future':[entry('5h',2.0,21),entry('weekly',2.0,21)],
++       'missing5h':[entry('weekly',2.0)],
++       'missing_weekly':[entry('5h',2.0)],
++       'unknown5h':[entry('5h',None),entry('weekly',2.0)],
++       'all_exhausted':full,
++       'has_spare':[entry('5h',90.0),entry('weekly',90.0)]
++    }[kind]
++    return full,other
++
++@pytest.mark.parametrize('kind',[
++ 'missing','stale','future','missing5h','missing_weekly','unknown5h'
++])
++def test_partial_glm_observation_is_unknown_not_authoritative(monkeypatch,tmp_path,kind):
++    full,other=rows(kind)
++    p=tmp_path/'quota.json'
++    doc={'glm':{'accounts':{
++      'a':{'refreshed_at':TS-1,'states':full},
++      'b':{'refreshed_at':TS-1,'states':other},
++    }}}
++    p.write_text(json.dumps(doc))
++    original=p.read_bytes()
++    def no_network(*args,**kwargs):raise AssertionError('UNEXPECTED_EXTERNAL_QUOTA_EFFECT')
++    monkeypatch.setattr(qr,'_atomic_write',no_network)
++    monkeypatch.setattr(qr,'_live_glm',no_network)
++    monkeypatch.setattr(qr,'_glm_accounts_dict',lambda:{
++      'a':{'api_key':'synthetic'},'b':{'api_key':'synthetic'}})
++    monkeypatch.setattr(qr,'glm_quota_decision',REAL_DECISION)
++    d=qr.glm_quota_decision(now_ts=TS,cache_path=str(p),allow_remote=False)
++    assert d['source'] == 'UNKNOWN',f"cannot assert account-wide exhaustion from partial observations: {kind}, {d['state']}"
++    assert d['state'] == 'UNKNOWN'
++    assert p.read_bytes()==original
++
++@pytest.mark.parametrize('kind,expected',[
++ ('all_exhausted','PARKED'),('has_spare','OK')
++])
++def test_wholly_observed_glm_pool_keeps_true_decision(monkeypatch,tmp_path,kind,expected):
++    full,other=rows(kind)
++    p=tmp_path/'quota.json'
++    p.write_text(json.dumps({'glm':{'accounts':{
++      'a':{'refreshed_at':TS-1,'states':full},
++      'b':{'refreshed_at':TS-1,'states':other}
++    }}}))
++    monkeypatch.setattr(qr,'_glm_accounts_dict',lambda:{
++      'a':{'api_key':'synthetic'},'b':{'api_key':'synthetic'}})
++    monkeypatch.setattr(qr,'glm_quota_decision',REAL_DECISION)
++    d=qr.glm_quota_decision(now_ts=TS,cache_path=str(p),allow_remote=False)
++    assert d['source']=='PROVIDER_AUTHORITATIVE'
++    assert d['state']==expected

@@ -1,0 +1,105 @@
+"""Render a systemd --user unit. The unit is text only; it is not started here."""
+from __future__ import annotations
+
+from pathlib import Path
+
+from .constants import CONFIG_EXIT, PINNED_UPSTREAM_SHA
+from .errors import RuntimeRefusal
+from .egress import ROLE_PROXY_HOST
+from .profile import RuntimeProfile
+
+_UNSAFE = set(" \n\r\t\"'`$")
+
+
+def _seconds(value: float) -> str:
+    if float(value).is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def assert_systemd_user_dir(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    if resolved.name != "user" or resolved.parent.name != "systemd":
+        raise RuntimeRefusal("NOT_A_SYSTEMD_USER_DIRECTORY")
+    banned = {
+        Path("/etc/systemd/system"),
+        Path("/lib/systemd/system"),
+        Path("/usr/lib/systemd/system"),
+        Path("/etc/systemd/user"),
+        Path("/run/systemd/system"),
+    }
+    if resolved in banned or resolved.as_posix().startswith("/etc/systemd/system"):
+        raise RuntimeRefusal("SYSTEM_UNIT_DIR_REFUSED")
+    return resolved
+
+
+def render_user_unit(
+    profile: RuntimeProfile,
+    *,
+    python_executable: str,
+    repo_root: Path,
+) -> str:
+    for label, value in (
+        ("python", python_executable),
+        ("repo", str(repo_root)),
+        ("state", str(profile.state_dir)),
+        ("profile", str(profile.state_dir / "current" / "profile.yaml")),
+        ("bin", str(profile.state_dir / "current" / "bin" / "hermes")),
+    ):
+        if any(ch in value for ch in _UNSAFE):
+            raise RuntimeRefusal("UNSAFE_PATH")
+        if label == "python" and not value:
+            raise RuntimeRefusal("UNSAFE_PATH")
+    proxy_host = ROLE_PROXY_HOST.get(profile.role)
+    if proxy_host is None:
+        raise RuntimeRefusal("NATIVE_EGRESS_ROLE_REFUSED")
+    state = str(profile.state_dir)
+    secrets = str(profile.secrets_file)
+    if any(ch in secrets for ch in _UNSAFE) or not secrets.startswith("/"):
+        raise RuntimeRefusal("UNSAFE_PATH")
+    text = f"""# Mastermind Hermes runtime user unit. One unit per agent.
+# Loopback only. This file names the 0600 secrets path. It does not contain secret bytes.
+# EnvironmentFile loads that file, including HERMES_SLACK_BOT_USER_ID, into this unit.
+# Upstream pin {PINNED_UPSTREAM_SHA} is enforced by the profile loader.
+[Unit]
+Description=Mastermind Hermes runtime ({profile.role}, pinned loopback)
+After=default.target
+StartLimitIntervalSec={profile.start_limit_interval_sec}
+StartLimitBurst={profile.start_limit_burst}
+
+[Service]
+Type=simple
+WorkingDirectory={state}
+ExecStart={python_executable} -m integrations.hermes_runtime supervise --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
+# Explicit operator-only canary. systemd executes ExecReload inside this unit's
+# existing cgroup and EnvironmentFile; no extra daemon or open network endpoint.
+# A PASS proves only a pinned native output observation, not remote auth/TLS.
+ExecReload={python_executable} -m integrations.hermes_runtime canary --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
+Environment=PYTHONPATH={repo_root}
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile={secrets}
+Restart=on-failure
+RestartSec={_seconds(profile.restart_sec)}
+RestartPreventExitStatus={CONFIG_EXIT}
+KillMode=control-group
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={state}
+UMask=0077
+RestrictAddressFamilies=AF_UNIX AF_INET
+IPAddressDeny=any
+# Backend gateway/health stay at 127.0.0.1; role-only proxy alias below.\n# No blanket 'localhost': that grants the sibling role's proxy IP.\nIPAddressAllow=127.0.0.1/32\nIPAddressAllow={proxy_host}/32\nRestrictSUIDSGID=true
+LockPersonality=true
+MemoryAccounting=true
+
+[Install]
+WantedBy=default.target
+"""
+    if "0.0.0.0" in text or text.count("EnvironmentFile=") != 1:
+        raise RuntimeRefusal("UNIT_UNSAFE")
+    if f"EnvironmentFile={secrets}\n" not in text:
+        raise RuntimeRefusal("UNIT_UNSAFE")
+    return text

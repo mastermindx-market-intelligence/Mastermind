@@ -1,0 +1,114 @@
+--- a/artifact_delivery.py
++++ b/artifact_delivery.py
+@@ -341,10 +341,47 @@
+         os.close(fd)
+ 
+ 
++class LeaseSnapshotLock:
++    """Bounded shared read under the incumbent broker writer's existing lock."""
++    def __init__(self, chain, seconds=4):
++        self.chain=chain;self.seconds=seconds;self.fd=None;self.identity=None
++    def __enter__(self):
++        import fcntl
++        self.fd=os.open('leases.lock',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=self.chain.fd)
++        try:
++            st=os.fstat(self.fd)
++            if not stat.S_ISREG(st.st_mode) or st.st_uid!=os.getuid() or st.st_mode & 0o022:
++                raise ValueError('lease_lock_metadata')
++            deadline=time.monotonic()+self.seconds
++            while True:
++                try:fcntl.flock(self.fd,fcntl.LOCK_SH|fcntl.LOCK_NB);break
++                except BlockingIOError:
++                    if time.monotonic()>=deadline:raise ValueError('lease_snapshot_busy')
++                    time.sleep(.01)
++            self.chain.verify()
++            seen=os.stat('leases.lock',dir_fd=self.chain.fd,follow_symlinks=False)
++            if (seen.st_dev,seen.st_ino)!=(st.st_dev,st.st_ino):
++                raise ValueError('lease_lock_changed')
++            self.identity=(st.st_dev,st.st_ino)
++            return self
++        except BaseException:
++            os.close(self.fd);self.fd=None;raise
++    def __exit__(self,*_):
++        import fcntl
++        try:
++            self.chain.verify()
++            seen=os.stat('leases.lock',dir_fd=self.chain.fd,follow_symlinks=False)
++            current=os.fstat(self.fd)
++            if (seen.st_dev,seen.st_ino)!=self.identity or (current.st_dev,current.st_ino)!=self.identity:
++                raise ValueError('lease_lock_changed')
++        finally:
++            fcntl.flock(self.fd,fcntl.LOCK_UN);os.close(self.fd);self.fd=None
++
++
+ def retained_lease(lease_id, *, include_pool=False):
+-    # A bounded, stable main-file snapshot; refuse an active WAL rather than
++    # A bounded snapshot under the existing broker lock; refuse an active WAL rather than
+     # following SQLite sidecar paths or opening an unverified pathname.
+-    with DirectoryChain(HERE / "broker") as chain:
++    with DirectoryChain(HERE / "broker") as chain, LeaseSnapshotLock(chain):
+         def no_wal():
+             for suffix in ("-wal", "-journal"):
+                 try:
+@@ -974,12 +1011,35 @@
+             os.close(handle)
+ 
+ 
++def failure_diagnostic(exc):
++    # Fixed categories only: exception text may contain private paths or data.
++    known={'lease_snapshot_has_live_sidecar','lease_snapshot_changed','lease_snapshot_busy',
++           'lease_lock_metadata','lease_lock_changed','capture_or_cleanup_conflict',
++           'settlement_unqualified','lease_identity_or_settlement_mismatch',
++           'grok_normalized_output_unqualified','directory_owner_or_mode',
++           'destination_outside_approved_evidence_root','local_publication_unconfirmed'}
++    if isinstance(exc, PermissionError):
++        return 'permission_denied'
++    return str(exc) if isinstance(exc,ValueError) and str(exc) in known else 'unclassified_local_failure'
++
++
++def failure_phase(exc, phase):
++    exc.fabric_delivery_phase=phase
++    return exc
++
++
+ def export(request, destination):
+     reader.validate_request(request)
+     if any(p.rsplit("/", 1)[1] in {"request.json", "receipt.json"} for p in request["paths"]):
+         raise ValueError("reserved_output_name")
+-    evidence = qualify(request)
+-    chain = reserve_destination(destination)
++    try:
++        evidence = qualify(request)
++    except (OSError, ValueError, TypeError, KeyError, RecursionError, sqlite3.Error) as exc:
++        raise failure_phase(exc, 'qualification')
++    try:
++        chain = reserve_destination(destination)
++    except (OSError, ValueError, TypeError, KeyError, RecursionError, sqlite3.Error) as exc:
++        raise failure_phase(exc, 'destination_reservation')
+     fd = chain.fd
+     receipt = {"schema": "mastermind.fabric_artifact_export.v1", "request": request,
+                "evidence": evidence, "destination": str(destination), "state": "READ_PENDING",
+@@ -1021,7 +1081,9 @@
+                     and set(request["paths"]) == set(declared)):
+                 receipt["advertised_manifest_matched"] = True
+                 receipt["provenance"] = "All advertised files were retained and their bytes match the scoped manifest in this result; producer verification and parent acceptance remain separate."
+-        except (OSError, ValueError, TypeError, KeyError, RecursionError, subprocess.SubprocessError, sqlite3.Error):
++        except (OSError, ValueError, TypeError, KeyError, RecursionError, subprocess.SubprocessError, sqlite3.Error) as exc:
++            receipt['failure_phase']='transport_or_validation'
++            receipt['failure_diagnostic']=failure_diagnostic(exc)
+             unavailable(receipt, request)
+         receipt["observed_at_epoch"] = time.time()
+         def verify_source():
+@@ -1075,8 +1137,10 @@
+         receipt = export(request, args.destination)
+         print(reader.canonical(receipt).decode())
+         return 0 if receipt["state"] == "COMPLETE" else 76
+-    except (OSError, ValueError, TypeError, KeyError, RecursionError, sqlite3.Error):
+-        print('{"state":"REFUSED","reason":"artifact_export_precondition_or_local_delivery_failed"}')
++    except (OSError, ValueError, TypeError, KeyError, RecursionError, sqlite3.Error) as exc:
++        phase=getattr(exc,'fabric_delivery_phase','validation_or_publication')
++        print(json.dumps({'state':'REFUSED','reason':'artifact_export_precondition_or_local_delivery_failed',
++                          'failure_phase':phase,'diagnostic':failure_diagnostic(exc)}))
+         return 75
+ 
+ 
