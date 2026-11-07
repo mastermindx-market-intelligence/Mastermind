@@ -21,7 +21,7 @@ import {
   type ExecutiveToolEnvelope,
   type LaunchBindingConfig,
 } from "./executive-launch-command-port";
-import type { LaunchForm } from "./ui/LaunchOrchestrator";
+import { composeAcceptanceGoal, type LaunchForm } from "./ui/LaunchOrchestrator";
 import type { OrchestratorSessionPresentation } from "./host-command-bindings";
 
 const PRINCIPAL = "scope-A";
@@ -286,7 +286,7 @@ function makeClient(
 
 function makeBinding(
   client: ExecutiveToolClient,
-  config: LaunchBindingConfig = RESEARCH_CONFIG,
+  config: LaunchBindingConfig | null = RESEARCH_CONFIG,
   store: PendingPointerStore = makeStore(),
   session: OrchestratorSessionPresentation | null = SESSION,
 ) {
@@ -315,6 +315,28 @@ function expectedResearchPayload(form: LaunchForm = RESEARCH_FORM) {
     workstream: WORKSTREAM,
   };
 }
+
+describe("Executive owner without a legacy Launch manifest", () => {
+  it("retains the existing owner and store while refusing every new legacy launch entry", async () => {
+    const idle = makeClient(() => barePreflight("not_found"));
+    const configured = makeBinding(idle.client);
+    const intent = configured.makeLaunchIntent(RESEARCH_FORM)!;
+    const pointer = configured.port.prepare(intent);
+    const store = makeStore();
+    const binding = makeBinding(idle.client, null, store, null);
+
+    expect(completeOrchestratorCommandBinding(binding)).toBe(binding);
+    expect(binding.port.context()).toEqual({ principalScope: PRINCIPAL, generation: GENERATION });
+    expect(binding.store).toBe(store);
+    expect(binding.getView()).toEqual({ projects: [], profiles: [], session: null });
+    expect(binding.makeLaunchIntent(RESEARCH_FORM)).toBeNull();
+    expect(() => binding.port.prepare(intent)).toThrow(COMMAND_ROUTE_UNAVAILABLE);
+    expect(await binding.port.submit(pointer, intent, new AbortController().signal)).toMatchObject({
+      operationKey: pointer.operationKey, disposition: "refused", reason: COMMAND_ROUTE_UNAVAILABLE,
+    });
+    expect(idle.log).toEqual([]);
+  });
+});
 
 describe("T3 makeLaunchIntent", () => {
   const idle = makeClient(() => barePreflight("not_found"));
@@ -378,6 +400,21 @@ describe("T3 makeLaunchIntent", () => {
         validation: { git_diff_check: true },
       }).makeLaunchIntent(boundedForm),
     ).toBeNull();
+  });
+
+  it("carries acceptance criteria through the existing exact operation payload, without new fields", () => {
+    const objective = composeAcceptanceGoal("Ship project conversation", "Messages are sent once\nReopen restores the original selection");
+    expect(objective).not.toBeNull();
+    const form = { ...RESEARCH_FORM, goal: objective! };
+    const intent = binding.makeLaunchIntent(form);
+    expect(intent).toEqual({ kind: "launch", targetKey: WORKSTREAM, payload: expectedResearchPayload(form) });
+    expect(intent?.payload.objective).toContain("Messages are sent once");
+    expect(intent?.payload.objective).toContain("[MASTERMIND_ACCEPTANCE_CRITERIA_V1:");
+    expect(intent?.payload.objective).toContain('["Messages are sent once","Reopen restores the original selection"]]');
+    expect(Object.keys(intent?.payload ?? {}).sort()).toEqual(Object.keys(expectedResearchPayload(form)).sort());
+    const pointer = binding.port.prepare(intent!);
+    expect(pointer.operationKey).toBe(intent?.payload.operation_key);
+    expect(binding.makeLaunchIntent(RESEARCH_FORM)?.payload.operation_key).not.toBe(pointer.operationKey);
   });
 
   it("returns the exact launch payload on the happy path", () => {

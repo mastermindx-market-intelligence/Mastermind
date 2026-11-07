@@ -16,6 +16,7 @@ from ops.executive_os import autonomy_control as owner
 
 PUBLICATION_PHASE = 'CONTROL_OBSERVATION_PUBLICATION_STARTED'
 ROLLBACK_PUBLICATION_PHASE = 'ROLLBACK_OBSERVATION_PUBLICATION_STARTED'
+COMPONENT_PUBLICATION_PHASE = 'CONTROL_COMPONENT_PUBLICATION_STARTED'
 
 
 def _source(expected_sha):
@@ -240,15 +241,32 @@ def _publish_for_transaction(host, transaction):
         and getattr(host, '_control_observation_recovery_owner', None) == identity
         and getattr(host, '_control_observation_fresh_transaction', None) is not transaction
     )
+    # A Control component update owes exactly ONE publication.  Its
+    # same-operation reconciliation may perform it only after the owner has
+    # proved every retained postimage exactly, and only while the retained
+    # phase still says the publication was never attempted: once this phase
+    # is recorded, the publication is never repeated.
+    component_admitted = (
+        manifest.get('operation') == owner.CONTROL_COMPONENT_UPDATE
+        and manifest.get('phase') in owner._CONTROL_COMPONENT_PUBLICATION_ADMISSIBLE_PHASES
+        and getattr(host, '_component_observation_recovery_owner', None) == identity
+        and getattr(host, '_control_observation_fresh_transaction', None) is not transaction
+    )
     fresh = (
         (getattr(host, '_control_observation_fresh_transaction', None) is transaction
          and (getattr(host, '_control_observation_origin', None) == identity
               or (restored and getattr(host, '_control_observation_recovery_owner', None) == identity))
          and manifest.get('phase') not in {PUBLICATION_PHASE, ROLLBACK_PUBLICATION_PHASE})
         or a2_restore_admitted
+        or component_admitted
     )
     if fresh:
-        phase = ROLLBACK_PUBLICATION_PHASE if restored else PUBLICATION_PHASE
+        if component_admitted:
+            phase = COMPONENT_PUBLICATION_PHASE
+        elif restored:
+            phase = ROLLBACK_PUBLICATION_PHASE
+        else:
+            phase = PUBLICATION_PHASE
         host._persist_phase(transaction, phase)
         reread = host._manifest()
         if (reread.get('phase') != phase
