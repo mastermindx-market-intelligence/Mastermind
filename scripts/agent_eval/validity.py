@@ -128,6 +128,57 @@ def _require_matching_identity(scenario: dict, configuration: dict, experiment, 
         raise ContractError(defects)
 
 
+def comparison_binding_reason_codes(run_scenario_ref: dict, configuration_ref: dict,
+                                    experiment, comparison: dict) -> set[str]:
+    """Incumbent comparison semantics shared by admission and run finalization.
+
+    Inputs have already passed closed shape and identity validation. This
+    computes comparison defects only; it grants no validity or execution.
+    """
+    reasons: set[str] = set()
+    if experiment is None:
+        if comparison["pair_key"] is not None:
+            reasons.add("PAIR_IDENTITY_MISSING")
+    else:
+        scenario_key = (run_scenario_ref["scenario_id"], run_scenario_ref["scenario_version"])
+        scenario_in_experiment = any(
+            (ref["scenario_id"], ref["scenario_version"]) == scenario_key for ref in experiment["scenario_refs"]
+        )
+        if not scenario_in_experiment:
+            reasons.add("SCENARIO_NOT_IN_EXPERIMENT")
+
+        arm_lookup = {arm["arm_id"]: arm for arm in experiment["arms"]}
+        config_ids_in_experiment = {arm["configuration_id"] for arm in experiment["arms"]}
+        if configuration_ref["configuration_id"] not in config_ids_in_experiment:
+            reasons.add("CONFIGURATION_NOT_IN_EXPERIMENT")
+
+        arm = arm_lookup.get(comparison["arm_id"])
+        if arm is None or arm["configuration_id"] != configuration_ref["configuration_id"]:
+            reasons.add("EXPERIMENT_ARM_MISMATCH")
+
+        replicate_index = comparison["replicate_index"]
+        target = experiment["replicates_per_arm_target"]
+        if replicate_index is None or not (1 <= replicate_index <= target):
+            reasons.add("REPLICATE_OUT_OF_RANGE")
+
+        method = experiment["pairing"]["method"]
+        pair_key = comparison["pair_key"]
+        if method == "PAIRED_BY_SCENARIO":
+            expected_pair_key = None
+            if replicate_index is not None:
+                expected_pair_key = f"pair:{run_scenario_ref['scenario_id']}:v{run_scenario_ref['scenario_version']}:r{replicate_index}"
+            if pair_key is None or pair_key != expected_pair_key:
+                reasons.add("PAIR_IDENTITY_MISSING")
+        elif method == "UNPAIRED":
+            if pair_key is not None:
+                reasons.add("PAIR_IDENTITY_MISSING")
+        elif method == "BLOCKED":
+            if pair_key is None or not pair_key.startswith("block:"):
+                reasons.add("PAIR_IDENTITY_MISSING")
+
+    return reasons
+
+
 def _gather_reason_codes(scenario: dict, configuration: dict, experiment, run_like: dict) -> set[str]:
     reasons: set[str] = set()
     execution = run_like["execution"]
@@ -238,47 +289,9 @@ def _gather_reason_codes(scenario: dict, configuration: dict, experiment, run_li
         if effect["operation_ref"] is not None or effect["reconciliation_ref"] is not None:
             reasons.add("EFFECT_REFERENCE_MISMATCH")
 
-    comparison = run_like["comparison"]
     run_scenario_ref = run_like["scenario"]
-    if experiment is None:
-        if comparison["pair_key"] is not None:
-            reasons.add("PAIR_IDENTITY_MISSING")
-    else:
-        scenario_key = (run_scenario_ref["scenario_id"], run_scenario_ref["scenario_version"])
-        scenario_in_experiment = any(
-            (ref["scenario_id"], ref["scenario_version"]) == scenario_key for ref in experiment["scenario_refs"]
-        )
-        if not scenario_in_experiment:
-            reasons.add("SCENARIO_NOT_IN_EXPERIMENT")
-
-        arm_lookup = {arm["arm_id"]: arm for arm in experiment["arms"]}
-        config_ids_in_experiment = {arm["configuration_id"] for arm in experiment["arms"]}
-        if run_like["configuration"]["configuration_id"] not in config_ids_in_experiment:
-            reasons.add("CONFIGURATION_NOT_IN_EXPERIMENT")
-
-        arm = arm_lookup.get(comparison["arm_id"])
-        if arm is None or arm["configuration_id"] != run_like["configuration"]["configuration_id"]:
-            reasons.add("EXPERIMENT_ARM_MISMATCH")
-
-        replicate_index = comparison["replicate_index"]
-        target = experiment["replicates_per_arm_target"]
-        if replicate_index is None or not (1 <= replicate_index <= target):
-            reasons.add("REPLICATE_OUT_OF_RANGE")
-
-        method = experiment["pairing"]["method"]
-        pair_key = comparison["pair_key"]
-        if method == "PAIRED_BY_SCENARIO":
-            expected_pair_key = None
-            if replicate_index is not None:
-                expected_pair_key = f"pair:{run_scenario_ref['scenario_id']}:v{run_scenario_ref['scenario_version']}:r{replicate_index}"
-            if pair_key is None or pair_key != expected_pair_key:
-                reasons.add("PAIR_IDENTITY_MISSING")
-        elif method == "UNPAIRED":
-            if pair_key is not None:
-                reasons.add("PAIR_IDENTITY_MISSING")
-        elif method == "BLOCKED":
-            if pair_key is None or not pair_key.startswith("block:"):
-                reasons.add("PAIR_IDENTITY_MISSING")
+    reasons.update(comparison_binding_reason_codes(
+        run_scenario_ref, run_like["configuration"], experiment, run_like["comparison"]))
 
     if run_scenario_ref["scenario_digest"] != scenario["scenario_digest"] or run_scenario_ref["corpus_revision"] != scenario["corpus_revision"]:
         reasons.add("CORPUS_REVISION_MISMATCH")

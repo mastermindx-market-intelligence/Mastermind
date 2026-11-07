@@ -185,7 +185,7 @@ def _request_observation(value, *, receipt: dict, role: str) -> dict:
     provider delivery, historical process attestation or model identity.
     """
     from .native_request_observation import (
-        SCHEMA as observation_schema, LEGACY_SCHEMA, STAGE, CONTENT_FIELDS,
+        SCHEMA as observation_schema, PREVIOUS_SCHEMA, LEGACY_SCHEMA, STAGE, CONTENT_FIELDS,
         TOOLS_STAGE, TOOL_COVERAGE, TOOL_IDENTIFIERS, TOOL_ERRORS, CANONICALIZATION,
         MAX_CONTENT_BYTES, MAX_EVENTS, MAX_TOOL_EVENTS, MAX_METADATA_BYTES,
     )
@@ -244,11 +244,15 @@ def _request_observation(value, *, receipt: dict, role: str) -> dict:
 
     fields = ("schema", "stage", "scope", "observations", "errors", "overflow", "coverage",
               "provider_dispatch_proven", "model_identity_verified")
-    v2 = type(value) is dict and literal(value.get("schema"), observation_schema)
+    v3 = type(value) is dict and literal(value.get("schema"), observation_schema)
+    v2 = v3 or type(value) is dict and literal(value.get("schema"), PREVIOUS_SCHEMA)
     if v2:
         fields += ("tools_stage", "tool_coverage", "executions", "commits", "tool_overflow", "metadata_overflow")
+    if v3:
+        fields += ("transport",)
     shape(value, fields)
-    if (not literal(value["schema"], observation_schema if v2 else LEGACY_SCHEMA) or not literal(value["stage"], STAGE)
+    selected_schema = observation_schema if v3 else PREVIOUS_SCHEMA if v2 else LEGACY_SCHEMA
+    if (not literal(value["schema"], selected_schema) or not literal(value["stage"], STAGE)
             or value["provider_dispatch_proven"] is not False or value["model_identity_verified"] is not False
             or type(value["overflow"]) is not bool):
         refuse()
@@ -313,13 +317,19 @@ def _request_observation(value, *, receipt: dict, role: str) -> dict:
             or not literal(value["coverage"], "assembly_hooks_only" if events else "no_assembly_observation")
             or not v2 and value["overflow"] and len(events) != MAX_EVENTS):
         refuse()
-    projected = {"schema": observation_schema if v2 else LEGACY_SCHEMA, "stage": STAGE, "scope": scope,
+    projected = {"schema": selected_schema, "stage": STAGE, "scope": scope,
         "observations": events, "errors": list(errors), "overflow": value["overflow"],
         "coverage": value["coverage"], "provider_dispatch_proven": False, "model_identity_verified": False}
+    transport = None
+    if v3:
+        from .native_transport_observation import validate_document
+        transport = validate_document(value["transport"])
+        projected["transport"] = transport
     if v2:
         if (not literal(value["tools_stage"], TOOLS_STAGE) or not literal(value["tool_coverage"], TOOL_COVERAGE)
                 or type(value["tool_overflow"]) is not bool or type(value["metadata_overflow"]) is not bool
-                or value["metadata_overflow"] and not (value["overflow"] or value["tool_overflow"])
+                or value["metadata_overflow"] and not (value["overflow"] or value["tool_overflow"]
+                    or transport is not None and transport["overflow"])
                 or value["overflow"] and not value["metadata_overflow"] and len(events) != MAX_EVENTS):
             refuse()
 
@@ -427,6 +437,12 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
     from hermes_state_runtime import find_session_admission, get_session_admission
     from gateway.session_results import admission_result
     required = {"operation", "profile_id", "session_id", "submission_id", "input_sha256", "admission_id"}
+    evaluation_expected = params.get("evaluation_binding")
+    if "evaluation_binding" in params:
+        required = required | {"evaluation_binding"}
+        if (type(evaluation_expected) is not dict or set(evaluation_expected) != {"run_id", "binding_sha256"}
+                or any(type(item) is not str for item in evaluation_expected.values())):
+            raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
     if set(params) != required or params["profile_id"] != str(home):
         raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
     sid, submission = _id(params["session_id"]), _id(params["submission_id"])
@@ -442,12 +458,27 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
         if (row.get("principal_id") != principal or row.get("target_session_id") != sid
                 or (params["admission_id"] is not None and row.get("admission_id") != params["admission_id"])
                 or row.get("request_id") != submission or row.get("intent") != "queue"
-                or type(row.get("payload")) is not dict or set(row["payload"]) != {"text", "finite"}
+                or type(row.get("payload")) is not dict
                 or row["payload"].get("finite") is not True
                 or input_digest(row["payload"].get("text")) != params["input_sha256"]):
             raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
+        marker = None
+        if set(row["payload"]) != {"text", "finite"}:
+            from .native_eval_inputs import MARKER_KEY, validate_marker
+            if set(row["payload"]) != {"text", "finite", MARKER_KEY}:
+                raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
+            marker = validate_marker(row["payload"][MARKER_KEY], text=row["payload"]["text"])
+            if (marker["source"]["profile_id"] != str(home)
+                    or marker["input"]["principal_id"] != principal
+                    or marker["input"]["session_id"] != sid or marker["input"]["submission_id"] != submission):
+                raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
+        if evaluation_expected is not None and (marker is None or evaluation_expected != {
+                "run_id": marker["run_id"], "binding_sha256": marker["binding_sha256"]}):
+            raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
         receipt = _admission(row, home, sid, stored=True)
         result = _result("OBSERVED", role=role, admission=receipt)
+        if marker is not None:
+            result["evaluation_binding"] = {"run_id": marker["run_id"], "binding_sha256": marker["binding_sha256"]}
         saved = admission_result(db, receipt["admission_id"])
         if type(saved) is dict and receipt["status"] == "terminal":
             value = saved.get("result")
@@ -472,6 +503,17 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
                     # Close only the evidence projection. Preserve the original
                     # answer, native outcome and existing terminal metadata.
                     result["request_observation_error"] = "INVALID_RETAINED_OBSERVATION"
+            if marker is not None:
+                from .native_eval_inputs import RESULT_KEY as EVAL_RESULT_KEY, validate_observation
+                if EVAL_RESULT_KEY not in saved:
+                    result["evaluation_inputs_error"] = "OBSERVATION_NOT_RETAINED"
+                else:
+                    try:
+                        result["evaluation_inputs"] = validate_observation(
+                            saved[EVAL_RESULT_KEY], marker=marker, receipt=receipt,
+                            request_observation=result.get("request_observation"))
+                    except Exception:
+                        result["evaluation_inputs_error"] = "INVALID_RETAINED_OBSERVATION"
         return result
     finally:
         db.close()
@@ -546,7 +588,7 @@ def _admission_guard(authority, actor, target):
     return authorize
 
 
-async def _submit(runner, home, params, principal, *, role: str = "mmsecretary"):
+async def _submit(runner, home, params, principal, *, role: str = "mmsecretary", evaluation_owner=None):
     def result(status, **fields):
         return _result(status, role=role, **fields)
     from gateway.session_controls import AuthorityConnection
@@ -554,6 +596,16 @@ async def _submit(runner, home, params, principal, *, role: str = "mmsecretary")
     from gateway.session_authorities import owner_scope
     from gateway.run_idle_exit import attached_client
     from tui_gateway.transport import StdioTransport, bind_transport, reset_transport
+    selected_inputs = None
+    if params.get("operation") == "submit_evaluation":
+        from .native_eval_inputs import NativeEvalInputOwner
+        if type(evaluation_owner) is not NativeEvalInputOwner:
+            return result("REFUSED", reason="EVALUATION_RECEIVER_UNAVAILABLE")
+        try:
+            selected_inputs = evaluation_owner.select(params["evaluation"], principal=principal,
+                session_id=params["target"]["session_id"], submission_id=params["submission_id"], text=params["text"])
+        except Exception:
+            return result("REFUSED", reason="EVALUATION_INPUTS_UNQUALIFIED")
     try:
         target = validate_target(params["target"])
         observed = await asyncio.to_thread(_target, runner, home, target["session_id"], principal)
@@ -599,8 +651,13 @@ async def _submit(runner, home, params, principal, *, role: str = "mmsecretary")
                 receipt = await connection.authority.submit(
                     connection.actor, submission,
                     _authorize_write=_admission_guard(connection.authority, connection.actor, target),
-                    queue_while_restarting=False)
-                return result("ADMITTED", admission=_admission(asdict(receipt), home, target["session_id"]))
+                    queue_while_restarting=False,
+                    **({"_mmx_eval": selected_inputs} if selected_inputs is not None else {}))
+                value = result("ADMITTED", admission=_admission(asdict(receipt), home, target["session_id"]))
+                if selected_inputs is not None:
+                    binding = json.loads(selected_inputs.encoded)
+                    value["evaluation_binding"] = {"run_id": binding["run_id"], "binding_sha256": binding["binding_sha256"]}
+                return value
         except _AdmissionRefused:
             return result("NOT_SUBMITTED", reason="TARGET_CHANGED_BEFORE_ADMISSION")
         except Exception:
@@ -1057,7 +1114,7 @@ async def _enrollment_operation(runner, home, params, principal, *, consumer_tra
 def install_private_control(runner, home: Path, role: str, *,
                             implementation_sha: str | None = None,
                             session_enrollment: dict | None = None,
-                            consumer_transition=None) -> None:
+                            consumer_transition=None, evaluation_owner=None) -> None:
     if type(role) is not str or role not in {"mmsecretary", "mmmeta"}:
         return
     contract = conversation_contract(role)
@@ -1148,7 +1205,14 @@ def install_private_control(runner, home: Path, role: str, *,
                     from integrations.hermes_harness.native_executive_consumer import _consume_future_result
                     future.add_done_callback(_consume_future_result)
                     return role_result("UNAVAILABLE")
-            if operation != "submit" or set(params) != {"operation", "target", "submission_id", "text", "ticket"}:
+            keys = {"operation", "target", "submission_id", "text", "ticket"}
+            if operation == "submit_evaluation":
+                from .native_eval_inputs import NativeEvalInputOwner, submission_id_for_run
+                keys.add("evaluation")
+                if (type(evaluation_owner) is not NativeEvalInputOwner or type(params.get("evaluation")) is not dict
+                        or params["submission_id"] != submission_id_for_run(params["evaluation"].get("run_id"))):
+                    raise RuntimeRefusal("NATIVE_EVAL_INPUTS_UNQUALIFIED")
+            if operation not in {"submit", "submit_evaluation"} or set(params) != keys:
                 raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
             _id(params["submission_id"])
             input_digest(params["text"])
@@ -1159,7 +1223,10 @@ def install_private_control(runner, home: Path, role: str, *,
                 "observe", "read_original", "consumer_extension", "consumer_capabilities"} else "REFUSED")
         # This is the native control server's existing executor. The native
         # loop owns the bounded coroutine; never create a new event loop.
-        coroutine = _submit(runner, home, params, peer_subject, role=role)
+        # Detach caller-owned containers before crossing into the original loop.
+        params = json.loads(_canonical(params))
+        coroutine = _submit(runner, home, params, peer_subject, role=role,
+                            **({"evaluation_owner": evaluation_owner} if operation == "submit_evaluation" else {}))
         try:
             future = asyncio.run_coroutine_threadsafe(coroutine, loop)
         except Exception:
@@ -1292,10 +1359,15 @@ class NativeSecretaryClient:
     def observe(self, session_id: str):
         return self._call({"operation": "observe", "profile_id": str(self.home), "session_id": _id(session_id)})
 
-    def submit(self, target: dict, submission_id: str, text: str):
+    def submit(self, target: dict, submission_id: str, text: str, *, evaluation=None):
         input_digest(text)
         target = validate_target(target)
         _id(submission_id)
+        if evaluation is not None:
+            from .native_eval_inputs import submission_id_for_run, _detach
+            evaluation = _detach(evaluation)
+            if type(evaluation) is not dict or submission_id != submission_id_for_run(evaluation.get("run_id")):
+                raise RuntimeRefusal("NATIVE_EVAL_REQUEST_ID_MISMATCH")
         from hermes_cli.gateway_client import _session_ticket
         observed = self._identify()
         endpoint = observed.endpoint
@@ -1306,15 +1378,17 @@ class NativeSecretaryClient:
             return _result("REFUSED", role=self._role, reason="TARGET_CHANGED")
         ticket = _session_ticket(self.home, endpoint)
         try:
-            return self._call({"operation": "submit", "target": target,
-                               "submission_id": _id(submission_id), "text": text, "ticket": ticket})
+            return self._call({"operation": "submit" if evaluation is None else "submit_evaluation", "target": target,
+                               "submission_id": _id(submission_id), "text": text, "ticket": ticket,
+                               **({"evaluation": evaluation} if evaluation is not None else {})})
         except Exception:
             return _result("EFFECT_UNKNOWN", role=self._role)
 
-    def read_original(self, *, session_id, submission_id, input_sha256, admission_id=None):
+    def read_original(self, *, session_id, submission_id, input_sha256, admission_id=None, evaluation_binding=None):
         return self._call({"operation": "read_original", "profile_id": str(self.home),
                            "session_id": _id(session_id), "submission_id": _id(submission_id),
-                           "input_sha256": input_sha256, "admission_id": admission_id})
+                           "input_sha256": input_sha256, "admission_id": admission_id,
+                           **({"evaluation_binding": evaluation_binding} if evaluation_binding is not None else {})})
 
     def consumer_extension(self):
         """Read the serving process's actual scoped native extension entry.

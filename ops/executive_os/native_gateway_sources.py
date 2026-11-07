@@ -383,6 +383,15 @@ WORKSPACE_OAUTH_DERIVATION_POSTIMAGES = {
 }
 _WORKSPACE_OAUTH_PACKAGE = "integrations/hermes_qualification/workspace_oauth_privacy"
 
+# Explicit cumulative source selection. Historical derivation meanings and
+# postimages remain unchanged; no arbitrary patch stack is admitted.
+EVAL_INPUTS_DERIVATION_KIND = "native_eval_inputs"
+EVAL_INPUTS_DERIVATION_PATCH = "750385de0d48588641c6301587627d53a5f124153414f1529d0e80ce5bbdeb59"
+EVAL_INPUTS_DERIVATION_POSTIMAGES = {**WORKSPACE_OAUTH_DERIVATION_POSTIMAGES,
+    "gateway/session_authority.py": "7779fd227b5e3105ded5a3407434c7a8c77e1d998cdf087e1e8a492d0cd9ae99",
+    "hermes_state_mutation_retirement.py": "7c0b12ab4502411592bc19454a89a8d03730a8a764122fe4266f1d5e706cafe7"}
+_EVAL_INPUTS_PACKAGE = "integrations/hermes_qualification/native_eval_inputs"
+
 
 def _derivation_policy(kind):
     if kind == DERIVATION_KIND:
@@ -391,6 +400,8 @@ def _derivation_policy(kind):
         return PRIVACY_DERIVATION_PATCH, PRIVACY_DERIVATION_POSTIMAGES, _PRIVACY_PACKAGE
     if kind == WORKSPACE_OAUTH_DERIVATION_KIND:
         return WORKSPACE_OAUTH_DERIVATION_PATCH, WORKSPACE_OAUTH_DERIVATION_POSTIMAGES, _WORKSPACE_OAUTH_PACKAGE
+    if kind == EVAL_INPUTS_DERIVATION_KIND:
+        return EVAL_INPUTS_DERIVATION_PATCH, EVAL_INPUTS_DERIVATION_POSTIMAGES, _EVAL_INPUTS_PACKAGE
     _refuse()
 
 
@@ -549,6 +560,8 @@ def _guard(owner, kind):
         from integrations.hermes_qualification.diagnostic_privacy import qualify
     elif kind == WORKSPACE_OAUTH_DERIVATION_KIND:
         from integrations.hermes_qualification.workspace_oauth_privacy import qualify
+    elif kind == EVAL_INPUTS_DERIVATION_KIND:
+        from integrations.hermes_qualification.native_eval_inputs import qualify
     else:
         _refuse()
     package = owner.root / relative
@@ -564,7 +577,7 @@ def _guard(owner, kind):
             or {name: row["after_sha256"] for name, row in policy["files"].items()}
                != postimages):
         _refuse()
-    if (kind in {PRIVACY_DERIVATION_KIND, WORKSPACE_OAUTH_DERIVATION_KIND} and hashlib.sha256(
+    if (kind in {PRIVACY_DERIVATION_KIND, WORKSPACE_OAUTH_DERIVATION_KIND, EVAL_INPUTS_DERIVATION_KIND} and hashlib.sha256(
             owner.source(f"{relative}/UPSTREAM_LICENSE")).hexdigest() != PRIVACY_LICENSE_SHA256):
         _refuse()
     owner.check()

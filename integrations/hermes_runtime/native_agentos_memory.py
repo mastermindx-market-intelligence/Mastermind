@@ -18,7 +18,8 @@ from ops.executive_os.native_gateway_sources import (
     DERIVATION_BASE, PRIVACY_DERIVATION_KIND, PRIVACY_DERIVATION_PATCH,
     PRIVACY_DERIVATION_POSTIMAGES, PRIVACY_LICENSE_SHA256,
     WORKSPACE_OAUTH_DERIVATION_KIND, WORKSPACE_OAUTH_DERIVATION_PATCH,
-    WORKSPACE_OAUTH_DERIVATION_POSTIMAGES)
+    WORKSPACE_OAUTH_DERIVATION_POSTIMAGES, EVAL_INPUTS_DERIVATION_KIND,
+    EVAL_INPUTS_DERIVATION_PATCH, EVAL_INPUTS_DERIVATION_POSTIMAGES)
 
 from integrations.hermes_harness.agentos_memory_provider import (
     AgentOsBinding, AgentOsHostPorts, AgentOsRefusal, create_provider)
@@ -76,11 +77,17 @@ def _privacy_derivation(launch, vendor, *, publication=None):
     if publication is not None and type(publication) is not ExecutiveContextConsumerPublication:
         _refuse("NATIVE_AGENTOS_PRIVACY_DERIVATION_REQUIRED")
     current = publication is not None and publication.workspace_principal is not None
+    evaluation = "evaluation_inputs" in launch.recipe
+    if evaluation and not current:
+        _refuse("NATIVE_AGENTOS_PRIVACY_DERIVATION_REQUIRED")
     expected = {"kind": WORKSPACE_OAUTH_DERIVATION_KIND if current else PRIVACY_DERIVATION_KIND,
         "base_sha": DERIVATION_BASE,
         "patch_sha256": WORKSPACE_OAUTH_DERIVATION_PATCH if current else PRIVACY_DERIVATION_PATCH,
         "postimages": dict(WORKSPACE_OAUTH_DERIVATION_POSTIMAGES if current else PRIVACY_DERIVATION_POSTIMAGES),
         "license_sha256": PRIVACY_LICENSE_SHA256, "vendor_root": str(vendor)}
+    if evaluation:
+        expected.update(kind=EVAL_INPUTS_DERIVATION_KIND, patch_sha256=EVAL_INPUTS_DERIVATION_PATCH,
+                        postimages=dict(EVAL_INPUTS_DERIVATION_POSTIMAGES))
     if (not _plain_strings(selected)
             or set(selected) != {"kind", "base_sha", "patch_sha256", "source_root"}
             or any(selected[key] != expected[key] for key in ("kind", "base_sha", "patch_sha256"))
@@ -670,6 +677,8 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
         claim = _Claim(factory, scope, turn)
         setattr(scope, _CLAIM_ATTRIBUTE, claim)
         try:
+            if scope.evaluation is not None:
+                args, kwargs = scope.evaluation.resolve_arguments(resolve, turn, args, kwargs)
             result = resolve(turn, *args, **kwargs)
             factory.bind_agent(claim, result[0])
             return result
@@ -680,11 +689,16 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
             claim.loading = False
 
     def wire_agent(turn, agent, *args, **kwargs):
+        scope = observation._current.get()
+        if scope is not None and scope.binding is request_observation and scope.evaluation is not None:
+            args, kwargs = scope.evaluation.wire_arguments(wire_callbacks, turn, agent, args, kwargs)
         result = wire_callbacks(turn, agent, *args, **kwargs)
         claim = factory.current_claim()
         if claim.turn is not turn or claim.agent is not agent or not claim.current(adopted=True):
             claim.failed = True
             _refuse("NATIVE_AGENTOS_ADOPTION_UNAVAILABLE")
+        if scope is not None and scope.evaluation is not None:
+            scope.evaluation.require_agent(agent)
         return result
 
     def prefetch_turn(agent, original_user_message, turn_author=None):
@@ -708,12 +722,20 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
         factory.require_snapshot(claim, agent)
         result = build_messages(agent, messages, **kwargs)
         factory.require_snapshot(claim, agent)
+        evaluation = claim.scope.evaluation
+        if evaluation is not None:
+            evaluation.require_messages(agent, result)
         try:
             factory.note_prompt(claim, agent, messages, result,
                 current_turn_user_idx=kwargs["current_turn_user_idx"],
                 ext_prefetch_cache=kwargs["ext_prefetch_cache"])
         except Exception:
             pass  # Observation failure cannot invent a native request failure.
+        if evaluation is not None:
+            try:
+                evaluation.note_messages(agent, result, claim.returned)
+            except Exception:
+                evaluation.fail("delivery_unavailable")
         return result
 
     wrappers = [(memory, "find_provider_dir", find_provider), (memory, "_load_package", held_package),

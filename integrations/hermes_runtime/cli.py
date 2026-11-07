@@ -302,7 +302,8 @@ def _enroll_native_session(profile_path: Path, hermes_bin: Path, *, expected_rol
         assert_role_network_profile(current)
         assert_role_credential_isolation(current)
         enforce_role_tcp_ports(current)
-        expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"))
+        expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"),
+                              evaluation_inputs=native_launch.recipe.get("evaluation_inputs"))
 
     qualify_profile()
     home = (profile.hermes_home.resolve(strict=True) / "profiles" / profile.role).resolve(strict=True)

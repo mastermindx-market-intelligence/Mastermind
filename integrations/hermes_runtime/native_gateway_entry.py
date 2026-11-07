@@ -83,6 +83,8 @@ def bind_native_api(module, *, vendor: Path, role_home: Path, role: str,
             options["consumer_transition"] = consumer_transition
         if request_observation is not None:
             request_observation.bind_authority(runner)
+            if getattr(request_observation, "evaluation_owner", None) is not None:
+                options["evaluation_owner"] = request_observation.evaluation_owner
         install_private_control(runner, role_home, role, **options)
         return await original(runner, host=host, port=port)
 
@@ -538,7 +540,8 @@ def run(launch, argv: list[str]) -> int:
     if consumer_document is None:
         expected_disabled_mcp(profile)
     else:
-        expected_disabled_mcp(profile, consumer_document)
+        expected_disabled_mcp(profile, consumer_document,
+                              evaluation_inputs=launch.recipe.get("evaluation_inputs"))
     _selection(role, profile.gateway_host, profile.backend_port)
     gateway_args = ["-p", role, "gateway", "run", "--external-supervisor"]
     tools_args = ["-p", role, "tools", "list", "--platform", "cli"]
@@ -579,7 +582,10 @@ def run(launch, argv: list[str]) -> int:
         from .native_request_observation import install_request_observation
         request_observation = install_request_observation(launch, vendor, role_home, role)
         from .native_agentos_memory import install_native_agentos_memory
-        install_native_agentos_memory(launch, vendor, role_home, request_observation)
+        request_observation.memory_factory = install_native_agentos_memory(launch, vendor, role_home, request_observation)
+        if "evaluation_inputs" in launch.recipe:
+            from .native_eval_inputs import NativeEvalInputOwner
+            request_observation.evaluation_owner = NativeEvalInputOwner(launch, profile, request_observation)
         api = _vendor_module("gateway.run_api", vendor)
         bind_native_api(api, vendor=vendor, role_home=role_home, role=role,
                         host=profile.gateway_host, port=profile.backend_port,

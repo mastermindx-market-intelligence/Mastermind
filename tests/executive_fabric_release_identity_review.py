@@ -746,14 +746,21 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha
 # C21 attended-parent source review combines native composition with the
 # accepted archive closure and inert gateway replacement. ensure_directories
 # retains its exact AST and whole permission token at the accepted moved site.
-REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '0ada16eef382a9083b431caf305ee97c08e38b6b1547d193455dabe23a72404c',
-                                                              'sites': ((687, 71, 76, 'int', '0o750'),)}
+REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': 'd81df611509d78a84a2995a5f579efd78262cd6909855a3d7981ff67c36c76e2',
+                                                              'sites': ((706, 71, 76, 'int', '0o750'),)}
 
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "7531a99e59e878aecc1df9d0bf0b6a388a8b1af3dfd5f8d3035a9beb5c91edf6",
+    "sha256": "c327386b754fcab542b000819d64777efba98a362b303df208e313a8c093de70",
     "sites": ((23, 17, 20, "int", "512"),),
+}
+
+# HTTPX 0.28.1 donor same-host HTTPS upgrade: standard HTTPS port only. No principal,
+# UID/GID or fleet selection. Full archive/site drift restores ordinary D8.
+REVIEWED_FILES["integrations/hermes_runtime/tests/fixtures/transport_observation/httpx___client.py.source"] = {
+    "sha256": "c43f941baefe58c91e96d00039e1868fe719d91453026d7db1647194563bff8d",
+    "sites": ((73, 42, 45, "int", "443"),),
 }
 
 # Fixed Secretary wire-response byte ceiling, not an OS identity. The complete
