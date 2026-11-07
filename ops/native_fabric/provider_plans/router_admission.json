@@ -1,0 +1,13 @@
+{
+  "schema": "mastermind.provider_plan_remote_mode_boundary.v1",
+  "parent_source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "parent_profile_sha256": "ea1f44245a6e01b2aae4873fcc0d89d9a650dfd567fd38bbc81e352e4d1ae3cd",
+  "member": "ext/pick.py",
+  "before": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
+  "after": "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019",
+  "patch": "patches/pick_remote_plan_modes.forward.patch",
+  "patch_sha256": "7da90e717876c1a965b9c146298577723b733ea5e5ccec163c6269fa89e919a2",
+  "members": 116,
+  "authority": "SOURCE_ONLY; no profile/selection/admission mutation",
+  "consumer": "RuntimePath owns explicit combined116 Broker/picker composition; verify fixed before/patch/after and actual other114 members, no caller path or policy override"
+}
