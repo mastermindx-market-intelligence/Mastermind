@@ -170,4 +170,3 @@ def test_new_selector_and_history_operation_do_not_widen_legacy_shapes(correctio
     assert validate_operation_request("read_original", lookup) == lookup
     assert operation_response_limit("read_original") == original.MAX_RESPONSE_BYTES
     with pytest.raises(ValueError): validate_operation_request("read_original", dict(lookup, action="add_project_file"))
-
