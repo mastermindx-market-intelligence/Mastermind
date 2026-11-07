@@ -22,6 +22,7 @@ from test_go_service_workload_composition import (
     ADDITIONS, ALL_NAMES, complete_v7, workload_specification, prepare_workloads,
 )
 from test_go_service_startup import environment, inspect, boot
+from test_hermes_primary_application_enrollment import isolated_native_service_imports
 
 
 def fresh_specification(case, previous=None, *, additions=False):

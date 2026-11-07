@@ -67,7 +67,7 @@
     }
   },
   "implementation": {
-    "grant_semantics": "Explicit append-only additions, at most128 per operation. Empty additions preserve exact current account bytes and grant no new inference authority. Every present grant list and every addition uses the complete A parser.",
+    "grant_semantics": "Explicit append-only additions, at most 128 per operation. Empty additions preserve exact current account bytes and grant no new inference authority. Every present grant list and every addition uses the complete A parser.",
     "interrupted_peer_fix": "Before a first v9 intent, repeat current completed-peer/partial-record validation under the incumbent locks. Original-intent recovery is unchanged.",
     "owner": "existing family binding, intent, credential custody and completion receipt",
     "predecessor_retained_counts": {
