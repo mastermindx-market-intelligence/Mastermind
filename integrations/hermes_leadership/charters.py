@@ -6,6 +6,14 @@ CHARTER_KEYS = ('meta_ceo', 'secretary', 'delivery', 'engineering', 'reliability
                 'product', 'intelligence', 'assurance', 'grok_adviser')
 
 # Immutable authoring data. Each call materializes a detached consumer view.
+# Source advisory only: this enters a native Hermes session only if its bound
+# charter reader is actually consumed. Installed SOUL.md profiles are separate.
+_REUSE_FIRST_BUILD_GUIDANCE = (
+    'For substantial engineering, inspect incumbent owners and maintained open-source '
+    'libraries before custom commodity builds; prefer adapters, preserve licensing, '
+    'security and unique quantitative logic (docs/REUSE_FIRST_ENGINEERING.md).'
+)
+
 _ROWS = (
  ('meta_ceo','Meta-CEO','principal','coordinate',
   'Set direction, prioritize outcomes and resolve consequential cross-project trade-offs.',
@@ -89,7 +97,7 @@ def charter_for(key: str) -> dict:
         'authority_grant': False, 'objective': objective,
         'responsibility_intent': ResponsibilityIntent(role, mode).to_dict(),
         'wake_conditions': list(triggers), 'completion_evidence': list(evidence),
-        'limits': list(limits),
+        'limits': list(limits) + [_REUSE_FIRST_BUILD_GUIDANCE],
         'routing': {'advisory_only': True, 'guidance': routing,
                     'suitability_owner': 'ModelRouter', 'placement_owner': 'Capacity'},
         'continuity_owners': ['Agent OS', 'Executive OS', 'GitHub'],
