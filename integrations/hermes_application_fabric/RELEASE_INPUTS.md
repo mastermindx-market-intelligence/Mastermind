@@ -211,3 +211,11 @@ Acceptance remains one authenticated native primary turn and harmless tool
 continuation, exact selected/served model and physical/shared account attribution,
 bounded output, original durable usage, applicable budget refusal and original
 result recovery without duplicate provider or tool effects.
+
+## Published v10 source join and CI fixture qualification
+
+The contribution joins published original `72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0` with the committed-current owner and worker hardening source. It preserves the eight-role routed enrollment implementation, its foreign-module refusal, and both existing fixture-isolation boundaries. The original current-pair receipt now uses structured source references; the superseded URL-line exception is removed. Metadata cases retain the published finite scheduling budget and exact response/upstream-call checks.
+
+The actual joined participant, primary/retained enrollment, fresh-family, anonymous-read guard and metadata suites passed **244 cases in one process**, with zero failures, errors or skips. Five focused exact-identity cases also passed; the historical shared-relay receipt remains byte-for-byte intact and its one observed host-identity token is qualified only through the existing exact source/site registry. Full source and token drift continue to refuse. Detailed source identities and retained failed iterations remain in `review_evidence/fabric_application/hermes-committed-owner-proof-20261107.json`.
+
+The earlier nine-job hosted inference success is bound to `559989d`; it is not relabeled as a successor hosted or installed result. The active protected-base/H6 source composition remains on original PR #2175. Runtime and provider acceptance boundaries above remain in force.

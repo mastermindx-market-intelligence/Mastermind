@@ -81,8 +81,9 @@ def published(native_stage, tmp_path):
 
 
 @contextmanager
-def loaded_entry(published, *, clean_yaml=False):
-    names = {Path(p).stem for p in published.manifest if p.startswith("ext/") and p.endswith(".py")}
+def native_module_namespace(manifest, *, clean_yaml=False):
+    """Own one disposable native namespace and restore every prior module."""
+    names = {Path(p).stem for p in manifest if p.startswith("ext/") and p.endswith(".py")}
     names.add("glm_shim")
     if clean_yaml:
         names.update(n for n in sys.modules if n == "yaml" or n.startswith("yaml."))
@@ -90,12 +91,8 @@ def loaded_entry(published, *, clean_yaml=False):
     path_before = list(sys.path)
     for name in names:
         sys.modules.pop(name, None)
-    spec = importlib.util.spec_from_file_location("native_go_entry", published.release / "ext/native_go_entry.py")
-    entry = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = entry
-    spec.loader.exec_module(entry)
     try:
-        yield entry
+        yield
     finally:
         for name in names:
             sys.modules.pop(name, None)
@@ -104,6 +101,30 @@ def loaded_entry(published, *, clean_yaml=False):
                 sys.modules.pop(name, None)
         sys.modules.update(previous)
         sys.path[:] = path_before
+
+
+@contextmanager
+def loaded_entry(published, *, clean_yaml=False):
+    with native_module_namespace(published.manifest, clean_yaml=clean_yaml):
+        spec = importlib.util.spec_from_file_location("native_go_entry", published.release / "ext/native_go_entry.py")
+        entry = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = entry
+        spec.loader.exec_module(entry)
+        yield entry
+
+
+def test_native_module_namespace_restores_the_exact_foreign_owner(monkeypatch):
+    name = "a04_terminal_reconcile"
+    original = SimpleNamespace(__file__="fixture:foreign-owner")
+    replacement = SimpleNamespace(__file__="fixture:disposable-owner")
+    monkeypatch.setitem(sys.modules, name, original)
+    paths = list(sys.path)
+    with native_module_namespace({"ext/a04_terminal_reconcile.py": "a" * 64}):
+        assert name not in sys.modules
+        sys.modules[name] = replacement
+        sys.path.insert(0, "fixture:temporary-import-path")
+    assert sys.modules[name] is original and sys.path == paths
+
 
 def before_collection_successor(manifest):
     # Frozen historical tests keep their original bytes. This test-only inverse

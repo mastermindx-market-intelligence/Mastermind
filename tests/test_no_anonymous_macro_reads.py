@@ -190,20 +190,10 @@ _INERT_PR_LINK_DATA_LINES: dict[str, frozenset[str]] = {
     )),
 }
 
-# Retained source provenance, not an executable acquisition. Both the path
-# and the complete JSON data line are fixed; any added call or drift still fails.
-_INERT_EVIDENCE_LINK_DATA_LINES: dict[str, frozenset[str]] = {
-    "review_evidence/fabric_application/hermes-macro-current-pair-qualification-20261107.json": frozenset((
-        '"qualification_receipt": "https://github.com/mastermindx-market-intelligence/macro/blob/c2261cb826d1bd76c2e980efb68edb9ed7d0829c/docs/reports/metabolism-publication-history-integration-20261107.json",',
-        '"source_comment": "https://github.com/mastermindx-market-intelligence/macro/pull/10740#issuecomment-6707954668",',
-    )),
-}
-
 def _is_inert_pr_link_data(relative: str, shape: str, line: str) -> bool:
-    return (shape == "bare_clone_url" and (
-        ("/macro/pull/" in line
-         and line.strip() in _INERT_PR_LINK_DATA_LINES.get(relative, ()))
-        or line.strip() in _INERT_EVIDENCE_LINK_DATA_LINES.get(relative, ())))
+    return (shape == "bare_clone_url"
+            and "/macro/pull/" in line
+            and line.strip() in _INERT_PR_LINK_DATA_LINES.get(relative, ()))
 
 _ALLOWED_EXTS = {".py", ".sh", ".js", ".ts", ".yml", ".yaml", ".json", ".toml"}
 # Top-level directories excluded from the walk per the commission's scope, plus
@@ -595,9 +585,7 @@ def test_ci_yml_macro_checkout_step_is_authenticated():
 
 
 def test_inert_pr_link_lines_are_exact_live_data_not_file_exemptions():
-    for relative, expected in {
-        **_INERT_PR_LINK_DATA_LINES, **_INERT_EVIDENCE_LINK_DATA_LINES,
-    }.items():
+    for relative, expected in _INERT_PR_LINK_DATA_LINES.items():
         actual = {line.strip() for line in (_ROOT / relative).read_text().splitlines()}
         assert expected and expected <= actual
         for line in expected:
@@ -614,7 +602,7 @@ def test_same_pr_data_path_still_refuses_anonymous_fetch_and_raw_content():
         "fetch('https://raw.githubusercontent.com/mastermindx-market-intelligence/macro/main/secret.json')",
         "fetch('https://api.github.com/repos/mastermindx-market-intelligence/macro/contents/README.md')",
     )
-    for relative in {*_INERT_PR_LINK_DATA_LINES, *_INERT_EVIDENCE_LINK_DATA_LINES}:
+    for relative in _INERT_PR_LINK_DATA_LINES:
         for line in acquisition:
             hits = [shape for shape, pattern in _BANNED_PATTERNS.items() if pattern.search(line)]
             assert hits

@@ -50,10 +50,18 @@
       "d7b6ac402e359f68bee6c670ae975fc86e6ec868",
       "1575d8ccb7c618f52efdcfdc638f5cbbf217d334"
     ],
-    "qualification_receipt": "https://github.com/mastermindx-market-intelligence/macro/blob/c2261cb826d1bd76c2e980efb68edb9ed7d0829c/docs/reports/metabolism-publication-history-integration-20261107.json",
+    "qualification_receipt": {
+      "path": "docs/reports/metabolism-publication-history-integration-20261107.json",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "c2261cb826d1bd76c2e980efb68edb9ed7d0829c"
+    },
     "ready_readback": true,
     "release_armed": false,
-    "source_comment": "https://github.com/mastermindx-market-intelligence/macro/pull/10740#issuecomment-6707954668",
+    "source_comment": {
+      "comment_id": 6707954668,
+      "pull_request": 10740,
+      "repository": "mastermindx-market-intelligence/macro"
+    },
     "source_update": {
       "branch_and_pr_readback": true,
       "expected_old_head": "1575d8ccb7c618f52efdcfdc638f5cbbf217d334",
@@ -213,5 +221,6 @@
     }
   },
   "purpose": "Qualify the reconciled original Macro source through the existing Mastermind/Hermes pair.",
-  "schema": 1
+  "schema": 1,
+  "source_reference_representation": "Two inert GitHub citations use explicit repository/revision/path or PR/comment pointers. Source identities and observation facts are unchanged; no transport or guard exemption is added."
 }

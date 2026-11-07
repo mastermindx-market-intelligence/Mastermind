@@ -157,6 +157,62 @@
     "worker_backend_sha256": "8ff1b90a38ee3c16180e74b5a5083451784bfa9f4304e380252224baa0bdd8f1",
     "worker_package_sha256": "7979dd4fbc42eead4d6e24b0fbcd1cbd73bb73fe645f63f7767b6994639e207a"
   },
+  "published_source_join": {
+    "acceptance": "Source qualification only. Protected delivery, native generation publication/selection, runtime/service authority, provider execution and measured uptime are separate.",
+    "choices": [
+      "Preserve published v10 eight-role native enrollment and its exact registry update.",
+      "Preserve structured original pair evidence; retire the superseded exact URL-line allowance.",
+      "Use the incoming finite metadata scheduling default and exact upstream-call/status assertions.",
+      "Retain producer-scoped participant native/YAML restoration and incoming manifest-scoped enrollment isolation."
+    ],
+    "exact_observation_identity_qualification": {
+      "baseline_guard_refused": true,
+      "counts": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 5
+      },
+      "historical_receipt": "review_evidence/fabric_application/shared-relay-source-qualification-20261107.json",
+      "historical_receipt_sha256": "3629a7a963e9621aa1b190c1b946c6a3d8a1277caaa3ffac6dd129a4c984b5b3",
+      "log_sha256": "4d2df7a96ce4a667da3ccf295f2d16c728a65ed0e861a3baa919f7bb469b02b5",
+      "mechanism": "Existing exact whole-file hash and UTF-8 token-site registry; path, byte, token and diff/postimage mismatch refusal retained.",
+      "qualified_findings": [],
+      "xml_sha256": "8c483937645599a2b59ec6949722c8e8125f16e89ac381889f9d0f7e0a2bc768"
+    },
+    "governing_compatible_pin": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c",
+    "one_process_qualification": {
+      "counts": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 244
+      },
+      "elapsed_seconds": 307.649,
+      "files": {
+        "ops/native_fabric/quota_continuity/tests/test_go_service_fresh_family_composition.py": "6a36ace5edc209a4227382e4787a1fb0851166864f643a3905bb3f010aeda281",
+        "tests/test_experiential_account_metadata_proxy.py": "f31e1bcfa4285ea9d3d4f5f70d4ed9cc4c2cfc7bbf27ebeda69be35c15a5f12f",
+        "tests/test_fabric_participant_owner.py": "d1aa62bceeb9dc22691ace8c60689bad7f3a81973ce8334275a2651ed02c33e6",
+        "tests/test_hermes_primary_application_enrollment.py": "32a5521964f161ba7e098bac717e9b3f6cb8a5d5acd37bb11985c48df331c6c9",
+        "tests/test_hermes_primary_retained_enrollment.py": "5b31725ba9747f71b23b0b68794d7e1ac65736852dc12243dfda388f474fd436",
+        "tests/test_no_anonymous_macro_reads.py": "6574961cbc1cc9389bb0a3090de0fc085802f9abc5b06579456e1f483438a625"
+      },
+      "log_sha256": "745225374d3b4870961b9de53eed9b33a65461ce42000b181cc4a4d75731b95d",
+      "source_unchanged": true,
+      "xml_sha256": "35b810a960ce44c625dbc09e3e986cfe11ea676b07594d97bcda6677b70188f2"
+    },
+    "parents": [
+      "49652e3525008d9f8d7c14adc8da84604066d8a3",
+      "72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0"
+    ],
+    "previous_hosted_head": {
+      "general_result": "FAILED: twenty native enrollment namespace conflicts plus one unregistered observation token. The joined source repairs these causes; this receipt does not claim successor hosted success.",
+      "general_run": 42389715155,
+      "head": "559989dbce12848a1a66bb76d315e5ae5b1dc8a2",
+      "inference_jobs_passed": 9,
+      "inference_run": 42389715328
+    }
+  },
   "retained_patch_whitespace": {
     "blank_context_lines": [
       68,

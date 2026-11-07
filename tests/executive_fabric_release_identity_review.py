@@ -83,9 +83,9 @@ REVIEWED_FILES = {
     },
     'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
         # v9 keeps the original private account directory permission check.
-        "sha256": 'eed37568f732d270ec420109601cd166fe23a8c07f714ac4f2a228504d3af320',
+        "sha256": 'ada5c451254f6186acdee100725e1f5517b9e446e863b6f125308485d203e055',
         "sites": (
-            (822, 60, 65, 'int', '0o700'),
+            (831, 60, 65, 'int', '0o700'),
         ),
     },
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
@@ -876,4 +876,13 @@ REVIEWED_FILES[
 ] = {
     "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
     "sites": ((27, 26, 29, "int", "443"),),
+}
+
+# Retained source qualification records the observed proof parent UID only.
+# It grants no runtime identity or enrollment. Exact bytes and the sole complete
+# UTF-8 integer token are required; drift restores the ordinary identity guard.
+REVIEWED_FILES["review_evidence/fabric_application/shared-relay-source-qualification-20261107.json"] = {
+    "sha256": "3629a7a963e9621aa1b190c1b946c6a3d8a1277caaa3ffac6dd129a4c984b5b3",
+    "sites": (),
+    "utf8_sites": ((296, 26, 29, "int", "501"),),
 }
