@@ -16,11 +16,13 @@ import pytest
 
 from test_go_native_stage import published, loaded_entry
 from test_quota_reset_native_stage import stages
+from test_provider_application_transition import combined_builds
 
 
-@pytest.fixture(scope="module", params=("application", "http"))
-def native_stage(request, stages):
-    return getattr(stages, request.param)
+@pytest.fixture(scope="module", params=("application", "http", "quota_application", "quota_http"))
+def native_stage(request, stages, combined_builds):
+    source = combined_builds if request.param.startswith("quota_") else stages
+    return getattr(source, request.param)
 
 
 def test_emitted_quota_readers_keep_original_owners_and_repeatable_inspection(published, monkeypatch):

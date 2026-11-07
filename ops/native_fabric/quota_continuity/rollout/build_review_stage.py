@@ -381,13 +381,19 @@ def go_staged_dependency_hashes(manifest, candidate_hashes):
     """Keep original candidate provenance while binding actual combined bytes."""
     result = dict(candidate_hashes)
     base = _application_base(manifest)
-    if _has_provider_members(base):
-        before_provider_application(base)
+    parent = before_quota_reset_recovery(base)
+    if _has_provider_members(parent):
+        before_provider_application(parent)
         record, _ = provider_application_record()
         broker = record["replacements"]["ext/lease_broker.py"]
-        if candidate_hashes.get("lease_broker.py") != broker["preimage_sha256"]:
-            raise ValueError("provider APPLICATION broker preimage differs")
-        result["lease_broker.py"] = broker["sha256"]
+        if parent != base:
+            # H2's reviewed dependency record carries both exact patch steps.
+            if candidate_hashes.get("lease_broker.py") != PROVIDER_QUOTA_RESET_DIGESTS["lease_broker.py"]:
+                raise ValueError("provider quota reset captured dependency differs")
+        else:
+            if candidate_hashes.get("lease_broker.py") != broker["preimage_sha256"]:
+                raise ValueError("provider APPLICATION broker preimage differs")
+            result["lease_broker.py"] = broker["sha256"]
     return result
 
 
@@ -399,11 +405,15 @@ def validate_go_source_transition(before, after):
     go_members = {"ext/native_go_entry.py", "ext/go_application_handler.py"}
     http_members = HTTP_GENERATION_MEMBERS & set(after)
     base = _application_base(after)
+    try:
+        parent = before_quota_reset_recovery(base)
+        before_provider_application(parent)
+    except ValueError:
+        raise ValueError("provider APPLICATION source transition differs") from None
     if (before != provider or not go_members <= set(after)
             or http_members and http_members != HTTP_GENERATION_MEMBERS
-            or len(base) != 116 or _manifest_digest(base) != record["manifest_sha256"]):
+            or len(base) != 116 or _manifest_digest(parent) != record["manifest_sha256"]):
         raise ValueError("provider APPLICATION source transition differs")
-    before_provider_application(base)
 
 
 def compose_provider_application_stage(root, output, manifest, files):
@@ -672,6 +682,20 @@ QUOTA_RESET_PATCHES = {
 }
 
 
+# Exact H2 successor of the provider-preserving116 source. This is distinct
+# from the historical H2-only107 family; neither can impersonate the other.
+PROVIDER_QUOTA_RESET_PARENT_SHA256 = "f256ac145cbf66c5b325d8f8d1cbe5d5e096646b2796bbe05efb45d6fb21dfd4"
+PROVIDER_QUOTA_RESET_MANIFEST_SHA256 = "b49e1350b83afd4f2c439e7b13b2b7079a4db88dd7d9d6b0cf9801c423f29547"
+PROVIDER_QUOTA_RESET_PREIMAGES = dict(QUOTA_RESET_PREIMAGES, **{
+    "lease_broker.py": "05880dc3e6f0849ff1f39094e2dbfe778797ebaddc04acd3b7474598888ca4cd",
+    "pick.py": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3",
+})
+PROVIDER_QUOTA_RESET_DIGESTS = dict(QUOTA_RESET_DIGESTS, **{
+    "lease_broker.py": "3a210b259681460ec1e8ded91c45f84f6807e6ba4da1704b1ce587693d6531ed",
+    "pick.py": "a61e4bd966cb3ce94cb00c262170453840edea02c4eb4d42b1521d097476a1dc",
+})
+
+
 def _quota_reset_file(path, expected):
     if path.is_symlink() or not path.is_file():
         raise ValueError("quota reset source must be a regular file")
@@ -724,13 +748,28 @@ def _quota_reset_patch(original, patch, name):
     return b"".join(output)
 
 
-def quota_reset_sources(root):
+def quota_reset_sources(root, *, preserve_provider=False):
     """Capture all four reviewed successors and their exact source provenance."""
     root = Path(root)
     overlay = root.parent / "grok47/quota_billing"
     captured = {}
+    provider_record = provider_application_record(root)[0] if preserve_provider else None
+    expected = PROVIDER_QUOTA_RESET_DIGESTS if preserve_provider else QUOTA_RESET_DIGESTS
     for name, preimage in QUOTA_RESET_PREIMAGES.items():
         original = _quota_reset_file(root / "candidate" / name, preimage)
+        provider_preimage = None
+        if preserve_provider and name in QUOTA_RESET_PATCHES:
+            row = provider_record["replacements"]["ext/" + name]
+            if row["preimage_sha256"] != preimage:
+                raise ValueError("provider quota reset candidate preimage differs")
+            patch = _provider_source(root / row["source"], row["patch_sha256"])
+            original = _quota_reset_patch(original, patch, name)
+            if sha(original) != PROVIDER_QUOTA_RESET_PREIMAGES[name] or sha(original) != row["sha256"]:
+                raise ValueError("provider quota reset preimage differs")
+            provider_preimage = {"composition_sha256": PROVIDER_APPLICATION_RECORD_SHA256,
+                "source": row["source"], "patch_sha256": row["patch_sha256"],
+                "preimage_sha256": preimage, "sha256": sha(original)}
+            preimage = sha(original)
         if name in QUOTA_RESET_PATCHES:
             patch_source = "../grok47/quota_billing/" + name + ".patch"
             patch = _quota_reset_file(overlay / (name + ".patch"), QUOTA_RESET_PATCHES[name])
@@ -741,13 +780,15 @@ def quota_reset_sources(root):
                 "patch_source": patch_source,
                 "patch_sha256": QUOTA_RESET_PATCHES[name],
             }
+            if provider_preimage is not None:
+                provenance["provider_preimage"] = provider_preimage
             source = "candidate/" + name
         else:
             source = "../grok47/quota_billing/" + name
             raw = _quota_reset_file(overlay / name, QUOTA_RESET_DIGESTS[name])
             provenance = {"schema": "native-exact-replacement.v1",
                           "preimage_sha256": preimage}
-        if sha(raw) != QUOTA_RESET_DIGESTS[name]:
+        if sha(raw) != expected[name]:
             raise ValueError("quota reset postimage differs")
         captured[name] = (raw, source, provenance)
     return captured
@@ -757,6 +798,19 @@ def before_quota_reset_recovery(manifest):
     """Reverse only the complete H2 successor of the exact APPLICATION parent."""
     if type(manifest) is not dict:
         return manifest
+    if _has_provider_members(manifest) and any(
+            manifest.get("ext/" + name) == digest
+            for name, digest in PROVIDER_QUOTA_RESET_DIGESTS.items()):
+        if (len(manifest) != 116 or _manifest_digest(manifest) != PROVIDER_QUOTA_RESET_MANIFEST_SHA256
+                or any(manifest.get("ext/" + name) != digest
+                       for name, digest in PROVIDER_QUOTA_RESET_DIGESTS.items())):
+            raise ValueError("provider quota reset cohort incomplete or foreign")
+        previous = dict(manifest)
+        previous.update({"ext/" + name: digest for name, digest in PROVIDER_QUOTA_RESET_PREIMAGES.items()})
+        if _manifest_digest(previous) != PROVIDER_QUOTA_RESET_PARENT_SHA256:
+            raise ValueError("provider quota reset parent closure differs")
+        before_provider_application(previous)
+        return previous
     if not any(manifest.get("ext/" + name) == digest
                for name, digest in QUOTA_RESET_DIGESTS.items()):
         return dict(manifest)
@@ -785,7 +839,7 @@ def go_application_dependencies(root, *, staged_manifest=None):
             del base[name]
         parent = before_quota_reset_recovery(base)
         if parent != base:
-            quota = quota_reset_sources(root)
+            quota = quota_reset_sources(root, preserve_provider=_has_provider_members(parent))
     dependencies = {}
     for name in GO_APPLICATION_DEPENDENCIES:
         if quota is not None and name in quota:
@@ -803,11 +857,14 @@ def go_application_dependencies(root, *, staged_manifest=None):
 
 def compose_quota_reset_stage(root, output, manifest, files):
     """Replace four existing members only after authenticating their whole parent."""
-    if sha((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()) != QUOTA_RESET_PARENT_SHA256:
+    identity = _manifest_digest(manifest)
+    preserve_provider = identity == PROVIDER_QUOTA_RESET_PARENT_SHA256
+    if identity not in (QUOTA_RESET_PARENT_SHA256, PROVIDER_QUOTA_RESET_PARENT_SHA256):
         raise ValueError("quota reset requires exact complete APPLICATION parent")
-    captured = quota_reset_sources(root)
+    captured = quota_reset_sources(root, preserve_provider=preserve_provider)
+    preimages = PROVIDER_QUOTA_RESET_PREIMAGES if preserve_provider else QUOTA_RESET_PREIMAGES
     targets = {}
-    for name, preimage in QUOTA_RESET_PREIMAGES.items():
+    for name, preimage in preimages.items():
         relative = "ext/" + name
         target = Path(output) / "native-code-stage" / relative
         if manifest.get(relative) != preimage:
@@ -820,6 +877,11 @@ def compose_quota_reset_stage(root, output, manifest, files):
         manifest[relative] = sha(raw)
         files[relative] = {**files[relative], "source": source, "sha256": sha(raw),
                            "bytes": len(raw), "composition": provenance}
+        if preserve_provider and name in QUOTA_RESET_PATCHES:
+            # The nested provenance now records both exact patch steps.
+            for key in ("source_kind", "composition_preimage_source",
+                        "composition_preimage_sha256", "patch_sha256"):
+                files[relative].pop(key, None)
     before_quota_reset_recovery(manifest)
 
 

@@ -8,11 +8,14 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 from types import SimpleNamespace
 from unittest import mock
 import zlib
 
 import pytest
+
+import test_quota_reset_native_stage as quota_proof
 
 from test_go_native_stage import builds, native_stage, ROOT, g, installer, builder
 from test_go_native_install import (source_owners, owner, go_owner, retained_go_owner,
@@ -92,8 +95,13 @@ def test_selected_provider_cannot_prepare_legacy_application(owner_name, extensi
 def combined_builds(tmp_path_factory):
     root = tmp_path_factory.mktemp("provider-application-build").resolve()
     outputs = {}
-    for name, flags in (("base", []), ("application", ["--include-go-application"]),
-                        ("http", ["--include-go-application", "--include-application-http"])):
+    for name, flags in (
+            ("base", []), ("application", ["--include-go-application"]),
+            ("http", ["--include-go-application", "--include-application-http"]),
+            ("quota_base", ["--include-quota-reset-recovery"]),
+            ("quota_application", ["--include-quota-reset-recovery", "--include-go-application"]),
+            ("quota_http", ["--include-quota-reset-recovery", "--include-go-application",
+                            "--include-application-http"])):
         output = root / name
         argv = ["builder", "--output", str(output), "--include-provider-plan-application", *flags]
         with mock.patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()):
@@ -140,7 +148,8 @@ def prepare_combined(case, owner_name, provider_stage, source):
     return api, plan, bundle
 
 
-@pytest.mark.parametrize("extension,count", [("application", 118), ("http", 121)])
+@pytest.mark.parametrize("extension,count", [
+    ("application", 118), ("http", 121), ("quota_application", 118), ("quota_http", 121)])
 def test_actual_component_preserves_candidate_and_staged_broker(combined_builds, builds, extension, count):
     output = getattr(combined_builds, extension)
     manifest = json.loads((output / "native-manifest.json").read_bytes())
@@ -151,21 +160,41 @@ def test_actual_component_preserves_candidate_and_staged_broker(combined_builds,
     base = {k: v for k, v in manifest.items()
             if k not in {g.GO_ENTRY, g.GO_HANDLER} | builder.HTTP_GENERATION_MEMBERS}
     assert len(manifest) == count and len(base) == 116
-    assert builder.before_provider_application(base) == original
+    parent = builder.before_quota_reset_recovery(base)
+    assert builder.before_provider_application(parent) == original
     assert manifest == unchanged
     broker = "lease_broker.py"
-    assert record["dependencies"][broker]["sha256"] == original["ext/" + broker]
     assert record["native_stage_dependencies"][broker] == manifest["ext/" + broker]
-    assert record["dependencies"][broker]["sha256"] != record["native_stage_dependencies"][broker]
+    if extension.startswith("quota_"):
+        assert builder._manifest_digest(base) == builder.PROVIDER_QUOTA_RESET_MANIFEST_SHA256
+        assert builder._manifest_digest(parent) == builder.PROVIDER_QUOTA_RESET_PARENT_SHA256
+        assert record["dependencies"][broker]["sha256"] == builder.PROVIDER_QUOTA_RESET_DIGESTS[broker]
+        for name in builder.QUOTA_RESET_PATCHES:
+            row = inventory["files"]["ext/" + name]
+            composition = row["composition"]
+            assert composition["preimage_sha256"] == builder.PROVIDER_QUOTA_RESET_PREIMAGES[name]
+            assert composition["patch_sha256"] == builder.QUOTA_RESET_PATCHES[name]
+            assert composition["provider_preimage"]["preimage_sha256"] == original["ext/" + name]
+            assert composition["provider_preimage"]["sha256"] == builder.PROVIDER_QUOTA_RESET_PREIMAGES[name]
+            assert composition["provider_preimage"]["composition_sha256"] == builder.PROVIDER_APPLICATION_RECORD_SHA256
+            assert row["source"] == "candidate/" + name
+            assert "composition_preimage_sha256" not in row and "patch_sha256" not in row
+        assert record["dependencies"][broker]["composition"] == inventory["files"]["ext/" + broker]["composition"]
+    else:
+        assert record["dependencies"][broker]["sha256"] == original["ext/" + broker]
+        assert record["dependencies"][broker]["sha256"] != record["native_stage_dependencies"][broker]
     assert installer._go_component(output / "external-go-component", Path(record["stable_ext"]), manifest)
     for key, digest in manifest.items():
         raw = (output / "native-code-stage" / key).read_bytes()
         assert g.digest(raw) == digest == inventory["files"][key]["sha256"]
         assert len(raw) == inventory["files"][key]["bytes"]
     before = dict(base)
+    hashes = {name: row["sha256"] for name, row in record["dependencies"].items()}
+    if extension.startswith("quota_"):
+        builder.validate_go_base_manifest(base, hashes)
+        hashes[broker] = builder.PROVIDER_QUOTA_RESET_PREIMAGES[broker]
     with pytest.raises(ValueError, match="captured application dependency"):
-        builder.validate_go_base_manifest(base,
-            {name: row["sha256"] for name, row in record["dependencies"].items()})
+        builder.validate_go_base_manifest(base, hashes)
     assert base == before
 
 
@@ -188,7 +217,7 @@ def test_partial_or_mixed_combined_source_refuses(combined_builds, fault):
 
 
 @pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
-@pytest.mark.parametrize("extension", ["application", "http"])
+@pytest.mark.parametrize("extension", ["application", "http", "quota_application", "quota_http"])
 def test_combined_application_commits_and_recovers_original_transaction(
         owner_name, extension, request, provider_stage, combined_builds):
     case = request.getfixturevalue(owner_name)
@@ -209,31 +238,35 @@ def test_combined_application_commits_and_recovers_original_transaction(
 
 @pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
 @pytest.mark.parametrize("fault", ["changed", "partial", "no-additions"])
-@pytest.mark.parametrize("combined", [False, True])
+@pytest.mark.parametrize("target_kind", ["legacy", "provider", "quota"])
 def test_invalid_provider_predecessor_cannot_fall_through(
-        owner_name, fault, combined, request, provider_stage, combined_builds, builds):
+        owner_name, fault, target_kind, request, provider_stage, combined_builds, builds):
     case = request.getfixturevalue(owner_name)
     selected = select_provider(case, provider_stage, fault=fault)
-    source = combined_builds.application if combined else builds.application
+    source = {"legacy": builds.application, "provider": combined_builds.application,
+              "quota": combined_builds.quota_application}[target_kind]
     target, component = application_target(case, source)
     refuse_prepare(case, owner_name, target, component, selected)
 
 
 @pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
-def test_combined_target_requires_qualified_provider_predecessor(owner_name, request, combined_builds):
+@pytest.mark.parametrize("extension", ["application", "quota_application"])
+def test_combined_target_requires_qualified_provider_predecessor(owner_name, extension, request, combined_builds):
     case = request.getfixturevalue(owner_name)
     selected = g.current(case.store)
-    target, component = application_target(case, combined_builds.application)
+    target, component = application_target(case, getattr(combined_builds, extension))
     refuse_prepare(case, owner_name, target, component, selected)
 
 
-@pytest.mark.parametrize("extension", ["application", "http"])
+@pytest.mark.parametrize("extension", ["application", "http", "quota_application", "quota_http"])
 def test_rewound_staged_dependency_is_not_an_installer_component(combined_builds, extension, tmp_path):
     output = tmp_path / "source"
     shutil.copytree(getattr(combined_builds, extension), output)
     path = output / "external-go-component/component.json"
     record = json.loads(path.read_bytes())
-    record["native_stage_dependencies"]["lease_broker.py"] = record["dependencies"]["lease_broker.py"]["sha256"]
+    record["native_stage_dependencies"]["lease_broker.py"] = (
+        builder.PROVIDER_QUOTA_RESET_PREIMAGES["lease_broker.py"] if extension.startswith("quota_")
+        else record["dependencies"]["lease_broker.py"]["sha256"])
     path.write_text(json.dumps(record))
     manifest = json.loads((output / "native-manifest.json").read_bytes())
     with pytest.raises(ValueError, match="exact reviewed source"):
@@ -242,10 +275,11 @@ def test_rewound_staged_dependency_is_not_an_installer_component(combined_builds
 
 @pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
 @pytest.mark.parametrize("boundary", ["selection", "receipt"])
+@pytest.mark.parametrize("extension", ["http", "quota_http"])
 def test_combined_postcommit_interruption_does_not_select_again(
-        owner_name, boundary, request, provider_stage, combined_builds):
+        owner_name, boundary, extension, request, provider_stage, combined_builds):
     case = request.getfixturevalue(owner_name)
-    api, plan, bundle = prepare_combined(case, owner_name, provider_stage, combined_builds.http)
+    api, plan, bundle = prepare_combined(case, owner_name, provider_stage, getattr(combined_builds, extension))
     original = g.atomic_bytes
     seen = []
     def write(path, raw, mode):
@@ -268,10 +302,11 @@ def test_combined_postcommit_interruption_does_not_select_again(
 
 
 @pytest.mark.parametrize("owner_name", ["go_owner", "retained_go_owner"])
+@pytest.mark.parametrize("extension", ["application", "quota_application"])
 def test_combined_plan_rechecks_complete_pointer_before_any_write(
-        owner_name, request, provider_stage, combined_builds):
+        owner_name, extension, request, provider_stage, combined_builds):
     case = request.getfixturevalue(owner_name)
-    api, plan, bundle = prepare_combined(case, owner_name, provider_stage, combined_builds.application)
+    api, plan, bundle = prepare_combined(case, owner_name, provider_stage, getattr(combined_builds, extension))
     before = g.current(case.store)
     later = g.select(case.store, before["generation"], before["generation"])
     assert later["sequence"] == before["sequence"] + 1
@@ -282,15 +317,17 @@ def test_combined_plan_rechecks_complete_pointer_before_any_write(
     api.history(case)
 
 
-def test_combined_source_retains_original_application_v3_journeys(combined_builds, tmp_path):
+@pytest.mark.parametrize("extension", ["application", "quota_application"])
+def test_combined_source_retains_original_application_v3_journeys(combined_builds, extension, tmp_path):
     # Reuse the original owner tests in their asserted layout. A fresh process
     # ensures no previously imported candidate can impersonate the staged bytes.
     fixture = tmp_path / "ops/native_fabric/quota_continuity"
     tests = fixture / "tests"
     tests.mkdir(parents=True)
     (fixture / "source").mkdir()
-    stage = combined_builds.application / "native-code-stage"
-    manifest = json.loads((combined_builds.application / "native-manifest.json").read_bytes())
+    source = getattr(combined_builds, extension)
+    stage = source / "native-code-stage"
+    manifest = json.loads((source / "native-manifest.json").read_bytes())
     shutil.copytree(stage / "ext", fixture / "candidate")
     for relative, digest in manifest.items():
         if relative.startswith("ext/"):
@@ -323,3 +360,56 @@ raise SystemExit(not result.wasSuccessful() or bool(result.skipped))
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.splitlines()[-1]) == {
         "tests": 14, "failures": 0, "errors": 0, "skipped": 0}
+
+
+@pytest.mark.parametrize("member", sorted(builder.PROVIDER_QUOTA_RESET_DIGESTS))
+@pytest.mark.parametrize("replacement", ["preimage", "foreign"])
+def test_provider_quota_partial_or_foreign_quartet_refuses(combined_builds, member, replacement):
+    actual = json.loads((combined_builds.quota_base / "native-manifest.json").read_bytes())
+    actual["ext/" + member] = (builder.PROVIDER_QUOTA_RESET_PREIMAGES[member]
+                              if replacement == "preimage" else "0" * 64)
+    before = dict(actual)
+    with pytest.raises(ValueError, match="provider quota reset cohort"):
+        builder.before_quota_reset_recovery(actual)
+    assert actual == before
+
+
+@pytest.mark.parametrize("fault", ["legacy-quartet", "missing-provider", "foreign-parent"])
+def test_provider_quota_cannot_relabel_legacy_or_foreign_parent(combined_builds, fault):
+    actual = json.loads((combined_builds.quota_application / "native-manifest.json").read_bytes())
+    if fault == "legacy-quartet":
+        actual.update({"ext/" + name: digest for name, digest in builder.QUOTA_RESET_DIGESTS.items()})
+    elif fault == "missing-provider":
+        del actual["ext/experiential_transport.py"]
+    else:
+        actual["ext/model_tier.py"] = "0" * 64
+    before = dict(actual)
+    _, provider = builder.provider_application_record()
+    with pytest.raises(ValueError, match="provider.*transition"):
+        builder.validate_go_source_transition(provider, actual)
+    assert actual == before
+
+
+def test_provider_quota_component_authenticates_both_patch_steps(combined_builds, tmp_path):
+    output = tmp_path / "source"
+    shutil.copytree(combined_builds.quota_http, output)
+    path = output / "external-go-component/component.json"
+    record = json.loads(path.read_bytes())
+    record["dependencies"]["lease_broker.py"]["composition"]["provider_preimage"]["sha256"] = \
+        builder.QUOTA_RESET_PREIMAGES["lease_broker.py"]
+    path.write_text(json.dumps(record))
+    manifest = json.loads((output / "native-manifest.json").read_bytes())
+    with pytest.raises(ValueError, match="exact reviewed source"):
+        installer._go_component(output / "external-go-component", Path(record["stable_ext"]), manifest)
+
+
+class TestProviderQuotaResetBrokerJourney(quota_proof.TestEmittedGlmResetBrokerJourney):
+    """Run the original sixteen GLM claim/settlement cases on combined bytes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.stage_temp = tempfile.TemporaryDirectory(prefix="provider-emitted-h2-")
+        cls.addClassCleanup(cls.stage_temp.cleanup)
+        cls.stage = quota_proof.build(Path(cls.stage_temp.name).resolve() / "http",
+            "--include-provider-plan-application", "--include-go-application", "--include-application-http")
+        cls.stage_manifest = quota_proof.manifest(cls.stage)
