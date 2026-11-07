@@ -247,8 +247,9 @@ it("discards a delayed snapshot after Workspace acquisition access is revoked", 
 });
 
 it("formats observation time with the requested zone across daylight saving and rejects invalid times", () => {
-  const summer = displayObservationTime("2026-07-01T12:00:00Z", "en", "America/Vancouver");
-  const winter = displayObservationTime("2026-12-01T12:00:00Z", "en", "America/Vancouver");
+  // Use completed historical seasons; future civil-time rules can change between ICU versions.
+  const summer = displayObservationTime("2025-07-01T12:00:00Z", "en", "America/Vancouver");
+  const winter = displayObservationTime("2025-12-01T12:00:00Z", "en", "America/Vancouver");
   expect(summer).toContain("05:00:00");
   expect(winter).toContain("04:00:00");
   expect(summer).toMatch(/PDT|GMT-7/);
