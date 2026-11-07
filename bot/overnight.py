@@ -97,7 +97,6 @@ def watch(pid: str, asof: str | None = None, *, force: bool = False,
         mod_name, fn_name = _RUNNERS.get(pid, (None, None))
         if not mod_name:
             return {**out, "skipped": "unknown_book"}
-        fn = getattr(importlib.import_module(mod_name), fn_name)
         kwargs = {}
         if run_id is not None:
             kwargs["run_id"] = run_id
@@ -106,6 +105,7 @@ def watch(pid: str, asof: str | None = None, *, force: bool = False,
         from brain import runlog
         if runlog.portfolio_lookup(run_id, book=pid) is not None:
             # Recover the same original before tripwire, de-risk, or queue mutations.
+            fn = getattr(importlib.import_module(mod_name), fn_name)
             res = fn(asof=asof, **kwargs) or {}
             out["refined"] = {key: res.get(key) for key in _REFINED_FIELDS}
             return out
@@ -148,6 +148,7 @@ def watch(pid: str, asof: str | None = None, *, force: bool = False,
         if not (force or overnight.is_material(t)):
             return {**out, "skipped": "tape_calm"}          # deterministic tripwire → free, no LLM
         # MATERIAL overnight move → re-prompt the Brain (Opus) to refine the queued target
+        fn = getattr(importlib.import_module(mod_name), fn_name)
         res = fn(asof=asof, directive=_overnight_directive(pid, t), **kwargs) or {}
         out["refined"] = {key: res.get(key) for key in _REFINED_FIELDS}
         return out
