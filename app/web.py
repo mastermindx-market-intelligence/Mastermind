@@ -1367,11 +1367,16 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
     if view is not None:
         return JSONResponse({"error": "unsupported_portfolio_view", "portfolio_id": portfolio},
                             status_code=400, headers={"Cache-Control": "no-store"})
-    path = _portfolio_dir(portfolio) / "latest.json"
-    if not path.exists():
-        return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
     try:
-        payload = json.loads(path.read_text())
+        path = _portfolio_dir(portfolio) / "latest.json"
+        try:
+            payload = json.loads(path.read_text())
+        except FileNotFoundError:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
+            raise
         from portfolio import registry
         # Runtime registry is authoritative: persisted book contracts may predate a benchmark
         # migration and must never make CSI 300 / Hang Seng appear as FXI or SPY in the UI.
@@ -1583,7 +1588,12 @@ def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None)
 
         return JSONResponse(payload)
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        _log.warning("portfolio snapshot read failed for %s: %s", portfolio, type(exc).__name__)
+        return JSONResponse({
+            "error": "portfolio_unavailable",
+            "snapshot_status": "unavailable",
+            "portfolio_id": portfolio,
+        }, status_code=500)
 
 
 # The tab-switcher status payload is just NAV/return chips — re-pricing every book on every poll or
