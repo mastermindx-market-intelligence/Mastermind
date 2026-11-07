@@ -124,3 +124,21 @@ MiniMax-M3 launch failure is retained; a successful preview does not erase it.
 Protected PR: [#2196](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2196).
 Protected merge and installed production command readback remain separate from
 this isolated-profile native proof.
+
+
+## Hosted-stack repair
+
+Initial exact-head hosted run
+[42346944088](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42346944088)
+failed in `hermes_models/tests/test_contract.py`: an inherited assertion still
+expected commercial ModelArk aliases to be absent until already-merged #1824.
+The routing-preview implementation does not change that catalog.
+
+The existing Hermes owner's exact repair from
+`d7d5bfdb4bc656473a7e940dee07d0b437aed40d` was adopted as a dependency, matching
+the #2155 test postimage Git blob
+`a7cc6976bcd71872a18a1675a8df73887520f918`. This reuses the original repair.
+The test verifies exact present-but-inert aliases, unchanged enabled/autonomous
+flags for every provider, and a separate legacy absent-catalog case. No production
+model/routing behavior, credential, admission or capacity policy changed.
+The complete affected `hermes_models` suite passed **23 tests** locally.
