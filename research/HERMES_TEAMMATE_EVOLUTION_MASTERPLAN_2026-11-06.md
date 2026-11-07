@@ -903,3 +903,37 @@ Macro10813 at5a226a935b21839f9c9b999ba9f242ff47c2ed6b passed its full selected C
 A bounded read of the original vendor worker's M1 source found its registered branch `sol/hermes-vendor-derive-20261107-c3` in `/Volumes/STORAGE/agent-workspaces/claude/36170df991f45592/pr-2134-b2a49ae6d982ec8f`. Head65cb4dd0697ff892016384bf31799b56206c062b is the explicit dependency merge with parents7a3160fa and1c8a4391; native_gateway_sources.py is being edited. This supports original source-writer custody, not a fabricated canonical START/root receipt. Keep original controller17269 and await/consume its return; no replacement writer.
 
 Remaining core integration is unchanged: actual held memory enrollment/first-turn delivery, full native EVAL instrumentation, account-custodian enrollment plus atomic secret-safe browser fill, original installed/runtime/fleet/endurance proof. The real Ubuntu1 C26 denial still requires restoration of its original authorized root/admin connection before that exact journal can be reconciled. No alternate-account replay, new authority/store/controller or post-turn wake has been introduced.
+
+
+## 22. Recovered vendor implementation and release boundary — 2026-11-07 02:41 UTC
+
+MISSION_COMPLETE=false; BUILT_NOT_PROVEN. This milestone records source progress, not installed-role acceptance.
+
+### Canonical release receipts
+
+- Agent OS continuity PR10813 merged at 2026-11-07T02:06:29Z as `a29e6b1354f1f6255582c135eec12306853a5ed0` through the incumbent Macro merge-on-green controller. No native auto-merge was used.
+- Computer-environment guard PR2165 merged at 2026-11-07T02:10:51Z as `cd4600eec2c0420358af1d9b75adbf27feeb613c`. Do not re-arm it.
+- Native integration PR2134 remains original head `7a3160fa76ceae58726eacd27d741872273d3828`. Its current-head status rollup is SUCCESS; its original release effect is now a merge-queue entry, observed position3 AWAITING_CHECKS. Auto request is null because the queue owns the next step. Do not re-arm or duplicate.
+- Terminal metadata PR2170 remains Ready, stacked on PR2134 at `f2a8ae6b5c2a517a882f8001d35e823676bc6ac2`; no auto request. Retarget the original PR to master only after2134's canonical merge.
+
+### Vendor child reconciliation and actual source
+
+The original vendor Fabric run `hermes-teammate-vendor-derive-20261107-c3-01` reached verified-terminal rc1, accepted=false, with a provider connection/session-title error. Exact failure response:292bytes, SHA-256 `e7e0ba556470bd39a62c45ad7efc0bb1b57fc8c979ceb75736a37538becc8d78`. No retry or failover.
+
+Parent inspected the original M1 worktree `/Volumes/STORAGE/agent-workspaces/claude/36170df991f45592/pr-2134-b2a49ae6d982ec8f`. It retained branch `sol/hermes-vendor-derive-20261107-c3`, merge parent `65cb4dd0697ff892016384bf31799b56206c062b` (7a3160 + exact2165 dependency), and one incomplete source file. Parent recovered this same writer/worktree, replaced the incomplete helpers with connected implementation and tested it. Source is now committed and pushed cleanly at `7413842fb903d6a0d62d3d29d5af0fe9e73038f7`, exact remote readback.
+
+Draft PR2171: https://github.com/mastermindx-market-intelligence/Mastermind/pull/2171
+It connects the one closed computer_env_guard derivation to the existing root preparation, complete frozen inventory, native installer, installed receipt, launch and rollback. It has no new permission or runtime owner and activates nothing. Tests:385passed,1skipped under CPython3.12 on M1; the skip requires the actual fixed Linux3.12 recipe. Focused portable subset48passed under3.14. Required hosted Linux CI remains outstanding. Earlier two Linux-oriented lifecycle assertions failed on Mac /tmp and /etc aliases; these were not reported as passing. Actual tracked upstream census:20,971 regular blobs, no tracked symlink/gitlink at selected1c0cd; not host custody proof.
+
+The six-file implementation delta, limitations and rollback tuple are documented in `docs/hermes/NATIVE_VENDOR_DERIVATION.md` at7413842. Preserve the original PR; do not merge the dependent branch into active2134. Parent retargets after canonical2134 merge.
+
+### Next source lanes and bounded refusal
+
+Request-content observation full brief is persisted at:
+https://github.com/mastermindx-market-intelligence/Mastermind/blob/f8787f362eeee9da9b92a011082ab706e76b5039/research/hermes/HERMES_NATIVE_REQUEST_OBSERVATION_BRIEF_2026-11-07.md
+
+Its original Fabric run `hermes-native-request-observation-20261107-c3-01`, controller69401, was REQUEST_REFUSED_BEFORE_LAUNCH with retained request and MMX_FABRIC_EXIT=75. No worker, source branch or result was created by that request; same-run replay is false. Parent proceeds with permitted direct source work, not a duplicate dispatch.
+
+Memory enrollment design is pinned to the original held native recipe/loader/current-claim owner. An additional concrete issue must be resolved before implementing its compiler runner: Macro's compiler imports YAML and local helper code, so an entry-script hash alone does not qualify its executable closure. The reader's actual `sys.executable -B` subprocess must use a qualified source/dependency recipe and a closed environment. Do not guess a Macro host path, widen native import_roots, or treat a duck-typed callback as custody. Also7a3160 does not contain the merged recall provider; compose the actual2163 merge `5ca25e561ffaeacb4ef94bb08f507617f80d0607` when implementing this lane.
+
+No admitted turn, provider dispatch, valid EVAL, browser account enrollment, fleet activation or endurance proof is claimed. Original Ubuntu1 C26 root/admin connection restoration remains the exact installed-runtime gate; no alternate carrier or account was used to replay its denied journal read. Outcome Learning398 stays held.
