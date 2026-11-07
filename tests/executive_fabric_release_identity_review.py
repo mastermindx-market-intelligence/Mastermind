@@ -982,14 +982,6 @@ REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/curre
               (31, 52333, 52352, 'str', '_mastermind_account')),
 }
 
-# Retained protected readiness qualification records the actual proof-host UID.
-# This is evidence, not a runtime default or grant. The one complete UTF-8 token
-# requires this exact full postimage; any byte/path drift restores the guard.
-REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json'] = {
-    'sha256': 'ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33',
-    'sites': (),
-    'utf8_sites': ((61, 13, 16, 'int', '501'),),
-}
 
 # Retained protected readiness qualification records the actual proof-host UID.
 # This is evidence, not a runtime default or grant. The one complete UTF-8 token

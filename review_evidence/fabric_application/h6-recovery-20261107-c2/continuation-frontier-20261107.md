@@ -1,3 +1,13 @@
+## Current source join — original7e and preserving2ce
+
+The owned H6 branch has preserved original7e's exact accepted CI repair and genuinely merged the completed provider-preserving2ce input. Source/installer proof passed391 cases and actual emitted provider AUTO/local-return proof passed27, all without failure/error/skip. Nine artifacts were read back member-by-member; provider116 staysf256, provider118 is72a393 and provider121 is7e9c46 with the accepted41dc entry. Full exact identities and source decisions: `provider-application-owner-join.json`.
+
+The first ordinary qualified account path remains independent from broader H3 optimization. Externally provisioned configurations are not inherently a PhaseB blocker: the actual serving account/config binding, fresh allowance, enforceable whole-operation budget/no-overage, original identity, usage, settlement and recovery are still required. Unknown external config writers and serving adoption remain separate gates for strict mutable shared-capacity/atomicity claims.
+
+The next isolated121+H2+H3/fence source merge has no conflicts and remains unselectable. It has not changed production builder flags to accept that successor, native artifacts, installed selection or account/runtime state. Original #2175/#10740, broader #2232, H4 and originalJ/C3 custody remain protected. Current hosted b694 run42407083688 remains its own original historical-head effect; do not replay or cancel it. MISSION_COMPLETE=false.
+
+---
+
 # H6 continuation after the current source return
 
 ## Durable source and effects

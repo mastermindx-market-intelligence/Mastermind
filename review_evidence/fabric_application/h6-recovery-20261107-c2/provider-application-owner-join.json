@@ -1,0 +1,226 @@
+{
+  "schema": "mastermind.h6.provider_application_owner_join.v1",
+  "original_source": "7e61fb8c8e8e43d08e2272e502b3f8e4386ee95f",
+  "provider_source": "2ce06c261241e2a82723fa01bfc990c748a9b1d0",
+  "h6_source": "b69469ad0677e7ca330a45b061d29c6d393da289",
+  "first_merge": {
+    "utc": "2026-11-07T19:54:15.054726+00:00",
+    "returncode": 0,
+    "stdout": "[sol/web-h6-contract-compose-20261107-c2 de9d2388b1e] Merge original qualified carrier and preserve accepted CI repair\n",
+    "stderr": "",
+    "head": "de9d2388b1e3b00936fd55292b6b2910f5c0bdc2",
+    "tree": "746ae0daa483ca851733751376e3add15f0e08db",
+    "parents": [
+      "b69469ad0677e7ca330a45b061d29c6d393da289",
+      "7e61fb8c8e8e43d08e2272e502b3f8e4386ee95f"
+    ],
+    "status": [],
+    "merge_head": ""
+  },
+  "original_repair_preserved": {
+    "tests/test_fabric_grok47_qwen_release_composition_20261022.py": "ff5e65e2e830afe41975d4e50f30c586ed62cfd1b2141678d34d985c60eed8ce",
+    "tests/test_native_pool_policy_publication.py": "67c566fb12d89d82a9f2267bb65da03d084d34f55ec559d81bb7a09a2429a4d4"
+  },
+  "resolutions": {
+    "expected_head": "de9d2388b1e3b00936fd55292b6b2910f5c0bdc2",
+    "merge_head": "2ce06c261241e2a82723fa01bfc990c748a9b1d0",
+    "resolved_paths": [
+      {
+        "path": "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+        "sha256": "6ca4b768de6d3be694998d6cf8c269aacf4ba4413f2714ee5b7d7944277269bd"
+      },
+      {
+        "path": "ops/native_fabric/quota_continuity/rollout/native_install.py",
+        "sha256": "7611de59d939df241bae3ee5987c11c7428dad856ad6842cef505d1affc62cc5"
+      },
+      {
+        "path": "tests/executive_fabric_release_identity_review.py",
+        "sha256": "a1582a8227d578e7a9c64ce99f43ccf6ad5b8a45e7fd396cae16d76cb62fae10"
+      },
+      {
+        "path": "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py",
+        "sha256": "4ac570d5e9b918694c68eb7ec015198f4d83060b3d690ed907c8ee5d71a15ddc"
+      }
+    ],
+    "staged_tree": "70a391e5a596593211e9e3723c6add11f1bc5a6d",
+    "resolved_source_diff_check": "PASS",
+    "whole_diff_check": "Original C4 unified-patch context blank lines are reported as whitespace; all six patch files are byte-identical to2ce and their pinned hashes remain unchanged.",
+    "unchanged_pinned_patches": [
+      "ops/native_fabric/quota_continuity/rollout/provider_application/slot.py.patch",
+      "ops/native_fabric/quota_continuity/rollout/provider_application/sub.sh.patch",
+      "ops/native_fabric/quota_continuity/rollout/provider_application/pick.py.patch",
+      "ops/native_fabric/quota_continuity/rollout/provider_application/remote_sub.sh.patch",
+      "ops/native_fabric/quota_continuity/rollout/provider_application/lease_broker.py.patch",
+      "ops/native_fabric/quota_continuity/rollout/provider_application/fabric_task.py.patch"
+    ],
+    "ruling": "Separate exact H2/C4 cohorts remain supported. Both source owners share H2 provenance plus C4 staged Broker mapping. Preserve41dc entry, original transition guards and existing CURRENT transaction. Combined H2/provider options fail before output pending distinct whole-cohort qualification. No H3/fence production adoption."
+  },
+  "qualification": [
+    {
+      "root": "/private/tmp/h6-provider-owner-join-proof-3wchwbx7",
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+        "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py",
+        "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py",
+        "ops/native_fabric/quota_continuity/tests/test_go_native_install.py",
+        "tests/test_fabric_grok47_qwen_release_composition_20261022.py",
+        "tests/test_native_pool_policy_publication.py",
+        "--basetemp",
+        "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/fixtures",
+        "--junitxml",
+        "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/result.xml"
+      ],
+      "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+      "rc": 0,
+      "seconds": 124.946,
+      "testcases": 391,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "1b3b9d8a31c2dbc3d7c778b4ec158e841bc0c84fc89abf237f20f6f5d1a4b85a",
+        "result.xml": "0c8dbdc4bdedaf7e6e50e2e24ecdceda7f7be651cdccf1b108ff952981901ae0"
+      }
+    },
+    {
+      "root": "/private/tmp/h6-provider-joined-consumer-proof-zwe9bxgs",
+      "argv": [
+        "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_provider_plan_auto_routing.py",
+        "tests/test_provider_plan_local_return.py",
+        "-o",
+        "addopts=",
+        "--noconftest",
+        "--basetemp",
+        "/private/tmp/h6-provider-joined-consumer-proof-zwe9bxgs/fixtures",
+        "--junitxml",
+        "/private/tmp/h6-provider-joined-consumer-proof-zwe9bxgs/result.xml"
+      ],
+      "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+      "rc": 0,
+      "seconds": 20.525,
+      "testcases": 27,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": {
+        "result.log": "d5f275f98236b6764a4e1a0d729e2bb8bddabc3527fbc50e53598b17d636bb2c",
+        "result.xml": "bfe72279fac0837dd9f8aa7f3425f348b626ddcaa7be6aa9bc0e2ccb7f26a8cb"
+      }
+    }
+  ],
+  "actual_builds": [
+    {
+      "cohort": "ordinary",
+      "directory": "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/fixtures/go-reviewed-build0/application",
+      "members": 109,
+      "manifest_sha256": "a3b345e305c34a5f8b6284fc5ee00c36c0ddf274635886038c472eb88284780f",
+      "inventory_sha256": "6e42565f0f32914c4ee3df58b8c097961f19730de4718f20bc49fbd720308d97",
+      "entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+      "broker_sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+      "all_member_bytes_verified": true
+    },
+    {
+      "cohort": "ordinary",
+      "directory": "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/fixtures/go-reviewed-build0/default",
+      "members": 107,
+      "manifest_sha256": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+      "inventory_sha256": "d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47",
+      "entry_sha256": null,
+      "broker_sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+      "all_member_bytes_verified": true
+    },
+    {
+      "cohort": "ordinary",
+      "directory": "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/fixtures/go-reviewed-build0/http",
+      "members": 112,
+      "manifest_sha256": "bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af",
+      "inventory_sha256": "5faf9b583fe6398d6b6dff0b1033d498b13169d71413c51c846dcc2c8e0aaa66",
+      "entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+      "broker_sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+      "all_member_bytes_verified": true
+    },
+    {
+      "cohort": "h2",
+      "directory": "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/fixtures/h2-complete-native0/application",
+      "members": 109,
+      "manifest_sha256": "9aea48df187d03e6e13496ad5e9dad35ce5a5af6115dea6b650eb7fa62c71df7",
+      "inventory_sha256": "9dbb7d348b8711456eab74e7457d9a5ac7cf0010701d291c53350378825e585a",
+      "entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+      "broker_sha256": "100d6bff060ded3e8606d94cd9a3453b062bf2063f844bbb98b4d709e604d85e",
+      "all_member_bytes_verified": true
+    },
+    {
+      "cohort": "h2",
+      "directory": "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/fixtures/h2-complete-native0/base",
+      "members": 107,
+      "manifest_sha256": "4fe3fee49a6260c96eaf454aa5af14268ce94bd0019b5d06f29d7b45e4979e6c",
+      "inventory_sha256": "bbc37ef439df13ecabc1c9c0cbcca613f57f852a704a5a226072c7e811237dcc",
+      "entry_sha256": null,
+      "broker_sha256": "100d6bff060ded3e8606d94cd9a3453b062bf2063f844bbb98b4d709e604d85e",
+      "all_member_bytes_verified": true
+    },
+    {
+      "cohort": "h2",
+      "directory": "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/fixtures/h2-complete-native0/http",
+      "members": 112,
+      "manifest_sha256": "01adcdf9d6f085e3d9dfdd911a2520d4f72a581599fc06e06b954a8983c7008d",
+      "inventory_sha256": "4f36c81c6a524cf7a60fd14402a4e31f97a5b797704f882f55214b3b444d6520",
+      "entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+      "broker_sha256": "100d6bff060ded3e8606d94cd9a3453b062bf2063f844bbb98b4d709e604d85e",
+      "all_member_bytes_verified": true
+    },
+    {
+      "cohort": "provider",
+      "directory": "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/fixtures/provider-application-build0/application",
+      "members": 118,
+      "manifest_sha256": "72a393d431caf160360aeab0a02a5fb5fffdefd2f21a7916c3419c812d978081",
+      "inventory_sha256": "b99db44af119ff90c493a20b48bf52adf63b0c76bc748dd5ba51ea48edf79216",
+      "entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+      "broker_sha256": "05880dc3e6f0849ff1f39094e2dbfe778797ebaddc04acd3b7474598888ca4cd",
+      "all_member_bytes_verified": true
+    },
+    {
+      "cohort": "provider",
+      "directory": "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/fixtures/provider-application-build0/base",
+      "members": 116,
+      "manifest_sha256": "f256ac145cbf66c5b325d8f8d1cbe5d5e096646b2796bbe05efb45d6fb21dfd4",
+      "inventory_sha256": "f4cae97eba27963387461f164fa54482eea11cd41a8a562bad8bb3b46365ab4e",
+      "entry_sha256": null,
+      "broker_sha256": "05880dc3e6f0849ff1f39094e2dbfe778797ebaddc04acd3b7474598888ca4cd",
+      "all_member_bytes_verified": true
+    },
+    {
+      "cohort": "provider",
+      "directory": "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/fixtures/provider-application-build0/http",
+      "members": 121,
+      "manifest_sha256": "7e9c46b0d9da706ddde154ceb6b431bb7fcfe049ab5553ada077a8879f7efb0e",
+      "inventory_sha256": "5ac98d99008de5523563b52b69c2a75ed1dce656877fe62f8fa946b2e0800dfc",
+      "entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+      "broker_sha256": "05880dc3e6f0849ff1f39094e2dbfe778797ebaddc04acd3b7474598888ca4cd",
+      "all_member_bytes_verified": true
+    }
+  ],
+  "rulings": [
+    "Original7e accepted CI test postimages supersede H6 b694 alternative; both histories preserved.",
+    "The existing builder and installer derive H2 dependency provenance followed by the exact C4 staged-broker relation. Neither whole-source check is widened.",
+    "C4 complete provider predecessor and both transition guards remain exact; selected116 cannot downgrade to107/109/112.",
+    "C4 source patches, nine additions and116 base remain byte-identical. The combined v10/H2 loader41dc changes the118/121 artifact identity and was qualified in this join.",
+    "H2 and provider options remain distinct exact cohorts. Both flags together refuse before creating output; H3/common-fence source remains isolated and unselectable.",
+    "391 source/installer and27 actual emitted provider consumer cases are separate fresh runs; neither is a live provider or installed-generation receipt."
+  ],
+  "runtime_changed": false,
+  "protected_merge": false,
+  "selection_changed": false,
+  "account_grant_changed": false,
+  "mission_complete": false
+}

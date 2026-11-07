@@ -1,0 +1,2770 @@
+{
+  "root": "/private/tmp/h6-provider-owner-join-proof-3wchwbx7",
+  "argv": [
+    "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+    "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py",
+    "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_install.py",
+    "tests/test_fabric_grok47_qwen_release_composition_20261022.py",
+    "tests/test_native_pool_policy_publication.py",
+    "--basetemp",
+    "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/fixtures",
+    "--junitxml",
+    "/private/tmp/h6-provider-owner-join-proof-3wchwbx7/result.xml"
+  ],
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "rc": 0,
+  "seconds": 124.946,
+  "testcases": 391,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "cases": [
+    {
+      "name": "test_native_module_namespace_restores_the_exact_foreign_owner",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_current_host_pull_epoch_refuses_extended_native_base[application]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_current_host_pull_epoch_refuses_extended_native_base[http]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_historical_picker_remains_a_valid_base_but_no_arbitrary_fourth_member",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[handler]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[dependency]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[base]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[picker]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[executor]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[original-collector]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[ubuntu4]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[provider-outcome]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[post-failure]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[post-failure-old-observer]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[post-failure-old-delivery]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[other-member]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_closed_component_drift_refuses_before_go_pair_creation[entry-symlink]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_post_failure_cohort_and_prior_102_are_both_closed",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_old_and_updated_post_failure_pairs_remain_exact_cohorts",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_completed_poll_pair_is_closed_and_cannot_relabel_historical_102",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_ubuntu4_runtime_cohort_preserves_prior_generation_and_rejects_mixtures",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_protected_process_custody_is_one_exact_reversible_source_cohort",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_sparse_config_executor_successor_is_exact_and_does_not_mutate_manifest",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_participant_cohort_preserves_prior_104_and_input_identity",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_collection_successor_preserves_prior_releases_without_backdating",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_committed_original_collection_successor_carries_one_qualified_member",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_committed_original_collection_successor_keeps_parent_closures_exact",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_collector_sparse_and_pool_or_scoped_routes_bind_complete_parents[False-False]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_collector_sparse_and_pool_or_scoped_routes_bind_complete_parents[False-True]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_collector_sparse_and_pool_or_scoped_routes_bind_complete_parents[True-False]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_collector_sparse_and_pool_or_scoped_routes_bind_complete_parents[True-True]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_flagged_build_publishes_the_committed_collector_in_the_complete_release",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_installer_go_validation_accepts_the_committed_collector_release",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_participant_cohort_cannot_relabel_legacy_namespace[binding-absent]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_participant_cohort_cannot_relabel_legacy_namespace[owner-absent]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_participant_cohort_cannot_relabel_legacy_namespace[binding-hash]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_participant_cohort_cannot_relabel_legacy_namespace[owner-hash]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_participant_cohort_cannot_relabel_legacy_namespace[old-operator-with-pair]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_participant_cohort_cannot_relabel_legacy_namespace[new-operator-without-pair]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_participant_cohort_cannot_relabel_legacy_namespace[participants-without-diagnostics]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_protected_custody_cannot_relabel_prior_namespace[104]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_protected_custody_cannot_relabel_prior_namespace[102]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_artifact_recovery_preserves_exact_previous106_and_raw_identity",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace[reader-missing]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace[reader-hash]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace[delivery-hash]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace[new-reader-old-delivery]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace[new-delivery-without-reader]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace[pair-in104]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_artifact_pair_cannot_expand_or_relabel_historical_namespace[pair-in102]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_census_successor_preserves_original_107_without_mutation",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_census_successor_cannot_be_backdated_to_a_historical_namespace[83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d-106]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_census_successor_cannot_be_backdated_to_a_historical_namespace[83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d-104]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_census_successor_cannot_be_backdated_to_a_historical_namespace[83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d-102]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_census_successor_cannot_be_backdated_to_a_historical_namespace[a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f-106]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_census_successor_cannot_be_backdated_to_a_historical_namespace[a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f-104]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_census_successor_cannot_be_backdated_to_a_historical_namespace[a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f-102]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_unknown_census_bytes_refuse_without_changing_the_manifest[ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_unknown_census_bytes_refuse_without_changing_the_manifest[]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_remote_cwd_task_preserves_original_107_and_caller_manifest",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace[72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037-remote-cwd task cannot relabel-106]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace[72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037-remote-cwd task cannot relabel-104]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace[72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037-remote-cwd task cannot relabel-102]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace[2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4-refusal task cannot relabel-106]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace[2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4-refusal task cannot relabel-104]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_remote_cwd_task_cannot_be_backdated_to_a_historical_namespace[2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4-refusal task cannot relabel-102]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort[72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037-members0]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort[72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037-members1]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort[72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037-members2]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort[2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4-members0]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort[2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4-members1]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_remote_cwd_task_still_requires_the_complete_ubuntu4_cohort[2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4-members2]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_unknown_remote_cwd_task_bytes_refuse_without_changing_the_manifest[ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_unknown_remote_cwd_task_bytes_refuse_without_changing_the_manifest[]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_unknown_remote_cwd_task_bytes_refuse_without_changing_the_manifest[0a6cb393fc30d978a78686b9e588f6f51b1b9ec191e291aea4ccf96a4d7bdaa0]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_refusal_diagnostics_preserve_exact_remote_cwd_107_and_raw_identity",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_refusal_task_cannot_mix_the_predecessor_poll_helper",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_refusal_task_requires_the_complete_raw_namespace[pool]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_refusal_task_requires_the_complete_raw_namespace[ext/participant_binding.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_preserves_actual_and_historical_manifest_identity",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_rejects_partial_or_foreign_member[historical-native_remote.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_rejects_partial_or_foreign_member[historical-remote_sub_exec.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_rejects_partial_or_foreign_member[historical-remote_sub.sh]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_rejects_partial_or_foreign_member[historical-remote_sub_helpers.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_rejects_partial_or_foreign_member[historical-support_bundle.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_rejects_partial_or_foreign_member[foreign-native_remote.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_rejects_partial_or_foreign_member[foreign-remote_sub_exec.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_rejects_partial_or_foreign_member[foreign-remote_sub.sh]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_rejects_partial_or_foreign_member[foreign-remote_sub_helpers.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_rejects_partial_or_foreign_member[foreign-support_bundle.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_cannot_relabel_another_complete_base[prior-namespace]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_cannot_relabel_another_complete_base[extra-member]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_cannot_relabel_another_complete_base[old-picker]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_cannot_relabel_another_complete_base[changed-pool]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_inventory_retains_actual_candidate_provenance",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_carrier_source_requires_all_five_exact_members",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_successor_binds_actual_sources_and_preserves_parent",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_rejects_partial_foreign_and_backdated_closures[old-task]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_rejects_partial_foreign_and_backdated_closures[old-runtime]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_rejects_partial_foreign_and_backdated_closures[foreign-task]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_rejects_partial_foreign_and_backdated_closures[foreign-runtime]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_rejects_partial_foreign_and_backdated_closures[missing-task]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_rejects_partial_foreign_and_backdated_closures[missing-runtime]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_rejects_partial_foreign_and_backdated_closures[extra-member]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_rejects_partial_foreign_and_backdated_closures[foreign-parent]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_rejects_partial_foreign_and_backdated_closures[different-valid-parent]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_rejects_partial_foreign_and_backdated_closures[historical106]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_rejects_partial_foreign_and_backdated_closures[historical104]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_rejects_partial_foreign_and_backdated_closures[historical102]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_admission_integrity_forward_delta_is_reversible_and_source_exact",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_both_exact_admission_repair_lineages_remain_distinct[worker]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_both_exact_admission_repair_lineages_remain_distinct[application]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_both_exact_admission_repair_lineages_remain_distinct[application-j]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[worker-go_lease_capability.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[worker-go_lease_gateway.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[worker-lease_broker.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[worker-native_remote.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[worker-remote_sub.sh]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[worker-remote_sub_exec.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[worker-remote_sub_helpers.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[worker-support_bundle.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[foreign-go_lease_capability.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[foreign-go_lease_gateway.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[foreign-lease_broker.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[foreign-native_remote.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[foreign-remote_sub.sh]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[foreign-remote_sub_exec.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[foreign-remote_sub_helpers.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_application_rejects_change_to_any_preserved_member[foreign-support_bundle.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_base_cannot_relabel_an_extended_namespace[application]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_repaired_base_cannot_relabel_an_extended_namespace[http]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_sparse_preflight_is_one_exact_successor_of_the_repaired_application_parent",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_sparse_preflight_cannot_relabel_a_different_complete_parent[old-task]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_sparse_preflight_cannot_relabel_a_different_complete_parent[old-runtime]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_sparse_preflight_cannot_relabel_a_different_complete_parent[old-application-parent]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_sparse_preflight_cannot_relabel_a_different_complete_parent[worker-lineage]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_sparse_preflight_cannot_relabel_a_different_complete_parent[foreign-member]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_sparse_preflight_cannot_relabel_a_different_complete_parent[missing-member]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_sparse_preflight_cannot_relabel_a_different_complete_parent[extra-member]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_sparse_preflight_cannot_relabel_a_different_complete_parent[application109]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_sparse_preflight_cannot_relabel_a_different_complete_parent[http112]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_binds_actual_dependencies_and_preserves_parent",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[old-gateway]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[old-broker]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[foreign-gateway]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[foreign-broker]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[old-executor]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[old-task]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[changed-pool]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[missing-member]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[extra-member]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[application109]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[http112]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[worker-parent]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_has_one_exact_parent_and_actual_dependencies",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_partial_or_mixed_members[missing-ext/support_bundle.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_partial_or_mixed_members[missing-ext/go_lease_gateway.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_partial_or_mixed_members[missing-ext/lease_broker.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_partial_or_mixed_members[foreign-ext/support_bundle.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_partial_or_mixed_members[foreign-ext/go_lease_gateway.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_partial_or_mixed_members[foreign-ext/lease_broker.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_partial_or_mixed_members[preimage-ext/support_bundle.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_partial_or_mixed_members[preimage-ext/go_lease_gateway.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_partial_or_mixed_members[preimage-ext/lease_broker.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_unqualified_whole_parents[old-task]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_unqualified_whole_parents[old-runtime]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_unqualified_whole_parents[foreign-pool]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_unqualified_whole_parents[foreign-executor]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_unqualified_whole_parents[missing-member]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_unqualified_whole_parents[extra-member]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_unqualified_whole_parents[historical102]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_unqualified_whole_parents[historical104]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_rejects_unqualified_whole_parents[historical106]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publisher_only_source_is_not_an_application_precursor",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_emits_actual_complete_provenance[default-107]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_emits_actual_complete_provenance[application-109]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_composition_emits_actual_complete_provenance[http-112]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_application_pool_forward_delta_is_reversible_and_source_exact",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_pool_and_sparse_source_preserves_both_exact_lineages",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_pool_and_sparse_source_refuses_unqualified_closures[old-gateway]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_pool_and_sparse_source_refuses_unqualified_closures[old-broker]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_pool_and_sparse_source_refuses_unqualified_closures[foreign-publisher]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_pool_and_sparse_source_refuses_unqualified_closures[foreign-executor]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_pool_and_sparse_source_refuses_unqualified_closures[old-task]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_pool_and_sparse_source_refuses_unqualified_closures[old-runtime]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_pool_and_sparse_source_refuses_unqualified_closures[foreign-pool]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_pool_and_sparse_source_refuses_unqualified_closures[missing-member]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_pool_and_sparse_source_refuses_unqualified_closures[extra-member]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_pool_and_sparse_source_refuses_unqualified_closures[application109]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_pool_and_sparse_source_refuses_unqualified_closures[http112]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_complete_emitted_generation_preserves_exact_parent_and_source_provenance[base-107]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_complete_emitted_generation_preserves_exact_parent_and_source_provenance[application-109]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_complete_emitted_generation_preserves_exact_parent_and_source_provenance[http-112]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_installer_validates_actual_composed_broker_and_complete_artifact[application]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_installer_validates_actual_composed_broker_and_complete_artifact[http]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_cohort_refuses_without_mutating_manifest[preimage-lease_broker.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_cohort_refuses_without_mutating_manifest[preimage-pick.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_cohort_refuses_without_mutating_manifest[preimage-quota_circuit.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_cohort_refuses_without_mutating_manifest[preimage-quota_remote.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_cohort_refuses_without_mutating_manifest[foreign-lease_broker.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_cohort_refuses_without_mutating_manifest[foreign-pick.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_cohort_refuses_without_mutating_manifest[foreign-quota_circuit.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_foreign_cohort_refuses_without_mutating_manifest[foreign-quota_remote.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_complete_cohort_cannot_relabel_a_different_parent",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_historical_complete_h2_parent_retains_its_exact_inverse[False]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_historical_complete_h2_parent_retains_its_exact_inverse[True]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_current_builder_refuses_historical_parent_before_new_emission[False]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_current_builder_refuses_historical_parent_before_new_emission[True]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_stale_go_dependency_receipt_is_not_accepted_through_historical_inverse",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_reviewed_source_refuses_before_any_stage_write[preimage]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_reviewed_source_refuses_before_any_stage_write[patch]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_reviewed_source_refuses_before_any_stage_write[overlay]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_bytes_through_symlink_are_not_a_qualified_source[lease_broker.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_bytes_through_symlink_are_not_a_qualified_source[pick.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_bytes_through_symlink_are_not_a_qualified_source[quota_circuit.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_exact_bytes_through_symlink_are_not_a_qualified_source[quota_remote.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_installer_refuses_a_changed_bundle_or_staged_postimage[component]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_installer_refuses_a_changed_bundle_or_staged_postimage[stage]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_active_rate_limit_survives_a_later_quota_failure_and_refill",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_actual_atomic_claim_allows_only_one_contender_across_pool_and_model_aliases",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_failed_due_picker_refresh_holds_and_does_not_repeat_network_on_same_attempt",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_host_account_filter_also_refreshes_before_removing_the_blocked_glm_route",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_manual_refill_opens_one_real_broker_lease_then_settled_success_clears_hold",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_new_failure_after_probe_claim_wins_over_late_success",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_new_failure_between_projection_and_claim_is_rechecked",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_normal_picker_refreshes_a_blocked_account_before_filtering_and_real_claim",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_paired_window_and_identity_fences_preserve_hard_hold",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_permission_refusal_is_not_cleared_by_reset_or_positive_cache",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_provider_disable_and_unqualified_cache_are_still_admission_gates",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_rate_component_is_not_extended_to_an_earlier_longer_quota_deadline",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_rate_limit_legacy_generation_and_shared_scope_do_not_gain_early_recovery",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_refresh_during_claim_precedes_stored_grant_and_can_settle",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_refresh_started_before_failure_cannot_reopen_even_if_response_arrives_after",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_unpublished_refusal_blocks_a_separate_real_broker_admission",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage.TestEmittedGlmResetBrokerJourney",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_h2_cannot_relabel_an_incomplete_host_pull_parent[preimage-ext/host_pull.sh]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_h2_cannot_relabel_an_incomplete_host_pull_parent[preimage-ext/host_pull_backend.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_h2_cannot_relabel_an_incomplete_host_pull_parent[preimage-ext/host_pull_daemon.sh]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_h2_cannot_relabel_an_incomplete_host_pull_parent[foreign-ext/host_pull.sh]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_h2_cannot_relabel_an_incomplete_host_pull_parent[foreign-ext/host_pull_backend.py]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_h2_cannot_relabel_an_incomplete_host_pull_parent[foreign-ext/host_pull_daemon.sh]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_quota_reset_native_stage",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_selected_provider_cannot_prepare_legacy_application[application-go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_selected_provider_cannot_prepare_legacy_application[application-retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_selected_provider_cannot_prepare_legacy_application[http-go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_selected_provider_cannot_prepare_legacy_application[http-retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_actual_component_preserves_candidate_and_staged_broker[application-118]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_actual_component_preserves_candidate_and_staged_broker[http-121]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_mixed_combined_source_refuses[broker-preimage]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_mixed_combined_source_refuses[missing-addition]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_mixed_combined_source_refuses[changed-retained]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_or_mixed_combined_source_refuses[unexpected]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_application_commits_and_recovers_original_transaction[application-go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_application_commits_and_recovers_original_transaction[application-retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_application_commits_and_recovers_original_transaction[http-go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_application_commits_and_recovers_original_transaction[http-retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_invalid_provider_predecessor_cannot_fall_through[False-changed-go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_invalid_provider_predecessor_cannot_fall_through[False-changed-retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_invalid_provider_predecessor_cannot_fall_through[False-partial-go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_invalid_provider_predecessor_cannot_fall_through[False-partial-retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_invalid_provider_predecessor_cannot_fall_through[False-no-additions-go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_invalid_provider_predecessor_cannot_fall_through[False-no-additions-retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_invalid_provider_predecessor_cannot_fall_through[True-changed-go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_invalid_provider_predecessor_cannot_fall_through[True-changed-retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_invalid_provider_predecessor_cannot_fall_through[True-partial-go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_invalid_provider_predecessor_cannot_fall_through[True-partial-retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_invalid_provider_predecessor_cannot_fall_through[True-no-additions-go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_invalid_provider_predecessor_cannot_fall_through[True-no-additions-retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_target_requires_qualified_provider_predecessor[go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_target_requires_qualified_provider_predecessor[retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_rewound_staged_dependency_is_not_an_installer_component[application]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_rewound_staged_dependency_is_not_an_installer_component[http]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_postcommit_interruption_does_not_select_again[selection-go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_postcommit_interruption_does_not_select_again[selection-retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_postcommit_interruption_does_not_select_again[receipt-go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_postcommit_interruption_does_not_select_again[receipt-retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_plan_rechecks_complete_pointer_before_any_write[go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_plan_rechecks_complete_pointer_before_any_write[retained_go_owner]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_combined_source_retains_original_application_v3_journeys",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_unqualified_provider_quota_flag_combination_refuses_before_output",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_provider_application_transition",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_real_completed_successor_go_transition_commits_once_and_remote_stays_legacy",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_interrupted_transition_reconciles_without_second_selection[intent]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_interrupted_transition_reconciles_without_second_selection[launcher]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_interrupted_transition_reconciles_without_second_selection[pool]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_interrupted_transition_reconciles_without_second_selection[task]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_interrupted_transition_reconciles_without_second_selection[go]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_interrupted_transition_reconciles_without_second_selection[selection]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_original_interrupted_transition_reconciles_without_second_selection[receipt]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_completed_history_survives_later_current_but_stale_go_plan_cannot_select",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_different_valid_bundle_between_bridges_or_before_cas_is_not_adopted[pool]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_different_valid_bundle_between_bridges_or_before_cas_is_not_adopted[go]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_sources_or_custody_refuse_without_installing[component]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_sources_or_custody_refuse_without_installing[payload-symlink]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_sources_or_custody_refuse_without_installing[ingress-hardlink]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_sources_or_custody_refuse_without_installing[launcher-source]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_sources_or_custody_refuse_without_installing[foreign-intent]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_selected_missing_go_launcher_is_not_repaired_by_reconciliation",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_retained_completed_successor_prepares_one_truthful_forward_go_plan",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_pruned_history_is_never_relabelled_as_an_intact_successor",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_retained_go_transition_commits_once_and_keeps_the_original_transaction",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_retained_evidence_refuses_without_installing[successor-plan]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_retained_evidence_refuses_without_installing[successor-payload]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_retained_evidence_refuses_without_installing[prior-payload]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_retained_evidence_refuses_without_installing[receipt]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_retained_evidence_refuses_without_installing[launcher]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_retained_evidence_refuses_without_installing[bridge]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_restored_original_bootstrap_refuses_the_retained_admission",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_foreign_or_mixed_retained_chain_refuses",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_partial_target_or_changed_component_refuses",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_stale_retained_plan_cannot_select_a_later_current",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_studio_consumer_conflict_refuses_before_any_ingress_write",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_interrupted_retained_transition_reconciles_without_second_selection[intent]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_interrupted_retained_transition_reconciles_without_second_selection[launcher]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_interrupted_retained_transition_reconciles_without_second_selection[pool]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_interrupted_retained_transition_reconciles_without_second_selection[task]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_interrupted_retained_transition_reconciles_without_second_selection[go]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_interrupted_retained_transition_reconciles_without_second_selection[selection]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_interrupted_retained_transition_reconciles_without_second_selection[receipt]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_completed_retained_go_proof_is_available_to_service_owner",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_completed_retained_go_service_proof_keeps_all_native_fences[receipt]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_completed_retained_go_service_proof_keeps_all_native_fences[intent]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_completed_retained_go_service_proof_keeps_all_native_fences[pointer]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_completed_retained_go_service_proof_keeps_all_native_fences[bridge]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_completed_retained_go_service_proof_keeps_all_native_fences[launcher]",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_completed_go_service_owner_refuses_unknown_schema_before_reader",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_completed_go_service_owner_never_falls_back_from_invalid_intact_plan",
+      "classname": "ops.native_fabric.quota_continuity.tests.test_go_native_install",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_grok47_merged_source_digest_is_pinned",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_rebuild_staged_manifest_is_exact",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_published_bundle_keeps_protected_worker_ceiling_and_operator_scope",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_published_paid_model_and_grok_controls_composed",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_rejects_changed_accepted_grok_source",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_approved_grok_bytes_stay_pinned_after_concurrent_source_change",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_unqualified_forward_composition[changed-artifact_delivery.py]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_unqualified_forward_composition[changed-pick.py]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_unqualified_forward_composition[changed-remote_sub.sh]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_unqualified_forward_composition[changed-remote_sub_helpers.py]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_unqualified_forward_composition[missing-artifact_delivery.py]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_unqualified_forward_composition[missing-pick.py]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_unqualified_forward_composition[missing-remote_sub.sh]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_unqualified_forward_composition[missing-remote_sub_helpers.py]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_unqualified_forward_composition[symlink-artifact_delivery.py]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_unqualified_forward_composition[symlink-pick.py]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_unqualified_forward_composition[symlink-remote_sub.sh]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_unqualified_forward_composition[symlink-remote_sub_helpers.py]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_tampered_overlay_base_despite_valid_forward[artifact_delivery.py]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_builder_refuses_tampered_overlay_base_despite_valid_forward[pick.py]",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_forward_map_retains_original_four_and_adds_three_long_horizon_bounds",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_protected_qwen_files_and_exact_context_reader_forward",
+      "classname": "tests.test_fabric_grok47_qwen_release_composition_20261022",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publication_uses_existing_target_lock_and_durable_receipt",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_rollback_is_same_owner_cas_in_reverse_not_pointer_rewind",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_stale_expected_current_refuses_under_original_lock",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_noop_has_no_write_or_activation",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_critical_change_cannot_silently_invalidate_native_snapshots[model]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_critical_change_cannot_silently_invalidate_native_snapshots[pool]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_critical_change_cannot_silently_invalidate_native_snapshots[quota_limit]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_active_or_unknown_metadata_refuses_without_reaping[active-original]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_active_or_unknown_metadata_refuses_without_reaping[.unrecognized-sidecar]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_active_or_unknown_metadata_refuses_without_reaping[.original.preexec-settlement.json]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_reconciler_observation_does_not_require_or_clear_idle_state",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_lock_busy_never_creates_second_lock_or_rebinds",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_symlink_final_operand_refuses[candidate]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_symlink_final_operand_refuses[rollback]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_symlink_final_operand_refuses[target]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_symlink_final_operand_refuses[lock]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_rollback_cannot_be_the_live_inode",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_installer_lock_must_already_exist",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_writable_foreign_policy_is_refused[438]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_writable_foreign_policy_is_refused[436]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_candidate_changed_before_commit_refuses",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_lost_replace_ack_retains_original_new_target_no_replay",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_directory_sync_failure_is_unknown_not_success",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_unknown_target_hash_is_not_exposed",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publication_validates_public_policy_before_replace[x: &x [*x]]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publication_validates_public_policy_before_replace[{\"pools\":{},\"pools\":{}}]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publication_validates_public_policy_before_replace[[]]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publication_validates_public_policy_before_replace[\"\\ud800\"]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_even_noncritical_source_field_cannot_carry_a_secret",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_operator_uses_real_selected_publisher_and_observes_same_target",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_older_installed_owner_is_not_replaced_with_checkout_code",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_changed_selected_generation_cannot_dispatch",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_lost_owner_reply_is_unknown_and_never_resent",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_real_operator_cli_fixed_refusal_does_not_echo_invalid_digest",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_legacy_three_argument_policy_consumer_keeps_its_contract",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_cancelled_modifying_owner_call_stays_unknown[KeyboardInterrupt]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_cancelled_modifying_owner_call_stays_unknown[SystemExit]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_lost_lock_close_ack_after_replace_keeps_unknown_and_original_target",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publisher_successor_preserves_actual_manifest_and_prior_go_validator",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publisher_forward_transform_refuses_partial_or_mixed_closures[other_member]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publisher_forward_transform_refuses_partial_or_mixed_closures[missing_member]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publisher_forward_transform_refuses_partial_or_mixed_closures[renamed_member]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_publisher_forward_transform_refuses_partial_or_mixed_closures[added_member]",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    },
+    {
+      "name": "test_unknown_publisher_never_receives_forward_compatibility",
+      "classname": "tests.test_native_pool_policy_publication",
+      "failure": false,
+      "error": false,
+      "skipped": false
+    }
+  ],
+  "files": {
+    "result.log": "1b3b9d8a31c2dbc3d7c778b4ec158e841bc0c84fc89abf237f20f6f5d1a4b85a",
+    "result.xml": "0c8dbdc4bdedaf7e6e50e2e24ecdceda7f7be651cdccf1b108ff952981901ae0"
+  }
+}
