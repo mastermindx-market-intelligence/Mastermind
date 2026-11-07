@@ -1,4 +1,4 @@
-"""Finite prospective cohort over authentic protected107; no install effects."""
+"""Finite Memory cohort over immutable prospective combined107; no install effects."""
 import copy
 import hashlib
 import json
@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from ops.native_fabric.quota_continuity.rollout import build_review_stage as b
 ROOT=Path(__file__).resolve().parents[1]
-PARENT=ROOT/'tests/fixtures/memory-protected-parent-107.json'
+PARENT=ROOT/'tests/fixtures/memory-prospective-parent-107-72ba7ebf.json'
 
 
 def current():

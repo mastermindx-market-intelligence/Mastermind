@@ -595,6 +595,79 @@ Required CI run `42359846449`, shard4 job `128365751637`, exposed an inherited r
 
 Moved the existing bounded original-task wait before the event snapshot. Full event-log equality and the exact two native turns remain required; no production path or assertion was loosened. The complete12-case turn file passed with zero failures/errors/skips. Evidence: `review_evidence/fabric_admission/turn-settlement-ci-20261107.json`. The native manifest remains the previously qualified WORKER107 identity and must not replace the larger APPLICATION installed generation.
 
+### Combined host-pull source image — 2026-11-07 (#1836)
+
+The host-pull composition advances the ordinary current source image from
+`8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6`
+to
+`a42259df6aa9dc910abd3e6eacb75f30b9089663d569c88f946f965bc8ceedd3`.
+The existing builder emitted 107 members, 75 baseline files and 3,089,380
+payload bytes. Its source-inventory SHA256 is
+`553b24be3cbb9523d618ebdbfd95421b39dc9ef5783cff0946404dba5787c298`.
+
+Only `ext/host_pull.sh`, `ext/host_pull_backend.py` and
+`ext/host_pull_daemon.sh` change in that manifest and inventory. All other
+member hashes, metadata and installed-preimage identities remain intact.
+The builder validates one exact three-member inverse against the complete
+8af730 parent, then uses the unchanged 815ec admission-parent guard; emitted
+metadata continues to identify the actual repaired bytes. The historical
+95-member upgrade and 6ac208 manifest are unchanged.
+
+The earlier variant table and dated CI records above describe their original
+source epochs. Their 8af730 identity remains historical predecessor authority;
+it must not be globally replaced with the new current identity. Current
+qualification consumers bind the generated a42259 manifest. The catalog and
+paid-initializer expectations each require only that current-pin correction:
+the initializer's historical comparison still has 95 original members,
+12 additions, 36 changed common members and 59 unchanged original members.
+
+The three historical host-pull payloads are retained as authenticated fixture
+data for the old 102-member stage. Current Go tests first normalize the
+validated host epoch before exercising the older admission inverse. Hosted
+native preflight job 128415654001 in workflow 42376687583 passed these consumers;
+that run's ordinary shard 5 subsequently identified the two stale current-pin
+assertions above. This records the distinct results and does not claim the
+full workflow passed.
+
+The combined-image technical source review covers the unchanged production
+composition. Source qualification and a protected merge do not authorize an
+installed generation, CURRENT change, launchctl action, H1 admission, provider
+or worker start. Existing APPLICATION #2175 composition and enrollment
+constraints remain separate; no installed generation was replaced or selected.
+
+
 ### Prospective Memory source-only109 candidate
 
 Derived manifest `c11a3f11ffc693102ab17d93a39362a2f01a657157b19d41ce497bf0c5a82ea9` preserves the protected107 parent `8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6` through the closed seven-member replacement/two-helper cohort. The original95/102 maps, immutable overlays and paired-upgrade target stay exact. Native evaluation source and new source records are review inputs only: no installed generation, selection, issuer permission, study exposure or science admission is claimed. Paired Macro source integration remains outstanding.
+
+### Prospective Memory over combined host-pull/Broker source — 2026-11-07
+
+The earlier first-Memory paragraph is historical. The actual four-case Macro
+`b2513ad2` to native `71ef08cf` source join is accepted separately; it proves the
+prospective issuer/admission/assignment/owned-FD/pair/resolution path only. All
+verification/science flags remain false, and no live permission is inferred.
+
+This source-only composition consumes immutable prospective common source
+`72ba7ebf2f8b75324fded7f7740401faf4e79472`, whose exact 107-member manifest is
+`45a90565e189bca551cb79f579296689aa00674778d3917a6af75a720ff71c18`.
+It is not a claim that PR2224 landed. Memory's seven exact replacements and two
+named helpers derive 109 members with manifest
+`45085e1d0427111cef6e177378104bdb175ff421f5275216749a878c4d640a35` and inventory
+`2a318f7116344c22b4499171bee867cfae1166a8f32250ffbc1d9a46f2402068`.
+The separate original protected107 fixture remains byte-exact; the new fixture
+explicitly names its prospective72 source. Emitted/captured bytes remain the
+current109, while the exact Memory inverse yields combined107 before its
+unchanged, separately reviewed host-pull/quiescence and admission proof views.
+The Go pair and HTTP trio retain their exact 111/114 output closures.
+
+The finite cohort/Go check reports141 checks/121 testcase elements (subtest
+accounting), all passing;32 staging/seal cases pass. Both selected historical
+95/102 owner cases and the selected current support-executor case pass. The
+same security-module run also imports donor cases: its total69 has37 passes
+and32 failures, with the first failure in the already identified unchanged
+sparse-Git observation path. That compatibility repair remains with the common
+source owner; it is not waived or silently fixed here. Its final exact executor
+and common-cohort source must be consumed before publication eligibility.
+
+No installed image, CURRENT selection, host read, provider/worker start, study,
+private-source access or runtime adoption was performed by this composition.

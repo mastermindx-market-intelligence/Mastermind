@@ -232,10 +232,10 @@ ADMISSION_INTEGRITY_DIGESTS = {
 }
 
 
-# Prospective source-only Memory cohort over the immutable accepted dd61
-# 107-file parent (not yet protected). This restores only these accepted replacements/additions before the
+# Prospective source-only Memory cohort over immutable accepted 72ba7ebf
+# combined107 parent (not yet protected). This restores only these accepted replacements/additions before the
 # unchanged historical validator; it grants no install, issuer or study right.
-MEMORY_OWNER_PARENT_MANIFEST_SHA256 = '7b58e10efbf879ac6e2e3e4c6b89ddc2a79cba4f0b1b47f0131bbafc34bc1ce9'
+MEMORY_OWNER_PARENT_MANIFEST_SHA256 = '45a90565e189bca551cb79f579296689aa00674778d3917a6af75a720ff71c18'
 MEMORY_OWNER_PREIMAGES = {'ext/artifact_delivery.py': '6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d',
  'ext/fabric_operator_contract.py': 'e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e',
  'ext/fabric_operator_owner.py': '90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f55c5f72c0c7',
@@ -284,7 +284,7 @@ def before_qualification_quiescence(manifest):
     if previous.get("ext/lease_broker.py") != QUALIFICATION_QUIESCENCE_BROKER_SHA256:
         return previous
     previous["ext/lease_broker.py"] = QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
-    if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != QUALIFICATION_QUIESCENCE_PARENT_SHA256:
+    if sha((json.dumps(_source_integrity_parent(previous), sort_keys=True, indent=2) + "\n").encode()) != QUALIFICATION_QUIESCENCE_PARENT_SHA256:
         raise ValueError("qualification quiescence parent closure differs")
     return previous
 
@@ -304,6 +304,57 @@ def before_admission_integrity(manifest):
     previous.update(ADMISSION_INTEGRITY_PREIMAGES)
     if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256:
         raise ValueError("native admission integrity parent closure differs")
+    return previous
+
+
+# The complete host-pull repair composes only on the current protected107
+# admission-integrity closure. This inverse is a validation view; emitted
+# manifests and staged payloads keep the repaired source identities.
+HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+HOST_PULL_INTEGRITY_PREIMAGES = {
+    "ext/host_pull.sh": "b58b4cf4932b801df45d4a70fdd99aaaee800e7e57cc06501aa5c21b20ea8a1c",
+    "ext/host_pull_backend.py": "d00ff264dcb1a51b73d1e1f772da22a2130873f517299e8c430f060a8191f248",
+    "ext/host_pull_daemon.sh": "826aed96db81ecbfee1b647a1d5e4842414d43961b6daaea5a77606e9e679345",
+}
+HOST_PULL_INTEGRITY_DIGESTS = {
+    "ext/host_pull.sh": "464d9a5522a61311d5e8c2b7495a6297c86300d611903ad56524d4aa2e574e72",
+    "ext/host_pull_backend.py": "822226666c479137afe8f357d43032a805066a71a5b90d38f2051b40230c2ae9",
+    "ext/host_pull_daemon.sh": "842c12036b7bcd1a7101747a522efa272a893474342d57817fb06ecee3e73f0b",
+}
+
+
+def _source_integrity_parent(manifest):
+    """Prove the same complete parent for either or both exact source deltas.
+
+    This private proof view never replaces emitted or captured current bytes.
+    Each public inverse still returns only its own declared inverse.
+    """
+    previous = dict(manifest)
+    if previous.get("ext/lease_broker.py") == QUALIFICATION_QUIESCENCE_BROKER_SHA256:
+        previous["ext/lease_broker.py"] = QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
+    if any(previous.get(name) == digest
+           for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        if any(previous.get(name) != digest
+               for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+            raise ValueError("native host-pull integrity cohort is incomplete or foreign")
+        previous.update(HOST_PULL_INTEGRITY_PREIMAGES)
+    return previous
+
+
+def before_host_pull_integrity(manifest):
+    """Validate the complete host-pull successor without changing its identity."""
+    if type(manifest) is not dict:
+        raise ValueError("native host-pull integrity manifest invalid")
+    if not any(manifest.get(name) == digest
+               for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        raise ValueError("native host-pull integrity cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(HOST_PULL_INTEGRITY_PREIMAGES)
+    if sha((json.dumps(_source_integrity_parent(previous), sort_keys=True, indent=2) + "\n").encode()) != HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256:
+        raise ValueError("native host-pull integrity parent closure differs")
     return previous
 
 
@@ -334,7 +385,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     if type(manifest) is not dict:
         raise ValueError("native admission integrity manifest invalid")
     actual_manifest = dict(manifest)
-    manifest = before_admission_integrity(before_memory_owner_integrity(actual_manifest))
+    manifest = before_admission_integrity(before_host_pull_integrity(before_memory_owner_integrity(actual_manifest)))
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS} - set(MEMORY_OWNER_ADDITIONS)
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -688,7 +739,7 @@ def main():
                     or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
                 raise ValueError('qualified pure YAML member differs')
     # Qualify the complete repair cohort even when no APPLICATION pair is added.
-    before_admission_integrity(before_memory_owner_integrity(manifest))
+    before_admission_integrity(before_host_pull_integrity(before_memory_owner_integrity(manifest)))
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)
