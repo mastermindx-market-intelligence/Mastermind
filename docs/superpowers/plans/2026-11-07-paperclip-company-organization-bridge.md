@@ -108,3 +108,175 @@ Current Chairman assignment: complete the native signed-in organizational dashbo
 | O3.4 | Signed-in real-data acceptance | Exact source/PR/test/browser receipts, actual selection-to-agent/result navigation; fixtures/build/CI alone do not satisfy |
 
 O3 remains `in_progress`; the mission is incomplete until O3.4. Save milestones in this existing plan and the source PR, with exact current head and readback. Agent OS remains the organizational owner; this appendix creates no new workstream, task registry, admission or watcher.
+
+### O3 implementation and qualification — 7 November 2026
+
+**Owner / original carrier:** `organization-live-experience-20261107-c3`, branch
+`sol/web-organization-live-experience-20261107-c3`, managed workspace
+`/Volumes/Mastermind 2/agent-workspaces/web/organization-live-experience-20261107-c3`.
+This continuation owns `app/mastermind_os/src/organization/**`, this existing
+plan, and its new `docs/evidence/organization-live-experience-20261107-c3/` evidence
+directory. The earlier plan commit is `fbca40efcf777d08e174ec9baa97b7e090bd4ed4`.
+O1/O2 and #2173 remain DO_NOT_REDO. This is **BUILT_NOT_PROVEN**, not product acceptance.
+
+#### Capability delivered in source
+
+The existing OrganizationWorkspace now accepts the incumbent Office's optional
+`missionProjection`, existing project/result navigation callbacks, an explicit
+`loading` signal, and the incumbent plan-reader inputs. It does no acquisition,
+creates no identity, and owns no task, scheduler, runtime or source store.
+
+The pure adapter strictly decodes the existing Mission v2/v3, checks the exact
+auth generation, work/root, session/binding and owner revision, and reuses
+`completeMissionOfficeRead`. A CURRENT label without the owner receipt is
+insufficient. Historical, denied, mismatched or unavailable observations reveal
+no current work. A detached qualified value feeds the view.
+
+Observed work reuses `missionInteriors` and `qualifyWorkerResultRef`. It displays
+actual job/worker/attempt identities, selectable job details, parent/child
+navigation, execution/review/acceptance distinctions and exact retained-result
+destinations. An active observation requires the matching running attempt and an
+observed worker. Queued is distinct from running. Complete job coverage with an
+unknown activity still withholds activity totals. Missing worker or charter
+availability stays unknown. Counts describe selected-operation jobs, never a
+company or agent census.
+
+The existing admitted-plan inspector is relocated once through the app owner's
+inputs. It retains its own explicit read, auth generation, permission and
+selection fences and remains usable independently when Mission is unavailable.
+Mission unavailability supplies no worker association to that independent read.
+No second plan reader is created.
+
+The view has EN/ZH copy, existing Noir/light tokens, neutral container borders,
+390/760px responsive rules, keyboard focus into the selected detail, loading
+geometry, filtered/empty and degraded states. These are implemented behaviors;
+responsive browser appearance remains unaccepted as described below.
+
+#### Source and writer custody
+
+#2180's live source writer advanced the original native app operation to
+`ea7a1f0b52e8449ca68ed7622611821a0784480b` during this work. The source workspace
+status and published PR readback matched that head. This is affirmative current
+writer evidence. `MetaCeoOffice.tsx`, `App.tsx`, native auth/conversation files
+and #2179's leadership reader/client remain untouched by this continuation.
+
+[Coordination comment on #2180](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2180#issuecomment-6702521153)
+names the source boundary and proposed inputs. Delivery is not pickup or
+integration acceptance. Session-target discovery returned an empty list; no
+addressable runtime recipient was invented.
+
+The reviewable
+[`incumbent-office-mount.patch`](../../../app/mastermind_os/src/organization/incumbent-office-mount.patch)
+is prepared **against exact incumbent head `ea7a1f0b52e8449ca68ed7622611821a0784480b`**.
+It passes `missionProjection` and the real callbacks, relocates the one existing
+plan inspector, and opens the Organization disclosure when a CURRENT Mission
+exists. It does not apply itself. It is a zero-context patch; the reconciled app
+writer must verify the exact current preimage and use
+`git apply --check --unidiff-zero` before an authorized application. A read-only
+check against the incumbent workspace succeeded. The loading input must come
+from the incumbent acquisition's actual pending state; UNKNOWN must not be
+relabeled as loading.
+
+The protected source comparison from `23c9b011e30a4acc6892a59d67a629f74b07a491`
+to `de5c29e73be53ad40c4d165db197197d1d965c12` changed no organization consumer,
+Mission/Office/Fabric helper, or governing law in this dependency set. The usable
+procedure pin is retained; no ancestry-only merge or rebase was performed.
+
+#### Actual executable evidence
+
+[Qualification receipt](../../evidence/organization-live-experience-20261107-c3/qualification.json)
+binds the source SHA-256 values and commands:
+
+- `npm run typecheck`: exit 0.
+- `npx vitest run src/organization`: **3 files, 70 tests passed**, exit 0.
+  Existing hierarchy tests remain unchanged (12); new UI integration tests (20);
+  new pure adapter tests (38).
+- `npm run build`: exit 0. Existing large-bundle and ineffective dynamic-import
+  warnings remain; no deployment is implied.
+- Author review of the diff and source-custody boundary; no formal GitHub approval
+  or distinct technical-review prerequisite is claimed.
+- Native source checks and the patch application check are read-only. The reserved
+  app/reader files were not changed.
+
+Regression inputs reuse committed owner-produced exports:
+`mission-v2-current-128c46f6.json`,
+`mission-v4-owner-accepted.json` (only its nested v3 Mission),
+`mission-v3-owner-current-operator-harness.json`, and
+`window-mission-association-producer.json`. Controlled test mutations are
+explicitly labeled; fixtures prove consumer behavior, not live data or acceptance.
+
+A bounded paid Fabric test-writing child
+`organization-mission-tests-20261107-c3-01` returned under this exact root/parent,
+terminal rc 0, response SHA-256
+`b6b09f24b121f45246e495f0040fc81b426ec420fe7ca48ad87506183e7478a0`.
+The parent corrected a test helper that ignored overrides and the return's
+incorrect implication that already-merged #2173 would add the new adapter.
+The substantive exported-helper historical-count finding was repaired and
+regressed. Unknown activity totals were tightened by product judgment.
+The repaired tests ran in the parent's workspace. The exact response was
+manually reviewed and canonical Fabric acceptance read back true. This was paid
+test labor, not a separate formal review. An initial acceptance argument was
+too small for the returned bytes; original-ledger readback showed not accepted,
+then the corrected size on the same carrier accepted the same digest once.
+No child restart, retry, account switch or duplicate acceptance is claimed.
+The native architecture adviser returned read-only judgment and received explicit
+ACCEPTED / STOP; it made no code edits.
+
+#### Real browser evidence and current blockers
+
+The actual deployed [Mastermind OS](https://mcp.mastermind-x.com/os/) page displayed
+**signed in**, but Today/Projects were `UNAVAILABLE`; a single explicit
+**Refresh Projects** completed with `SOURCE_UNAVAILABLE`. No exact Mission could
+be selected. This establishes the visible deployed failure, not successful
+authorized data retrieval.
+
+[Captured deployed Projects state](../../evidence/organization-live-experience-20261107-c3/live-projects-source-unavailable.jpg)
+has SHA-256
+`66c7f90178f4b66a90cca4c805278c260acfba175e0db4d6e723464ed1cc9785`.
+Observed deployed asset names were `/os/assets/index-CmhQwMIu.js` and
+`/os/assets/index-Db36Ii6P.css`. Their owning source revision was not established;
+this image is not a screenshot of this candidate.
+
+The candidate's loopback preview could not be reached from the connected browser
+(`ERR_SOCKET_NOT_CONNECTED`). A subsequent static rendered-HTML layout
+inspection was explicitly rejected by Browser URL policy because `data:` is not
+an allowed protocol. That action ended; no alternate browser surface, network
+egress workaround, raw CDP or injected script was used. The temporary preview
+sources were removed and the owned development session was terminated.
+No responsive screenshot, live candidate mount, or production acceptance is
+claimed.
+
+Independent canonical reads are distinct:
+- Executive state returned `backend_unavailable` for that installed reader.
+- Executive Fabric `view=roots, limit=25` succeeded at
+  `2026-11-07T05:25:40Z`, with bounded/truncated, explicitly unjoined provenance.
+  Runtime source identity `b9ed85ddd18d8c6c2a0fe298f8e52cb4`, SAME generation 2,
+  snapshot digest
+  `2f761b36d007ee3ba7b506e7feced7468bca2fbd4fd901aa1f9964d2fd106a36`.
+  This does not join any root to this workstream or authorize new submissions.
+  The successful action disproves a blanket claim that all Executive reads are
+  unavailable; it does not repair the app's Projects source.
+
+#### Next material product work, still in original scope
+
+1. Complete the authenticated organization-observation path using the existing
+   producer/owner. The optional Hermes hierarchy observation remains unbound;
+   charter seats are not a live roster. No current MissionHost or Secretary
+   roster method has been established.
+2. Reconcile with the verified live #2180 writer and mount the provided consumer
+   through its existing authenticated app inputs, preserving #2179's reader
+   custody and the single plan reader. No historical-author ACK is required, but
+   current writer protection remains.
+3. Diagnose and repair the app's actual Projects/Mission acquisition under its
+   existing service/auth owner. Do not fabricate a project/root association from
+   the separately available Fabric root list.
+4. Qualify the real signed-in journey: exact selected project → observed worker/
+   job → admitted dependencies → retained result, stale/revoke/loading behavior,
+   EN/ZH and 390px/desktop dark/light layout. Bind screenshots and results to the
+   actual mounted candidate/release.
+5. Consume exact-head hosted checks and actual source/release holds. Remain Draft
+   while the original consumer integration and visual acceptance are incomplete;
+   no merge, install, deployment or product-acceptance claim follows these tests.
+
+The parent mission remains incomplete. This source continuation is not a new
+program, task store, runtime grant, detached daemon or claimed background worker.

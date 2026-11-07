@@ -1,5 +1,9 @@
-import type { ProjectionContext, SourceState } from "../meta-ceo/projection";
+import type { OfficeProjection, ProjectionContext, SourceState } from "../meta-ceo/projection";
 import { sameTarget } from "../meta-ceo/projection";
+import type { ResultSelection } from "../result";
+import { qualifyOrganizationMission } from "./organization-mission";
+import { OrganizationMissionView } from "./OrganizationMissionView";
+import { AdmittedPlanInspector, type AdmittedPlanInspectorProps } from "../planning/AdmittedPlanInspector";
 import "./organization-workspace.css";
 
 /** A view of the *existing* Hermes owner response, never an organization registry. */
@@ -10,10 +14,20 @@ export interface OrganizationObservation {
   readonly value: unknown;
 }
 
+export type OrganizationPlanReader = Pick<AdmittedPlanInspectorProps,
+  "read" | "readActivity" | "sourceGeneration" | "canRead">;
+
 export interface OrganizationWorkspaceProps {
   readonly binding: ProjectionContext;
   readonly missionState: SourceState;
   readonly observation?: OrganizationObservation;
+  /** The incumbent authenticated Office acquisition, never a second Mission fetch. */
+  readonly missionProjection?: OfficeProjection;
+  readonly loading?: boolean;
+  readonly onOpenProject?: (selection: { workRef: string; rootJobId: string }) => void;
+  readonly onInspectWorkerResult?: (selection: ResultSelection) => void;
+  /** Relocate the incumbent plan reader here; do not mount a second plan reader. */
+  readonly planReader?: OrganizationPlanReader;
   readonly locale?: "en" | "zh-CN";
 }
 
@@ -118,6 +132,9 @@ export function qualifyOrganization(
 
 const COPY = {
   "Organization": "组织架构",
+  "Observed work and reporting": "已观测工作与汇报关系",
+  "Reading organization…": "正在读取组织信息…",
+  "Current work is unavailable for this identity and selection. Activity remains unknown.": "当前身份和选择下的工作信息不可用，活动仍未知。",
   "Read-only reporting view": "只读汇报架构",
   "The organization source has not been qualified for this selected mission. This is not evidence of no team or no work.":
     "此任务尚无已核验的组织来源。这不代表团队或工作不存在。",
@@ -141,15 +158,38 @@ const COPY = {
     "参考汇报关系不授予权限，也不证明角色正在运行。结果或绿色检查不等于验收。",
 } as const;
 
-export function OrganizationWorkspace({ binding, missionState, observation, locale = "en" }: OrganizationWorkspaceProps) {
+export function OrganizationWorkspace({
+  binding, missionState, observation, missionProjection, loading = false,
+  onOpenProject, onInspectWorkerResult, planReader, locale = "en",
+}: OrganizationWorkspaceProps) {
   const t = (key: keyof typeof COPY) => locale === "zh-CN" ? COPY[key] : key;
   const context = qualifyOrganization(binding, missionState, observation);
+  const mission = qualifyOrganizationMission(binding, missionState, missionProjection);
+  if (loading) return <section className="organization-workspace" aria-label={t("Organization")} aria-busy="true">
+    <header className="organization-workspace__header"><h2>{t("Organization")}</h2></header>
+    <p role="status">{t("Reading organization…")}</p>
+    <div className="organization-workspace__skeleton" aria-hidden="true">
+      <span /><span /><span /><span />
+    </div>
+  </section>;
   return <section className="organization-workspace" aria-label={t("Organization")}>
     <header className="organization-workspace__header">
       <h2>{t("Organization")}</h2>
-      <span>{t("Read-only reporting view")}</span>
+      <span>{t(mission ? "Observed work and reporting" : "Read-only reporting view")}</span>
     </header>
-    {!context ? <p role="status">{t("The organization source has not been qualified for this selected mission. This is not evidence of no team or no work.")}</p> : <>
+    {mission && <OrganizationMissionView key={JSON.stringify([
+      binding.authGeneration, binding.selection, binding.sessionRef, binding.bindingGeneration, binding.revisions.mission,
+    ])} mission={mission} observedAt={missionProjection!.mission.source.observed_at!}
+      onOpenProject={onOpenProject} onInspectWorkerResult={onInspectWorkerResult}
+      hasPlanReader={!!planReader} locale={locale} />}
+    {missionProjection && !mission && <p className="organization-workspace__notice" role="status">
+      {t("Current work is unavailable for this identity and selection. Activity remains unknown.")}
+    </p>}
+    {planReader && <AdmittedPlanInspector key={binding.authGeneration} {...planReader}
+      selection={binding.selection ? { work_ref: binding.selection.workRef, root_job_id: binding.selection.rootJobId } : null}
+      mission={mission} missionSourceState={mission ? "CURRENT" : "UNAVAILABLE"}
+      missionObservedAt={mission ? missionProjection!.mission.source.observed_at : null} locale={locale} />}
+    {!context ? <p className="organization-workspace__notice" role="status">{t("The organization source has not been qualified for this selected mission. This is not evidence of no team or no work.")}</p> : <>
       <div className="organization-workspace__grid">
         <section aria-label={t("Chairman")}>
           <div className="organization-workspace__root"><strong>{context.organization.human_root.title}</strong><span>{t("Human direction")}</span></div>

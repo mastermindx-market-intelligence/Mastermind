@@ -1,0 +1,39 @@
+--- a/app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx
++++ b/app/mastermind_os/src/meta-ceo/MetaCeoOffice.tsx
+@@ -15 +14,0 @@
+-import { AdmittedPlanInspector } from "../planning/AdmittedPlanInspector";
+@@ -379 +378 @@
+-    <details className="office-disclosure office-organization">
++    <details className="office-disclosure office-organization" open={projection.mission.source.state === "CURRENT"}>
+@@ -382 +381,12 @@
+-        observation={organizationObservation} locale={locale} />
++        observation={organizationObservation} missionProjection={projection}
++        onOpenProject={onOpenProject} onInspectWorkerResult={onInspectWorkerResult}
++        planReader={{
++          read: typeof window !== "undefined" && window.MastermindMissionHost?.readAdmittedPlan
++            ? readOfficePlan : undefined,
++          readActivity: typeof window !== "undefined" && window.MastermindMissionHost?.readRetainedActivity
++            ? readOfficeActivity : undefined,
++          sourceGeneration: typeof window !== "undefined" && window.MastermindMissionHost?.invalidationGeneration
++            ? officePlanGeneration : undefined,
++          canRead: typeof window !== "undefined" && window.MastermindMissionHost?.auth
++            ? officePlanPermission : undefined,
++        }} locale={locale} />
+@@ -407,17 +416,0 @@
+-    <AdmittedPlanInspector
+-      key={`plan:${projection.context.authGeneration}`}
+-      selection={mission?.program?.work_ref && mission?.mission?.root_job_id
+-        ? { work_ref: mission.program.work_ref, root_job_id: mission.mission.root_job_id } : null}
+-      read={typeof window !== "undefined" && window.MastermindMissionHost?.readAdmittedPlan
+-        ? readOfficePlan : undefined}
+-      readActivity={typeof window !== "undefined" && window.MastermindMissionHost?.readRetainedActivity
+-        ? readOfficeActivity : undefined}
+-      sourceGeneration={typeof window !== "undefined" && window.MastermindMissionHost?.invalidationGeneration
+-        ? officePlanGeneration : undefined}
+-      canRead={typeof window !== "undefined" && window.MastermindMissionHost?.auth
+-        ? officePlanPermission : undefined}
+-      locale={locale}
+-      mission={mission}
+-      missionSourceState={projection.mission.source.state}
+-      missionObservedAt={projection.mission.source.observed_at}
+-    />
