@@ -106,8 +106,20 @@ def engine(native, monkeypatch):
     import httpx._client as client_module
     monkeypatch.setattr(httpx.Client, "_send_single_request", httpx.Client._send_single_request)
     monkeypatch.setattr(client_module, "_mmx_transport_observation_bound", False, raising=False)
-    installation = transport.prepare(native.binding, native.vendor)
-    assert installation.description()["status"] == "qualified", installation.description()
+    # Preserve a bounded cause for the production fail-closed source check.
+    # Record only its line and exception class; no exception text or file data.
+    qualification_errors = []
+    previous_trace = sys.gettrace()
+    def qualification_trace(frame, event, value):
+        if event == "exception" and frame.f_code is transport.prepare.__code__:
+            qualification_errors.append((frame.f_lineno, type(value[1]).__name__))
+        return qualification_trace
+    try:
+        sys.settrace(qualification_trace)
+        installation = transport.prepare(native.binding, native.vendor)
+    finally:
+        sys.settrace(previous_trace)
+    assert installation.description()["status"] == "qualified", (installation.description(), qualification_errors)
     native.binding.transport_installation = installation
     installation.commit()
     assert conversation.perform_api_call is calls.perform_api_call
