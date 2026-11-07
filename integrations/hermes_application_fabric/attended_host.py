@@ -44,7 +44,8 @@ class AttendedHost:
 
     def admitted_turn(self, *, factory, operation_id, session_id, task_id,
                       requested_model, strict_model, authorized,
-                      prior_admission_possible):
+                      prior_admission_possible, automatic=False, strict_pool=None,
+                      max_output_tokens=4096):
         """All identities/authorization come from the ORIGINAL admitted host.
 
         A prior/unknown admission is recovered by its owner, not reconstructed
@@ -55,7 +56,8 @@ class AttendedHost:
         return AttendedTurn(self, factory=factory, operation_id=operation_id,
             session_id=session_id, task_id=task_id, requested_model=requested_model,
             strict_model=strict_model, authorized=authorized,
-            prior_admission_possible=prior_admission_possible)
+            prior_admission_possible=prior_admission_possible, automatic=automatic,
+            strict_pool=strict_pool, max_output_tokens=max_output_tokens)
 
     @contextmanager
     def activate(self, turn):
@@ -83,16 +85,27 @@ class AttendedTurn:
     """One retained original binding across native agent/facade reconstruction."""
     def __init__(self, host, *, factory, operation_id, session_id, task_id,
                  requested_model, strict_model, authorized,
-                 prior_admission_possible):
+                 prior_admission_possible, automatic=False, strict_pool=None,
+                 max_output_tokens=4096):
         if prior_admission_possible is not False:
             raise HermesFabricError("hermes_fabric_original_recovery_required")
         if (not all(_identity(value) for value in
-                    (operation_id, session_id, task_id, requested_model, strict_model))
+                    (operation_id, session_id, task_id, requested_model))
                 or not callable(authorized)):
             raise HermesFabricError("hermes_fabric_host_identity_invalid")
+        if (type(automatic) is not bool
+                or strict_model is None and not automatic
+                or strict_model is not None and not _identity(strict_model)
+                or strict_pool is not None and (not automatic or not _identity(strict_pool))):
+            raise HermesFabricError("hermes_fabric_host_selection_invalid")
+        if type(max_output_tokens) is not int or not 1 <= max_output_tokens <= 32768:
+            raise HermesFabricError("hermes_fabric_output_bound_invalid")
         self._host, self._factory = host, factory
         self.operation_id, self.session_id, self.task_id = operation_id, session_id, task_id
         self.requested_model, self.strict_model = requested_model, strict_model
+        # Capture the original host selection once; the existing binding freezes
+        # its inspected owner recipe before any credential or admission effect.
+        self._routing = (automatic, strict_pool, max_output_tokens)
         self._authorized = authorized
         self._binding = self._failure = self._close_result = None
         self._closed, self._lock = False, RLock()
@@ -131,6 +144,8 @@ class AttendedTurn:
                         profile_id=ATTENDED_PROFILE, operation_id=self.operation_id,
                         session_id=self.session_id, turn_id=call.turn_id,
                         requested_model=self.requested_model, strict_model=self.strict_model,
+                        automatic=self._routing[0], strict_pool=self._routing[1],
+                        max_output_tokens=self._routing[2],
                         authorized=self._allowed, prior_admission_possible=False)
                     if type(binding) is not ApplicationBinding:
                         raise HermesFabricError("hermes_fabric_application_owner_required",

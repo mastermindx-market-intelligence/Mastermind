@@ -298,3 +298,21 @@ Running it alone on the older protected parent reports missing
 `ORIGINAL_COLLECTION_LEGACY_SCHEMA`, so it must be qualified on the actual
 composed target. The production guard and original assertions are preserved;
 no new parallel fixture repair, skip, or runtime relaxation is introduced.
+
+### Current verified successor projection
+
+The successor-identity extension preserves the original logical run and projects
+`effective_run_id` only from a qualified incumbent status/result. Nested status
+and continuation identities must agree; an absent successor never authorizes a
+replacement submit of the original task. Result currentness is checked again
+after retrieval, including the effective leaf.
+
+The current eight-file runtime projection is
+`e010d6366c8142e977ffab2f591656e6ea17fe6725d262c937abf065365a51b9`.
+The earlier `c099a74d` projection above belongs to the previous milestone.
+The updated source passes74 worker contract cases and22 actual native owner
+cases with zero failures/errors/skips. The native MCP status double now carries
+the same original/effective IDs as the existing wire contract; the production
+absence/currentness checks were retained. The package/identity gate also passes.
+This remains source qualification; the actual native install and paid worker
+START/result-consumption path still require their own receipts.

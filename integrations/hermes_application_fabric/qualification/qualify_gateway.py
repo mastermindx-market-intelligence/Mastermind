@@ -44,6 +44,9 @@ def main():
     owner_bytes = (owner / "engine/fabric_inference_client.py").read_bytes()
     if hashlib.sha256(owner_bytes).hexdigest() != "0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e":
         raise RuntimeError("APPLICATION owner source checksum mismatch")
+    owner_modes = (owner / "engine/provider_production_modes.py").read_bytes()
+    if hashlib.sha256(owner_modes).hexdigest() != "9309f18bee81ce8745804e0520c256e165f2bb6119c9d3cc02c62ac6320f68d0":
+        raise RuntimeError("APPLICATION transport owner checksum mismatch")
     fixture = Path(args.hermes_fixture).resolve()
     if fixture == hermes or fixture.is_relative_to(hermes):
         raise RuntimeError("Qualification fixture must be separate from the installation")
@@ -83,9 +86,13 @@ def main():
     from gateway import session_provider_context
     if not Path(session_provider_context.__file__).resolve().is_relative_to(fixture):
         raise RuntimeError("Native host patch did not load from the immutable fixture")
+    import yaml
+    if yaml.__version__ != "6.0.3":
+        raise RuntimeError("Use the qualified APPLICATION YAML dependency")
     print(json.dumps({"candidate": args.candidate, "hermes": actual,
-        "owner": "a577dbbf605474f97bbafa4ceeb0daf841292421", "owner_source_verified": True,
+        "owner": "dcb0ef02d700bbc97422b4e1046837641f9fe5ae", "owner_source_verified": True,
         "python": sys.version.split()[0], "jsonschema": importlib.metadata.version("jsonschema"),
+        "pyyaml": yaml.__version__,
         "mode": "pinned-native-host-patch-loopback-fixture", "live_provider_acceptance": False}), flush=True)
     suite = unittest.TestSuite()
     for directory in (package / "tests", package / "qualification"):
@@ -95,7 +102,7 @@ def main():
         "errors": len(result.errors), "skips": len(result.skipped),
         "sdk_constructions": sdk_constructions, "blocked_external_connections": len(blocked_connections),
         "live_provider_acceptance": False}), flush=True)
-    return 0 if result.wasSuccessful() and result.testsRun == 100 and not result.skipped and not sdk_constructions and not blocked_connections else 1
+    return 0 if result.wasSuccessful() and result.testsRun == 106 and not result.skipped and not sdk_constructions and not blocked_connections else 1
 
 
 if __name__ == "__main__":

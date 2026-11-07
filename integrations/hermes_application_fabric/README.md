@@ -192,3 +192,28 @@ Fabric account, observed model/account/usage, budget denial and original-result
 recovery without duplicate effects. Keep the proposals held until those owner
 conditions are satisfied.
 
+
+## Ordinary attended AUTO selection
+
+After the ordinary plugin installation, its declared native dependencies and the
+original APPLICATION service enrollment are present, select AUTO for one session:
+
+```text
+/model mastermind-fabric/auto --provider mastermind-fabric --session
+```
+
+The existing profile configuration can also select `provider: mastermind-fabric`
+and `default: mastermind-fabric/auto`. This is an explicit profile choice. It does
+not enroll a service or qualify an account. The original attended automatic
+transport is `native_fabric_hermes_attended_auto_v1`; it shares the original
+attended service identity and uses that service's qualified route scope.
+
+A concrete model selection under an AUTO enrollment narrows the existing owner
+before its inspection is frozen. A fixed enrollment refuses the AUTO label.
+A new admitted turn may choose another eligible route; one admitted turn and
+its tool continuations keep their bound route and original operation identity.
+Unknown effects never authorize a replacement request.
+
+The local static catalog recognizes the AUTO label. Ordinary picker availability
+and standalone installation source closure are separate integration work tracked
+in `review_evidence/hermes_primary/attended-installation-frontier-20261107.md`.

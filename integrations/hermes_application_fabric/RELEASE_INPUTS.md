@@ -17,10 +17,14 @@ failure; focused success is not general-CI or release acceptance.
 
 The attended contribution a664a288a3791bda3ea2b43af08278f1d8fb0d9b
 from #2166 is incorporated. Its older 81-case receipt remains historical.
-The current runtime has 100 patched-gateway, 85 unpatched-native and 66 offline
-contract cases. Their fbf execution used Macro9eb; the workflow now binds
-the exact current owner c164 below, with the same verified client bytes.
-Current-head executed results must be read from the corresponding workflow.
+The #2225 extension adds attended AUTO and exact selection through the original
+factory, local AUTO recognition, explicit native dependency declarations, and
+verified worker successor projection. The current suite contracts require106
+patched-gateway,87 unpatched-native and68 offline cases. The attended gateway
+suite executed106 cases with zero failures, errors, skips, external connections
+or standard SDK constructions against exact Macro dcb0ef02 and the pinned2bd
+native patch fixture. The original fbf results remain historical. Current-head
+hosted results must be read from their corresponding workflow.
 
 The original APPLICATION handler/Broker qualification preserves all nine
 secretary fixed/AUTO/exact conversation, limit and unknown-effect cases and
@@ -32,10 +36,10 @@ projection. The shared paired gate still consumes its original CI-owned pin.
 
 | Input | Exact identity / owner |
 | --- | --- |
-| Primary runtime package | Eleven-file digest `c8bb8e02f42dd41d31e36fa255f87df619216d5e55a7f55194016ed6ce2bc5aa`, computed by the existing publication.py algorithm |
+| Primary runtime package | Eleven-file digest `d5fbdcafacfaaaa62366e59a0a62c2457a9e2a56a43bc67b65a7e0aace3a808f`, computed by the existing publication.py algorithm |
 | Original primary runtime predecessor | 08b8daf9 digest1ae0d896; its installed69-case proof is retained but does not qualify the two amended current runtime files |
-| APPLICATION factory/client | Original Macro#10740 at c1647bf55ad5faf07e682f7055e3791280d6d41f; client SHA2560817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e is unchanged from9eb |
-| Attended owner declarations | Original c164 factory blob4dfa5a9ccb9fbcf2e5717d40039eb62af1c8322b and workload blobf9f0bd26af3f543aaee8d05fb465a4ea53219660; source-held transport remains unqualified |
+| APPLICATION factory/client | Contribution to original Macro#10740 at dcb0ef02d700bbc97422b4e1046837641f9fe5ae, parent e85fcf2248f52a8e25a9c850ab3ebd047555c75a; client SHA2560817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e remains unchanged |
+| Attended owner declarations | Original dcb0ef02 factory blob988c4026f8a68834846a6ecc8f3c3f5b011522e9 adds the attended automatic variant; the original workload is unchanged and both source-held variants remain unqualified |
 | Attended owner qualification | Macro#10832 at83aa7e16bfe0bd1f07d373e2e42aca69e5e8da20, parentc164; three-file test/workflow/evidence contribution, no production/configuration change; hosted126 and local197 cases passed |
 | Native APPLICATION installer/entry | Original #2175 plus qualified v9 contribution in #2186; current Go ingress/account/service publishers remain authoritative |
 | Role Hermes ABI | Qualified upstream1c0cd667 and installed2bd378ed; existing held role installation and source closure |
@@ -77,8 +81,8 @@ route fixture alone could not establish these properties.
 | Meta-CEO | hermes-meta-ceo / hermes_meta_fabric / site_interactive | Original mmmeta role/session/principal and HERMES_META_FABRIC_APPLICATION_TOKEN |
 | Ordinary attended | hermes-attended / hermes_attended_fabric / hermes_attended | Original attended native admission plus a separately qualified APPLICATION service relation |
 
-Original Macro c164 supplies the attended relation, fixed transport and
-inference workload. The shipped application mode map remains empty; the
+Original Macro dcb0ef02 supplies the attended relation, fixed and automatic
+transport variants, and the original inference workload. The shipped application mode map remains empty; the
 transport remains qualified=false, application_allowed=false and
 client_session_metadata_accepted=false. A configuration-only edit cannot
 override those source qualification flags. No enrolled attended capability,
@@ -86,10 +90,14 @@ runtime service record, principal/grant or credential is created here.
 
 The attended factory therefore remains closed until its original owners
 qualify and enroll the actual service. It cannot borrow a Brain, secretary,
-meta-CEO or worker credential. Attended remains fixed-model; the role
-publication retains its existing fixed, AUTO and exact contracts. The new
-attended owner conversation tests use only synthetic in-memory credentials
-and temporary mode/capability/grant inputs, with external access blocked.
+meta-CEO or worker credential. Attended AUTO uses the same service identity with
+native_fabric_hermes_attended_auto_v1. An exact model within an enrolled AUTO
+scope is narrowed before the existing inspection is frozen. Fixed enrollment
+refuses the AUTO label. Routing can change on a new admitted turn; one turn and
+its tool continuations retain the bound route and original operation identity.
+The role publication retains its fixed, AUTO and exact contracts. Qualification
+uses synthetic in-memory credentials and disposable mode/capability/grant inputs,
+with external access blocked.
 
 The initial role canary can use one eligible account/model under the current
 Chairman contract. The original attended GLM-specific contract is a separate

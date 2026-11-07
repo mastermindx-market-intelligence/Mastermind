@@ -59,6 +59,29 @@ class HostTests(unittest.TestCase):
         self.assertEqual(len(self.closes), 1)
         self.assertEqual(len(self.callbacks), 1)
 
+    def test_auto_selection_retains_one_binding_and_original_output_bound(self):
+        turn = self.turn(requested_model=f"{PROVIDER}/auto", strict_model=None,
+                         automatic=True, strict_pool="go", max_output_tokens=512)
+        with patch.object(ApplicationBinding, "from_factory", side_effect=self.bind):
+            with self.host.activate(turn):
+                first = self.host._resolve(self.call)
+                self.assertIs(first, self.host._resolve(
+                    NativeCall("session-1", "task-1", "turn-1", "api-2")))
+        self.assertEqual(len(self.factories), 1)
+        self.assertEqual((self.factories[0]["automatic"], self.factories[0]["strict_model"],
+                          self.factories[0]["strict_pool"], self.factories[0]["max_output_tokens"]),
+                         (True, None, "go", 512))
+
+    def test_invalid_host_selection_never_constructs_a_binding(self):
+        with patch.object(ApplicationBinding, "from_factory") as bind:
+            for values in ({"automatic": 1}, {"strict_model": None},
+                           {"strict_pool": "go"}, {"automatic": True, "strict_pool": ""},
+                           {"max_output_tokens": True}, {"max_output_tokens": 0},
+                           {"max_output_tokens": 32769}):
+                with self.subTest(values=values), self.assertRaises(HermesFabricError):
+                    self.turn(**values)
+            bind.assert_not_called()
+
     def test_unknown_prior_admission_is_not_rebound(self):
         for prior in (True, None, 0, ""):
             with self.subTest(prior=prior), self.assertRaises(HermesFabricError):

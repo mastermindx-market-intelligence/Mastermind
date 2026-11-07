@@ -5,6 +5,7 @@ from .client import ApplicationBinding, HermesApplicationClient, NativeCall, cal
 from .errors import HermesFabricError, CodecError
 
 PROVIDER = "mastermind-fabric"
+AUTO_MODEL = f"{PROVIDER}/auto"
 AUTH_TYPE = "mastermind_application_session"
 INSTALLED_HERMES_SHA = "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
 
@@ -17,6 +18,15 @@ def classify_error(error, **_):
     reason = "format_error" if isinstance(error, (ValueError, TypeError)) else "unknown"
     return {"reason": reason, "retryable": False, "should_compress": False,
             "should_rotate_credential": False, "should_fallback": False}
+
+
+def _picker_catalog(force_refresh=False):
+    """Native inventory observation; an empty list must not fall back to AUTO."""
+    try:
+        from .gateway_plugin import available_models
+        return available_models()
+    except Exception:
+        return []
 
 
 def build_profile():
@@ -32,6 +42,7 @@ def build_profile():
                    display_name="Mastermind Fabric", auth_type=AUTH_TYPE,
                    env_vars=(), base_url="", supports_streaming=False,
                    supports_health_check=False, supports_model_listing=False,
+                   static_models=(AUTO_MODEL,),
                    supports_vision=False, supports_vision_tool_messages=False,
                    default_max_tokens=4096, classify_api_error=classify_error)
     if "host_bound_runtime" in ProviderProfile.__dataclass_fields__:

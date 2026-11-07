@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from .native import FabricNativeRefusal, FabricPreDispatchRefusal, SessionGrant
+from .native import FabricNativeRefusal, FabricPreDispatchRefusal, SessionGrant, IDENTITY
 
 FABRIC_SCHEMA = "mastermind.fabric_mcp.v1"
 STATUS_SCHEMA = "mastermind.fabric_task_status.v1"
@@ -88,7 +88,14 @@ class FabricFacadePort:
         if status.get("state") == "NOT_FOUND":
             # The incumbent facade has only observed absence. This result
             # cannot be used to infer absence after a lost possible write.
-            if raw.get("root_verified") is True or status.get("result_available") is not False:
+            absent_continuation = status.get("continuation")
+            if (raw.get("root_verified") is True or status.get("result_available") is not False
+                    or status.get("run_id") != run_id
+                    or raw.get("effective_run_id") != run_id
+                    or absent_continuation is not None and (
+                        not isinstance(absent_continuation, Mapping)
+                        or absent_continuation.get("requested_run_id") != run_id
+                        or absent_continuation.get("effective_run_id") != run_id)):
                 raise FabricNativeRefusal("FABRIC_STATUS_ABSENCE_INVALID")
             return {**self._identity(grant, run_id), "state": "NOT_FOUND",
                     "reason": "ORIGINAL_ID_OBSERVED_NOT_FOUND",
@@ -139,8 +146,14 @@ class FabricFacadePort:
                     "reason": "FABRIC_STATUS_LINEAGE_NOT_PROVEN",
                     "worker_started": False}
         effective = raw.get("effective_run_id")
-        if type(effective) is not str or not effective:
+        if (type(effective) is not str or IDENTITY.fullmatch(effective) is None
+                or status.get("run_id") != effective):
             raise FabricNativeRefusal("FABRIC_STATUS_EFFECTIVE_ID_INVALID")
+        if effective != run_id or continuation is not None:
+            if (not isinstance(continuation, Mapping)
+                    or continuation.get("requested_run_id") != run_id
+                    or continuation.get("effective_run_id") != effective):
+                raise FabricNativeRefusal("FABRIC_STATUS_CONTINUATION_INVALID")
         state = status["state"]
         # A status label alone never proves worker START.
         start_proven = (
@@ -232,4 +245,5 @@ class FabricFacadePort:
         # These observations do not invent an atomic owner seal or acceptance.
         return {**self._identity(grant, run_id), "state": "TERMINAL",
                 "result_digest": digest, "result_text": body,
+                "effective_run_id": observed["effective_run_id"],
                 "worker_started": False}

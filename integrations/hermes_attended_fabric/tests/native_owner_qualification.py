@@ -124,8 +124,8 @@ class NativeOwnerQualification(unittest.TestCase):
         if action == "fabric_status":
             if self.on_status:
                 self.on_status()
-            result.update(root_verified=False, status={
-                "schema": "mastermind.fabric_task_status.v1",
+            result.update(root_verified=False, effective_run_id=args["run_id"], status={
+                "schema": "mastermind.fabric_task_status.v1", "run_id": args["run_id"],
                 "state": "NOT_FOUND", "result_available": False,
             })
         elif action == "fabric_request":

@@ -180,6 +180,10 @@ class TestComposedReturnCurrentness(unittest.TestCase):
                             facade.root = "other-root"
                     elif action == "fabric_status" and fetched[0] and change == "effective":
                         reply["effective_run_id"] = "different-attempt-same-bytes"
+                        reply["status"]["run_id"] = reply["effective_run_id"]
+                        reply["status"]["continuation"] = {
+                            "requested_run_id": args["run_id"],
+                            "effective_run_id": reply["effective_run_id"]}
                     return reply
 
                 facade.call_tool = changing

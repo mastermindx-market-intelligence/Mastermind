@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .attended_host import AttendedHost
 from .errors import HermesFabricError
-from .native import PROVIDER
+from .native import AUTO_MODEL, PROVIDER
 
 
 def _original_factory():
@@ -16,6 +16,42 @@ def _original_factory():
         service_mode_id="hermes_attended_fabric",
         workload_cfg={"workload_profile": "hermes_attended", "provider_order": ["fabric"]},
         root=Path(owner.__file__).resolve().parent.parent)
+
+
+def _owner_variant(factory):
+    """Read the current credential-free selection from the one APPLICATION owner."""
+    from .codec import ID
+    from engine.fabric_inference_client import AUTO_INSPECTION_SCHEMA, validate_auto_inspection
+    inspected = factory.inspect()
+    if type(inspected) is not dict:
+        raise HermesFabricError("hermes_fabric_application_unavailable")
+    if "schema" not in inspected:
+        model = inspected.get("model")
+        if type(model) is not str or ID.fullmatch(model) is None:
+            raise HermesFabricError("hermes_fabric_host_selection_invalid")
+        return False, model
+    inspected = validate_auto_inspection(inspected)
+    if (inspected["schema"] != AUTO_INSPECTION_SCHEMA
+            or inspected["requested_model"] is not None):
+        raise HermesFabricError("hermes_fabric_host_selection_invalid")
+    return True, None
+
+
+def available_models():
+    """An eligibility observation only; never bind, acquire credentials or admit."""
+    automatic, model = _owner_variant(_original_factory())
+    return [AUTO_MODEL if automatic else model]
+
+
+def _routing_selection(factory, requested_model):
+    """The binding narrows AUTO before freezing its own current inspection."""
+    from .codec import ID
+    if type(requested_model) is not str or ID.fullmatch(requested_model) is None:
+        raise HermesFabricError("hermes_fabric_host_selection_invalid")
+    automatic, _ = _owner_variant(factory)
+    if not automatic and requested_model == AUTO_MODEL:
+        raise HermesFabricError("hermes_fabric_auto_owner_required")
+    return automatic, None if requested_model == AUTO_MODEL else requested_model
 
 
 @contextmanager
@@ -30,11 +66,14 @@ def _gateway_scope(host, runner, context, route, admitted):
         raise HermesFabricError("hermes_fabric_host_runtime_override")
     try:
         factory = _original_factory()
+        automatic, strict_model = _routing_selection(factory, route["model"])
+    except HermesFabricError:
+        raise
     except Exception:
         raise HermesFabricError("hermes_fabric_application_unavailable") from None
     turn = host.admitted_turn(factory=factory, operation_id=admitted.operation_id,
         session_id=context.session_id, task_id=context.session_id,
-        requested_model=route["model"], strict_model=route["model"],
+        requested_model=route["model"], strict_model=strict_model, automatic=automatic,
         authorized=admitted.current, prior_admission_possible=False)
     turn.attach_gateway_context(context)
     with host.activate(turn):
