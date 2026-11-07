@@ -5,6 +5,7 @@ router, credential reader, request writer, or model execution path. The existing
 HAE middleware owns all scoring, turn reuse, manual mode and request mutation.
 """
 from __future__ import annotations
+from http.client import HTTPS_PORT
 from urllib.parse import urlsplit
 
 LEVELS = ("low", "high", "max")
@@ -23,7 +24,7 @@ def direct_zai_levels(provider, model, api_mode, base_url):
     try:
         url = urlsplit(base_url)
         if (url.scheme != "https" or url.hostname != "api.z.ai"
-                or url.port not in (None, 443) or url.username is not None
+                or url.port not in (None, HTTPS_PORT) or url.username is not None
                 or url.password is not None or url.query or url.fragment
                 or url.path.rstrip("/") not in (
                     "/api/paas/v4", "/api/coding/paas/v4")):
