@@ -51,25 +51,51 @@ MINIMUM_DESKTOP_HANDOFF_VERSION = (2, 1, 285)
 _CLAUDE_VERSION_RE = re.compile(r"(?<![0-9])(\d+)\.(\d+)\.(\d+)(?![0-9])")
 
 
-def _has_multiple_parall_claude_wrappers() -> bool:
-    """Detect ambiguous native Desktop routing on a multi-account macOS host.
+def _has_multiple_parall_claude_wrappers(
+    applications_dir: Path | None = None,
+    user_applications_dir: Path | None = None,
+) -> bool:
+    """Refuse ambiguous native Claude Desktop routing on multi-account macOS.
 
-    This detects application wrappers, not Claude Code CLI sessions. No app is
-    started, selected, killed or inspected for credentials. Each Parall wrapper
-    has a distinct outer app identity but shares the underlying Anthropic app
-    identity and claude:// handler with other accounts.
+    Count distinct installed Claude Desktop bundles, not Claude CLI sessions.
+    Include the system and per-user Applications directories because
+    LaunchServices can resolve from either. Alias symlinks of a single app
+    count once. No app launches, profile data reads, or credential access.
     """
     if sys.platform != "darwin":
         return False
+    if applications_dir is None:
+        roots = (Path("/Applications"), Path.home() / "Applications")
+    elif user_applications_dir is None:
+        roots = (applications_dir,)
+    else:
+        roots = (applications_dir, user_applications_dir)
     try:
-        applications = Path("/Applications")
-        wrappers = (
-            app for app in applications.glob("Claude *.app")
-            if re.fullmatch(r"Claude [0-9]+\.app", app.name) and app.is_dir()
-        )
-        return sum(1 for _ in wrappers) >= 2
-    except OSError:
-        # Unknown handler selection is not proof of a safe single-account host.
+        distinct_bundles: set[Path] = set()
+        for index, applications in enumerate(roots):
+            try:
+                entries = os.scandir(applications)
+            except FileNotFoundError:
+                # Many Macs have no ~/Applications. A missing required system
+                # directory or explicit test root is not proof of uniqueness.
+                if index > 0:
+                    continue
+                return True
+            with entries:
+                for entry in entries:
+                    if not re.fullmatch(
+                        r"Claude(?: (?:[0-9]+(?: Legacy)?|Default|Official))?\.app",
+                        entry.name,
+                    ):
+                        continue
+                    if not entry.is_dir(follow_symlinks=True):
+                        continue
+                    distinct_bundles.add(Path(entry.path).resolve(strict=True))
+                    if len(distinct_bundles) >= 2:
+                        return True
+        return False
+    except (OSError, RuntimeError):
+        # Unknown handler selection is not a safe account binding.
         return True
 
 
