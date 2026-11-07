@@ -2614,32 +2614,20 @@ class CodexWorkerAdapter:
             ) from exc
 
     def _refuse_subscription_for_plain_start(self, spec: LaunchSpec) -> None:
-        """Preserve subscriber-only canaries; permit only a reviewed commercial API.
+        """Reject subscription traffic and hold commercial plain START.
 
-        A commercial Responses model still receives the existing validated
-        WorkerLaunchSpec, Executive claim and one-shot process fences. This
-        seam only distinguishes legal provider transport; it does NOT enroll
-        a worker, grant Capacity, mint credentials or perform an API canary.
+        ProviderRealm *transport* review cannot grant autonomous START. An
+        owner-bound Executive claim, registered Worker and issuer-attested
+        Capacity are separately required; no such live authorization is
+        installed by this source-only release. Never use transport membership
+        as a substitute for those owner facts.
         """
         if self.provider_realm is not None:
-            from control_plane.codex_provider_realm import (
-                BYTEPLUS_MODELARK_COMMERCIAL,
-                CodexProviderRealm,
-                REVIEWED_CODEX_PROVIDER_REALMS,
-            )
-
-            realm = self.provider_realm
-            if (
-                type(realm) is CodexProviderRealm
-                and realm is BYTEPLUS_MODELARK_COMMERCIAL
-                and realm.commercial_api_only is True
-                and realm.interactive_subscription_only is False
-                and REVIEWED_CODEX_PROVIDER_REALMS.get(realm.realm_id) is realm
-                and self.provider_credential_loader is not None
-                and self.subscription_realm_owner is None
-                and not spec.subscription_canary_claim
-            ):
-                return
+            from control_plane.codex_provider_realm import BYTEPLUS_MODELARK_COMMERCIAL
+            if self.provider_realm is BYTEPLUS_MODELARK_COMMERCIAL:
+                raise LaunchValidationError(
+                    "commercial ModelArk autonomous START is not owner-authorized"
+                )
         if (
             self.provider_realm is not None
             or self.subscription_realm_owner is not None

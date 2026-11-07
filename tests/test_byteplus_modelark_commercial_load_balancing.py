@@ -74,17 +74,10 @@ def test_commercial_preview_still_held_without_reviewed_realm():
     assert BYTEPLUS_MODELARK_COMMERCIAL.realm_id not in REVIEWED_CODEX_PROVIDER_REALMS
 
 
-def test_commercial_reviewed_route_allows_only_non_authoritative_preference(monkeypatch):
+def test_mutable_reviewed_realm_and_router_do_not_mint_source_authority(monkeypatch):
     router = reviewed_test_router(monkeypatch)
-    result = project_quota_preference(
-        tiers(), commercial_preview(), reviewed_router=router
-    )
-    assert result.provider == "byteplus-modelark"
-    assert result.model_alias == ALIAS
-    assert result.selection_is_commitment is False
-    assert result.claim_time_revalidation_required is True
-    assert result.estimated_startable_jobs == 2
-    assert result.suggested_parallelism == 1
+    with pytest.raises(CapacityEconomicsProjectionError, match="unreviewed commercial"):
+        project_quota_preference(tiers(), commercial_preview(), reviewed_router=router)
 
 
 @pytest.mark.parametrize("mutation", ["provider_off", "no_autonomy", "not_worker", "wrong_tier"])
@@ -155,7 +148,8 @@ def test_only_exact_reviewed_commercial_realm_may_reach_plain_worker_start(monke
     realm = BYTEPLUS_MODELARK_COMMERCIAL
     monkeypatch.setitem(REVIEWED_CODEX_PROVIDER_REALMS, realm.realm_id, realm)
     spec = SimpleNamespace(subscription_canary_claim=False)
-    guarded_adapter(realm)._refuse_subscription_for_plain_start(spec)
+    with pytest.raises(LaunchValidationError, match="owner-authorized"):
+        guarded_adapter(realm)._refuse_subscription_for_plain_start(spec)
     for adapter, claim in [
         (guarded_adapter(replace(realm, display_name="Unreviewed copy")), False),
         (guarded_adapter(realm, credential_loader=None), False),

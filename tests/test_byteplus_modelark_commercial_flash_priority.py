@@ -5,14 +5,17 @@ claiming it has an installed, callable or presently valid production tier.
 """
 from copy import deepcopy
 from dataclasses import replace
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 
 import pytest
 
+from control_plane import capacity_economics_projection
 from control_plane.capacity_economics_projection import (
     BYTEPLUS_COMMERCIAL_FLASH_MODELS,
     CapacityEconomicsProjectionError,
+    QuotaPreviewFreshness,
     project_quota_preference,
 )
 from control_plane.codex_provider_realm import (
@@ -27,6 +30,11 @@ DEEPSEEK = "byteplus-modelark.deepseek-v4.1-flash"
 ZAI = "glm.paid.sealed-input"
 TIER = "research.routine.primary"
 TIERS = ({"tier_id": TIER, "model_aliases": [ZAI, GLM, DEEPSEEK]},)
+FRESH = QuotaPreviewFreshness(
+    observed_at=datetime(2026, 10, 24, 8, 0, tzinfo=timezone.utc),
+    verified_at=datetime(2026, 10, 24, 8, 1, tzinfo=timezone.utc),
+    max_age_seconds=120,
+)
 
 
 def preview(*, selected="zai-flash", glm_slots=2, deepseek_slots=1):
@@ -75,6 +83,10 @@ def preview(*, selected="zai-flash", glm_slots=2, deepseek_slots=1):
 def projected_test_router(monkeypatch):
     """A future-review simulation; does NOT pass through Router.load tier parsing."""
     router = ModelRouter.load()
+    # Synthetic-only algorithm fixture; the installed canonical source remains
+    # DISABLED and cannot satisfy production source/Capacity authority.
+    monkeypatch.setattr(capacity_economics_projection,
+                        "_canonical_model_router_matches", lambda candidate: candidate is router)
     monkeypatch.setitem(
         REVIEWED_CODEX_PROVIDER_REALMS,
         BYTEPLUS_MODELARK_COMMERCIAL.realm_id,
@@ -132,8 +144,10 @@ def test_prefer_available_commercial_flash_over_zai_flash_in_first_tier(monkeypa
     router = projected_test_router(monkeypatch)
     doc = preview(glm_slots=2, deepseek_slots=3)
     before = deepcopy(doc)
-    result = project_quota_preference(TIERS, doc, reviewed_router=router)
+    result = project_quota_preference(TIERS, doc, reviewed_router=router, owner_freshness=FRESH)
     assert result.provider == "byteplus-modelark"
+    assert result.original_suggested_option_id == "zai-flash"
+    assert result.preference_substituted is True
     assert result.model_alias == DEEPSEEK
     assert result.suggested_parallelism == 3
     assert result.selection_is_commitment is False
@@ -144,7 +158,8 @@ def test_prefer_available_commercial_flash_over_zai_flash_in_first_tier(monkeypa
 def test_glm_flash_and_deepseek_flash_equivalent_at_equal_headroom(monkeypatch):
     router = projected_test_router(monkeypatch)
     result = project_quota_preference(
-        TIERS, preview(glm_slots=3, deepseek_slots=3), reviewed_router=router
+        TIERS, preview(glm_slots=3, deepseek_slots=3), reviewed_router=router,
+        owner_freshness=FRESH,
     )
     assert result.model_alias == GLM
 

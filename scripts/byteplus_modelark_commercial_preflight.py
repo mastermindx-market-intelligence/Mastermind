@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Sequence
 from typing import Any
 
 from control_plane.capacity_economics_projection import (
-    BYTEPLUS_COMMERCIAL_FLASH_MODELS,
+    BYTEPLUS_COMMERCIAL_MODEL_PINS,
 )
 from control_plane.codex_provider_realm import (
     BYTEPLUS_MODELARK_COMMERCIAL,
@@ -46,12 +47,48 @@ class CommercialPreflightError(ValueError):
     """A closed, non-secret source/identity qualification refusal."""
 
 
-def source_preflight(router: ModelRouter | None = None) -> dict[str, Any]:
-    """Pure source-only evidence, never readiness or approval to dispatch."""
+def source_preflight(
+    router: ModelRouter | None = None, *,
+    expected_router_source_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Canonical, key-free source-only proof; custom input requires an owner pin.
+
+    An in-memory ModelRouter mutation or a byte-identical foreign file does not
+    provide the canonical installed policy identity. This never promotes a
+    credential, transport, Worker, or Capacity claim.
+    """
+    supplied = router is not None
+    try:
+        canonical = ModelRouter.load()
+        canonical_bytes = canonical.source_path.read_bytes()
+    except (OSError, ValueError) as exc:
+        raise CommercialPreflightError("CANONICAL_ROUTER_UNAVAILABLE") from None
+    canonical_digest = hashlib.sha256(canonical_bytes).hexdigest()
     if router is None:
-        router = ModelRouter.load()
+        router = canonical
     if type(router) is not ModelRouter:
         raise CommercialPreflightError("ROUTER_NOT_VERIFIED")
+    if supplied:
+        if (
+            type(expected_router_source_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", expected_router_source_sha256) is None
+            or expected_router_source_sha256 != canonical_digest
+        ):
+            raise CommercialPreflightError("CUSTOM_ROUTER_SOURCE_NOT_OWNER_PINNED")
+    if (
+        router.source_path != canonical.source_path
+        or router.policy_version != canonical.policy_version
+        or router.providers != canonical.providers
+        or router.model_aliases != canonical.model_aliases
+        or router.routes != canonical.routes
+        or router.capability_registry.policy_version
+            != canonical.capability_registry.policy_version
+        or router.capability_registry.policy_digest
+            != canonical.capability_registry.policy_digest
+        or router.capability_registry.source_path
+            != canonical.capability_registry.source_path
+    ):
+        raise CommercialPreflightError("ROUTER_SOURCE_OR_IN_MEMORY_DRIFT")
 
     commercial = router.providers.get(PROVIDER)
     personal = router.providers.get(PERSONAL_PROVIDER)
@@ -87,8 +124,7 @@ def source_preflight(router: ModelRouter | None = None) -> dict[str, Any]:
     ):
         raise CommercialPreflightError("PROVIDER_CATALOG_NOT_SOURCE_HELD")
 
-    models = {**BYTEPLUS_COMMERCIAL_FLASH_MODELS}
-    models[COMMERCIAL_CODING] = "dola-seed-2-1-turbo-260628"
+    models = dict(BYTEPLUS_COMMERCIAL_MODEL_PINS)
     for alias_name, model_name in models.items():
         alias = router.model_aliases.get(alias_name)
         if (
@@ -110,12 +146,9 @@ def source_preflight(router: ModelRouter | None = None) -> dict[str, Any]:
     ):
         raise CommercialPreflightError("SOURCE_CANDIDATE_LEAKED_INTO_LIVE_TIER")
 
-    # The digest is of the existing router source. No new release provenance
-    # or claimed native generation is minted.
-    try:
-        raw = router.source_path.read_bytes()
-    except OSError:
-        raise CommercialPreflightError("ROUTER_SOURCE_UNAVAILABLE") from None
+    # This canonical digest is diagnostic for SOURCE_ONLY; the owner must
+    # independently approve an installed digest before runtime promotion.
+    raw = canonical_bytes
     return {
         "schema": SCHEMA,
         "evidence_scope": "SOURCE_ONLY",

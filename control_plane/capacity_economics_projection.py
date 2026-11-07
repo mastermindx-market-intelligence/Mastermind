@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+from datetime import datetime, timezone
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -25,12 +26,58 @@ BYTEPLUS_COMMERCIAL_FLASH_MODELS = {
     "byteplus-modelark.glm-5.3-flash": "glm-5-3-flash-260828",
     "byteplus-modelark.deepseek-v4.1-flash": "deepseek-v4-1-flash-261017",
 }
+BYTEPLUS_COMMERCIAL_MODEL_PINS = {
+    **BYTEPLUS_COMMERCIAL_FLASH_MODELS,
+    "byteplus-modelark.commercial-coding": "dola-seed-2-1-turbo-260628",
+}
 _ZAI_FLASH_MODELS = frozenset({"glm-5.3-flash", "glm-5-3-flash-260828"})
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 class CapacityEconomicsProjectionError(ValueError):
     """The router/quota preview composition is invalid or non-actionable."""
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class QuotaPreviewFreshness:
+    """Owner-supplied advisory timestamps; never a signed quota/Worker grant.
+
+    observed_at: independent Provider Control observation time, not a value
+    copied from the untrusted preview. verified_at: the owner's current time
+    at evaluation. Neither value is sampled implicitly in this projection.
+    """
+    observed_at: datetime
+    verified_at: datetime
+    max_age_seconds: int
+
+
+def _source_freshness_ok(as_of: str, freshness: Any) -> bool:
+    if type(freshness) is not QuotaPreviewFreshness:
+        return False
+    age_limit = freshness.max_age_seconds
+    if type(age_limit) is not int or not 1 <= age_limit <= 900:
+        return False
+    stamps = (freshness.observed_at, freshness.verified_at)
+    if any(type(stamp) is not datetime or stamp.tzinfo is None
+           or stamp.utcoffset() is None for stamp in stamps):
+        return False
+    try:
+        preview_time = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if preview_time.tzinfo is None or preview_time.utcoffset() is None:
+        return False
+    observed = freshness.observed_at.astimezone(timezone.utc)
+    verified = freshness.verified_at.astimezone(timezone.utc)
+    preview = preview_time.astimezone(timezone.utc)
+    observed_lag = (observed - preview).total_seconds()
+    verified_lag = (verified - observed).total_seconds()
+    end_to_end_age = (verified - preview).total_seconds()
+    return (
+        0 <= observed_lag
+        and 0 <= verified_lag
+        and 0 <= end_to_end_age <= age_limit
+    )
 
 
 def _token(value: Any, *, field: str) -> str:
@@ -51,6 +98,35 @@ def _mentions_byteplus(value: str) -> bool:
     return "byteplus" in compact
 
 
+def _canonical_model_router_matches(candidate: Any) -> bool:
+    """Reject caller-mutated router objects that are not the installed policy.
+
+    A canonical source reload is a necessary source-integrity preflight,
+    **not** the issuer/Worker/Capacity owner attestation. Until those owners
+    issue independent receipts, live START remains held by codex_worker.
+    """
+    from control_plane.model_router import ModelRouter
+    if type(candidate) is not ModelRouter:
+        return False
+    try:
+        installed = ModelRouter.load()
+    except (OSError, ValueError):
+        return False
+    return (
+        candidate.source_path == installed.source_path
+        and candidate.policy_version == installed.policy_version
+        and candidate.providers == installed.providers
+        and candidate.model_aliases == installed.model_aliases
+        and candidate.routes == installed.routes
+        and candidate.capability_registry.policy_version
+            == installed.capability_registry.policy_version
+        and candidate.capability_registry.policy_digest
+            == installed.capability_registry.policy_digest
+        and candidate.capability_registry.source_path
+            == installed.capability_registry.source_path
+    )
+
+
 def _commercial_byteplus_reviewed(
     provider: str,
     model_alias: str,
@@ -67,9 +143,7 @@ def _commercial_byteplus_reviewed(
     if provider != "byteplus-modelark":
         return False
     # No arbitrary BytePlus-looking preview may expand the commercial scope.
-    if model_alias not in BYTEPLUS_COMMERCIAL_FLASH_MODELS and (
-        model_alias != "byteplus-modelark.commercial-coding"
-    ):
+    if model_alias not in BYTEPLUS_COMMERCIAL_MODEL_PINS:
         return False
 
     from control_plane.codex_provider_realm import (
@@ -79,7 +153,7 @@ def _commercial_byteplus_reviewed(
     from control_plane.model_router import ModelRouter
 
     if (
-        type(reviewed_router) is not ModelRouter
+        not _canonical_model_router_matches(reviewed_router)
         or REVIEWED_CODEX_PROVIDER_REALMS.get(
             BYTEPLUS_MODELARK_COMMERCIAL.realm_id
         ) is not BYTEPLUS_MODELARK_COMMERCIAL
@@ -96,11 +170,7 @@ def _commercial_byteplus_reviewed(
         or registered_model.provider_alias != provider
         or registered_model.adapter_id != "codex-cli"
         or registered_model.worker_eligible is not True
-        or (
-            model_alias in BYTEPLUS_COMMERCIAL_FLASH_MODELS
-            and registered_model.model
-            != BYTEPLUS_COMMERCIAL_FLASH_MODELS[model_alias]
-        )
+        or registered_model.model != BYTEPLUS_COMMERCIAL_MODEL_PINS[model_alias]
     ):
         return False
     # Caller-supplied first-tier text is not routing authority. Require an
@@ -122,6 +192,7 @@ def _prefer_commercial_flash_over_zai_flash(
     first_tier_id: str,
     first_tier_aliases: tuple[str, ...],
     reviewed_router: Any,
+    source_freshness_ok: bool,
 ) -> Mapping[str, Any]:
     """Project scarcity priority inside the first *already lawful* tier.
 
@@ -134,7 +205,7 @@ def _prefer_commercial_flash_over_zai_flash(
     """
     from control_plane.model_router import ModelRouter
 
-    if type(reviewed_router) is not ModelRouter:
+    if not source_freshness_ok or type(reviewed_router) is not ModelRouter:
         return selected
     if selected.get("provider") != "glm":
         return selected
@@ -262,6 +333,8 @@ class EconomicRoutePreference:
     estimated_startable_jobs: int
     suggested_parallelism: int
     expiry_pressure_jobs_per_hour: str | None
+    original_suggested_option_id: str = ""
+    preference_substituted: bool = False
     selection_is_commitment: bool = False
     claim_time_revalidation_required: bool = True
 
@@ -276,6 +349,8 @@ class EconomicRoutePreference:
             "estimated_startable_jobs": self.estimated_startable_jobs,
             "suggested_parallelism": self.suggested_parallelism,
             "expiry_pressure_jobs_per_hour": self.expiry_pressure_jobs_per_hour,
+            "original_suggested_option_id": self.original_suggested_option_id,
+            "preference_substituted": self.preference_substituted,
             "selection_is_commitment": self.selection_is_commitment,
             "claim_time_revalidation_required": self.claim_time_revalidation_required,
         }
@@ -292,6 +367,7 @@ def project_quota_preference(
     quota_preview: Mapping[str, Any],
     *,
     reviewed_router: Any = None,
+    owner_freshness: QuotaPreviewFreshness | None = None,
 ) -> EconomicRoutePreference:
     """Project one provider/model economic preference without changing authority.
 
@@ -344,6 +420,7 @@ def project_quota_preference(
         row, options, first_tier_id=first_tier_id,
         first_tier_aliases=first_tier_aliases,
         reviewed_router=reviewed_router,
+        source_freshness_ok=_source_freshness_ok(as_of, owner_freshness),
     )
     model_alias = _token(row.get("model_alias"), field="option.model_alias")
     if model_alias not in first_tier_aliases:
@@ -397,4 +474,6 @@ def project_quota_preference(
         estimated_startable_jobs=estimated,
         suggested_parallelism=parallelism,
         expiry_pressure_jobs_per_hour=pressure,
+        original_suggested_option_id=suggested_option,
+        preference_substituted=(option_id != suggested_option),
     )
