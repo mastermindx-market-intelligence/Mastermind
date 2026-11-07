@@ -806,3 +806,9 @@ The actual combined source retains the sparse executor and pool publisher. Exact
 The 188-case stage suite passed within the 374-case consumer run. That larger run had 367 passes, six Linux-only skips, and one publisher failure caused by PyYAML being present only in the host user site, which the actual publisher correctly excludes. Installing PyYAML6.0.3 inside the disposable proof venv made the exact affected case pass; the failed run is retained. No guard or assertion was weakened. See `review_evidence/fabric_application/hardening-j-sparse-package-composition-20261107.json`.
 
 This is source composition, not native selection, runtime enrollment, reconciliation of the separate original J driver, or measured availability.
+
+## 2026-11-07: no-replay CI settlement boundary
+
+Required CI run `42359846449`, shard4 job `128365751637`, exposed an inherited race in `test_signed_consumed_parent_second_turn_original_read_and_no_replay`: its duplicate-turn event snapshot preceded the original dispatcher appending `JOB_COMPLETED` for `JOB-002`. The duplicate returned the correct original result; the test already awaited that original task later. The same test and turn owner bytes exist in protected `064a08b2c6360ece12999f1d7f2d712062ea0636` and the passing workspace-release shard.
+
+Moved the existing bounded original-task wait before the event snapshot. Full event-log equality and the exact two native turns remain required; no production path or assertion was loosened. The complete12-case turn file passed with zero failures/errors/skips. Evidence: `review_evidence/fabric_admission/turn-settlement-ci-20261107.json`. The native manifest remains the previously qualified WORKER107 identity and must not replace the larger APPLICATION installed generation.
