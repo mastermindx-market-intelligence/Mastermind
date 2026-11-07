@@ -1,0 +1,4 @@
+{
+  "answer": "RESHAPE_OUTPUT_CHECKPOINT_AND_CONTINUE",
+  "rationale": "A soft target calls for bounded retrieval and reassessment, not an invented turn ceiling."
+}

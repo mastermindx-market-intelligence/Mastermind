@@ -32,15 +32,27 @@ def health_client(monkeypatch):
     """The REAL /health and /ready handlers, without firing the startup hook."""
     import app.main as main_mod
 
+    # A multi-call fixture must not leave multiple stacked setattr undo entries
+    # for a Starlette State key that may be absent during pytest teardown.
+    state = main_mod.app.state
+    missing = object()
+    prior = state._state.get("scheduler", missing)
+
     def _client(*, serve_only: bool, scheduler) -> TestClient:
         if serve_only:
             monkeypatch.setenv("MASTERMIND_SERVE_ONLY", "1")
         else:
             monkeypatch.delenv("MASTERMIND_SERVE_ONLY", raising=False)
-        monkeypatch.setattr(main_mod.app.state, "scheduler", scheduler, raising=False)
+        state.scheduler = scheduler
         return TestClient(main_mod.app, raise_server_exceptions=True)
 
-    return _client
+    try:
+        yield _client
+    finally:
+        if prior is missing:
+            state._state.pop("scheduler", None)
+        else:
+            state.scheduler = prior
 
 
 # ---------------------------------------------------------------------------

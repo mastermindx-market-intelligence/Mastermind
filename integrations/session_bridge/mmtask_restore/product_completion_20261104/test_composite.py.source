@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+"""Focused composite tests for `mmtask rebind --related` against the sibling candidate mmtask.new.
+
+Deterministic local tests over SYNTHETIC charter buffers plus an isolated minimal AgentOS mirror
+fixture (mirror/scripts/agentos.py exposes only parse_record, the one call `mmtask import` makes).
+Per the commission these are NOT a real-source import check and do not replace the installed
+regression suite; the parent runs both before acceptance.
+
+Covered here:
+  1. pristine placeholder composite init — primary + 3 related existing records imported in one call
+  2. null-binding init with --related — legacy v1 row byte-untouched, bare row qualified
+  3. same-primary additive related update — accepted/blocked/active/superseded/complete rows and
+     their evidence/history byte-identical
+  4. existing related associations retained when adding new ones
+  5. duplicated --related input normalization and idempotent repeat (no-op, zero writes)
+  6. missing related target refuses with zero data-file writes
+  7. malformed related key refuses with zero data-file writes
+  8. related key aliasing the primary refuses (rebind and null variants), zero writes
+  9. populated placeholder + --related still refuses (pristine guard not bypassed), zero writes
+ 10. same wave id across workstreams keeps distinct P# and (workstream, id) identity
+ 11. no --related retains incumbent rebind behavior exactly
+ 12. candidate source compiles and exposes --related
+ 13. null-init repeat of the same set stays a no-op
+
+Run: python3 test_composite.py   (or pytest test_composite.py)
+"""
+import hashlib
+import json
+import os
+import py_compile
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+MMTASK = os.path.join(HERE, "mmtask")
+
+# Minimal isolated AgentOS mirror parser fixture: only what do_import consumes (parse_record).
+MIRROR_AGENTOS = '''\
+def parse_record(p):
+    """Minimal standalone workstream-record parser for the isolated test mirror."""
+    with open(p, encoding="utf-8") as stream:
+        lines = stream.read().splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}, ""
+    end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
+    if end is None:
+        return {}, ""
+    fm, waves, item = {}, None, None
+    for raw in lines[1:end]:
+        if not raw.strip():
+            continue
+        if raw.lstrip().startswith("- "):
+            item = {}
+            waves.append(item)
+            raw = raw.lstrip()[2:]
+        k, _, v = raw.strip().partition(":")
+        k, v = k.strip(), v.strip()
+        if waves is None:
+            if v == "":
+                waves = []
+                fm[k] = waves
+            else:
+                fm[k] = v
+        else:
+            item[k] = v
+    return fm, ""
+'''
+
+
+def record(key, waves):
+    rows = "".join(
+        f"  - id: {wid}\n    title: {key} {wid}\n    status: {st}\n    next_action: do {wid}\n"
+        for wid, st in waves)
+    return (f"---\nworkstream: WS:{key}\nstatus: in_progress\nobjective: {key} canonical objective\n"
+            f"next_action: advance {key}\nwaves:\n{rows}---\n{key} body.\n")
+
+
+RECORDS = {
+    "ALPHA": record("ALPHA", [("foundation", "in_progress"), ("rollout", "todo")]),
+    "BETA": record("BETA", [("foundation", "todo"), ("hardening", "todo")]),
+    "GAMMA": record("GAMMA", [("obs", "todo")]),
+    "DELTA": record("DELTA", [("docs", "todo")]),
+    "ZETA": record("ZETA", [("zeta-base", "todo")]),
+}
+
+# Chart/data files whose bytes must never change on a refused run. (.TASKS.lock is a lockfile the
+# incumbent creates for every non-`next` command, so it is not a data file.)
+DATA_FILES = ("TASKS.json", "TASKS.md", "NORTH_STAR.md", "PLAN.md", "PROGRESS.log", "DECISIONS.md", "HANDOFF.md", "STATE.md")
+
+
+def task(id, ws=None, wave="foundation", status="proposed", history=None, evidence=None, **extra):
+    row = {"id": id, "kind": "task", "parent": None, "title": f"{id} title", "wave": wave,
+           "depends_on": [], "status": status, "owner": None, "acceptance": [], "evidence": evidence,
+           "superseded_by": [], "reason": None, "notes": [],
+           "created": "2026-01-01T00:00:00Z", "created_by": "codex:old",
+           "history": history if history is not None else [{"at": "2026-01-01T00:00:00Z", "by": "codex:old", "event": "add"}]}
+    if ws is not None:
+        row["workstream"] = ws
+    row.update(extra)
+    return row
+
+
+class CompositeBase(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmtask-composite-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.mirror = os.path.join(self.tmp, "mirror")
+        os.makedirs(os.path.join(self.mirror, "scripts"))
+        wsdir = os.path.join(self.mirror, "agentos", "workstreams")
+        os.makedirs(wsdir)
+        with open(os.path.join(self.mirror, "scripts", "agentos.py"), "w", encoding="utf-8") as fh:
+            fh.write(MIRROR_AGENTOS)
+        for key, body in RECORDS.items():
+            with open(os.path.join(wsdir, f"WS-{key}.md"), "w", encoding="utf-8") as fh:
+                fh.write(body)
+        self.d = os.path.join(self.tmp, "charter")
+        os.makedirs(self.d)
+
+    # -- fixtures ------------------------------------------------------------
+    def seed(self, db):
+        db.setdefault("schema", "mm.harness.tasks")
+        db.setdefault("schema_version", "2.0.0")
+        db.setdefault("project", "comp")
+        db.setdefault("tasks", [])
+        db.setdefault("waves", [])
+        db.setdefault("agentos", {})
+        with open(os.path.join(self.d, "TASKS.json"), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(db, indent=2) + "\n")
+
+    def db(self):
+        with open(os.path.join(self.d, "TASKS.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def tasks(self):
+        return {t["id"]: t for t in self.db()["tasks"]}
+
+    def wmap(self):
+        return {(w.get("workstream"), w["id"]): w["p"] for w in self.db()["waves"]}
+
+    def read_opt(self, n):
+        p = os.path.join(self.d, n)
+        if not os.path.exists(p):
+            return None
+        with open(p, "rb") as stream:
+            return stream.read()
+
+    def snap(self):
+        return {n: self.read_opt(n) for n in DATA_FILES}
+
+    def assert_no_writes(self, before):
+        for n, b in before.items():
+            self.assertEqual(self.read_opt(n), b, f"refused run wrote {n}")
+
+    # -- runner --------------------------------------------------------------
+    def cli(self, *args):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("MM_") and k != "CODEX_THREAD_ID"}
+        env["MM_CHARTER"] = self.d
+        env["MM_SESSION"] = "tester"
+        env["PATH"] = os.environ.get("PATH", os.defpath)
+        return subprocess.run([sys.executable, MMTASK, *args], capture_output=True, text=True, env=env, cwd=self.tmp)
+
+    def rebind(self, *extra):
+        return self.cli("--dir", self.d, "rebind", "--mirror", self.mirror, *extra)
+
+
+class TestPristinePlaceholderComposite(CompositeBase):
+    def test_placeholder_composite_imports_primary_and_three_related(self):
+        seed = {"workstream": "WS:<unknown>"}
+        self.seed(seed)
+        with open(os.path.join(self.d, "TASKS.json"), "rb") as fh:
+            raw = fh.read()
+        r = self.rebind("--from", "WS:<unknown>", "--to", "WS:ALPHA",
+                        "--related", "WS:BETA", "--related", "WS:GAMMA", "--related", "WS:DELTA",
+                        "--reason", "recover canonical identity for the composite mission")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        db = self.db()
+        self.assertEqual(db["workstream"], "WS:ALPHA")
+        self.assertEqual(db["related_workstreams"], ["WS:BETA", "WS:GAMMA", "WS:DELTA"])
+        recs = {x["workstream"]: x for x in db["agentos"]["records"]}
+        self.assertEqual(len(recs), 4)
+        self.assertTrue(all(x["exists"] for x in recs.values()))
+        self.assertEqual(sorted(recs), ["WS:ALPHA", "WS:BETA", "WS:DELTA", "WS:GAMMA"])
+        # every requested record's canonical waves imported alongside the primary's
+        self.assertEqual(self.wmap(), {
+            ("WS:ALPHA", "foundation"): "P1", ("WS:ALPHA", "rollout"): "P2",
+            ("WS:BETA", "foundation"): "P3", ("WS:BETA", "hardening"): "P4",
+            ("WS:GAMMA", "obs"): "P5", ("WS:DELTA", "docs"): "P6"})
+        self.assertEqual(db["tasks"], [])
+        bh = db["binding_history"]
+        self.assertEqual(len(bh), 1)
+        self.assertEqual((bh[0]["from"], bh[0]["to"]), ("WS:<unknown>", "WS:ALPHA"))
+        self.assertEqual(bh[0]["kind"], "placeholder-init")
+        self.assertEqual(bh[0]["previous_seed_sha256"], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(bh[0]["related_added"], ["WS:BETA", "WS:GAMMA", "WS:DELTA"])
+        self.assertEqual(bh[0]["related"], ["WS:BETA", "WS:GAMMA", "WS:DELTA"])
+        ns = Path(os.path.join(self.d, "NORTH_STAR.md")).read_text(encoding="utf-8")
+        for key in ("WS:ALPHA", "WS:BETA", "WS:GAMMA", "WS:DELTA"):
+            self.assertIn(f"**{key}**", ns)
+        plan = Path(os.path.join(self.d, "PLAN.md")).read_text(encoding="utf-8")
+        self.assertIn("WS:DELTA", plan)
+        self.assertIn("WS:BETA", plan)
+        tasks_md = Path(os.path.join(self.d, "TASKS.md")).read_text(encoding="utf-8")
+        self.assertIn("related: WS:BETA, WS:GAMMA, WS:DELTA", tasks_md)
+
+
+class TestNullInitRelated(CompositeBase):
+    def test_null_init_with_related_preserves_legacy_row_and_qualifies_bare(self):
+        legacy = task("P1.T1", wave="foundation", status="done", evidence="legacy evidence",
+                      history=[{"at": "2026-01-01T00:00:00Z", "by": "codex:old", "event": "add"},
+                               {"at": "2026-01-02T00:00:00Z", "by": "codex:old", "event": "done", "note": "legacy evidence"}])
+        bare = task("P1.T2", ws="ALPHA", status="ready")
+        self.seed({"workstream": None, "tasks": [legacy, bare],
+                   "waves": [{"p": "P1", "workstream": None, "id": "foundation", "title": "Local foundation",
+                              "status": "todo", "source": "local-proposed"}]})
+        r = self.rebind("--from", "null", "--to", "WS:ALPHA", "--related", "WS:BETA",
+                        "--reason", "bind to the existing canonical record and its related scope")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        db = self.db()
+        self.assertEqual(db["workstream"], "WS:ALPHA")
+        self.assertEqual(db["related_workstreams"], ["WS:BETA"])
+        # legacy v1 row: byte-for-byte untouched (no workstream key, no history event)
+        self.assertEqual(db["tasks"][0], legacy)
+        self.assertNotIn("workstream", db["tasks"][0])
+        # bare same-canonical row qualified with appended history
+        got = db["tasks"][1]
+        self.assertEqual(got["workstream"], "WS:ALPHA")
+        self.assertEqual(len(got["history"]), 2)
+        self.assertEqual(got["history"][-1]["event"], "bind-init")
+        # local wave qualified, canonical related waves merged with their own P#
+        w = {(x.get("workstream"), x["id"]): x for x in db["waves"]}
+        self.assertEqual(w[("WS:ALPHA", "foundation")]["p"], "P1")
+        self.assertEqual(w[("WS:ALPHA", "foundation")].get("qualified_from"), None)
+        self.assertEqual(self.wmap()[("WS:ALPHA", "rollout")], "P2")
+        self.assertEqual(self.wmap()[("WS:BETA", "foundation")], "P3")
+        self.assertIn(("WS:BETA", "hardening"), self.wmap())
+        bh = db["binding_history"][0]
+        self.assertEqual(bh["kind"], "null-init")
+        self.assertEqual(bh["legacy_untouched"], ["P1.T1"])
+        self.assertEqual(bh["qualified_tasks"], ["P1.T2"])
+        self.assertEqual(bh["related_added"], ["WS:BETA"])
+        self.assertEqual(bh["related"], ["WS:BETA"])
+
+
+class TestSamePrimaryAdditive(CompositeBase):
+    def seed_bound(self, related=()):
+        rows = [
+            task("P1.T1", ws="WS:ALPHA", status="accepted", evidence="PR #11 merged",
+                 history=[{"at": "2026-01-01T00:00:00Z", "by": "codex:old", "event": "add"},
+                          {"at": "2026-01-03T00:00:00Z", "by": "codex:old", "event": "accept", "note": "PR #11 merged"}]),
+            task("P1.T2", ws="WS:ALPHA", status="blocked", reason="waiting on upstream",
+                 history=[{"at": "2026-01-02T00:00:00Z", "by": "codex:old", "event": "block", "note": "waiting on upstream"}]),
+            task("P1.T3", ws="WS:ALPHA", status="in_progress",
+                 history=[{"at": "2026-01-02T12:00:00Z", "by": "codex:old", "event": "start"}]),
+            task("P1.T4", ws="WS:ALPHA", status="superseded", superseded_by=["P1.T1"], reason="DROPPED: no longer needed",
+                 history=[{"at": "2026-01-02T13:00:00Z", "by": "codex:old", "event": "drop", "note": "DROPPED: no longer needed"}]),
+            task("P1.T5", ws="WS:ALPHA", status="implementation_complete", evidence="checks green",
+                 history=[{"at": "2026-01-02T14:00:00Z", "by": "codex:old", "event": "done", "note": "checks green"}]),
+        ]
+        waves = [{"p": "P1", "workstream": "WS:ALPHA", "id": "foundation", "title": "Alpha foundation",
+                  "status": "in_progress", "source": "agentos"},
+                 {"p": "P2", "workstream": "WS:ALPHA", "id": "rollout", "title": "Alpha rollout",
+                  "status": "todo", "source": "agentos"}]
+        self.seed({"workstream": "WS:ALPHA", "related_workstreams": list(related),
+                   "tasks": rows, "waves": waves})
+
+    def test_same_primary_addition_leaves_every_task_untouched(self):
+        self.seed_bound()
+        before = json.dumps(self.db()["tasks"], sort_keys=True)
+        r = self.rebind("--from", "WS:ALPHA", "--to", "WS:ALPHA", "--related", "WS:BETA",
+                        "--reason", "attach the related scope to the already-bound primary")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        db = self.db()
+        self.assertEqual(db["workstream"], "WS:ALPHA")
+        self.assertEqual(db["related_workstreams"], ["WS:BETA"])
+        self.assertEqual(json.dumps(db["tasks"], sort_keys=True), before)
+        # associations and wave identity unchanged for the primary; related waves imported after it
+        self.assertEqual(self.wmap()[("WS:ALPHA", "foundation")], "P1")
+        self.assertEqual(self.wmap()[("WS:ALPHA", "rollout")], "P2")
+        self.assertEqual(self.wmap()[("WS:BETA", "foundation")], "P3")
+        self.assertEqual(self.wmap()[("WS:BETA", "hardening")], "P4")
+        bh = db["binding_history"][-1]
+        self.assertEqual((bh["from"], bh["to"]), ("WS:ALPHA", "WS:ALPHA"))
+        self.assertEqual(bh["task_changes"], "none (same-primary additive related update)")
+
+    def test_existing_related_retained_when_adding(self):
+        self.seed_bound(related=["WS:BETA"])
+        r = self.rebind("--from", "WS:ALPHA", "--to", "WS:ALPHA", "--related", "WS:GAMMA",
+                        "--reason", "extend the composite with an existing record")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        db = self.db()
+        self.assertEqual(db["related_workstreams"], ["WS:BETA", "WS:GAMMA"])
+        self.assertIn(("WS:GAMMA", "obs"), self.wmap())
+        self.assertIn(("WS:BETA", "foundation"), self.wmap())
+
+
+class TestNormalizationAndIdempotence(CompositeBase):
+    def seed_bound(self, related=()):
+        self.seed({"workstream": "WS:ALPHA", "related_workstreams": list(related),
+                   "tasks": [task("P1.T1", ws="WS:ALPHA", status="ready")],
+                   "waves": [{"p": "P1", "workstream": "WS:ALPHA", "id": "foundation",
+                              "title": "Alpha foundation", "status": "in_progress", "source": "agentos"}]})
+
+    def test_duplicates_collapse_and_repeat_is_a_noop(self):
+        self.seed_bound()
+        r1 = self.rebind("--from", "WS:ALPHA", "--to", "WS:ALPHA",
+                         "--related", "WS:BETA", "--related", "WS:BETA", "--related", "WS:GAMMA",
+                         "--reason", "attach related scope")
+        self.assertEqual(r1.returncode, 0, r1.stderr)
+        self.assertEqual(self.db()["related_workstreams"], ["WS:BETA", "WS:GAMMA"])
+        before = self.snap()
+        hist_before = len(self.db()["binding_history"])
+        r2 = self.rebind("--from", "WS:ALPHA", "--to", "WS:ALPHA",
+                         "--related", "WS:GAMMA", "--related", "WS:BETA", "--related", "WS:BETA",
+                         "--reason", "repeat of the same qualified set")
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        self.assertIn("nothing changed", r2.stdout + r2.stderr)
+        self.assert_no_writes(before)
+        self.assertEqual(len(self.db()["binding_history"]), hist_before)
+
+    def test_bind_init_repeat_of_same_set_is_a_noop(self):
+        self.seed_bound(related=["WS:BETA"])
+        before = self.snap()
+        r = self.rebind("--from", "null", "--to", "WS:ALPHA", "--related", "WS:BETA", "--reason", "repeat")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("nothing changed", r.stdout + r.stderr)
+        self.assert_no_writes(before)
+
+
+class RefusalBase(CompositeBase):
+    def seed_bound(self):
+        self.seed({"workstream": "WS:ALPHA", "related_workstreams": [],
+                   "tasks": [task("P1.T1", ws="WS:ALPHA", status="ready", evidence=None)],
+                   "waves": [{"p": "P1", "workstream": "WS:ALPHA", "id": "foundation",
+                              "title": "Alpha foundation", "status": "in_progress", "source": "agentos"}]})
+
+
+class TestRefusalsWriteNothing(RefusalBase):
+    def test_missing_related_target_refuses(self):
+        self.seed_bound()
+        before = self.snap()
+        r = self.rebind("--from", "WS:ALPHA", "--to", "WS:ALPHA", "--related", "WS:NOPE", "--reason", "x")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("does not exist in the mirror", r.stderr)
+        self.assertIn("WS-NOPE.md", r.stderr)
+        self.assert_no_writes(before)
+
+    def test_malformed_related_key_refuses(self):
+        self.seed_bound()
+        before = self.snap()
+        for bad in ("beta", "WS:beta", "WS:BE TA", "ALPHA"):
+            r = self.rebind("--from", "WS:ALPHA", "--to", "WS:ALPHA", "--related", bad, "--reason", "x")
+            self.assertNotEqual(r.returncode, 0, bad)
+            self.assertIn("bad related workstream key", r.stderr)
+        self.assert_no_writes(before)
+
+    def test_same_primary_alias_refuses(self):
+        self.seed_bound()
+        before = self.snap()
+        r = self.rebind("--from", "WS:ALPHA", "--to", "WS:ALPHA", "--related", "WS:ALPHA", "--reason", "x")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("aliases the primary target", r.stderr)
+        self.assert_no_writes(before)
+
+    def test_null_variant_primary_alias_refuses(self):
+        self.seed({"workstream": None, "tasks": [], "waves": []})
+        before = self.snap()
+        r = self.rebind("--from", "null", "--to", "WS:ALPHA", "--related", "WS:ALPHA", "--reason", "x")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("aliases the primary target", r.stderr)
+        self.assert_no_writes(before)
+
+    def test_populated_placeholder_with_related_still_refuses(self):
+        self.seed({"workstream": "WS:<unknown>", "tasks": [task("P1.T1", ws="WS:ALPHA", status="ready")], "waves": []})
+        before = self.snap()
+        r = self.rebind("--from", "WS:<unknown>", "--to", "WS:ALPHA", "--related", "WS:BETA", "--reason", "x")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("pristine empty seed", r.stderr)
+        self.assert_no_writes(before)
+
+
+class TestCrossWorkstreamWaveIds(CompositeBase):
+    def test_same_wave_id_across_workstreams_keeps_distinct_p(self):
+        self.seed({"workstream": "WS:ALPHA", "related_workstreams": [],
+                   "tasks": [task("P1.T1", ws="WS:ALPHA", status="ready")],
+                   "waves": [{"p": "P1", "workstream": "WS:ALPHA", "id": "foundation",
+                              "title": "Alpha foundation", "status": "in_progress", "source": "agentos"}]})
+        r = self.rebind("--from", "WS:ALPHA", "--to", "WS:ALPHA", "--related", "WS:BETA",
+                        "--reason", "attach a record that also defines a foundation wave")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        db = self.db()
+        rows = [w for w in db["waves"] if w["id"] == "foundation"]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(sorted((w["workstream"], w["p"]) for w in rows),
+                         [("WS:ALPHA", "P1"), ("WS:BETA", "P3")])
+        # exactly one wave matches the qualified (workstream, id) identity for each key
+        for key in ("WS:ALPHA", "WS:BETA"):
+            self.assertEqual(sum(1 for w in db["waves"] if w["id"] == "foundation" and w["workstream"] == key), 1)
+
+
+class TestIncumbentRetained(CompositeBase):
+    def test_no_related_flag_keeps_incumbent_rebind(self):
+        self.seed({"workstream": "WS:ALPHA", "related_workstreams": ["WS:BETA"],
+                   "tasks": [task("P1.T1", ws="WS:ALPHA", status="ready")],
+                   "waves": [{"p": "P1", "workstream": "WS:ALPHA", "id": "foundation",
+                              "title": "Alpha foundation", "status": "in_progress", "source": "agentos"}]})
+        r = self.rebind("--from", "WS:ALPHA", "--to", "WS:ZETA", "--reason", "canonical identity corrected")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        db = self.db()
+        self.assertEqual(db["workstream"], "WS:ZETA")
+        self.assertEqual(db["related_workstreams"], ["WS:BETA"])
+        t = db["tasks"][0]
+        self.assertEqual(t["workstream"], "WS:ZETA")
+        self.assertEqual(len(t["history"]), 2)
+        self.assertEqual(t["history"][-1]["event"], "rebind")
+        self.assertEqual(t["history"][-1]["note"], "WS:ALPHA -> WS:ZETA")
+        self.assertEqual(self.wmap(), {("WS:ZETA", "foundation"): "P1", ("WS:ZETA", "zeta-base"): "P2",
+                                       ("WS:BETA", "foundation"): "P3", ("WS:BETA", "hardening"): "P4"})
+        bh = db["binding_history"][-1]
+        self.assertEqual((bh["from"], bh["to"]), ("WS:ALPHA", "WS:ZETA"))
+        self.assertEqual(bh["related_added"], [])
+
+
+class TestCandidateSource(CompositeBase):
+    def test_source_compiles_and_exposes_related(self):
+        pyc = os.path.join(self.tmp, "mmtask.pyc")
+        py_compile.compile(MMTASK, cfile=pyc, doraise=True)
+        self.assertTrue(os.path.exists(pyc))
+        env = {k: v for k, v in os.environ.items() if not k.startswith("MM_") and k != "CODEX_THREAD_ID"}
+        env["PATH"] = os.environ.get("PATH", os.defpath)
+        h = subprocess.run([sys.executable, MMTASK, "rebind", "--help"], capture_output=True, text=True, env=env)
+        self.assertEqual(h.returncode, 0, h.stderr)
+        self.assertIn("--related", h.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

@@ -1,0 +1,3803 @@
+{
+ "schema": "pbr_econ_capture_manifest.v1",
+ "captured_at_utc": "20261022T073119Z",
+ "source": "root@146.190.142.17:/opt/mastermind-live-data (bind-mounted at /opt/mastermind/data inside mastermind.service; /opt/mastermind/data outside the namespace is a stale legacy rsync target)",
+ "method": "ssh tar read-only pull; nothing written on the VPS; no bot code run",
+ "fingerprint_checks": [
+  {
+   "kind": "fills",
+   "book": "US",
+   "path": "portfolios/autonomous/fills.jsonl",
+   "expected_sha256": "778f2846e0e9e527b314a91e0cf105604186c8f081085c0b543a63da54df0a91",
+   "captured_sha256": "778f2846e0e9e527b314a91e0cf105604186c8f081085c0b543a63da54df0a91",
+   "status": "MATCH"
+  },
+  {
+   "kind": "nav",
+   "book": "US",
+   "path": "portfolios/autonomous/nav_history.jsonl",
+   "expected_sha256": "a61e03ceeaa2c40d6a33829a1ee82812b6410bea8e88e7a8ff21cf6537dec918",
+   "captured_sha256": "a61e03ceeaa2c40d6a33829a1ee82812b6410bea8e88e7a8ff21cf6537dec918",
+   "status": "MATCH"
+  },
+  {
+   "kind": "fills",
+   "book": "CN",
+   "path": "portfolios/china/fills.jsonl",
+   "expected_sha256": "ed5f35b9d22c1630a25f696611d2152578afa464037cdb75bd4ed483919ee5a7",
+   "captured_sha256": "ed5f35b9d22c1630a25f696611d2152578afa464037cdb75bd4ed483919ee5a7",
+   "status": "MATCH"
+  },
+  {
+   "kind": "nav",
+   "book": "CN",
+   "path": "portfolios/china/nav_history.jsonl",
+   "expected_sha256": "c137d2f105b049cae786659ed7a8735515469e4fc5ed50bdc1da9431624990f7",
+   "captured_sha256": "c137d2f105b049cae786659ed7a8735515469e4fc5ed50bdc1da9431624990f7",
+   "status": "MATCH"
+  },
+  {
+   "kind": "fills",
+   "book": "HK",
+   "path": "portfolios/hk/fills.jsonl",
+   "expected_sha256": "e37be161fd3f39371160c785142d798ee32edf1568c3a4da1c090a40f7617f93",
+   "captured_sha256": "e37be161fd3f39371160c785142d798ee32edf1568c3a4da1c090a40f7617f93",
+   "status": "MATCH"
+  },
+  {
+   "kind": "nav",
+   "book": "HK",
+   "path": "portfolios/hk/nav_history.jsonl",
+   "expected_sha256": "509b7e1a95c0338c6fd061b807b304664681824d90172d3676c16b9911314ac7",
+   "captured_sha256": "509b7e1a95c0338c6fd061b807b304664681824d90172d3676c16b9911314ac7",
+   "status": "MATCH"
+  },
+  {
+   "kind": "fills",
+   "book": "US-vs-legacy-flagship-store",
+   "path": "portfolio/fills.jsonl",
+   "expected_sha256": "778f2846e0e9e527b314a91e0cf105604186c8f081085c0b543a63da54df0a91",
+   "captured_sha256": "c72051b68f4c4a49d8eccaf85b98656d819107c92a7d1d0d3080ffb70a1e7e59",
+   "captured_rows": 182,
+   "status": "MISMATCH_NO_PREFIX"
+  },
+  {
+   "kind": "nav",
+   "book": "US-vs-legacy-flagship-store",
+   "path": "portfolio/nav_history.jsonl",
+   "expected_sha256": "a61e03ceeaa2c40d6a33829a1ee82812b6410bea8e88e7a8ff21cf6537dec918",
+   "captured_sha256": "fdb1acd8a5ad03f624c6c60e5646ce7a090f383c686c3fcc3a8949e61da69ba6",
+   "captured_rows": 40,
+   "status": "MISMATCH_NO_PREFIX"
+  }
+ ],
+ "files": [
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/_pending_decision.json",
+   "sha256": "3fe487316b3184ff1b14170060b2a1ff6c6c2fa5e2c1e7507bbdeb9703390454",
+   "size": 8000,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/_pending_decision.json",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/autonomous/_pending_decision.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/account.json",
+   "sha256": "04f24a95f1b3364ec34aa6b41ab746d10899f2f75c80c3fa50a43add69f94a95",
+   "size": 984,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/account.json",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/autonomous/account.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/decisions.jsonl",
+   "sha256": "df5de2cb16908e2f25cac58ea6022438abadd696a414659e40d7886041147eb3",
+   "size": 11021,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/decisions.jsonl",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/autonomous/decisions.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/fills.jsonl",
+   "sha256": "58ac86c8a5570f2d53a1f9140de1399be0800c93aeb89ff7fded9299a40ff1c3",
+   "size": 1126,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/fills.jsonl",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/autonomous/fills.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/latest.json",
+   "sha256": "3853b4d4e5e30bc955e692ab3fd3c44a2120cfe63a77c11d8eadf78248f18bc9",
+   "size": 26464,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/latest.json",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/autonomous/latest.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/nav_history.jsonl",
+   "sha256": "105479219f3a8690379d19ef7eae3f90077cc77f4620247b5d233eec2722ba6c",
+   "size": 103,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/nav_history.jsonl",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/autonomous/nav_history.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/portfolio.json",
+   "sha256": "3853b4d4e5e30bc955e692ab3fd3c44a2120cfe63a77c11d8eadf78248f18bc9",
+   "size": 26464,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/portfolio.json",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/autonomous/portfolio.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/positions_ledger.json",
+   "sha256": "e846c56bd69e57045c5467baf65688746cac5dc3be5aef68cad82f585ad7d584",
+   "size": 6002,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/autonomous/positions_ledger.json",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/autonomous/positions_ledger.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/_pending_decision.json",
+   "sha256": "d92f8211f881d3a61206600cc9af6dd80a3f738dd941832a5b2b0a50fac859f3",
+   "size": 6155,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/_pending_decision.json",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/_pending_decision.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/account.json",
+   "sha256": "b5ab8cda163b2cb8c62281c560b0f8381e96c3d1561b241499eab4d172d25220",
+   "size": 658,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/account.json",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/account.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/decisions.jsonl",
+   "sha256": "383cf12c8508693e3f529dc91ee0f1b24236e95e6407a0def0bf823986c5282e",
+   "size": 9315,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/decisions.jsonl",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/decisions.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/fills.jsonl",
+   "sha256": "ceff6d7901c13fb82de696bdc4741364f6d66f00bddd4d164da5a9efe8617a34",
+   "size": 682,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/fills.jsonl",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/fills.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/latest.json",
+   "sha256": "15e8fbfb782bcf882b469811630e6a15712e62314c88253aa5298b1802c8dc65",
+   "size": 20474,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/latest.json",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/latest.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/nav_history.jsonl",
+   "sha256": "aebd2e22469a0846c5217b0655b326d217921d7a879e74a3f340217316d9b95b",
+   "size": 103,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/nav_history.jsonl",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/nav_history.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/portfolio.json",
+   "sha256": "15e8fbfb782bcf882b469811630e6a15712e62314c88253aa5298b1802c8dc65",
+   "size": 20474,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/portfolio.json",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/portfolio.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/positions_ledger.json",
+   "sha256": "5b8aa2f2e265ef8ecb6c436651d88689aba5e19cb15099c1c427ba4360d55848",
+   "size": 3599,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/positions_ledger.json",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/heavyweight/positions_ledger.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/self_directed/account.json",
+   "sha256": "2c44d7e8594ec4740ac73d4e62ae3b4d4c299fed7f799d06dc8c3512e6aa6af0",
+   "size": 257,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/self_directed/account.json",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/self_directed/account.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/self_directed/fills.jsonl",
+   "sha256": "05552abfcd1dbc998023882e6304e4ebfc02980d9bcecbd765c5278b9be2a6e8",
+   "size": 656,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/self_directed/fills.jsonl",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/self_directed/fills.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/self_directed/pending.json",
+   "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+   "size": 2,
+   "mtime_utc": "2026-07-26T04:21:06+00:00",
+   "host_path": "/opt/mastermind-live-data/_backup_remove_nvda_avgo_20260622-221155/self_directed/pending.json",
+   "service_path": "/opt/mastermind/data/_backup_remove_nvda_avgo_20260622-221155/self_directed/pending.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-03.json",
+   "sha256": "046871a4b110f4a427b1e3ff818ee20f705a711bf143af4d90581352d39252f8",
+   "size": 1705,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-03.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-03.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-06.json",
+   "sha256": "ce6e1e8dfd6657f45cb46a18390b8e2fe320190a309e147736e45618ac1c11b6",
+   "size": 2778,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-06.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-06.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-07.json",
+   "sha256": "7ac930e9818daacad22600bd6c78b3723367a43eef1a0437cce2e467ac69dabe",
+   "size": 2871,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-07.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-07.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-08.json",
+   "sha256": "6a49decf4b1cedd6ac2a0a8ccb85f97d9b50294942acaad42612710448165397",
+   "size": 2973,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-08.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-08.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-09.json",
+   "sha256": "421c67a27849168ea73095ea1f38e326692c8a741fc72da5df288770e9e12b84",
+   "size": 3065,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-09.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-09.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-10.json",
+   "sha256": "8e4767dc815fc5197d6469382b4defb1f04279c3d5a2dd626e25fc0f408094d9",
+   "size": 3161,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-10.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-10.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-13.json",
+   "sha256": "d2a7366439df4ddb5fd75f2c1c258898a89f3fd3148becb8c0485b70c5dbb976",
+   "size": 3257,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-13.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-13.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-14.json",
+   "sha256": "1643e2cdf5c53e538c50fae53cd30997099ced83e83d9e1dd29d3ea13683c73a",
+   "size": 3353,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-14.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-14.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-15.json",
+   "sha256": "f6071de5be6f93a253a45c892bfa3277a8cabc5d2ef0f678caec6909bc5535df",
+   "size": 3449,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-15.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-15.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-16.json",
+   "sha256": "d2daa2e7ccf4a2ecc79f93711cad4013b24e070fa983458c791b77706d85557f",
+   "size": 3545,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-16.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-16.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-17.json",
+   "sha256": "8febbfe3d97689a409a985702f05ef097d3d5a83bf2468c13f4f90e5b3387cc6",
+   "size": 3645,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-17.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-17.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-20.json",
+   "sha256": "95500f6dace99adb7b8f4d98134b8956bf0ca84f39a715366dba322e69eca7ff",
+   "size": 3741,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-20.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-20.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-21.json",
+   "sha256": "558c19d7cf2fa2a5337c1b42733e9ae8e26af24524ac1817962117b8f1c85947",
+   "size": 3833,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-21.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-21.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-22.json",
+   "sha256": "ba71d3bb295ffec7ff94fa5808809dce9bce91a173c3add7306c14df48e79aad",
+   "size": 3927,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-22.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-22.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-23.json",
+   "sha256": "0aadecb387233a01ba14dc4c481dae47ff8d78eb791fd2a7241930140174f55c",
+   "size": 4027,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-23.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-23.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-24.json",
+   "sha256": "d55ba2628ff9087a2f76faae0302c8f23e4eaeb3c4ab723119d64c97ea9f9ba8",
+   "size": 4123,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-24.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-24.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-29.json",
+   "sha256": "6846bbb087b6279c8a3644794fab793a2563d2df59d4913c3304c8d991fdc68a",
+   "size": 4219,
+   "mtime_utc": "2026-07-29T22:35:06+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-29.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-29.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-30.json",
+   "sha256": "2cedef30bfcf6cb2c03e209b099cc977768b04ff1cf5492a78fb308c1a9d6bb9",
+   "size": 4312,
+   "mtime_utc": "2026-07-30T22:35:00+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-30.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-30.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-07-31.json",
+   "sha256": "0965e7390685f43a6d0649f6f1b9869bf18852ba54fa634cae603eef1ca68c04",
+   "size": 4410,
+   "mtime_utc": "2026-07-31T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-07-31.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-07-31.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-03.json",
+   "sha256": "2f2b207ded940e4767c0ccf93177c9ebda1d521fee48bd7d988f901877080c14",
+   "size": 4502,
+   "mtime_utc": "2026-08-03T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-03.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-03.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-04.json",
+   "sha256": "a7cba42322e7748bdb8364254f823047c84308415009e54a5fb63f5a4de88b4e",
+   "size": 4598,
+   "mtime_utc": "2026-08-04T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-04.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-04.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-05.json",
+   "sha256": "4d2ecd2ea6511bbf14c80a9f3689e715514ca56cfb3d1dad280a3ec73b030f7f",
+   "size": 4694,
+   "mtime_utc": "2026-08-05T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-05.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-05.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-06.json",
+   "sha256": "90226c84d2a4f248b41b8caea5ea64b451eaa96a1dfebb4a008c1f46f25e5110",
+   "size": 4790,
+   "mtime_utc": "2026-08-06T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-06.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-06.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-07.json",
+   "sha256": "5e50412f374070d7e553fe29010aba47328f07fa343533dde90cf1f3ca6684eb",
+   "size": 4886,
+   "mtime_utc": "2026-08-07T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-07.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-07.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-10.json",
+   "sha256": "6e2dd9f1d396959a94cb58260eeee897a4f72aade96556fcdb7336adb54cf5db",
+   "size": 4982,
+   "mtime_utc": "2026-08-10T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-10.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-10.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-11.json",
+   "sha256": "1acc8722ed5353a946d14b66405792020b30156f68d89823bcbcfdd180843224",
+   "size": 5072,
+   "mtime_utc": "2026-08-11T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-11.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-11.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-12.json",
+   "sha256": "ebb835e3b53c020b3124d800930cacead69a92d28bd6a0fb6e5f8f0c2406e775",
+   "size": 5172,
+   "mtime_utc": "2026-08-12T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-12.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-12.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-13.json",
+   "sha256": "cdac20ba449eb14bab3312f55a18f516b2037302c608a92c6c273cc681832661",
+   "size": 5268,
+   "mtime_utc": "2026-08-13T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-13.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-13.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-14.json",
+   "sha256": "cb0e847c46dd22729ee87a20cdc63a93bdd575ddca9a3342560594721e6af046",
+   "size": 5358,
+   "mtime_utc": "2026-08-14T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-14.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-14.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-17.json",
+   "sha256": "099fcff0e5b6d2ad8de052f4a6b905cbb51c113ad8e40b61eb5d91c3bfa962bf",
+   "size": 5458,
+   "mtime_utc": "2026-08-17T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-17.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-17.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-18.json",
+   "sha256": "58e76fefcde2aa1897be3253a52c6d74e84eebc2faf7088c7638271f6fa93afd",
+   "size": 5554,
+   "mtime_utc": "2026-08-18T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-18.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-18.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-19.json",
+   "sha256": "e604cec2578bbbfc920ca0c44c3752f243027d20d7fc0050a6a9bc926952d27b",
+   "size": 5650,
+   "mtime_utc": "2026-08-19T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-19.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-19.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-20.json",
+   "sha256": "1e2915ed66b2843895dfc6ef27db9344a0d2439567d05d63a40ea7e3405b80bd",
+   "size": 5746,
+   "mtime_utc": "2026-08-20T22:35:07+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-20.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-20.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-21.json",
+   "sha256": "881390c9738c63b0ff8f286c2d20f4a62489d42829c47719ef921dce2b4a37c1",
+   "size": 5842,
+   "mtime_utc": "2026-08-21T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-21.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-21.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-24.json",
+   "sha256": "5c1ab6af9d4a7231b741c217653e446afd33d19299ddcf8e790a5b3457b00793",
+   "size": 5938,
+   "mtime_utc": "2026-08-24T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-24.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-24.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-25.json",
+   "sha256": "074f179129d75b7e7dbe5f4e0dd1a23518cba2e14414dcdf4e712272ea76d38e",
+   "size": 6034,
+   "mtime_utc": "2026-08-25T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-25.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-25.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-26.json",
+   "sha256": "6dde42910e4a481e1f1322bceb7cdebcc59aa2158c96f4a382248ff6047c9955",
+   "size": 6130,
+   "mtime_utc": "2026-08-26T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-26.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-26.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-27.json",
+   "sha256": "36325574fc9b69dfedd8a1cc70ddd9ed4acb6a4c7ca88a8b511664b2088e82f7",
+   "size": 6220,
+   "mtime_utc": "2026-08-27T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-27.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-27.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-28.json",
+   "sha256": "5655045a44343ff704d27d451510c21b48a8d8c2f3fb0ee648b64fa99d8a29bb",
+   "size": 6320,
+   "mtime_utc": "2026-08-28T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-28.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-28.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-08-31.json",
+   "sha256": "18b6cee46c4c7252ae355d8c00e2509efba03cbf2775e4fa4ea0fee46c1fc621",
+   "size": 6404,
+   "mtime_utc": "2026-08-31T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-08-31.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-08-31.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-01.json",
+   "sha256": "834469b4b7d70e8a8f5cbade1129a0210166cedfb29801d29a61c841f7b9c474",
+   "size": 6502,
+   "mtime_utc": "2026-09-01T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-01.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-01.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-02.json",
+   "sha256": "72dfd5439cecbf54eb3d0e3840607993c7f4c2991e1d25a772f3839411cbb218",
+   "size": 6602,
+   "mtime_utc": "2026-09-02T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-02.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-02.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-03.json",
+   "sha256": "493fba038a345b0f981c8f06098026216e346f076ab5cb07b81ffe2da3b8a682",
+   "size": 6698,
+   "mtime_utc": "2026-09-03T22:35:08+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-03.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-03.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-04.json",
+   "sha256": "ac4fd4f658c912c967a21cc44f352662c809f4e2d8a82dd8c2159b26b00132ba",
+   "size": 6794,
+   "mtime_utc": "2026-09-04T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-04.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-04.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-07.json",
+   "sha256": "d8f72d78b67f7253c8105d95cddc5677f867709dafd76cb0e469202fbebe721d",
+   "size": 6890,
+   "mtime_utc": "2026-09-07T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-07.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-07.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-08.json",
+   "sha256": "6281c69f63b1c6859d46131b28a920e9941e6aee0a28eda8a359b451c2b0e534",
+   "size": 6983,
+   "mtime_utc": "2026-09-08T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-08.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-08.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-09.json",
+   "sha256": "47e6c090742198450fce354497759d30a310b0245ec79280778fa8fda93197eb",
+   "size": 7081,
+   "mtime_utc": "2026-09-09T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-09.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-09.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-10.json",
+   "sha256": "e187cd0a503c2d85264c5905b65ab92c41d054b7af32a94b30a9937fe04ade34",
+   "size": 7177,
+   "mtime_utc": "2026-09-10T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-10.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-10.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-11.json",
+   "sha256": "d90fb6893f9acce0c1ba0ac41c147838835b3cf35852d0f3b71a4465caa6baa9",
+   "size": 7273,
+   "mtime_utc": "2026-09-11T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-11.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-11.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-14.json",
+   "sha256": "366aa76ef07a2faa391c36a195498b57001f6b77f3c636a7a2315108aeb59878",
+   "size": 7369,
+   "mtime_utc": "2026-09-14T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-14.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-14.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-15.json",
+   "sha256": "7142638fb4a29983aec3e09fe418fc0be474589950093e713a2c4ac5e855838e",
+   "size": 7459,
+   "mtime_utc": "2026-09-15T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-15.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-15.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-16.json",
+   "sha256": "b4f51f6df13f24a29f707e83c8b5d971cfd77ad05d16ef7a451b1297eb5e3620",
+   "size": 7553,
+   "mtime_utc": "2026-09-16T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-16.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-16.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-17.json",
+   "sha256": "b7f5ef5886c726598064b247ac02ab73abf71fac7c481930d21219188cccfade",
+   "size": 7653,
+   "mtime_utc": "2026-09-17T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-17.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-17.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-18.json",
+   "sha256": "d7dec5a581cd2baf6cd7d7d850684c1fab9da1b7a9eada3f423c239e6451abfa",
+   "size": 7749,
+   "mtime_utc": "2026-09-18T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-18.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-18.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-21.json",
+   "sha256": "4e2754dc7ececafe452d329ba5907487de1591ee1b08b6264cc03d5131fda4a7",
+   "size": 7845,
+   "mtime_utc": "2026-09-21T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-21.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-21.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-22.json",
+   "sha256": "6061cbdb6fa3691230c9b5c1c5ff0475d699138ebcb1d64acb3073a205fc72d2",
+   "size": 7941,
+   "mtime_utc": "2026-09-22T22:35:10+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-22.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-22.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-23.json",
+   "sha256": "50bcb9055988977b276e3de7610b74447127a94f87760cdd6b3773df9a9622ed",
+   "size": 8037,
+   "mtime_utc": "2026-09-23T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-23.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-23.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-24.json",
+   "sha256": "6ea4d5dc11179d730aceb616acb4c79587322fb12dd1d39974a3a3cd6db49a33",
+   "size": 8133,
+   "mtime_utc": "2026-09-24T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-24.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-24.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-25.json",
+   "sha256": "328e84b4e73bd240edf3f35eb3d1bbeb096f5ae6fdd08a1c8ff0645380885910",
+   "size": 8226,
+   "mtime_utc": "2026-09-25T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-25.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-25.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-28.json",
+   "sha256": "8edbfa7440f0e53acc67d3f8642475893bd87c562d0e33c58e3d59ff3cff4a83",
+   "size": 8324,
+   "mtime_utc": "2026-09-28T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-28.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-28.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-29.json",
+   "sha256": "ce3ecf40951eef0dc0c45a8ade7abbf1bd3af429c4c21717296ba348ddd75f65",
+   "size": 8420,
+   "mtime_utc": "2026-09-29T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-29.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-29.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-09-30.json",
+   "sha256": "5762e2baa897c21cb94dee2f3bf7c121b1dd2d12fb53401a69e064798237d236",
+   "size": 8518,
+   "mtime_utc": "2026-09-30T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-09-30.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-09-30.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-01.json",
+   "sha256": "69005f82be61707b5c23e7acac8c6663cd910abe033f78cb96c81d527204bcb2",
+   "size": 8614,
+   "mtime_utc": "2026-10-01T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-01.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-01.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-02.json",
+   "sha256": "d55499dc2c1b12092fcacc9e9baa58342e75ebf52eab4a563612a8c759188dd0",
+   "size": 8710,
+   "mtime_utc": "2026-10-02T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-02.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-02.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-05.json",
+   "sha256": "3136f998bac8e4db741f85f3c253cfe32c701cf7bd83dd79703d2af299742e01",
+   "size": 8801,
+   "mtime_utc": "2026-10-05T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-05.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-05.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-06.json",
+   "sha256": "0cb88ebc45285dea38c8b2cff144291c34c9b9d67448fbe55381b11c29679b1d",
+   "size": 8899,
+   "mtime_utc": "2026-10-06T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-06.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-06.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-07.json",
+   "sha256": "f1a2403709761540f2e78ba40a30bf014404506a4f683eff23fac4648f5f42a0",
+   "size": 8995,
+   "mtime_utc": "2026-10-07T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-07.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-07.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-08.json",
+   "sha256": "bdee027dc72b67f34832f479a1462e699ca13401b75313649e29056d8e294be3",
+   "size": 9091,
+   "mtime_utc": "2026-10-08T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-08.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-08.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-09.json",
+   "sha256": "e97f781deb016d1b72b42ef924431f61a6920e31efd0c6c737177b54c24f5555",
+   "size": 9187,
+   "mtime_utc": "2026-10-09T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-09.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-09.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-12.json",
+   "sha256": "c0f551806f25f9f9355d6f594ba8a3497fc9dfdae7b568a7a7208b1166551690",
+   "size": 9283,
+   "mtime_utc": "2026-10-12T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-12.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-12.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-13.json",
+   "sha256": "aaf3b8e67f48382c1265828e723c9e785320b1be760299823d1b659083e3fae6",
+   "size": 9379,
+   "mtime_utc": "2026-10-13T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-13.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-13.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-14.json",
+   "sha256": "da44082303012c36694c41c9787b71ba713b01f17917aa0a5ef23c9488521666",
+   "size": 9475,
+   "mtime_utc": "2026-10-14T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-14.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-14.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-15.json",
+   "sha256": "d903c23546b698c21670dbec5411ec48ac2095cecc2e8c172127b7a3166675d5",
+   "size": 9571,
+   "mtime_utc": "2026-10-15T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-15.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-15.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-16.json",
+   "sha256": "6f1f0bf19756abd29bf1e6b03a803e3aa4505f651cd8bf96a5807669165c8bf5",
+   "size": 9667,
+   "mtime_utc": "2026-10-16T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-16.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-16.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-19.json",
+   "sha256": "247a144c118e0850e29679b5693d3c903a344d704644ff82f9054c8d6b695ac5",
+   "size": 9763,
+   "mtime_utc": "2026-10-19T22:35:07+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-19.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-19.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-20.json",
+   "sha256": "f1b8630bd47b4cea3db6e519c72081a45cc601cfa86463a14f2eb537e88c5546",
+   "size": 9853,
+   "mtime_utc": "2026-10-20T22:35:09+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-20.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-20.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/2026-10-21.json",
+   "sha256": "bc5532c7ad116619590d8ed03c9af69b4db0053eb3066975499822777332160a",
+   "size": 9947,
+   "mtime_utc": "2026-10-21T22:35:13+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/2026-10-21.json",
+   "service_path": "/opt/mastermind/data/benchmark/2026-10-21.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/_book_returns.jsonl",
+   "sha256": "a68fd89a44e77b6779fd7f3f1a6c1050dd88162e355fa625b521d372f2ca5117",
+   "size": 9991,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/_book_returns.jsonl",
+   "service_path": "/opt/mastermind/data/benchmark/_book_returns.jsonl",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/_series.json",
+   "sha256": "cc5ecf5a92ec9a701c7f1f675cf08ff4731e5189ba3e338140e2081c1021775c",
+   "size": 46044,
+   "mtime_utc": "2026-10-21T22:35:13+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/_series.json",
+   "service_path": "/opt/mastermind/data/benchmark/_series.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/_series_meta.json",
+   "sha256": "85714db138d286a5272fb3db4f89fbd42b09f9b24d5139d421380f8c92e0ed8b",
+   "size": 2732,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/_series_meta.json",
+   "service_path": "/opt/mastermind/data/benchmark/_series_meta.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-06.json",
+   "sha256": "1632bcb9753d733b18fe08a191b1a48d064c7b048d12fe69756476fe1a0c5d74",
+   "size": 1305,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-06.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-06.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-07.json",
+   "sha256": "29e46a0ab284506c45fbb4363adfc0d1b7dce9e9bb2afe098816515e111b7e08",
+   "size": 1337,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-07.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-07.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-08.json",
+   "sha256": "b90df29513ee3bf754211de831a130ff7fd176627a1946061825e5cd4b1ca58b",
+   "size": 1367,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-08.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-08.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-09.json",
+   "sha256": "b25ce48d81b5fa4c07ccc02c9587fc3ca7486b5ffaf07f89f03c86b9d63f3e2a",
+   "size": 1399,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-09.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-09.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-10.json",
+   "sha256": "771196fa662f1ceb15d5e95dd7fdea3e343cd911f1016725fa766ed2ccad5caa",
+   "size": 1431,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-10.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-10.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-13.json",
+   "sha256": "a7ddacffc59a5c683dd86e49a27d0433664c8a0a9f4cfbc2b20464f1fb62325b",
+   "size": 1463,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-13.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-13.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-14.json",
+   "sha256": "aaabcf62667f99dfd5bdc3c89da82b817166ee407cf4ed26b56016aa26f5b8d8",
+   "size": 1495,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-14.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-14.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-15.json",
+   "sha256": "52273d6e37499c12009b798e9c5a9840b11ab1c5f97b729ac558265021adeaac",
+   "size": 1517,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-15.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-15.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-16.json",
+   "sha256": "5e68ff0bec5324de11ccbeec25778a357c2199c97113b62756786add6e21c37e",
+   "size": 1555,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-16.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-16.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-17.json",
+   "sha256": "c7c9a73927a3beb45dbea3b2f3b549fe063b8b11c39831bfdb41431d1bd99080",
+   "size": 1587,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-17.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-17.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-20.json",
+   "sha256": "87377a6b743be369093ba636d7959485fd64b57c53235d30ff4a404040daac94",
+   "size": 1619,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-20.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-20.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-21.json",
+   "sha256": "d7925007761fd12cef9caf585bc6dd56f0f03421a1a79c102e6fe8dee8674823",
+   "size": 1648,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-21.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-21.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-22.json",
+   "sha256": "cbef22af42f6879a668c772d74b70dc4e3cdc1dee329dff19127eedc51f46f44",
+   "size": 1682,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-22.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-22.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-23.json",
+   "sha256": "a5bde03fde43c6106f248a322183c230470601603c4782955d9afddfe34276b3",
+   "size": 1714,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-23.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-23.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-24.json",
+   "sha256": "0b25e2fddb41a1dc6ea1d13b8c71c2d713952c9c12dc6685da93f9f645554082",
+   "size": 1743,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-24.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-24.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-29.json",
+   "sha256": "832ef42ec3c69505c6ec101380a7562054645bc7b94759ad1c63d091c1ee3b35",
+   "size": 1777,
+   "mtime_utc": "2026-07-29T22:35:06+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-29.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-29.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-30.json",
+   "sha256": "04994c1f544a37a5988fc9a9c1116885a3208f1205bc23755d66fc76f6332d9a",
+   "size": 1809,
+   "mtime_utc": "2026-07-30T22:35:00+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-30.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-30.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-07-31.json",
+   "sha256": "5c4c098aaee8950132e0a1340bf3f3649b60737c15e51e62ae76e340cfa2ea0a",
+   "size": 15991,
+   "mtime_utc": "2026-07-31T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-07-31.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-07-31.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-03.json",
+   "sha256": "12e65d9868f88b83b7db5b79bbaf6a4ba62cb532545bdb7d6cddba57c2b38162",
+   "size": 16023,
+   "mtime_utc": "2026-08-03T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-03.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-03.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-04.json",
+   "sha256": "e8c9a9549d00d140a5d6f78009c4ecb93ce4300e00410f299b2bf81304e2a706",
+   "size": 16055,
+   "mtime_utc": "2026-08-04T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-04.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-04.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-05.json",
+   "sha256": "ddf90488c083164581022150d41fa6291b211757dfc6f2deeb4f248e5d23f4bd",
+   "size": 16087,
+   "mtime_utc": "2026-08-05T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-05.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-05.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-06.json",
+   "sha256": "801c86bc025774855b3c2cc9aac2c6a69547d756bde145b9f01d4225380e25ec",
+   "size": 16119,
+   "mtime_utc": "2026-08-06T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-06.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-06.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-07.json",
+   "sha256": "06fd0832be3f0211d948a902da930161445707a37b496b847156a3c190421fa3",
+   "size": 16151,
+   "mtime_utc": "2026-08-07T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-07.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-07.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-10.json",
+   "sha256": "75d004821c34a869873766b0b62f97edc18e3a0b9199392238830133e63f08fa",
+   "size": 16183,
+   "mtime_utc": "2026-08-10T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-10.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-10.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-11.json",
+   "sha256": "e937ef30bb4f1933bb2f6d4e92bed35efa8fb8a6abf635adbe422fb9a4af150b",
+   "size": 16215,
+   "mtime_utc": "2026-08-11T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-11.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-11.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-12.json",
+   "sha256": "911c5bda65ce85e7934fe759f3589df9a1dff19f93f09adf2d0536e767d3abd4",
+   "size": 16247,
+   "mtime_utc": "2026-08-12T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-12.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-12.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-13.json",
+   "sha256": "08de8d4e5aefd06f8ff6c41f9e1455fc56e835aad07031457f84a02146c4bf41",
+   "size": 16279,
+   "mtime_utc": "2026-08-13T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-13.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-13.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-14.json",
+   "sha256": "41e37b76df37c265ea4d391a9f608609f934bed84c11cd570afff6f4421d6855",
+   "size": 16311,
+   "mtime_utc": "2026-08-14T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-14.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-14.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-17.json",
+   "sha256": "aada006f26fe6db502ff1b4bb07f1a878d68f89ce804ecfadb762124c971adcd",
+   "size": 16343,
+   "mtime_utc": "2026-08-17T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-17.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-17.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-18.json",
+   "sha256": "626957e770df05346b7f5eb9ef86eabf708189a1b142a741e316baef5da90714",
+   "size": 16375,
+   "mtime_utc": "2026-08-18T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-18.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-18.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-19.json",
+   "sha256": "0153cb184d4764882491ed17fd0a48cff9525d27b717bd616f9ba30f7bad0b36",
+   "size": 16407,
+   "mtime_utc": "2026-08-19T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-19.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-19.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-20.json",
+   "sha256": "c117b5dcb04ab4fcc1371ec349e66c9d43c9d07cf4bbf2045a56e4c90270e968",
+   "size": 16439,
+   "mtime_utc": "2026-08-20T22:35:07+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-20.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-20.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-21.json",
+   "sha256": "d3661755aee82bc8693f240d307c9cf6377af7fdcdd1c74d75fefb3341db068a",
+   "size": 16471,
+   "mtime_utc": "2026-08-21T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-21.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-21.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-24.json",
+   "sha256": "0cde7a172603b6dfc5515084e39c7735f5c5cc33bce55a0fd919dbadba279fad",
+   "size": 16503,
+   "mtime_utc": "2026-08-24T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-24.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-24.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-25.json",
+   "sha256": "b8c622113b17e627f25023f981bee71818b368a676de1abdbd26af7357704863",
+   "size": 16535,
+   "mtime_utc": "2026-08-25T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-25.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-25.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-26.json",
+   "sha256": "3760350535d8c8e2a36c9f5afc5b544ee60bc38dc9d980023405ce346bea6fb9",
+   "size": 16567,
+   "mtime_utc": "2026-08-26T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-26.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-26.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-27.json",
+   "sha256": "2784a070e6431ef23b654142f828d8b3d9a2644b1d3f2768f5326ce5fa527acc",
+   "size": 16599,
+   "mtime_utc": "2026-08-27T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-27.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-27.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-28.json",
+   "sha256": "eae57f941febc31d7d2fb4d6aa3c4aa30e89e29aac54b78c8ea8a0e73462ee5d",
+   "size": 16631,
+   "mtime_utc": "2026-08-28T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-28.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-28.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-08-31.json",
+   "sha256": "9bdbb4f01b4831097f7aeea07e17599f4912794c7575195d0d67fc177ccea1d1",
+   "size": 16663,
+   "mtime_utc": "2026-08-31T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-08-31.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-08-31.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-01.json",
+   "sha256": "a40023fe908dea39b0af8fd9cd7cb67f906bec1cf21568b8f41390098b352866",
+   "size": 16695,
+   "mtime_utc": "2026-09-01T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-01.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-01.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-02.json",
+   "sha256": "77ac8e333caed3ce05bfdb7a45cc198d3e3af40d5b8ab07937e0433b7811c85f",
+   "size": 16727,
+   "mtime_utc": "2026-09-02T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-02.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-02.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-03.json",
+   "sha256": "b547c1116251f5072437dd2f333a4af023207d603d54f10271967d27dc464638",
+   "size": 16759,
+   "mtime_utc": "2026-09-03T22:35:08+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-03.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-03.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-04.json",
+   "sha256": "23bcfaeee6ccfcec22c4e6af86c61bcc53be94c4f1fbf792945ac8df261b249b",
+   "size": 16791,
+   "mtime_utc": "2026-09-04T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-04.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-04.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-07.json",
+   "sha256": "5470a7ce1152d593807985dae680dd9873a35b0d4701533994507b45591fe9d4",
+   "size": 16823,
+   "mtime_utc": "2026-09-07T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-07.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-07.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-08.json",
+   "sha256": "c64c977db9d028c659420f558ec59cdb45c4b6a092778af16a07c0014158235f",
+   "size": 16855,
+   "mtime_utc": "2026-09-08T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-08.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-08.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-09.json",
+   "sha256": "a2dc9455f4ec2c77bfa0111dfa936382c0a29e3e09b4449e6df2c59d78a316e1",
+   "size": 16887,
+   "mtime_utc": "2026-09-09T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-09.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-09.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-10.json",
+   "sha256": "473e49ddf0f75fc1f03425ae9551f80ce074f1bc92c9b7d44a73ee6b6d5934cf",
+   "size": 16919,
+   "mtime_utc": "2026-09-10T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-10.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-10.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-11.json",
+   "sha256": "43374edec8ee40c560f1f269085780fac0f937e513592eb8e01d95bc6048cf7a",
+   "size": 16951,
+   "mtime_utc": "2026-09-11T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-11.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-11.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-14.json",
+   "sha256": "9e97ad0fa0b2033c96be830661b98785de06ef6d7eefd220534a7270d22b135f",
+   "size": 16983,
+   "mtime_utc": "2026-09-14T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-14.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-14.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-15.json",
+   "sha256": "e53dc5c02167c2382d8611341500ebe3bbf40ece17beae01f3f9fbebb72531ad",
+   "size": 17015,
+   "mtime_utc": "2026-09-15T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-15.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-15.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-16.json",
+   "sha256": "1c3c48bb3742e438f05fd00554e6fa9d0268bf584b2d5f9bcdb1c034d3236cc8",
+   "size": 17047,
+   "mtime_utc": "2026-09-16T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-16.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-16.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-17.json",
+   "sha256": "3a2ff590d0476a7bc28b7e483edd1efb035db3e4ef2bf5d895d9d780bf8d4e57",
+   "size": 17079,
+   "mtime_utc": "2026-09-17T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-17.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-17.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-18.json",
+   "sha256": "e84d49391ad98591a7fab79c412d7d6c4023edde1b3625b1105022155b815780",
+   "size": 17111,
+   "mtime_utc": "2026-09-18T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-18.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-18.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-21.json",
+   "sha256": "19c2d0b1a7ec207928943086bce9278bdfd841de9e03400fc105a7bb17743048",
+   "size": 17143,
+   "mtime_utc": "2026-09-21T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-21.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-21.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-22.json",
+   "sha256": "899aa3943d5e76881268bee55433e6b06cc7294e4ab29e0c4dc164739bc777fb",
+   "size": 17175,
+   "mtime_utc": "2026-09-22T22:35:10+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-22.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-22.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-23.json",
+   "sha256": "567dac0416cf6eeaf98b1791d95faf9f20b3403c66e7583eb84c3958de4b9d74",
+   "size": 17207,
+   "mtime_utc": "2026-09-23T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-23.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-23.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-24.json",
+   "sha256": "0fa503bcc6fc0c5078278c7292fbe727130b3242e3a59e81dff868443f4af915",
+   "size": 17239,
+   "mtime_utc": "2026-09-24T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-24.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-24.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-25.json",
+   "sha256": "8425943cdbac17e74e815f71d3d5987ff496fdc394db0cce80fbf7fe16709625",
+   "size": 17271,
+   "mtime_utc": "2026-09-25T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-25.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-25.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-28.json",
+   "sha256": "1cd8fc5f9d7355ea4e157542a31ecfe7b44e3071c33e9dfdc66f6ed752f5fab8",
+   "size": 17303,
+   "mtime_utc": "2026-09-28T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-28.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-28.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-29.json",
+   "sha256": "57673bed58dfbf598d99d47e4ced3575f04badaa484f5fce38da1fe7c54cf12a",
+   "size": 17335,
+   "mtime_utc": "2026-09-29T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-29.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-29.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-09-30.json",
+   "sha256": "d67b9121d0315364be0d500b124e54a5e66d2e8f40de47ec73cb4b70ae0070c3",
+   "size": 17367,
+   "mtime_utc": "2026-09-30T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-09-30.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-09-30.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-01.json",
+   "sha256": "b3511aada96e3000fc52d80f7bd35c38d060fda8ec476928ac8b106bc6a7fd2a",
+   "size": 17399,
+   "mtime_utc": "2026-10-01T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-01.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-01.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-02.json",
+   "sha256": "8e236b2cebec0f9ab0faea2f27b59be49d8610584596f526ce9735a7bf6b09a5",
+   "size": 17431,
+   "mtime_utc": "2026-10-02T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-02.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-02.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-05.json",
+   "sha256": "dd2f6a4724f73c0112fbcb01ef1bb30cadbb7f31a6cf37023ce3a0bb36474b48",
+   "size": 17463,
+   "mtime_utc": "2026-10-05T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-05.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-05.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-06.json",
+   "sha256": "3d5a9bdf1073bf4780ea187b2edf570cfd3b699a950b7e33ae354ca65fb16ea4",
+   "size": 17495,
+   "mtime_utc": "2026-10-06T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-06.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-06.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-07.json",
+   "sha256": "cfc57b4b77c0d21fb656821c3f4222410c460935305d8fc0829ae1122754fa20",
+   "size": 17527,
+   "mtime_utc": "2026-10-07T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-07.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-07.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-08.json",
+   "sha256": "18630499fce647a98ce15d232cf933c4faa38364799c46bac1e2f3ba69968709",
+   "size": 17556,
+   "mtime_utc": "2026-10-08T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-08.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-08.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-09.json",
+   "sha256": "06ecc04958dbc657bf28b23973ce2e2c0c2cad5165d5e995ed39dc703eb83091",
+   "size": 17590,
+   "mtime_utc": "2026-10-09T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-09.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-09.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-12.json",
+   "sha256": "920f7126e792db1de5f30f50e875f4dc8a2d62c37cdb1d63350df9a47446a991",
+   "size": 17622,
+   "mtime_utc": "2026-10-12T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-12.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-12.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-13.json",
+   "sha256": "176cdc2a7e3d123ff4d73f762fca9ed06e47b443989935f0d688d2271a2604b2",
+   "size": 17654,
+   "mtime_utc": "2026-10-13T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-13.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-13.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-14.json",
+   "sha256": "011f374df7283701ff37c76af0fc8428a1b5fa05e960de0cb264d8ab7e46b8d5",
+   "size": 17686,
+   "mtime_utc": "2026-10-14T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-14.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-14.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-15.json",
+   "sha256": "bccb776a81f09cbbd1cad157019a9929c6e7c60cef420094a8b92763dbe7c8bc",
+   "size": 17718,
+   "mtime_utc": "2026-10-15T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-15.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-15.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-16.json",
+   "sha256": "45a88b2beea88154d2321630807e32059aa6d78f68fd70966d5ac2c4690ce18f",
+   "size": 17750,
+   "mtime_utc": "2026-10-16T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-16.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-16.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-19.json",
+   "sha256": "ae3715409d4f893f7535d2ae33e6a1bb49522bd591ecb6ae7cc8ddbcae51ef5e",
+   "size": 17782,
+   "mtime_utc": "2026-10-19T22:35:07+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-19.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-19.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-20.json",
+   "sha256": "534cf6a6cd5a382153cc2545508fab2c7628e690b1807083b0d330dd5f4a87e2",
+   "size": 17814,
+   "mtime_utc": "2026-10-20T22:35:09+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-20.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-20.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/china/2026-10-21.json",
+   "sha256": "8629aa53d097436c17991795e22e0f1633c68aac14e65916908d2d4ba61a81a6",
+   "size": 17846,
+   "mtime_utc": "2026-10-21T22:35:13+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/china/2026-10-21.json",
+   "service_path": "/opt/mastermind/data/benchmark/china/2026-10-21.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-06.json",
+   "sha256": "677cc5256b98db6aecba38f13a453618f5fa1b943799dfb04768ead7b64d4001",
+   "size": 1295,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-06.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-06.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-07.json",
+   "sha256": "860a26a967903c0b97dc9a27abc5ce851f43de9c9edc2adc3e1720801583eb54",
+   "size": 1327,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-07.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-07.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-08.json",
+   "sha256": "77e59f5e7e7268866d05998180d4935280bc0530f790928af8825a5f64a01bec",
+   "size": 1357,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-08.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-08.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-09.json",
+   "sha256": "561c7060bc9d1eaa0f9fea0db05076cd878970b17e674b3da9b5db076cfb6958",
+   "size": 1389,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-09.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-09.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-10.json",
+   "sha256": "eeaa91d5d692fb611b7e4be8a10e41039a8d98d5a7b507c76054e40dc035a0f4",
+   "size": 1421,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-10.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-10.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-13.json",
+   "sha256": "c3b5b386507e526bb5b6366c8ac985e063df917bc6460c570dea5c6b59e8bea5",
+   "size": 1453,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-13.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-13.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-14.json",
+   "sha256": "ef6d4c1d15de567facb6c1c8cef5695f03628b542bb553f126318969af2a34f3",
+   "size": 1485,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-14.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-14.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-15.json",
+   "sha256": "3a21b18329b64194d00c4372f4474fd9ab2aa11433b8ec40e79d602093e17e88",
+   "size": 1507,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-15.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-15.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-16.json",
+   "sha256": "0c932c7bdf5bf1d417a15245a9300944aee697a39060d66fa7b1584f2db48ad5",
+   "size": 1545,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-16.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-16.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-17.json",
+   "sha256": "018e0adbe23a28790e447aec673d17d6961894fcbbdc33d1ce6f15f42ebf0da7",
+   "size": 1577,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-17.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-17.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-20.json",
+   "sha256": "3b72b91bdf87e16a48ff382f24f300951835005c2d62432cb719e994542bf52a",
+   "size": 1609,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-20.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-20.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-21.json",
+   "sha256": "0be9ed1319e0ed1721f9ee75857c9f4ddadea49700f0263d8acae6260dcc9218",
+   "size": 1638,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-21.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-21.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-22.json",
+   "sha256": "e3f2816ba60cb10d490ac3c83fd1030c7d483dd57495e37e3a9d277aa301e997",
+   "size": 1672,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-22.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-22.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-23.json",
+   "sha256": "036978243d3e6995d86dfcc6f0444afe5de410d747f545bf2ca19afaa4a6c905",
+   "size": 1704,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-23.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-23.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-24.json",
+   "sha256": "46f88a3b2c9b8e9bb92717e3ff04b95cccf2739184112b09d5c6c53fbaa93500",
+   "size": 1733,
+   "mtime_utc": "2026-07-26T04:21:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-24.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-24.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-29.json",
+   "sha256": "165f84ea3faeb99bdb8d3b6cb9e06f898823eb9df4f9b1c23861840d29323a51",
+   "size": 1767,
+   "mtime_utc": "2026-07-29T22:35:06+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-29.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-29.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-30.json",
+   "sha256": "0ef5dd1b1abd88ad450a7d6e7dc41a267b7227cc33f46cea1901baef896938ad",
+   "size": 1799,
+   "mtime_utc": "2026-07-30T22:35:00+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-30.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-30.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-07-31.json",
+   "sha256": "3c2b019ad232026d9217b66c9ecb1782ce172e8eb95e97b889703ffa8ee6da99",
+   "size": 16478,
+   "mtime_utc": "2026-07-31T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-07-31.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-07-31.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-03.json",
+   "sha256": "d6500d5f4526b518721056c93e58b69be099dbd2c47a3f45c6f0c174e42c8107",
+   "size": 16510,
+   "mtime_utc": "2026-08-03T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-03.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-03.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-04.json",
+   "sha256": "9bb5177001668b15044961c61a442d5251a086006b5db68cdf9ed6bf160c1339",
+   "size": 16542,
+   "mtime_utc": "2026-08-04T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-04.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-04.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-05.json",
+   "sha256": "b1efcb59441c1c5ff187c8c89c8b8603983c5093d1bfdc826f7814b161031249",
+   "size": 16574,
+   "mtime_utc": "2026-08-05T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-05.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-05.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-06.json",
+   "sha256": "cdeb19611c52ca02c68ee1eea77377a4e3c26b876eb5b7c0f277d892d73ff3c9",
+   "size": 16606,
+   "mtime_utc": "2026-08-06T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-06.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-06.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-07.json",
+   "sha256": "172daba74023f4d46d8a2979767502f09afe5baffc819d33317fd7891bf5a754",
+   "size": 16638,
+   "mtime_utc": "2026-08-07T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-07.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-07.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-10.json",
+   "sha256": "4f9c49155fda99f9edc1fb04373a2b7a2ba4e4be84b80cf84d993c39abbc6118",
+   "size": 16670,
+   "mtime_utc": "2026-08-10T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-10.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-10.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-11.json",
+   "sha256": "1035fdd1a09f493a7a2b724c1bf5853ce565a6424f82e306a3d65866f9782d83",
+   "size": 16702,
+   "mtime_utc": "2026-08-11T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-11.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-11.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-12.json",
+   "sha256": "65fcb05262aa4591f7821218c62b67be0ea67fb463f007b69cd8c260b615ab07",
+   "size": 16734,
+   "mtime_utc": "2026-08-12T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-12.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-12.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-13.json",
+   "sha256": "d1ea40c8ccff120b31ea49bf416afb0a4444af4ca53a80c51851c2cec233b375",
+   "size": 16766,
+   "mtime_utc": "2026-08-13T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-13.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-13.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-14.json",
+   "sha256": "3c76dc0057e1797f525f3e9621aecbefac056b8251a42c4c64566fcf97cd6123",
+   "size": 16798,
+   "mtime_utc": "2026-08-14T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-14.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-14.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-17.json",
+   "sha256": "4918e50403f96a91f269d11e53269092eb14b66336dc611b179817908b0208ab",
+   "size": 16830,
+   "mtime_utc": "2026-08-17T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-17.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-17.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-18.json",
+   "sha256": "198c5b3111dfba7740906855c645166b07ba27b7e8bd0583d87a7d0891f0370a",
+   "size": 16862,
+   "mtime_utc": "2026-08-18T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-18.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-18.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-19.json",
+   "sha256": "055479a722ebc6bda195bec6dd1be65ee4552a52ba68efdfe9a7e610547cfcab",
+   "size": 16894,
+   "mtime_utc": "2026-08-19T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-19.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-19.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-20.json",
+   "sha256": "ff6a9ce7a606b7ec58b038441f8ba268a575a78acb35e9ae6c647c40e94d39b9",
+   "size": 16926,
+   "mtime_utc": "2026-08-20T22:35:07+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-20.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-20.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-21.json",
+   "sha256": "1309e149a73afd0b3183701db4e831868fb46289d2bdd0c1d055c20727b495a1",
+   "size": 16958,
+   "mtime_utc": "2026-08-21T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-21.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-21.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-24.json",
+   "sha256": "acd23604137dd21f293bd3db1652a48642ae15300d279f48ffb6cbd5d6e12431",
+   "size": 16990,
+   "mtime_utc": "2026-08-24T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-24.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-24.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-25.json",
+   "sha256": "0d33fe3b4d0ac62acd278bf0b014e572e4819aba9e561879d741df6f5f7b6d09",
+   "size": 17022,
+   "mtime_utc": "2026-08-25T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-25.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-25.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-26.json",
+   "sha256": "eda6061c930f16b147cec77cdd03bd89a65df442b7c41eddf0d17e85cd4a5921",
+   "size": 17054,
+   "mtime_utc": "2026-08-26T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-26.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-26.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-27.json",
+   "sha256": "f892dadd61964d0d97245be3a5c7c5396f856338a58a783360457d84abd9d867",
+   "size": 17086,
+   "mtime_utc": "2026-08-27T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-27.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-27.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-28.json",
+   "sha256": "1b568564f851f927a5f8da58d8d6f72d971bbee48724929db811d7a83f949efe",
+   "size": 17118,
+   "mtime_utc": "2026-08-28T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-28.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-28.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-08-31.json",
+   "sha256": "bf3d55b4f4c691d3963e8d98e6c83a4b2f1b04d60da68bfbb0b53e7bd7d530c4",
+   "size": 17150,
+   "mtime_utc": "2026-08-31T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-08-31.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-08-31.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-01.json",
+   "sha256": "f8cd3afa05e569e48170e3745f9de5e3227ea57f6295290d488588955539d62f",
+   "size": 17182,
+   "mtime_utc": "2026-09-01T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-01.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-01.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-02.json",
+   "sha256": "e73b970d59e579e6be88274388917a1236a8be48852a5d32f46473926e48886d",
+   "size": 17214,
+   "mtime_utc": "2026-09-02T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-02.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-02.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-03.json",
+   "sha256": "628bc4aa71acf6bd1207a7beea46d15b0566f6f974113d43efe7d45d56007b38",
+   "size": 17246,
+   "mtime_utc": "2026-09-03T22:35:08+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-03.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-03.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-04.json",
+   "sha256": "045cba24755fafcf8608d37e4d8fd2b1d7423108d0c7f69cce18c160649057f1",
+   "size": 17278,
+   "mtime_utc": "2026-09-04T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-04.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-04.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-07.json",
+   "sha256": "00e631a6700c6174d17d6268bdce3d5a1e7023048dd0046c961c8fddfee78fed",
+   "size": 17310,
+   "mtime_utc": "2026-09-07T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-07.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-07.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-08.json",
+   "sha256": "462faac8a01f6bbb820625b93611e67c079fb7c8ec4a180cf422baa0d430c244",
+   "size": 17342,
+   "mtime_utc": "2026-09-08T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-08.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-08.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-09.json",
+   "sha256": "9495b8eedfd7667b0eaf4834a2bae4e52ab2a41ef8a23943d31992a026caedc8",
+   "size": 17374,
+   "mtime_utc": "2026-09-09T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-09.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-09.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-10.json",
+   "sha256": "97ba5527bf8ef8fc667cb267cbba3532b9359de4eb6ffcf237d755b1abc9c223",
+   "size": 17406,
+   "mtime_utc": "2026-09-10T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-10.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-10.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-11.json",
+   "sha256": "f0be4fc7ccb37ab15374b6fa20a83ef7f6b0c68118be272555e0611785dc3c5c",
+   "size": 17438,
+   "mtime_utc": "2026-09-11T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-11.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-11.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-14.json",
+   "sha256": "66f7ddbc1549e800aacbb493e8487d1e8a97db4dc29cbd44b6b30618de899d1c",
+   "size": 17470,
+   "mtime_utc": "2026-09-14T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-14.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-14.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-15.json",
+   "sha256": "32e13799174a5e527247b71353f2bbcd1445c7225acf38155f77325e87e21553",
+   "size": 17498,
+   "mtime_utc": "2026-09-15T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-15.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-15.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-16.json",
+   "sha256": "175717e5467bc336b20cb3a62427fd38093923c49441bad94e9d25d9396c1eed",
+   "size": 17533,
+   "mtime_utc": "2026-09-16T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-16.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-16.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-17.json",
+   "sha256": "fc7b1db4b9a76f3eae7888d9b08fd825753b7c85d60324893a25b2ab82558a97",
+   "size": 17565,
+   "mtime_utc": "2026-09-17T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-17.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-17.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-18.json",
+   "sha256": "8e18919e8ab6b6f5136908969fd6e7dda5b3be374d10ea698a2c76ef42016ea3",
+   "size": 17597,
+   "mtime_utc": "2026-09-18T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-18.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-18.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-21.json",
+   "sha256": "73848afd1841003a000993c983e8d2be36514f954d8e20557606402ad23e86fa",
+   "size": 17629,
+   "mtime_utc": "2026-09-21T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-21.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-21.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-22.json",
+   "sha256": "8a9860ae651329ced63d0b67de05b0624e2c634bfab5b63965787fc7eeec4c45",
+   "size": 17661,
+   "mtime_utc": "2026-09-22T22:35:10+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-22.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-22.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-23.json",
+   "sha256": "e3bb95598ea143514839011471664edf9adb6958af32a77d3b54edbf078b0d41",
+   "size": 17693,
+   "mtime_utc": "2026-09-23T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-23.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-23.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-24.json",
+   "sha256": "981f56ea8628dfd87c4ecd4a095a71ce9dea5a408b7fecf4a4f7d43319d87b3b",
+   "size": 17725,
+   "mtime_utc": "2026-09-24T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-24.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-24.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-25.json",
+   "sha256": "b985c02cc54dd74c6cedd518e40d1b04863f7b780a6bbb748215e9ba5dee1a4d",
+   "size": 17756,
+   "mtime_utc": "2026-09-25T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-25.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-25.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-28.json",
+   "sha256": "895aba91a03e5f77d5167b9838d4c8eab60d5889b932a8ff07135888613e2a1b",
+   "size": 17788,
+   "mtime_utc": "2026-09-28T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-28.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-28.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-29.json",
+   "sha256": "1a649b5e770020ba788b701ecda01e7b3bd19dad62b58ec676c909b1a7103bd9",
+   "size": 17816,
+   "mtime_utc": "2026-09-29T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-29.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-29.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-09-30.json",
+   "sha256": "a29e290ad00d0df61f1918bc40b9ffb1440e9d7ae326ead8c8660c3fcc3562de",
+   "size": 17851,
+   "mtime_utc": "2026-09-30T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-09-30.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-09-30.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-01.json",
+   "sha256": "e69811b000e8fc16ca4d3062e16d2a4b5b7d88e0855d14a15279cfdd77469f92",
+   "size": 17883,
+   "mtime_utc": "2026-10-01T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-01.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-01.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-02.json",
+   "sha256": "a2c39578a77ebe8c0be286995527dc750bc65f831b9278555f1c3195270457c2",
+   "size": 17915,
+   "mtime_utc": "2026-10-02T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-02.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-02.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-05.json",
+   "sha256": "dac18a679f647bee9a34d5bcb9e6ae33f972f9bbc41cd95b29c4ca3a4656ff78",
+   "size": 17947,
+   "mtime_utc": "2026-10-05T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-05.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-05.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-06.json",
+   "sha256": "cb00d0dcbb8f291c8c080938dd3882b0b4ad5ff9913afb8877d01c578d50ff47",
+   "size": 17979,
+   "mtime_utc": "2026-10-06T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-06.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-06.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-07.json",
+   "sha256": "b2587f564a4eb805aacd4eda996580fb9780d148ccbc65e82eafb062c8cfbcf7",
+   "size": 18011,
+   "mtime_utc": "2026-10-07T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-07.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-07.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-08.json",
+   "sha256": "3b123bebbc054b42569f292b485bd7fff3fbc4ecd8c1bfd648f8d0ce72279388",
+   "size": 18039,
+   "mtime_utc": "2026-10-08T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-08.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-08.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-09.json",
+   "sha256": "55f2a5f440739e3492ff347ec33e53d0827e48e89875036002b6d43d146b89d9",
+   "size": 18074,
+   "mtime_utc": "2026-10-09T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-09.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-09.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-12.json",
+   "sha256": "7783beb982e2dbbee62c89e530de0a881baf8208e7de59a2bae17df6c808fe49",
+   "size": 18106,
+   "mtime_utc": "2026-10-12T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-12.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-12.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-13.json",
+   "sha256": "e51ef4aa3ebe10394e7bc34165667b9a0c5b1af2f68869356936ca8565d67015",
+   "size": 18138,
+   "mtime_utc": "2026-10-13T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-13.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-13.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-14.json",
+   "sha256": "a999584c9cfed12aa148a8eff829eccf32f598caf2d147fc96f7a510dc7dbbcb",
+   "size": 18166,
+   "mtime_utc": "2026-10-14T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-14.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-14.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-15.json",
+   "sha256": "9d1ecddc9f1fec9100ed5ed5d4f0397cfd4eca5af6a39a7404abc73a5ff9c3df",
+   "size": 18201,
+   "mtime_utc": "2026-10-15T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-15.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-15.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-16.json",
+   "sha256": "2f27ffde5581b140ef1ce6157a6c0033e5c531d6be8b5211ed50d05adf09c118",
+   "size": 18233,
+   "mtime_utc": "2026-10-16T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-16.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-16.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-19.json",
+   "sha256": "ce9de75cdf4069f1fad1cfcabc68d71638055cd6aa8f27e1827ce98fb33ffa0d",
+   "size": 18265,
+   "mtime_utc": "2026-10-19T22:35:07+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-19.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-19.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-20.json",
+   "sha256": "3e640ac60f21556aec6d36e152ae6a246642c9309012a110f1f82bef410ba540",
+   "size": 18297,
+   "mtime_utc": "2026-10-20T22:35:09+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-20.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-20.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/benchmark/hk/2026-10-21.json",
+   "sha256": "af2075d6b2e0e584862ba3497a39a7e25fccd79251c13a1633ad760750fc65d0",
+   "size": 18329,
+   "mtime_utc": "2026-10-21T22:35:13+00:00",
+   "host_path": "/opt/mastermind-live-data/benchmark/hk/2026-10-21.json",
+   "service_path": "/opt/mastermind/data/benchmark/hk/2026-10-21.json",
+   "label": "benchmark"
+  },
+  {
+   "path": "opt/mastermind-live-data/deploy_lag.json",
+   "sha256": "b213d5755696d60371ada8e1d278912b7207f72cac192b283186dbe964ea61e2",
+   "size": 358,
+   "mtime_utc": "2026-07-29T22:40:00+00:00",
+   "host_path": "/opt/mastermind-live-data/deploy_lag.json",
+   "service_path": "/opt/mastermind/data/deploy_lag.json",
+   "label": "other"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-03.json",
+   "sha256": "c055c4dd73ae67d30935597e6466e76e4fbf691e3d45c116f2cc747db84116af",
+   "size": 5448,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-03.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-03.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-06.json",
+   "sha256": "67b57773ab6513b886393aee53e585965acca38ae039b5e920b8346d11ac527f",
+   "size": 2980,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-06.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-06.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-07.json",
+   "sha256": "c66f60c5101c756cb9c470e07851815117e986bfaef0c76a7ea5a1af678cc6c0",
+   "size": 2889,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-07.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-07.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-08.json",
+   "sha256": "49d350354701090421b19b7364a910777d9611d10a44206f44a3faaaa31a12bc",
+   "size": 2691,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-08.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-08.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-09.json",
+   "sha256": "e70d57a7cb7f93abd1de51540e459f90c8fed660ba3302d04cbea1cfb47399ec",
+   "size": 2583,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-09.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-09.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-10.json",
+   "sha256": "afd34904c8be3f82e3c17af154d7a609bb86a51b1ef11a05bcf0559d78895208",
+   "size": 2695,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-10.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-10.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-13.json",
+   "sha256": "22b64f15c63851ad23bd9a711bd788511f6fbb21610ca5f1465143bb10c21823",
+   "size": 2684,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-13.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-13.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-14.json",
+   "sha256": "ee2ef83e03cc2c142a5808383454087a5fa43f142f6661682ea78f6b26bd3f8f",
+   "size": 3184,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-14.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-14.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-15.json",
+   "sha256": "76e2e7978ad265e4540e49f06be625a999070cee5fd3788b1fd42fe81f52604d",
+   "size": 3176,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-15.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-15.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-16.json",
+   "sha256": "f56eebb459a106dcfe7c49bdb2aa8244c7834b59ef32d9991bc160b8b80eef60",
+   "size": 2590,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-16.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-16.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-17.json",
+   "sha256": "873cd4a3bfde46ef01a21cba01e58337d5208b8bfcf69bb29da34ac464681657",
+   "size": 2589,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-17.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-17.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-20.json",
+   "sha256": "489c179e5d61c1b062a6e9c012f815192277ae41d0c4841f1576089e03c30a65",
+   "size": 2588,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-20.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-20.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-21.json",
+   "sha256": "2d8c3e52c32decd3b6bc0e0cefff8991e78f6cf1fa0b224cbee39a1966ebb5d5",
+   "size": 2385,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-21.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-21.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-22.json",
+   "sha256": "9f4aafb92ae8db0e8aaa4ca910d9a440b48dca092cc087e344020277138ec741",
+   "size": 2383,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-22.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-22.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-23.json",
+   "sha256": "96abd6fd5fe0db425ad58b759c10be98c74b56213da7e8905e8e826e0f6aef64",
+   "size": 2386,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-23.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-23.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-24.json",
+   "sha256": "9d00bc49d27b367a6cb05b92c371c277c0ec574b9d05db581c52c66709e558db",
+   "size": 2481,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-24.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-24.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-29.json",
+   "sha256": "741e05a46eaf22da4a9cf2fb075370f684719bcdfd0110d809e5db3320c800db",
+   "size": 2383,
+   "mtime_utc": "2026-07-29T22:35:06+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-29.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-29.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-30.json",
+   "sha256": "5532fe626c453de5714674f5a6ad9769902aa57b250da342116a152834976ea9",
+   "size": 2073,
+   "mtime_utc": "2026-07-30T22:35:00+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-30.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-30.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-07-31.json",
+   "sha256": "be48e358e25daf09ec36aa00861ffcd4add342d4ac1754bdc2bd06818986ee61",
+   "size": 1976,
+   "mtime_utc": "2026-07-31T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-07-31.json",
+   "service_path": "/opt/mastermind/data/marks/2026-07-31.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-03.json",
+   "sha256": "5ee8d7b72476569f3ee3b844a5bd30d49674bda0655d1a99b834bccfbec6cc0c",
+   "size": 2186,
+   "mtime_utc": "2026-08-03T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-03.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-03.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-04.json",
+   "sha256": "123a5f8ef6caaf667f52fed823f77c67200b451eab87f12159ebc95e88dd54f1",
+   "size": 1881,
+   "mtime_utc": "2026-08-04T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-04.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-04.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-05.json",
+   "sha256": "b9ca7f4b4ca16205e520d907ab0839b978c170e3ed58831885601d6c8d62d31a",
+   "size": 2179,
+   "mtime_utc": "2026-08-05T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-05.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-05.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-06.json",
+   "sha256": "c79490805202aa57a3504c1a3f1458c1d6d52209afe87acc77c636af852674d4",
+   "size": 2081,
+   "mtime_utc": "2026-08-06T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-06.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-06.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-07.json",
+   "sha256": "21973e06ad4062f834a85f69b817f2f349873728acbde123d0356ae4cbd799f3",
+   "size": 1984,
+   "mtime_utc": "2026-08-07T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-07.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-07.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-10.json",
+   "sha256": "e7988a52457ee4e7e153b1b3912ed00edf9dfc5b06ed31d292ad24e9107643ba",
+   "size": 1982,
+   "mtime_utc": "2026-08-10T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-10.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-10.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-11.json",
+   "sha256": "c337025c435a6e90769b382e1aff679108a5d21797a0a82c28437da1ebdf35de",
+   "size": 988,
+   "mtime_utc": "2026-08-11T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-11.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-11.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-12.json",
+   "sha256": "6dea7e2392fc435833f9e7701432ae0da1e7f8f1f4c893b4825944164258fc5f",
+   "size": 889,
+   "mtime_utc": "2026-08-12T22:35:01+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-12.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-12.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-13.json",
+   "sha256": "2bfe4224d45542db66c18c5ae5bf8cc20a9b4e3bcc44a8cff32096f7c0a23aef",
+   "size": 988,
+   "mtime_utc": "2026-08-13T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-13.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-13.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-14.json",
+   "sha256": "2b79bfa48e96125154534f1f7bbb9bd32bef74eb3fbfe1f0346bf4058a13029a",
+   "size": 990,
+   "mtime_utc": "2026-08-14T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-14.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-14.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-17.json",
+   "sha256": "2af0d20244f63c6854e903cace8bdfa10591d5b9f9bf6a4902d8a11f667f03c6",
+   "size": 987,
+   "mtime_utc": "2026-08-17T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-17.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-17.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-18.json",
+   "sha256": "683e404a19cfaac5a158428231682b103ed794c1656626a0d099992e9b97ade4",
+   "size": 989,
+   "mtime_utc": "2026-08-18T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-18.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-18.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-19.json",
+   "sha256": "35c944feb163f9bcf96e8ec9d300bc97f9b68c6d3fee83dab213cfc1f23bcfdf",
+   "size": 986,
+   "mtime_utc": "2026-08-19T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-19.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-19.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-20.json",
+   "sha256": "2356723293f6916fb0578b264cad6c56f835a79985db09f6b5282f8e8bd0b1eb",
+   "size": 1086,
+   "mtime_utc": "2026-08-20T22:35:06+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-20.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-20.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-21.json",
+   "sha256": "d423e0934ded5c2565f87cb60297d28cae5f57629bf0cf00910dc84b5abc4a56",
+   "size": 1084,
+   "mtime_utc": "2026-08-21T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-21.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-21.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-24.json",
+   "sha256": "7babc510f141e5f6caa8af98af9e999110daa42a4edc940f58fb80b83d1b923e",
+   "size": 1086,
+   "mtime_utc": "2026-08-24T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-24.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-24.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-25.json",
+   "sha256": "43ed57dc099cba0fe3ca64792db03acca4ad04c25313588e163dae69ec9e8703",
+   "size": 1088,
+   "mtime_utc": "2026-08-25T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-25.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-25.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-26.json",
+   "sha256": "6ddc391853832fe60f01ed93804d7fd7f124872b86c43464c39df4a724ff0dd6",
+   "size": 1086,
+   "mtime_utc": "2026-08-26T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-26.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-26.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-27.json",
+   "sha256": "00a3d3cb2ac4f1b91848def28c7e74c84c1cb8627ca76880bb29f240afe30f1b",
+   "size": 1088,
+   "mtime_utc": "2026-08-27T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-27.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-27.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-28.json",
+   "sha256": "247a403b8b8d00eeabf428b625e2b1e4f01174eb58f717f6be198ba4a7385361",
+   "size": 1083,
+   "mtime_utc": "2026-08-28T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-28.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-28.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-08-31.json",
+   "sha256": "9cb8b2875cd5a3dd51dcfee71234e176a85fbc0bf694eec41e8ef2cb4c7c98d9",
+   "size": 1087,
+   "mtime_utc": "2026-08-31T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-08-31.json",
+   "service_path": "/opt/mastermind/data/marks/2026-08-31.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-01.json",
+   "sha256": "89237b38b35c6c72ac701c4c00703143ec5afe0265184e2f8631c6e6e9db0205",
+   "size": 1085,
+   "mtime_utc": "2026-09-01T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-01.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-01.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-02.json",
+   "sha256": "711417da816a52bbd13e85a3a283b58db027b65333c48ec0f98dd2cf39edc52c",
+   "size": 1085,
+   "mtime_utc": "2026-09-02T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-02.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-02.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-03.json",
+   "sha256": "a3e5e71cf07b51205ea830cbce09aaf4528f42c6d7cf86db2a9da8abcbbfa00f",
+   "size": 1093,
+   "mtime_utc": "2026-09-03T22:35:08+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-03.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-03.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-04.json",
+   "sha256": "3e311974e96ccacf76b1e4e76673b22e9d14f53834e7f0e690a6803658ab4dc8",
+   "size": 1085,
+   "mtime_utc": "2026-09-04T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-04.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-04.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-07.json",
+   "sha256": "a3e4a335525b049d41e050a03fc87c0fa71bd3cbf13b83230f581dfcbf2075fa",
+   "size": 1085,
+   "mtime_utc": "2026-09-07T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-07.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-07.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-08.json",
+   "sha256": "b182af7b88eb9b86808da9ccece5f1b92fbf44fa6649ffae9c3ce1f627f74553",
+   "size": 1089,
+   "mtime_utc": "2026-09-08T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-08.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-08.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-09.json",
+   "sha256": "b01be36faa9b145a9d89bd11f21be168db912d390c348d26e082d5d21296365f",
+   "size": 1086,
+   "mtime_utc": "2026-09-09T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-09.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-09.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-10.json",
+   "sha256": "504c86a4f6893e28377de74b885b4211b6e2da9c9ae0e287ef173871ce83d9b7",
+   "size": 1086,
+   "mtime_utc": "2026-09-10T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-10.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-10.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-11.json",
+   "sha256": "bc60d6fb438f67a7574e5417dc6b540396d43c10202eed589ca56237fd0244fa",
+   "size": 1087,
+   "mtime_utc": "2026-09-11T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-11.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-11.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-14.json",
+   "sha256": "a9e6db676e711efe9c8ca1b6b2f5f2953ed046a250ac01996ede5b9ac2b83b6b",
+   "size": 1086,
+   "mtime_utc": "2026-09-14T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-14.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-14.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-15.json",
+   "sha256": "0115c0007625da96e9455b0bb782e0ff5b0d5395b6d25bc4f4e37dab4b46e093",
+   "size": 1087,
+   "mtime_utc": "2026-09-15T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-15.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-15.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-16.json",
+   "sha256": "d01ced41628127083033e25e3664bc18158df256372216cf1b96ad885efbc6bd",
+   "size": 1085,
+   "mtime_utc": "2026-09-16T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-16.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-16.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-17.json",
+   "sha256": "b2c4a7956df5f92d101d0e60c5443a408ac0900e09e187282dd8fc5219344fb7",
+   "size": 1084,
+   "mtime_utc": "2026-09-17T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-17.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-17.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-18.json",
+   "sha256": "5d0b23b656ea66e7d5b679c474c1fb14cbc4df0bfff6689343e63bf3ffe358d8",
+   "size": 1085,
+   "mtime_utc": "2026-09-18T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-18.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-18.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-21.json",
+   "sha256": "9b3867737ebb7144abaa276b95b4efeee07af95f5c9160e68a2ea0dd6d4cd25c",
+   "size": 1087,
+   "mtime_utc": "2026-09-21T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-21.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-21.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-22.json",
+   "sha256": "b6e97f3234e6541e76d453a8f9693ee9f55d6f29af2ed95e7d5a646c8bd3de99",
+   "size": 1086,
+   "mtime_utc": "2026-09-22T22:35:10+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-22.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-22.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-23.json",
+   "sha256": "509252654b19208d02287fe11fca3c292301c17fb7a1cb0141e75b73abbddc49",
+   "size": 1088,
+   "mtime_utc": "2026-09-23T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-23.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-23.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-24.json",
+   "sha256": "55bdfaa1feac970a6fec2181a9ea23ffa348e789230c2e9cc4cfa2808ff2e908",
+   "size": 1086,
+   "mtime_utc": "2026-09-24T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-24.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-24.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-25.json",
+   "sha256": "c9281ebdb0c715c721f4eb02d5ec3132c64f147df7d6d829e97e7f0b89179549",
+   "size": 1087,
+   "mtime_utc": "2026-09-25T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-25.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-25.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-28.json",
+   "sha256": "7b7730ac819e0b5b3b0f706ae1b50105096ac4adadd8196e93bd24eb911e11a3",
+   "size": 1089,
+   "mtime_utc": "2026-09-28T22:35:02+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-28.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-28.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-29.json",
+   "sha256": "765a2d86091bc202840a5a4002f30e6f8f43ad23e33299e9539c0f208cc798a0",
+   "size": 1091,
+   "mtime_utc": "2026-09-29T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-29.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-29.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-09-30.json",
+   "sha256": "7f202bff42026f3a263f4ecc339f57e87723aa690cf278c80eea2e2b877adc26",
+   "size": 1085,
+   "mtime_utc": "2026-09-30T22:35:04+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-09-30.json",
+   "service_path": "/opt/mastermind/data/marks/2026-09-30.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-01.json",
+   "sha256": "f3d873b3071267d58a58a264c11a5ac5343040e071db5115f563f4348e0c7aba",
+   "size": 1083,
+   "mtime_utc": "2026-10-01T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-01.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-01.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-02.json",
+   "sha256": "e3fa1d9e5c5bd32a43f22858cda5ac6f8ee1c042c1f0ae6faf64b1381b6129c9",
+   "size": 1087,
+   "mtime_utc": "2026-10-02T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-02.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-02.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-05.json",
+   "sha256": "01f2233d013dd76bf0b231251631d0a2acbb50feabca94ac7da1114a7a93ab55",
+   "size": 1186,
+   "mtime_utc": "2026-10-05T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-05.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-05.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-06.json",
+   "sha256": "868e6332e7bdc11a20104335c3b31acf2a084b998b884c26a7b561641fe7e6e5",
+   "size": 1187,
+   "mtime_utc": "2026-10-06T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-06.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-06.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-07.json",
+   "sha256": "4abd3edd084b72400562c53139a6fa7f1c423d0a7843c5398b43f27c738ec082",
+   "size": 1190,
+   "mtime_utc": "2026-10-07T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-07.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-07.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-08.json",
+   "sha256": "632c903f27f610dec96f7397616c7d6512cdcfc6de000f7d233fdd997427a7b4",
+   "size": 1184,
+   "mtime_utc": "2026-10-08T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-08.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-08.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-09.json",
+   "sha256": "0e8e09d98ed9f2299d34f9e9c8fc1bd71162cba2311d063c8c0ec386c6844d05",
+   "size": 1188,
+   "mtime_utc": "2026-10-09T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-09.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-09.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-12.json",
+   "sha256": "f34a5810317aad52662c40db15fa3aa94d2634cf940c375b31cb5c6c313888dc",
+   "size": 1187,
+   "mtime_utc": "2026-10-12T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-12.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-12.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-13.json",
+   "sha256": "c5cbbd8c3ab4cafdd4467c871711ab45612344e24785f53d150003e5f2cb8d9a",
+   "size": 1186,
+   "mtime_utc": "2026-10-13T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-13.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-13.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-14.json",
+   "sha256": "6478f90fc83eb15ad7dd185c076e17f0ae695e9a3b0f99cbd336dbb66bdbf5eb",
+   "size": 1184,
+   "mtime_utc": "2026-10-14T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-14.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-14.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-15.json",
+   "sha256": "b0693c4ffccb82902e47f1a17bab70e827bc598c7c1827b34c7f64ba3e4aec04",
+   "size": 1184,
+   "mtime_utc": "2026-10-15T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-15.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-15.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-16.json",
+   "sha256": "1f8ddb3e0156287207b09aeb744c522406e56c79e92b405c7c08501fd89711ed",
+   "size": 1183,
+   "mtime_utc": "2026-10-16T22:35:03+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-16.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-16.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-19.json",
+   "sha256": "25fe463677e5ccaef869c3992aba82631a6e92665161c32137a1fdae6e19d7f0",
+   "size": 1188,
+   "mtime_utc": "2026-10-19T22:35:05+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-19.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-19.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-20.json",
+   "sha256": "cebb2db9d99277e3f4eaf36761aecd62b633ec9c833bd50fa07ad338d4b500d7",
+   "size": 1187,
+   "mtime_utc": "2026-10-20T22:35:08+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-20.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-20.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/2026-10-21.json",
+   "sha256": "73567472529eccb08a1854e740a159fe80def201ce8965585bd65d7477a99ff6",
+   "size": 1184,
+   "mtime_utc": "2026-10-21T22:35:12+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/2026-10-21.json",
+   "service_path": "/opt/mastermind/data/marks/2026-10-21.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/marks/last_good.json",
+   "sha256": "d976dec21a11ad37f884b8b22abcdaed599a38b98b0b821fc045401074d4ca4d",
+   "size": 6938,
+   "mtime_utc": "2026-10-21T22:35:12+00:00",
+   "host_path": "/opt/mastermind-live-data/marks/last_good.json",
+   "service_path": "/opt/mastermind/data/marks/last_good.json",
+   "label": "marks"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/account.json",
+   "sha256": "d20aa50b863572070b6d7f15286716a734a0686afd8fb6ee6694bb8fe6528237",
+   "size": 1991,
+   "mtime_utc": "2026-07-26T04:21:08+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/account.json",
+   "service_path": "/opt/mastermind/data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/account.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/fills.jsonl",
+   "sha256": "96e836dc11efe4f00a0814d668cfb28f67b3491a8cd17d8d6b9087ef218234b5",
+   "size": 3352,
+   "mtime_utc": "2026-07-26T04:21:08+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/fills.jsonl",
+   "service_path": "/opt/mastermind/data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/fills.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/latest.json",
+   "sha256": "0fab22770068244c196475f5f20529194b557567a605908a5879b30933f045ee",
+   "size": 158601,
+   "mtime_utc": "2026-07-26T04:21:08+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/latest.json",
+   "service_path": "/opt/mastermind/data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/latest.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/nav_history.jsonl",
+   "sha256": "661a022584338163c92252d6d102772ad7501eb2215bf79f5c287f2dcba14289",
+   "size": 404,
+   "mtime_utc": "2026-07-26T04:21:08+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/nav_history.jsonl",
+   "service_path": "/opt/mastermind/data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/nav_history.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/positions_ledger.json",
+   "sha256": "43abd672e987d740a0e6f152df4d20ba766920d873235600baae22d13076263c",
+   "size": 16748,
+   "mtime_utc": "2026-07-26T04:21:08+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/positions_ledger.json",
+   "service_path": "/opt/mastermind/data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/positions_ledger.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/theses.jsonl.bak",
+   "sha256": "b23de97482152ca1ed64810a89e88891c529b388effc1bd8ce54c0248bce8cda",
+   "size": 21740,
+   "mtime_utc": "2026-07-26T04:21:08+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/theses.jsonl.bak",
+   "service_path": "/opt/mastermind/data/portfolio/_backup_pre_nvda_avgo_exit_20260622-150122/theses.jsonl.bak",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_backup_test_contamination_20260728/README.md",
+   "sha256": "2958c66d600096d5e7c36bcb82467a39835e6d4fe7d0bb44711fac84fb6ddc18",
+   "size": 2180,
+   "mtime_utc": "2026-07-28T09:00:46+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_backup_test_contamination_20260728/README.md",
+   "service_path": "/opt/mastermind/data/portfolio/_backup_test_contamination_20260728/README.md",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_backup_test_contamination_20260728/pending_target.json.contaminated",
+   "sha256": "0f9ac49bb6c7126f2dd7e01ce286c56a204675fcfc6f7b53890072e389d07dcd",
+   "size": 113,
+   "mtime_utc": "2026-07-28T09:00:32+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_backup_test_contamination_20260728/pending_target.json.contaminated",
+   "service_path": "/opt/mastermind/data/portfolio/_backup_test_contamination_20260728/pending_target.json.contaminated",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/INCIDENT.json",
+   "sha256": "26dea620554f5ac5abbf1e7f50d4b7e8f2288972d72c849cffd0161587863ef9",
+   "size": 1429,
+   "mtime_utc": "2026-07-30T23:18:32+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/INCIDENT.json",
+   "service_path": "/opt/mastermind/data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/INCIDENT.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/account.json",
+   "sha256": "9a8e59dc144ad3d86a8199b9f3ea409d6c4fbba607023e39c99e25f5a4a3ed4c",
+   "size": 338,
+   "mtime_utc": "2026-07-30T22:35:00+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/account.json",
+   "service_path": "/opt/mastermind/data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/account.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/fills.jsonl",
+   "sha256": "5e07e0d9cb379f525c39421e6d54aa392d526b2684a400ca53447d95e5351592",
+   "size": 22234,
+   "mtime_utc": "2026-07-30T15:00:00+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/fills.jsonl",
+   "service_path": "/opt/mastermind/data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/fills.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/latest.json",
+   "sha256": "bb663281d6a136b4bc52fe31db05eb9701b36334a58bd97bd7f184edecfabf77",
+   "size": 60124,
+   "mtime_utc": "2026-07-30T15:00:00+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/latest.json",
+   "service_path": "/opt/mastermind/data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/latest.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/nav_history.jsonl",
+   "sha256": "f78aeff833f1f5841abe150cd65f5757ca9140dbe1772c72b5fba3b47415c9df",
+   "size": 3430,
+   "mtime_utc": "2026-07-30T22:35:00+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/nav_history.jsonl",
+   "service_path": "/opt/mastermind/data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/nav_history.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/pending_orders.json",
+   "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+   "size": 2,
+   "mtime_utc": "2026-07-30T15:00:00+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/pending_orders.json",
+   "service_path": "/opt/mastermind/data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/pending_orders.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/pending_target.json",
+   "sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+   "size": 5,
+   "mtime_utc": "2026-07-28T09:00:52+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/pending_target.json",
+   "service_path": "/opt/mastermind/data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/pending_target.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/portfolio.json",
+   "sha256": "a8f5ea684975e2d9fe97dd8b4f2f970c0678a1136ea3660a4aa457af6bee3a4b",
+   "size": 61579,
+   "mtime_utc": "2026-07-29T22:56:19+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/portfolio.json",
+   "service_path": "/opt/mastermind/data/portfolio/_incident_backup_peer_sentinel_liquidation_20260730T231832Z/portfolio.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/account.json",
+   "sha256": "500a2ea87b138171fd0fef19ee6d7c976c9b5fa2573d147e2af7146b83018223",
+   "size": 785,
+   "mtime_utc": "2026-08-10T22:54:59+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/account.json",
+   "service_path": "/opt/mastermind/data/portfolio/account.json",
+   "label": "legacy"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/fills.jsonl",
+   "sha256": "c72051b68f4c4a49d8eccaf85b98656d819107c92a7d1d0d3080ffb70a1e7e59",
+   "size": 23777,
+   "mtime_utc": "2026-08-06T15:00:01+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/fills.jsonl",
+   "service_path": "/opt/mastermind/data/portfolio/fills.jsonl",
+   "label": "legacy"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/latest.json",
+   "sha256": "55c05dc4e1152e9ac1375a9b0ee649f322a42261dae7cdeb0294658f70a395c4",
+   "size": 68975,
+   "mtime_utc": "2026-08-10T22:56:29+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/latest.json",
+   "service_path": "/opt/mastermind/data/portfolio/latest.json",
+   "label": "legacy"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/mandate_packet.json",
+   "sha256": "a2b1522a59361e776b92dedea70e284f31f3eba2ca24f4176c23d528996946d0",
+   "size": 553,
+   "mtime_utc": "2026-08-10T22:56:29+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/mandate_packet.json",
+   "service_path": "/opt/mastermind/data/portfolio/mandate_packet.json",
+   "label": "legacy"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/nav_history.jsonl",
+   "sha256": "fdb1acd8a5ad03f624c6c60e5646ce7a090f383c686c3fcc3a8949e61da69ba6",
+   "size": 4315,
+   "mtime_utc": "2026-08-10T22:54:59+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/nav_history.jsonl",
+   "service_path": "/opt/mastermind/data/portfolio/nav_history.jsonl",
+   "label": "legacy"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/pending_orders.json",
+   "sha256": "b084a98ce265ad71f2b628e7aaf5e33f10ed61ab3129e2ec6e93c4226030c2eb",
+   "size": 529,
+   "mtime_utc": "2026-08-10T22:54:59+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/pending_orders.json",
+   "service_path": "/opt/mastermind/data/portfolio/pending_orders.json",
+   "label": "legacy"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/pending_target.json",
+   "sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+   "size": 5,
+   "mtime_utc": "2026-07-28T09:00:52+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/pending_target.json",
+   "service_path": "/opt/mastermind/data/portfolio/pending_target.json",
+   "label": "legacy"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/portfolio.json",
+   "sha256": "55c05dc4e1152e9ac1375a9b0ee649f322a42261dae7cdeb0294658f70a395c4",
+   "size": 68975,
+   "mtime_utc": "2026-08-10T22:56:29+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/portfolio.json",
+   "service_path": "/opt/mastermind/data/portfolio/portfolio.json",
+   "label": "legacy"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/positions_ledger.json",
+   "sha256": "2646720e73c7da0748f79a3637d433a30786b12e4d086eab4d7c3c07e433f555",
+   "size": 145499,
+   "mtime_utc": "2026-08-10T22:52:03+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/positions_ledger.json",
+   "service_path": "/opt/mastermind/data/portfolio/positions_ledger.json",
+   "label": "legacy"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolio/safety.json",
+   "sha256": "c95eafc92e2173578d93b1260d23cedf3a3b3493b5dc36b89ec47f007eec0207",
+   "size": 3644,
+   "mtime_utc": "2026-08-10T22:52:03+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolio/safety.json",
+   "service_path": "/opt/mastermind/data/portfolio/safety.json",
+   "label": "legacy"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/_pending_decision.json",
+   "sha256": "3e7a3a2e13902f5dc1c8a4fb6d3da9f14d4f2b224f712534fbed01d394684ec4",
+   "size": 16280,
+   "mtime_utc": "2026-10-22T06:22:45+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/_pending_decision.json",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/_pending_decision.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/account.json",
+   "sha256": "c8fc39d3b91c0be8c46691b15c0e6bd91faa8e3d5b731895ac48ccba23809e6e",
+   "size": 1412,
+   "mtime_utc": "2026-10-22T06:23:03+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/account.json",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/account.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/fills.jsonl",
+   "sha256": "778f2846e0e9e527b314a91e0cf105604186c8f081085c0b543a63da54df0a91",
+   "size": 12606,
+   "mtime_utc": "2026-10-09T15:00:03+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/fills.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/fills.jsonl",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/latest.json",
+   "sha256": "29234b60ea0426a394a3f5b58a5e8f7bd652ef35cc98c914dc3ca74b0c3ac665",
+   "size": 13334,
+   "mtime_utc": "2026-10-22T06:23:03+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/latest.json",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/latest.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/legacy_etf_migration.jsonl",
+   "sha256": "5e39f9eebaae359b8cc60d81b18e63a92d5fb95aef81cd075859fd47cae6c0fe",
+   "size": 3161,
+   "mtime_utc": "2026-08-12T15:00:02+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/legacy_etf_migration.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/legacy_etf_migration.jsonl",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/mandate_packet.json",
+   "sha256": "a437a11bdbaee0dfeb2b62cca321cc28c6ea27293d1008fae2e529aa248eaa19",
+   "size": 577,
+   "mtime_utc": "2026-10-22T06:23:03+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/mandate_packet.json",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/mandate_packet.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/nav_history.jsonl",
+   "sha256": "a61e03ceeaa2c40d6a33829a1ee82812b6410bea8e88e7a8ff21cf6537dec918",
+   "size": 10792,
+   "mtime_utc": "2026-10-22T06:23:03+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/nav_history.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/nav_history.jsonl",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/pending_target.json",
+   "sha256": "45fedfa89718214363abdd6ce2d5869c070ebebe08278917b800c3e582c2d681",
+   "size": 18672,
+   "mtime_utc": "2026-10-22T06:23:03+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/pending_target.json",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/pending_target.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/pending_target.quarantine.20260811T133659871633Z.59c17f3a.json",
+   "sha256": "3aa9210325a3133273e0d8cfd07a35de0cada2abb123edbbbbbf36438ba0be0f",
+   "size": 173,
+   "mtime_utc": "2026-08-10T23:13:42+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/pending_target.quarantine.20260811T133659871633Z.59c17f3a.json",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/pending_target.quarantine.20260811T133659871633Z.59c17f3a.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/pending_target_quarantine.jsonl",
+   "sha256": "35a9ed74ae32460bbfac7445abca3292e473257a48264243b685609ff599d564",
+   "size": 808,
+   "mtime_utc": "2026-08-11T13:36:59+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/pending_target_quarantine.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/pending_target_quarantine.jsonl",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/portfolio.json",
+   "sha256": "29234b60ea0426a394a3f5b58a5e8f7bd652ef35cc98c914dc3ca74b0c3ac665",
+   "size": 13334,
+   "mtime_utc": "2026-10-22T06:23:03+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/portfolio.json",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/portfolio.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/positions_ledger.json",
+   "sha256": "c385e4e7a03289a8685362dbcf6a1027bfd658e5ec0051a8df8e299a23d51cff",
+   "size": 26727,
+   "mtime_utc": "2026-10-12T15:00:03+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/positions_ledger.json",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/positions_ledger.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/autonomous/safety.json",
+   "sha256": "f20c793fa28574c5e1bfff6a59ef928de499955107d92f91785877919dea05a3",
+   "size": 4427,
+   "mtime_utc": "2026-10-22T06:23:03+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/autonomous/safety.json",
+   "service_path": "/opt/mastermind/data/portfolios/autonomous/safety.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_backup_fx_repair_20260624-173547/account.json",
+   "sha256": "fda7ea323f77172f5ed8a5f35e3a297aeb67f9b4c77a58221b9c9c32cb22fbd2",
+   "size": 690,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_backup_fx_repair_20260624-173547/account.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/_backup_fx_repair_20260624-173547/account.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_backup_fx_repair_20260624-173547/nav_history.jsonl",
+   "sha256": "7c63a5e5563dccb52482737769d659e5cca5f36186d9622bf52a50e7c559378f",
+   "size": 312,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_backup_fx_repair_20260624-173547/nav_history.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/china/_backup_fx_repair_20260624-173547/nav_history.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_backup_scrub_tiny_trims_20260623-052644/account.json",
+   "sha256": "b13eb435f28001c88a4fe4a4eb0989c4dcc6023fda342dc8f5a4de6764bb7eea",
+   "size": 537,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_backup_scrub_tiny_trims_20260623-052644/account.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/_backup_scrub_tiny_trims_20260623-052644/account.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_backup_scrub_tiny_trims_20260623-052644/decisions.jsonl",
+   "sha256": "3fa88e495bc8caf29df3c1547f820af3f323d429453e89379aa1d7e5f5e0f48e",
+   "size": 7774,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_backup_scrub_tiny_trims_20260623-052644/decisions.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/china/_backup_scrub_tiny_trims_20260623-052644/decisions.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_backup_scrub_tiny_trims_20260623-052644/fills.jsonl",
+   "sha256": "85b878cbd949dd9735da795c47c235ebe98b313a7b08568ff4c3604dff804234",
+   "size": 1056,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_backup_scrub_tiny_trims_20260623-052644/fills.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/china/_backup_scrub_tiny_trims_20260623-052644/fills.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_backup_scrub_tiny_trims_20260623-052644/latest.json",
+   "sha256": "8da3e8640cc2009bff13e8b8e35410275b8cbf4dea7f1c9aabf36358f1089724",
+   "size": 15304,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_backup_scrub_tiny_trims_20260623-052644/latest.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/_backup_scrub_tiny_trims_20260623-052644/latest.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/INCIDENT.json",
+   "sha256": "b78cbb5461a2ad51a5bc144a3974cacec728e70ace42ac789a3d0b758719303b",
+   "size": 723,
+   "mtime_utc": "2026-07-30T23:18:34+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/INCIDENT.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/INCIDENT.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/account.json",
+   "sha256": "f27184901afb16283fa01ee304b810bd5620d44c3390fa632ee5eca1fee7645f",
+   "size": 1157,
+   "mtime_utc": "2026-07-30T22:35:33+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/account.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/account.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/decisions.jsonl",
+   "sha256": "94099d16c9156f7025e80f11152754a3f3b2afe26da356fe4e93d2fbc9cc14a0",
+   "size": 136498,
+   "mtime_utc": "2026-07-30T08:00:56+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/decisions.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/decisions.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/fills.jsonl",
+   "sha256": "c0aa9a4a23c260a0e421dbf78644084ce62bdd05f28a464d33806fe6cec6a16c",
+   "size": 5103,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/fills.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/fills.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/latest.json",
+   "sha256": "3b75f0ec5b76745a3e658e3f22ba3d4d32f2b15eec81d0e662188ccb5d3a3be9",
+   "size": 4994,
+   "mtime_utc": "2026-07-30T08:00:56+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/latest.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/latest.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/nav_history.jsonl",
+   "sha256": "834efc6a9ed8e68260fa96f379249bb296c9b65e889e66dc82720027ff9705ad",
+   "size": 3052,
+   "mtime_utc": "2026-07-30T22:35:33+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/nav_history.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/nav_history.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/pending_target.json",
+   "sha256": "a78c91451f0d44b86cabf37dea65c2cfe421709e51f93246d1b1485aae9ad313",
+   "size": 255,
+   "mtime_utc": "2026-07-30T00:20:05+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/pending_target.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/pending_target.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/portfolio.json",
+   "sha256": "3b75f0ec5b76745a3e658e3f22ba3d4d32f2b15eec81d0e662188ccb5d3a3be9",
+   "size": 4994,
+   "mtime_utc": "2026-07-30T08:00:56+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/portfolio.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/_incident_backup_ashare_quote_route_20260730T231834Z/portfolio.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/account.json",
+   "sha256": "7fb5498617670bce409889d9f8f64ee44e4493f21523563163a2698cab3db737",
+   "size": 2823,
+   "mtime_utc": "2026-10-21T22:35:16+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/account.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/account.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/fills.jsonl",
+   "sha256": "ed5f35b9d22c1630a25f696611d2152578afa464037cdb75bd4ed483919ee5a7",
+   "size": 18251,
+   "mtime_utc": "2026-10-12T01:35:07+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/fills.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/china/fills.jsonl",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/latest.json",
+   "sha256": "7b47dcaad2945131c5284f5e9c96132342bca0019aecf30cfb83d09d6e15b6a4",
+   "size": 6097,
+   "mtime_utc": "2026-10-21T08:00:57+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/latest.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/latest.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/mandate_packet.json",
+   "sha256": "92c23811936c37a082748b2c4cd18ab36087656c726fb83ad8d0fd8c417c5b13",
+   "size": 603,
+   "mtime_utc": "2026-10-21T08:00:58+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/mandate_packet.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/mandate_packet.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/nav_history.jsonl",
+   "sha256": "c137d2f105b049cae786659ed7a8735515469e4fc5ed50bdc1da9431624990f7",
+   "size": 10786,
+   "mtime_utc": "2026-10-21T22:35:16+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/nav_history.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/china/nav_history.jsonl",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/portfolio.json",
+   "sha256": "7b47dcaad2945131c5284f5e9c96132342bca0019aecf30cfb83d09d6e15b6a4",
+   "size": 6097,
+   "mtime_utc": "2026-10-21T08:00:57+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/portfolio.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/portfolio.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/positions_ledger.json",
+   "sha256": "8aa6425f725db486b3a74794b7883c482ce2db046ef645f990b2f5aaabc85b80",
+   "size": 37104,
+   "mtime_utc": "2026-10-12T01:35:10+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/positions_ledger.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/positions_ledger.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/china/safety.json",
+   "sha256": "5bcb4442b2dda5254d27241d637bc1cd69cab75050c799f039bbeb1d9968fcc0",
+   "size": 2947,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/china/safety.json",
+   "service_path": "/opt/mastermind/data/portfolios/china/safety.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/heavyweight/_backup_clobber_repair_20260727/account.json.clobbered",
+   "sha256": "a1525e5147681aee3ab5cfa2704dca3191fd45f6c9929eb949ca1d59c4680164",
+   "size": 104,
+   "mtime_utc": "2026-07-28T05:29:29+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/heavyweight/_backup_clobber_repair_20260727/account.json.clobbered",
+   "service_path": "/opt/mastermind/data/portfolios/heavyweight/_backup_clobber_repair_20260727/account.json.clobbered",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/heavyweight/_backup_clobber_repair_20260727/nav_history.jsonl.clobbered",
+   "sha256": "50276ddaa2dcd87673474caefd64844f588352e6de309ef18e53f06204046a7f",
+   "size": 2697,
+   "mtime_utc": "2026-07-28T05:29:44+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/heavyweight/_backup_clobber_repair_20260727/nav_history.jsonl.clobbered",
+   "service_path": "/opt/mastermind/data/portfolios/heavyweight/_backup_clobber_repair_20260727/nav_history.jsonl.clobbered",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/_backup_fx_repair_20260624-173547/account.json",
+   "sha256": "327e892568984202094a3bc1c78e4ab553ed6d876a437ee3259918aa5785cb55",
+   "size": 1114,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/_backup_fx_repair_20260624-173547/account.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/_backup_fx_repair_20260624-173547/account.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/_backup_fx_repair_20260624-173547/nav_history.jsonl",
+   "sha256": "f4533a25e27d656de013a42fcb82cbeb1f58e537aa8b9bdcfdc09ca349b69a6b",
+   "size": 416,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/_backup_fx_repair_20260624-173547/nav_history.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/hk/_backup_fx_repair_20260624-173547/nav_history.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/INCIDENT.json",
+   "sha256": "3df5c3459d6288ac41eeb541cf116f96f79e14a148388648ff146e600b9df68f",
+   "size": 450,
+   "mtime_utc": "2026-07-30T22:56:20+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/INCIDENT.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/_incident_backup_20260730_missing_yfinance/INCIDENT.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/_pending_decision.json",
+   "sha256": "6b53fe5a5ccbf8e4a05b94b36171bb792ac1e37584e80031036a5dc25e647902",
+   "size": 1475,
+   "mtime_utc": "2026-07-30T09:01:42+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/_pending_decision.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/_incident_backup_20260730_missing_yfinance/_pending_decision.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/account.json",
+   "sha256": "47cd89d886d7ac91df9f446868b73f42f12d5dd50fd8b2fa464f40b76c0a586e",
+   "size": 1393,
+   "mtime_utc": "2026-07-30T22:35:33+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/account.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/_incident_backup_20260730_missing_yfinance/account.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/decisions.jsonl",
+   "sha256": "bdd9601695e5dd026ea4c8a00427cccb9906c78b39269a3c6c701306ca4bc7bb",
+   "size": 159663,
+   "mtime_utc": "2026-07-30T09:01:55+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/decisions.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/hk/_incident_backup_20260730_missing_yfinance/decisions.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/latest.json",
+   "sha256": "383df532a1888b21ec532eb09e04e8bdadfac8bbfbc4a64c403cacdf81a5ff03",
+   "size": 9127,
+   "mtime_utc": "2026-07-30T09:01:55+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/latest.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/_incident_backup_20260730_missing_yfinance/latest.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/mandate_packet.json",
+   "sha256": "22e0a7b1e51287eded77a7d8b52a0838b08323edd4a2782f377d00b4435f85fd",
+   "size": 533,
+   "mtime_utc": "2026-07-30T09:02:13+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/mandate_packet.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/_incident_backup_20260730_missing_yfinance/mandate_packet.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/nav_history.jsonl",
+   "sha256": "edd7c0ef29a9f18336e9fad5a90869aae483dc7b896af22cffc51e6ba6d13dd7",
+   "size": 3157,
+   "mtime_utc": "2026-07-30T22:35:33+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/nav_history.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/hk/_incident_backup_20260730_missing_yfinance/nav_history.jsonl",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/pending_target.json",
+   "sha256": "58e8e2eb8d033896d9afdeeed9b1abe24b59b6cb9332b4110cf9f1aee85dcb01",
+   "size": 309,
+   "mtime_utc": "2026-07-30T00:22:46+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/pending_target.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/_incident_backup_20260730_missing_yfinance/pending_target.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/portfolio.json",
+   "sha256": "383df532a1888b21ec532eb09e04e8bdadfac8bbfbc4a64c403cacdf81a5ff03",
+   "size": 9127,
+   "mtime_utc": "2026-07-30T09:01:55+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/_incident_backup_20260730_missing_yfinance/portfolio.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/_incident_backup_20260730_missing_yfinance/portfolio.json",
+   "label": "backup"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/account.json",
+   "sha256": "19658998de164395e48473dac2b37031a3f782ef062906ce238ec3a4606b712c",
+   "size": 2208,
+   "mtime_utc": "2026-10-21T22:35:17+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/account.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/account.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/fills.jsonl",
+   "sha256": "e37be161fd3f39371160c785142d798ee32edf1568c3a4da1c090a40f7617f93",
+   "size": 13401,
+   "mtime_utc": "2026-10-12T01:35:13+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/fills.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/hk/fills.jsonl",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/latest.json",
+   "sha256": "ab504d9d16da61f808d7f9e3e0daabcf29f82ffc95373dfab5043518e7846b6c",
+   "size": 5285,
+   "mtime_utc": "2026-10-21T09:00:45+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/latest.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/latest.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/mandate_packet.json",
+   "sha256": "26bf8871163f506217feed55f1efa01c766a3e3eadc4f876c3fbec809fa96154",
+   "size": 601,
+   "mtime_utc": "2026-10-21T09:00:45+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/mandate_packet.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/mandate_packet.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/nav_history.jsonl",
+   "sha256": "509b7e1a95c0338c6fd061b807b304664681824d90172d3676c16b9911314ac7",
+   "size": 10636,
+   "mtime_utc": "2026-10-21T22:35:17+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/nav_history.jsonl",
+   "service_path": "/opt/mastermind/data/portfolios/hk/nav_history.jsonl",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/portfolio.json",
+   "sha256": "ab504d9d16da61f808d7f9e3e0daabcf29f82ffc95373dfab5043518e7846b6c",
+   "size": 5285,
+   "mtime_utc": "2026-10-21T09:00:45+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/portfolio.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/portfolio.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/positions_ledger.json",
+   "sha256": "3438541c43aea67d1abaf49c71288477fa18005d65919a4c477502d7f314d7f4",
+   "size": 26905,
+   "mtime_utc": "2026-10-12T01:35:13+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/positions_ledger.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/positions_ledger.json",
+   "label": "live"
+  },
+  {
+   "path": "opt/mastermind-live-data/portfolios/hk/safety.json",
+   "sha256": "bc6ec9a5a308e12189a7261f64b40b5194a9a58c9c4067b5bada5f9fd24232dc",
+   "size": 2878,
+   "mtime_utc": "2026-07-26T04:21:07+00:00",
+   "host_path": "/opt/mastermind-live-data/portfolios/hk/safety.json",
+   "service_path": "/opt/mastermind/data/portfolios/hk/safety.json",
+   "label": "live"
+  }
+ ],
+ "host_root": "/opt/mastermind-live-data",
+ "in_service_root": "/opt/mastermind/data",
+ "bind_mount": "mastermind.service drop-in authoritative.conf: BindPaths=/opt/mastermind-live-data:/opt/mastermind/data",
+ "book_roots": {
+  "US (autonomous, live)": "portfolios/autonomous",
+  "CN (china, live)": "portfolios/china",
+  "HK (hk, live)": "portfolios/hk",
+  "legacy flagship (archived Aug-10, NOT live)": "portfolio",
+  "benchmark ledgers": "benchmark",
+  "marks": "marks"
+ },
+ "label_counts": {
+  "backup": 62,
+  "benchmark": 232,
+  "other": 1,
+  "marks": 78,
+  "legacy": 10,
+  "live": 29
+ }
+}
