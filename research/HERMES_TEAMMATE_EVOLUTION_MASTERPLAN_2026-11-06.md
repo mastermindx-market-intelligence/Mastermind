@@ -2367,3 +2367,35 @@ Material pinned-source correction to the earlier design: gateway/session_worker_
 The existing integrations/hermes_harness/native_model_credential.py owner is outside2234's finite contextual path set. Principal source-scope adjudication is underway before edits; no self-expanded exemption or disconnected precursor has been published. A dedicated source-only checkout **/Users/chriswong/hermes-discovery-correction-20261107-a52esz9q/auth-original-request-validation** was requested from exactde966 for this work; original checkoutPID13308 remains to be read back. No auth implementation or test run is claimed.
 
 Original runtimeC26 denial, paid Fabric refusal, two denied AF_UNIX cases, local execution unavailability, held398/409 owners and fleet predecessor/writer predicates remain unchanged. Original runtime carrier stays meta-ceo-byok-followon-parent-20261106-c35-01. C3 is source validation only.
+
+## 54. Principal authorization: bounded native credential-mechanism observation — 2026-11-07
+
+**Actual source operation:** hermes-native-auth-observation-20261107-c3. **Single publication carrier:** [sol/hermes-native-auth-observation-20261107-c3](https://github.com/mastermindx-market-intelligence/Mastermind/tree/sol/hermes-native-auth-observation-20261107-c3), created and read back at de966803faff6033a5d0e6b164843ab22edabe42 before implementation. This is a source-operation label, not an invented Executive Job, runtime admission, worker grant or background-execution claim. Dedicated clean source validation worktree auth-original-request-validation was read back at the same head/tree5a9db90d3b147ca41d0b9ef552f50511c5850580.
+
+### Explicit assigned-principal amendment
+
+Under the current Chairman commission to fully implement Hermes, the assigned integration principal **authorizes the following exact contextual connections** for this operation. They may be added to NATIVE_EVAL_INTEGRATION_PATHS, excluded from PROGRAM_SURFACE_PATHS:
+
+1. integrations/hermes_harness/native_model_credential.py
+2. integrations/hermes_harness/tests/test_native_model_credentials.py
+3. integrations/hermes_harness/tests/fixtures/native_credential_observation/agent__secret_scope.py.source
+4. integrations/hermes_harness/tests/fixtures/native_credential_observation/agent__client_lifecycle.py.source
+5. integrations/hermes_harness/tests/fixtures/native_credential_observation/agent__agent_runtime_helpers.py.source
+6. integrations/hermes_harness/tests/fixtures/native_credential_observation/gateway__session_worker_construct.py.source
+7. integrations/hermes_harness/tests/fixtures/native_credential_observation/provenance.json
+
+The first two are existing credential-owner paths. The five fixture/provenance paths are finite test-only licensed source qualifications for actual secret selection, request-client construction/cache reuse and the LOCAL policy route. Reuse the existing pinned runtime-provider fixtures and upstream MIT license; do not duplicate their source or license ownership. This authorizes these exact paths only, not adjacent paths or an open prefix.
+
+The existing transport, native gateway entry, EVAL publisher, owned publisher tests, input-selection documentation, finite scope tests and exact identity review table remain their already-granted connections. The fence comment must cite this actual operation and source-linked principal amendment. Required fence tests must prove the connected EVAL change admitted, unrelated shared-owner work outside EVAL ownership, and adjacent unlisted or forbidden surfaces still refused.
+
+This amendment follows the protected per-wave ratchet rule already present at20e17 and preserved inde966: additional finite paths require explicit principal authorization plus an operation citation; a worker cannot infer or widen its own grant. The current outer Chairman instruction empowers this bounded principal decision. The native source-governance judgment supports it but is not itself the authority. No new Chairman permission round or disconnected precursor is required.
+
+### Consumer and non-negotiable boundaries
+
+The named consumer is the **existing native EVAL publisher/retained Trial path**. Reuse the existing credential resolver, child native lifecycle, original request/transport observation and publication carriers. Implement the connected slice rather than an unused helper. Record a broad mechanism only from the actual selected direct key, actual original factory/cache/client and matching original request presentation, under current execution/claim/agent/dispatch identity. Ambiguous, missing, changed, unsupported, late or historical-unobserved evidence remains unavailable/conflicting.
+
+The credential owner may compare already-selected private values inside its existing execution boundary. It must not make an extra credential fetch for observation, persist a credential/header/secret-derived digest or pointer, or expose credential material to the EVAL core. Only a closed nonsecret mechanism/status may cross into existing observation records. Ordinary credential selection, failure behavior and authentication must remain unchanged. API_KEY proves neither account identity, exact realm/generation, permissions nor remote acceptance.
+
+All core import, environment, credential, process, network, dependency, workflow and forbidden-path restrictions remain intact. No new credential store/auth service/client/retry/publication registry, runtime grant, provider inference, deployment, fleet activation or bypass of originalC26/Fabric/socket denials is authorized. Tests use only explicit synthetic credentials and in-process SDK transports. Historical schemas must stay closed, and the shared observation budget and current native-invalid validity/effect/cleanup gates remain controlling.
+
+PR2234's original protected release request is not to be replaced or repeated. This follow-up depends on its actual accepted source; pending parent acceptance is not a grant to bypass integrated CI. No new auth source postimage or test result exists at this authorization checkpoint. **MISSION_COMPLETE=false.**
