@@ -206,10 +206,10 @@ REVIEWED_FILES = {
                                               (1104, 100, 103, 'int', '456'))},
  'ops/executive_os/attended_worker_definition.py': {'sha256': '267ca3fceea48d2c3a1e8a4aaefbf8a90bd595d0c324f1a503826e9604ead92d',
  'sites': ((255, 31, 51, 'str', "'_mastermind_worker'"), (351, 95, 100, 'int', '0o660'))},
- 'ops/executive_os/bootstrap-host.sh': {'sha256': '805279ecceb16965ded44f94ab62aa882090accf45edf8a2e7ab86487bca04ce',
-                                        'sites': ((776, 21, 43, 'str', '_mastermind_[a-z0-9_]*'),
-                                                  (778, 97, 120, 'str', '_mastermind_agent_relay'),
-                                                  (784, 89, 92, 'int', '457'))}}
+ 'ops/executive_os/bootstrap-host.sh': {'sha256': 'acb2c16a703b018fe110bf88ff576b60a32b2d029db24a769e58dac3d98daf60',
+ 'sites': ((784, 21, 43, 'str', '_mastermind_[a-z0-9_]*'),
+           (786, 97, 120, 'str', '_mastermind_agent_relay'),
+           (792, 89, 92, 'int', '457'))}}
 
 # Candidate-only fixed finite publisher principal/mode postimage for independent
 # review: SHA and precise sites are frozen, not computed at runtime. This does
@@ -782,3 +782,18 @@ REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
 # Native Agent OS v2 adds private readback and projects an optional real child.
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
 # the same sole 512 operand remains at (23, 17, 20), with no new identity mask.
+
+
+# Original #852 held subscription principals, source-qualified at exact sites.
+# This fixed source evidence grants no installed identity, credential or capacity.
+REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af39347f1a6e762b7716b73506beca5460b05914e9e2d9f1a19d9b7fb42e',
+ 'sites': ((168, 20, 44, 'str', '"_mastermind_alibaba_01"'),
+           (169, 21, 45, 'str', '"_mastermind_alibaba_01"'),
+           (170, 19, 22, 'int', '459'),
+           (171, 19, 22, 'int', '459'),
+           (180, 20, 44, 'str', '"_mastermind_minimax_01"'),
+           (181, 21, 45, 'str', '"_mastermind_minimax_01"'),
+           (182, 19, 22, 'int', '460'),
+           (183, 19, 22, 'int', '460'),
+           (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
+           (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}
