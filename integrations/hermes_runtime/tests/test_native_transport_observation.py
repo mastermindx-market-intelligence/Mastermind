@@ -41,6 +41,9 @@ def source(native, monkeypatch, path, names=None, *, values=None, methods=None):
     target = native.vendor / path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
+    # Match the incumbent pinned-source fixture regardless of the runner umask.
+    # The production source owner still rejects group/other-writable input.
+    target.chmod(0o644)
     name = path.removesuffix(".py").replace("/", ".")
     result = module(monkeypatch, name, __file__=str(target), **(values or {}))
     if names is None:
@@ -104,7 +107,7 @@ def engine(native, monkeypatch):
     monkeypatch.setattr(httpx.Client, "_send_single_request", httpx.Client._send_single_request)
     monkeypatch.setattr(client_module, "_mmx_transport_observation_bound", False, raising=False)
     installation = transport.prepare(native.binding, native.vendor)
-    assert installation.description()["status"] == "qualified"
+    assert installation.description()["status"] == "qualified", installation.description()
     native.binding.transport_installation = installation
     installation.commit()
     assert conversation.perform_api_call is calls.perform_api_call
