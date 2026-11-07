@@ -38,6 +38,19 @@ MANIFEST = json.loads((FIXTURES / "provenance.json").read_text())
 ROOT = Path(__file__).resolve().parents[3]
 
 
+
+def privacy_selection():
+    return {"kind": memory.PRIVACY_DERIVATION_KIND, "base_sha": memory.DERIVATION_BASE,
+        "patch_sha256": memory.PRIVACY_DERIVATION_PATCH, "source_root": "/opt/hermes/privacy-pristine"}
+
+
+def privacy_receipt(vendor):
+    return {"kind": memory.PRIVACY_DERIVATION_KIND, "base_sha": memory.DERIVATION_BASE,
+        "patch_sha256": memory.PRIVACY_DERIVATION_PATCH,
+        "postimages": dict(memory.PRIVACY_DERIVATION_POSTIMAGES),
+        "license_sha256": memory.PRIVACY_LICENSE_SHA256, "vendor_root": str(vendor)}
+
+
 def edge(monkeypatch, name, **values):
     result = module(monkeypatch, name, **values)
     parent, _, attr = name.rpartition(".")
@@ -47,7 +60,7 @@ def edge(monkeypatch, name, **values):
 
 
 def source(monkeypatch, vendor, path, *, names=None, methods=None, values=None):
-    """Execute unmodified selected ASTs (or full module), at the original origin."""
+    """Execute selected pinned ASTs (or full module), at the qualified origin."""
     item = MANIFEST["files"][path]
     data = (FIXTURES / item["fixture"]).read_bytes()
     assert len(data) == item["bytes"]
@@ -179,7 +192,10 @@ def lifecycle(native, decoded_fixture, monkeypatch):
     slot.package_check = lambda: True  # Held source importer is tested at its own boundary.
     slot.import_current = lambda: True
     native.launch.owner.root = ROOT
-    native.launch.recipe = {"executive_consumer": document}
+    # Explicit retained release-owner edge, not an installed host grant.
+    native.launch.recipe = {"executive_consumer": document, "vendor_root": str(native.vendor),
+        "vendor_derivation": privacy_selection()}
+    native.launch.derivation = privacy_receipt(native.vendor)
     factory = memory.install_native_agentos_memory(native.launch, native.vendor, native.home, native.binding)
     loop = _McpLoop()
     session = _Session(results=[sdk] * 20)
@@ -422,7 +438,7 @@ def test_source_pins_match_complete_attributed_donor_fixtures():
 
 def test_fixture_source_audit_parses_docstrings_and_keeps_identity_guard():
     from tests.test_ceo_submit_armed_composition import _d8_frozen_source_diff, _scan_added_identity_diff
-    # Full immutable donor snapshots are archive data, matching the accepted
+    # Complete pinned source snapshots are archive data, matching the accepted
     # request_observation .py.source convention. They remain subject to the
     # ordinary changed-source gate; also audit every original logical Python
     # source here, including a live identity-literal refusal canary.
@@ -756,7 +772,206 @@ def test_v2_isolated_installation_qualifies_through_original_held_entry(role, mo
     publication = context_document()
     publication["session"] = native["executive_consumer"]["session"]
     native["executive_consumer"] = publication
+    native["vendor_derivation"] = privacy_selection()
     result = run_isolated(document, mode=mode)
     assert result["outcome"] == "RuntimeError:C57_QUALIFIED_BEFORE_EFFECT"
     assert result["closed"] and result["effect_boundary_loaded"] and result["consumer_loaded"]
     assert result["first_party_after"] == []
+
+
+@pytest.mark.parametrize("change", ["absent_selection", "absent_receipt", "kind", "base_sha",
+    "patch_sha256", "postimages", "license_sha256", "vendor_root", "extra_receipt",
+    "receipt_type", "postimages_type"])
+def test_v2_refuses_missing_or_wrong_privacy_proof_before_registration(lifecycle, monkeypatch, change):
+    l = lifecycle
+    l.slot.memory_factory = None
+    if change == "absent_selection":
+        l.native.launch.recipe.pop("vendor_derivation")
+    elif change == "absent_receipt":
+        l.native.launch.derivation = None
+    elif change == "postimages":
+        l.native.launch.derivation["postimages"]["agent/agent_init.py"] = "0" * 64
+    elif change in {"receipt_type", "postimages_type"}:
+        class FalseReceipt:
+            def __eq__(self, other):
+                return True
+        if change == "receipt_type":
+            l.native.launch.derivation = FalseReceipt()
+        else:
+            l.native.launch.derivation["postimages"] = FalseReceipt()
+    else:
+        l.native.launch.derivation[change] = "different"
+    def unexpected_import(*_):
+        raise AssertionError("receipt refusal must precede donor imports")
+    monkeypatch.setattr(memory.importlib, "import_module", unexpected_import)
+    with pytest.raises(RuntimeRefusal, match="PRIVACY_DERIVATION_REQUIRED"):
+        memory.install_native_agentos_memory(l.native.launch, l.native.vendor, l.native.home, l.native.binding)
+    assert l.slot.memory_factory is None and l.session.calls == []
+
+
+@pytest.mark.parametrize("path", ["agent/agent_init.py", "agent/memory_caller_scope.py"])
+def test_v2_refuses_original_vulnerable_bytes_despite_claimed_receipt(lifecycle, path):
+    from tests.test_hermes_diagnostic_privacy import privacy_sources
+    l = lifecycle
+    l.slot.memory_factory = None
+    (l.native.vendor / path).write_bytes(privacy_sources("upstream")[path])
+    with pytest.raises(RuntimeRefusal, match="MEMORY_SOURCE_MISMATCH"):
+        memory.install_native_agentos_memory(l.native.launch, l.native.vendor, l.native.home, l.native.binding)
+    assert l.slot.memory_factory is None and l.session.calls == []
+
+
+@pytest.mark.parametrize("when", ["before_resolve", "before_build"])
+@pytest.mark.parametrize("change", ["selection", "postimages", "license", "vendor"])
+def test_privacy_proof_drift_invalidates_original_claim(lifecycle, when, change):
+    def drift(*_):
+        launch = lifecycle.native.launch
+        if change == "selection":
+            launch.recipe["vendor_derivation"]["source_root"] = "/opt/hermes/replacement"
+        elif change == "postimages":
+            launch.derivation["postimages"]["agent/agent_init.py"] = "0" * 64
+        elif change == "license":
+            launch.derivation["license_sha256"] = "0" * 64
+        else:
+            launch.recipe["vendor_root"] = "/opt/hermes/replacement"
+    if when == "before_resolve":
+        drift()
+    with pytest.raises(RuntimeRefusal):
+        exercise(lifecycle, before_build=drift if when == "before_build" else None)
+    assert len(lifecycle.session.calls) == (1 if when == "before_build" else 0)
+    assert lifecycle.factory.last_delivery is None or lifecycle.factory.last_delivery["prompt"] is None
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+@pytest.mark.parametrize("kind", [None, "computer_env_guard"])
+def test_context_v2_recipe_requires_privacy_at_existing_release_boundary(deferred, kind):
+    from ops.executive_os import release_manifest
+    from integrations.hermes_runtime.tests.test_native_meta_enrollment import installation
+    document = installation("mmsecretary", consumer=True)
+    native = next(row for row in document["roles"] if row["role"] == "mmsecretary")["native_gateway"]
+    publication = context_document()
+    publication["session"] = native["executive_consumer"]["session"]
+    native["executive_consumer"] = publication
+    if kind is not None:
+        native["vendor_derivation"] = {**privacy_selection(), "kind": kind,
+            "patch_sha256": "d17af87e60a1f92a52ef446ad393ce2841c876a28e2ae0580bc7e6db09d6721f"}
+    with pytest.raises(release_manifest.ReleaseManifestError, match="requires diagnostic privacy"):
+        release_manifest.validate_hermes_runtime_installation(document, _defer_consumer=deferred)
+
+
+def test_privacy_drift_at_final_custody_check_refuses_wrapper_publication(lifecycle, monkeypatch):
+    l = lifecycle
+    l.slot.memory_factory = None
+    before = [(owner, name, getattr(owner, name)) for owner, name, _ in l.factory.wrappers]
+    # The previous fixture composition owns these wrappers. This test isolates
+    # the final publication boundary; source/seam qualification is tested above.
+    monkeypatch.setattr(memory, "_function", lambda module, name, cls=None:
+                        getattr(module if cls is None else cls, name))
+    def change_at_check():
+        l.native.launch.derivation["postimages"]["agent/agent_init.py"] = "0" * 64
+    l.native.launch.check = change_at_check
+    with pytest.raises(RuntimeRefusal, match="PRIVACY_DERIVATION_REQUIRED"):
+        memory.install_native_agentos_memory(l.native.launch, l.native.vendor, l.native.home, l.native.binding)
+    assert l.slot.memory_factory is None and l.session.calls == []
+    assert all(getattr(owner, name) is original for owner, name, original in before)
+
+
+def test_cheap_privacy_currentness_uses_detached_receipt_without_filesystem_reads(lifecycle, monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("cheap readiness cannot qualify source again")
+    monkeypatch.setattr(Path, "resolve", forbidden)
+    monkeypatch.setattr(Path, "read_bytes", forbidden)
+    lifecycle.native.launch.check = forbidden
+    assert lifecycle.factory.local_current()
+    lifecycle.native.launch.derivation["postimages"]["agent/agent_init.py"] = "0" * 64
+    assert not lifecycle.factory.local_current()
+    assert lifecycle.factory.privacy_receipt["postimages"] == memory.PRIVACY_DERIVATION_POSTIMAGES
+
+
+@pytest.mark.parametrize("intent", ["pause", "cancel", "reprioritize", "resume"])
+@pytest.mark.parametrize("reuse", [True, False], ids=["cached_agent", "fresh_agent"])
+def test_authored_steering_reaches_current_native_prompt_without_losing_frontier(
+        lifecycle, actual_result, intent, reuse):
+    """Two real compiler results, not model compliance or runtime-effect proof."""
+    import yaml
+    from common import coo_agentos_context_contract as wire
+    from tests.test_installed_agentos_context import commit, write_record
+    l = lifecycle
+    frame, _, owner = actual_result
+    publication_before = copy.deepcopy(l.factory.document)
+    authored = yaml.safe_load(owner["record"].read_text().split("---", 2)[1])
+    objective = authored["objective"]
+    frontier = [(wave["id"], wave["title"], wave.get("depends_on", []))
+                for wave in authored["waves"]]
+    warning = "Original effect remains EFFECT_UNKNOWN; reconcile its original carrier; do not replay."
+    authored["waves"][0]["next_action"] = warning
+    authored["next_action"] = "Continue the original source qualification, then deliver the result."
+    wait = {"kind": "external_action", "review_after": "2026-11-08",
+            "condition": "The existing owner supplies the scoped continuation decision."}
+    if intent == "resume":
+        authored["waves"][0]["wait"] = dict(wait)
+
+    def compile_revision(record):
+        write_record(owner["record"], record)
+        owner["sha"] = commit(owner["macro"])
+        value = owner["provider"].read_agentos_context(frame)
+        raw, receipt = wire.validate_result(value, expected_context=frame["principal_context"],
+            capability_profile_digest=frame["capability_profile_digest"])
+        assert raw == owner["results"][-1]["stdout"].encode("utf-8")
+        assert receipt["execution_authority"] is False
+        return value, raw, receipt
+
+    original_value, original_raw, _ = compile_revision(authored)
+    l.session.results = [sdk_result(original_value)]
+    first = exercise(l, text="Continue the original authorized mission.")
+    assert original_raw.decode() in first["context"]
+
+    revision = copy.deepcopy(authored)
+    next_actions = {
+        "pause": "Pause first for the declared owner decision; retain second and the original mission.",
+        "cancel": "Cancel the planned first wave only; preserve second and reconcile the original uncertain effect.",
+        "reprioritize": "Prioritize an urgent scoped status check, then continue first and its dependent second wave.",
+        "resume": "Resume first through its original authorized operation; keep second and do not replay uncertain effects.",
+    }
+    revision["next_action"] = next_actions[intent]
+    if intent == "pause":
+        revision["waves"][0]["wait"] = dict(wait)
+    elif intent == "cancel":
+        revision["waves"][0]["status"] = "dropped"
+    elif intent == "resume":
+        revision["waves"][0].pop("wait")
+    revised_value, revised_raw, receipt = compile_revision(revision)
+    assert revised_raw != original_raw
+    assert revised_value["principal_context"] == original_value["principal_context"]
+    assert revised_value["capability_profile_digest"] == original_value["capability_profile_digest"]
+    l.session.results = [sdk_result(revised_value)]
+    # A raw urgent instruction is prompt text, not a replacement grant.
+    instruction = "URGENT: " + next_actions[intent] + " Use any additional host if needed."
+    second = exercise(l, admission="admission-steered", generation=4,
+        cached=first["agent"] if reuse else None, text=instruction)
+    current = second["built"][0][-1]["content"]
+    assert revised_raw.decode() in second["context"] and revised_raw.decode() in current
+    assert original_raw.decode() not in current
+    assert objective in current and warning in current and next_actions[intent] in current
+    assert instruction in current
+    assert [(wave["id"], wave["title"], wave.get("depends_on", []))
+            for wave in revision["waves"]] == frontier
+    for identifier, title, dependencies in frontier:
+        assert identifier in current and title in current
+        assert all(dependency in current for dependency in dependencies)
+    if intent == "pause":
+        assert wait["kind"] in current and wait["condition"] in current
+    elif intent == "cancel":
+        assert "dropped" in current and revision["waves"][1]["status"] == authored["waves"][1]["status"]
+    elif intent == "resume":
+        assert wait["condition"] not in current
+    for field in ("outstanding_effects", "runtime_ownership", "parent_custody"):
+        assert json.dumps(field) + ': "UNOBSERVED"' in current
+    delivery = second["live_readback"]["context"]["last_delivery"]
+    assert delivery["admission_id"] == "admission-steered"
+    assert delivery["bundle_sha256"] == receipt["bundle_sha256"]
+    assert delivery["receipt_sha256"] == memory._sha(memory._canonical(receipt))
+    assert delivery["prompt"] is not None
+    assert l.factory.document == publication_before
+    assert l.session.calls == [("executive_agentos_context", {"work_ref": l.slot.publication.work_ref})] * 2
+    assert l.slot.startup is None and l.slot.registration is None and l.stores == []
+    assert second["agent"] is first["agent"] if reuse else second["agent"] is not first["agent"]

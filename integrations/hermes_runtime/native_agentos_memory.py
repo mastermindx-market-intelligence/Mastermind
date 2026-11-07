@@ -14,6 +14,10 @@ import json
 from pathlib import Path
 from types import ModuleType
 
+from ops.executive_os.native_gateway_sources import (
+    DERIVATION_BASE, PRIVACY_DERIVATION_KIND, PRIVACY_DERIVATION_PATCH,
+    PRIVACY_DERIVATION_POSTIMAGES, PRIVACY_LICENSE_SHA256)
+
 from integrations.hermes_harness.agentos_memory_provider import (
     AgentOsBinding, AgentOsHostPorts, AgentOsRefusal, create_provider)
 from integrations.hermes_harness.native_agentos_context import NativeAgentOsContextRead
@@ -28,11 +32,11 @@ _CLAIM_ATTRIBUTE = "_mmx_agentos_memory_claim"
 _INSTANCE_ATTRIBUTE = "_mmx_agentos_memory_instance"
 _PACKAGE_MODULE = "integrations.hermes_harness.native_selected_child_plugin"
 SOURCE_SHA256 = {
-    "agent/agent_init.py": "040c74ad19dc27c7886bf32d2e60a251a44b5b0efc95425c461b2b3b322cbcc0",
+    "agent/agent_init.py": "eea2233a2b6cd536fca891dc3436a8dd55c1e69f0ad54a5aa6cf8fa58a3c7e08",
     "agent/memory_provider.py": "ac81dcf489c698891f0edebfe26845a75c50d2bde77ec3be8d7938a85c79f1fc",
     "agent/memory_manager.py": "88027d7ae6ee27b5abbd266619a8fbf37a561465acc1a30e0bb27954ea6f8657",
     "agent/memory_context.py": "3ed4a7bb2d7b5d8394e204c911c7983e4e1804a797083fffc87a071767b3851f",
-    "agent/memory_caller_scope.py": "98e96ae63394a0e80d3b0b235c59a520184d64b76006f73e8954f9a71e7a7d88",
+    "agent/memory_caller_scope.py": "e8924a95d756f0235071a0276763bffdaa7fdf5cef68eda589f7f46939a872a6",
     "agent/turn_context.py": "89df9b4ad047d3efff4b3d3514cc4a6eef2ac05d6add105e1e4b354bee4191fa",
     "plugins/memory/__init__.py": "166663beca1203abceffccca25c283af953a590955863a911f5d94b769725b2d",
     "plugins/plugin_loader.py": "b4d4e730df8d8163e45d4fb9dd305f61a1c6fb724ed4c3c7768eac880abba320",
@@ -49,6 +53,34 @@ def _refuse(code="NATIVE_AGENTOS_MEMORY_UNAVAILABLE"):
 
 def _sha(value):
     return hashlib.sha256(value).hexdigest()
+
+
+def _plain_strings(value):
+    return type(value) is dict and all(type(item) is str for item in value.values())
+
+
+def _privacy_receipt_equal(value, expected):
+    return (type(value) is dict and set(value) == set(expected)
+            and _plain_strings(value.get("postimages"))
+            and all(type(value[key]) is str for key in expected if key != "postimages")
+            and value == expected)
+
+
+def _privacy_derivation(launch, vendor):
+    """Require the existing held owner's verified receipt, never mint a grant."""
+    selected = launch.recipe.get("vendor_derivation")
+    expected = {"kind": PRIVACY_DERIVATION_KIND, "base_sha": DERIVATION_BASE,
+        "patch_sha256": PRIVACY_DERIVATION_PATCH,
+        "postimages": dict(PRIVACY_DERIVATION_POSTIMAGES),
+        "license_sha256": PRIVACY_LICENSE_SHA256, "vendor_root": str(vendor)}
+    if (not _plain_strings(selected)
+            or set(selected) != {"kind", "base_sha", "patch_sha256", "source_root"}
+            or any(selected[key] != expected[key] for key in ("kind", "base_sha", "patch_sha256"))
+            or type(selected["source_root"]) is not str or not Path(selected["source_root"]).is_absolute()
+            or launch.recipe.get("vendor_root") != str(vendor)
+            or not _privacy_receipt_equal(getattr(launch, "derivation", None), expected)):
+        _refuse("NATIVE_AGENTOS_PRIVACY_DERIVATION_REQUIRED")
+    return dict(selected), expected
 
 
 def _function(module, name, cls=None):
@@ -157,9 +189,12 @@ class _Instance:
 
 class NativeAgentOsMemoryFactory:
     """Qualified loader composition retained by the original ConsumerSlot."""
-    def __init__(self, launch, role_home, slot, request_observation, modules):
+    def __init__(self, launch, role_home, slot, request_observation, modules, privacy):
         self.launch, self.role_home, self.slot = launch, role_home, slot
         self.observation, self.modules = request_observation, modules
+        # Detached values from the already verified release owner. Cheap claim
+        # and loader guards compare them without filesystem I/O or new grants.
+        self.privacy_selection, self.privacy_receipt = privacy
         self.document = validate_consumer_publication(launch.recipe["executive_consumer"])
         self.publication = slot.publication
         if self.publication != publication_from_document(self.document):
@@ -182,6 +217,10 @@ class NativeAgentOsMemoryFactory:
                 and getattr(slot.manager, CONSUMER_SLOT_ATTRIBUTE, None) is slot
                 and str(slot.manager.scope_key) == str(self.role_home) == str(slot.scope)
                 and not self.launch.owner.closed and not self.launch.closure.closed
+                and _plain_strings(self.launch.recipe.get("vendor_derivation"))
+                and self.launch.recipe["vendor_derivation"] == self.privacy_selection
+                and self.launch.recipe.get("vendor_root") == self.privacy_receipt["vendor_root"]
+                and _privacy_receipt_equal(self.launch.derivation, self.privacy_receipt)
                 and self.launch.recipe["executive_consumer"] == self.document
                 and (self.connection_current is None or self.connection_current() is True)
                 and all(getattr(owner, name, None) is wrapper for owner, name, wrapper in self.wrappers))
@@ -509,6 +548,7 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
         return None
     if slot.memory_factory is not None:
         _refuse("NATIVE_AGENTOS_FACTORY_ALREADY_BOUND")
+    privacy = _privacy_derivation(launch, vendor)
     modules = {}
     for path, expected in SOURCE_SHA256.items():
         if _digest(vendor / path, maximum=256 * 1024) != expected:
@@ -534,7 +574,7 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
     prefetch = _function(turn_context, "_memory_turn_start_and_prefetch")
     build_messages = _function(turn_context, "build_api_messages")
     _function(modules["agent.agent_init"], "_init_memory")
-    factory = NativeAgentOsMemoryFactory(launch, role_home, slot, request_observation, modules)
+    factory = NativeAgentOsMemoryFactory(launch, role_home, slot, request_observation, modules, privacy)
     package = Path(slot.package_path)
 
     def find_provider(name):
@@ -646,6 +686,8 @@ def install_native_agentos_memory(launch, vendor: Path, role_home: Path, request
         (turn_context, "_memory_turn_start_and_prefetch", prefetch_turn),
         (turn_context, "build_api_messages", api_messages)]
     launch.check()
+    if _privacy_derivation(launch, vendor) != privacy:
+        _refuse("NATIVE_AGENTOS_PRIVACY_DERIVATION_REQUIRED")
     slot.memory_factory = factory
     factory.wrappers = wrappers
     for owner, name, wrapper in wrappers:

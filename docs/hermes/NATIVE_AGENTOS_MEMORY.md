@@ -16,7 +16,11 @@ credential store, daemon, scheduler, queue, retry service or publication owner.
 
 Dependencies are the adopted receiver, authenticated COO context transport and
 original native request-observation scope. The context transport's dedicated
-profile remains disabled by default. Existing grants are not broadened.
+profile remains disabled by default. Existing grants are not broadened. The v2
+publication also requires the fixed `diagnostic_privacy` vendor derivation and
+its verified six-field receipt through the original held release owner. Runtime
+file hashes alone do not qualify the vendor transformation. See
+[NATIVE_VENDOR_DERIVATION.md](NATIVE_VENDOR_DERIVATION.md).
 
 ## One enrolled consumer
 
@@ -138,11 +142,14 @@ The root protected test module `tests/test_hermes_native_agentos_memory.py`
 imports the integration's actual-source lifecycle and SDK contract cases into
 the existing CI collection and shards. It creates no alternate workflow.
 
-Fixtures include complete, unmodified MIT-licensed source files from
+Fixtures include complete MIT-licensed source files based on
 `NousResearch/hermes-agent@1c0cd667746d3395fe9e1b6c74f8f85952486f18`.
-Each has its source URL, Git blob, SHA-256 and size in the fixture provenance
-manifest, alongside the license. The tests execute the original selected ASTs
-or complete modules. Model/provider services, config and selected native edges
+`agent_init.py` and `memory_caller_scope.py` are the exact diagnostic-privacy
+postimages pinned by the runtime. Their provenance retains original upstream
+URL, Git blob, SHA-256 and size separately from derived identities and the fixed
+patch. Other fixtures remain upstream-identical. The MIT notice is retained.
+The tests execute the pinned selected ASTs or complete modules; the D8 source
+audit and its injected-identity negative remain intact. Model/provider services, config and selected native edges
 are explicitly controlled; this is component proof, not installed-host proof.
 
 Coverage includes cold registration/adoption, cached reuse, physical rotation,
@@ -152,6 +159,18 @@ policy, held general imports, source origin, late timeout ownership, unlocked
 lock waiters, old-prefetch return, lost scope, current-row evidence, native
 prefix removal/spill/trivial behavior, readback races and supervisor stages.
 
+Steering cases compile two distinct authored Git revisions through the existing
+collector/compiler and authenticated context provider, then deliver their exact
+SDK bytes through cached-agent and fresh-agent native turns. Pause retains a
+typed wait, cancel retains the named wave as `dropped`, reprioritize changes the
+current next action, and resume removes only the resolved wait. The current
+prompt retains the original objective, wave frontier and authored unresolved
+effect warning. Principal, mission and profile scope stay fixed even when urgent
+prompt text asks for broader hosts. These are prompt-continuity component proofs,
+not evidence of model compliance, process restart, runtime cancellation or effect
+settlement. Runtime ownership, outstanding effects and parent custody remain
+`UNOBSERVED` in the provider envelope.
+
 ## Installed acceptance still owed
 
 The next runtime slice must use the original authorized host connection and the
@@ -160,7 +179,8 @@ and original uncertain effect, rather than retry through another carrier.
 The concrete acceptance requires:
 
 - A new exact-source installation publication, real plugin digest and qualified
-  native interpreter/vendor closure, including this optional v2 document.
+  native interpreter/vendor closure, including this optional v2 document and
+  the original owner's verified diagnostic-privacy derivation receipt.
 - The receiving owner's real context profile/grant, authenticated principal
   binding and original OAuth connection; a current selected mission and its
   permission receipt. This source change supplies none of those credentials.

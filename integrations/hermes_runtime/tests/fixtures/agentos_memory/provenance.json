@@ -1,19 +1,45 @@
 {
   "commit": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+  "derivation": {
+    "kind": "diagnostic_privacy",
+    "manifest": "integrations/hermes_qualification/diagnostic_privacy/manifest.json",
+    "patch_sha256": "ded504ad2d660f14c89527ec74593fcc459485666fbb0994bb92f7b02c878bce",
+    "scope": "Two diagnostic-only postimages; all other fixtures are original upstream bytes. This is source evidence, not installed qualification."
+  },
   "files": {
     "agent/agent_init.py": {
-      "bytes": 126617,
+      "bytes": 126495,
+      "derivation": {
+        "kind": "diagnostic_privacy",
+        "patch_sha256": "ded504ad2d660f14c89527ec74593fcc459485666fbb0994bb92f7b02c878bce"
+      },
       "fixture": "agent__agent_init.py.source",
-      "git_blob": "1d2d7f302e41c0f83f32fe628a3d308f6fdc5bca",
-      "sha256": "040c74ad19dc27c7886bf32d2e60a251a44b5b0efc95425c461b2b3b322cbcc0",
-      "source_url": "https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/agent/agent_init.py"
+      "git_blob": "b62a9fe0cf03a003ea0882e3281f40053bbf3bf2",
+      "sha256": "eea2233a2b6cd536fca891dc3436a8dd55c1e69f0ad54a5aa6cf8fa58a3c7e08",
+      "source_url": "https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/agent/agent_init.py",
+      "upstream": {
+        "bytes": 126617,
+        "git_blob": "1d2d7f302e41c0f83f32fe628a3d308f6fdc5bca",
+        "sha256": "040c74ad19dc27c7886bf32d2e60a251a44b5b0efc95425c461b2b3b322cbcc0",
+        "source_url": "https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/agent/agent_init.py"
+      }
     },
     "agent/memory_caller_scope.py": {
-      "bytes": 7600,
+      "bytes": 7497,
+      "derivation": {
+        "kind": "diagnostic_privacy",
+        "patch_sha256": "ded504ad2d660f14c89527ec74593fcc459485666fbb0994bb92f7b02c878bce"
+      },
       "fixture": "agent__memory_caller_scope.py.source",
-      "git_blob": "a05d2de55d3df2d8913a23f457779f49527d29d7",
-      "sha256": "98e96ae63394a0e80d3b0b235c59a520184d64b76006f73e8954f9a71e7a7d88",
-      "source_url": "https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/agent/memory_caller_scope.py"
+      "git_blob": "a48df847b4c59268613256e32252545c523ee62a",
+      "sha256": "e8924a95d756f0235071a0276763bffdaa7fdf5cef68eda589f7f46939a872a6",
+      "source_url": "https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/agent/memory_caller_scope.py",
+      "upstream": {
+        "bytes": 7600,
+        "git_blob": "a05d2de55d3df2d8913a23f457779f49527d29d7",
+        "sha256": "98e96ae63394a0e80d3b0b235c59a520184d64b76006f73e8954f9a71e7a7d88",
+        "source_url": "https://github.com/NousResearch/hermes-agent/blob/1c0cd667746d3395fe9e1b6c74f8f85952486f18/agent/memory_caller_scope.py"
+      }
     },
     "agent/memory_context.py": {
       "bytes": 8618,
