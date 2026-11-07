@@ -143,6 +143,31 @@ class FixedCustodyInspection(unittest.TestCase):
         with mock.patch.object(os,'stat',side_effect=replace):
             with self.assertRaisesRegex(ValueError,'directory_changed'):self.call()
 
+    def final_receipt_stat_drift(self, kind):
+        self.prior.write_bytes(b'private')
+        original=os.stat;count=[0]
+        def drift(path,*args,**kw):
+            value=original(path,*args,**kw)
+            if path==policy.RECORD:
+                count[0]+=1
+                if count[0]==2:  # Last fixed-file stat in final current(), not initial observation.
+                    if kind=='marker':(self.active/'late').touch()
+                    else:
+                        self.lock.unlink();self.lock.write_bytes(b'');self.lock.chmod(0o600)
+                        with self.lock.open('r+') as new:
+                            fcntl.flock(new,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            return value
+        with mock.patch.object(os,'stat',side_effect=drift):
+            with self.assertRaisesRegex(ValueError,'active_or_unknown_marker|admission_lock_changed'):
+                self.call()
+        self.assertEqual(count[0],2)
+
+    def test_final_receipt_stat_marker_withholds_metadata(self):
+        self.final_receipt_stat_drift('marker')
+
+    def test_final_receipt_stat_acquirable_replacement_lock_withholds_metadata(self):
+        self.final_receipt_stat_drift('lock')
+
     def test_fixed_scope_stays_closed(self):
         for field,value in [('uid',0),('account','other'),('hostname','other'),('platform','darwin')]:
             with self.subTest(field=field),self.assertRaisesRegex(ValueError,'fixed_host_account'):

@@ -245,7 +245,7 @@ def inspect_custody(*, home=None, uid=None, platform=None, account=None, hostnam
         except BlockingIOError:
             raise storage.InstallHeld('admission_lock_busy') from None
 
-        def current():
+        def namespace_current():
             for path, component, fd, original in held:
                 reopened = _custody_call(component, storage._directory, path, uid)
                 try:
@@ -256,10 +256,14 @@ def inspect_custody(*, home=None, uid=None, platform=None, account=None, hostnam
                         raise storage.InstallHeld('directory_changed')
                 finally:
                     os.close(reopened)
-            if storage._identity(os.stat('.admission.lock', dir_fd=active, follow_symlinks=False)) != storage._identity(lock_stat):
+            if (storage._identity(os.fstat(lock)) != storage._identity(lock_stat)
+                    or storage._identity(os.stat('.admission.lock', dir_fd=active, follow_symlinks=False)) != storage._identity(lock_stat)):
                 raise storage.InstallHeld('admission_lock_changed')
             if _entries(active) != {'.admission.lock'}:
                 raise storage.InstallHeld('active_or_unknown_marker')
+
+        def current():
+            namespace_current()
             for fd, name, component, original in files:
                 try:
                     now = os.stat(name, dir_fd=fd, follow_symlinks=False)
@@ -267,6 +271,9 @@ def inspect_custody(*, home=None, uid=None, platform=None, account=None, hostnam
                     now = None
                 if (None if now is None else storage._identity(now)) != original:
                     raise storage.InstallHeld('file_changed')
+            # Fixed-file stats may block or run across a namespace change.
+            # Rejoin OUR held directories/lock and active set before publishing.
+            namespace_current()
 
         current()
         for fd, name, component in [(target, 'pools.yaml', 'POLICY_FILE'),
