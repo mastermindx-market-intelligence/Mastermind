@@ -232,10 +232,30 @@ ADMISSION_INTEGRITY_DIGESTS = {
 }
 
 
+# Reviewed current-quiescence read/guard changes only Broker in exact raw107.
+# Validate the whole parent; never normalize a mixed or unrelated source set.
+QUALIFICATION_QUIESCENCE_PARENT_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE = "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a"
+QUALIFICATION_QUIESCENCE_BROKER_SHA256 = "5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a"
+
+
+def before_qualification_quiescence(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("qualification quiescence manifest invalid")
+    previous = dict(manifest)
+    if previous.get("ext/lease_broker.py") != QUALIFICATION_QUIESCENCE_BROKER_SHA256:
+        return previous
+    previous["ext/lease_broker.py"] = QUALIFICATION_QUIESCENCE_BROKER_PREIMAGE
+    if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != QUALIFICATION_QUIESCENCE_PARENT_SHA256:
+        raise ValueError("qualification quiescence parent closure differs")
+    return previous
+
+
 def before_admission_integrity(manifest):
     """Validate one exact forward cohort without mutating caller identity."""
     if type(manifest) is not dict:
         raise ValueError("native admission integrity manifest invalid")
+    manifest = before_qualification_quiescence(manifest)
     if not any(manifest.get(name) == digest
                for name, digest in ADMISSION_INTEGRITY_DIGESTS.items()):
         return dict(manifest)

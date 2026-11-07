@@ -15,9 +15,13 @@ from unittest import mock
 ROOT=Path(__file__).resolve().parents[1]
 CAND=ROOT/'ops/native_fabric/quota_continuity/candidate'
 SOURCE=ROOT/'ops/native_fabric/quota_continuity/source'
-sys.path[:0]=[str(CAND),str(SOURCE)]
-spec=importlib.util.spec_from_file_location('inert_qualification_broker',CAND/'lease_broker.py')
-broker=importlib.util.module_from_spec(spec);sys.modules[spec.name]=broker;spec.loader.exec_module(broker)
+original_path=list(sys.path)
+try:
+    sys.path[:0]=[str(CAND),str(SOURCE)]
+    spec=importlib.util.spec_from_file_location('inert_qualification_broker',CAND/'lease_broker.py')
+    broker=importlib.util.module_from_spec(spec);sys.modules[spec.name]=broker;spec.loader.exec_module(broker)
+finally:
+    sys.path[:]=original_path
 
 
 class Quiescence(unittest.TestCase):
