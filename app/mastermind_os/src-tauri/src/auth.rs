@@ -1,5 +1,15 @@
 //! The native client owns OAuth transactions and bearer tokens. The webview
 //! receives fixed read results and sanitized state, never credential material.
+pub mod host_observation;
+pub mod hermes_native;
+pub mod control_room_read;
+pub mod company_priorities;
+mod draft_continuity;
+mod transport_diagnostics;
+use transport_diagnostics::{ExecutiveObservation, ExecutiveReason, ProgramsRead};
+pub mod native_draft_identity;
+#[cfg(test)]
+mod draft_recovery_tests;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -92,11 +102,15 @@ struct Pending {
     generation: u64,
 }
 struct Inner {
+    draft_continuity: draft_continuity::DraftContinuity,
     client_id: Option<String>,
     executive_resource: Option<String>,
     executive_generation: u64,
     executive_changed: tokio::sync::watch::Sender<()>,
     executive: Option<Token>,
+    executive_reason: ExecutiveReason,
+    programs_sequence: u64,
+    programs_read: ProgramsRead,
     generation: u64,
     pending: Option<Pending>,
     exchanging: bool,
@@ -114,11 +128,15 @@ impl Inner {
             .filter(|value| crate::native_client::validate_native_client_id(value).is_ok())
             .map(str::to_owned);
         Self {
+            draft_continuity: draft_continuity::DraftContinuity::new(draft_owner_instance()),
             client_id,
             executive_resource: resource.and_then(executive_resource),
             executive_generation: 0,
             executive_changed: tokio::sync::watch::channel(()).0,
             executive: None,
+            executive_reason: ExecutiveReason::NotEstablished,
+            programs_sequence: 0,
+            programs_read: ProgramsRead::default(),
             generation: 0,
             pending: None,
             exchanging: false,
@@ -129,16 +147,21 @@ impl Inner {
         }
     }
     fn token(&self, resource: Resource) -> Option<&Token> {
+        self.stored_token(resource)
+            .filter(|t| t.expires > Instant::now() && t.wall_expires > SystemTime::now())
+    }
+    fn stored_token(&self, resource: Resource) -> Option<&Token> {
         match resource {
             Resource::Acquisition => self.acquisition.as_ref(),
             Resource::Content => self.content.as_ref(),
             Resource::Executive => self.executive.as_ref().filter(|_| self.executive_resource.is_some()),
         }
-        .filter(|t| t.expires > Instant::now() && t.wall_expires > SystemTime::now())
     }
     fn status(&self) -> AuthStatus {
         let acquisition = self.token(Resource::Acquisition).is_some();
         let content = self.token(Resource::Content).is_some();
+        let expired = self.acquisition.as_ref().is_some_and(|_| !acquisition)
+            || self.content.as_ref().is_some_and(|_| !content);
         AuthStatus {
             status: if self.client_id.is_none() {
                 "unconfigured"
@@ -154,7 +177,11 @@ impl Inner {
             reason: if self.client_id.is_none() {
                 Some("NATIVE_CLIENT_ID_MISSING")
             } else {
-                self.reason
+                self.reason.or_else(|| {
+                    if matches!(self.draft_continuity.snapshot(None).phase, draft_continuity::Phase::Withdrawn) {
+                        Some("USER_SIGNED_OUT")
+                    } else if expired { Some("NATIVE_TOKEN_EXPIRED") } else { None }
+                })
             },
             acquisition,
             content,
@@ -167,16 +194,17 @@ impl Inner {
         self.executive_changed.send_replace(());
         match self.executive_generation.checked_add(1).filter(|n| *n <= MAX_SAFE_GENERATION) {
             Some(next) => { self.executive_generation = next; true }
-            None => { self.executive = None; self.executive_resource = None; false }
+            None => { self.executive = None; self.executive_resource = None; self.executive_reason = ExecutiveReason::GenerationExhausted; false }
         }
     }
     fn clear_executive(&mut self) {
         self.executive = None;
-        self.advance_executive();
+        if self.advance_executive() { self.executive_reason = ExecutiveReason::NotEstablished; }
     }
     fn expire_executive(&mut self) {
         if self.executive.as_ref().is_some_and(|t| t.expires <= Instant::now()) {
             self.clear_executive();
+            if self.executive_resource.is_some() { self.executive_reason = ExecutiveReason::Expired; }
         }
     }
     fn executive_status(&mut self) -> ExecutiveAuthStatus {
@@ -184,12 +212,45 @@ impl Inner {
         ExecutiveAuthStatus { generation: self.executive_generation,
             available: self.token(Resource::Executive).is_some() }
     }
+    fn executive_observation(&mut self) -> ExecutiveObservation {
+        let status = self.executive_status();
+        let configured = self.executive_resource.is_some();
+        let reason = if status.available { ExecutiveReason::Available }
+            else if self.executive_reason == ExecutiveReason::GenerationExhausted { ExecutiveReason::GenerationExhausted }
+            else if !configured { ExecutiveReason::Unconfigured }
+            else if self.executive.is_some() { ExecutiveReason::Expired }
+            else { self.executive_reason };
+        ExecutiveObservation { schema: "mastermind.native_executive_status.v1",
+            generation: status.generation, available: status.available, configured, reason,
+            programs_read: self.programs_read }
+    }
+    fn begin_programs_observation(&mut self) -> Option<(u64, u64)> {
+        let Some(next) = self.programs_sequence.checked_add(1) else {
+            self.programs_read = ProgramsRead::default(); return None;
+        };
+        self.programs_sequence = next; self.programs_read = ProgramsRead::pending();
+        Some((self.generation, next))
+    }
+    fn finish_programs_observation(&mut self, ticket: Option<(u64, u64)>, observed: ProgramsRead) {
+        if ticket == Some((self.generation, self.programs_sequence)) { self.programs_read = observed; }
+    }
     fn fail_transaction(&mut self, resource: Resource, reason: &'static str) {
-        if resource == Resource::Executive { self.clear_executive(); }
-        else { self.reason = Some(reason); }
+        if resource == Resource::Executive {
+            self.clear_executive();
+            if self.executive_resource.is_some() { self.executive_reason = ExecutiveReason::failure(reason); }
+        } else { self.reason = Some(reason); }
     }
     fn invalidate(&mut self) {
+        self.invalidate_auth();
+        self.draft_continuity.logout();
+    }
+    fn begin_reauthentication(&mut self) {
+        self.invalidate_auth();
+        self.draft_continuity.begin_reauthentication();
+    }
+    fn invalidate_auth(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+        self.programs_sequence = 0; self.programs_read = ProgramsRead::default();
         self.clear_executive();
         self.pending = None;
         self.exchanging = false;
@@ -213,6 +274,7 @@ impl Inner {
         let url = if resource == Resource::Executive {
             authorization_url_for_audience(client, resource, self.executive_resource.as_deref().ok_or("EXECUTIVE_UNCONFIGURED")?, &state, &verifier)
         } else { authorization_url(client, resource, &state, &verifier) };
+        if resource == Resource::Executive { self.executive_reason = ExecutiveReason::Authorizing; }
         self.pending = Some(Pending {
             state,
             verifier,
@@ -229,6 +291,19 @@ impl Inner {
         // Only this initial handoff requests it. Chained grants keep SSO.
         let url = self.transaction(Resource::Acquisition)?;
         Ok(format!("{url}&prompt=login"))
+    }
+    fn expire_transaction(&mut self, generation: u64, expires: Instant, now: Instant) -> bool {
+        // A completed or replaced transaction's timer must not announce a new
+        // auth boundary. Only the exact original pending deadline can expire.
+        if self.generation != generation
+            || !self.pending.as_ref().is_some_and(|pending|
+                pending.generation == generation && pending.expires == expires && expires <= now)
+        {
+            return false;
+        }
+        let Some(pending) = self.pending.take() else { return false; };
+        self.fail_transaction(pending.resource, "AUTH_TRANSACTION_EXPIRED");
+        true
     }
     fn consume(&mut self, callback: &str) -> Result<(Pending, String, String)> {
         // Malformed or unrelated callbacks cannot cancel another transaction.
@@ -247,6 +322,7 @@ impl Inner {
             return Err("AUTHORIZATION_REFUSED".into());
         }
         self.exchanging = true;
+        if pending.resource == Resource::Executive { self.executive_reason = ExecutiveReason::Exchanging; }
         Ok((
             pending,
             code.ok_or("AUTH_CALLBACK_INVALID")?,
@@ -269,6 +345,7 @@ impl Inner {
         match token {
             Ok(token) if resource == Resource::Acquisition => {
                 self.acquisition = Some(token);
+                self.draft_continuity.unqualified();
                 self.reason = None;
                 self.transaction(Resource::Content).ok()
             }
@@ -280,11 +357,17 @@ impl Inner {
             Ok(token) => {
                 if self.executive_resource.is_some() && self.advance_executive() {
                     self.executive = Some(token);
+                    self.executive_reason = ExecutiveReason::Available;
                 }
                 None
             }
-            Err(_) => {
+            Err(error) => {
+                // Only the dedicated public enum may retain a closed cause.
+                // Raw token/provider/error material is never stored or emitted.
                 self.fail_transaction(resource, "TOKEN_EXCHANGE_FAILED");
+                if resource == Resource::Executive && self.executive_resource.is_some() {
+                    self.executive_reason = ExecutiveReason::failure(&error);
+                }
                 None
             }
         }
@@ -324,6 +407,11 @@ fn random_secret() -> String {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
     URL_SAFE_NO_PAD.encode(bytes)
+}
+fn draft_owner_instance() -> String {
+    let mut bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 fn authorization_url(client: &str, resource: Resource, state: &str, verifier: &str) -> String {
     authorization_url_for_audience(client, resource, resource.audience(), state, verifier)
@@ -397,7 +485,7 @@ fn emit(app: &AppHandle) {
     }
 }
 fn open_transaction(app: &AppHandle, url: String, generation: u64) -> Result<()> {
-    {
+    let expires = {
         let state = app.state::<NativeAuth>();
         let mut inner = state.lock()?;
         // Serialize browser handoff with logout and replacement transactions.
@@ -411,24 +499,15 @@ fn open_transaction(app: &AppHandle, url: String, generation: u64) -> Result<()>
             emit(app);
             return Err("AUTH_BROWSER_UNAVAILABLE".into());
         }
-    }
+        inner.pending.as_ref().ok_or("AUTHENTICATION_CHANGED")?.expires
+    };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(TRANSACTION_TTL).await;
         let state = app.state::<NativeAuth>();
-        if let Ok(mut inner) = state.lock() {
-            if inner.generation == generation
-                && inner
-                    .pending
-                    .as_ref()
-                    .is_some_and(|p| p.expires <= Instant::now())
-            {
-                if let Some(pending) = inner.pending.take() {
-                    inner.fail_transaction(pending.resource, "AUTH_TRANSACTION_EXPIRED");
-                }
-            }
-        }
-        emit(&app);
+        let expired = state.lock().map(|mut inner|
+            inner.expire_transaction(generation, expires, Instant::now())).unwrap_or(false);
+        if expired { emit(&app); }
     });
     Ok(())
 }
@@ -439,7 +518,16 @@ pub fn auth_status(state: tauri::State<'_, NativeAuth>) -> Result<AuthStatus> {
 #[tauri::command]
 pub fn sign_out(app: AppHandle) -> Result<AuthStatus> {
     let state = app.state::<NativeAuth>();
-    let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+    let _keychain = match state.keychain_lock.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            // Explicit logout withdraws in-memory authority and privacy
+            // continuity even when platform credential cleanup is unavailable.
+            state.lock()?.invalidate();
+            emit(&app);
+            return Err("KEYCHAIN_UNAVAILABLE".into());
+        }
+    };
     let mut inner = state.lock()?;
     inner.invalidate();
     let client = inner.client_id.clone();
@@ -469,7 +557,7 @@ pub fn sign_in(app: AppHandle) -> Result<AuthStatus> {
     if inner.client_id.is_none() {
         return Ok(inner.status());
     }
-    inner.invalidate();
+    inner.begin_reauthentication();
     if crate::native_refresh::enabled() {
         let client = inner.client_id.as_deref().ok_or("NATIVE_CLIENT_ID_MISSING")?;
         for resource in [Resource::Acquisition, Resource::Content] {
@@ -744,7 +832,10 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
         if inner.generation != generation { return Err("AUTHENTICATION_CHANGED".into()); }
         crate::native_refresh::finish_rotation(&client, resource.audience(), &old, next)?;
         match resource {
-            Resource::Acquisition => inner.acquisition = Some(access),
+            Resource::Acquisition => {
+                inner.acquisition = Some(access);
+                inner.draft_continuity.unqualified();
+            },
             Resource::Content => inner.content = Some(access),
             Resource::Executive => return Err("AUTHENTICATION_REQUIRED".into()),
         }
@@ -779,6 +870,16 @@ fn native_refresh_deadline(expires: Instant, now: Instant) -> Instant {
     let floor = now + Duration::from_secs(10);
     if early < floor { floor } else { early }
 }
+fn original_expiry_current(inner: &Inner, resource: Resource, expires: Instant,
+    wall_expires: SystemTime, generation: u64) -> bool {
+    inner.generation == generation && inner.stored_token(resource)
+        .is_some_and(|token| token.expires == expires && token.wall_expires == wall_expires)
+}
+fn original_expiry_due(inner: &Inner, resource: Resource, expires: Instant,
+    wall_expires: SystemTime, generation: u64, now: Instant, wall: SystemTime) -> bool {
+    original_expiry_current(inner, resource, expires, wall_expires, generation)
+        && (now >= expires || wall >= wall_expires)
+}
 fn schedule_expiration(app: AppHandle, resource: Resource, expires: Instant, wall_expires: SystemTime, generation: u64) {
     tauri::async_runtime::spawn(async move {
         let target = if resource.persistent() {
@@ -801,6 +902,23 @@ fn schedule_expiration(app: AppHandle, resource: Resource, expires: Instant, wal
             // A network/rotation failure does not replay an ambiguous token;
             // a later explicit sign-in remains available.
             let _ = refresh_one(&app, resource).await;
+        }
+        // An early refresh failure may leave the old token valid at this
+        // point. The same original deadline owner must still report its real
+        // expiry; it never retries refresh, creates another timer or extends
+        // the token. A replacement grant/logout retires this old deadline.
+        loop {
+            let state = app.state::<NativeAuth>();
+            let due = match state.lock() {
+                Ok(inner) => {
+                    if !original_expiry_current(&inner, resource, expires, wall_expires, generation) { return; }
+                    original_expiry_due(&inner, resource, expires, wall_expires, generation, Instant::now(), SystemTime::now())
+                },
+                Err(_) => return,
+            };
+            if due { break; }
+            let remaining = expires.saturating_duration_since(Instant::now());
+            tokio::time::sleep(remaining.min(Duration::from_secs(30))).await;
         }
         emit(&app);
     });
@@ -854,6 +972,51 @@ impl MissionSelection {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct SessionSelection {
+    work_ref: String,
+    root_job_id: String,
+    /// The closed target kind of the selected session. An absent kind keeps
+    /// the incumbent fabric target; no other kind is admitted.
+    #[serde(default, deserialize_with = "deserialize_session_target_kind")]
+    target_kind: Option<String>,
+}
+fn deserialize_session_target_kind<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Only omission uses the default. Explicit null is not legacy Fabric.
+    String::deserialize(deserializer).map(Some)
+}
+impl SessionSelection {
+    fn validate(&self) -> Result<()> {
+        MissionSelection {
+            work_ref: self.work_ref.clone(),
+            root_job_id: self.root_job_id.clone(),
+        }
+        .validate()?;
+        match self.target_kind.as_deref() {
+            None => Ok(()),
+            Some("fabric_attempt") | Some("hermes_secretary") | Some("hermes_meta") => Ok(()),
+            Some(_) => Err("SELECTION_INVALID".into()),
+        }
+    }
+    /// The exact wire selection. The legacy pair is carried verbatim; an
+    /// explicit kind adds the one closed key and nothing else.
+    fn wire(&self) -> Value {
+        let mut selection = serde_json::json!({
+            "work_ref": self.work_ref, "root_job_id": self.root_job_id
+        });
+        if let Some(kind) = &self.target_kind {
+            selection["target_kind"] = Value::String(kind.to_owned());
+        }
+        selection
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResultSelection {
     work_ref: String,
     root_job_id: String,
@@ -889,6 +1052,9 @@ impl ResultSelection {
 
 const RESULT_RESPONSE_CAP: usize = 16_384;
 const MISSION_V3_RESPONSE_CAP: usize = 2_000_000;
+const MISSION_RESULT_RESPONSE_CAP: usize = 2_000_000;
+const MISSION_RESULT_PATH: &str = "/workspace/mission-result/current";
+const MISSION_RESULT_SCHEMA: &str = "mastermind.workspace_mission_result.v1";
 const RESULT_MISSION_V3_PATH: &str = "/workspace/mission/v3/current";
 const RESULT_DETAIL_PATH: &str = "/workspace/result/current";
 const PLAN_DETAIL_PATH: &str = "/workspace/plan/current";
@@ -910,6 +1076,22 @@ fn typed_unavailable(value: Value, schema: &str, require_null_result: bool) -> R
         Ok(value)
     }
 }
+// Header compatibility is deliberately fixed to this one zero-selector read.
+// The shared frontend decoder still validates the entire versioned DTO.
+fn workspace_read_body(value: Value, path: &str, schema: &str) -> Result<Value> {
+    let actual = value.get("schema").and_then(Value::as_str);
+    let programs_v2 = path == "/workspace/programs/current"
+        && schema == "mastermind.workspace_programs.v1"
+        && actual == Some("mastermind.workspace_programs.v2");
+    if !value.is_object() || (actual != Some(schema) && !programs_v2) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+fn finish_programs_observation(state: &NativeAuth, ticket: Option<(u64, u64)>, observed: ProgramsRead) {
+    // Optional observability never adds a fallible gate to the real read.
+    if let Ok(mut inner) = state.lock() { inner.finish_programs_observation(ticket, observed); }
+}
 async fn read(
     app: AppHandle,
     resource: Resource,
@@ -925,26 +1107,35 @@ async fn read(
             .append_pair("root_job_id", &selection.root_job_id);
     }
     let state = app.state::<NativeAuth>();
-    let (token, generation) = ensure_native_token(&app, resource).await?;
-    let response = state
-        .http
-        .get(url)
-        .bearer_auth(token)
-        .header("Accept", "application/json")
-        .header("Cache-Control", "no-store")
-        .send()
-        .await
-        .map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let observation = if resource == Resource::Acquisition && path == "/workspace/programs/current" {
+        state.lock().ok().and_then(|mut inner| inner.begin_programs_observation())
+    } else { None };
+    let (token, generation) = match ensure_native_token(&app, resource).await {
+        Ok(value) => value,
+        Err(error) => {
+            finish_programs_observation(&state, observation, ProgramsRead::auth_unavailable());
+            return Err(error);
+        }
+    };
+    let response = match state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await {
+        Ok(response) => response,
+        Err(error) => {
+            finish_programs_observation(&state, observation, ProgramsRead::network(error.is_timeout()));
+            return Err("SOURCE_UNAVAILABLE".into());
+        }
+    };
+    let status = response.status().as_u16();
     let result = bounded_json(response, MAX_RESPONSE).await;
     if !state.lock()?.release_allowed(generation, resource) {
+        finish_programs_observation(&state, observation, ProgramsRead::auth_unavailable());
         return Err("AUTHENTICATION_CHANGED".into());
     }
-    let value = result?;
-    if !value.is_object() || value.get("schema").and_then(Value::as_str) != Some(schema) {
-        return Err("RESPONSE_INVALID".into());
-    }
-    // The shared frontend decoder validates the full closed DTO before rendering.
-    Ok(value)
+    let result = result.and_then(|value| workspace_read_body(value, path, schema));
+    finish_programs_observation(&state, observation,
+        ProgramsRead::response(status, result.as_ref().err().map(String::as_str)));
+    result
 }
 #[tauri::command]
 pub async fn read_byok_roles(app: AppHandle) -> Result<Value> {
@@ -1495,7 +1686,7 @@ pub struct SourceOperationContextSelection {
 }
 fn source_operation_context_target(selection: &SourceOperationContextSelection) -> Result<Url> {
     if !matches!(selection.action.as_str(), "publish_project_proposal" | "ADOPT_PLAN" | "ACCEPT_DIRECTION"
-        | "add_project_file" | "set_project_communication_preference") {
+        | "add_project_file" | "set_project_communication_preference" | "correct_project_discovery") {
         return Err("SELECTION_INVALID".into());
     }
     if let Some(work) = &selection.work_ref {
@@ -1558,6 +1749,7 @@ fn source_operation_identity(request: &Value) -> Result<(&str, &str, &str)> {
         "ACCEPT_DIRECTION" => "mmos-direction-accept-",
         "add_project_file" => "mmos-project-file-add-",
         "set_project_communication_preference" => "mmos-project-preference-set-",
+        "correct_project_discovery" => "mmos-project-discovery-correct-",
         _ => return Err("REQUEST_INVALID".into()),
     };
     let id = request
@@ -1580,6 +1772,55 @@ fn source_operation_identity(request: &Value) -> Result<(&str, &str, &str)> {
     .validate()?;
     Ok((action, id, work))
 }
+fn source_discovery_ref(value: Option<&str>) -> bool {
+    value.and_then(|s| s.strip_prefix("DSC:")).is_some_and(|key| {
+        (2..=64).contains(&key.len()) && key.split('-').all(|part| !part.is_empty()
+            && part.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()))
+    })
+}
+fn source_correction_text(value: &Value, limit: usize, empty: bool) -> bool {
+    value.as_str().is_some_and(|s| s.len() <= limit && (!s.trim().is_empty() || (empty && s.is_empty()))
+        && !s.chars().any(|c| (c < '\u{20}' && !matches!(c, '\n' | '\r' | '\t')) || ('\u{7f}'..='\u{9f}').contains(&c)))
+}
+fn source_correction_date(value: &Value) -> bool {
+    let Some(s) = value.as_str() else { return false; };
+    let b = s.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-'
+        || b.iter().enumerate().any(|(i,c)| i != 4 && i != 7 && !c.is_ascii_digit()) { return false; }
+    let year: u32 = s[..4].parse().unwrap_or(0);
+    let month: usize = s[5..7].parse().unwrap_or(0);
+    let day: u32 = s[8..].parse().unwrap_or(0);
+    let days = [31, if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {29} else {28},31,30,31,30,31,31,30,31,30,31];
+    year > 0 && (1..=12).contains(&month) && day > 0 && day <= days[month - 1]
+}
+fn source_discovery_correction_request(value: &Value) -> Result<()> {
+    source_operation_keys(value, &["schema","request_id","work_ref","source_commit","base_revision",
+        "discovery_ref","expected_discovery_revision","correction_reason","replacement"])?;
+    if value["schema"].as_str() != Some("mastermind.project_discovery_correct_request.v1")
+        || !source_operation_hex(value["source_commit"].as_str(),40)
+        || !source_operation_hex(value["base_revision"].as_str(),64)
+        || !source_operation_hex(value["expected_discovery_revision"].as_str(),64)
+        || !source_discovery_ref(value["discovery_ref"].as_str())
+        || !source_correction_text(&value["correction_reason"],2048,false)
+        || serde_json::to_vec(value).map_err(|_| "REQUEST_INVALID")?.len() > 24_576 {
+        return Err("REQUEST_INVALID".into());
+    }
+    let r = &value["replacement"];
+    source_operation_keys(r, &["claim","falsifier","so_what","kind","confidence","verified_at","verified_by","expires","body_utf8","evidence"])?;
+    if ["claim","falsifier","so_what","verified_by"].iter().any(|key| !source_correction_text(&r[*key],2048,false))
+        || !source_correction_text(&r["body_utf8"],8192,true)
+        || !matches!(r["kind"].as_str(),Some("architecture"|"data"|"landmine"|"dead_code"|"constraint"|"runtime"))
+        || !matches!(r["confidence"].as_str(),Some("verified"|"probable"|"suspected"))
+        || !source_correction_date(&r["verified_at"])
+        || (!r["expires"].is_null() && (!source_correction_date(&r["expires"]) || r["expires"].as_str() < r["verified_at"].as_str()))
+        || serde_json::to_vec(r).map_err(|_| "REQUEST_INVALID")?.len() > 16_384 {
+        return Err("REQUEST_INVALID".into());
+    }
+    let evidence = r["evidence"].as_array().ok_or("REQUEST_INVALID")?;
+    if !(1..=8).contains(&evidence.len()) || evidence.iter().enumerate().any(|(i,item)|
+        !source_correction_text(item,1024,false) || evidence[..i].contains(item)) {return Err("REQUEST_INVALID".into());}
+    Ok(())
+}
 fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
     let file_prepare = kind == "prepare" && request.get("action").and_then(Value::as_str) == Some("add_project_file");
     let request_cap = if file_prepare { PROJECT_FILE_PREPARE_CAP } else { SOURCE_OPERATION_CAP };
@@ -1590,7 +1831,10 @@ fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
     {
         return Err("REQUEST_INVALID".into());
     }
-    if kind == "prepare" {
+    if kind == "options" {
+        source_operation_keys(request,&["action"])?;
+        if request.get("action").and_then(Value::as_str)!=Some("publish_project_proposal") {return Err("REQUEST_INVALID".into());}
+    } else if kind == "prepare" {
         source_operation_keys(request, &["action", "request"])?;
         let inner = request
             .get("request")
@@ -1619,6 +1863,7 @@ fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
             .get("action")
             .and_then(Value::as_str)
             .ok_or("REQUEST_INVALID")?;
+        if action == "correct_project_discovery" {source_discovery_correction_request(inner)?;}
         let work = inner.get("work_ref").and_then(Value::as_str);
         source_operation_context_target(&SourceOperationContextSelection {
             action: action.to_owned(),
@@ -1630,6 +1875,7 @@ fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
             "ACCEPT_DIRECTION" => "mmos-direction-accept-",
             "add_project_file" => "mmos-project-file-add-",
             "set_project_communication_preference" => "mmos-project-preference-set-",
+            "correct_project_discovery" => "mmos-project-discovery-correct-",
             _ => return Err("REQUEST_INVALID".into()),
         };
         if !inner
@@ -1693,9 +1939,20 @@ fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
         {
             return Err("REQUEST_INVALID".into());
         }
+    } else if kind == "read" && request.get("action").and_then(Value::as_str)==Some("publish_project_proposal") && request.get("work_ref").is_some_and(Value::is_null) {
+        source_operation_keys(request,&["schema","action","request_id","work_ref"])?;
+        let id=request.get("request_id").and_then(Value::as_str).and_then(|s|s.strip_prefix("mmos-project-create-")).ok_or("REQUEST_INVALID")?;
+        if !source_operation_hex(Some(id),40) || request.get("schema").and_then(Value::as_str)!=Some("mastermind.workspace_source_operation_lookup.v1") {return Err("REQUEST_INVALID".into());}
     } else if kind == "read" || kind == "reconcile" {
         let (action, _, _) = source_operation_identity(request)?;
-        if matches!(action, "add_project_file" | "set_project_communication_preference") {
+        if action == "correct_project_discovery" {
+            source_operation_keys(request, &["action","request_id","work_ref","source_commit","base_revision","request_sha256","discovery_ref","expected_discovery_revision"])?;
+            if !source_operation_hex(request["source_commit"].as_str(),40)
+                || !source_operation_hex(request["base_revision"].as_str(),64)
+                || !source_operation_hex(request["request_sha256"].as_str(),64)
+                || !source_operation_hex(request["expected_discovery_revision"].as_str(),64)
+                || !source_discovery_ref(request["discovery_ref"].as_str()) {return Err("REQUEST_INVALID".into());}
+        } else if matches!(action, "add_project_file" | "set_project_communication_preference") {
             source_operation_keys(request, &["action", "request_id", "work_ref", "source_commit", "base_revision", "request_sha256", "expected_preference_revision"])?;
             let preference = request.get("expected_preference_revision").ok_or("REQUEST_INVALID")?;
             if !source_operation_hex(request.get("source_commit").and_then(Value::as_str), 40)
@@ -1717,12 +1974,20 @@ fn source_operation_target(kind: &str, request: &Value) -> Result<Url> {
     let suffix = if kind == "read" { "operation" } else { kind };
     let mut url = Url::parse(&format!("{ORIGIN}/workspace/source-operation/{suffix}"))
         .map_err(|_| "REQUEST_INVALID")?;
+    if kind == "options" {url.query_pairs_mut().append_pair("action","publish_project_proposal");}
     if kind == "read" {
-        let (action, id, work) = source_operation_identity(request)?;
+        let (action,id,work) = if request.get("action").and_then(Value::as_str)==Some("publish_project_proposal") && request.get("work_ref").is_some_and(Value::is_null) {
+            ("publish_project_proposal",request["request_id"].as_str().ok_or("REQUEST_INVALID")?,"null")
+        } else { source_operation_identity(request)? };
         url.query_pairs_mut()
             .append_pair("action", action)
             .append_pair("request_id", id)
             .append_pair("work_ref", work);
+        if action == "correct_project_discovery" {
+            for field in ["source_commit","base_revision","request_sha256","discovery_ref","expected_discovery_revision"] {
+                url.query_pairs_mut().append_pair(field,request[field].as_str().ok_or("REQUEST_INVALID")?);
+            }
+        }
         if matches!(action, "add_project_file" | "set_project_communication_preference") {
             for field in ["source_commit", "base_revision", "request_sha256", "expected_preference_revision"] {
                 // The fixed HTTP owner decodes only literal null for the
@@ -1741,7 +2006,7 @@ async fn source_operation_exchange(app: AppHandle, kind: &str, request: Value) -
     let mut call = state
         .http
         .request(
-            if kind == "read" {
+            if kind == "read" || kind == "options" {
                 reqwest::Method::GET
             } else {
                 reqwest::Method::POST
@@ -1751,7 +2016,7 @@ async fn source_operation_exchange(app: AppHandle, kind: &str, request: Value) -
         .bearer_auth(token)
         .header("Accept", "application/json")
         .header("Cache-Control", "no-store");
-    if kind != "read" {
+    if kind != "read" && kind != "options" {
         call = call.json(&request);
     }
     let response = call.send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
@@ -1762,7 +2027,13 @@ async fn source_operation_exchange(app: AppHandle, kind: &str, request: Value) -
     {
         return Err("AUTHENTICATION_CHANGED".into());
     }
-    let value = result?;
+    source_operation_body(result?, kind, &request)
+}
+fn source_operation_body(value: Value, kind: &str, request: &Value) -> Result<Value> {
+    if kind == "options" {
+        if value.get("schema").and_then(Value::as_str)!=Some("mastermind.project_creation_options.v1") {return Err("RESPONSE_INVALID".into());}
+        return Ok(value);
+    }
     let source = if kind == "prepare" {
         request.get("request").ok_or("REQUEST_INVALID")?
     } else {
@@ -1776,12 +2047,16 @@ async fn source_operation_exchange(app: AppHandle, kind: &str, request: Value) -
     if value.get("schema").and_then(Value::as_str) != Some(schema)
         || value.get("selection").and_then(|v| v.get("action")) != request.get("action")
         || value.get("selection").and_then(|v| v.get("request_id")) != source.get("request_id")
-        || (source.get("work_ref").is_some()
+        || (source.get("work_ref").is_some_and(|v| !v.is_null())
             && value.get("selection").and_then(|v| v.get("work_ref")) != source.get("work_ref"))
     {
         return Err("RESPONSE_INVALID".into());
     }
     Ok(value)
+}
+#[tauri::command]
+pub async fn source_operation_options(app: AppHandle, request: Value) -> Result<Value> {
+    source_operation_exchange(app, "options", request).await
 }
 #[tauri::command]
 pub async fn source_operation_prepare(app: AppHandle, request: Value) -> Result<Value> {
@@ -2206,6 +2481,64 @@ pub async fn read_result(app: AppHandle, selection: ResultSelection) -> Result<V
     }
     Ok(value)
 }
+fn mission_result_url(selection: &ResultSelection) -> Result<Url> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{MISSION_RESULT_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id)
+        .append_pair("job_id", &selection.job_id)
+        .append_pair("attempt_id", &selection.attempt_id)
+        .append_pair("result_envelope_digest", &selection.result_envelope_digest);
+    Ok(url)
+}
+
+fn typed_mission_result_unavailable(value: Value) -> Result<Value> {
+    let value = typed_unavailable(value, MISSION_RESULT_SCHEMA, false)?;
+    if !value.get("mission").is_some_and(Value::is_null)
+        || !value.get("role_result").is_some_and(Value::is_null)
+    {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+
+#[tauri::command]
+pub async fn read_mission_result(app: AppHandle, selection: ResultSelection) -> Result<Value> {
+    let url = mission_result_url(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state
+        .http
+        .get(url)
+        .bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send()
+        .await
+        .map_err(|_| "SOURCE_UNAVAILABLE")?;
+    // One acquisition and the received-byte cap apply to both nested documents.
+    // The existing typed host still owns exact association and nested Result limits.
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, MISSION_RESULT_RESPONSE_CAP)
+            .await
+            .and_then(typed_mission_result_unavailable)
+    } else {
+        bounded_json(response, MISSION_RESULT_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if !value.is_object()
+        || value.get("schema").and_then(Value::as_str) != Some(MISSION_RESULT_SCHEMA)
+    {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+
 const WINDOW_SCHEMA_V1: &str = "mastermind.workspace.window_read_candidate.v1";
 const WINDOW_SCHEMA_V2: &str = "mastermind.workspace.window_read_candidate.v2";
 fn allowed_window_schema(schema: &str) -> bool {
@@ -2327,6 +2660,31 @@ where
     let foreground_research = path == "/os/executive/submit"
         && body.get("arguments").and_then(|v| v.get("execution_profile"))
             .and_then(Value::as_str) == Some("research_only");
+    let planning=crate::project_planning::operation(path);
+    let execution=crate::project_execution::operation(path);
+    let fresh=crate::fresh_conversation::operation(path);
+    let conversation_read=crate::project_conversations_read::operation(path);
+    let session_send=path==crate::native_session_send::PATH;
+    if session_send {
+        if !body.as_object().is_some_and(|o|o.len()==1&&o.contains_key("arguments")){return Err("REQUEST_INVALID".into())}
+        crate::native_session_send::validate(&body["arguments"])?;
+    }
+    if let Some(operation)=conversation_read {
+        if !body.as_object().is_some_and(|o|o.len()==1 && o.contains_key("arguments")) {return Err("REQUEST_INVALID".into())}
+        crate::project_conversations_read::validate(operation,&body["arguments"])?;
+    }
+    if let Some(operation)=fresh {
+        if !body.as_object().is_some_and(|o|o.len()==1 && o.contains_key("arguments")) {return Err("REQUEST_INVALID".into())}
+        crate::fresh_conversation::validate(operation,&body["arguments"])?;
+    }
+    if let Some(operation)=execution {
+        if !body.as_object().is_some_and(|o|o.len()==1 && o.contains_key("arguments")) {return Err("REQUEST_INVALID".into())}
+        crate::project_execution::validate(operation,&body["arguments"])?;
+    }
+    if let Some(operation)=planning {
+        if !body.as_object().is_some_and(|o|o.len()==1 && o.contains_key("arguments")) {return Err("REQUEST_INVALID".into())}
+        crate::project_planning::validate(operation,&body["arguments"])?;
+    }
     // Validate the closed selectors at the shared boundary before dispatch,
     // including callers other than the public command wrappers.
     match path {
@@ -2335,13 +2693,14 @@ where
         "/os/executive/direct-native/correction" => { direct_native_correction_arguments(body.clone())?; }
         _ => {}
     }
-    let (token, token_expires, generation, changed) = {
+    let (token, token_expires, generation, changed, workspace) = {
         let inner = state.lock()?;
         let token = inner.token(Resource::Executive).ok_or("EXECUTIVE_AUTH_REQUIRED")?;
         match path {
             "/os/executive/context"
             | "/os/executive/status"
             | "/os/executive/session/context"
+            | "/os/executive/session/history-context"
             | "/os/executive/session/reply"
             | "/os/executive/session/references"
             | "/os/executive/direct-native/result" => {}
@@ -2350,11 +2709,17 @@ where
                     return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
                 }
             }
-            "/os/executive/submit" | "/os/executive/direct-native/consume" => {
+            "/os/executive/submit" | "/os/executive/direct-native/consume" | "/os/executive/session/send" => {
                 if !token.executive_send {
                     return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
                 }
             }
+            _ if conversation_read.is_some() => {}
+            _ if planning.is_some() || execution.is_some() => {if !token.executive_send {return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into())}}
+            // Every original fresh-conversation operation belongs to the
+            // enrolled submit-policy principal. Pure project catalogue READ
+            // is separately composed; it is never relabeled here.
+            _ if fresh.is_some() => {if !token.executive_send {return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into())}}
             _ => return Err("REQUEST_INVALID".into()),
         }
         (
@@ -2362,6 +2727,8 @@ where
             token.expires,
             inner.executive_generation,
             inner.executive_changed.subscribe(),
+            if planning.is_some() || execution.is_some() || matches!(fresh,Some("preview"|"create"|"consume"|"turn"|"turn_preview")) {let workspace=inner.token(Resource::Acquisition).ok_or("WORKSPACE_AUTH_REQUIRED")?;
+                Some((workspace.value.clone(),inner.generation,workspace.expires))} else {None},
         )
     };
     let serialized = executive_body(&body)?;
@@ -2380,17 +2747,26 @@ where
         .header("Cache-Control", "no-store")
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(serialized);
-    if foreground_research {
+    if let Some((value,_,_))=&workspace {
+        request=request.header("X-Mastermind-Workspace-Authorization",format!("Bearer {value}"));
+    }
+    if fresh.is_some() || execution.is_some() {
+        request = request.timeout(Duration::from_secs(300));
+    } else if foreground_research || planning.is_some() {
         request = request.timeout(EXECUTIVE_FOREGROUND_TIMEOUT);
     }
     let exchange = async {
         let response = dispatch(request)
             .await
             .map_err(|_| "EXECUTIVE_TRANSPORT_UNAVAILABLE".to_owned())?;
-        { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
+        { planning_auth_guard(&mut *state.lock()?,generation,token_expires,workspace.as_ref())?; }
         let status = response.status();
         let result = if status.is_success() {
             read_json_body(response, if direct { DIRECT_NATIVE_RESPONSE_CAP } else { EXECUTIVE_RESPONSE_CAP }).await
+        } else if execution.is_some() && [400, 401, 403, 409, 503].contains(&status.as_u16()) {
+            let value = read_json_body(response, EXECUTIVE_RESPONSE_CAP).await?;
+            if crate::project_execution::is_refusal(&value, execution.unwrap()) { Ok(value) }
+            else { Err("EXECUTIVE_TRANSPORT_UNAVAILABLE".into()) }
         } else if direct && [401, 403, 409, 503].contains(&status.as_u16()) {
             let value = read_json_body(response, DIRECT_NATIVE_RESPONSE_CAP).await?;
             if value.get("schema").and_then(Value::as_str) == Some("mastermind.direct_native_result_response.v1")
@@ -2404,38 +2780,84 @@ where
                 _ => "EXECUTIVE_TRANSPORT_UNAVAILABLE",
             }.into())
         };
-        { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
+        { planning_auth_guard(&mut *state.lock()?,generation,token_expires,workspace.as_ref())?; }
         result
     };
-    if foreground_research || direct {
-        executive_foreground_exchange(state, generation, token_expires, changed, exchange).await
+    if foreground_research || direct || planning.is_some() || execution.is_some() || fresh.is_some() || session_send {
+        executive_foreground_exchange(state, generation, token_expires, changed, workspace.as_ref(), exchange).await
     } else {
         exchange.await
     }
 }
 
+fn planning_auth_guard(inner:&mut Inner,generation:u64,expires:Instant,workspace:Option<&(String,u64,Instant)>)->Result<()> {
+    executive_guard(inner,generation,expires)?;
+    if let Some((value,epoch,deadline))=workspace {
+        if inner.generation!=*epoch || !inner.token(Resource::Acquisition).is_some_and(|t|t.expires==*deadline && t.value==*value) {
+            return Err("WORKSPACE_AUTH_CHANGED".into());
+        }
+    }
+    Ok(())
+}
+
 async fn executive_foreground_exchange<T, F>(
     state: &NativeAuth, generation: u64, expires: Instant,
-    mut changed: tokio::sync::watch::Receiver<()>, exchange: F,
+    mut changed: tokio::sync::watch::Receiver<()>, workspace:Option<&(String,u64,Instant)>, exchange: F,
 ) -> Result<T>
 where F: std::future::Future<Output = Result<T>> {
     use std::{future::Future, task::Poll};
     let mut exchange = std::pin::pin!(exchange);
-    let mut expiry = std::pin::pin!(tokio::time::sleep_until(expires.into()));
+    let deadline=workspace.map(|(_,_,deadline)|expires.min(*deadline)).unwrap_or(expires);
+    let mut expiry = std::pin::pin!(tokio::time::sleep_until(deadline.into()));
+    let mut workspace_tick=tokio::time::interval(Duration::from_millis(25));
     let mut notification = std::pin::pin!(changed.changed());
     std::future::poll_fn(|cx| {
         if notification.as_mut().poll(cx).is_ready() || expiry.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Err("EXECUTIVE_AUTH_CHANGED".into()));
         }
-        if let Err(error) = state.lock().and_then(|mut inner| executive_guard(&mut inner, generation, expires)) {
+        if workspace.is_some() {let _=workspace_tick.poll_tick(cx);}
+        if let Err(error) = state.lock().and_then(|mut inner| planning_auth_guard(&mut inner,generation,expires,workspace)) {
             return Poll::Ready(Err(error));
         }
         exchange.as_mut().poll(cx)
     }).await
 }
 #[tauri::command]
-pub fn executive_auth_status(state: tauri::State<'_, NativeAuth>) -> Result<ExecutiveAuthStatus> {
-    Ok(state.lock()?.executive_status())
+pub async fn executive_project_conversations_read(app:AppHandle,operation:String,arguments:Value)->Result<Value> {
+    let path=crate::project_conversations_read::path(&operation).ok_or("REQUEST_INVALID")?;
+    crate::project_conversations_read::validate(&operation,&arguments)?;
+    let result=executive_post(app.clone(),path,serde_json::json!({"arguments":arguments})).await;
+    if result.is_err(){emit(&app);}
+    result
+}
+#[tauri::command]
+pub async fn executive_fresh_conversation(app:AppHandle,operation:String,arguments:Value)->Result<Value> {
+    let path=crate::fresh_conversation::path(&operation).ok_or("REQUEST_INVALID")?;
+    crate::fresh_conversation::validate(&operation,&arguments)?;
+    let result=executive_post(app.clone(),path,serde_json::json!({"arguments":arguments})).await;
+    if result.is_err(){emit(&app);}
+    result
+}
+#[tauri::command]
+pub async fn executive_project_execution(app:AppHandle,operation:String,arguments:Value)->Result<Value> {
+    let path=crate::project_execution::route(&operation)?;
+    let arguments=crate::project_execution::validate(&operation,&arguments)?;
+    executive_post(app,path,serde_json::json!({"arguments":arguments})).await
+}
+#[tauri::command]
+pub async fn executive_project_planning(app:AppHandle,operation:String,arguments:Value)->Result<Value> {
+    let path=crate::project_planning::route(&operation)?;
+    let arguments=crate::project_planning::validate(&operation,&arguments)?;
+    executive_post(app,path,serde_json::json!({"arguments":arguments})).await
+}
+#[tauri::command]
+pub fn executive_auth_status(state: tauri::State<'_, NativeAuth>, diagnostics: Option<bool>) -> Result<Value> {
+    let mut inner = state.lock()?;
+    if diagnostics.unwrap_or(false) {
+        serde_json::to_value(inner.executive_observation()).map_err(|_| "RESPONSE_INVALID".into())
+    } else {
+        serde_json::to_value(inner.executive_status()).map_err(|_| "RESPONSE_INVALID".into())
+    }
 }
 #[tauri::command]
 pub async fn executive_context(app: AppHandle) -> Result<Value> {
@@ -2496,7 +2918,7 @@ pub async fn executive_direct_correction(app: AppHandle, arguments: Value) -> Re
 
 // Read-only original-answer transport on the existing Executive token and
 // generation. These commands do not originate or ACK a CONTINUE; in particular
-// there is deliberately no executive_session_send native command. The separate
+// SEND now has its own closed command below. The separate
 // original F2 review of executive_submit remains held and unmodified.
 fn valid_original_operation_key(key: &str) -> bool {
     key.strip_prefix("session-continue-")
@@ -2550,15 +2972,35 @@ pub async fn executive_project_session_references(
     if result.is_err() { emit(&app); }
     result
 }
+/// One continuation through the incumbent Executive resource. No implicit
+/// target, alternate origin, retries, login or Workspace authority is added.
 #[tauri::command]
-pub async fn executive_session_context(app: AppHandle, selection: MissionSelection) -> Result<Value> {
+pub async fn executive_session_send(app:AppHandle,arguments:Value)->Result<Value>{
+    let body=crate::native_session_send::body(arguments)?;
+    let result=executive_post(app.clone(),crate::native_session_send::PATH,body).await;
+    if result.is_err(){emit(&app);}
+    result
+}
+#[tauri::command]
+pub async fn executive_session_context(app: AppHandle, selection: SessionSelection) -> Result<Value> {
     selection.validate()?;
-    // The Session context endpoint requires the selected pair directly,
-    // whereas replies/references use the existing arguments envelope.
+    // The Session context endpoint requires the selected variant directly,
+    // whereas replies/references use the existing arguments envelope. This
+    // stays a READ. The fixed SEND command validates Fabric, Secretary or Meta targets.
     let result = executive_post(app.clone(), "/os/executive/session/context",
-        serde_json::json!({ "selection": {
-            "work_ref": selection.work_ref, "root_job_id": selection.root_job_id
-        }})).await;
+        serde_json::json!({ "selection": selection.wire() })).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+fn project_history_context_body(work_ref: String) -> Result<Value> {
+    let selection = ProjectPlanSelection { work_ref };
+    selection.validate()?;
+    Ok(serde_json::json!({ "selection": { "work_ref": selection.work_ref } }))
+}
+#[tauri::command]
+pub async fn executive_project_history_context(app: AppHandle, work_ref: String) -> Result<Value> {
+    let body = project_history_context_body(work_ref)?;
+    let result = executive_post(app.clone(), "/os/executive/session/history-context", body).await;
     if result.is_err() { emit(&app); }
     result
 }
@@ -2683,7 +3125,9 @@ mod tests {
         }
     }
     fn inner() -> Inner {
-        Inner::new(Some("public-client"))
+        // This fixture covers the base two-resource flow independently of the
+        // compiled optional Executive profile; enabled flows have explicit fixtures.
+        Inner::with_executive_resource(Some("public-client"), None)
     }
     fn callback_url(state: &str) -> String {
         format!("{CALLBACK}?state={state}&code=test-code")
@@ -2729,6 +3173,98 @@ mod tests {
         assert_eq!(i.token(Resource::Content).unwrap().value, "content");
         assert_eq!(i.status().status, "signed_in");
     }
+    #[test]
+    fn completed_transaction_timers_do_not_announce_an_auth_change() {
+        let mut i = Inner::with_executive_resource(Some("public-client"),
+            Some("https://mcp.mastermind-x.com/os/executive"));
+        i.transaction(Resource::Acquisition).unwrap();
+        let mut deadlines = Vec::new();
+        for resource in [Resource::Acquisition, Resource::Content, Resource::Executive] {
+            let pending = i.pending.as_ref().unwrap();
+            deadlines.push((pending.generation, pending.expires));
+            let state = pending.state.clone();
+            let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
+            assert_eq!(pending.resource, resource);
+            i.finish_exchange(pending.generation, resource, Ok(token("grant")));
+        }
+        let generation = i.generation;
+        let executive_generation = i.executive_generation;
+        for (timer_generation, expires) in deadlines {
+            assert!(!i.expire_transaction(timer_generation, expires, expires));
+        }
+        assert_eq!(i.status().status, "signed_in");
+        assert!(i.token(Resource::Acquisition).is_some());
+        assert!(i.token(Resource::Content).is_some());
+        assert!(i.token(Resource::Executive).is_some());
+        assert_eq!(i.generation, generation);
+        assert_eq!(i.executive_generation, executive_generation);
+        assert!(i.pending.is_none());
+        assert!(i.reason.is_none());
+    }
+
+    #[test]
+    fn consumed_callback_timer_does_not_interrupt_exchange() {
+        let mut i = inner();
+        i.transaction(Resource::Acquisition).unwrap();
+        let state = i.pending.as_ref().unwrap().state.clone();
+        let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
+        assert!(!i.expire_transaction(pending.generation, pending.expires, pending.expires));
+        assert!(i.exchanging);
+        assert!(i.reason.is_none());
+        assert!(i.finish_exchange(pending.generation, pending.resource, Ok(token("grant"))).is_some());
+        assert!(i.status().acquisition);
+    }
+
+    #[test]
+    fn stale_transaction_timer_preserves_replacement_and_logout_generation() {
+        let mut i = inner();
+        i.transaction(Resource::Acquisition).unwrap();
+        let generation = i.generation;
+        let old_deadline = i.pending.as_ref().unwrap().expires;
+        i.transaction(Resource::Content).unwrap();
+        let replacement_deadline = old_deadline + Duration::from_secs(1);
+        i.pending.as_mut().unwrap().expires = replacement_deadline;
+        let replacement_state = i.pending.as_ref().unwrap().state.clone();
+        assert!(!i.expire_transaction(generation, old_deadline, replacement_deadline));
+        assert!(!i.expire_transaction(generation, replacement_deadline, old_deadline));
+        assert_eq!(i.pending.as_ref().unwrap().state, replacement_state);
+        assert_eq!(i.pending.as_ref().unwrap().resource, Resource::Content);
+        i.invalidate();
+        i.transaction(Resource::Acquisition).unwrap();
+        let current_deadline = i.pending.as_ref().unwrap().expires;
+        let current_state = i.pending.as_ref().unwrap().state.clone();
+        assert!(!i.expire_transaction(generation, current_deadline, current_deadline));
+        assert_eq!(i.pending.as_ref().unwrap().state, current_state);
+        assert!(i.reason.is_none());
+    }
+
+    #[test]
+    fn current_transaction_expires_once_with_resource_failure_isolation() {
+        for resource in [Resource::Acquisition, Resource::Content, Resource::Executive] {
+            let mut i = Inner::with_executive_resource(Some("public-client"),
+                Some("https://mcp.mastermind-x.com/os/executive"));
+            i.acquisition = Some(token("acquisition"));
+            i.content = Some(token("content"));
+            i.transaction(resource).unwrap();
+            let expires = i.pending.as_ref().unwrap().expires;
+            let generation = i.generation;
+            assert!(i.expire_transaction(generation, expires, expires));
+            assert!(!i.expire_transaction(generation, expires, expires));
+            assert!(i.pending.is_none());
+            assert!(!i.exchanging);
+            assert!(i.status().acquisition);
+            assert!(i.status().content);
+            if resource == Resource::Executive {
+                assert_eq!(i.status().status, "signed_in");
+                assert!(i.reason.is_none());
+                assert!(i.executive.is_none());
+            } else {
+                assert_eq!(i.reason, Some("AUTH_TRANSACTION_EXPIRED"));
+                assert_eq!(i.status().status, "error");
+            }
+        }
+    }
+
     #[test]
     fn late_token_exchange_cannot_restore_signed_out_session() {
         let mut i = inner();
@@ -2993,6 +3529,55 @@ mod tests {
     }
 
     #[test]
+    fn mission_result_acquisition_uses_fixed_path_and_exact_selection() {
+        let mut selection = ResultSelection {
+            work_ref: "WS:AB".into(),
+            root_job_id: "JOB-1".into(),
+            job_id: "JOB-2".into(),
+            attempt_id: format!("ATT-{}", "a".repeat(32)),
+            result_envelope_digest: "b".repeat(64),
+        };
+        let url = mission_result_url(&selection).unwrap();
+        assert_eq!(url.origin(), Url::parse(ORIGIN).unwrap().origin());
+        assert_eq!(url.path(), "/workspace/mission-result/current");
+        assert!(url.fragment().is_none());
+        let pairs: std::collections::BTreeMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(pairs.len(), 5);
+        assert_eq!(pairs.get("work_ref"), Some(&selection.work_ref));
+        assert_eq!(pairs.get("root_job_id"), Some(&selection.root_job_id));
+        assert_eq!(pairs.get("job_id"), Some(&selection.job_id));
+        assert_eq!(pairs.get("attempt_id"), Some(&selection.attempt_id));
+        assert_eq!(pairs.get("result_envelope_digest"), Some(&selection.result_envelope_digest));
+        selection.job_id = "https://other.invalid".into();
+        assert!(mission_result_url(&selection).is_err());
+    }
+
+    #[test]
+    fn compound_unavailable_cannot_carry_a_mission_or_result() {
+        let unavailable = serde_json::json!({
+            "schema": MISSION_RESULT_SCHEMA,
+            "availability": "UNAVAILABLE",
+            "mission": null,
+            "role_result": null,
+        });
+        assert!(typed_mission_result_unavailable(unavailable.clone()).is_ok());
+        for name in ["mission", "role_result"] {
+            let mut non_null = unavailable.clone();
+            non_null[name] = serde_json::json!({});
+            assert!(typed_mission_result_unavailable(non_null).is_err());
+            let mut missing = unavailable.clone();
+            missing.as_object_mut().unwrap().remove(name);
+            assert!(typed_mission_result_unavailable(missing).is_err());
+        }
+        let mut wrong = unavailable.clone();
+        wrong["schema"] = RESULT_SCHEMA.into();
+        assert!(typed_mission_result_unavailable(wrong).is_err());
+        let mut available = unavailable;
+        available["availability"] = "AVAILABLE".into();
+        assert!(typed_mission_result_unavailable(available).is_err());
+    }
+
+    #[test]
     fn structured_result_selectors_use_exact_new_contract() {
         let valid = serde_json::json!({"work_ref":"WS:AB", "root_job_id":"JOB-1", "job_id":"JOB-2", "attempt_id":format!("ATT-{}", "a".repeat(32)), "result_envelope_digest":"b".repeat(64)});
         assert!(serde_json::from_value::<ResultSelection>(valid.clone()).unwrap().validate().is_ok());
@@ -3050,6 +3635,57 @@ mod tests {
         assert!(i.token(Resource::Content).is_some());
         assert!(i.executive_status().available);
         assert_eq!(i.status().status, "signed_in");
+    }
+    #[test]
+    fn native_diagnostic_status_preserves_regular_wire_and_workspace_authority() {
+        let mut i = at_executive_pending();
+        let workspace_generation = i.generation;
+        let pending_state = i.pending.as_ref().unwrap().state.clone();
+        let regular = serde_json::to_value(i.executive_status()).unwrap();
+        assert_eq!(regular.as_object().unwrap().len(), 2);
+        let observation = serde_json::to_value(i.executive_observation()).unwrap();
+        assert_eq!(observation.as_object().unwrap().len(), 6);
+        assert_eq!(observation["configured"], true);
+        assert_eq!(observation["reason"], "AUTHORIZING");
+        assert_eq!(i.generation, workspace_generation);
+        assert_eq!(i.pending.as_ref().unwrap().state, pending_state);
+        assert!(i.token(Resource::Acquisition).is_some() && i.token(Resource::Content).is_some());
+        assert!(!i.executive_status().available);
+        assert!(i.consume(&format!("{CALLBACK}?state={pending_state}&error=access_denied")).is_err());
+        assert_eq!(serde_json::to_value(i.executive_observation()).unwrap()["reason"], "AUTHORIZATION_REFUSED");
+        assert!(i.reason.is_none());
+        assert_eq!(i.status().status, "signed_in");
+        assert!(i.token(Resource::Acquisition).is_some() && i.token(Resource::Content).is_some());
+    }
+    #[test]
+    fn native_diagnostic_status_reports_ready_expired_and_unconfigured_without_grant_inference() {
+        let mut i = at_executive_pending();
+        assert!(complete_resource(&mut i, Resource::Executive).is_none());
+        assert_eq!(serde_json::to_value(i.executive_observation()).unwrap()["reason"], "AVAILABLE");
+        i.executive.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
+        let observed = serde_json::to_value(i.executive_observation()).unwrap();
+        assert_eq!(observed["reason"], "EXPIRED");
+        assert_eq!(observed["available"], false);
+        assert!(i.token(Resource::Acquisition).is_some() && i.token(Resource::Content).is_some());
+        i.executive_resource = None;
+        assert_eq!(serde_json::to_value(i.executive_observation()).unwrap()["reason"], "UNCONFIGURED");
+    }
+    #[test]
+    fn native_diagnostic_programs_observation_is_latest_same_generation_only() {
+        let mut i = executive_inner();
+        let first = i.begin_programs_observation();
+        let second = i.begin_programs_observation();
+        i.finish_programs_observation(first, ProgramsRead::response(503, None));
+        assert_eq!(i.programs_read, ProgramsRead::pending());
+        i.finish_programs_observation(second, ProgramsRead::response(200, None));
+        assert_eq!(i.programs_read.phase, transport_diagnostics::ProgramsPhase::Ready);
+        i.invalidate_auth();
+        i.finish_programs_observation(second, ProgramsRead::response(503, None));
+        assert_eq!(i.programs_read, ProgramsRead::default());
+        i.programs_sequence = u64::MAX;
+        assert_eq!(i.begin_programs_observation(), None);
+        i.finish_programs_observation(None, ProgramsRead::response(503, None));
+        assert_eq!(i.programs_read, ProgramsRead::default());
     }
     #[test]
     fn executive_denial_and_exchange_failure_preserve_workspace_tokens() {
@@ -3181,6 +3817,463 @@ mod tests {
             .body(r#"{"fixture":"native-dispatch"}"#.to_owned())
             .unwrap()
             .into()
+    }
+
+    #[test]
+    fn native_diagnostic_wire_same_run_file_source_requests_and_responses_preserve_exact_bodies() {
+        let fixture: Value = serde_json::from_str(include_str!("../../src/fixtures/native-wire/source-file-6cb8.json")).unwrap();
+        for index in [3usize, 4, 5, 6, 8, 9, 10, 11, 12] {
+            let sample = &fixture["samples"][index];
+            let kind = sample["operation"].as_str().unwrap();
+            let request = &sample["request"];
+            let response = sample["response"].clone();
+            let target = source_operation_target(kind, request).unwrap();
+            assert_eq!(target.path(), format!("/workspace/source-operation/{}", if kind == "read" {"operation"} else {kind}));
+            assert_eq!(source_operation_body(response.clone(), kind, request).unwrap(), response);
+            let mut foreign = response.clone(); foreign["schema"] = "foreign.v1".into();
+            assert!(source_operation_body(foreign, kind, request).is_err());
+            let mut foreign = response; foreign["selection"]["request_id"] = "foreign".into();
+            assert!(source_operation_body(foreign, kind, request).is_err());
+            let mut foreign = request.clone(); foreign["principal_scope"] = "foreign".into();
+            assert!(source_operation_target(kind, &foreign).is_err());
+        }
+        let sample = &fixture["samples"][2];
+        assert!(source_operation_target("options", &sample["request"]).is_ok());
+        assert_eq!(source_operation_body(sample["response"].clone(), "options", &sample["request"]).unwrap(), sample["response"]);
+    }
+    #[test]
+    fn native_diagnostic_wire_same_run_planning_preserves_signed_producer_vectors() {
+        let fixture: Value = serde_json::from_str(include_str!("../../src/fixtures/native-wire/source-file-6cb8.json")).unwrap();
+        for index in [15usize,16] {
+            let sample = &fixture["samples"][index];
+            let operation = sample["operation"].as_str().unwrap();
+            let arguments = &sample["request"]["arguments"];
+            assert_eq!(crate::project_planning::validate(operation,arguments).unwrap(), *arguments);
+            let path = crate::project_planning::route(operation).unwrap();
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            state.lock().unwrap().acquisition = Some(token("fixture-workspace"));
+            let calls = std::cell::Cell::new(0);
+            let body = serde_json::json!({"arguments":arguments});
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state, path, body.clone(), |builder| {
+                calls.set(calls.get()+1);
+                let request=builder.build().unwrap();
+                assert_eq!(request.url().path(),path);
+                assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(),body);
+                assert!(request.headers().contains_key("x-mastermind-workspace-authorization"));
+                let encoded=serde_json::to_string(&sample["response"]).unwrap();
+                async move {Ok(tauri::http::Response::builder().status(200).header("Content-Type","application/json").body(encoded).unwrap().into())}
+            })).unwrap();
+            assert_eq!(calls.get(),1);assert_eq!(result,sample["response"]);
+            let mut foreign=arguments.clone();foreign["principal_scope"]="foreign".into();
+            assert!(crate::project_planning::validate(operation,&foreign).is_err());
+        }
+    }
+    #[test]
+    fn native_diagnostic_wire_same_run_initial_and_attended_requests_dispatch_once_and_preserve_bodies() {
+        let fixture: Value = serde_json::from_str(include_str!("../../src/fixtures/native-wire/fresh-attended-0f44.json")).unwrap();
+        let initial = serde_json::json!({"work_ref":fixture["request"]["work_ref"],"operation_key":fixture["request"]["operation_key"]});
+        let attended = &fixture["attended"];
+        let cases = [
+            ("preview", fixture["request"].clone(), fixture["preview"].clone()),
+            ("create", fixture["create_request"].clone(), fixture["create"].clone()),
+            ("status", initial.clone(), fixture["status"].clone()),
+            ("read", initial, fixture["read"].clone()),
+            ("consume", attended["consume_request"].clone(), attended["lost_consume"].clone()),
+            ("consume_status", attended["consume_request"].clone(), attended["consume_status"].clone()),
+            ("turn_preview", attended["turn_preview_request"].clone(), attended["turn_preview"].clone()),
+            ("turn", attended["turn_request"].clone(), attended["turn"].clone()),
+            ("turn_status", attended["turn_selection"].clone(), attended["status"].clone()),
+            ("turn_read", attended["turn_selection"].clone(), attended["turn_read"].clone()),
+        ];
+        for (operation, arguments, response) in cases {
+            crate::fresh_conversation::validate(operation, &arguments).unwrap();
+            let path = crate::fresh_conversation::path(operation).unwrap();
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            state.lock().unwrap().acquisition = Some(token("fixture-workspace"));
+            let calls = std::cell::Cell::new(0);
+            let body = serde_json::json!({"arguments":arguments});
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state, path, body.clone(), |builder| {
+                calls.set(calls.get() + 1);
+                let request = builder.build().unwrap();
+                assert_eq!(request.url().path(), path);
+                assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(), body);
+                let encoded = serde_json::to_string(&response).unwrap();
+                async move {Ok(tauri::http::Response::builder().status(200).header("Content-Type", "application/json").body(encoded).unwrap().into())}
+            })).unwrap();
+            assert_eq!(calls.get(), 1); assert_eq!(result, response);
+            let mut foreign = arguments; foreign["principal_scope"] = "foreign".into();
+            assert!(crate::fresh_conversation::validate(operation, &foreign).is_err());
+        }
+    }
+    #[test]
+    fn native_diagnostic_programs_header_preserves_actual_same_run_v1_v2_and_rejects_foreign() {
+        let fixture: Value = serde_json::from_str(include_str!("../../src/fixtures/project-discovery-app-source.json")).unwrap();
+        for key in ["programs_before", "programs"] {
+            let raw = fixture[key].clone();
+            let body = workspace_read_body(raw.clone(), "/workspace/programs/current", "mastermind.workspace_programs.v1").unwrap();
+            assert_eq!(body, raw); // no source/row/clock/identity or DATA relabel
+        }
+        for header in ["mastermind.workspace_programs.v3", "foreign", "mastermind.workspace_work_queue.v1"] {
+            let mut raw = fixture["programs"].clone(); raw["schema"] = header.into();
+            assert_eq!(workspace_read_body(raw, "/workspace/programs/current", "mastermind.workspace_programs.v1").unwrap_err(), "RESPONSE_INVALID");
+        }
+        assert!(workspace_read_body(fixture["programs"].clone(), "/workspace/work/current", "mastermind.workspace_programs.v1").is_err());
+        assert!(workspace_read_body(fixture["programs"].clone(), "/workspace/programs/current", "mastermind.workspace_work_queue.v1").is_err());
+    }
+
+
+    fn project_execution_read_reference() -> Value {
+        serde_json::json!({
+            "schema": "mastermind.project_execution_reference.v1", "work_ref": "WS:PROJECT-ONE",
+            "root_job_id": "JOB-123", "root_event_id": 42, "root_event_sha256": "a".repeat(64),
+            "project_execution_source_sha256": "b".repeat(64), "principal_scope_sha256": "c".repeat(64)
+        })
+    }
+
+    #[test]
+    fn project_conversations_read_execution_routes_use_only_read_only_executive_grant() {
+        for operation in ["execution_references", "execution_read"] {
+            let state = native_executive_state("mastermind.executive.read");
+            state.lock().unwrap().acquisition = None;
+            let path = crate::project_conversations_read::path(operation).unwrap();
+            let args = if operation == "execution_references" {
+                serde_json::json!({"work_ref": "WS:PROJECT-ONE"})
+            } else { project_execution_read_reference() };
+            let body = serde_json::json!({"arguments": args});
+            let calls = std::cell::Cell::new(0);
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state, path, body.clone(), |builder| {
+                calls.set(calls.get() + 1);
+                let request = builder.build().unwrap();
+                assert_eq!(request.url().as_str(), format!("{ORIGIN}{path}"));
+                assert_eq!(request.headers()["authorization"], "Bearer fixture-native-executive");
+                assert!(!request.headers().contains_key("x-mastermind-workspace-authorization"));
+                assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(), body);
+                async { Ok(native_fixture_response()) }
+            }));
+            assert!(result.is_ok()); assert_eq!(calls.get(), 1);
+            assert!(!state.lock().unwrap().token(Resource::Executive).unwrap().executive_send);
+        }
+    }
+
+    #[test]
+    fn project_conversations_read_execution_refuses_new_authority_and_invalid_identity_before_dispatch() {
+        let state = native_executive_state("mastermind.executive.read");
+        state.lock().unwrap().acquisition = None;
+        let calls = std::cell::Cell::new(0);
+        let mut extra = project_execution_read_reference(); extra["operation_key"] = "forged".into();
+        let mut foreign = project_execution_read_reference(); foreign["project_execution_source_sha256"] = "short".into();
+        for args in [extra, foreign] {
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                "/os/executive/session/project-execution-read", serde_json::json!({"arguments": args}), |_| {
+                    calls.set(calls.get() + 1); async { Ok(native_fixture_response()) }
+                }));
+            assert_eq!(result.unwrap_err(), "REQUEST_INVALID");
+        }
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn project_conversations_read_execution_late_response_is_fenced_by_current_executive_generation() {
+        let state = native_executive_state("mastermind.executive.read");
+        state.lock().unwrap().acquisition = None;
+        let calls = std::cell::Cell::new(0);
+        let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+            "/os/executive/session/project-execution-read",
+            serde_json::json!({"arguments": project_execution_read_reference()}), |_| async {
+                calls.set(calls.get() + 1);
+                state.lock().unwrap().executive_generation += 1;
+                Ok(native_fixture_response())
+            }));
+        assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_CHANGED"); assert_eq!(calls.get(), 1);
+    }
+
+    fn project_execution_arguments(operation: &str) -> Value {
+        let mut value = serde_json::json!({
+            "operation_key": format!("mmos-project-execute-{}", "a".repeat(40)), "work_ref": "WS:EXAMPLE"
+        });
+        if operation != "status" {
+            value["expected_context"] = serde_json::json!({
+                "record_source": {"repository": "mastermindx-market-intelligence/macro", "commit": "b".repeat(40),
+                    "path": "agentos/workstreams/WS-EXAMPLE.md", "content_sha256": "c".repeat(64)},
+                "adoption": null, "adoption_decision_source": null
+            });
+        }
+        if operation == "preview" {
+            value["operation_key"] = format!("mmos-project-preview-{}", "d".repeat(40)).into();
+        }
+        if operation == "submit" {
+            value["context_sha256"] = "e".repeat(64).into();
+            value["execution_binding_sha256"] = "f".repeat(64).into();
+            value["execution_profile"] = "research_only".into();
+            value["objective"] = "Finish the project".into();
+            value["handoff_text"] = "Original private handoff".into();
+            value["continuation_mode"] = "DURABLE".into();
+        }
+        value
+    }
+
+    #[test]
+    fn project_execution_uses_fixed_routes_and_distinct_private_resource_tokens() {
+        for operation in ["preview", "submit", "status"] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            state.lock().unwrap().acquisition = Some(token("fixture-workspace"));
+            let path = crate::project_execution::route(operation).unwrap();
+            let body = serde_json::json!({"arguments": project_execution_arguments(operation)});
+            let calls = std::cell::Cell::new(0);
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state, path, body.clone(), |builder| {
+                calls.set(calls.get() + 1);
+                let request = builder.build().unwrap();
+                assert_eq!(request.url().as_str(), format!("{ORIGIN}{path}"));
+                assert_eq!(request.headers()["authorization"], "Bearer fixture-native-executive");
+                assert_eq!(request.headers()["x-mastermind-workspace-authorization"], "Bearer fixture-workspace");
+                assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(), body);
+                async { Ok(native_fixture_response()) }
+            }));
+            assert!(result.is_ok()); assert_eq!(calls.get(), 1);
+        }
+    }
+
+    #[test]
+    fn project_execution_requires_both_resources_and_send_scope_before_native_dispatch() {
+        for (workspace, send) in [(false, true), (true, false), (true, true)] {
+            let state = native_executive_state(if send { EXECUTIVE_SCOPE } else { "mastermind.executive.read" });
+            state.lock().unwrap().acquisition = if workspace { Some(token("fixture-workspace")) } else { None };
+            let calls = std::cell::Cell::new(0);
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                "/os/executive/project-execution/submit",
+                serde_json::json!({"arguments": project_execution_arguments("submit")}), |_| {
+                    calls.set(calls.get() + 1); async { Ok(native_fixture_response()) }
+                }));
+            assert_eq!(calls.get(), usize::from(workspace && send));
+            assert_eq!(result.is_ok(), workspace && send);
+        }
+    }
+
+    #[test]
+    fn project_execution_secondary_generation_and_expiry_fence_pending_response() {
+        for change in ["generation", "remove", "expire"] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            state.lock().unwrap().acquisition = Some(token("fixture-workspace"));
+            let calls = std::cell::Cell::new(0);
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                "/os/executive/project-execution/submit",
+                serde_json::json!({"arguments": project_execution_arguments("submit")}), |_| async {
+                    calls.set(calls.get() + 1);
+                    { let mut inner = state.lock().unwrap(); match change {
+                        "generation" => inner.generation += 1,
+                        "remove" => inner.acquisition = None,
+                        _ => inner.acquisition.as_mut().unwrap().wall_expires = SystemTime::UNIX_EPOCH,
+                    }}
+                    Ok(native_fixture_response())
+                }));
+            assert_eq!(result.unwrap_err(), "WORKSPACE_AUTH_CHANGED");
+            assert_eq!(calls.get(), 1);
+        }
+    }
+
+    #[test]
+    fn project_execution_rejects_extra_authority_and_oversize_handoff_before_dispatch() {
+        let state = native_executive_state(EXECUTIVE_SCOPE);
+        state.lock().unwrap().acquisition = Some(token("fixture-workspace"));
+        let calls = std::cell::Cell::new(0);
+        let mut forged = project_execution_arguments("submit"); forged["root_job_id"] = "JOB-forged".into();
+        let mut oversized = project_execution_arguments("submit"); oversized["handoff_text"] = "界".repeat(10923).into();
+        for args in [forged, oversized] {
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                "/os/executive/project-execution/submit", serde_json::json!({"arguments": args}), |_| {
+                    calls.set(calls.get() + 1); async { Ok(native_fixture_response()) }
+                }));
+            assert!(result.is_err());
+        }
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn project_execution_preserves_typed_refusal_and_unknown_without_retry() {
+        for (status, code) in [(403, "context_changed"), (409, "operation_conflict"), (503, "source_unavailable"), (202, "effect_unknown")] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            state.lock().unwrap().acquisition = Some(token("fixture-workspace"));
+            let expected = serde_json::json!({
+                "schema": "mastermind.project_execution_private_result.v1", "operation": "submit", "ok": false,
+                "data": null, "error": {"code": code, "message": "Fixed refusal"}
+            });
+            let calls = std::cell::Cell::new(0);
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                "/os/executive/project-execution/submit", serde_json::json!({"arguments": project_execution_arguments("submit")}), |_| {
+                    calls.set(calls.get() + 1);
+                    let encoded = serde_json::to_string(&expected).unwrap();
+                    async move { Ok(tauri::http::Response::builder().status(status)
+                        .header("Content-Type", "application/json").body(encoded).unwrap().into()) }
+                })).unwrap();
+            assert_eq!(result, expected); assert_eq!(calls.get(), 1);
+        }
+    }
+
+    #[test]
+    fn project_execution_refuses_mismatched_error_response_without_retry() {
+        let state = native_executive_state(EXECUTIVE_SCOPE);
+        state.lock().unwrap().acquisition = Some(token("fixture-workspace"));
+        let calls = std::cell::Cell::new(0);
+        let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+            "/os/executive/project-execution/submit", serde_json::json!({"arguments": project_execution_arguments("submit")}), |_| {
+                calls.set(calls.get() + 1);
+                async { Ok(tauri::http::Response::builder().status(403).header("Content-Type", "application/json")
+                    .body(serde_json::json!({"schema": "mastermind.project_execution_private_result.v1",
+                        "operation": "status", "ok": false, "data": null,
+                        "error": {"code": "refused", "message": "Different operation"}}).to_string()).unwrap().into()) }
+            }));
+        assert_eq!(result.unwrap_err(), "EXECUTIVE_TRANSPORT_UNAVAILABLE"); assert_eq!(calls.get(), 1);
+    }
+
+    fn native_session_send_fixtures() -> Vec<Value> {
+        [
+            include_str!("../../src/fixtures/native-session-send-producer.json"),
+            include_str!("../../src/fixtures/native-hermes-session-send-producer.json"),
+        ].into_iter().map(|raw| serde_json::from_str(raw).unwrap()).collect()
+    }
+
+    #[test]
+    fn native_session_send_actual_signed_body_uses_only_current_executive_resource() {
+        for fixture in native_session_send_fixtures() {
+            let state=native_executive_state(EXECUTIVE_SCOPE);
+            {let mut i=state.lock().unwrap();i.acquisition=None;i.content=None;}
+            let body=crate::native_session_send::body(fixture["arguments"].clone()).unwrap();
+            let count=std::cell::Cell::new(0);
+            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,crate::native_session_send::PATH,body.clone(),|builder|{
+                count.set(count.get()+1);let request=builder.build().unwrap();
+                assert_eq!(request.url().as_str(),format!("{ORIGIN}/os/executive/session/send"));
+                assert_eq!(request.headers()["authorization"],"Bearer fixture-native-executive");
+                assert!(!request.headers().contains_key("x-mastermind-workspace-authorization"));
+                assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(),body);
+                let result:reqwest::Response=tauri::http::Response::builder().status(200).header("Content-Type","application/json").body(fixture["sent"].to_string()).unwrap().into();
+                async{Ok(result)}
+            })).unwrap();
+            assert_eq!(count.get(),1);assert_eq!(result,fixture["sent"]);
+        }
+    }
+
+    #[test]
+    fn native_session_send_absent_readonly_and_expired_private_tokens_never_dispatch() {
+        for fixture in native_session_send_fixtures() {
+            for mode in ["absent","read","expired"] {
+                let state=native_executive_state(if mode=="read"{"mastermind.executive.read"}else{EXECUTIVE_SCOPE});
+                {let mut i=state.lock().unwrap();i.acquisition=None;i.content=None;
+                    if mode=="absent"{i.executive=None;}
+                    if mode=="expired"{i.executive.as_mut().unwrap().expires=Instant::now()-Duration::from_secs(1);}}
+                let count=std::cell::Cell::new(0);
+                let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,crate::native_session_send::PATH,crate::native_session_send::body(fixture["arguments"].clone()).unwrap(),|_|{
+                    count.set(count.get()+1);async{Ok(tauri::http::Response::builder().status(200).body("{}").unwrap().into())}
+                }));
+                assert_eq!(count.get(),0);assert_eq!(result.unwrap_err(),if mode=="read"{"EXECUTIVE_SEND_SCOPE_REQUIRED"}else{"EXECUTIVE_AUTH_REQUIRED"});
+            }
+        }
+    }
+
+    #[test]
+    fn native_session_send_unknown_fields_or_foreign_route_never_dispatch() {
+        for fixture in native_session_send_fixtures() {
+            let state=native_executive_state(EXECUTIVE_SCOPE);
+            for extra in ["principal_scope","url","work_ref","permission"] {
+                let mut args=fixture["arguments"].clone();args[extra]="not an authority".into();let count=std::cell::Cell::new(0);
+                let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,crate::native_session_send::PATH,serde_json::json!({"arguments":args}),|_|{
+                    count.set(count.get()+1);async{Ok(tauri::http::Response::builder().status(200).body("{}").unwrap().into())}
+                }));assert_eq!(count.get(),0);assert_eq!(result.unwrap_err(),"REQUEST_INVALID");
+            }
+            let count=std::cell::Cell::new(0);
+            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,"/os/executive/session/send/",serde_json::json!({"arguments":fixture["arguments"]}),|_|{
+                count.set(count.get()+1);async{Ok(tauri::http::Response::builder().status(200).body("{}").unwrap().into())}
+            }));assert_eq!(count.get(),0);assert_eq!(result.unwrap_err(),"REQUEST_INVALID");
+        }
+    }
+
+    #[test]
+    fn native_session_send_auth_change_after_one_dispatch_withholds_receipt_without_retry() {
+        for fixture in native_session_send_fixtures() {
+            let state=native_executive_state(EXECUTIVE_SCOPE);let count=std::cell::Cell::new(0);
+            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,crate::native_session_send::PATH,crate::native_session_send::body(fixture["arguments"].clone()).unwrap(),|_|{
+                count.set(count.get()+1);state.lock().unwrap().executive_generation+=1;
+                let response:reqwest::Response=tauri::http::Response::builder().status(200).header("Content-Type","application/json").body(fixture["sent"].to_string()).unwrap().into();async{Ok(response)}
+            }));assert_eq!(count.get(),1);assert_eq!(result.unwrap_err(),"EXECUTIVE_AUTH_CHANGED");
+        }
+    }
+
+    #[test]
+    fn native_e_only_fresh_recovery_keeps_workspace_effects_closed() {
+        // Actual signed-source public replies, with only the private token
+        // and HTTP dispatch replaced by the existing native test fixtures.
+        let fixture: Value=serde_json::from_str(include_str!("../../src/auth-recovery/fixtures/native-executive-draft-owner.json")).unwrap();
+        let state=native_executive_state(EXECUTIVE_SCOPE);
+        {let mut inner=state.lock().unwrap();inner.acquisition=None;inner.content=None;}
+        assert!(state.lock().unwrap().acquisition.is_none());
+        let selected=serde_json::json!({"work_ref":fixture["request"]["work_ref"],"operation_key":fixture["request"]["operation_key"]});
+        for (operation,arguments,reply) in [
+            ("status",selected.clone(),fixture["status"].clone()),
+            ("read",selected.clone(),fixture["read"].clone()),
+            ("preview",fixture["request"].clone(),Value::Null),
+            ("create",fixture["create_request"].clone(),Value::Null),
+            ("consume",fixture["consume_request"].clone(),Value::Null),
+        ] {
+            let path=crate::fresh_conversation::path(operation).unwrap();
+            let calls=std::cell::Cell::new(0);
+            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,path,
+                serde_json::json!({"arguments":arguments}),|builder|{
+                    calls.set(calls.get()+1);let request=builder.build().unwrap();
+                    assert_eq!(request.url().as_str(),format!("{ORIGIN}{path}"));
+                    assert_eq!(request.headers()["authorization"],"Bearer fixture-native-executive");
+                    assert!(!request.headers().contains_key("x-mastermind-workspace-authorization"));
+                    let response:reqwest::Response=tauri::http::Response::builder().status(200)
+                        .header("Content-Type","application/json").body(reply.to_string()).unwrap().into();
+                    async {Ok(response)}
+                }));
+            if operation=="status" || operation=="read" {
+                assert_eq!(calls.get(),1);assert!(result.is_ok());
+            } else {
+                assert_eq!(calls.get(),0);assert_eq!(result.unwrap_err(),"WORKSPACE_AUTH_REQUIRED");
+            }
+        }
+    }
+
+    #[test]
+    fn project_planning_requires_both_private_resources_before_native_dispatch() {
+        for workspace in [false,true] {
+            let state=native_executive_state(EXECUTIVE_SCOPE);
+            state.lock().unwrap().acquisition=if workspace {Some(token("fixture-workspace"))} else {None};
+            let calls=std::cell::Cell::new(0);
+            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                "/os/executive/project-planning/status",serde_json::json!({"arguments":{"operation_key":"original","work_ref":"WS:EXAMPLE"}}),|builder|{
+                    calls.set(calls.get()+1);let request=builder.build().unwrap();
+                    assert_eq!(request.url().as_str(),format!("{ORIGIN}/os/executive/project-planning/status"));
+                    assert_eq!(request.headers()["x-mastermind-workspace-authorization"],"Bearer fixture-workspace");
+                    assert_eq!(request.headers()["authorization"],"Bearer fixture-native-executive");
+                    async {Ok(native_fixture_response())}
+                }));
+            assert_eq!(calls.get(),usize::from(workspace));assert_eq!(result.is_ok(),workspace);
+        }
+        let state=native_executive_state("mastermind.executive.read");
+        state.lock().unwrap().acquisition=Some(token("fixture-workspace"));
+        let calls=std::cell::Cell::new(0);
+        let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+            "/os/executive/project-planning/status",serde_json::json!({"arguments":{"operation_key":"original","work_ref":"WS:EXAMPLE"}}),|_|{
+                calls.set(calls.get()+1);async {Ok(native_fixture_response())}
+            }));
+        assert_eq!(calls.get(),0);assert!(result.is_err());
+    }
+
+    #[test]
+    fn project_planning_secondary_resource_generation_and_expiry_fence_pending_native_response() {
+        for change in ["generation","remove","expire"] {
+            let state=native_executive_state(EXECUTIVE_SCOPE);
+            state.lock().unwrap().acquisition=Some(token("fixture-workspace"));
+            let result=tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                "/os/executive/project-planning/status",serde_json::json!({"arguments":{"operation_key":"original","work_ref":"WS:EXAMPLE"}}),|_|async{
+                    {let mut inner=state.lock().unwrap();match change {
+                        "generation"=>inner.generation+=1,"remove"=>inner.acquisition=None,
+                        _=>inner.acquisition.as_mut().unwrap().wall_expires=SystemTime::UNIX_EPOCH,
+                    }}
+                    Ok(native_fixture_response())
+                }));
+            assert_eq!(result.unwrap_err(),"WORKSPACE_AUTH_CHANGED");
+        }
     }
 
     #[test]
@@ -3952,6 +5045,42 @@ mod project_archive_read_tests {
 #[cfg(test)]
 mod source_operation_transport_tests {
     use super::*;
+    fn correction_owner_fixture() -> Value {
+        serde_json::from_str(include_str!("../../src/fixtures/discovery-correction-owner.json")).unwrap()
+    }
+    #[test]
+    fn discovery_correction_keeps_eight_field_lookup_and_fixed_routes() {
+        let fixture=correction_owner_fixture();let lookup=&fixture["lookup"];
+        let url=source_operation_target("read",lookup).unwrap();
+        assert_eq!(url.path(),"/workspace/source-operation/operation");
+        let pairs:std::collections::HashMap<_,_>=url.query_pairs().into_owned().collect();
+        assert_eq!(pairs.len(),8);assert!(!pairs.contains_key("expected_preference_revision"));
+        assert_eq!(pairs["discovery_ref"],"DSC:ORIGINAL-FINDING");
+        assert_eq!(pairs["expected_discovery_revision"],lookup["expected_discovery_revision"].as_str().unwrap());
+        assert_eq!(source_operation_target("reconcile",lookup).unwrap().path(),"/workspace/source-operation/reconcile");
+        assert!(source_operation_target("advance",lookup).is_err());
+        let prepare=serde_json::json!({"action":"correct_project_discovery","request":fixture["request"]});
+        assert!(source_operation_target("prepare",&prepare).is_ok());
+        assert_eq!(source_operation_body(fixture["preview"].clone(),"prepare",&prepare).unwrap(),fixture["preview"]);
+        assert_eq!(source_operation_body(fixture["source_status"].clone(),"read",lookup).unwrap(),fixture["source_status"]);
+    }
+    #[test]
+    fn discovery_correction_refuses_authority_grafts_and_invalid_evidence() {
+        let fixture=correction_owner_fixture();
+        for (field,value) in [("expected_preference_revision",Value::Null),("principal_scope",serde_json::json!("f".repeat(64))),
+            ("discovery_ref",serde_json::json!("DSC:ORIGINAL-FINDING\n")),
+            ("request_id",serde_json::json!(format!("mmos-project-file-add-{}","a".repeat(40))))] {
+            let mut lookup=fixture["lookup"].clone();lookup[field]=value;
+            assert!(source_operation_target("read",&lookup).is_err(),"{field}");
+            assert!(source_operation_target("reconcile",&lookup).is_err(),"{field}");
+        }
+        for (field,value) in [("verified_at",serde_json::json!("2026-02-29")),("expires",serde_json::json!("2026-11-04")),
+            ("confidence",serde_json::json!("")),("claim",serde_json::json!("中".repeat(683))),
+            ("evidence",serde_json::json!(["same","same"])),("auto_verify",serde_json::json!(true))] {
+            let mut request=fixture["request"].clone();request["replacement"][field]=value;
+            assert!(source_operation_target("prepare",&serde_json::json!({"action":"correct_project_discovery","request":request})).is_err(),"{field}");
+        }
+    }
     fn lookup() -> Value {
         serde_json::json!({"schema":"mastermind.workspace_source_operation_lookup.v1","action":"ADOPT_PLAN","request_id":format!("mmos-project-adopt-{}","a".repeat(40)),"work_ref":"WS:TEST"})
     }
@@ -4136,5 +5265,42 @@ mod source_operation_context_tests {
                 action: action.into(), work_ref: work.map(str::to_string)
             }).is_err());
         }
+    }
+
+}
+
+
+#[cfg(test)]
+mod secretary_selection_contract_tests {
+    use super::*;
+
+    #[test]
+    fn session_kind_omission_and_closed_strings_preserve_the_wire_shape() {
+        let pair = serde_json::json!({"work_ref": "WS:ALPHA", "root_job_id": "JOB-1"});
+        let legacy: SessionSelection = serde_json::from_value(pair.clone()).unwrap();
+        legacy.validate().unwrap();
+        assert_eq!(legacy.wire(), pair);
+        for kind in ["fabric_attempt", "hermes_secretary", "hermes_meta"] {
+            let value = serde_json::json!({
+                "work_ref": "WS:ALPHA", "root_job_id": "JOB-1", "target_kind": kind
+            });
+            let selected: SessionSelection = serde_json::from_value(value.clone()).unwrap();
+            selected.validate().unwrap();
+            assert_eq!(selected.wire(), value);
+        }
+    }
+
+    #[test]
+    fn an_explicit_null_kind_is_never_legacy_fabric() {
+        for kind in [Value::Null, serde_json::json!(true), serde_json::json!(7), serde_json::json!([])] {
+            let value = serde_json::json!({
+                "work_ref": "WS:ALPHA", "root_job_id": "JOB-1", "target_kind": kind
+            });
+            assert!(serde_json::from_value::<SessionSelection>(value).is_err());
+        }
+        let unsupported: SessionSelection = serde_json::from_value(serde_json::json!({
+            "work_ref": "WS:ALPHA", "root_job_id": "JOB-1", "target_kind": "other"
+        })).unwrap();
+        assert!(unsupported.validate().is_err());
     }
 }

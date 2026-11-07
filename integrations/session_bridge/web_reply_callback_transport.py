@@ -170,11 +170,17 @@ def _signed_request_headers(packet: PreparedReplyWebhook, host: str,
                                 ensure_ascii=True).encode("ascii")
         else:
             data=parsed.get("data")
-            if (type(data) is not dict or type(data.get("request_ref")) is not str
+            if (type(data) is not dict
                     or _EVENT.fullmatch(source["webhook-id"]) is None
                     or parsed.get("eventId") != source["webhook-id"]):
                 raise ValueError
-            expected=_validated_event(parsed,data["request_ref"])
+            if parsed.get("name") == "mastermind.slack_canary_message":
+                from .dot_canary_webhook import _validated_canary_event
+                expected = _validated_canary_event(parsed)
+            else:
+                if type(data.get("request_ref")) is not str:
+                    raise ValueError
+                expected=_validated_event(parsed,data["request_ref"])
         if expected != packet.body:
             raise ValueError
     except (ValueError,TypeError,UnicodeError,binascii.Error):

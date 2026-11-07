@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import { openLegacyProjectTabs } from "./test-operational-navigation";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -75,7 +74,9 @@ describe("Projects in the actual App", () => {
     const reopen = await screen.findByRole("button", { name: "Open project Beta program" });
     reopen.focus(); await user.keyboard("{Enter}");
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Beta program", level: 1 }));
-    await openLegacyProjectTabs(user);
+    await user.click(screen.getByRole("button", { name: "Project details" }));
+    await user.click(screen.getByRole("button", { name: "Work controls" }));
+    await user.click(screen.getByText("More work details", { selector: "summary" }));
     const plan = screen.getByRole("tab", { name: "Plan" });
     await user.click(plan); expect(document.activeElement).toBe(screen.getByRole("tab",{name:"Plan"}));
     projects.focus();
@@ -97,7 +98,9 @@ describe("Projects in the actual App", () => {
     await user.click(projects);
     await user.click(await screen.findByRole("button", { name: "Open project Beta program" }));
     expect(ownerState().textContent).toContain("SOURCE READ PENDING");
-    await openLegacyProjectTabs(user);
+    await user.click(screen.getByRole("button", { name: "Project details" }));
+    await user.click(screen.getByRole("button", { name: "Work controls" }));
+    await user.click(screen.getByText("More work details", { selector: "summary" }));
     await user.click(screen.getByRole("tab", { name: "Plan" }));
     await act(async () => first.reject(new Error("private host detail")));
     for (const name of ["Overview", "Plan", "Work", "Evidence", "More"]) {

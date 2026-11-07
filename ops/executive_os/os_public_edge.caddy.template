@@ -2,7 +2,7 @@ mcp.mastermind-x.com {
   route {
     @get {
       method GET
-      path /os/ /os/auth/callback /workspace/programs/current /workspace/work/current /workspace/mission/current /workspace/mission/v3/current /workspace/result/current /workspace/window/current /workspace/plan/current /workspace/operator/activity/current /workspace/result-references/current /workspace/control-room/state/current /workspace/control-room/discover/current /workspace/mission/v4/current /workspace/fabric/catalog/current /workspace/fabric/status/current /workspace/project-plan/current /workspace/project-journal/current /workspace/autonomy/current /workspace/project-session/current /workspace/resources/capacity/current /workspace/project-direction/current /workspace/project-admission/current /workspace/project-admission/operation /workspace/projects/archive/current /workspace/project-knowledge/current /workspace/project-memory/current /workspace/project-source/current /workspace/source-operation/context /workspace/source-operation/operation /workspace/project-instructions/current /workspace/instruction-admission/current /workspace/instruction-admission/operation /workspace/project-access/current /workspace/mission-result/current __ASSET_PATHS__
+      path /os/ /os/auth/callback /workspace/programs/current /workspace/work/current /workspace/mission/current /workspace/mission/v3/current /workspace/result/current /workspace/window/current /workspace/plan/current /workspace/operator/activity/current /workspace/result-references/current /workspace/control-room/state/current /workspace/control-room/discover/current /workspace/mission/v4/current /workspace/fabric/catalog/current /workspace/fabric/status/current /workspace/project-plan/current /workspace/project-journal/current /workspace/autonomy/current /workspace/project-session/current /workspace/resources/capacity/current /workspace/project-direction/current /workspace/project-admission/current /workspace/project-admission/operation /workspace/projects/archive/current /workspace/project-knowledge/current /workspace/project-memory/current /workspace/project-source/current /workspace/source-operation/context /workspace/source-operation/operation /workspace/project-instructions/current /workspace/instruction-admission/current /workspace/instruction-admission/operation /workspace/project-access/current /workspace/source-operation/options /workspace/resources/host-observation/current /workspace/mission-result/current /workspace/native-draft-identity/current /workspace/byok/roles/current __ASSET_PATHS__
     }
     handle @get {
       reverse_proxy 127.0.0.1:__RELAY_PORT__ {
@@ -20,7 +20,7 @@ mcp.mastermind-x.com {
     }
     @post {
       method POST
-      path /os/executive/context /os/executive/submit /os/executive/status /os/executive/session/context /os/executive/session/reply /os/executive/session/references /workspace/control-room/open /workspace/control-room/bind /workspace/control-room/unbind /workspace/control-room/refresh-builds /workspace/project-admission/pause /workspace/project-admission/resume /workspace/instruction-admission/pause
+      path /os/executive/context /os/executive/submit /os/executive/status /os/executive/session/context /os/executive/session/reply /os/executive/session/references /workspace/control-room/open /workspace/control-room/bind /workspace/control-room/unbind /workspace/control-room/refresh-builds /workspace/project-admission/pause /workspace/project-admission/resume /workspace/instruction-admission/pause /os/executive/project-planning/submit /os/executive/project-planning/status /os/executive/project-planning/result /os/executive/project-planning/consume /os/executive/project-planning/prepare_proposal /os/executive/session/history-context /os/executive/session/conversations /os/executive/session/conversation-read /os/executive/session/fresh-conversations /os/executive/session/fresh-conversation-read /os/executive/conversation/preview /os/executive/conversation/create /os/executive/conversation/status /os/executive/conversation/read /os/executive/conversation/consume /os/executive/conversation/turn /os/executive/conversation/turn/status /os/executive/conversation/turn/read /os/executive/conversation/consume/status /os/executive/conversation/turn/preview /os/executive/session/send /os/executive/project-execution/preview /os/executive/project-execution/submit /os/executive/project-execution/status /os/executive/session/project-executions /os/executive/session/project-execution-read /os/executive/direct-native/result /os/executive/direct-native/consume /os/executive/direct-native/correction /os/executive/company-priorities
     }
     handle @post {
       request_body {
@@ -62,7 +62,7 @@ mcp.mastermind-x.com {
     }
     @mcpmeta {
       method GET
-      path /.well-known/oauth-protected-resource/mcp
+      path /.well-known/oauth-protected-resource/mcp /.well-known/oauth-protected-resource/mcp/coo
     }
     handle @mcpmeta {
       reverse_proxy 127.0.0.1:__RELAY_PORT__ {
@@ -80,7 +80,7 @@ mcp.mastermind-x.com {
     }
     @mcp {
       method POST
-      path /mcp
+      path /mcp /mcp/coo
     }
     handle @mcp {
       request_body {

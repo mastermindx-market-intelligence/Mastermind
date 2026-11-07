@@ -1889,6 +1889,11 @@ body.page-mm .mm-pf-tab .mm-pf-sub {
   white-space: nowrap;
 }
 
+body.page-mm .mm-pf-status-chip { margin-left: 5px; font-size: 8px; font-weight: 800; letter-spacing: .05em; }
+body.page-mm .mm-pf-status-chip.partial { color: var(--warn); }
+body.page-mm .mm-pf-status-chip.unavailable { color: var(--down); }
+body.page-mm .mm-pf-switch-unavailable { align-self: center; padding: 0 10px; color: var(--down); font-size: 11px; font-weight: 750; }
+
 /* Unified layout rhythm and machined panels. */
 body.page-mm .mm-section { margin-top: 18px; }
 body.page-mm .grid { gap: 18px; }
@@ -3928,6 +3933,17 @@ var _factorZoo = null;            // advanced factor-alpha lab verdict (/api/fac
 var _fundamentals = null;         // PIT fundamental (value/quality) factor verdict (/api/fundamentals)
 var _student = null;              // CatBoost return-predicting student (/api/student)
 var _distill = null;              // CatBoost Opus-mimic distillation model (/api/distill)
+function _learningUnavailable(surface) {
+  return {
+    read_status: 'unavailable', status: 'unavailable',
+    error: 'learning_transport_unavailable', surface: surface
+  };
+}
+function _learningFetch(url, surface) {
+  return fetch(url)
+    .then(function(r) { return r.ok ? r.json() : _learningUnavailable(surface); })
+    .catch(function() { return _learningUnavailable(surface); });
+}
 // paged-feed state (Brain Log + Research Feed) — preserved across re-renders, clamped on reload
 var _brainPage = 0, _researchPage = 0;
 // brain rows are compact, research cards are tall — bias counts so the two columns end ~level
@@ -3985,6 +4001,7 @@ var _papersLoaded = false, _papersLoad = null;
 var _calibLoaded = false, _calibLoad = null;
 var _pendingSelfSelect = false;   // set when loaded at /self — auto-select that tab once portfolios load
 var _portfolios = [];             // [{id,name,tagline,kind,manager,status}] from /api/portfolios
+var _portfoliosStatus = 'loading'; // loading | available | unavailable
 var _decisionAvailability = null; // independent persisted decision/account clocks; active regional books only
 var _forwardEvaluation = null;
 var _forwardEvaluationPending = true;
@@ -5116,8 +5133,18 @@ function renderPositions() {
     return;
   }
 
+  var accountUnavailable = b.account_reconciliation_status === 'unavailable';
+  var accountWarning = accountUnavailable
+    ? '<div class="mm-cal-building" style="margin-bottom:10px"><span class="ic">!</span><span class="tx">' +
+      '<span class="l-en"><strong>Account reconciliation unavailable</strong> — showing published strategy positions only; live/account-only holdings may be missing.</span>' +
+      '<span class="l-zh"><strong>账户对账暂不可用</strong> — 当前仅显示已发布的策略持仓；实时/仅账户持仓可能缺失。</span></span></div>'
+    : '';
+
   if (!positions.length) {
-    el.innerHTML = '<h2><span class="l-en">Positions</span><span class="l-zh">持仓</span></h2><div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('pos.empty') + '</div>';
+    var emptyCopy = accountUnavailable
+      ? '<span class="l-en">Published strategy snapshot has no position rows; actual account holdings could not be reconciled.</span><span class="l-zh">已发布策略快照没有持仓行；实际账户持仓目前无法对账。</span>'
+      : t('pos.empty');
+    el.innerHTML = '<h2><span class="l-en">Positions</span><span class="l-zh">持仓</span></h2>' + accountWarning + '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + emptyCopy + '</div>';
     return;
   }
 
@@ -5300,7 +5327,7 @@ function renderPositions() {
     : '';
 
   el.innerHTML = '<h2><span class="l-en">Positions</span><span class="l-zh">持仓</span> <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:6px">' + t('pos.subtitle') + '</span></h2>' +
-    banner +
+    banner + accountWarning +
     '<div class="mm-table-wrap"><table>' +
     '<thead><tr>' +
     '<th>' + t('pos.ticker') + '</th>'
@@ -5853,9 +5880,9 @@ function renderCalibrationPage() {
 }
 
 // ── DESK page ───────────────────────────────────────────────────────────────
-// Lazy-loaded observability over the multi-seat Flagship desk. Fetches the four /api/desk/*
-// endpoints in parallel, then renders four sections. Every fetch degrades to null on any error
-// (the renderers then show a graceful "building" / empty state); nothing here can break the page.
+// Lazy-loaded observability over the multi-seat Flagship desk. Fetches Desk and scheduler
+// endpoints in parallel. Watchlist and scheduler boundaries distinguish unavailable reads
+// from successful empty results; null before a completed read remains the loading state.
 var _deskData = { strategist: null, macroRisk: null, decisions: null, watchlist: null, scorecard: null, firm: null, scheduler: null };
 
 function _deskBuilding(msgKey) {
@@ -5872,7 +5899,9 @@ window.loadDesk = function() {
   Promise.all([
     g('/api/desk/strategist'),
     g('/api/desk/decisions'),
-    g('/api/desk/watchlist?book=flagship'),
+    g('/api/desk/watchlist?book=flagship').then(function(d) {
+      return d || {status: 'unavailable', watchlist: null, error: 'desk_watchlist_unavailable'};
+    }),
     g('/api/desk/scorecard'),
     g('/api/desk/firm-exposure'),
     g('/api/desk/macro-risk'),
@@ -5884,7 +5913,10 @@ window.loadDesk = function() {
     _deskData.scorecard  = res[3];
     _deskData.firm       = res[4];
     _deskData.macroRisk  = res[5];
-    _deskData.scheduler  = res[6];
+    var scheduler = res[6];
+    _deskData.scheduler = scheduler && Array.isArray(scheduler.jobs)
+      ? scheduler
+      : { scheduler_status: 'unavailable', jobs: null, error: 'scheduler_health_unavailable' };
     renderDeskPage();
   }).catch(function(){ renderDeskPage(); });
 };
@@ -5903,8 +5935,16 @@ function renderDeskPage() {
 function renderDeskScheduler() {
   var host = E('desk-scheduler'); if (!host) return;
   var d = _deskData.scheduler;
-  if (!d || !(d.jobs || []).length) {
-    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">⊙</span>Scheduler not available (apscheduler absent or no run events yet).</div>';
+  if (!d) {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>Loading scheduler health…</div>';
+    return;
+  }
+  if (d.scheduler_status === 'unavailable' || d.status === 'unavailable') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">!</span>Scheduler health unavailable — this read did not complete.</div>';
+    return;
+  }
+  if (!(d.jobs || []).length) {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>No scheduler jobs reported.</div>';
     return;
   }
   var rows = '';
@@ -6109,7 +6149,18 @@ function renderDeskDecisions() {
 function renderDeskWatchlist() {
   var host = E('desk-watchlist'); if (!host) return;
   var d = _deskData.watchlist;
-  var rows = (d && d.watchlist) || [];
+  var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  if (d == null) {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' +
+      (isZh ? '正在读取观察名单…' : 'Loading watchlist…') + '</div>';
+    return;
+  }
+  if (d.status === 'unavailable' || !Array.isArray(d.watchlist)) {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' +
+      (isZh ? '观察名单暂不可用。' : 'Watchlist unavailable.') + '</div>';
+    return;
+  }
+  var rows = d.watchlist;
   if (!rows.length) { host.innerHTML = _deskEmpty('desk.wl_empty'); return; }
   var html = '<div class="mm-rp-wrap"><table class="mm-rp-table"><thead><tr>' +
     '<th class="l">' + t('desk.col_ticker') + '</th>' +
@@ -7069,6 +7120,10 @@ function _fmtPctSigned(v) {
 function renderPortfolioSwitch() {
   var host = E('pf-switch');
   if (!host) return;
+  if (_portfoliosStatus === 'unavailable') {
+    host.innerHTML = '<span class="mm-pf-switch-unavailable"><span class="l-en">Portfolios unavailable</span><span class="l-zh">组合列表暂不可用</span></span>';
+    return;
+  }
   if (!_portfolios.length) { host.innerHTML = ''; return; }
   host.innerHTML = _pfOrdered(_portfolios).map(function(p) {
     var st = p.status || {};
@@ -7079,7 +7134,13 @@ function renderPortfolioSwitch() {
     // tracks the live mark. The old $X.XXM format quantized to $10k steps, so intraday moves
     // (and books sitting near $1M) looked frozen even though /api/portfolios refreshes them.
     var navStr = st.nav != null ? ccy + Math.round(st.nav).toLocaleString('en-US') : '—';
-    var sub = navStr + ' · <span class="' + cls + '">' + _fmtPctSigned(ret) + '</span>';
+    var statusChip = '';
+    if (st.read_status === 'partial') {
+      statusChip = '<span class="mm-pf-status-chip partial"><span class="l-en">PARTIAL</span><span class="l-zh">不完整</span></span>';
+    } else if (st.read_status === 'unavailable') {
+      statusChip = '<span class="mm-pf-status-chip unavailable"><span class="l-en">UNAVAILABLE</span><span class="l-zh">不可用</span></span>';
+    }
+    var sub = navStr + ' · <span class="' + cls + '">' + _fmtPctSigned(ret) + '</span>' + statusChip;
     var archived = p.lifecycle === 'archived' || p.active === false;
     var archiveChip = archived ? '<span class="mm-archive-chip">' + (document.documentElement.getAttribute('data-lang') === 'zh' ? '已归档' : 'ARCHIVED') + '</span>' : '';
     var title = archived ? ((p.archived_reason || 'Frozen historical portfolio') + (p.superseded_by ? ' · successor: ' + p.superseded_by : '')) : (p.tagline || '');
@@ -7218,7 +7279,14 @@ async function loadPortfolios() {
   try {
     var r = await fetch('/api/portfolios');
     var d = r.ok ? await r.json() : null;
-    if (d && d.portfolios) {
+    if (!d || d.read_status === 'unavailable' || !Array.isArray(d.portfolios) ||
+        !d.portfolios.every(function(p) { return p && typeof p === 'object' && !Array.isArray(p) && typeof p.id === 'string' && p.id.length > 0; })) {
+      _portfoliosStatus = 'unavailable';
+      renderPortfolioSwitch();
+      return;
+    }
+    if (Array.isArray(d.portfolios)) {
+      _portfoliosStatus = 'available';
       _portfolios = d.portfolios;
       // The registry owns the product default. Explicit historical/workspace URLs keep their
       // selected book, while the root dashboard follows the backend contract instead of a second
@@ -7238,7 +7306,10 @@ async function loadPortfolios() {
       }
       _schedulePortfolioPrefetch();
     }
-  } catch (e) {}
+  } catch (e) {
+    _portfoliosStatus = 'unavailable';
+    renderPortfolioSwitch();
+  }
 }
 
 // ── DECISION AVAILABILITY: display-only, per-book, independent source clocks ──
@@ -8723,6 +8794,12 @@ function renderShadowBooks() {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var head = collH2('shadow-books', 'Shadow Books — Policy A/B', '影子组合 — 策略 A/B',
     isZh ? '前瞻式平行组合 · 无泄漏' : 'parallel forward books · leakage-free');
+  if (d.read_status === 'unavailable') {
+    el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">!</span>'
+      + '<span class="l-en">Shadow-book evidence unavailable — this read did not complete.</span>'
+      + '<span class="l-zh">影子组合证据暂不可用 — 本次读取未完成。</span></div>';
+    return;
+  }
   if (!lb.length) {
     el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">○</span>'
       + '<span class="l-en">No shadow books yet — they accrue from the next build.</span>'
@@ -8794,6 +8871,12 @@ function renderXsec() {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var head = collH2('xsec', 'Cross-Sectional Edge', '横截面边际',
     isZh ? '全域预测日志 · 日聚类置信区间' : 'universe-wide prediction log · date-clustered CIs');
+  if (d.read_status === 'unavailable') {
+    el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">!</span>'
+      + '<span class="l-en">Prediction evidence unavailable — this read did not complete.</span>'
+      + '<span class="l-zh">预测证据暂不可用 — 本次读取未完成。</span></div>';
+    return;
+  }
   if (!cov.n_total) {
     el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">○</span>'
       + '<span class="l-en">No predictions logged yet — they accrue from the next build.</span>'
@@ -8853,6 +8936,12 @@ function renderEngineBacktest() {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var head = collH2('engine-bt', 'Engine Backtest Verdict', '引擎回测裁定',
     isZh ? '历史 · 无泄漏 · 高样本量' : 'historical · leakage-free · high-n');
+  if (d.read_status === 'unavailable') {
+    el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">!</span>'
+      + '<span class="l-en">Engine-backtest evidence unavailable — this read did not complete.</span>'
+      + '<span class="l-zh">引擎回测证据暂不可用 — 本次读取未完成。</span></div>';
+    return;
+  }
   if (d.status !== 'ok' || !d.verdict) {
     el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">○</span>'
       + '<span class="l-en">No engine backtest recorded yet — run scripts/run_engine_backtest.py.</span>'
@@ -8918,6 +9007,12 @@ function renderFactorZoo() {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var head = collH2('factor-zoo', 'Factor Alpha Lab', '因子阿尔法实验室',
     isZh ? '因子库 + 复合 + IC 期限结构 · 多重检验诚实' : 'factor zoo + composite + IC term-structure · multiple-testing-honest');
+  if (d.read_status === 'unavailable') {
+    el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">!</span>'
+      + '<span class="l-en">Factor-zoo evidence unavailable — this read did not complete.</span>'
+      + '<span class="l-zh">因子库证据暂不可用 — 本次读取未完成。</span></div>';
+    return;
+  }
   if (d.status !== 'ok' || !d.verdict) {
     el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">○</span>'
       + '<span class="l-en">No factor-zoo run recorded yet — run scripts/run_factor_zoo.py.</span>'
@@ -9025,6 +9120,12 @@ function renderFundamentals() {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var head = collH2('fundamentals', 'Fundamental Factors — PIT', '基本面因子 — 时点',
     isZh ? 'EDGAR 价值/质量 · 时点无泄漏 · 含做多做空' : 'EDGAR value/quality · point-in-time · long-only + long-short');
+  if (d.read_status === 'unavailable') {
+    el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">!</span>'
+      + '<span class="l-en">Fundamental-factor evidence unavailable — this read did not complete.</span>'
+      + '<span class="l-zh">基本面因子证据暂不可用 — 本次读取未完成。</span></div>';
+    return;
+  }
   if (d.status !== 'ok' || !d.verdict) {
     el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">○</span>'
       + '<span class="l-en">No fundamentals run recorded yet — run scripts/run_fundamentals.py.</span>'
@@ -9189,6 +9290,7 @@ function renderSizingScorecard() {
 // state (status chip + what unblocks it) and shows the top predicted edges once a model trains.
 function _lmCard(title, sub, d, isZh, kind) {
   d = d || {};
+  var readUnavailable = d.read_status === 'unavailable';
   var status = d.status || 'building';
   var lbl = status === 'scoring' || status === 'ok' ? (isZh ? '已训练' : 'trained')
           : status === 'unavailable' ? (isZh ? '不可用' : 'unavailable') : (isZh ? '累积中' : 'building');
@@ -9211,10 +9313,13 @@ function _lmCard(title, sub, d, isZh, kind) {
     var evs = ev == null ? '' : ' <span style="opacity:.7">' + (Number(ev) >= 0 ? '+' : '') + Number(ev).toFixed(3) + '</span>';
     return '<span class="mm-ticker-chip">' + esc(tk) + evs + '</span>';
   }).join('');
-  var predBlock = preds
-    ? ('<div class="mm-comp-holdings-h" style="margin-top:10px">' + (isZh ? '当前最高预测' : 'Top predicted now') + '</div>' +
-       '<div style="display:flex;flex-wrap:wrap;gap:4px">' + preds + '</div>')
-    : ('<div style="font-size:11px;color:var(--muted);margin-top:10px;font-style:italic">' + esc(sub) + '</div>');
+  var predBlock = readUnavailable
+    ? ('<div style="font-size:11px;color:var(--muted);margin-top:10px;font-style:italic">' +
+       (isZh ? '模型状态暂不可用 — 本次读取未完成。' : 'Model state unavailable — this read did not complete.') + '</div>')
+    : (preds
+      ? ('<div class="mm-comp-holdings-h" style="margin-top:10px">' + (isZh ? '当前最高预测' : 'Top predicted now') + '</div>' +
+         '<div style="display:flex;flex-wrap:wrap;gap:4px">' + preds + '</div>')
+      : ('<div style="font-size:11px;color:var(--muted);margin-top:10px;font-style:italic">' + esc(sub) + '</div>'));
   return '<div class="mm-comp-card m-claude">' +
     '<div class="mm-comp-name">' + esc(title) + ' <span class="mm-chip ' + chipCls + '" style="margin-left:4px">' + lbl + '</span></div>' +
     '<div class="mm-comp-metrics">' + metrics + '</div>' + predBlock + '</div>';
@@ -9426,7 +9531,7 @@ function _mergeLiveMarks(data) {
         var mark = byTicker[row.ticker];
         if (mark) {
           seen[row.ticker] = true;
-          reconciled.push(Object.assign(row, mark));
+          reconciled.push(Object.assign({}, row, mark));
         } else if (row.pending) {
           reconciled.push(row);
         }
@@ -9448,6 +9553,16 @@ function _mergeLiveMarks(data) {
       var hasPricing = data.pricing != null && typeof data.pricing === 'object';
       var holdingsComplete = !data.error && hasPricing && Number(data.pricing.total_positions || 0) === (data.positions || []).length;
       if (holdingsComplete) _book.positions = reconciled;
+      if (holdingsComplete && _book.account_reconciliation_status === 'unavailable') {
+        _book.account_reconciliation_status = 'available';
+        if (Array.isArray(_book.failed_sources)) {
+          var hadAccountFailure = _book.failed_sources.indexOf('account_reconciliation') !== -1;
+          _book.failed_sources = _book.failed_sources.filter(function(source) { return source !== 'account_reconciliation'; });
+          if (hadAccountFailure && !_book.failed_sources.length && _book.snapshot_status === 'partial') {
+            _book.snapshot_status = 'available';
+          }
+        }
+      }
       // Without the block, the cached rows stay and the gap is named in the status line.
       if (!hasPricing) _liveMarks.pricing_partial = true;
     }
@@ -9656,13 +9771,13 @@ function _hydrateShared() {
     return Promise.allSettled([
       fetch('/api/activity').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
       fetch('/api/research').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
-      fetch('/api/shadow_books').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/predictions').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/engine_backtest').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/factor_zoo').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/fundamentals').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/student').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
-      fetch('/api/distill').then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
+      _learningFetch('/api/shadow_books', 'shadow_books'),
+      _learningFetch('/api/predictions', 'predictions'),
+      _learningFetch('/api/engine_backtest', 'engine_backtest'),
+      _learningFetch('/api/factor_zoo', 'factor_zoo'),
+      _learningFetch('/api/fundamentals', 'fundamentals'),
+      _learningFetch('/api/student', 'student'),
+      _learningFetch('/api/distill', 'distill'),
     ]);
   }).then(function(s) {
     var actRes = s[0], researchRes = s[1], shadowRes = s[2], predRes = s[3],

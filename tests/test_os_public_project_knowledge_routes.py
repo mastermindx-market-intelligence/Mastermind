@@ -6,7 +6,7 @@ def test_three_fixed_read_routes_preserve_the_whole_predecessor_profile():
  expected={"/workspace/project-knowledge/current","/workspace/project-memory/current","/workspace/project-source/current"}
  source_operation_reads={"/workspace/source-operation/context","/workspace/source-operation/operation"}
  control_reads={"/workspace/project-instructions/current", "/workspace/instruction-admission/current",
-                "/workspace/instruction-admission/operation", "/workspace/project-access/current", "/workspace/mission-result/current"}
+                "/workspace/instruction-admission/operation", "/workspace/project-access/current", '/workspace/source-operation/options', '/workspace/resources/host-observation/current', '/workspace/mission-result/current', '/workspace/native-draft-identity/current', '/workspace/byok/roles/current'}
  assert set(PROJECT_KNOWLEDGE_GET_ROUTES)==expected
  assert set(GET_ROUTES)-set(PRE_PROJECT_KNOWLEDGE_GET_ROUTES)==expected|source_operation_reads|control_reads
  assert (PRE_PROJECT_KNOWLEDGE_GET_ROUTES,PRE_INSTRUCTION_ADMISSION_POST_ROUTES) in TRANSITION_ROUTE_PROFILES

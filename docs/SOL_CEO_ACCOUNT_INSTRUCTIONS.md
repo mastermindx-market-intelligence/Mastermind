@@ -136,7 +136,7 @@ The authoritative source is the **fenced Project instruction block** in `docs/so
 
 Before writing, inspect current Project identity, editor permission, active concurrent UI writer, and saved instruction text. Diff against the approved source, **preserving newer valid Project-specific rules** (including the existing Grok Secretary contact rule where present); do not blindly overwrite the live block with an older 39-rule snapshot. Maintain both the 8,000-character and UTF-8 byte budgets and do not use another tool/account to evade an explicit browser or provider denial.
 
-After an authorized save, verify the actual Project ID and saved text/marker, then run **fresh-chat action scenarios per intended member account**: archived old author -> assume permitted leadership; live exclusive writer/EFFECT_UNKNOWN -> fence; explicit tool denial -> no same-effect retry; unconsumed Slack handoff -> do not claim START. A paraphrase and a concrete correct next action are valid evidence; requiring verbatim disclosure of hidden instructions is not. Record each seat as VERIFIED or an exact UNKNOWN/BLOCKED gap, citing existing rollout evidence, without credentials. `HANDOFF_SOURCE_LINK_V1` is a source/transport marker, not proof of ChatGPT settings installation or agent execution.
+After an authorized save, verify the actual Project ID and saved text/marker, then run **fresh-chat action scenarios per intended member account**: archived old author -> assume permitted leadership; live exclusive writer/EFFECT_UNKNOWN -> fence; explicit tool denial -> no same-effect retry; unconsumed Slack handoff -> do not claim START; completed phase or pending CI/review -> save and execute the next independent safe milestone, not a status-only close. A paraphrase and a concrete correct next action are valid evidence; requiring verbatim disclosure of hidden instructions is not. Record each seat as VERIFIED or an exact UNKNOWN/BLOCKED gap, citing existing rollout evidence, without credentials. `HANDOFF_SOURCE_LINK_V1` is a source/transport marker, not proof of ChatGPT settings installation or agent execution.
 
 ## Execute economically
 
@@ -207,6 +207,25 @@ Preserve actual parent-child returns and repair stranded return paths; do not ad
 Pending CI blocks the gated release, not unrelated implementation or diagnosis. An
 observer request is not a running observer. Verify its successful launch and real return
 path before relying on it; never promise that a finished Web turn keeps working.
+
+## First-class GitHub-native source authoring
+
+A protected `master` SHA is the procedural baseline and eventual release target,
+not a mandate to author every change inside its host checkout. An explicitly
+assigned Web session with native GitHub repository-write tools can create an
+isolated branch, commit scoped changes with blob-SHA/preimage or expected-ref
+compare-and-swap, and open/update its PR **without** acquiring `mmx-workspace`,
+Studio Direct, a fleet worktree, or another publisher session. A GitHub-native
+branch requires no host-local cleanup receipt. The same is true for eligible
+Codex/Claude tools under their actual grants.
+
+Do not replace an active writer/PR or transfer a denied or `EFFECT_UNKNOWN`
+mutation to a different carrier. A session using a **host-local** checkout retains
+the installed launcher, source root, mount, and writer fences; untrusted workers
+keep their private-clone boundary. All sources still converge through the actual
+protected GitHub review/CI/merge queue. API write access is not merge permission,
+formal approval, CI proof, installed instruction rollout, or production deployment.
+Use `docs/DELIVERY_WORKFLOW.md` for the precise path.
 
 ## Cross-repository PR auto-merge discipline
 

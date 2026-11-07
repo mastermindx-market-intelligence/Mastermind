@@ -136,6 +136,28 @@
         }
       }
     },
+    "operator.appserver.readonly.docs-mcp.native-helper.sol61.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "cce666edef9750e85b8bf64f34ae206df7f06c040b01c21f76ac388ce38e07b6",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        },
+        "cli": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        },
+        "desktop-local": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        },
+        "inline-subagent": {
+          "reason": "Not qualified by this static CLI/SDK slice; requires explicit owner review and exact surface/native-helper/resource admission.",
+          "status": "deferred"
+        }
+      }
+    },
     "operator.appserver.readonly.docs-mcp.native-helper.v1": {
       "package_generation_digests": {},
       "profile_digest": "028fce73ff8c4cb8f8ada7b514e89b74fba64b92f29db3780004a360e0995d39",

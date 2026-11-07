@@ -33,7 +33,13 @@ GROK_FORWARD_PATCH_SHA = "d0ae2b5337f7235695316d4148f2e4764aa0c75af6a239257ed13c
 COMPOSED_SHA = "6be6830dcd9c00dc46cf613a610ad0dc574ca13f50aa1cd5fbffb7e65e1649c1"
 PRE_LONG_HORIZON_COMPOSED_SHA = "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d"
 PRE_SLOT_HANDOFF_COMPOSED_SHA = "b670196db8f56018e91d73976b926a550318cb94cc566f86fa40f34a5d55de63"
-FINAL_COMPOSED_SHA = "9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1"
+PRE_SPARSE_CONFIG_DATA_COMPOSED_SHA = "9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1"
+SPARSE_CONFIG_DATA_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-sparse-config-data-forward.patch"
+SPARSE_CONFIG_DATA_FORWARD_PATCH_SHA = "fa1c45d7aedeb7f915b1f205900d78da259d74ba6d39a94bea68193d9235ccdb"
+PRE_SPARSE_INDEX_ADVICE_COMPOSED_SHA = "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db"
+SPARSE_INDEX_ADVICE_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-sparse-index-advice-forward.patch"
+SPARSE_INDEX_ADVICE_FORWARD_PATCH_SHA = "4ad04e658b51d3e6fdba7a9d13227810ea6bdf541345344647cab2b9799e62a7"
+FINAL_COMPOSED_SHA = "4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281"
 H1_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-h1-provider-entry-forward.patch"
 H1_FORWARD_PATCH_SHA = "4be46626757b8654babb5140ffc757d0fa74de879a37240965737a0c874b2918"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
@@ -54,7 +60,7 @@ def _current_native_count():
     owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)
     return len(owner.BASE_FILES|owner.ADDITIONS)+1
 EXPECTED_NATIVE_FILES = _current_native_count()
-NATIVE_MANIFEST_SHA = "21bfb96c95086f48120790d31bb7ded0bd3487996128d5d8dcf3aff6ee6b9045"
+NATIVE_MANIFEST_SHA = "684b390df13df9590a22f5af5581495370606dd40cc47569f37b3f9500578c68"
 
 
 def _sha(raw):
@@ -107,10 +113,35 @@ def _composition(directory):
     assert _sha(H1_FORWARD_PATCH.read_bytes()) == H1_FORWARD_PATCH_SHA
     donor_contract._git(directory, "apply", "--check", str(H1_FORWARD_PATCH))
     donor_contract._git(directory, "apply", str(H1_FORWARD_PATCH))
-    composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
+    current_composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
+    assert _sha(SPARSE_INDEX_ADVICE_FORWARD_PATCH.read_bytes()) == SPARSE_INDEX_ADVICE_FORWARD_PATCH_SHA
+    advice_delta = directory / "sparse-index-advice"
+    advice_delta.mkdir()
+    advice_target = advice_delta / "remote_sub_exec.py"
+    advice_target.write_bytes(current_composed)
+    donor_contract._git(advice_delta, "apply", "--reverse", "--check", str(SPARSE_INDEX_ADVICE_FORWARD_PATCH))
+    donor_contract._git(advice_delta, "apply", "--reverse", str(SPARSE_INDEX_ADVICE_FORWARD_PATCH))
+    composed = advice_target.read_bytes()
+    assert _sha(composed) == PRE_SPARSE_INDEX_ADVICE_COMPOSED_SHA
+    donor_contract._git(advice_delta, "apply", "--check", str(SPARSE_INDEX_ADVICE_FORWARD_PATCH))
+    donor_contract._git(advice_delta, "apply", str(SPARSE_INDEX_ADVICE_FORWARD_PATCH))
+    assert advice_target.read_bytes() == current_composed
+    # Prove this additive data-parser delta against the exact predecessor in
+    # both directions; retain every earlier transformation and historical pin.
+    assert _sha(SPARSE_CONFIG_DATA_FORWARD_PATCH.read_bytes()) == SPARSE_CONFIG_DATA_FORWARD_PATCH_SHA
+    sparse_delta = directory / "sparse-config-data"
+    sparse_delta.mkdir()
+    sparse_target = sparse_delta / "remote_sub_exec.py"
+    sparse_target.write_bytes(composed)
+    donor_contract._git(sparse_delta, "apply", "--reverse", "--check", str(SPARSE_CONFIG_DATA_FORWARD_PATCH))
+    donor_contract._git(sparse_delta, "apply", "--reverse", str(SPARSE_CONFIG_DATA_FORWARD_PATCH))
+    previous = sparse_target.read_bytes()
+    assert _sha(previous) == PRE_SPARSE_CONFIG_DATA_COMPOSED_SHA
+    donor_contract._git(sparse_delta, "apply", "--check", str(SPARSE_CONFIG_DATA_FORWARD_PATCH))
+    donor_contract._git(sparse_delta, "apply", str(SPARSE_CONFIG_DATA_FORWARD_PATCH))
+    assert sparse_target.read_bytes() == composed
     # Preserve the exact reviewed long-horizon executor as predecessor bytes.
     # The new handoff is removed only in a disposable inverse for source proof.
-    previous = composed
     first = previous.index(b'\n\ndef _slot_child_timeout_env(')
     last = previous.index(b'\ndef _fail(message:', first)
     previous = previous[:first] + previous[last:]
@@ -127,9 +158,10 @@ def _composition(directory):
     prior_long = prior_long.replace(b"not re.fullmatch(r'[1-9][0-9]{0,4}', commission_budget)",
                                     b"not re.fullmatch(r'[1-9][0-9]{0,3}', commission_budget)")
     assert _sha(prior_long) == PRE_LONG_HORIZON_COMPOSED_SHA
-    assert _sha(composed) == FINAL_COMPOSED_SHA
+    assert _sha(composed) == PRE_SPARSE_INDEX_ADVICE_COMPOSED_SHA
+    assert _sha(current_composed) == FINAL_COMPOSED_SHA
     assert target.read_bytes() == prior_long  # verified unchanged reviewed source cone
-    return composed
+    return current_composed
 
 
 @pytest.fixture(scope="session")

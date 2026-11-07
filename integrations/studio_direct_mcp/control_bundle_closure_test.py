@@ -6,6 +6,8 @@ invalid successor plan refuses before native selection or ingress observation.
 from __future__ import annotations
 
 import hashlib
+import importlib._bootstrap_external
+import importlib.util
 import json
 import os
 import py_compile
@@ -27,9 +29,12 @@ EXPECTED_FILES = {
     "studio_direct_control.py",
     "private_service_status_successor.py",
     "private_service_pin.py",
+    "fleet_git_failure_compat.py",
     "private_service_pin_enrollment.py",
     "paper_v20_fleet_cohorts.py",
     "ops/native_fabric/quota_continuity/rollout/native_install.py",
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/native_generation_75330d.py",
     "ops/native_fabric/quota_continuity/rollout/native_generation.py",
     "ops/fabric_launch/install.py",
 }
@@ -86,16 +91,93 @@ class InstalledClosureTests(unittest.TestCase):
             capture_output=True, text=True, timeout=timeout,
         )
 
+    def _captured_ten_member_fixture(self):
+        # This models the existing owner's exact membership and seal for
+        # migration; the new runtime must not execute this older membership.
+        self._install()
+        path = self.control / "manifest.json"
+        manifest = json.loads(path.read_text())
+        manifest["files"] = {
+            name: manifest["files"][name] for name in bundle.CAPTURED_CONTROL_FILES}
+        manifest["bundleDigest"] = bundle._bundle_digest(
+            manifest["files"], manifest["launcherHash"])
+        path.write_text(json.dumps(manifest))
+        for name in set(bundle.CONTROL_FILES) - set(bundle.CAPTURED_CONTROL_FILES):
+            (self.control / name).unlink()
+        for path in sorted(self.control.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if path.is_dir() and not any(path.iterdir()):
+                path.rmdir()
+        return manifest
+
+    def test_captured_ten_member_bundle_upgrades_only_under_original_cas(self):
+        prior = self._captured_ten_member_fixture()
+        verified = bundle.verify(control_root=self.control, launcher=self.launcher)
+        self.assertEqual(set(verified["files"]), set(bundle.CAPTURED_CONTROL_FILES))
+        before = self._snapshot()
+        with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_CAS_MISMATCH"):
+            bundle.install(source=HERE, control_root=self.control,
+                           launcher=self.launcher, expected_bundle_digest="0" * 64)
+        self.assertEqual(self._snapshot(), before)
+        result = bundle.install(source=HERE, control_root=self.control,
+                                launcher=self.launcher,
+                                expected_bundle_digest=prior["bundleDigest"])
+        self.assertEqual(set(result["files"]), EXPECTED_FILES)
+        self.assertEqual(bundle.verify(control_root=self.control,
+                                      launcher=self.launcher)["bundleDigest"],
+                         result["bundleDigest"])
+
+    def test_captured_ten_member_verification_keeps_lock_and_cache_fences(self):
+        self._captured_ten_member_fixture()
+        cache = self.control / "__pycache__"
+        cache.mkdir(mode=0o700)
+        (cache / "private_service.fixture.pyc").write_bytes(b"not executable")
+        (cache / "private_service.fixture.pyc").chmod(0o600)
+        with self.assertRaises(bundle.Refusal):
+            bundle.verify(control_root=self.control, launcher=self.launcher)
+        shutil.rmtree(cache)
+        (self.control / ".control-bundle.lock").unlink()
+        with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_LOCK_REQUIRED"):
+            bundle.verify(control_root=self.control, launcher=self.launcher)
+
+    def test_formatter_compiler_executes_only_authenticated_captured_bytes(self):
+        self._install()
+        marker = self.home / "compiler-replacement-executed"
+        result = self._child(r"""
+path=root/"fleet_git_failure_compat.py"
+path.write_text("from pathlib import Path\nPath("+repr(sys.argv[2])+").write_text('unsafe')\n")
+owner=svc._fleet_git_failure_compat_module()
+assert callable(owner.compile_successor)
+assert Path(owner.__file__)==path
+assert not Path(sys.argv[2]).exists()
+print("authenticated compiler snapshot")
+""", marker)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("authenticated compiler snapshot", result.stdout)
+        self.assertFalse(marker.exists())
+        self._assert_refused()
+
     def test_actual_payload_installs_exact_closed_runtime(self):
         installed = self._install()
+        self.assertEqual(len(bundle.CONTROL_FILES), 13)
+        self.assertEqual(len(bundle.CAPTURED_CONTROL_FILES), 10)
+        self.assertIn("fleet_git_failure_compat.py", bundle.CONTROL_FILES)
+        self.assertIn(
+            "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+            bundle.CONTROL_FILES)
+        self.assertNotEqual(set(bundle.CONTROL_FILES), set(bundle.CAPTURED_CONTROL_FILES))
         self.assertEqual(set(installed["files"]), EXPECTED_FILES)
+        self.assertEqual(set(installed["files"]), set(bundle.CONTROL_FILES))
+        import private_service as source_service
+        self.assertEqual(set(source_service.CONTROL_BUNDLE_FILES), set(bundle.CONTROL_FILES))
+        self.assertEqual(len(source_service.CONTROL_BUNDLE_FILES), 13)
         verified = bundle.verify(control_root=self.control, launcher=self.launcher)
         self.assertEqual(verified["bundleDigest"], installed["bundleDigest"])
         for name, digest in installed["files"].items():
             self.assertEqual(hashlib.sha256((self.control / name).read_bytes()).hexdigest(), digest)
         result = self._child(r"""
 mods=[svc._pin_owner_module(),svc._pin_enrollment_owner_module(),
-      svc._fleet_status_successor_owner_module(),svc._frozen_paper_fleet_module()]
+      svc._fleet_status_successor_owner_module(),svc._frozen_paper_fleet_module(),
+      svc._fleet_git_failure_compat_module()]
 assert {Path(m.__file__).parent for m in mods}=={root}
 assert all(Path(m.__file__).is_relative_to(root) for m in mods)
 print(json.dumps({"helpers":[Path(m.__file__).name for m in mods]}))
@@ -104,6 +186,7 @@ print(json.dumps({"helpers":[Path(m.__file__).name for m in mods]}))
         self.assertEqual(set(json.loads(result.stdout)["helpers"]), {
             "private_service_pin.py", "private_service_pin_enrollment.py",
             "private_service_status_successor.py", "paper_v20_fleet_cohorts.py",
+            "fleet_git_failure_compat.py",
         })
 
     def test_installed_resolvers_reach_real_native_plan_refusal(self):
@@ -209,7 +292,8 @@ print(json.dumps({"real_native_imports":len(seen),"fixture_refusal":"invalid lau
         self._install()
         path = self.control / "manifest.json"
         raw = path.read_bytes()
-        for names in (bundle.LEGACY_CONTROL_FILES, bundle.STATUS_CONTROL_FILES):
+        for names in (bundle.LEGACY_CONTROL_FILES, bundle.STATUS_CONTROL_FILES,
+                      bundle.CAPTURED_CONTROL_FILES):
             with self.subTest(members=len(names)):
                 manifest = json.loads(raw)
                 manifest["files"] = {name: manifest["files"][name] for name in names}
@@ -484,8 +568,27 @@ print(json.dumps(value))
         self.assertLess(len(malicious), len(original))
         source.write_bytes(malicious + b"#" * (len(original) - len(malicious)))
         os.utime(source, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
-        cache = Path(py_compile.compile(
-            str(source), doraise=True, invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP))
+        saved_prefix = sys.pycache_prefix
+        sys.pycache_prefix = None
+        try:
+            cache = Path(importlib.util.cache_from_source(str(source)))
+            self.assertEqual(Path(py_compile.compile(
+                str(source), cfile=str(cache), doraise=True,
+                invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)), cache)
+        finally:
+            sys.pycache_prefix = saved_prefix
+        self.assertIn(sys.implementation.cache_tag, cache.name)
+        self.assertTrue(cache.is_file())
+        loader = importlib.machinery.SourceFileLoader("fixture_private_service", str(source))
+        self.assertEqual(loader.path_stats(str(source))["mtime"], original_stat.st_mtime)
+        raw = cache.read_bytes()
+        self.assertEqual(raw[:4], importlib.util.MAGIC_NUMBER)
+        self.assertEqual(int.from_bytes(raw[4:8], "little"), 0)
+        self.assertEqual(int.from_bytes(raw[8:12], "little"), int(original_stat.st_mtime))
+        self.assertEqual(int.from_bytes(raw[12:16], "little"), len(original))
+        code = loader.get_code("fixture_private_service")
+        self.assertIsInstance(code, type((lambda: None).__code__))
+        self.assertEqual(code.co_filename, str(source))
         source.write_bytes(original)
         os.utime(source, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
         cache.chmod(0o600)
@@ -532,7 +635,16 @@ print(json.dumps(value))
     def test_installer_removes_prior_bootstrap_caches_under_its_lock(self):
         self._install()
         source = self.control / "private_service.py"
-        py_compile.compile(str(source), doraise=True)
+        saved_prefix = sys.pycache_prefix
+        sys.pycache_prefix = None
+        try:
+            cache_file = Path(importlib.util.cache_from_source(str(source)))
+            self.assertEqual(Path(py_compile.compile(
+                str(source), cfile=str(cache_file), doraise=True)), cache_file)
+        finally:
+            sys.pycache_prefix = saved_prefix
+        self.assertIn(sys.implementation.cache_tag, cache_file.name)
+        self.assertTrue(cache_file.is_file())
         cache = self.control / "__pycache__"
         self.assertTrue(cache.is_dir())
         installed = self._install()

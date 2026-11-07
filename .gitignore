@@ -11,6 +11,7 @@ data/portfolio/*.json
 data/portfolio/*.jsonl
 data/brain/*.jsonl
 data/brain/*.json
+data/brain/.*.lock
 data/brain/runs/
 data/signal_archive/*.parquet
 data/*.db

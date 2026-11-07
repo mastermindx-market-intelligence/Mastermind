@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-14T17:21:03.423889+00:00",
+  "source_scope": "Existing broker account admission using existing cached quota data only",
+  "installed_files": {
+    "quota_remote.py": "80ce4151a5d3f05528bc3c5e9af214d510ad9d9f17803c62f01a4c2d818ec5ff",
+    "lease_broker.py": "a72bc031ddb81e559e0cf48fcbf824a959edfcf445c1d3d2d89348c3c66c6f0c"
+  },
+  "no_installed_effect": true,
+  "failed_run": "fabric-ci-read-contract-tests-01a11e90-v1",
+  "failed_run_replay": false,
+  "proven_gap": "GLM global meter can be OK while individual broker account has zero weekly remaining; account_cap has no GLM quota filter"
+}

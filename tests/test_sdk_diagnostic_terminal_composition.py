@@ -18,19 +18,15 @@ from test_sdk_diagnostic_bridge import (
 
 
 def waterfall_call(harness, monkeypatch, *, guard=None):
-    """Keep the real waterfall/classifier, with explicit metadata and no providers."""
+    """Keep the real waterfall; owned terminals and vetoes never consult shared auth."""
     from brain import provider_waterfall as pw
-    import bot  # noqa: F401 -- install the repository's original Macro import path
-    from engine import llm_auth
+    shared_lookups = []
 
-    class Pool:
-        def mark_cooling(self, *args, **kwargs):
-            raise AssertionError("a refusal or owned terminal failure cannot cool a provider")
+    def unexpected_shared_modules():
+        shared_lookups.append(True)
+        raise AssertionError("a refusal or owned SDK terminal cannot consult shared auth")
 
-        def record_session(self, *args, **kwargs):
-            raise AssertionError("a refusal or owned terminal failure is not a successful session")
-
-    monkeypatch.setattr(pw, "_shared_modules", lambda: (llm_auth, Pool()))
+    monkeypatch.setattr(pw, "_shared_modules", unexpected_shared_modules)
     monkeypatch.setattr(pw, "provider_rungs", lambda _role: [
         {"provider": "oauth", **candidate, "cooling": False} for candidate in CANDIDATES
     ])
@@ -50,11 +46,14 @@ def waterfall_call(harness, monkeypatch, *, guard=None):
     monkeypatch.setattr(pw, "_failure_kind", failure_kind)
 
     def invoke():
-        return asyncio.run(pw.reason(
-            "fixture prompt", model="fixture-model", role="deep", arm=True,
-            allowed_tools=[], add_dirs=[], mcp_servers={}, cwd="/fixture/workspace",
-            book="autonomous", before_provider_start=guard,
-        ))
+        try:
+            return asyncio.run(pw.reason(
+                "fixture prompt", model="fixture-model", role="deep", arm=True,
+                allowed_tools=[], add_dirs=[], mcp_servers={}, cwd="/fixture/workspace",
+                book="autonomous", before_provider_start=guard,
+            ))
+        finally:
+            assert shared_lookups == [], "owned terminal/refusal consulted shared auth"
 
     return invoke, entries, classifications
 
@@ -189,7 +188,7 @@ def test_sticky_terminal_preserves_thinking_text_and_tool_handlers(
     assert result["cost_usd"] == 0.75 and result["session_id"] == "fixture-session"
     assert result["usage"] == {"input_tokens": 11, "output_tokens": 7}
     assert len(entries) == len(h.providers) == len(result["provider_attempts"]) == 1
-    assert outer_classifications == ["sdk_terminal_error"]
+    assert outer_classifications == []
     assert h.classifications == h.cooling == h.sessions == []
     assert len(ledger) == 1
     assert ledger[0]["thinking"] == [
@@ -256,7 +255,7 @@ def test_terminal_finalization_failure_never_becomes_auth_or_quota_replay(
         assert result["ok"] is False and result["error"] == "sdk_terminal_error"
         assert result["text"] == "401 429 usage limit reached"
         assert len(result["provider_attempts"]) == 1
-        assert outer_classifications == ["sdk_terminal_error"]
+        assert outer_classifications == []
     assert finishes == [("exhausted", None)] and len(records) == 1
     assert len(entries) == len(h.providers) == 1
     assert h.classifications == h.cooling == h.sessions == []

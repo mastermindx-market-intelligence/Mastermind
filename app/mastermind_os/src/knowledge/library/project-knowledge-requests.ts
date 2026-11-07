@@ -22,6 +22,10 @@
  */
 
 /** Maximum accepted file size in bytes (read and validated before decoding). */
+import {DISCOVERY_CORRECTION_SCHEMA, validateDiscoveryCorrectionRequest, type ProjectDiscoveryCorrectionRequest} from './project-discovery-correction';
+export type {ProjectDiscoveryCorrectionRequest} from './project-discovery-correction';
+export type ProjectKnowledgeRequest = ProjectFileAddRequest | ProjectPreferenceSetRequest | ProjectDiscoveryCorrectionRequest;
+
 export const MAX_FILE_BYTES = 32768;
 
 /** Maximum communication preference literal size in UTF-8 bytes. */
@@ -467,6 +471,27 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+/** Local draft DATA only. No project, request identity, source, grant or upload.
+ * The later publisher still uses buildProjectFileRequest with its independently
+ * current source context and must compare this exact staged file part.
+ */
+export async function readStagedProjectFile(
+  file: File,
+  signal?: AbortSignal | null,
+): Promise<Readonly<ProjectFileAddRequestFile>> {
+  const meta = captureFileMeta(file);
+  const displayName = validateDisplayName(meta.name);
+  const mediaType = mediaTypeForBasename(displayName);
+  if (mediaType === null || (meta.type !== '' && meta.type !== mediaType)) {
+    reject('UNSUPPORTED_FILE_TYPE', 'file type does not match the trusted extension mapping');
+  }
+  ensureNotAborted(signal);
+  const bytes = await readFileBytes(meta);
+  ensureNotAborted(signal);
+  return deepFreeze({display_name: displayName, media_type: mediaType,
+    content_utf8: decodeFileText(bytes)});
+}
+
 /**
  * Builds the exact closed public project file add request from one actual
  * browser File the user explicitly selected. Pure construction: on any
@@ -598,6 +623,9 @@ function validatePublicRequestCopy(request: unknown): Record<string, unknown> {
     reject('INVALID_REQUEST_ID', 'public request must be a plain closed data object');
   }
   const schema = readStringField(request, 'schema', 'INVALID_REQUEST_ID');
+  if (schema === DISCOVERY_CORRECTION_SCHEMA) {
+    return {...validateDiscoveryCorrectionRequest(request)};
+  }
   if (schema === FILE_REQUEST_SCHEMA) {
     requireExactKeys(
       request,
@@ -721,7 +749,7 @@ function validateBaseRevisionField(request: Record<string, unknown>): string {
  * is rejected before any serialization.
  */
 export function canonicalPublicRequest(
-  request: ProjectFileAddRequest | ProjectPreferenceSetRequest,
+  request: ProjectKnowledgeRequest,
 ): string {
   const validated = validatePublicRequestCopy(request);
   return canonicalJson(validated);
@@ -735,7 +763,7 @@ export function canonicalPublicRequest(
  * source-currency fence applies here.
  */
 export async function publicRequestSha256(
-  request: ProjectFileAddRequest | ProjectPreferenceSetRequest,
+  request: ProjectKnowledgeRequest,
 ): Promise<string> {
   const canonical = canonicalPublicRequest(request);
   const subtle: Crypto['subtle'] | undefined =

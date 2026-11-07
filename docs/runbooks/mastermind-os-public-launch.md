@@ -4,6 +4,29 @@ This is installation guidance for the existing OS → Executive command path.
 Source tests do not establish an installed launch or permission to widen a grant.
 Keep the existing Workspace, Content, Executive, Studio, Git and Runtime owners.
 
+## Current-project entry — 6 November 2026 source candidate
+
+The current project-team path mounts the existing Executive command context and
+pending-operation store without requiring a legacy Launch catalog. Current-project
+Start work, completed-result follow-ups and fresh conversations still require
+their actual Executive authentication and source-qualified admission. See
+[Project team execution](../../app/mastermind_os/docs/project-team-execution.md)
+for the exact composition, retained-code behavior and installed acceptance scope.
+
+For a web build that supplies only the qualified Executive resource, use the
+existing `ops.executive_os.os_release_assets` recipe with its explicit
+`--executive-resource` input and omit `--launch-manifest`. Its closed
+`mastermind.os_web_build.executive.v3` receipt uses mode `web+executive` and has no
+legacy manifest fields. Omitting both inputs retains the read-only v1 default;
+supplying the exact resource and canonical manifest retains the legacy v2
+`web+launch` contract. Ambient build configuration is not inherited.
+
+The commission-publication and manifest instructions below describe the legacy
+Launch flow. Its installed grants and v2-only publication qualifier are unchanged;
+a v3 resource-only artifact cannot qualify as legacy Launch enrollment. The source
+candidate does not establish installation, authorize an edge transition or clear
+any F2, original-operation, administrator or private-artifact hold recorded below.
+
 ## Publication before admission
 
 An OS launch key is the SHA-256-derived "mmos-launch-<40hex>" of the authenticated
@@ -197,8 +220,9 @@ the native callback is com.mastermind.os://oauth/callback. Reconcile existing
 registrations before creating clients; unknown prior registration effects are
 not permission to recreate/delete one. No offline refresh scope is needed.
 
-Supply actual immutable VITE_MM_LAUNCH_CONFIG matching installed publication
-templates. The UI's project ref maps to department, profile ref to execution_profile;
+For the legacy Launch catalog, supply actual immutable VITE_MM_LAUNCH_CONFIG
+matching installed publication templates. The UI's project ref maps to department,
+profile ref to execution_profile;
 optional fields must match what the form emits. Workspace and Content views retain
 their own existing auth/policy/binding owners. Use workspace_owner_enrollment.py
 with real client, subject and permission receipts; a working Executive token is

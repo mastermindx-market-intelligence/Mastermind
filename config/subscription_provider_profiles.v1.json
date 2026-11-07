@@ -114,8 +114,8 @@
       "activation_gate": "provider_realm_enrolled_and_capacity_known",
       "usage_policy": {
         "supported_harness_required": true,
-        "interactive_only": true,
-        "unattended_background_allowed": false,
+        "interactive_only": false,
+        "unattended_background_allowed": true,
         "production_backend_allowed": false,
         "single_user_only": true
       }

@@ -13,6 +13,7 @@ For each principal construct `SecretaryAccessClient(work_ref="WS:...", root_job_
 Source APIs:
 
 - `await sdk.read_mission(previous_fingerprint=None, limit=8)`: fixed `GET /workspace/mission/v3/current`, exact host-bound Mission v3 selection and closed bounded summary; invalid/missing/foreign sources fail closed.
+- `await sdk.read_project_plan()`: one fixed `GET /workspace/project-plan/current` using only the host-selected workstream, the incumbent v1/v2 canonical validator and 131072-byte wire cap. No caller selector, raw filesystem path or new authorization. This is authored plan evidence, not dispatch authority or a guaranteed root-job plan. The leadership reader can optionally consume a bounded projection.
 - `await sdk.read_native_catalog(...)`: fixed `GET /workspace/fabric/catalog/current`, always explicitly `PARTIAL`, `EXACT_RUN_SET`, unknown fleet count; original COO-only entitlement is enforced by the existing server.
 - `await sdk.read_native_status(root_id="JOB-...", run_id="ATT-...")`: fixed exact native status read; owner fields preserve execution/acceptance separately.
 - `await sdk.mandate()`: fixed `POST /v1/tools/executive_mandate`; an observed mandate never grants a new effect locally.
@@ -20,7 +21,7 @@ Source APIs:
 - `await sdk.reconcile_intent(original_request_ref)`: **read-only logical operation** through the original `POST /v1/tools/principal_intent_status`; no new work.
 - `await sdk.rule(public_ruling_arguments)`: opt-in **one** original `POST /mcp/principal-ruling` `tools/call` using the original validated public argument schema, bound target and caller supplied by host. A transport loss yields `EFFECT_UNKNOWN` with the original obligation; no reroute.
 
-No method takes an arbitrary URL, origin, actor, credential, Authorization header, model/provider/host, account, new-obligation ID or retry destination. Responses are bounded and strict JSON (duplicate keys, nonfinite values, oversize and deep shapes refused). Redirects are never followed. Source-invalid READ returns `UNAVAILABLE`; HTTP permission refusal remains `REFUSED`. Modifying response loss, cancellation, malformed post-send status, or an unverified receipt leaves the **original** effect `EFFECT_UNKNOWN`, with `replay_authorized=false`. The host must supply a **non-retrying transport**. Never retry or fail over an unknown effect; use only the incumbent reconciliation path.
+No method takes an arbitrary URL, origin, actor, credential, Authorization header, model/provider/host, account, new-obligation ID or retry destination. Responses are bounded and strict JSON (duplicate keys, nonfinite values, oversize and deep shapes refused). Redirects are never followed. Source-invalid READ returns `UNAVAILABLE`; HTTP permission refusal remains `REFUSED`, including observed 401/403 responses whose body is empty, malformed, oversized or interrupted. Modifying response loss, cancellation, malformed post-send status, or an unverified receipt leaves the **original** effect `EFFECT_UNKNOWN`, with `replay_authorized=false`. The host must supply a **non-retrying transport**. Never retry or fail over an unknown effect; use only the incumbent reconciliation path.
 
 ## Proven vs outstanding
 

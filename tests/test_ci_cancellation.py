@@ -16,14 +16,9 @@ def test_heavy_jobs_cancel_and_final_gate_keeps_aggregating():
     source = WORKFLOW.read_text(encoding="utf-8")
     validate_parallel_workflow(source)
     jobs = yaml.load(source, Loader=_WorkflowYAMLLoader)["jobs"]
-    assert jobs["pr_fast"]["if"] == (
-        "${{ !cancelled() && github.event_name == 'pull_request' && "
-        "needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}"
-    )
-    assert jobs["pytest_shards"]["if"] == (
-        "${{ !cancelled() && (github.event_name != 'pull_request' || "
-        "(needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}"
-    )
+    from scripts import ci_parallel_shard as fan
+    assert jobs["pr_fast"]["if"] == fan._REQUIRED_PR_FAST_IF
+    assert jobs["pytest_shards"]["if"] == fan._REQUIRED_SHARDS_IF
     assert jobs["test"]["if"] == "${{ always() }}"
     assert jobs["test"]["needs"] == ["pr_scope", "pr_fast", "pytest_shards"]
 

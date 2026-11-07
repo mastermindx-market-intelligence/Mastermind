@@ -62,6 +62,80 @@ def extension_tools_for(profile: RuntimeProfile) -> frozenset[str]:
     return frozenset(found)
 
 
+def inspect_extension_proof(
+    observed: object,
+    *,
+    expected_tool: str,
+    expected_schema_sha256: str | None = None,
+    expected_scope: str | None = None,
+    expected_binding: Mapping[str, object] | None = None,
+) -> dict:
+    """Evaluate the serving-process extension proof.
+
+    This is deliberately *not* the static census. The static census is the
+    no-credential built-in listing a separate process produces; it can never
+    prove an extension, and feeding desired extension names through
+    ``register_extension_tools`` is not installed proof either.
+
+    This evaluates the read-back of the actual scoped entry in the serving
+    process: the tool is present, in the expected scope, with the released
+    schema. An absent, stale or unqualified process keeps the hold.
+    """
+    issues: set[str] = set()
+    if not isinstance(observed, Mapping):
+        return {
+            "schema": REGISTRY_SCHEMA,
+            "status": "BLOCKED",
+            "issues": ["EXTENSION_PROOF_UNREADABLE"],
+            "installed": False,
+            "effect_expectation": "NONE",
+        }
+    if observed.get("tool") != expected_tool:
+        issues.add("EXTENSION_TOOL_MISMATCH")
+    if observed.get("present") is not True:
+        issues.add("EXTENSION_NOT_PRESENT")
+    if expected_scope is not None and observed.get("scope") != expected_scope:
+        issues.add("EXTENSION_SCOPE_MISMATCH")
+    if expected_schema_sha256 is not None:
+        if observed.get("schema_sha256") != expected_schema_sha256:
+            issues.add("EXTENSION_SCHEMA_MISMATCH")
+    if expected_binding is not None:
+        if not isinstance(expected_binding, Mapping) or not expected_binding:
+            issues.add("EXTENSION_BINDING_UNQUALIFIED")
+        elif any(observed.get(key) != value for key, value in expected_binding.items()):
+            issues.add("EXTENSION_BINDING_MISMATCH")
+    return {
+        "schema": REGISTRY_SCHEMA,
+        "status": "PASS_EXTENSION_PROOF" if not issues else "BLOCKED",
+        "issues": sorted(issues),
+        "installed": not issues,
+        "effect_expectation": "NONE",
+    }
+
+
+def assert_extension_proof_exact(
+    observed: object,
+    *,
+    expected_tool: str,
+    expected_schema_sha256: str | None = None,
+    expected_scope: str | None = None,
+    expected_binding: Mapping[str, object] | None = None,
+) -> dict:
+    """Require a proved serving-process extension entry.
+
+    The refusal is ``NATIVE_EXTENSION_NOT_INSTALLED``: the hold is never
+    globally cleared by a static name, a configured value or a connected
+    boolean.
+    """
+    result = inspect_extension_proof(
+        observed, expected_tool=expected_tool,
+        expected_schema_sha256=expected_schema_sha256, expected_scope=expected_scope,
+        expected_binding=expected_binding)
+    if result["status"] != "PASS_EXTENSION_PROOF":
+        raise RuntimeRefusal("NATIVE_EXTENSION_NOT_INSTALLED")
+    return result
+
+
 def inspect_tool_registry(
     tool_list: str,
     stderr: str | bytes | None,

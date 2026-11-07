@@ -158,10 +158,15 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "a2-restored-readside-preflight",
         "finite-control-stage",
         "finite-control-stage-reconcile",
+        "finite-control-retire",
+        "finite-control-retire-reconcile",
         "paid-control-stage",
         "paid-control-stage-reconcile",
         "publish-os-gateway",
         "reconcile-os-gateway",
+        "plan-control-component",
+        "apply-control-component",
+        "reconcile-control-component",
     }
     # The OS gateway publication domain: the two closed verbs carry only the
     # bounded digests and the original transaction id, and never accept a
@@ -182,6 +187,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "expected_mcp_plist_sha256": "c" * 64,
         "expected_grant_sha256": None,
         "expected_grant_absent": True,
+        "expected_predecessor_receipt_sha256": None,
     }
     digest_publish = list(publish_argv)
     digest_publish[-1:] = ["--expected-grant-sha256", "d" * 64]
@@ -232,10 +238,11 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         with pytest.raises(SystemExit):
             parser.parse_args([command, "--expected-sha", SHA, "--service-label", "foreign"])
 
-    for command in ("finite-control-stage", "finite-control-stage-reconcile"):
+    for command in ("finite-control-stage", "finite-control-stage-reconcile",
+                    "finite-control-retire", "finite-control-retire-reconcile"):
         argv = [command, "--expected-sha", SHA]
         expected = {"command": command, "expected_sha": SHA}
-        if command == "finite-control-stage":
+        if command in {"finite-control-stage", "finite-control-retire"}:
             with pytest.raises(SystemExit):
                 parser.parse_args(argv)
             argv += ["--expected-control-sha256", "a" * 64]

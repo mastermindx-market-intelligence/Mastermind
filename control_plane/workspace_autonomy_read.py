@@ -67,16 +67,25 @@ def compose_autonomy_policy_read(plan_body, policy):
             or not _hash(policy.policy_sha256)
             or plan["policy_sha"] != policy.policy_sha256
             or not _hash(policy.source_sha256)
+            or type(plan["plan_schema_version"]) is not str
             or plan["plan_schema_version"] not in {
                 "mastermind.execution_plan/v1", "mastermind.execution_plan/v2",
-                "mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
+                "mastermind.execution_plan/v3", "mastermind.execution_plan/v4",
+                "mastermind.execution_plan/v5"}
+            or type(plan["admission_schema_version"]) is not str
             or plan["admission_schema_version"] != (
-                "mastermind.coo_plan_admission/v2" if plan["plan_schema_version"] in {
+                "mastermind.coo_plan_admission/v3"
+                if plan["plan_schema_version"] == "mastermind.execution_plan/v5"
+                else "mastermind.coo_plan_admission/v2" if plan["plan_schema_version"] in {
                     "mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
                 else "mastermind.coo_plan_admission/v1")
+            or policy.schema_version != (
+                2 if plan["plan_schema_version"] == "mastermind.execution_plan/v5" else 1)
             or type(plan["plan_attempt_id"]) is not str
             or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", plan["plan_attempt_id"]) is None
-            or type(plan["steps"]) is not list or len(plan["steps"]) > 8):
+            or type(plan["steps"]) is not list
+            or len(plan["steps"]) > (
+                16 if plan["plan_schema_version"] == "mastermind.execution_plan/v5" else 8)):
         _refuse()
     limits = policy.to_dict()
     if (type(limits) is not dict or set(limits) != _LIMIT_FIELDS

@@ -17,13 +17,17 @@ def _approved_project_block(text: str) -> str:
     )[1].split("\n```", 1)[0]
 
 
+
 def _contains_macro_release_instruction(text: str) -> bool:
+    # Accepted Macro opt-in still lives in DELIVERY_WORKFLOW; the compact
+    # one-pass rule routes there and must never bulk-arm other PRs.
     return all(
         snippet in _approved_project_block(text)
         for snippet in (
-            "9A. Macro `merge-on-green`:",
+            "9A. ONE-PASS DELIVERY:",
             "docs/DELIVERY_WORKFLOW.md",
-            "Never bulk-arm.",
+            "actual repo controls/opt-ins govern",
+            "Never bulk-arm/clear other holds",
         )
     )
 
@@ -36,27 +40,25 @@ def test_actual_web_project_block_exposes_release_pointer_within_budget():
     assert len(block) <= 8000
     assert len(block.encode("utf-8")) <= 8000
     for anchor in (
-        "6A. No named-seat lock",
-        "33. MORE_WORK_EXISTS means the mission is incomplete",
-        "39. Persist results/rulings/continuations",
+        "6A. No named reviewer seat absent binding rule",
+        "33. MORE_WORK_EXISTS is incomplete",
+        "39. Persist rulings/results to canonical owners",
         "40. Grok Secretary",
-        "Review: load docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md at pin.",
+        "5A. CHATGPT WEB REVIEW WAIVER",
     ):
-        assert anchor in block, f"incumbent #1987 instruction lost: {anchor}"
+        assert anchor in block, f"incumbent release safety lost: {anchor}"
     assert DELIVERY.is_file()
 
 
 def test_outside_fence_release_note_does_not_count_as_installed_instruction():
     kernel = KERNEL.read_text(encoding="utf-8")
     assert _contains_macro_release_instruction(kernel)
-    moved = kernel.replace(
-        "9A. Macro `merge-on-green`: docs/DELIVERY_WORKFLOW.md. Never bulk-arm.",
-        "",
-    )
-    assert moved != kernel, "the exact projected rule must exist in the source"
+    marker = "9A. ONE-PASS DELIVERY:"
+    moved = kernel.replace(marker, "", 1) + "\n" + marker
+    assert moved != kernel, "actual projected release pointer must exist"
     assert not _contains_macro_release_instruction(moved)
+    assert marker in moved
     assert "Cross-session PR release and auto-merge discoverability" in moved
-
 
 def test_release_procedure_requires_review_holds_ci_and_real_sweeper_readback():
     delivery = DELIVERY.read_text(encoding="utf-8")

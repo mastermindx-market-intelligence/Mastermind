@@ -25,7 +25,10 @@ HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102
 PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
 PRE_POLL255_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
 PRE_POLL255_WITH_UBUNTU4_TASK_SHA = "36fbd16469befa0f4ade8d75fe15b3384a042b726668879c59ae03c82d194058"
-CURRENT_TASK_SHA = "c132a163aa6071eb577d8ecea0749d47ef2377b58c92dacb5fcc4a34c8dbc9a7"
+PRE_REMOTE_CWD_TASK_SHA = "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
+PRE_REFUSAL_DIAGNOSTICS_TASK_SHA = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
+PRE_ADMISSION_TASK_SHA = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
+CURRENT_TASK_SHA = "85bebdfd19ec5d13124608e74ebe37fd310a0d4d0fb5071a6e8fc4d87463d799"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -36,7 +39,7 @@ AFTER = {
     "ext/pick.py": "9bbb96c8da84e38bbd802fdd373a0e8ba386395abc5a80bc8628b49d5afd8174",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
 }
-COMPOSED_PICK = "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132"
+COMPOSED_PICK = "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892"
 
 
 def _preobserver_picker():
@@ -66,7 +69,69 @@ def _pre_central_glm_task(value: bytes) -> bytes:
     for newer, older in pairs:
         assert value.count(newer) == 1
         value = value.replace(newer, older, 1)
-    assert hashlib.sha256(value).hexdigest() == "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd"
+    assert hashlib.sha256(value).hexdigest() == "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68"
+    return value
+
+
+def _pre_refusal_diagnostics_task(value: bytes) -> bytes:
+    """Undo only the exact diagnostic successor inside the disposable F1 stage."""
+    assert hashlib.sha256(value).hexdigest() == PRE_ADMISSION_TASK_SHA
+    pairs = (
+        (
+            b"# Closed diagnostics only: these labels grant no routing, retry or acceptance.\n"
+            b"# Never retain arbitrary picker text, provider output, paths or account detail.\n"
+            b"_REQUEST_REFUSAL_CODES = frozenset({\n"
+            b"    \"NO_OPERATOR_AVAILABLE\", \"NO_POOL_AVAILABLE\", \"NO_ROUTE\",\n"
+            b"    \"ROUTE_INCOMPLETE\", \"REQUEST_ROUTING_RETURN_UNQUALIFIED\",\n"
+            b"    \"REQUEST_MAX_TURNS_INVALID\", \"REQUEST_MAX_TURNS_ROUTE_UNSUPPORTED\",\n"
+            b"    \"ECONOMIC_POLICY_REFUSED\", \"UNCLASSIFIED_PRELAUNCH_REFUSAL\",\n"
+            b"})\n"
+            b"\n"
+            b"\n"
+            b"def _safe_request_refusal_code(exc: BaseException) -> str:\n"
+            b"    unknown = \"UNCLASSIFIED_PRELAUNCH_REFUSAL\"\n"
+            b"    if type(exc) is not FabricTaskError:\n"
+            b"        return unknown\n"
+            b"    args = exc.args\n"
+            b"    if not args or type(args[0]) is not str or len(args[0]) > 1024:\n"
+            b"        return unknown\n"
+            b"    message = args[0]\n"
+            b"    # The deadline-aware picker runs in an owned subprocess. It returns only\n"
+            b"    # this fixed no-operator marker; historical receipts omitted the cause.\n"
+            b"    if message == \"NONE reason=no_operator_available\":\n"
+            b"        return \"NO_OPERATOR_AVAILABLE\"\n"
+            b"    if message == \"NONE reason=no_pool_available\":\n"
+            b"        return \"NO_POOL_AVAILABLE\"\n"
+            b"    code = message.partition(\":\")[0]\n"
+            b"    return code if code in _REQUEST_REFUSAL_CODES else unknown\n"
+            b"\n"
+            b"\n",
+            b"",
+        ),
+        (
+            b"                refusal_diagnostic: dict[str, str] = {}\n",
+            b"",
+        ),
+        (
+            b"                    code = proof.get(\"refusal_code\")\n"
+            b"                    refusal_diagnostic[\"request_refusal_code\"] = (\n"
+            b"                        code if type(code) is str and code in _REQUEST_REFUSAL_CODES\n"
+            b"                        else \"UNCLASSIFIED_PRELAUNCH_REFUSAL\")\n",
+            b"",
+        ),
+        (
+            b"                    \"same_run_replay_allowed\": False, **refusal_diagnostic}\n",
+            b"                    \"same_run_replay_allowed\": False}\n",
+        ),
+        (
+            b"                    \"refusal_code\": _safe_request_refusal_code(exc),\n",
+            b"",
+        ),
+    )
+    for newer, older in pairs:
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == PRE_REFUSAL_DIAGNOSTICS_TASK_SHA
     return value
 
 
@@ -173,9 +238,31 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
             current = _inverse_judgment(_preobserver_picker())
         elif relative == "ext/fabric_task.py":
             assert sha(source) == CURRENT_TASK_SHA
-            # Restore the exact pre-poll-qualifier epoch first. The historical
-            # manual-auto fixture and every subsequent inverse stay immutable.
-            latest = _pre_central_glm_task(source.read_bytes())
+            # Rewind only this branch's three central GLM qualification hunks.
+            # The current protected admission/diagnostic inverses still apply.
+            (stage / relative).write_bytes(_pre_central_glm_task(current))
+            # Undo only the exact forward repair in this private stage, then
+            # retain every historical inverse and fixture at its original hash.
+            admission_patch = ROOT / "tests/fixtures/fabric-native-admission-integrity-20261107.patch"
+            assert sha(admission_patch) == "68c1abf049ee9e4c04fc749eebb9a4b99ba71a71c22945e0f5d02bc8fe107753"
+            reversed_repair = subprocess.run(
+                ["git", "apply", "--reverse", "--unidiff-zero", "--include=fabric_task.py", str(admission_patch)],
+                cwd=stage / "ext", capture_output=True, text=True, timeout=18,
+            )
+            assert reversed_repair.returncode == 0, reversed_repair.stderr[-1800:]
+            predecessor = (stage / relative).read_bytes()
+            assert hashlib.sha256(predecessor).hexdigest() == PRE_ADMISSION_TASK_SHA
+            latest = _pre_refusal_diagnostics_task(predecessor)
+            # Undo only the remote cwd default before the exact older epochs.
+            remote_cwd = (
+                b'    # Resolve an implicit working directory on the receiving host.\n'
+                b'    # The receiving host still validates explicit --cwd values.\n'
+                b'    p_request.add_argument("--cwd", default="~")\n'
+            )
+            caller_cwd = b'    p_request.add_argument("--cwd", default=os.getcwd())\n'
+            assert latest.count(remote_cwd) == 1
+            latest = latest.replace(remote_cwd, caller_cwd, 1)
+            assert hashlib.sha256(latest).hexdigest() == PRE_REMOTE_CWD_TASK_SHA
             start = b'# These reviewed wrapper bytes classify normal SSH255 as controller uncertainty\n'
             end = b'def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]:\n'
             hook = (b'    if state == "EFFECT_UNKNOWN" and _qualify_completed_poll255(rid, original_log, **owner):\n'

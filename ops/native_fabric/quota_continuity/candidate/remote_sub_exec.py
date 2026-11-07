@@ -163,6 +163,7 @@ _SPARSE_GIT_SETTINGS = (
     ("core.untrackedCache", "false"), ("core.useReplaceRefs", "false"),
     ("maintenance.auto", "false"), ("gc.auto", "0"),
     ("protocol.allow", "never"),
+    ("advice.sparseIndexExpanded", "false"),
 )
 
 
@@ -285,6 +286,17 @@ def _sparse_config(path: Path) -> tuple[dict, tuple | None]:
                 value = value.lower()
                 if value not in exact_values[key]:
                     raise ValueError("unsupported value")
+            elif key == "extensions.partialclone":
+                # This names the existing remote; preserve its case-sensitive
+                # identity. It grants no transport or lazy-fetch capability.
+                if value != "origin":
+                    raise ValueError("unsupported partial clone remote")
+            elif key in {"http.postbuffer", "http.lowspeedlimit", "http.lowspeedtime"}:
+                # Unscoped data only. Git's signs, units and other numeric
+                # spellings stay outside this deliberately closed parser.
+                if (re.fullmatch(r"0|[1-9][0-9]{0,9}", value) is None
+                        or int(value) > 2147483647):
+                    raise ValueError("unsupported HTTP numeric value")
             elif key in {"user.name", "user.email"}:
                 pass
             elif (section.startswith("remote.") and section.count(".") >= 2

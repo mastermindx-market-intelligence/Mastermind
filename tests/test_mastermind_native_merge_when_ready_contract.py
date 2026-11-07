@@ -52,6 +52,8 @@ def _assert_release_contract(release: str) -> None:
         "A changed head requires fresh source, hold, review and CI qualification",
         "Only GitHub's enforced PR-head checks and native `merge_group`",
         "Read the actual merged PR and commit before claiming release",
+        "Branch cleanup remains queue/repository-owned after merge; the native CLI"
+        " does not support `--delete-branch` during queue enrollment",
     ):
         assert required in source, required
 
@@ -61,7 +63,7 @@ def _assert_release_contract(release: str) -> None:
     assert shlex.split(command) == [
         "gh", "pr", "merge", "<PR>",
         "--repo", "mastermindx-market-intelligence/Mastermind",
-        "--auto", "--squash", "--delete-branch",
+        "--auto", "--squash",
         "--match-head-commit", "<CURRENT_40_HEX_HEAD>",
     ], "Wrong repository, missing --auto/head lease or unsafe native release flags"
 
@@ -90,6 +92,7 @@ def test_qualified_mastermind_ready_pr_enrolls_before_ci_concludes() -> None:
 ])
 def test_removing_a_binding_native_release_gate_fails_closed(required: str) -> None:
     release, _ = _sections(DELIVERY.read_text(encoding="utf-8"))
+    _assert_release_contract(release)
     assert required in " ".join(release.split())
     # Match original whitespace/newline wrapping; a literal replacement would
     # silently miss long phrases and falsely report a negative regression.
@@ -101,15 +104,31 @@ def test_removing_a_binding_native_release_gate_fails_closed(required: str) -> N
 
 
 @pytest.mark.parametrize("removed", [
-    "--auto", "--squash", "--delete-branch", "--match-head-commit",
+    "--auto", "--squash", "--match-head-commit",
     "mastermindx-market-intelligence/Mastermind",
     "<CURRENT_40_HEX_HEAD>",
 ])
 def test_native_command_mutation_is_rejected(removed: str) -> None:
     release, _ = _sections(DELIVERY.read_text(encoding="utf-8"))
+    _assert_release_contract(release)
     before, separator, fenced_and_after = release.partition("```bash")
     assert separator and removed in fenced_and_after
     # Mutate the actual command, not a preceding narrative repository mention.
     damaged = before + separator + fenced_and_after.replace(removed, "", 1)
+    with pytest.raises(AssertionError):
+        _assert_release_contract(damaged)
+
+
+@pytest.mark.parametrize("unsupported", ["--delete-branch", "--admin"])
+def test_unsupported_native_queue_flag_is_rejected(unsupported: str) -> None:
+    release, _ = _sections(DELIVERY.read_text(encoding="utf-8"))
+    _assert_release_contract(release)
+    before, opening, fenced_and_after = release.partition("```bash")
+    assert opening
+    command, closing, after = fenced_and_after.partition("```")
+    assert closing and command.count("--auto --squash") == 1
+    damaged_command = command.replace("--auto --squash", "--auto --squash " + unsupported, 1)
+    assert damaged_command != command
+    damaged = before + opening + damaged_command + closing + after
     with pytest.raises(AssertionError):
         _assert_release_contract(damaged)

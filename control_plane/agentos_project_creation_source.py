@@ -48,7 +48,7 @@ class AgentOsProjectCreationReader:
 
 
 
-def read_from_macro_owner(*, macro_root, expected_macro_sha, work_ref, record_commit=None, timeout=10.0, runner=None):
+def read_from_macro_owner(*, macro_root, expected_macro_sha, work_ref, record_commit=None, timeout=10.0, runner=None, _canonical_data_view=None):
     """Return source metadata only after the captured canonical parser/checker.
 
     The origin marker is checked against the exact parsed record rather than
@@ -59,6 +59,15 @@ def read_from_macro_owner(*, macro_root, expected_macro_sha, work_ref, record_co
     from common.workspace_project_journal_contract import validate_selection
     validate_selection({"work_ref": work_ref})
     root = Path(macro_root)
+    code_sha, code_root = expected_macro_sha, root
+    if _canonical_data_view is not None:
+        from control_plane.project_canonical_data import CanonicalProjectDataView
+        if (type(_canonical_data_view) is not CanonicalProjectDataView
+                or _canonical_data_view._root != root
+                or _canonical_data_view.data_commit != expected_macro_sha):
+            raise ValueError("source_unavailable")
+        _canonical_data_view.check()
+        code_sha, code_root = _canonical_data_view.code_commit, _canonical_data_view._code_root
     record_commit = expected_macro_sha if record_commit is None else record_commit
     if (not root.is_absolute() or not wire._hex(expected_macro_sha, 40)
             or not wire._hex(record_commit, 40)
@@ -85,9 +94,16 @@ def read_from_macro_owner(*, macro_root, expected_macro_sha, work_ref, record_co
         return result["stdout"]
 
     def captured(name, limit=262144):
-        return git("show", record_commit + ":" + name, limit=limit)
+        commit = code_sha if name in ("scripts/agentos.py", "config/mastermind_programs.yml") else record_commit
+        return git("show", commit + ":" + name, limit=limit)
 
-    if git("rev-parse", "HEAD").strip() != expected_macro_sha:
+    def current():
+        if _canonical_data_view is not None:
+            _canonical_data_view.check()
+            return True
+        return git("rev-parse", "HEAD").strip() == expected_macro_sha
+
+    if not current():
         raise ValueError("source_changed")
     # A recognized Runtime root may retain its original grounding after later
     # unrelated Macro commits. Read that immutable ancestor, never substitute
@@ -98,7 +114,7 @@ def read_from_macro_owner(*, macro_root, expected_macro_sha, work_ref, record_co
         raise ValueError("source_mismatch")
     content = captured(path, 32768)
     module = types.ModuleType("agentos_bound_project_creation_source")
-    module.__file__ = str(root / "scripts/agentos.py")
+    module.__file__ = str(code_root / "scripts/agentos.py")
     previous = sys.modules.get(module.__name__)
     original_path = list(sys.path)
     try:
@@ -131,7 +147,7 @@ def read_from_macro_owner(*, macro_root, expected_macro_sha, work_ref, record_co
         if len(raw) > 16384 or hashlib.sha256(raw).hexdigest() != request_sha:
             raise ValueError("source_mismatch")
         git("merge-base", "--is-ancestor", expected_base, record_commit, limit=1024)
-        if git("rev-parse", "HEAD").strip() != expected_macro_sha:
+        if not current():
             raise ValueError("source_changed")
         return {"repository": "macro", "commit": record_commit, "path": path,
                 "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(), "request_sha256": request_sha}

@@ -5,6 +5,9 @@ in its own interpreter so its inert routing imports cannot leak into unrelated
 repository tests.
 """
 from pathlib import Path
+import hashlib
+import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -31,3 +34,33 @@ def test_ubuntu4_central_route_regression_module(module):
         cwd=ROOT, env=env, capture_output=True, text=True, timeout=120,
     )
     assert result.returncode == 0, (result.stdout + result.stderr)[-12000:]
+
+
+def test_current_native_source_admits_only_exact_central_glm_cohort():
+    """Historical parent views must not accept a mixed or foreign source trio."""
+    builder_path = ROOT / "ops/native_fabric/quota_continuity/rollout/build_review_stage.py"
+    spec = importlib.util.spec_from_file_location("ubuntu4_native_integrity", builder_path)
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+    manifest = json.loads(builder_path.with_name("native-manifest.json").read_bytes())
+    for relative, digest in builder.UBUNTU4_CENTRAL_GLM_NATIVE_DIGESTS.items():
+        name = relative.removeprefix("ext/")
+        source = builder_path.parent.parent / "candidate" / name
+        assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
+        assert manifest[relative] == digest
+    original = dict(manifest)
+    predecessor = builder.before_ubuntu4_central_glm(manifest)
+    assert manifest == original
+    assert {key: predecessor[key] for key in builder.UBUNTU4_CENTRAL_GLM_NATIVE_PREIMAGES} == (
+        builder.UBUNTU4_CENTRAL_GLM_NATIVE_PREIMAGES)
+    assert builder.before_ubuntu4_central_glm(predecessor) == predecessor
+    for relative, historical in builder.UBUNTU4_CENTRAL_GLM_NATIVE_PREIMAGES.items():
+        mixed = dict(manifest)
+        mixed[relative] = historical
+        with pytest.raises(ValueError, match="incomplete or foreign"):
+            builder.before_ubuntu4_central_glm(mixed)
+    for relative in builder.UBUNTU4_CENTRAL_GLM_NATIVE_DIGESTS:
+        foreign = dict(manifest)
+        foreign[relative] = "0" * 64
+        with pytest.raises(ValueError, match="incomplete or foreign"):
+            builder.before_ubuntu4_central_glm(foreign)

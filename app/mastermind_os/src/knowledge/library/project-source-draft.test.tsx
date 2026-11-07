@@ -486,7 +486,7 @@ describe('ProjectSourceDraftCompanion', () => {
     expect(panel!.textContent).toContain('Original unsent draft');
     expect(panel!.textContent).toContain('The draft is empty.');
     expect(panel!.textContent).toContain(`${proof!.draftSource.label}`);
-    expect(panel!.textContent).toContain('Nothing is sent, stored or re-read');
+    expect(panel!.textContent).toContain('Adds the excerpt and source label to this unsent draft. Nothing is sent.');
     expect(rendered.container.querySelectorAll('button')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Add excerpt to draft' })).toBeTruthy();
   });

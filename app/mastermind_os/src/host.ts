@@ -1,5 +1,10 @@
+import { decodeCompanyPriorities, type CompanyPrioritiesOwner } from "./meta-ceo/company-priorities";
+import { decodeNativeExecutiveObservation, type NativeExecutiveObservation } from "./native-executive-observation";
+import {hostObservationHostMethods,hostObservationPublicSelection,type HostObservationRawMethods,type HostObservationHostMethods} from "./resources/host-observation-host";
+import {freshConversationArguments, freshConversationNeedsWorkspace, type FreshConversationTransport} from "./orchestration/fresh-conversation-transport";
 import { decodeByokRolesRead, type ByokRolesRead } from "./meta-ceo/byok-roles-read";
 import { createLazyTerminalSharingHost, type TerminalSharingSource } from "./terminal/terminal-sharing-host";
+import { createNativeDraftRecoveryOwner, type NativeDraftRecoveryOwner } from "./auth-recovery/native-draft-owner";
 import {projectAccessHostMethods,projectAccessPublicSelection,type ProjectAccessRawMethods,type ProjectAccessHostMethods} from "./access/project-access-host";
 import { projectAdmissionHostMethods, projectAdmissionPublicRequest, type ProjectAdmissionRawMethods, type ProjectAdmissionHostMethods } from "./admission/project-admission-host";
 import { validArchiveCursor, type ArchiveCursor } from "./projects/archive/project-archive-continuation";
@@ -24,7 +29,9 @@ import { decodeRetainedActivity, validActivitySelection, type ActivitySelection,
 import { createNativeExecutiveTransport } from "./native-executive-transport";
 import type { MissionDiagnosticSnapshot } from "./diagnostic-state";
 import { createTerminalBriefsNavigationPort, type TerminalBriefsNavigationPort } from "./terminal/terminal-navigation";
-import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
+import type { ProjectConversationHistoryTransport, ProjectConversationHistoryReaderFactory } from "./conversations/project-conversation-history-owner";
+import type { ProjectConversationCatalogueReaderFactory } from './conversations/project-conversation-catalogue-factory';
+import type { ProjectPlanningTransport } from "./planning/project-planning-transport";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
   decodeMission,
@@ -74,7 +81,11 @@ import {
   type ControlRoomOperation, type ControlRoomActionResult,
 } from "./control-room";
 
-export interface RawClient extends Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
+export interface RawClient extends Partial<HostObservationRawMethods>,Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
+  /** Explicit fixed local metadata read; never refreshes an authorization owner. */
+  readNativeExecutiveDiagnostics?(request: { signal: AbortSignal }): Promise<unknown>;
+  /** Native-owned privacy metadata only; never reconstructed from an event. */
+  readonly nativeDraftRecovery?: NativeDraftRecoveryOwner;
   /** Independent Terminal session; workspace grants never confer brief access. */
   readonly terminalSharing?: TerminalSharingSource;
   /** Public fixed navigation only; Terminal owns its user's authentication and access. */
@@ -89,7 +100,7 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods>,Partial<I
   readonly research?: ResearchEvidenceTransport;
   readonly executive?: OsExecutiveTransport;
   /** Optional fixed selected-session continuation transport; same private bearer custody. */
-  readonly executiveSession?: ExecutiveSessionTransport;
+  readonly executiveSession?: ProjectConversationHistoryTransport;
   getState(): AuthState;
   /** Existing source epoch, when exposed by the fixed client; never a principal or grant. */
   invalidationGeneration?(): number;
@@ -147,8 +158,8 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods>,Partial<I
     signal: AbortSignal;
   }): Promise<unknown>;
   /**
-   * Optional compound acquisition. Absent on native clients: no compound
-   * command is registered there. Signal stays outside the five-field selector.
+   * Optional compound acquisition through the web or fixed native read owner.
+   * Signal stays outside the five-field selector.
    */
   readMissionResult?(request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
   readResultReferences?(request: {
@@ -169,9 +180,13 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods>,Partial<I
 export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
-export interface MissionHost extends Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
+export interface MissionHost extends Partial<HostObservationHostMethods>,Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
+  readNativeExecutiveDiagnostics?(request: { signal: AbortSignal }): Promise<NativeExecutiveObservation>;
+  readonly nativeDraftRecovery?: NativeDraftRecoveryOwner;
   /** Independent Terminal session; workspace grants never confer brief access. */
   readonly terminalSharing?: TerminalSharingSource;
+  readonly projectPlanning?: ProjectPlanningTransport;
+  readonly freshConversation?: FreshConversationTransport;
   /** Optional zero-input navigation; no private content or access receipt. */
   openTerminalBriefs?: TerminalBriefsNavigationPort;
   readonly sourceOperations?:SourceOperationTransport;
@@ -213,6 +228,7 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods>,Partia
   /** Same fixed Programs acquisition, retaining its collection owner receipt. */
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
+  readonly companyPriorities?: CompanyPrioritiesOwner;
   readResult?: MissionResultRead;
   /** Mounted only when the raw method and the client invalidation generation both exist. */
   readMissionResult?(request: ResultSelection & { signal: AbortSignal }): Promise<MissionResultDocument>;
@@ -233,12 +249,16 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods>,Partia
   sessionCommandBinding?: unknown;
   /** Pushes the exact selection on every transition and registers the explicit condition provider. */
   session?: {
+    createProjectCatalogueReader?: ProjectConversationCatalogueReaderFactory;
+    createProjectHistoryReader?: ProjectConversationHistoryReaderFactory;
     refresh(selection: unknown): Promise<void>;
     setStopCondition(provider: () => unknown): void;
   };
 }
 export interface SessionHostAttachment {
+  readonly createProjectCatalogueReader?: ProjectConversationCatalogueReaderFactory;
   readonly binding: unknown;
+  readonly createProjectHistoryReader?: ProjectConversationHistoryReaderFactory;
   refresh(selection: unknown): Promise<void>;
   setStopCondition(provider: () => unknown): void;
 }
@@ -267,6 +287,7 @@ export function bindMissionHost(
   const sourceEpochReader = client.invalidationGeneration;
   const sourceMethods = sourceGroup
     ? {
+        options: sourceGroup.readProjectCreationOptions,
         prepare: sourceGroup.prepareSourceOperation,
         read: sourceGroup.readSourceOperation,
         submit: sourceGroup.submitSourceOperation,
@@ -278,12 +299,13 @@ export function bindMissionHost(
     sourceGroup &&
     sourceMethods &&
     sourceEpochReader &&
-    Object.values(sourceMethods).every((fn) => typeof fn === "function")
+    Object.entries(sourceMethods).every(([key,fn]) => key === "options" || typeof fn === "function")
       ? createSourceOperationTransport(async (method, _path, body, signal) => {
           const started = epoch,
             source = sourceEpochReader.call(client);
           const name = (
             {
+              options: "readProjectCreationOptions",
               prepare: "prepareSourceOperation",
               read: "readSourceOperation",
               submit: "submitSourceOperation",
@@ -309,14 +331,15 @@ export function bindMissionHost(
             input: unknown,
             signal: AbortSignal,
           ) => Promise<unknown>;
-          const result = await call.call(sourceGroup, body, signal);
+          const result = method === "options" ? await sourceGroup.readProjectCreationOptions!(signal) : await call.call(sourceGroup, body, signal);
           if (!authorized()) throw new Error("READ_CANCELLED");
-          if (method === "prepare") return result;
+          if (method === "prepare" || method === "options") return result;
           const decoded = decodeSourceOperationStatus(result);
           if (
             decoded.selection.action !== body.action ||
             decoded.selection.request_id !== body.request_id ||
-            decoded.selection.work_ref !== body.work_ref
+            (decoded.selection.work_ref !== body.work_ref && !(method === "read" &&
+              body.action === "publish_project_proposal" && body.work_ref === null))
           )
             throw new Error("SOURCE_OPERATION_RESPONSE_INVALID");
           return decoded;
@@ -425,10 +448,47 @@ export function bindMissionHost(
       sourceRead({work_ref:workRef,source_ref:sourceRef,expected_revision:expectedRevision,signal}) as Promise<FileSearchSource>,
   }):undefined;
   const command = completeOrchestratorCommandBinding(commandBinding);
+  const companyTransport=client.executive, companyRead=companyTransport?.companyPriorities;
+  const companyGeneration=companyTransport?.authGeneration, companyAvailable=companyTransport?.available;
+  const companySubscribe=companyTransport?.subscribe;
+  const companyCurrent=()=>!!companyTransport && client.executive===companyTransport &&
+    companyTransport.companyPriorities===companyRead && companyTransport.authGeneration===companyGeneration &&
+    companyTransport.available===companyAvailable && companyTransport.subscribe===companySubscribe;
   return {
+    ...(companyTransport && companyRead && companyGeneration && companyAvailable && companySubscribe ? {companyPriorities: {
+      generation: () => companyCurrent() ? companyGeneration.call(companyTransport) : -1,
+      available: () => companyCurrent() && companyAvailable.call(companyTransport),
+      subscribe: (listener:()=>void) => companySubscribe.call(companyTransport,listener),
+      read: async (signal:AbortSignal) => {
+        const generation=companyGeneration.call(companyTransport), started=epoch;
+        const current=()=>!signal.aborted && epoch===started && companyCurrent() && companyGeneration.call(companyTransport)===generation && companyAvailable.call(companyTransport);
+        if(!current())throw new Error("COMPANY_READ_UNAVAILABLE");
+        const raw=await companyRead.call(companyTransport,signal);
+        if(!current())throw new Error("READ_CANCELLED");
+        const value=decodeCompanyPriorities(raw);
+        if(!current())throw new Error("READ_CANCELLED");
+        return value;
+      },
+    }} : {}),
+    ...(client.nativeDraftRecovery ? { nativeDraftRecovery: client.nativeDraftRecovery } : {}),
     ...(client.terminalSharing ? { terminalSharing: client.terminalSharing } : {}),
     ...(client.openTerminalBriefs ? {
       openTerminalBriefs: createTerminalBriefsNavigationPort(() => client.openTerminalBriefs!()),
+    } : {}),
+    ...(client.readNativeExecutiveDiagnostics && client.invalidationGeneration ? {
+      async readNativeExecutiveDiagnostics({ signal }: { signal: AbortSignal }) {
+        const reader = client.readNativeExecutiveDiagnostics!, started = epoch;
+        const source = client.invalidationGeneration!();
+        const current = () => !signal.aborted && started === epoch &&
+          Number.isSafeInteger(source) && source >= 0 && source === client.invalidationGeneration?.() &&
+          reader === client.readNativeExecutiveDiagnostics;
+        if (!current()) throw new Error("READ_CANCELLED");
+        const raw = await reader.call(client, { signal });
+        if (!current()) throw new Error("READ_CANCELLED");
+        const value = decodeNativeExecutiveObservation(raw);
+        if (!value) throw new Error("RESPONSE_INVALID");
+        return value;
+      },
     } : {}),
     invalidationGeneration: () => epoch,
     ...(catalogueRead ? {readProjectKnowledgeCatalogue: catalogueRead} : {}),
@@ -447,6 +507,7 @@ export function bindMissionHost(
         return client.signOut();
       },
     },
+    ...hostObservationHostMethods(client,()=>epoch),
     ...projectAdmissionHostMethods(client,()=>epoch),
     ...instructionHostMethods(client,()=>epoch),
     ...projectAccessHostMethods(client,()=>epoch),
@@ -466,6 +527,35 @@ export function bindMissionHost(
         return decodeAutonomyPolicy(raw, selected);
       },
     } : {}),
+    ...(client.executive?.freshConversation ? {freshConversation:{request:async(operation,arguments_,signal)=>{
+      const closed=freshConversationArguments(operation,arguments_);
+      const transport=client.executive!,group=transport.freshConversation!,method=group.request;
+      const getter=client.getState,sourceMethod=client.invalidationGeneration;
+      const started=epoch,source=sourceMethod?.call(client),executiveEpoch=transport.authGeneration();
+      const current=()=>{
+        if(signal.aborted || epoch!==started || client.executive!==transport || transport.freshConversation!==group
+          || group.request!==method || client.getState!==getter || client.invalidationGeneration!==sourceMethod
+          || sourceMethod?.call(client)!==source || transport.authGeneration()!==executiveEpoch || !transport.available())return false;
+        const state=getter.call(client);
+        return state.status==='signed_in' && (!freshConversationNeedsWorkspace(operation) || state.acquisition===true);
+      };
+      if(!current())throw Error('FRESH_CONVERSATION_UNAVAILABLE');
+      const result=await method.call(group,operation,closed,signal);
+      if(!current())throw Error('FRESH_CONVERSATION_UNAVAILABLE');
+      return result;
+    }}} : {}),
+    ...(client.executive?.projectPlanning ? {projectPlanning:{request: async (operation,arguments_,signal)=>{
+      const transport=client.executive!,group=transport.projectPlanning!,method=group.request;
+      const started=epoch,source=client.invalidationGeneration?.(),executiveEpoch=transport.authGeneration();
+      const current=()=>!signal.aborted && epoch===started && client.executive===transport
+        && transport.projectPlanning===group && group.request===method
+        && client.invalidationGeneration?.()===source && transport.authGeneration()===executiveEpoch
+        && transport.available() && client.getState().status==='signed_in' && client.getState().acquisition;
+      if(!current())throw Error('PROJECT_PLANNING_UNAVAILABLE');
+      const result=await method.call(group,operation,arguments_,signal);
+      if(!current())throw Error('PROJECT_PLANNING_UNAVAILABLE');
+      return result;
+    }}} : {}),
     ...(boundSource?{sourceOperations:boundSource}:{}),
     ...(sourceContextReader && client.invalidationGeneration ? {
       async readSourceOperationContext(request: SourceOperationContextSelection & { signal: AbortSignal }) {
@@ -949,6 +1039,8 @@ export function bindMissionHost(
       ? {
           sessionCommandBinding: session.binding,
           session: {
+            ...(session.createProjectHistoryReader ? {createProjectHistoryReader: session.createProjectHistoryReader} : {}),
+            ...(session.createProjectCatalogueReader ? {createProjectCatalogueReader: session.createProjectCatalogueReader} : {}),
             refresh: (selection: unknown) => session.refresh(selection),
             setStopCondition: (provider: () => unknown) => session.setStopCondition(provider),
           },
@@ -1005,8 +1097,14 @@ export async function createNativeClient(
   };
   const listeners = new Set<(state: AuthState) => void>();
   let epoch = 0;
+  const nativeDraftRecovery = createNativeDraftRecoveryOwner({
+    inspect: () => invoke("read_native_draft_continuity"),
+    sourceGeneration: () => epoch,
+    signedIn: () => current.status === "signed_in" && current.acquisition,
+  });
   let readGeneration = new AbortController();
   const invalidateReads = () => {
+    nativeDraftRecovery.invalidate();
     epoch++;
     const previous = readGeneration;
     readGeneration = new AbortController();
@@ -1030,8 +1128,10 @@ export async function createNativeClient(
   if (initial === epoch) update(status);
   async function read(
     command:
+      | "executive_auth_status"
       | "read_programs"
       | "read_byok_roles"
+      | "read_control_room_state"
       | "read_work"
       | "read_mission"
       | "read_mission_v3"
@@ -1055,6 +1155,7 @@ export async function createNativeClient(
       | "read_project_archive"
       | "read_project_archive_page"
       | "read_source_operation_context"
+      | "source_operation_options"
       | "source_operation_prepare"
       | "source_operation_read"
       | "source_operation_submit"
@@ -1063,9 +1164,11 @@ export async function createNativeClient(
       | "read_admitted_plan"
       | "read_retained_activity"
       | "read_resource_capacity"
+      | "read_host_observation"
       | "read_fabric_catalog"
       | "read_fabric_status"
       | "read_result"
+      | "read_mission_result"
       | "read_result_references"
       | "read_current_window",
     signal: AbortSignal,
@@ -1109,6 +1212,8 @@ export async function createNativeClient(
     });
   }
   return {
+    readNativeExecutiveDiagnostics: ({ signal }) => read("executive_auth_status", signal, { diagnostics: true }),
+    nativeDraftRecovery,
     terminalSharing,
     executive: executive.transport,
     executiveSession: executive.sessionTransport,
@@ -1130,11 +1235,12 @@ export async function createNativeClient(
       if (ticket === control && started === epoch) update(result);
     },
     async signOut() {
+      nativeDraftRecovery.clear();
       executive.invalidate();
       const ticket = ++control;
       update({
         status: "signed_out",
-        reason: null,
+        reason: "USER_SIGNED_OUT",
         acquisition: false,
         content: false,
       });
@@ -1149,6 +1255,7 @@ export async function createNativeClient(
       return read(
         (
           {
+            options: "source_operation_options",
             prepare: "source_operation_prepare",
             read: "source_operation_read",
             submit: "source_operation_submit",
@@ -1163,6 +1270,11 @@ export async function createNativeClient(
   ),
     readPrograms: ({ signal }) => read("read_programs", signal),
     readByokRoles: ({ signal }) => read("read_byok_roles", signal),
+    readControlRoomState: ({ signal }) => {
+      if (current.status !== "signed_in" || !current.acquisition)
+        return Promise.reject(new Error("CONTROL_ROOM_READ_UNAUTHORIZED"));
+      return read("read_control_room_state", signal);
+    },
     readWork: ({ signal }) => read("read_work", signal),
     readAttendedFabricCatalog: ({ signal }) => read("read_fabric_catalog", signal),
     readAttendedFabric: ({ rootId, runId, signal }) => {
@@ -1285,6 +1397,11 @@ export async function createNativeClient(
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
     },
+    readHostObservation: request => {
+      const selection=hostObservationPublicSelection(request);
+      return selection ? read("read_host_observation",request.signal,{selection})
+        : Promise.reject(Error("HOST_OBSERVATION_REQUEST_INVALID"));
+    },
     readResourceCapacity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
       const selection = { work_ref, root_job_id, job_id, attempt_id };
       if (!validResourceCapacitySelection(selection))
@@ -1327,6 +1444,23 @@ export async function createNativeClient(
           job_id: jobId,
           attempt_id: attemptId,
           result_envelope_digest: resultEnvelopeDigest,
+        },
+      });
+    },
+    readMissionResult: ({
+      workRef, rootJobId, jobId, attemptId, resultEnvelopeDigest, signal,
+    }) => {
+      const selected = normalizeResultSelection({
+        workRef, rootJobId, jobId, attemptId, resultEnvelopeDigest,
+      });
+      if (!selected) return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("read_mission_result", signal, {
+        selection: {
+          work_ref: selected.workRef,
+          root_job_id: selected.rootJobId,
+          job_id: selected.jobId,
+          attempt_id: selected.attemptId,
+          result_envelope_digest: selected.resultEnvelopeDigest,
         },
       });
     },

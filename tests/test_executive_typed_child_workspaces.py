@@ -139,7 +139,8 @@ def test_real_runtime_paid_claim_uses_distinct_workspace_and_same_job_replay(tmp
 
 def test_actual_paid_terminal_to_independent_codex_review_clone_and_launchspec(tmp_path,monkeypatch):
     _install_paid_policy(tmp_path,monkeypatch)
-    paid.test_paid_subject_real_codex_review_prompt_and_serial_worker_schedule(tmp_path/'cycle')
+    paid.test_paid_subject_real_codex_review_prompt_and_serial_worker_schedule(
+        tmp_path/'cycle', monkeypatch, include_native=False, review_fault=False)
 
 
 class _BeforeWorkDispatch(Exception): pass

@@ -159,3 +159,74 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         result = await transport.read("health")
         self.assertEqual(result.error, "timeout")
         self.assertNotIn("PRIVATE_EXCEPTION", repr(result))
+
+
+    async def test_new_tools_use_only_their_fixed_public_hosts_without_credentials(self):
+        for endpoint in ("macro_overlay", "market_risk"):
+            self.assertEqual((await self.transport.read(endpoint)).status, 200)
+        self.assertEqual(self.hits, ["/api/overlay", "/data/market_risk.json"])
+        self.assertEqual([x["url"] for x in self.seen], [
+            "https://www.mastermind-x.com/api/overlay",
+            "https://app.mastermind-x.com/data/market_risk.json",
+        ])
+        for row in self.seen:
+            self.assertNotIn("authorization", row["headers"])
+            self.assertNotIn("cookie", row["headers"])
+        with self.assertRaises(ValueError):
+            await self.transport.read("macro_overlay", symbols=("SPY",))
+        with self.assertRaises(TypeError):
+            await self.transport.read("market_risk", cap=512 * 1024)
+        self.assertEqual(len(self.hits), 2)
+
+    async def test_endpoint_caps_bound_streams_and_keep_old_limits(self):
+        from integrations.product_access_mcp.contracts import BODY_LIMITS
+        self.assertEqual(dict(BODY_LIMITS), {
+            "health": 256 * 1024, "status": 256 * 1024, "market_pulse": 256 * 1024,
+            "macro_overlay": 512 * 1024, "market_risk": 64 * 1024,
+        })
+        for endpoint, cap in BODY_LIMITS.items():
+            for extra in (0, 1):
+                with self.subTest(endpoint=endpoint, extra=extra):
+                    class Body(httpx.AsyncByteStream):
+                        async def __aiter__(self):
+                            yield b"x" * cap
+                            if extra:
+                                yield b"x"
+                    transport = self.module.PublicTransport(transport_factory=lambda: httpx.MockTransport(
+                        lambda request: httpx.Response(200, headers={"Content-Type": "application/json"}, stream=Body())))
+                    result = await transport.read(endpoint, symbols=("SPY",) if endpoint == "market_pulse" else ())
+                    self.assertEqual(result.error, "response_too_large" if extra else None)
+                    self.assertEqual(len(result.body), 0 if extra else cap)
+
+    async def test_new_endpoint_declared_length_or_encoding_refuses_before_body(self):
+        from integrations.product_access_mcp.contracts import BODY_LIMITS
+        for endpoint in ("macro_overlay", "market_risk"):
+            for header, value, error in (
+                ("Content-Length", str(BODY_LIMITS[endpoint] + 1), "response_too_large"),
+                ("Content-Length", "-1", "invalid_content_length"),
+                ("Content-Encoding", "gzip", "content_encoding_refused"),
+            ):
+                with self.subTest(endpoint=endpoint, header=header):
+                    reads = []
+                    class Body(httpx.AsyncByteStream):
+                        async def __aiter__(self):
+                            reads.append(True)
+                            yield b"untrusted"
+                    headers = {"Content-Type": "application/json", header: value}
+                    transport = self.module.PublicTransport(transport_factory=lambda: httpx.MockTransport(
+                        lambda request: httpx.Response(200, headers=headers, stream=Body())))
+                    result = await transport.read(endpoint)
+                    self.assertEqual(result.error, error)
+                    self.assertEqual(result.body, b"")
+                    self.assertEqual(reads, [])
+
+    async def test_new_endpoint_redirects_are_not_followed(self):
+        for endpoint in ("macro_overlay", "market_risk"):
+            calls = []
+            def redirect(request):
+                calls.append(str(request.url))
+                return httpx.Response(302, headers={"Location": "https://unapproved.invalid/private"})
+            transport = self.module.PublicTransport(transport_factory=lambda: httpx.MockTransport(redirect))
+            result = await transport.read(endpoint)
+            self.assertEqual(result.error, "redirect_refused")
+            self.assertEqual(len(calls), 1)

@@ -107,6 +107,11 @@ def _profiles_document(document: Mapping[str, Any] | None) -> Mapping[str, Any]:
 
 def _usage_policy_satisfied(profile: SubscriptionProviderProfile, execution_mode: str) -> bool:
     policy = profile.usage_policy
+    if profile.profile_id == "byteplus-coding-plan-personal":
+        return (execution_mode in {"interactive_canary", "native_supported_coding_worker"}
+                and policy.get("supported_harness_required") is True
+                and policy.get("single_user_only") is True
+                and policy.get("production_backend_allowed") is False)
     if policy.get("interactive_only") is True and execution_mode != "interactive_canary":
         return False
     if (

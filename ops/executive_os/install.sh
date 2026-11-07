@@ -24,6 +24,7 @@ EXPECTED_SHA=""
 PROTECTED_MASTER_SHA=""
 ALLOW_FROZEN_ACCEPTED_ANCESTOR="0"
 STAGE_RELEASE_ONLY="0"
+STAGE_ADMIN_CHECKOUT_ONLY="0"
 ARM_PRIVILEGED_BROKER="0"
 PRIVILEGED_BROKER_LIVE="0"
 CONTROL_CONFIG_SOURCE=""
@@ -382,7 +383,7 @@ MASTERMIND_NATIVE_ACL_RUBY
 # --- END native ACL guard ---
 
 usage() {
-  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--stage-release-only --os-web-assets PATH] [--control-config PATH] [--os-web-assets PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
+  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--stage-release-only --os-web-assets PATH] [--stage-admin-checkout-only] [--control-config PATH] [--os-web-assets PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
   exit 64
 }
 
@@ -393,6 +394,7 @@ while [ "$#" -gt 0 ]; do
     --protected-master-sha) PROTECTED_MASTER_SHA="${2:-}"; shift 2 ;;
     --allow-frozen-accepted-ancestor) ALLOW_FROZEN_ACCEPTED_ANCESTOR="1"; shift ;;
     --stage-release-only) STAGE_RELEASE_ONLY="1"; shift ;;
+    --stage-admin-checkout-only) STAGE_ADMIN_CHECKOUT_ONLY="1"; shift ;;
     --arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
@@ -421,6 +423,22 @@ validate_release_staging_options() {
     }
 }
 # --- END release staging option guard ---
+
+# --- BEGIN admin checkout staging option guard ---
+# The administrative checkout is the only artifact this staging-only option
+# prepares.  It changes no configuration, no receipt, no service and no
+# selection, so it excludes the frozen-source, arming and configuration
+# replacement options exactly like the release staging option does.
+validate_admin_checkout_staging_options() {
+  [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "1" ] || return 0
+  [ "$ALLOW_FROZEN_ACCEPTED_ANCESTOR" = "0" ] \
+    && [ "$ARM_PRIVILEGED_BROKER" = "0" ] \
+    && [ -z "$CONTROL_CONFIG_SOURCE" ] || {
+      /bin/echo "admin-checkout staging excludes frozen source, arming and config replacement" >&2
+      return 65
+    }
+}
+# --- END admin checkout staging option guard ---
 [ "$(/usr/bin/id -u)" -eq 0 ] || {
   /bin/echo "install.sh must run as root" >&2
   exit 77
@@ -430,6 +448,7 @@ validate_release_staging_options() {
   exit 69
 }
 validate_release_staging_options || exit 65
+validate_admin_checkout_staging_options || exit 65
 [ -n "$SOURCE_REPO" ] && [ -n "$EXPECTED_SHA" ] && [ -n "$OPERATOR_USER" ] || usage
 case "$OPERATOR_USER" in
   [A-Za-z_]* ) ;;
@@ -1469,133 +1488,53 @@ MASTERMIND_RELEASE_NATIVE_STAGE
 }
 # --- END shared sealed release staging ---
 
-# --- BEGIN stage-only dispatch ---
-if [ "$STAGE_RELEASE_ONLY" = "1" ]; then
-  # No cleanup/service trap: an interrupted stage or publication is retained.
-  stage_sealed_release || exit 65
-  printf '{"staged_unselected":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false}\n' "$EXPECTED_SHA"
-  exit 0
-fi
-# --- END stage-only dispatch ---
-
-# Cross the mutation boundary only after the identity, runtime, source, auth,
-# and exact-SHA preflight above. From here to process exit the trap keeps all
-# install-owned daemons, including a separately prepared C1 Relay, disabled
-# and booted out across generation mutation and rollback.
-STAGING=""
-CODEX_CODE_MODE_HOST_TEMP=""
-wait_for_launchd_absent() {
-  local label="$1"
-  local description="$2"
-  # This exact source is covered by the installer's prior source preflight.
-  # One canonical parser and one bounded readback budget; an arbitrary native
-  # error never becomes absence. This is not a recovery-origin receipt.
-  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/recovery_install_observation.py" "$label" || {
-    /bin/echo "$description LaunchDaemon absence was not proven after bootout" >&2
-    return 1
-  }
-}
-leave_installed_services_stopped() {
-  if [ -n "${CODEX_CODE_MODE_HOST_TEMP:-}" ]; then
-    /bin/rm -f -- "$CODEX_CODE_MODE_HOST_TEMP"
-  fi
-  /bin/launchctl disable "system/$RELAY_LABEL" >/dev/null 2>&1 || true
-  /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
-  /bin/launchctl disable "system/$WORKER_LABEL" >/dev/null 2>&1 || true
-  /bin/launchctl disable "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
-  if [ "$PRIVILEGED_BROKER_LIVE" != "1" ]; then
-    /bin/launchctl disable "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
-    /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
-    if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
-      /bin/sleep 2
-      /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
-    fi
-    if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
-      /bin/echo "privileged LaunchDaemon remained loaded after cleanup" >&2
-      exit 65
-    fi
-  fi
-  /bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
-  /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
-  /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
-  /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
-  if [ -n "${STAGING:-}" ] && [ -d "$STAGING" ]; then
-    /bin/rm -rf -- "$STAGING"
-  fi
-}
-prepare_codex_code_mode_host || exit 65
-trap leave_installed_services_stopped EXIT
-/bin/launchctl disable "system/$RELAY_LABEL"
-/bin/launchctl disable "system/$CONTROL_LABEL"
-/bin/launchctl disable "system/$WORKER_LABEL"
-/bin/launchctl disable "system/$BACKUP_LABEL"
-/bin/launchctl disable "system/$PRIVILEGED_LABEL"
-/bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
-/bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
-/bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
-/bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
-/bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
-wait_for_launchd_absent "$RELAY_LABEL" relay || exit 65
-wait_for_launchd_absent "$CONTROL_LABEL" control || exit 65
-wait_for_launchd_absent "$WORKER_LABEL" worker || exit 65
-wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65
-wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
-
-stage_sealed_release || exit 65
-
-# This remains a substep of the existing serialized installer publication.
-# Same-profile occupants verify exactly; missing/changed occupants are not reset.
-if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
-  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/control_aead_profile.py" materialize \
-    --release-root "$RELEASE_ROOT" --bundle "$CONTROL_AEAD_BUNDLE" \
-    --operator-uid "$OPERATOR_UID" >/dev/null || exit 65
-fi
-INSTALLED_CODEX="$SYSTEM_ROOT/bin/codex-$CODEX_VERSION"
-if [ ! -f "$INSTALLED_CODEX" ]; then
-  CODEX_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.codex-$CODEX_VERSION.XXXXXX")"
-  /bin/rm -f -- "$CODEX_TEMP"
-  /usr/bin/ditto --noqtn "$CODEX_BINARY" "$CODEX_TEMP"
-  /usr/sbin/chown root:wheel "$CODEX_TEMP"
-  /bin/chmod 0555 "$CODEX_TEMP"
-  /bin/mv "$CODEX_TEMP" "$INSTALLED_CODEX"
-fi
-/usr/bin/codesign --verify --strict "$INSTALLED_CODEX" >/dev/null 2>&1 || {
-  /bin/echo "installed Codex signature is invalid" >&2
-  exit 65
-}
-INSTALLED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$INSTALLED_CODEX" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
-[ "$INSTALLED_TEAM" = "2DC432GLL2" ] || {
-  /bin/echo "installed Codex signer team is not OpenAI" >&2
-  exit 65
-}
-INSTALLED_VERSION="$("$INSTALLED_CODEX" --version 2>/dev/null | /usr/bin/awk '$1 == "codex-cli" {print $2}')"
-[ "$INSTALLED_VERSION" = "$CODEX_VERSION" ] || {
-  /bin/echo "installed Codex version does not match the explicit allowlist" >&2
-  exit 65
-}
-INSTALLED_HASH="$(/usr/bin/shasum -a 256 "$INSTALLED_CODEX" | /usr/bin/awk '{print $1}')"
-[ "$INSTALLED_HASH" = "$CODEX_SHA256" ] || {
-  /bin/echo "installed Codex bytes do not match the exact reviewed 0.159.2 allowlist" >&2
-  exit 65
-}
-[ "$(/usr/bin/stat -f '%u:%g:%Lp' "$INSTALLED_CODEX")" = "0:0:555" ] || {
-  /bin/echo "installed Codex is not root:wheel mode 0555" >&2
-  exit 65
-}
-[ ! -L "$INSTALLED_CODEX" ] && [ "$(/usr/bin/stat -f '%l' "$INSTALLED_CODEX")" -eq 1 ] || {
-  /bin/echo "installed Codex must be a direct single-link file" >&2
-  exit 65
-}
-require_native_no_acl one "$INSTALLED_CODEX" || {
-  /bin/echo "installed Codex has a filesystem ACL" >&2; exit 65
-}
-
+# --- BEGIN administrative checkout preparation ---
+# The installer-owned, credentialless source checkout that backs the Control
+# configuration's ``proof_source_repository`` coordinate.  The destination is
+# FIXED at /var/db/mastermind-executive/control/admin-checkout/<expected SHA>.
+#
+# An occupied target is accepted only when it already IS the exact expected
+# checkout owned by the control principal: a different commit, a different
+# owner or a non-checkout refuses here, untouched.  This preparation never
+# recursively repairs another owner's tree, and it never publishes, starts,
+# stops, reconfigures or selects anything.
+prepare_admin_checkout() {
 ADMIN_CHECKOUT="$RUNTIME_ROOT/control/admin-checkout/$EXPECTED_SHA"
-if [ ! -d "$ADMIN_CHECKOUT/.git" ]; then
+NEED_CLONE=1
+if [ -e "$ADMIN_CHECKOUT" ] || [ -L "$ADMIN_CHECKOUT" ]; then
+  [ -d "$ADMIN_CHECKOUT" ] && [ ! -L "$ADMIN_CHECKOUT" ] || {
+    /bin/echo "administrative checkout target is occupied by an unsafe path" >&2
+    exit 65
+  }
+  if [ -d "$ADMIN_CHECKOUT/.git" ] && [ ! -L "$ADMIN_CHECKOUT/.git" ]; then
+    # The occupied target is a checkout: it must already BE the exact
+    # expected one, owned by the control principal.  Anything else refuses
+    # here, untouched.
+    [ "$(/usr/bin/stat -f '%u' "$ADMIN_CHECKOUT")" = "$CONTROL_UID" ] || {
+      /bin/echo "administrative checkout target belongs to another owner" >&2
+      exit 65
+    }
+    [ "$(/usr/bin/sudo -u "$CONTROL_USER" /usr/bin/env -i \
+      PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$CONTROL_HOME" \
+      LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      GIT_NO_LAZY_FETCH=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 \
+      /usr/bin/git -C "$ADMIN_CHECKOUT" rev-parse --verify 'HEAD^{commit}')" = "$EXPECTED_SHA" ] || {
+      /bin/echo "administrative checkout target holds a different commit" >&2
+      exit 65
+    }
+    NEED_CLONE=0
+  fi
+  # A destination that is not a checkout is left to Git itself: the clone
+  # refuses an occupied directory and never writes into another owner's tree.
+fi
+if [ "$NEED_CLONE" = "1" ]; then
   # Root reads the operator-owned source through Git transport; the local-copy
   # optimization has a distinct ownership boundary. Trust only the validated
   # source path for this command, never persist a host-wide exception.
-  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local "$SOURCE_REPO" "$ADMIN_CHECKOUT"
+  # Only the qualified source HEAD and its complete ancestry are needed.
+  # Unrelated development branches/tags must not enter this private checkout.
+  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local --single-branch --no-tags "$SOURCE_REPO" "$ADMIN_CHECKOUT"
   /usr/bin/git -C "$ADMIN_CHECKOUT" checkout --detach "$EXPECTED_SHA"
   /usr/bin/git -C "$ADMIN_CHECKOUT" remote remove origin
 fi
@@ -1671,7 +1610,201 @@ fi
   /bin/echo "administrative checkout still holds loose objects after repack" >&2
   exit 65
 }
+}
+# --- END administrative checkout preparation ---
 
+# --- BEGIN stage-only dispatch ---
+if [ "$STAGE_RELEASE_ONLY" = "1" ]; then
+  # No cleanup/service trap: an interrupted stage or publication is retained.
+  stage_sealed_release || exit 65
+  printf '{"staged_unselected":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false}\n' "$EXPECTED_SHA"
+  exit 0
+fi
+# --- END stage-only dispatch ---
+
+# --- BEGIN admin-checkout-only dispatch ---
+if [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "1" ]; then
+  # The target release is sealed and published first: the administrative
+  # checkout normalizer is that release's own reviewed helper.  Nothing else
+  # is touched -- no service, no configuration, no receipt, no selection --
+  # and this dispatch returns BEFORE the mutation boundary.
+  stage_sealed_release || exit 65
+  prepare_admin_checkout
+  printf '{"staged_admin_checkout":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false}\n' "$EXPECTED_SHA"
+  exit 0
+fi
+# --- END admin-checkout-only dispatch ---
+
+# --- BEGIN gateway audit parent provisioning ---
+provision_gateway_audit_parent() {
+  # The normal publisher owns the Studio-identity leaf, not this root-owned
+  # parent. Existing occupants are checked without changing their custody.
+  require_native_no_acl one "$SYSTEM_ROOT" || return 65
+  "$PYTHON_BINARY" -I -S -B - "$SYSTEM_ROOT" <<'MASTERMIND_GATEWAY_AUDIT_PARENT' || return 65
+import os
+import stat
+import sys
+
+flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+def require_directory(info):
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022):
+        raise SystemExit("gateway audit parent requires a direct root:wheel directory without group/other write")
+
+def identity(info):
+    return info.st_dev, info.st_ino
+
+base = os.open(sys.argv[1], flags)
+try:
+    base_info = os.fstat(base)
+    require_directory(base_info)
+    created = False
+    try:
+        before = os.stat("audit", dir_fd=base, follow_symlinks=False)
+    except FileNotFoundError:
+        # Exclusive creation under the held sealed parent; a racing occupant
+        # refuses, and no existing directory is chowned or chmodded.
+        os.mkdir("audit", 0o700, dir_fd=base)
+        created = True
+        before = os.stat("audit", dir_fd=base, follow_symlinks=False)
+    audit = os.open("audit", flags, dir_fd=base)
+    try:
+        if identity(os.fstat(audit)) != identity(before):
+            raise SystemExit("gateway audit parent changed during provisioning")
+        if created:
+            os.fchown(audit, 0, 0)
+            os.fchmod(audit, 0o755)
+            os.fsync(audit)
+            os.fsync(base)
+        require_directory(os.fstat(audit))
+        if identity(os.stat("audit", dir_fd=base, follow_symlinks=False)) != identity(before):
+            raise SystemExit("gateway audit parent changed during provisioning")
+    finally:
+        os.close(audit)
+    if identity(os.stat(sys.argv[1], follow_symlinks=False)) != identity(base_info):
+        raise SystemExit("gateway audit base changed during provisioning")
+finally:
+    os.close(base)
+MASTERMIND_GATEWAY_AUDIT_PARENT
+  require_native_no_acl one "$SYSTEM_ROOT/audit" || return 65
+}
+# --- END gateway audit parent provisioning ---
+
+# Cross the mutation boundary only after the identity, runtime, source, auth,
+# and exact-SHA preflight above. From here to process exit the trap keeps all
+# install-owned daemons, including a separately prepared C1 Relay, disabled
+# and booted out across generation mutation and rollback.
+STAGING=""
+CODEX_CODE_MODE_HOST_TEMP=""
+wait_for_launchd_absent() {
+  local label="$1"
+  local description="$2"
+  # This exact source is covered by the installer's prior source preflight.
+  # One canonical parser and one bounded readback budget; an arbitrary native
+  # error never becomes absence. This is not a recovery-origin receipt.
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/recovery_install_observation.py" "$label" || {
+    /bin/echo "$description LaunchDaemon absence was not proven after bootout" >&2
+    return 1
+  }
+}
+leave_installed_services_stopped() {
+  if [ -n "${CODEX_CODE_MODE_HOST_TEMP:-}" ]; then
+    /bin/rm -f -- "$CODEX_CODE_MODE_HOST_TEMP"
+  fi
+  /bin/launchctl disable "system/$RELAY_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl disable "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl disable "system/$WORKER_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl disable "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
+  if [ "$PRIVILEGED_BROKER_LIVE" != "1" ]; then
+    /bin/launchctl disable "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+    /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+    if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
+      /bin/sleep 2
+      /bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+    fi
+    if /bin/launchctl print "system/$PRIVILEGED_LABEL" >/dev/null 2>&1; then
+      /bin/echo "privileged LaunchDaemon remained loaded after cleanup" >&2
+      exit 65
+    fi
+  fi
+  /bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
+  /bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
+  if [ -n "${STAGING:-}" ] && [ -d "$STAGING" ]; then
+    /bin/rm -rf -- "$STAGING"
+  fi
+}
+prepare_codex_code_mode_host || exit 65
+trap leave_installed_services_stopped EXIT
+/bin/launchctl disable "system/$RELAY_LABEL"
+/bin/launchctl disable "system/$CONTROL_LABEL"
+/bin/launchctl disable "system/$WORKER_LABEL"
+/bin/launchctl disable "system/$BACKUP_LABEL"
+/bin/launchctl disable "system/$PRIVILEGED_LABEL"
+/bin/launchctl bootout "system/$PRIVILEGED_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl bootout "system/$RELAY_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl bootout "system/$CONTROL_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl bootout "system/$WORKER_LABEL" >/dev/null 2>&1 || true
+/bin/launchctl bootout "system/$BACKUP_LABEL" >/dev/null 2>&1 || true
+wait_for_launchd_absent "$RELAY_LABEL" relay || exit 65
+wait_for_launchd_absent "$CONTROL_LABEL" control || exit 65
+wait_for_launchd_absent "$WORKER_LABEL" worker || exit 65
+wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65
+wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
+
+stage_sealed_release || exit 65
+provision_gateway_audit_parent || exit 65
+
+# This remains a substep of the existing serialized installer publication.
+# Same-profile occupants verify exactly; missing/changed occupants are not reset.
+if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
+  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/control_aead_profile.py" materialize \
+    --release-root "$RELEASE_ROOT" --bundle "$CONTROL_AEAD_BUNDLE" \
+    --operator-uid "$OPERATOR_UID" >/dev/null || exit 65
+fi
+INSTALLED_CODEX="$SYSTEM_ROOT/bin/codex-$CODEX_VERSION"
+if [ ! -f "$INSTALLED_CODEX" ]; then
+  CODEX_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.codex-$CODEX_VERSION.XXXXXX")"
+  /bin/rm -f -- "$CODEX_TEMP"
+  /usr/bin/ditto --noqtn "$CODEX_BINARY" "$CODEX_TEMP"
+  /usr/sbin/chown root:wheel "$CODEX_TEMP"
+  /bin/chmod 0555 "$CODEX_TEMP"
+  /bin/mv "$CODEX_TEMP" "$INSTALLED_CODEX"
+fi
+/usr/bin/codesign --verify --strict "$INSTALLED_CODEX" >/dev/null 2>&1 || {
+  /bin/echo "installed Codex signature is invalid" >&2
+  exit 65
+}
+INSTALLED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$INSTALLED_CODEX" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
+[ "$INSTALLED_TEAM" = "2DC432GLL2" ] || {
+  /bin/echo "installed Codex signer team is not OpenAI" >&2
+  exit 65
+}
+INSTALLED_VERSION="$("$INSTALLED_CODEX" --version 2>/dev/null | /usr/bin/awk '$1 == "codex-cli" {print $2}')"
+[ "$INSTALLED_VERSION" = "$CODEX_VERSION" ] || {
+  /bin/echo "installed Codex version does not match the explicit allowlist" >&2
+  exit 65
+}
+INSTALLED_HASH="$(/usr/bin/shasum -a 256 "$INSTALLED_CODEX" | /usr/bin/awk '{print $1}')"
+[ "$INSTALLED_HASH" = "$CODEX_SHA256" ] || {
+  /bin/echo "installed Codex bytes do not match the exact reviewed 0.159.2 allowlist" >&2
+  exit 65
+}
+[ "$(/usr/bin/stat -f '%u:%g:%Lp' "$INSTALLED_CODEX")" = "0:0:555" ] || {
+  /bin/echo "installed Codex is not root:wheel mode 0555" >&2
+  exit 65
+}
+[ ! -L "$INSTALLED_CODEX" ] && [ "$(/usr/bin/stat -f '%l' "$INSTALLED_CODEX")" -eq 1 ] || {
+  /bin/echo "installed Codex must be a direct single-link file" >&2
+  exit 65
+}
+require_native_no_acl one "$INSTALLED_CODEX" || {
+  /bin/echo "installed Codex has a filesystem ACL" >&2; exit 65
+}
+
+prepare_admin_checkout
 (
   cd "$RELEASE_ROOT"
   PYTHONDONTWRITEBYTECODE=1 "$PYTHON_BINARY" -I -S -B - "$RELEASE_ROOT" "$CONTROL_CONFIG" "$CONTROL_CONFIG_SOURCE" \
@@ -1803,7 +1936,18 @@ defaults = {
 }
 if source:
     source_path = pathlib.Path(source)
-    value = json.loads(source_path.read_text(encoding="utf-8"))
+    def unique_source_object(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("duplicate control config key")
+            result[key] = item
+        return result
+    try:
+        value = json.loads(source_path.read_text(encoding="utf-8"),
+                           object_pairs_hook=unique_source_object)
+    except (ValueError, RecursionError):
+        raise SystemExit("control config source must contain unambiguous finite UTF-8 JSON") from None
     if not isinstance(value, dict):
         raise SystemExit("control config source must contain an object")
     if value.get("python_runtime_provenance_digest") not in (None, python_runtime_provenance_digest):
@@ -1862,7 +2006,16 @@ if missing or unknown:
         f"control config schema drift; missing={sorted(missing)}, unknown={sorted(unknown)}"
     )
 for key, expected_value in expected.items():
-    if value.get(key) != expected_value:
+    # Python equality aliases booleans/integers and integers/floats, including
+    # nested policy fields. Preserve the Control loader's JSON type boundary
+    # before replacing the config; matching host values must also match types.
+    try:
+        matches = json.dumps(value.get(key), sort_keys=True, allow_nan=False) == (
+            json.dumps(expected_value, sort_keys=True, allow_nan=False)
+        )
+    except (TypeError, ValueError):
+        matches = False
+    if not matches:
         raise SystemExit(f"control config {key} differs from the reviewed host policy")
 blocked = re.compile(
     r"(?i)(password|credential|lease[_-]?token|api[_-]?key|access[_-]?token|secret_value)"
@@ -1871,12 +2024,17 @@ for key in value:
     if blocked.search(str(key)):
         raise SystemExit(f"control config contains forbidden secret-bearing key: {key}")
 
+# Validate the complete output before opening even the temporary file.
+# Strict serialization catches both non-finite tokens and exponent overflow;
+# UTF-8 encoding also refuses unpaired surrogates before any destination effect.
+try:
+    encoded = (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False,
+                          allow_nan=False) + "\n").encode("utf-8")
+except (TypeError, ValueError, RecursionError):
+    raise SystemExit("control config source must contain unambiguous finite UTF-8 JSON") from None
 path = pathlib.Path(destination)
 temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-temporary.write_text(
-    json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False) + "\n",
-    encoding="utf-8",
-)
+temporary.write_bytes(encoded)
 os.chmod(temporary, 0o440)
 os.replace(temporary, path)
 PY
