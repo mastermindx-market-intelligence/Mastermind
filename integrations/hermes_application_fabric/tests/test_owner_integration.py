@@ -100,6 +100,7 @@ class OwnerLoopbackTests(unittest.TestCase):
         self.binding.operation_id, self.binding.session_id, self.binding.turn_id = "owner-turn-1", "session-1", "turn-1"
         self.binding.model, self.binding.requested_model = "model-1", "host-selection"
         self.binding._authorized = lambda _: self.allow
+        self.binding._max_output_tokens = 4096
         self.call = NativeCall("session-1", "task-1", "turn-1", "api-1")
 
     def tearDown(self):
@@ -120,6 +121,15 @@ class OwnerLoopbackTests(unittest.TestCase):
         self.assertTrue(self.calls[0]["authenticated"])
         self.assertEqual(self.calls[0]["turn_id"], "owner-turn-1")
         self.assertEqual(self.calls[0]["request_id"], self.binding.request_id(self.call))
+
+    def test_final_native_request_cannot_expand_host_output_ceiling(self):
+        self.binding._max_output_tokens = 128
+        for extra in ({"max_tokens": 129}, {"max_completion_tokens": 129}, {}):
+            with self.subTest(extra=extra), self.assertRaises(HermesFabricError):
+                self.invoke(**extra)
+        self.assertEqual(self.calls, [])
+        self.invoke(max_completion_tokens=128)
+        self.assertEqual(self.calls[0]["payload"]["max_tokens"], 128)
 
     def test_rebuilt_facade_cannot_replay_completed_request(self):
         self.invoke()

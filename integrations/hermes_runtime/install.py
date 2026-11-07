@@ -279,6 +279,13 @@ def _write_release(
     role_dir = home / "profiles" / profile.role
     role_dir.mkdir(parents=True, mode=0o700)
     consumer = (native_installation or {}).get("executive_consumer")
+    primary = (native_installation or {}).get("primary_application")
+    if primary is not None:
+        from integrations.hermes_application_fabric.publication import expected_native_config as application_config
+        expected_config = application_config(profile, primary, consumer)
+        if hermes_config_renderer is not None and hermes_config_renderer(profile) != expected_config:
+            raise RuntimeRefusal("NATIVE_GATEWAY_CONFIG_MISMATCH")
+        hermes_config_renderer = lambda profile: expected_config
     if native_installation is not None and hermes_config_renderer is None:
         from integrations.hermes_harness.native_byok import expected_native_config
         hermes_config_renderer = lambda profile: expected_native_config(profile, consumer)
@@ -291,7 +298,8 @@ def _write_release(
         raise RuntimeRefusal("NATIVE_CONFIG_INVALID")
     if native_installation is not None:
         from integrations.hermes_harness.native_byok import expected_native_config
-        if config != expected_native_config(profile, consumer):
+        expected = application_config(profile, primary, consumer) if primary is not None else expected_native_config(profile, consumer)
+        if config != expected:
             raise RuntimeRefusal("NATIVE_GATEWAY_CONFIG_MISMATCH")
     _atomic_write(role_dir / "config.yaml", config.encode("utf-8"), 0o600)
     plugin_digest = None
@@ -452,3 +460,4 @@ def _json(payload: dict) -> bytes:
 def hashlib_sha256(data: bytes) -> str:
     import hashlib
     return hashlib.sha256(data).hexdigest()
+

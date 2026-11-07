@@ -100,7 +100,8 @@ class ApplicationBinding:
                      session_id: str, turn_id: str, requested_model: str,
                      authorized: Callable[[NativeCall], bool],
                      prior_admission_possible: bool,
-                     strict_model: str | None = None, strict_pool: str | None = None):
+                     strict_model: str | None = None, strict_pool: str | None = None,
+                     max_output_tokens: int = 4096):
         """Existing authenticated role host only; no environment/key bootstrap.
 
         Role-specific factories must be enrolled by the APPLICATION owner. A
@@ -111,6 +112,8 @@ class ApplicationBinding:
             # Restore/read belongs to the existing owner. Do not reconstruct a
             # fresh owner client from an uncertain or previously admitted ID.
             raise HermesFabricError("hermes_fabric_original_recovery_required")
+        if type(max_output_tokens) is not int or not 1 <= max_output_tokens <= 32768:
+            raise HermesFabricError("hermes_fabric_output_bound_invalid")
         if strict_pool is not None:
             # cap_id/provider_id is not a physical-account or pool selection
             # receipt. The incumbent owner must expose that qualified constraint.
@@ -158,6 +161,7 @@ class ApplicationBinding:
         instance.operation_id, instance.session_id, instance.turn_id = operation_id, session_id, turn_id
         instance.model, instance.requested_model = bound["model"], requested_model
         instance._authorized = authorized
+        instance._max_output_tokens = max_output_tokens
         return instance
 
     def check(self, call: NativeCall):
@@ -245,6 +249,11 @@ class HermesApplicationClient:
         request["model"] = binding.model
         request, structured = prepare_structured_request(request)
         owner_request = to_owner_request(request, binding.model)
+        # Validate the final emitted request, after native request overrides and
+        # structured-output conversion. Agent constructor defaults are not a
+        # bound on subsequent native kwargs.
+        if owner_request["max_tokens"] > binding._max_output_tokens:
+            raise HermesFabricError("hermes_fabric_native_output_bound_changed")
         request_id = binding.request_id(call)
         owner_error = None
         try:
