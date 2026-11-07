@@ -30,13 +30,15 @@ from brain import translate
 PINS = {
     "candidate/commission_deadline.py": "fade630ed75c1b93334a5711a6df7a554fbd24ee",
     "candidate/go_shim.py": "97deba9fc1f68458670b16a21cb410575a7466f8",
-    # Reviewed c5 current-quiescence/guard addition; incumbent97 definitions
-    # are unchanged. Keep this exact blob fence, including drift rejection below.
-    "candidate/lease_broker.py": "425dde8715612ab871f191c97a8142b80bffb13f",
+    # Accepted Memory existing-only modes + exact c5 quiescence methods/CLI.
+    # Old Memory99 defs are exact except main, which is exact common72.
+    # Keep the actual composed blob and before-import drift fence below.
+    "candidate/lease_broker.py": "8eb368b9d806d7252fb94abf3d15cbedf4a75d9c",
     "candidate/go_lease_gateway.py": "7eb74e2a9a18d3c6a1ad1f51ed198bd0e32bcdeb",
     "candidate/go_lease_capability.py": "13e6b2d43cbb2933512e6e46d27a431e7813af88",
     "candidate/application_http_transports.py": "b0b8404b45dd0a3e73a34430c2ef3a28b1edbf6d",
-    "candidate/provider_outcome.py": "981f35a01183e83fdb9f0b8a4175b290cdeb85f8",
+    # Accepted c90 pure unavailable-origin projection; incumbent13 defs exact.
+    "candidate/provider_outcome.py": "a30bb118578168f06444b8a4a98c5cf3b99292a6",
     "candidate/quota_circuit.py": "1583a6ba773e56dbc3f295b65ffc08dea2d31d48",
     "source/model_tier.py": "96093c2747d2dda69b3f2255cb84e656355c87ea",
     "source/pool_status.py": "02922043357d63b4bcfa3791899df27a5c42be12",
@@ -149,19 +151,22 @@ class FabricTranslationCompositionTests(unittest.TestCase):
         return guard.start()
 
     def test_reviewed_broker_byte_drift_stops_before_native_fixture_import(self):
-        source = Path(__file__).resolve().parents[2] / "ops/native_fabric/quota_continuity/candidate/lease_broker.py"
+        root = Path(__file__).resolve().parents[2] / "ops/native_fabric/quota_continuity/candidate"
         original = Path.read_bytes
-        def drift(path):
-            raw = original(path)
-            return raw + b"\n" if path == source else raw
-        class DriftFixture(FabricTranslationCompositionTests):
-            pass
-        with patch.dict(os.environ, {"MM_REQUIRE_FABRIC_COMPOSITION": "1",
-                                     "MM_FABRIC_FIXTURE_ROOT": str(self.macro_root)}), \
-                patch.object(Path, "read_bytes", drift), \
-                patch.object(importlib.util, "spec_from_file_location", side_effect=AssertionError("native import after drift")):
-            with self.assertRaisesRegex(AssertionError, "Native source mismatch: candidate/lease_broker.py"):
-                DriftFixture.setUpClass()
+        for member in ('lease_broker.py','provider_outcome.py'):
+            source = root / member
+            def drift(path):
+                raw = original(path)
+                return raw + b"\n" if path == source else raw
+            class DriftFixture(FabricTranslationCompositionTests):
+                pass
+            with self.subTest(member=member), \
+                    patch.dict(os.environ, {"MM_REQUIRE_FABRIC_COMPOSITION": "1",
+                                            "MM_FABRIC_FIXTURE_ROOT": str(self.macro_root)}), \
+                    patch.object(Path, "read_bytes", drift), \
+                    patch.object(importlib.util, "spec_from_file_location", side_effect=AssertionError("native import after drift")):
+                with self.assertRaisesRegex(AssertionError, "Native source mismatch: candidate/"+member):
+                    DriftFixture.setUpClass()
 
     def setUp(self):
         from engine import fabric_inference_client
