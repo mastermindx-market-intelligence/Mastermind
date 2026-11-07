@@ -21,6 +21,7 @@ class ReuseFirstInstructionsTest(unittest.TestCase):
             "docs/sol_skills/ACTIVE_EXECUTION.md",
             "docs/sol_skills/BOOTSTRAP_KERNEL.md",
             "skills/mastermind-worker-bootstrap/SKILL.md",
+            ".cursor/rules/reuse-first.mdc",
         ):
             with self.subTest(path=path):
                 self.assertIn(POLICY, (ROOT / path).read_text(encoding="utf-8"))

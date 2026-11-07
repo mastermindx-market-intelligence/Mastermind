@@ -1,0 +1,12 @@
+---
+description: Prefer maintained open-source components and existing infrastructure before new commodity builds
+alwaysApply: true
+---
+
+# Reuse-first Mastermind engineering
+
+Before implementing substantial solved machinery (charting, UI, agent harnesses, monitoring, scheduling or common infrastructure), inspect the incumbent owner and suitable maintained OSS. Prefer a narrow adapter, composition or extension; reserve custom engineering for genuinely differentiated or incompatible cases, especially independently validated sector/quant strategies.
+
+Check license/commercial rights, maintenance, security, dependencies, data exposure, integration fit and real consumer tests. Avoid copying proprietary competitor code or building a second Executive, Agent OS, Fabric, lifecycle, auth, queue or retry plane. Keep research proportionate: no approval form, exhaustive survey or delay for trivial repairs.
+
+Follow the protected `docs/REUSE_FIRST_ENGINEERING.md` rule at a compatible source pin. This rule grants no write, merge, install, credential, runtime or trading authority.
