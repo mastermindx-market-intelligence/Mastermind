@@ -833,9 +833,39 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 # Full-source or token-site drift restores the ordinary identity guard.
 REVIEWED_FILES[
     "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
-] = {
-    "sha256": "af7c54df3f34329ff7c02cfa6ad283d6bfa28ab21e1b5d1f809616eef71fd67b",
-    "sites": ((346, 37, 40, 'int', '409'),),
+] = {'sha256': 'e2039148bca4e1a7a0782a7ebc6e18d180a1f4333e581938bc8b0eb557cd86da', 'sites': ((354, 37, 40, 'int', '409'),)}
+
+# Original H4 f008 receipts record the existing Darwin host's ownership.
+# These are observed identities, not runtime defaults, service enrollment or
+# authorization. Preserve the receipts byte-for-byte. Only these fifteen
+# typed integer tokens in the two exact files are reviewed; any byte or path
+# drift restores the original identity guard for the complete receipt.
+REVIEWED_FILES["review_evidence/hermes_h4/profile-mapping-20261107.json"] = {
+    "sha256": "6df7896d56bc9b2098914fb945e314369d360f9f87f7d2f5d1d414f796aded53",
+    "sites": (),
+    "utf8_sites": (
+        (20, 20, 23, "int", "501"),
+        (47, 20, 23, "int", "501"),
+        (70, 20, 23, "int", "501"),
+    ),
+}
+REVIEWED_FILES["review_evidence/hermes_h4/native-preimage-qualification-20261107.json"] = {
+    "sha256": "eaa5796f0000713bc83e6fac6962a40b7c367cf311022bf81452334ed83bfdee",
+    "sites": (),
+    "utf8_sites": (
+        (29, 18, 21, "int", "501"),
+        (42, 18, 21, "int", "501"),
+        (55, 18, 21, "int", "501"),
+        (68, 18, 21, "int", "501"),
+        (85, 18, 21, "int", "501"),
+        (98, 18, 21, "int", "501"),
+        (111, 18, 21, "int", "501"),
+        (128, 18, 21, "int", "501"),
+        (141, 18, 21, "int", "501"),
+        (154, 18, 21, "int", "501"),
+        (167, 18, 21, "int", "501"),
+        (180, 18, 21, "int", "501"),
+    ),
 }
 
 # Exact HTTPS port excluded by the disposable Chisel fixture.
@@ -848,3 +878,73 @@ REVIEWED_FILES[
 }
 # H5 + protected Hermes/auth-timer composition retains all three exact Programs
 # observation status lines; whole-source hash and absolute line positions repinned.
+
+
+# H6 retained qualification receipts: exact immutable output tokens only.
+# These sites are traceback coordinates, temporary path identifiers, HTTP
+# results or negative-test names. They neither create identities nor qualify
+# runtime authority. Full-file or token drift restores the unchanged guard.
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/ci-paired-archive.log'] = {'sha256': '80853727ac6201e58ee123d4ab0a31c55b8ede993d0239935bba56c48812f101',
+ 'sites': ((17, 95, 98, 'int', '469'),
+           (18, 89, 92, 'int', '469'),
+           (21, 95, 98, 'int', '423'),
+           (22, 89, 92, 'int', '423'),
+           (116, 275, 278, 'int', '678'),
+           (306, 180, 183, 'int', '452'),
+           (311, 180, 183, 'int', '452'),
+           (316, 180, 183, 'int', '452'),
+           (321, 180, 183, 'int', '452'),
+           (326, 180, 183, 'int', '452'),
+           (331, 180, 183, 'int', '452'),
+           (336, 180, 183, 'int', '452'),
+           (341, 180, 183, 'int', '452'),
+           (346, 180, 183, 'int', '452'),
+           (351, 180, 183, 'int', '452'),
+           (356, 180, 183, 'int', '452'),
+           (361, 180, 183, 'int', '452'),
+           (366, 180, 183, 'int', '452'),
+           (371, 180, 183, 'int', '452'),
+           (376, 180, 183, 'int', '452'),
+           (381, 180, 183, 'int', '452'),
+           (386, 180, 183, 'int', '452'),
+           (391, 180, 183, 'int', '452'),
+           (396, 180, 183, 'int', '452'),
+           (401, 180, 183, 'int', '452'),
+           (406, 180, 183, 'int', '452'),
+           (411, 180, 183, 'int', '452'),
+           (416, 180, 183, 'int', '452'),
+           (421, 180, 183, 'int', '452'),
+           (426, 180, 183, 'int', '452'),
+           (431, 175, 178, 'int', '529'),
+           (436, 175, 178, 'int', '529'),
+           (441, 175, 178, 'int', '529'),
+           (446, 175, 178, 'int', '529'),
+           (451, 175, 178, 'int', '529'))}
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/ci-paired-archive.xml'] = {'sha256': '971791af5f8194d98c104e5590f525e4aa936fa3d57ec8862a4a0bb0bef500d2',
+ 'sites': ((1, 8804, 8807, 'int', '813'),)}
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/ci-release-preflight.xml'] = {'sha256': 'cae40e77100dfaa74987558327261726962b054cdd8e4a5309cd992a741ff9b1',
+ 'sites': ((1, 18691, 18694, 'int', '962'), (1, 55399, 55402, 'int', '971'))}
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/current-native-composition.xml'] = {'sha256': '0db10663c221bb632710946751d17df374503b10bb262837f0257e4482f8a0ed',
+ 'sites': ((1, 103703, 103722, 'str', '_mastermind_account'),
+           (1, 103731, 103750, 'str', '_mastermind_account'),
+           (1, 104037, 104056, 'str', '_mastermind_account'),
+           (1, 104065, 104084, 'str', '_mastermind_account'),
+           (1, 104362, 104381, 'str', '_mastermind_account'),
+           (1, 104390, 104409, 'str', '_mastermind_account'))}
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/h5-composed-baseline.xml'] = {'sha256': '974a1c7266c19a10ce2be0cc7f56d2aef33c07d1af58ee2471f1f7465c2caa29',
+ 'sites': ((10, 14, 17, 'int', '403'),
+           (10, 34, 37, 'int', '403'),
+           (10, 6505, 6521, 'str', '_mastermind_exec'),
+           (10, 6702, 6722, 'str', '_mastermind_intruder'),
+           (10, 53546, 53565, 'str', '_mastermind_account'),
+           (10, 53574, 53593, 'str', '_mastermind_account'),
+           (10, 53880, 53899, 'str', '_mastermind_account'),
+           (10, 53908, 53927, 'str', '_mastermind_account'),
+           (10, 54205, 54224, 'str', '_mastermind_account'),
+           (10, 54233, 54252, 'str', '_mastermind_account'),
+           (10, 59285, 59307, 'str', '_mastermind_unreviewed'),
+           (10, 59546, 59568, 'str', '_mastermind_unreviewed'),
+           (10, 64592, 64614, 'str', '_mastermind_unreviewed'),
+           (10, 64623, 64645, 'str', '_mastermind_unreviewed'))}
+REVIEWED_FILES['review_evidence/fabric_application/h6-recovery-20261107-c2/native-loader-baseline.log'] = {'sha256': '3e21b01c58fdc2a90ad265a0cea6309ec87ac41ffe050200a07baef4a9ac3f93',
+ 'sites': ((9, 102, 105, 'int', '677'),)}

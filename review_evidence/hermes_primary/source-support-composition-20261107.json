@@ -1,0 +1,144 @@
+{
+  "schema": "mastermind.hermes_primary_source_support_composition.v1",
+  "composition_parent": "322b0ec3556ca9db390a95480d57efd244dfd2bc",
+  "original_application_parent": "7118a1374bac0c70a695989bfccc1a84d54026b3",
+  "original_application_tree": "02c04181ba409461caf1a8f91bf0606d5d67a0ba",
+  "original_ci_blob": "441b4f2032edfaab367200e6d62c4ba67568c43b",
+  "macro_proposal_parent": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+  "macro_current_observed": "e85fcf2248f52a8e25a9c850ab3ebd047555c75a",
+  "macro_current_scope": "Original owner reports CI-only successor; proposal remains exact to a577 preimages.",
+  "runtime_package_sha256": "c8bb8e02f42dd41d31e36fa255f87df619216d5e55a7f55194016ed6ce2bc5aa",
+  "native_patch_sha256": "0029f3c8cba4ad16a66f47af20a9efb6186eb1745db2d2436c2eeaa9218c61ba",
+  "source_proposal": {
+    "patch": "integrations/hermes_application_fabric/qualification/application_owner_support/a577-hermes-source-support.patch",
+    "patch_sha256": "9ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d",
+    "changed_macro_files": 4,
+    "existing_hermes_descriptors": 5,
+    "local_unit_tests": 383,
+    "local_failures": 0,
+    "local_errors": 0,
+    "local_skips": 0,
+    "unchanged_owner_expected_positive_failures": 10,
+    "original_macro_branch_modified": false,
+    "original_owner_adoption_proven": false,
+    "native_contexts": 2,
+    "native_cases_per_context": 21,
+    "native_execution": "pending hosted receipts",
+    "source_flags_overridden_in_proposal": false,
+    "runtime_inputs_are_fixtures": true
+  },
+  "preserved_original_changes": [
+    "Same clean composed candidate supplies adapter and native owner.",
+    "Original gc.auto=0 Git controls.",
+    "Original paired sparse ops/launchd and scripts inputs.",
+    "All original 7118 tree members except explicitly changed owned qualification/documentation/review files.",
+    "Original CI and held native/Studio implementation blobs adopted unchanged.",
+    "All nine H4 additions present in 322 and absent from 7118 retained unchanged."
+  ],
+  "qualification_changes": [
+    "Studio diagnostic acquires original immutable edd30b4686d3aaf358b4ca6ebd9485b04d15751d anchor and full event history.",
+    "Original-a577 native context adds meta fixed/AUTO/exact cases.",
+    "Proposal context archives exact committed Macro inputs, applies a closed four-file patch, executes383 unit cases, then21 native cases without support-flag overrides.",
+    "Client-byte-only reports distinguish verified client content from whole-owner source identity.",
+    "Two exact H4 receipt reviews cover fifteen recorded host/file-ownership tokens; original receipts and guard implementation stay unchanged."
+  ],
+  "previous_322": {
+    "actual_merge": "719e73591513186dd12bc246dd0a4a1f62931e5f",
+    "inference_run": 42381637919,
+    "primary_jobs": {
+      "pinned_native": {
+        "job": 128430305570,
+        "tests": 85,
+        "seconds": 10.82
+      },
+      "offline_python_313": {
+        "job": 128430305694,
+        "tests": 66,
+        "seconds": 0.451
+      },
+      "offline_python_312": {
+        "job": 128430305725,
+        "tests": 66,
+        "seconds": 0.476
+      },
+      "host": {
+        "job": 128430305732,
+        "tests": 137,
+        "seconds": 22.29
+      },
+      "paired": {
+        "job": 128430305789,
+        "groups": [
+          52,
+          8,
+          32,
+          23,
+          32,
+          42,
+          16,
+          14,
+          3
+        ],
+        "tests": 222
+      },
+      "native_application_broker": {
+        "job": 128430305814,
+        "tests": 12,
+        "seconds": 83.68
+      },
+      "tunnel": {
+        "job": 128430305825,
+        "tests": 170,
+        "seconds": 31.14
+      },
+      "attended_gateway": {
+        "job": 128430305885,
+        "tests": 100,
+        "seconds": 10.78
+      }
+    },
+    "primary_jobs_conclusion": "all eight success; overlapping suites are not a unique-case total",
+    "enrollment": {
+      "run": 42381637833,
+      "job": 128430305067,
+      "tests": 385,
+      "seconds": 1250.88,
+      "conclusion": "success"
+    },
+    "studio_diagnostic": {
+      "job": 128430305746,
+      "baseline_target": "passed",
+      "observed_target": "passed",
+      "full_tests": 814,
+      "full_failures": 43,
+      "cause": "Missing historical Git fixture objects; repair changes checkout inputs only.",
+      "artifact_id": 13577079576,
+      "artifact_sha256": "c6c9a2308098a2c4a98e6875a875a3aaba419a01f8e8155f3670cda361ec020f"
+    },
+    "general_ci": {
+      "run": 42381637905,
+      "terminal_verdict_observed": false,
+      "known_failures": [
+        {
+          "job": 128431362206,
+          "test": "test_d8_template_topology_and_protected_defaults",
+          "finding": "15 original H4 receipt ownership literals; bounded existing review qualified in this contribution."
+        },
+        {
+          "job": 128431362245,
+          "test": "test_qwen_resolves_worker_override_before_yaml",
+          "finding": "Old composition expected worker override but received default endpoint; current original owner source/CI retained, new execution pending."
+        }
+      ]
+    }
+  },
+  "runtime_boundaries": {
+    "h4_diagnostic": "c79 global reload NOT_SENT after marketing profile_mismatch; no replay or cross-profile bypass.",
+    "go_c1": "Original GET /usage401 stop retained; legitimate auth/config recovery remains with provider owner.",
+    "provider_plan_metadata": "New original #2220 authenticated identity/credits/model evidence is not APPLICATION enrollment or a primary inference receipt.",
+    "installed_primary": false,
+    "real_provider_turn": false,
+    "live_usage_or_budget_acceptance": false,
+    "mission_complete": false
+  }
+}
