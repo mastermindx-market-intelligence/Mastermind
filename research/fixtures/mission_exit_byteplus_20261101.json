@@ -1,0 +1,56 @@
+{
+  "schema": "mastermind.mission_exit_audit_input/v1",
+  "mission": {
+    "requires": [
+      "accepted_worker_result",
+      "source_implementation",
+      "current_head_ci",
+      "independent_source_review",
+      "credential_owner_attestation",
+      "governed_production_result"
+    ]
+  },
+  "worker": {
+    "scope": "analysis",
+    "state": "TERMINAL",
+    "exit_code": 0,
+    "accepted": false,
+    "acceptance_ref": null,
+    "result_ref": null
+  },
+  "source": {
+    "head": "f559d9d188ab8905bd84779ed01b26a867f36ab9",
+    "implementation_applied": false,
+    "implementation_head": null,
+    "implementation_ref": null,
+    "implementation_scope_matched": false,
+    "ci_conclusion": "SUCCESS",
+    "ci_head": "f559d9d188ab8905bd84779ed01b26a867f36ab9",
+    "ci_run_ref": "github:Mastermind/actions/runs/40089032387",
+    "review_verdict": "APPROVED",
+    "review_head": "f559d9d188ab8905bd84779ed01b26a867f36ab9",
+    "review_ref": "fabric:modelark-pr1824-f559d9-minimax-review-20261024-v1",
+    "author_id": "source_author",
+    "reviewer_id": "independent_minimax_reviewer"
+  },
+  "credential": {
+    "issuer_activation_verified": false,
+    "issuer_evidence_ref": null,
+    "owner_identified": false,
+    "owner_ref": null
+  },
+  "production": {
+    "job_attempt_accepted": false,
+    "job_attempt_ref": null,
+    "original_parent_consumed": false,
+    "parent_consumption_ref": null,
+    "installed_generation_qualified": false,
+    "generation_ref": null
+  },
+  "effect": {
+    "class": "SAFETY_DENIED",
+    "action_id": "byteplus-pr1824-six-p2-source-write",
+    "carrier": "historical-originating-sol-session",
+    "dispatched": false
+  }
+}

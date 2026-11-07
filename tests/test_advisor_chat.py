@@ -7,6 +7,9 @@ message stream so we can assert that cli_bridge.chat_stream maps SDK messages
 from __future__ import annotations
 
 import asyncio
+import json
+
+import pytest
 
 from brain import advisor, cli_bridge
 
@@ -276,22 +279,12 @@ def test_advisor_action_is_proposal_only_and_cannot_touch_paper_state(tmp_path, 
     from brain import bot_mcp
     from brain import research_paper as rp
     from portfolio import advisor_trade
-    from portfolio import lenses
     from portfolio import paper_account as pa
     from portfolio import position_log as pl
 
     proposals = tmp_path / "recommendations.jsonl"
     monkeypatch.setattr(advisor_trade, "_PROPOSALS", proposals)
     monkeypatch.setattr(rp, "latest_for", lambda ticker: {"ticker": ticker, "confirmed": True})
-    # This test owns the proposal-only/no-execution invariant, not gate eligibility. Arrange a
-    # complete current preliminary gate so the proposal path is intentionally reachable.
-    monkeypatch.setattr(lenses, "full", lambda *_a, **_k: {
-        "subject": "AAPL", "kind": "name",
-        "rows": [{"lens": "trend", "direction": "bull"}],
-        "synthesis": {
-            "confluence": 0.42, "size_authority": "up", "vetoes": [], "divergences": []
-        },
-    })
 
     # Any regression into the former mutation path fails loudly.
     monkeypatch.setattr(pa, "execute_fill", lambda *a, **k: (_ for _ in ()).throw(
@@ -375,3 +368,32 @@ def test_history_roundtrip(tmp_path, monkeypatch):
     assert h[0]["role"] == "user" and h[0]["content"] == "should we add NVDA?"
     assert h[1]["tools"][0]["name"].endswith("get_decision_matrix")
     assert advisor.load_history(None) == []                # missing id never throws
+
+
+@pytest.mark.parametrize("conversation_id", ["../escape", "/absolute", "a/b", "a\\b", "a%2fb", "a\x00b", "a" * 65])
+def test_history_rejects_invalid_identity_before_file_access(tmp_path, monkeypatch, conversation_id):
+    monkeypatch.setattr(advisor, "_HISTORY", tmp_path / "history")
+    with pytest.raises(advisor.FabricConversationError, match="fabric_conversation_id_invalid"):
+        advisor.save_fabric_conversation({"conversation_id": conversation_id})
+    assert not (tmp_path / "history").exists()
+
+
+def test_fabric_history_save_replaces_leaf_without_overwriting_symlink_target(tmp_path, monkeypatch):
+    monkeypatch.setattr(advisor, "_ROOT", tmp_path)
+    monkeypatch.setattr(advisor, "_SESSIONS", tmp_path / "sessions.json")
+    history = tmp_path / "history"
+    history.mkdir()
+    monkeypatch.setattr(advisor, "_HISTORY", history)
+    cid = "conversation-1"
+    retained = history / "retained.json"
+    raw = json.dumps({"schema": advisor._FABRIC_SCHEMA, "backend": "fabric", "scope": "fixture",
+        "conversation_id": cid, "rendered": [], "messages": [], "turns": []})
+    retained.write_text(raw)
+    leaf = history / (cid + ".json")
+    leaf.symlink_to(retained)
+    with advisor.fabric_conversation(cid, scope="fixture") as doc:
+        doc["rendered"].append({"role": "user", "content": "Observed state."})
+        advisor.save_fabric_conversation(doc)
+    assert retained.read_text() == raw
+    assert not leaf.is_symlink()
+    assert advisor.load_history(cid) == [{"role": "user", "content": "Observed state."}]

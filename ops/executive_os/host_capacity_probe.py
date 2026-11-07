@@ -54,6 +54,7 @@ _SWAP_TOKEN = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\Z")
 
 _PROBE_ERROR_CODES = frozenset(
     {
+        "BOOT_IDENTITY_UNAVAILABLE",
         "ARGUMENTS_INVALID",
         "DISK_DESCRIPTOR_CLOSE_FAILED",
         "DISK_IDENTITY_DRIFT",
@@ -103,6 +104,29 @@ class HostCapacityProbeError(RuntimeError):
 
 def _refuse(code: str) -> None:
     raise HostCapacityProbeError(code)
+
+
+def current_boot_reference() -> str:
+    """Observe one kernel boot epoch under the existing FP1B host owner.
+
+    This normalizes the existing process inspector's real OS boot UUID. It
+    assigns no host/principal identity, enrollment epoch, policy or admission.
+    The inspector's process-local fallback is deliberately ineligible here.
+    Existing V1 probes/qualifications are not silently rewritten or activated.
+    """
+    import hashlib
+    from uuid import UUID
+    from control_plane.codex_worker import ProcessInspector, ProcessIdentityError
+    try:
+        raw = ProcessInspector().boot_session_id()
+        if type(raw) is not str or raw != raw.strip():
+            _refuse("BOOT_IDENTITY_UNAVAILABLE")
+        boot = UUID(raw)
+        if boot.int == 0:
+            _refuse("BOOT_IDENTITY_UNAVAILABLE")
+        return "boot-" + hashlib.sha256(b"mastermind.fp1b.kernel_boot/v1\0" + boot.bytes).hexdigest()
+    except (ValueError, OSError, ProcessIdentityError):
+        raise HostCapacityProbeError("BOOT_IDENTITY_UNAVAILABLE") from None
 
 
 def _checked_int(value: Any, *, code: str) -> int:

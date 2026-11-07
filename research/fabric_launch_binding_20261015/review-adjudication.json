@@ -1,0 +1,36 @@
+{
+  "run": "fabric-launch-binding-review-01a11e90-v1",
+  "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "parent": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "result_bytes": 6844,
+  "result_sha256": "928587a95879157a2c7583fa0736b87d26ed51c63db9737589a2bc04ed8e033b",
+  "child_acceptance": "NOT_ACCEPTED",
+  "reason": "Final review exceeded the6000-character bound; no accept command. Useful source findings separately adjudicated.",
+  "findings": {
+    "B1": "Valid plain-packet compatibility concern fixed by bounded prefix opt-in before strict contract checks. Rejected widening roots to paths or hosts to user@host: actual ROUTING_ROOT is ORCH_ID/native root and actual HOST_ARG is canonical host key.",
+    "B2": "Rejected: idempotent prelaunch replay not authorized. Duplicate/uncertain runs deliberately remain refused; original RUN_EXISTS/lease owner remains authoritative.",
+    "B3": "Accepted: exact parsed lease/account must equal LEASE_ID/ACCOUNT_ARG actually passed to launch. Added arguments and equality guard; two failing targeted tests now pass.",
+    "C1": "Confirmed installed LOG_FILE=$LOG_DIR/${ID}.log.",
+    "C2": "Confirmed exact minute-resolution log prefix and one original acquire/support publication on this new explicit artifact route. No ignored foreign or conflicting lines.",
+    "C3": "Confirmed OPERATOR_CHILD_BUDGET initialized0 and all call vars populated before call. DirectoryChain uses O_RDONLY|O_DIRECTORY, actual file+directory fsync exercised.",
+    "other": "Preserve partial-write refusal/no retry. Account is a non-secret broker identifier needed for exact join. Redirect helper diagnostic to stderr. No credentials or security settings changed."
+  },
+  "final_candidate": {
+    "remote_sub.sh": "c88b16b32bc3ce826ea0624ed46966dc94c95f53fae789eb7fd657277c8705de",
+    "remote_sub_helpers.py": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b"
+  },
+  "final_test_summary": [
+    {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "30",
+      "time": "0.225",
+      "timestamp": "2026-10-15T00:20:13.616740-07:00",
+      "hostname": "m2studio"
+    }
+  ],
+  "installation": "NOT_YET_RUN",
+  "scope": "parent-adjudicated prospective correlation repair; not native or settlement acceptance"
+}

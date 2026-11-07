@@ -1,0 +1,53 @@
+{
+  "schema": "soxx.early_failure_oracle_envelope.v21",
+  "date": "2026-10-12",
+  "predeclared_before_stage_evaluation": true,
+  "parent_source": "/private/tmp/soxx_terminal_finepivot_20261011_v14",
+  "cohort": [
+    "SOXX",
+    "SMH",
+    "QQQ",
+    "AMD",
+    "NVDA",
+    "MU",
+    "INTC",
+    "AMAT",
+    "LRCX",
+    "KLAC",
+    "XLV",
+    "XLE"
+  ],
+  "parent_entry": "First completed 3H MACD negative histogram improving + Stoch RSI turn, after 2x previous-80-bar RMS negative extreme; open next 15m RTH bar",
+  "baseline": "Prior v19 accepted 52 RTH-hour timer, 1.5% entry-price emergency stop, sell 25% at +2%, 5bp per side, 5m route low-first",
+  "checkpoints_market_hours": [
+    0.25,
+    0.5,
+    1.0,
+    2.0,
+    3.0,
+    6.0
+  ],
+  "intervention": "At each predefined checkpoint, if position remains live, request sale of all remaining shares at the NEXT observed 5m open, preserving original stop precedence. One checkpoint per separately evaluated policy, not repeated exits.",
+  "matched_data_contract": "Every originally qualifying entry remains in opportunity denominator. KLAC 7 historical 5m gaps: any gap between entry and later of baseline/forced exit => missing, NOT a win/loss or zero.",
+  "counterfactual_oracle": "max(0,forced_exit_net_minus_baseline_net) per original opportunity. Perfect hindsight is NOT a feasible policy.",
+  "naive_causal_controls": [
+    "sell_if_completed_5m_close_below_entry",
+    "sell_if_completed_5m_close_below_50_percent_of_favorable_excursion"
+  ],
+  "naive_halfgiveback_definition": "only if favorable excursion >0 and current close < entry + .5*(maximum observed high since entry minus entry); upper excursion known up to completed checkpoint; not a next-candle high",
+  "null_control": "unconditionally exit all remaining at checkpoint",
+  "primary_scoring": [
+    "available_at_checkpoint",
+    "saved_losers",
+    "harmed_winners",
+    "mean_inc_return_all_initial_opportunities",
+    "oracle_upper_bound_per_original_opportunity",
+    "economic opportunity after stop/partial",
+    "calendar-week-block bootstrap"
+  ],
+  "inference": "Never choose best checkpoint from these previously inspected observations as an independently validated strategy. No trading or actual 24h source.",
+  "data_rights": "No raw private/BOATS/Terminal bars in GitHub. Only code, aggregate output, version/source checksum metadata.",
+  "no_reopt": true,
+  "no_auth_vendor_calls": true,
+  "no_trade_orders": true
+}

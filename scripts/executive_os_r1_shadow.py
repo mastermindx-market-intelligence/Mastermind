@@ -22,7 +22,8 @@ from control_plane.executive_runtime import JobPayload, Runtime, SCHEMA_VERSION
 from control_plane.model_router import ModelRouter, WorkRequest
 
 
-ROUTING_POLICY_VERSION = "2026-08-24.stage4"
+# New fixture runs qualify the current catalogue; historical R1 receipts stay unchanged.
+ROUTING_POLICY_VERSION = "2026-10-14.attended-qualification"
 EVIDENCE_SCHEMA = "mastermind.executive_os_r1_shadow_evidence/v1"
 
 # These are the reviewed, bounded R1 fixture inputs.  The all-Sol values are a
