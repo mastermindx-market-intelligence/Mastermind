@@ -634,11 +634,12 @@ def _parse_native_completion(raw, content_type, model, packet, canonical_model=N
     if model == "gpt-6-luna-decisions:free":
         allowed_echoes.add("gpt-6-luna")
     if echo is not None and (type(echo) is not str or echo not in allowed_echoes):
-        # Jev's latest alias may report its concrete semantic version. Require
-        # the gateway's independent canonical alias header as the binding.
+        # TypeSafe documents a concrete Jev semantic version for jev-latest.
+        # The exact free request alias/endpoint stays pinned; a reported release
+        # is retained as model_echo, never used to select or send another model.
         if not (model == "jev-latest:free" and type(echo) is str
                 and re.fullmatch(r"jev-\d+\.\d+\.\d+", echo)
-                and canonical_model in allowed_echoes):
+                and (canonical_model is None or canonical_model in allowed_echoes | {echo})):
             raise ExperientialTransportRefused("GATEWAY_RESPONSE_MODEL_MISMATCH")
     questions, answers = packet["questions"], frame.get("answers")
     if FREE_NATIVE_MODELS[model] == "systemone":

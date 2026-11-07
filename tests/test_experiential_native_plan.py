@@ -371,13 +371,16 @@ def test_native_answer_validation_preserves_question_and_model_identity(model, f
         transport._parse_native_completion(json.dumps(frame).encode(), "application/json", model, native_packet(model))
 
 
-def test_native_latest_version_requires_gateway_alias_binding():
+def test_native_latest_alias_preserves_documented_release_and_rejects_conflicting_identity():
     model = "jev-latest:free"
     frame = json.dumps({"model": "jev-1.13.0", "answers": native_answer(model)}).encode()
-    with pytest.raises(transport.ExperientialTransportRefused, match="MODEL_MISMATCH"):
-        transport._parse_native_completion(frame, "application/json", model, native_packet(model))
+    assert transport._parse_native_completion(frame, "application/json", model,
+        native_packet(model))[1] == "jev-1.13.0"
     assert transport._parse_native_completion(frame, "application/json", model,
         native_packet(model), canonical_model="jev-latest")[1] == "jev-1.13.0"
+    with pytest.raises(transport.ExperientialTransportRefused, match="MODEL_MISMATCH"):
+        transport._parse_native_completion(frame, "application/json", model,
+            native_packet(model), canonical_model="other-model")
 
 
 def test_invalid_native_response_keeps_original_reconciliation_handle(tmp_path, monkeypatch, local_gateway):
