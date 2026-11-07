@@ -2,7 +2,7 @@
   "additional_identity_is_visible": true,
   "baseline_unreviewed_literals": 11,
   "complete_hosted_gate_owed": true,
-  "composed_original": "887b7d5df575e8c6492513161f3cb921995fbef5",
+  "composed_original": "51b4abe1f68b58b2c41f9aa45aceaf2ab45670f3",
   "content_drift_restores_all_findings": true,
   "failed_source": {
     "actual_merge": "14fd8df04c3a9736a869df0db7e098707d3a405a",
@@ -13,6 +13,7 @@
   },
   "live_provider_acceptance": false,
   "monetary_acceptance": false,
+  "original_repair_already_adopted": true,
   "packaging_repair": {
     "builder_unchanged": "74678de5b6e2d302a9dc367bc63ba08f788f8f45",
     "current_head_execution_claimed": false,
@@ -37,10 +38,12 @@
     "shared_ci_workflow_blob": "441b4f2032edfaab367200e6d62c4ba67568c43b"
   },
   "provider_calls": 0,
-  "registry_sha256": "6781382a5c22b19844f5e74e0899a0ed92dac9e4be4cc34312c39c8a0719d93b",
+  "registry_composition": "Preserve original51b complete record set including its exact readiness record once, then carry only the four distinct Hermes contribution records.",
+  "registry_sha256": "0e4ee8392196c8c583aabd038222512c8d8ce29834f1ef8cc895ba71ea86ae69",
   "review_record_scope": "One exact retained proposal plus one exact previously qualified evidence observation. Existing original and Hermes records preserved; source, path or literal drift remains visible.",
   "reviewed_remaining_literals": 0,
   "runtime_sources_imported": false,
   "schema": "mastermind.hermes_ci_review_qualification.v1",
-  "scope": "unchanged public scanner helper bodies with exact postimages; no full D8 Git-diff gate"
+  "scope": "unchanged public scanner helper bodies with exact postimages; no full D8 Git-diff gate",
+  "superseded_unmergeable_head": "f782ac0be36d652d27c8df1937e1c1a170df9755"
 }

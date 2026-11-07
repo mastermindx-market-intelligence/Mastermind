@@ -859,6 +859,15 @@ REVIEWED_FILES[
     "sites": ((27, 26, 29, "int", "443"),),
 }
 
+# Retained protected readiness qualification records the actual proof-host UID.
+# This is evidence, not a runtime default or grant. The one complete UTF-8 token
+# requires this exact full postimage; any byte/path drift restores the guard.
+REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json'] = {
+    'sha256': 'ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33',
+    'sites': (),
+    'utf8_sites': ((61, 13, 16, 'int', '501'),),
+}
+
 # Preserve the qualified Hermes contribution while composing the current original owner.
 REVIEWED_FILES['integrations/hermes_application_fabric/qualification/qualify_application_owner.py'] = {'sha256': 'e2039148bca4e1a7a0782a7ebc6e18d180a1f4333e581938bc8b0eb557cd86da',
  'sites': ((354, 37, 40, 'int', '409'),)}
@@ -893,9 +902,3 @@ REVIEWED_FILES['integrations/hermes_application_fabric/qualification/application
            (1026, 49, 52, 'int', '503'),
            (1031, 45, 48, 'int', '409'),
            (1048, 34, 37, 'int', '409'))}
-
-# Consume the exact completed H6 readiness-evidence record.
-# Observed host identity is evidence, never a new runtime default or grant.
-REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json'] = {'sha256': 'ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33',
- 'sites': (),
- 'utf8_sites': ((61, 13, 16, 'int', '501'),)}
