@@ -280,6 +280,34 @@
          )
          return concluded ? { kind: 'completed' } : null
        } catch (error: unknown) {
+@@ -609,6 +637,12 @@
+       config = proposedConfig
+     }
+     signal.throwIfAborted()
++    const phase = this.phase, sequence = session.seq
++    const native = this.loopCtx.llm.requireNativePreparation({ agent: this, session, turn, step, signal }, config, preparedCall)
++    if (native && (this.phase !== phase || session.seq !== sequence)) {
++      throw new Error('native request preparation changed the original Agent or Session')
++    }
++    signal.throwIfAborted()
+     return { config, ...preparedCall === undefined ? {} : { preparedCall } }
+   }
+ 
+@@ -628,6 +662,14 @@
+       ...preparedCall === undefined ? {} : { adapterDefaults: preparedCall.adapterDefaults },
+       ...tools.length > 0 ? { tools } : {},
+     })
++    const phase = this.phase, sequence = session.seq
++    const native = this.loopCtx.llm.requireNativePreparation({
++      agent: this, session, turn: position.turn, step: position.step, signal,
++    }, config, preparedCall)
++    if (native && (this.phase !== phase || session.seq !== sequence)) {
++      throw new Error('native header admission changed the original Agent or Session')
++    }
++    signal.throwIfAborted()
+     const baseline = this.session.requestHeader()
+     const startsSeries = startsRequestSeries
+       || this.requestSurfaceGeneration !== surfaceGeneration
 --- a/packages/core/agent-loop/src/inbox.ts
 +++ b/packages/core/agent-loop/src/inbox.ts
 @@ -10,12 +10,34 @@
@@ -832,6 +860,544 @@
  }
  
  /**
+--- a/packages/llm/llm-deepseek/src/adapter.ts
++++ b/packages/llm/llm-deepseek/src/adapter.ts
+@@ -1,7 +1,7 @@
+ /** Direct Messages transport with one cancellable lifecycle per model request. */
+ 
+-import { attributionHeaders, LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
+-import type { GenerateOptions, ImageAttachmentAccessResolver, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
++import { attributionHeaders, claimNativeLlmWritePermit, contentHasImage, LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
++import type { GenerateOptions, ImageAttachmentAccessResolver, NativeLlmWritePermit, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
+ import type { DeepSeekLlmApiJson } from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
+ import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
+ import { modelInfo } from './model-info.ts'
+@@ -21,6 +21,7 @@
+ /** DeepSeek provider using Messages content and native thinking replay. */
+ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapter {
+   private readonly files: DeepSeekFileStore
++  private readonly nativeRequired: boolean
+   private readonly imageAccess: ImageAttachmentAccessResolver = (ref) => {
+     const attachments = this.dependencies.resolveAttachments?.()
+     return attachments === undefined ? undefined : this.dependencies.resolveImageAccess?.(attachments, ref)
+@@ -28,6 +29,7 @@
+ 
+   constructor(private readonly dependencies: DeepSeekAdapterOptions<C>) {
+     super()
++    this.nativeRequired = dependencies.nativeRequired === true
+     this.files = dependencies.resolveFiles?.() ?? new DeepSeekFileStore()
+   }
+ 
+@@ -50,23 +52,28 @@
+   override async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+     const connection = await this.connection(signal)
+     this.dependencies.admit?.(connection, model)
+-    return { model: modelInfo(connection, provider, model), stream: options => this.generate(options, connection) }
++    return { model: modelInfo(connection, provider, model), stream: (options, native) => this.generate(options, connection, native) }
+   }
+-  stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
++  stream(options: GenerateOptions, native?: NativeLlmWritePermit): AsyncIterable<StreamChunk> {
+     const connection = this.dependencies.options()
+     this.dependencies.admit?.(connection, options.model)
+-    return this.generate(options, connection)
++    return this.generate(options, connection, native)
+   }
+ 
+   private connection(signal: AbortSignal | undefined): Promise<C> {
+     return this.dependencies.connect?.(signal) ?? Promise.resolve(this.dependencies.options())
+   }
+ 
+-  private async * generate(options: GenerateOptions, connection: C): AsyncGenerator<StreamChunk> {
++  private async * generate(options: GenerateOptions, connection: C, native?: NativeLlmWritePermit): AsyncGenerator<StreamChunk> {
++    if (this.nativeRequired && native === undefined) {
++      throw new LlmError("native request requires its original runtime witness", "NATIVE_AUTHORITY")
++    }
++    const requireNativeWrite = native === undefined ? undefined : claimNativeLlmWritePermit(native, this, options)
+     const consumer = new AbortController()
+-    const signal = options.signal === undefined ? consumer.signal : AbortSignal.any([consumer.signal, options.signal])
++    const signals = [consumer.signal, ...options.signal === undefined ? [] : [options.signal], ...native === undefined ? [] : [native.signal]]
++    const signal = signals.length === 1 ? consumer.signal : AbortSignal.any(signals)
+     using watchdog = idleWatchdog(signal, connection.streamIdleTimeoutMs, 'MESSAGES_IDLE')
+-    const iterator = this.request(options, connection, watchdog.signal, () => { watchdog.pulse() })
++    const iterator = this.request(options, connection, watchdog.signal, () => { watchdog.pulse() }, native, requireNativeWrite)
+     try {
+       while (true) {
+         const next = await watchdog.next(iterator)
+@@ -75,6 +82,7 @@
+       }
+     } catch (error) {
+       if (timeoutOf(watchdog.signal, 'MESSAGES_IDLE') !== undefined) throw new LlmError('DeepSeek Messages stream idle timeout', 'TIMEOUT', { cause: error })
++      if (native?.signal.aborted) throw new LlmError('Native request authority retired', 'ABORTED', { cause: error })
+       if (options.signal?.aborted) throw new LlmError('DeepSeek Messages request aborted', 'ABORTED', { cause: error })
+       if (error instanceof LlmError) throw error
+       throw new LlmError('DeepSeek Messages transport failed', 'TRANSPORT', { cause: error })
+@@ -89,9 +97,15 @@
+   }
+ 
+   private async * request(
+-    options: GenerateOptions, connection: C, signal: AbortSignal, activity: () => void,
++    options: GenerateOptions, connection: C, signal: AbortSignal, activity: () => void, native?: NativeLlmWritePermit, requireNativeWrite?: () => true,
+   ): AsyncGenerator<StreamChunk> {
+     signal.throwIfAborted()
++    if (native !== undefined) {
++      requireNativeWrite!()
++      if (options.messages.some(message => contentHasImage(message.content))) {
++        throw new LlmError('native attachments are not admitted', 'NATIVE_ATTACHMENT_UNSUPPORTED')
++      }
++    }
+     const { messages, versions } = await prepareImages(
+       options.messages, connection, options.model, this.dependencies.resolveAttachments?.(), this.imageAccess, signal,
+     )
+@@ -135,7 +149,8 @@
+             ? [MESSAGES_TOOL_CHANGES_BETA]
+             : [],
+         ]
+-        const response = await fetch(`${messagesApiRoot(connection.baseURL)}/messages`, {
++        const url = `${messagesApiRoot(connection.baseURL)}/messages`
++        const request: RequestInit = {
+           method: 'POST', signal, body: extensions.payload, redirect: 'error',
+           headers: {
+             ...attributionHeaders(),
+@@ -147,7 +162,11 @@
+             ...options.sessionId === undefined ? {} : { 'x-deepseek-harness-session-id': String(options.sessionId) },
+             ...options.purpose === 'compaction' ? { 'x-deepseek-harness-compact': '1' } : {},
+           },
+-        })
++        }
++        signal.throwIfAborted()
++        requireNativeWrite?.()
++        signal.throwIfAborted()
++        const response = await fetch(url, request)
+         if (!response.ok) {
+           const text = await response.text()
+           let raw: unknown
+--- a/packages/llm/llm-deepseek/src/host.ts
++++ b/packages/llm/llm-deepseek/src/host.ts
+@@ -26,6 +26,7 @@
+   const unacceptedRoutes = new Set<string>()
+   const adapter = new DeepSeekAdapter({
+     ...dependencies,
++    nativeRequired: ctx.root.get("nativeLlmAdmission") !== undefined,
+     resolveUserId: () => userId ??= getOrCreateAnonymousUserId(),
+     onReplayDegrade: ({ provider, model, reason }) => {
+       const key = `${provider}/${model}\u0000${reason}`
+--- a/packages/llm/llm-deepseek/src/types.ts
++++ b/packages/llm/llm-deepseek/src/types.ts
+@@ -91,6 +91,8 @@
+ 
+ /** Constructor options for {@link DeepSeekAdapter}: the operation-local resolution hooks the plugin owns. */
+ export interface DeepSeekAdapterOptions<Connection extends DeepSeekConnectionOptions = DeepSeekConnectionOptions> {
++  /** Fixed host composition; native requests require the original runtime witness. */
++  nativeRequired?: boolean
+   /** Report unusable native Messages replay metadata without exposing content or signatures. */
+   onReplayDegrade?: (detail: { provider: string; model: string; reason: string }) => void
+   /** Report extension fields omitted from one request because the merged request failed to serialize. */
+--- a/packages/llm/llm/src/index.ts
++++ b/packages/llm/llm/src/index.ts
+@@ -6,7 +6,7 @@
+  * @module @deepseek-ai/dsh-llm
+  */
+ 
+-import { Context } from '@deepseek-ai/cordis'
++import { Context, FiberState, symbols } from '@deepseek-ai/cordis'
+ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+ import { deepFreeze } from '@deepseek-ai/dsh-util-values'
+ import type {
+@@ -57,6 +57,8 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     llm: LlmRuntime
++    /** Host-only authority captured before the service mounts. */
++    nativeLlmAdmission?: NativeLlmAdmission
+   }
+ 
+   interface Events {
+@@ -191,12 +193,90 @@
+   stream(options: GenerateOptions): AsyncIterable<StreamChunk>
+ }
+ 
++/** Closed native configuration projection, excluding request metadata/content. */
++function nativeCallConfig(config: LlmCallConfig): Readonly<LlmCallConfig> {
++  return deepFreeze({
++    provider: config.provider, model: config.model,
++    ...config.reasoningEffort === undefined ? {} : { reasoningEffort: config.reasoningEffort },
++    ...config.temperature === undefined ? {} : { temperature: config.temperature },
++    ...config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens },
++    ...config.stop === undefined ? {} : { stop: [...config.stop] },
++  })
++}
++
++/** Original request owner before the Agent logs its resolved header. */
++export interface NativeLlmPreparationContext {
++  readonly agent: object
++  readonly session: object
++  readonly turn: number
++  readonly step: number
++  readonly signal: AbortSignal
++}
++export interface NativeLlmPreparationFacts extends NativeLlmPreparationContext {
++  readonly phase: 'prepare'
++  readonly runtime: LlmRuntime
++  readonly config: Readonly<LlmCallConfig>
++  readonly registrationIdentity: object
++  readonly adapterIdentity: LlmAdapter
++  readonly ownerIdentity: Context['fiber']
++}
++export interface NativeLlmDispatchFacts {
++  readonly phase: 'dispatch' | 'write'
++  readonly runtime: LlmRuntime
++  readonly request: Readonly<GenerateOptions>
++  readonly options: Readonly<GenerateOptions>
++  readonly config: Readonly<LlmCallConfig>
++  readonly registrationIdentity: object
++  readonly adapterIdentity: LlmAdapter
++  readonly ownerIdentity: Context['fiber']
++}
++/** Retained currentness, not another dispatch or retry authority. */
++export interface NativeLlmAdmission {
++  readonly signal: AbortSignal
++  check(facts: NativeLlmPreparationFacts | NativeLlmDispatchFacts): true
++}
++/** Runtime-only argument, never provider options, headers or log data. */
++export interface NativeLlmWritePermit {
++  readonly signal: AbortSignal
++  assertCurrent(): true
++}
++// Issuance belongs to this runtime module. A structural object is not a permit;
++// one original adapter invocation claims it once and retains its write check
++// through the adapter's own retry/settlement path.
++const nativeLlmPermits = new WeakMap<NativeLlmWritePermit, {
++  readonly adapter: LlmAdapter
++  readonly options: GenerateOptions
++  readonly requireCurrent: () => true
++  claimed: boolean
++}>()
++export function claimNativeLlmWritePermit(
++  permit: NativeLlmWritePermit, adapter: LlmAdapter, options: GenerateOptions,
++): () => true {
++  const issued = nativeLlmPermits.get(permit)
++  if (issued === undefined || issued.claimed || issued.adapter !== adapter || issued.options !== options) {
++    throw new LlmError('native write permit is not the original adapter invocation', 'NATIVE_AUTHORITY')
++  }
++  // Mark before calling authority so reentry cannot claim it twice. Refusal
++  // never restores the permit or creates a replacement attempt.
++  issued.claimed = true
++  issued.requireCurrent()
++  return issued.requireCurrent
++}
++
++export interface LlmRegistrationObservation {
++  readonly provider: Readonly<LlmProviderInfo>
++  readonly registrationIdentity: object
++  readonly adapterIdentity: LlmAdapter
++  readonly ownerIdentity: Context['fiber']
++  assertCurrent(): true
++}
++
+ /** One adapter-owned model-resolution generation bound to its eventual stream call. */
+ export interface PreparedAdapterCall {
+   /** Exact model metadata from the same adapter generation as {@link stream}. */
+   readonly model: LlmResolvedModelInfo
+   /** Dispatch through that generation without re-reading dynamic connection facts. */
+-  stream(options: GenerateOptions): AsyncIterable<StreamChunk>
++  stream(options: GenerateOptions, native?: NativeLlmWritePermit): AsyncIterable<StreamChunk>
+ }
+ 
+ /**
+@@ -290,7 +370,7 @@
+   async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+     return {
+       model: await this.resolveModel(provider, model, signal),
+-      stream: options => this.stream(options),
++      stream: (options, native) => this.stream(options, native),
+     }
+   }
+ 
+@@ -299,7 +379,7 @@
+    * @param options - the fully-assembled request; implementations must honor `options.signal`.
+    * @returns the chunk stream, obeying the adapter contract documented on `StreamChunk`.
+    */
+-  abstract stream(options: GenerateOptions): AsyncIterable<StreamChunk>
++  abstract stream(options: GenerateOptions, native?: NativeLlmWritePermit): AsyncIterable<StreamChunk>
+ }
+ 
+ /**
+@@ -353,6 +433,16 @@
+  */
+ export class LlmRuntime extends TypertRemoteService {
+   private adapters = new Map<string, AdapterRegistration>()
++  // Cordis traces service/function fields; keep these captured identities inside
++  // one plain immutable value so caller scoping cannot wrap each identity again.
++  private readonly nativeBinding: Readonly<{
++    root: Context
++    runtime: LlmRuntime
++    admission: NativeLlmAdmission
++    check: NativeLlmAdmission['check']
++    signal: AbortSignal
++  }> | undefined
++  private readonly nativePrepared = new WeakMap<PreparedLlmCall, AdapterRegistration>()
+   private directory = new Map<string, LlmConfigurableProvider>()
+   private discoveries = new Map<
+     string,
+@@ -361,6 +451,127 @@
+ 
+   constructor(ctx: Context) {
+     super(ctx, 'llm')
++    const admission = ctx.root.get('nativeLlmAdmission')
++    if (admission === undefined) {
++      this.nativeBinding = undefined
++    } else {
++      const check = admission.check, signal = admission.signal
++      if (typeof check !== 'function' || !(signal instanceof AbortSignal)) {
++        throw new LlmError('native LLM admission is invalid', 'NATIVE_AUTHORITY')
++      }
++      this.nativeBinding = Object.freeze({ root: ctx.root, runtime: this, admission, check, signal })
++    }
++  }
++
++  /** Passive exact-provider observation from the existing registry. */
++  observeRegistration(provider: string): LlmRegistrationObservation | undefined {
++    const registration = this.adapters.get(provider)
++    if (registration === undefined) return undefined
++    const root = this.nativeBinding?.root ?? this.ctx.root
++    const owner: LlmRuntime = this
++    const original = (owner as LlmRuntime & { [symbols.original]?: LlmRuntime })[symbols.original] ?? owner
++    return Object.freeze({
++      provider: Object.freeze({ ...registration.provider }),
++      registrationIdentity: registration,
++      adapterIdentity: registration.adapter,
++      ownerIdentity: registration.owner,
++      assertCurrent: (): true => {
++        const current = root.get('llm')
++        const runtime = current === undefined ? undefined
++          : (current as LlmRuntime & { [symbols.original]?: LlmRuntime })[symbols.original] ?? current
++        if (runtime !== original) throw new LlmError('observed LLM runtime changed', 'NATIVE_AUTHORITY')
++        this.requireRegistration(registration)
++        return true
++      },
++    })
++  }
++
++  private requireRegistration(registration: AdapterRegistration): void {
++    if (this.adapters.get(registration.provider.id) !== registration
++        || registration.owner.state === FiberState.UNLOADING
++        || registration.owner.state === FiberState.DISPOSED
++        || registration.owner.state === FiberState.FAILED) {
++      throw new LlmError('native LLM registration is no longer current', 'NATIVE_AUTHORITY')
++    }
++  }
++
++  private requireNative(facts: NativeLlmPreparationFacts | NativeLlmDispatchFacts, registration: AdapterRegistration): void {
++    const binding = this.nativeBinding
++    const admission = binding?.admission, check = binding?.check, lifetime = binding?.signal
++    if (admission === undefined || check === undefined || lifetime === undefined) {
++      throw new LlmError('native LLM authority is absent', 'NATIVE_AUTHORITY')
++    }
++    const requireCurrent = (): void => {
++      lifetime.throwIfAborted()
++      const runtime = this.nativeBinding!.root.get('llm')
++      const original = runtime === undefined ? undefined
++        : (runtime as LlmRuntime & { [symbols.original]?: LlmRuntime })[symbols.original] ?? runtime
++      if (this.nativeBinding!.root.get('nativeLlmAdmission') !== admission
++          || admission.check !== check || admission.signal !== lifetime || original !== this.nativeBinding!.runtime) {
++        throw new LlmError('native LLM authority owner changed', 'NATIVE_AUTHORITY')
++      }
++      this.requireRegistration(registration)
++      if (facts.phase === 'prepare') facts.signal.throwIfAborted()
++      else {
++        facts.request.signal?.throwIfAborted()
++        if (!callConfigEquals(facts.options, facts.config)) {
++          throw new LlmError('native LLM request config changed', 'NATIVE_AUTHORITY')
++        }
++      }
++    }
++    requireCurrent()
++    const allowed: unknown = check.call(admission, facts)
++    if (allowed !== true) {
++      if (allowed !== null && (typeof allowed === 'object' || typeof allowed === 'function')) {
++        void Promise.resolve(allowed).catch(() => {})
++      }
++      throw new LlmError('native LLM request authority refused', 'NATIVE_AUTHORITY')
++    }
++    requireCurrent()
++  }
++
++  /** Check discovery completion before original input/header admission. */
++  requireNativePreparation(
++    context: NativeLlmPreparationContext,
++    config: LlmCallConfig,
++    prepared: PreparedLlmCall | undefined,
++  ): boolean {
++    if (this.nativeBinding?.admission === undefined) return false
++    const registration = prepared === undefined ? undefined : this.nativePrepared.get(prepared)
++    if (registration === undefined || prepared === undefined || !callConfigEquals(config, prepared.config)) {
++      throw new LlmError('native request lacks its original prepared registration', 'NATIVE_AUTHORITY')
++    }
++    this.requireNative(Object.freeze({
++      ...context, phase: 'prepare', runtime: this.nativeBinding!.runtime,
++      config: nativeCallConfig(config), registrationIdentity: registration,
++      adapterIdentity: registration.adapter, ownerIdentity: registration.owner,
++    }), registration)
++    return true
++  }
++
++  private nativeWritePermit(
++    request: GenerateOptions, options: GenerateOptions,
++    config: LlmCallConfig, registration: AdapterRegistration,
++  ): NativeLlmWritePermit | undefined {
++    if (this.nativeBinding?.admission === undefined) return undefined
++    // The native company attachment ceiling is text-only. Inspect original
++    // content before projection can replace durable attachment facts with text.
++    if (request.messages.some(message => contentHasImage(message.content) || contentHasFile(message.content))) {
++      throw new LlmError('native attachments are not admitted', 'NATIVE_ATTACHMENT_UNSUPPORTED')
++    }
++    deepFreeze(options)
++    const common = {
++      runtime: this.nativeBinding!.runtime, request, options, config: nativeCallConfig(config),
++      registrationIdentity: registration, adapterIdentity: registration.adapter, ownerIdentity: registration.owner,
++    }
++    this.requireNative(Object.freeze({ ...common, phase: 'dispatch' }), registration)
++    const requireCurrent = (): true => {
++      this.requireNative(Object.freeze({ ...common, phase: 'write' }), registration)
++      return true
++    }
++    const permit = Object.freeze({ signal: this.nativeBinding!.signal, assertCurrent: requireCurrent })
++    nativeLlmPermits.set(permit, { adapter: registration.adapter, options, requireCurrent, claimed: false })
++    return permit
+   }
+ 
+   /** Notify topology observers without letting one broken listener veto the commit. */
+@@ -402,12 +613,13 @@
+     // The routes this registration currently holds; `replace` rewrites it, and
+     // the disposer releases whatever it holds at disposal time.
+     const owned = new Set<string>()
++    const owner = this.ctx.fiber
+     // The disposer has run: `owned` being empty cannot say so on its own,
+     // because `replace([])` legally leaves a live registration holding none.
+     let released = false
+     const dispose = this.ctx.effect(function* (this: LlmRuntime) {
+       if (providers.length === 0) throw new LlmError('an adapter must register at least one provider', 'INVALID_ADAPTER')
+-      this.commitRoutes(owned, this.prepareRoutes(providers, adapter, owned))
++      this.commitRoutes(owned, this.prepareRoutes(providers, adapter, owned, owner))
+       yield () => {
+         released = true
+         for (const provider of owned) this.adapters.delete(provider)
+@@ -424,7 +636,7 @@
+       if (released) {
+         throw new LlmError('a disposed adapter registration cannot replace its routes', 'REGISTRATION_DISPOSED')
+       }
+-      this.commitRoutes(owned, this.prepareRoutes(next, adapter, owned))
++      this.commitRoutes(owned, this.prepareRoutes(next, adapter, owned, owner))
+     }
+     return handle
+   }
+@@ -434,7 +646,7 @@
+    * registration already holds as available. Nothing is mutated: a rejected
+    * candidate leaves the registry exactly as it was.
+    */
+-  private prepareRoutes(providers: string[], adapter: LlmAdapter, owned: ReadonlySet<string>): AdapterRegistration[] {
++  private prepareRoutes(providers: string[], adapter: LlmAdapter, owned: ReadonlySet<string>, owner: Context['fiber']): AdapterRegistration[] {
+     const unique = new Set<string>()
+     const registrations: AdapterRegistration[] = []
+     for (const provider of providers) {
+@@ -449,11 +661,12 @@
+       unique.add(provider)
+       const retryPolicy = adapter.providerRetryPolicy(provider)
+         ?? resolveRetryPolicy(undefined, `llm: provider "${provider}" retryPolicy`)
+-      registrations.push({
++      registrations.push(Object.freeze({
+         adapter,
+-        provider: { id: info.id, name: info.name },
++        owner,
++        provider: Object.freeze({ id: info.id, name: info.name }),
+         retryPolicy,
+-      })
++      }))
+     }
+     return registrations
+   }
+@@ -982,7 +1195,7 @@
+         : {},
+     })
+     let dispatched = false
+-    return Object.freeze({
++    const prepared: PreparedLlmCall = Object.freeze({
+       config: resolvedConfig,
+       retryPolicy: registration.retryPolicy,
+       adapterDefaults,
+@@ -1007,10 +1220,12 @@
+           registration,
+           config: resolvedConfig,
+           modelInfo,
+-          dispatch: options => adapterCall.stream(options),
++          dispatch: (options, native) => adapterCall.stream(options, native),
+         })
+       },
+     })
++    if (this.nativeBinding?.admission !== undefined) this.nativePrepared.set(prepared, registration)
++    return prepared
+   }
+ 
+   private registration(provider: string): AdapterRegistration {
+@@ -1067,16 +1282,20 @@
+   ): AsyncGenerator<StreamChunk> {
+     let iterator: AsyncIterator<StreamChunk>
+     try {
++      if (this.nativeBinding !== undefined
++          && options.messages.some(message => contentHasImage(message.content) || contentHasFile(message.content))) {
++        throw new LlmError('native attachments are not admitted', 'NATIVE_ATTACHMENT_UNSUPPORTED')
++      }
+       const registration = prepared?.registration ?? this.registration(options.provider)
+       const adapter = registration.adapter
+       let modelInfo: LlmResolvedModelInfo
+       let resolvedConfig: LlmCallConfig
+-      let dispatch: (options: GenerateOptions) => AsyncIterable<StreamChunk>
++      let dispatch: (options: GenerateOptions, native?: NativeLlmWritePermit) => AsyncIterable<StreamChunk>
+       if (prepared === undefined) {
+         const adapterCall = await adapter.prepareCall(options.provider, options.model, options.signal)
+         modelInfo = this.normalizeModelInfo(registration, options.model, adapterCall.model)
+         resolvedConfig = this.resolveCallWithInfo(options, modelInfo).config
+-        dispatch = options => adapterCall.stream(options)
++        dispatch = (options, native) => adapterCall.stream(options, native)
+       } else {
+         modelInfo = prepared.modelInfo
+         resolvedConfig = prepared.config
+@@ -1115,7 +1334,9 @@
+         }
+         if (Object.isFrozen(resolvedOptions)) deepFreeze(projectedOptions)
+       }
+-      const stream = dispatch(this.forAdapter(projectedOptions, adapter))
++      const finalOptions = this.forAdapter(projectedOptions, adapter)
++      const native = this.nativeWritePermit(options, finalOptions, resolvedConfig, registration)
++      const stream = dispatch(finalOptions, native)
+       iterator = stream[Symbol.asyncIterator]()
+     } catch (error: unknown) {
+       yield adapterFailureChunk(error, options.signal)
+@@ -1171,6 +1392,7 @@
+     options: GenerateOptions,
+     prepared?: PreparedDispatch,
+   ): AsyncIterable<StreamChunk> {
++    if (this.nativeBinding?.admission !== undefined) deepFreeze(options)
+     return this.ctx.waterfall(
+       this,
+       'llm/stream',
+@@ -1203,6 +1425,7 @@
+ }
+ 
+ interface AdapterRegistration {
++  readonly owner: Context['fiber']
+   readonly adapter: LlmAdapter
+   readonly provider: LlmProviderInfo
+   readonly retryPolicy: ResolvedRetryPolicy
+@@ -1212,7 +1435,7 @@
+   readonly registration: AdapterRegistration
+   readonly config: LlmCallConfig
+   readonly modelInfo: LlmResolvedModelInfo
+-  readonly dispatch: (options: GenerateOptions) => AsyncIterable<StreamChunk>
++  readonly dispatch: (options: GenerateOptions, native?: NativeLlmWritePermit) => AsyncIterable<StreamChunk>
+ }
+ 
+ export default LlmRuntime
 --- a/packages/typert/protocol/src/index.ts
 +++ b/packages/typert/protocol/src/index.ts
 @@ -20,6 +20,23 @@

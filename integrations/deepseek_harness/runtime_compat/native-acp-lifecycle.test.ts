@@ -43,8 +43,9 @@ class FixtureAdapter extends LlmAdapter{
     }else for(const chunk of next){options.signal?.throwIfAborted();yield chunk;}
   }
 }
-async function host(script:(StreamChunk[]|"hang")[],opted=true,guard?:(facts:any)=>boolean,observer?:(facts:any,signal:AbortSignal)=>any,nativeInput?:AgentInputCapability){
+async function host(script:(StreamChunk[]|"hang")[],opted=true,guard?:(facts:any)=>boolean,observer?:(facts:any,signal:AbortSignal)=>any,nativeInput?:AgentInputCapability,nativeModelAdmission?:(facts:any)=>any,nativeLlmAdmission?:any){
   const ctx=new Context(),root=await mkdtemp(join(tmpdir(),"mmx-native-acp-"));
+  if(nativeLlmAdmission!==undefined)ctx.provide("nativeLlmAdmission",nativeLlmAdmission);
   cleanup.push(async()=>{await ctx.fiber.dispose();await rm(root,{recursive:true,force:true});});
   let nativeOwner:Context["fiber"]|undefined,selectedId:SessionId|undefined;
   const nativeGeneration=new AbortController();
@@ -66,6 +67,7 @@ async function host(script:(StreamChunk[]|"hang")[],opted=true,guard?:(facts:any
   const config:any={provider:"fixture",model:"fixture",stream:ndJsonStream(a.writable,b.readable)};
   if(opted)config.nativePromptAdmission=guard??(()=>true);
   if(observer!==undefined)config.nativeObservation=observer;
+  if(nativeModelAdmission!==undefined)config.nativeModelAdmission=nativeModelAdmission;
   await ctx.plugin({name:"native-acp-fixture",inject:[...Acp.inject],apply(inner:Context){nativeOwner=inner.fiber;Acp.apply(inner,config);}});
   const app=createClient({name:"original-native-acp-client"})
     .onNotification(methods.client.session.update,({params})=>{updates.push(params);})
@@ -605,3 +607,129 @@ it("does not classify enqueue-callback abort as an already queued native effect"
     expect(record.agent.session.snapshotEvents()).toEqual(before);expect(h.adapter.requests).toHaveLength(0);
   }finally{await record.close("original enqueue-abort fixture cleanup");}
 });
+
+
+async function modelHost(admission?:(facts:any)=>any,opted=true){
+  const h=await host([text("unused")],opted,undefined,undefined,undefined,admission);
+  vi.spyOn(h.adapter,"listModels").mockResolvedValue(["fixture","alternate"].map(id=>({
+    provider:"fixture",id,name:id,inputModalities:["text"] as const,
+  })));
+  vi.spyOn(h.adapter,"resolveModel").mockImplementation(async(provider:string,model:string)=>({
+    provider,id:model,name:model,inputModalities:["text"] as const,context:{contextWindow:1024},
+    reasoning:{efforts:[{id:"low" as any,name:"Low"},{id:"high" as any,name:"High"}]},
+  }));
+  const assignments=vi.spyOn(AcpSession.prototype,"setConfig").mockClear();
+  const select=(configId="model",value=JSON.stringify(["fixture","alternate"]))=>
+    h.client.request(methods.agent.session.setConfigOption,{sessionId:h.sessionId,configId,value});
+  const record=()=>assignments.mock.instances[0] as any;
+  return{...h,select,record,assignments};
+}
+
+it("native startup assignment requires its existing owner before catalog work",async()=>{
+  const h=await modelHost();
+  await expect(h.select()).rejects.toThrow("original startup owner");
+  expect(h.adapter.listModels).not.toHaveBeenCalled();expect(h.assignments).not.toHaveBeenCalled();
+  expect(h.adapter.requests).toEqual([]);
+});
+
+it("ordinary ACP model selection keeps the original ungated behavior",async()=>{
+  const h=await modelHost(undefined,false);
+  await expect(h.select()).resolves.toMatchObject({configOptions:[expect.objectContaining({
+    id:"model",currentValue:JSON.stringify(["fixture","alternate"]),
+  }),expect.any(Object)]});
+  expect(h.record().modelControl.snapshot()).toMatchObject({provider:"fixture",model:"alternate"});
+});
+
+it("native assignment binds the actual SDK request, Agent and resolved model once",async()=>{
+  const lifetime=new AbortController(),seen:any[]=[],current=vi.fn(()=>true);
+  const h=await modelHost(facts=>{seen.push(facts);return{signal:lifetime.signal,assertCurrent:current};});
+  const result=await h.select();
+  expect(seen).toHaveLength(1);
+  expect(seen[0].agent).toBe(h.agent);
+  expect({...seen[0],agent:undefined}).toMatchObject({requestId:expect.any(Number),configId:"model",
+    value:JSON.stringify(["fixture","alternate"]),selection:{provider:"fixture",model:"alternate"}});
+  expect(Object.isFrozen(seen[0])).toBe(true);expect(Object.isFrozen(seen[0].selection)).toBe(true);
+  expect(result.configOptions[0].currentValue).toBe(JSON.stringify(["fixture","alternate"]));
+  expect(current).toHaveBeenCalled();expect(h.adapter.requests).toEqual([]);
+});
+
+it.each(["callback-replaced","prior-selection-replaced","prior-selection-mutated"] as const)(
+  "catalog resolution cannot borrow a changed native owner: %s",async change=>{
+    const lifetime=new AbortController(),admit=vi.fn(()=>({signal:lifetime.signal,assertCurrent:()=>true}));
+    const h=await modelHost(admit),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+    const original=vi.mocked(h.adapter.resolveModel).getMockImplementation()!;let suspended=false;
+    vi.mocked(h.adapter.resolveModel).mockImplementation(async(provider:string,model:string)=>{
+      if(model==="alternate"&&!suspended){suspended=true;entered.resolve();await release.promise;}
+      return original(provider,model);
+    });
+    const pending=h.select(),observed=pending.then(value=>({value}),error=>({error}));
+    await entered.promise;
+    const control=h.record().modelControl;
+    if(change==="callback-replaced")h.config.nativeModelAdmission=()=>({signal:lifetime.signal,assertCurrent:()=>true});
+    else if(change==="prior-selection-replaced")control.selection.current={...control.snapshot()};
+    else control.selection.current.model="withdrawn";
+    release.resolve();
+    expect(await observed).toHaveProperty("error");expect(admit).not.toHaveBeenCalled();
+    expect(control.snapshot().model).not.toBe("alternate");expect(h.adapter.requests).toEqual([]);
+  });
+
+it.each(["false","async","retired","callback-reentry"] as const)(
+  "final native assignment rejects unusable or withdrawn authority: %s",async change=>{
+    const lifetime=new AbortController();let h:Awaited<ReturnType<typeof modelHost>>;
+    const admit=vi.fn(()=>{
+      if(change==="async")return Promise.resolve({signal:lifetime.signal,assertCurrent:()=>true});
+      if(change==="retired")lifetime.abort();
+      return{signal:lifetime.signal,assertCurrent:()=>{
+        if(change==="callback-reentry")h.record().modelControl.selection.current={provider:"fixture",model:"changed"};
+        return change==="false"?false:true;
+      }};
+    });
+    h=await modelHost(admit);
+    await expect(h.select()).rejects.toThrow();
+    expect(admit).toHaveBeenCalledTimes(1);
+    expect(h.record().modelControl.snapshot().model).not.toBe("alternate");
+    expect(h.adapter.requests).toEqual([]);
+  });
+
+it("native reasoning assignment uses the same final owner check",async()=>{
+  const lifetime=new AbortController(),seen:any[]=[];
+  const h=await modelHost(facts=>{seen.push(facts);return{signal:lifetime.signal,assertCurrent:()=>true};});
+  await h.select("reasoning_effort","high");
+  expect(seen).toHaveLength(1);expect(seen[0].selection).toEqual({provider:"fixture",model:"fixture",reasoningEffort:"high"});
+  expect(h.record().modelControl.snapshot()).toEqual(seen[0].selection);
+});
+
+it("withdrawal during post-assignment discovery retains the single committed selection",async()=>{
+  const lifetime=new AbortController(),admit=vi.fn(()=>({signal:lifetime.signal,assertCurrent:()=>true}));
+  const h=await modelHost(admit),entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+  const original=vi.mocked(h.adapter.resolveModel).getMockImplementation()!;let alternatives=0;
+  vi.mocked(h.adapter.resolveModel).mockImplementation(async(provider:string,model:string)=>{
+    if(model==="alternate"&&++alternatives===2){entered.resolve();await release.promise;}
+    return original(provider,model);
+  });
+  const pending=h.select(),observed=pending.then(value=>({value}),error=>({error}));
+  await entered.promise;expect(h.record().modelControl.snapshot().model).toBe("alternate");
+  lifetime.abort();release.resolve();
+  expect(await observed).toHaveProperty("error");
+  expect(admit).toHaveBeenCalledTimes(1);expect(h.assignments).toHaveBeenCalledTimes(1);
+  expect(h.record().modelControl.snapshot().model).toBe("alternate");
+  expect(h.adapter.requests).toEqual([]);
+});
+
+it.each(["preparation","header-after-microtask"] as const)(
+  "native request withdrawal at %s logs no model header and dispatches nothing",async boundary=>{
+    const lifetime=new AbortController();let current=true,preparations=0;
+    const admission={signal:lifetime.signal,check:(facts:any)=>{
+      if(facts.phase==="prepare"){
+        preparations++;
+        if(boundary==="preparation")return false;
+        if(preparations===1)queueMicrotask(()=>{current=false;});
+      }
+      return current;
+    }};
+    const h=await host([text("must not run")],true,undefined,undefined,undefined,undefined,admission);
+    await expect(h.prompt("native-header-withdrawal")).rejects.toThrow();
+    expect(h.adapter.requests).toEqual([]);
+    expect(h.agent.session.snapshotEvents().filter(event=>event.type==="request/header")).toEqual([]);
+    expect(preparations).toBe(boundary==="preparation"?1:2);
+  });

@@ -903,3 +903,24 @@ installed real signed-in journey. Reuse qualified listener configuration and
 actual listener readback; no automatic port fallback, service restart, duplicate
 Session owner or rerun of accepted canaries. All recorded production holds
 remain active; the mission continues beyond this source milestone.
+
+
+## C29 native model assignment and original HTTP dispatch qualification — 2026-11-07
+
+C29 is source-qualified on parent 661e4efcc2d809c76d906fa6c4acebedfad57a94; the next exact commit and committed guard are recorded in the existing canonical PR comment. This is not installed or authenticated-provider acceptance.
+
+The original ACP model owner now checks the exact original SDK request, Agent, Session, prior selection and resolved candidate immediately before assignment. Post-assignment withdrawal retains the one committed selection without rollback or retry. Root admission is captured in a plain immutable value because Cordis traces service/function fields. The original LLM registry supplies a passive exact-provider/adapter/owner witness, including root-runtime currentness; its exposed registration and provider metadata are immutable.
+
+The original Agent checks after model discovery and again immediately before its header append. At final adapter dispatch, native facts preserve the original request and carry a closed resolved config separately from transport metadata. The existing runtime issues one adapter/options-bound permit; the actual DeepSeek invocation claims it once before callbacks and retains its write checker through the original request loop. It checks after extension and header preparation immediately before fetch. The original accepted extension transaction still settles after HTTP success. Native withdrawal remains terminal ABORTED, not retryable TRANSPORT.
+
+Native attachments are explicitly refused before projection or auth/upload, and native ACP advertises no image support. Ordinary donor file/image/adapter behavior is preserved by the original suites. Attachments remain a capability hold until the original shared upload owner has equivalent currentness and uncertain-effect handling.
+
+Final qualification: 208 host + 214 ACP + 225 LLM/provider + 54 package/factory tests = 701 passed. All 7094 recorded inputs remained unchanged in each final run. Strict Agent, AgentLoop, LLM, DeepSeek and ACP checks report zero diagnostics. The exact receipts, source digests, diagnostics and limits are in research/evidence/deepseek-native-dispatch-qualification-20261107.json. The strict protected patch-review pin was advanced only to the exact reviewed host patch; its two HTTP-403 anchors and all identity/drift tests remain intact.
+
+The exact C28 canonical comment is archived at research/evidence/deepseek-native-handoff-c28-20261107.md. Earlier C17-C25 evidence and preservation requirements remain authoritative.
+
+### Immediate C30 continuation
+
+The same ignored candidate tree now contains original-account lifetime and passive nonsecret snapshot changes, plus captured-account provider and catalog GET checks. Its exact seven pending source hashes are recorded in the C29 evidence. Those candidate edits are not yet composed into the tracked package and are not qualified. Continue by composing/testing them through the existing host source closure, then build native_worker.mjs with the original full Web profile, original synchronous initializeHost, original ACP plugin and inherited FD. Produce observed account/model/workspace/capability facts; join Worker identity in the original Python broker/factory.
+
+Do not repeat Hermes or C21 accepted physical canaries, restart services, introduce another Session/conversation/auth/retry owner, alter os_assets.py ownership, or reopen unchanged explicit denials. The original installed Worker, quota, host, account, enabled profile, router/source custody and real packaged DeepSeek journey remain acceptance holds. MORE_WORK_EXISTS; this source milestone is followed by C30 in the same healthy assigned session.

@@ -25,7 +25,7 @@ const parsed=ts.readConfigFile(resolve(donor,"tsconfig.base.json"),ts.sys.readFi
 if(parsed.error)throw Error("Native paths unavailable");
 const root=resolve(donor,"packages/acp/acp/src");
 const hostRoots=["packages/core/agent/src","packages/core/agent-loop/src","apps/cli/src",
-  "packages/typert/protocol/src","packages/api/remote-access/src","packages/api/gateway/src","packages/client/connection/src"];
+  "packages/typert/protocol/src","packages/api/remote-access/src","packages/api/gateway/src","packages/client/connection/src","packages/llm/llm/src","packages/llm/llm-deepseek/src"];
 const redirect=(path:string)=>path===root||path.startsWith(root+"/")?resolve(candidate,path.slice(donor.length+1)):
   hostRoots.some(name=>path===resolve(donor,name)||path.startsWith(resolve(donor,name)+"/"))
     ?resolve(hostCandidate,path.slice(donor.length+1)):path;

@@ -11,12 +11,15 @@ ROOT = Path(__file__).resolve().parent
 PIN = "687f282e8625c6b8d11ff58211a90524be2e4317"
 PACKAGES = ("packages/core/agent", "packages/core/agent-loop", "apps/cli",
             "packages/typert/protocol", "packages/api/remote-access",
-            "packages/api/gateway", "packages/client/connection")
+            "packages/api/gateway", "packages/client/connection",
+            "packages/llm/llm", "packages/llm/llm-deepseek")
 CHANGED = frozenset((PACKAGES[0] + "/src/index.ts", PACKAGES[1] + "/src/index.ts",
                     PACKAGES[2] + "/src/profile-boot.ts", PACKAGES[3] + "/src/index.ts",
                     PACKAGES[4] + "/src/index.ts", PACKAGES[5] + "/src/index.ts",
                     PACKAGES[6] + "/src/rpc-host.ts", PACKAGES[1] + "/src/agent.ts",
-                    PACKAGES[1] + "/src/inbox.ts"))
+                    PACKAGES[1] + "/src/inbox.ts", PACKAGES[7] + "/src/index.ts",
+                    PACKAGES[8] + "/src/adapter.ts", PACKAGES[8] + "/src/host.ts",
+                    PACKAGES[8] + "/src/types.ts"))
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -36,8 +39,10 @@ def manifest() -> dict:
     for name, digest in {**value["source_sha256"], **value["output_sha256"]}.items():
         path = PurePosixPath(name)
         if (path.is_absolute() or ".." in path.parts
-                or not any(name.startswith(package + "/src/") for package in PACKAGES)
-                or path.suffix not in (".ts", ".tsx") or type(digest) is not str or len(digest) != 64
+                or not ((any(name.startswith(package + "/src/") for package in PACKAGES)
+                         and path.suffix in (".ts", ".tsx"))
+                        or name == "packages/llm/llm/package.json")
+                or type(digest) is not str or len(digest) != 64
                 or any(c not in "0123456789abcdef" for c in digest)):
             raise ValueError("native host source path or digest refused")
     lines = patch.decode().splitlines()

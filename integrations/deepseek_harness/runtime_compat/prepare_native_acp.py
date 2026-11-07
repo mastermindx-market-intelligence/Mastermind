@@ -10,7 +10,8 @@ import sys
 ROOT = Path(__file__).resolve().parent
 PIN = "687f282e8625c6b8d11ff58211a90524be2e4317"
 PACKAGES = ("packages/acp/acp",)
-CHANGED = frozenset((PACKAGES[0] + "/src/index.ts", PACKAGES[0] + "/src/session.ts"))
+CHANGED = frozenset((PACKAGES[0] + "/src/index.ts", PACKAGES[0] + "/src/session.ts",
+                    PACKAGES[0] + "/src/model-control.ts"))
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()

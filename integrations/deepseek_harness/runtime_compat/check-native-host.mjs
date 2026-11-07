@@ -2,7 +2,7 @@
 /** Exact original native Agent and AgentLoop projects with captured host source. */
 
 import {createRequire} from "node:module";
-import {readFileSync} from "node:fs";
+import {readFileSync,existsSync} from "node:fs";
 import {resolve,dirname} from "node:path";
 import {fileURLToPath} from "node:url";
 import {createHash} from "node:crypto";
@@ -14,8 +14,30 @@ for(const [name,digest] of Object.entries({...manifest.source_sha256,...manifest
  if(createHash("sha256").update(readFileSync(resolve(candidate,name))).digest("hex")!==digest)throw Error("Host source changed: "+name);
 }
 const ts=createRequire(resolve(donor,"package.json"))("typescript");
+const base=ts.readConfigFile(resolve(donor,"tsconfig.base.json"),ts.sys.readFile);
+if(base.error)throw Error("Original source path configuration unavailable");
+const patched=["packages/core/agent","packages/core/agent-loop","packages/llm/llm","packages/llm/llm-deepseek"];
+const projectCache=new Map();
+function declarationPath(value){
+ value=value.replace(/^\.\//,"");
+ const match=/\/src(?:\/|$)/.exec(value);
+ if(!match)return resolve(donor,value);
+ const marker=match.index,relative=value.slice(0,marker),suffix=value.slice(marker+4).replace(/^\//,"")||"index.ts";
+ if(relative.includes("*"))return resolve(donor,value);
+ if(patched.includes(relative))return resolve(candidate,value);
+ let parsed=projectCache.get(relative);
+ if(!parsed){
+  const project=resolve(donor,relative),file=ts.readConfigFile(resolve(project,"tsconfig.json"),ts.sys.readFile);
+  if(file.error)throw Error("Original dependency project unavailable: "+relative);
+  parsed=ts.parseJsonConfigFileContent(file.config,ts.sys,project);projectCache.set(relative,parsed);
+ }
+ const directory=parsed.options.declarationDir??parsed.options.outDir??resolve(donor,relative,"lib/types");
+ const output=resolve(directory,suffix.replace(/\.tsx?$/,".d.ts"));
+ return output.includes("*")||existsSync(output)?output:resolve(donor,value);
+}
+const sourcePaths=Object.fromEntries(Object.entries(base.config.compilerOptions.paths).map(([key,values])=>[key,values.map(declarationPath)]));
 let total=0;
-for(const name of ["packages/core/agent","packages/core/agent-loop"]){
+for(const name of ["packages/core/agent","packages/core/agent-loop","packages/llm/llm","packages/llm/llm-deepseek"]){
  const project=resolve(donor,name),raw=ts.readConfigFile(resolve(project,"tsconfig.json"),ts.sys.readFile);
  if(raw.error)throw Error("Host TypeScript project unavailable");
  const parsed=ts.parseJsonConfigFileContent(raw.config,ts.sys,project);
@@ -23,13 +45,23 @@ for(const name of ["packages/core/agent","packages/core/agent-loop"]){
  const options={...parsed.options,noEmit:true,composite:false,incremental:false,declaration:false,declarationMap:false,
  disableSourceOfProjectReferenceRedirect:true,rootDir:undefined,outDir:undefined,tsBuildInfoFile:undefined,
  typeRoots:[resolve(donor,"node_modules/@types")],
- paths:{...parsed.options.paths,
- "@deepseek-ai/dsh-agent":[resolve(candidate,"packages/core/agent/src/index.ts")],
- "@deepseek-ai/dsh-agent/src/*":[resolve(candidate,"packages/core/agent/src/*")],
- "@deepseek-ai/dsh-agent-loop":[resolve(candidate,"packages/core/agent-loop/src/index.ts")],
- "@deepseek-ai/dsh-agent-loop/src/*":[resolve(candidate,"packages/core/agent-loop/src/*")]}};
+ paths:sourcePaths};
  const names=parsed.fileNames.map(file=>file.replace(resolve(project,"src"),root));
- const program=ts.createProgram({rootNames:names,options,projectReferences:parsed.projectReferences});
+ const host=ts.createCompilerHost(options);
+ host.resolveModuleNames=(modules,containingFile)=>modules.map(module=>{
+  const found=ts.resolveModuleName(module,containingFile,options,host).resolvedModule;
+  if(!found)return found;
+  for(const dependency of patched){
+   const prefix=resolve(donor,dependency,"lib/types")+"/";
+   if(found.resolvedFileName.startsWith(prefix)){
+    const source=resolve(candidate,dependency,"src",found.resolvedFileName.slice(prefix.length).replace(/\.d\.ts$/,".ts"));
+    if(!existsSync(source))throw Error("Patched declaration has no exact source: "+source);
+    return {...found,resolvedFileName:source,extension:ts.Extension.Ts};
+   }
+  }
+  return found;
+ });
+ const program=ts.createProgram({rootNames:names,options,host});
  const diagnostics=[...parsed.errors,...ts.getPreEmitDiagnostics(program)];total+=diagnostics.length;
  console.log("PROJECT "+name+" DIAGNOSTICS "+diagnostics.length);
  console.log(ts.formatDiagnosticsWithColorAndContext(diagnostics,{getCanonicalFileName:x=>x,getCurrentDirectory:()=>here,getNewLine:()=>"\n"}));

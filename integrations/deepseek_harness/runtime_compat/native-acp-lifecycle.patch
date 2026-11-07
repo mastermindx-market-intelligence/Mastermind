@@ -1,9 +1,11 @@
 --- a/packages/acp/acp/src/index.ts
 +++ b/packages/acp/acp/src/index.ts
-@@ -46,6 +46,9 @@
+@@ -45,7 +45,10 @@
+   type SessionNotification,
    type Stream,
  } from '@agentclientprotocol/sdk'
- import type { ModelSelection } from '@deepseek-ai/dsh-agent'
+-import type { ModelSelection } from '@deepseek-ai/dsh-agent'
++import type { Agent, ModelSelection } from '@deepseek-ai/dsh-agent'
 +import type { UserMessage } from '@deepseek-ai/dsh-llm'
 +import { deepFreeze } from '@deepseek-ai/dsh-util-values'
 +import { isPromise } from 'node:util/types'
@@ -19,12 +21,10 @@
  
  const DEFAULT_SESSION_LIST_PAGE_SIZE = 100
  
-@@ -69,6 +72,50 @@
- /** Preserve failed-turn detail; plain handler errors become a generic wire internal error. */
- function internalError(detail: string): RequestError {
+@@ -71,7 +74,66 @@
    return RequestError.internalError(undefined, detail)
-+}
-+
+ }
+ 
 +
 +/** Existing OHF observed-attestation wire, not a serializable configuration knob. */
 +export interface NativeObservedAttestation {
@@ -67,26 +67,50 @@
 +  } | null
 +  readonly supports_subagent_capability_ceiling: 'VERIFIED' | 'FALSE' | 'UNKNOWN'
 +  readonly unknown_fields: readonly string[]
- }
- 
++}
++
  /** Plugin config: the provider/model selection used for each ACP-created agent. */
-@@ -81,6 +128,10 @@
++/** Actual candidate at the original serialized model assignment, never a wire grant. */
++export interface NativeModelAssignmentFacts {
++  readonly agent: Agent
++  readonly requestId: NativePromptClaim['requestId']
++  readonly configId: string
++  readonly value: string
++  readonly selection: Readonly<ModelSelection>
++}
++
++/** Retained original startup authority; the setter creates no operation owner. */
++export interface NativeModelAssignmentPermit {
++  readonly signal: AbortSignal
++  assertCurrent(): true
++}
++
+ export interface AcpConfig {
+   /** Provider route for created agents. */
+   provider?: string
+@@ -81,6 +143,12 @@
    sessionListPageSize?: number
    /** Runtime-only transport override; production uses stdio. */
    stream?: Stream
 +  /** Runtime-only trusted owner check. JSON correlation never creates authority. */
 +  nativePromptAdmission?: (facts: NativePromptFacts) => boolean
++  /** Runtime-only one-shot assignment admission from the original startup operation. */
++  nativeModelAdmission?: (facts: NativeModelAssignmentFacts) => NativeModelAssignmentPermit
 +  /** Passive runtime-only facts on the original retained Agent and session. */
 +  nativeObservation?: (facts: NativeObservationFacts, signal: AbortSignal) => NativeObservedAttestation | Promise<NativeObservedAttestation>
  }
  
  export const Config: Schema<AcpConfig> = Schema.object({
-@@ -104,6 +155,14 @@
+@@ -104,6 +172,18 @@
    const activating = new Set<SessionId>()
    let closed = false
    let imagePromptEnabled = false
 +  const nativePromptAdmission = config.nativePromptAdmission
++  const nativeModelAdmission = config.nativeModelAdmission
 +  const nativeObservation = config.nativeObservation
++  if (nativeModelAdmission !== undefined && (typeof nativeModelAdmission !== 'function' || nativePromptAdmission === undefined)) {
++    throw invalidParams('native model assignment requires the original trusted admission')
++  }
 +  if (nativeObservation !== undefined && (typeof nativeObservation !== 'function' || nativePromptAdmission === undefined)) {
 +    throw invalidParams('native observation requires the original trusted admission')
 +  }
@@ -96,7 +120,16 @@
  
    /** Return the bridge-owned record for an agent, rejecting same-id impostors. */
    const ownedRecord = (agent: Parameters<AcpSession['owns']>[0]): AcpSession | undefined => {
-@@ -190,6 +249,14 @@
+@@ -180,7 +260,7 @@
+     async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
+       // Single-version agent: the spec's "same version if supported, else
+       // the latest supported" both resolve to this server's one version.
+-      imagePromptEnabled = await supportsAcpImagePrompts(ctx, config.provider, config.model)
++      imagePromptEnabled = nativePromptAdmission === undefined && await supportsAcpImagePrompts(ctx, config.provider, config.model)
+       return {
+         protocolVersion: PROTOCOL_VERSION,
+         agentInfo: { name: 'deepseek-harness-acp', version: '0.0.1' },
+@@ -190,6 +270,14 @@
            sessionCapabilities: { close: {}, list: {}, resume: {} },
          },
          authMethods: [],
@@ -111,7 +144,61 @@
        }
      },
  
-@@ -362,13 +429,74 @@
+@@ -337,11 +425,52 @@
+     async setSessionConfigOption(
+       params: SetSessionConfigOptionRequest,
+       signal: AbortSignal,
++      requestId: NativePromptClaim['requestId'],
+     ): Promise<SetSessionConfigOptionResponse> {
+       assertOpen()
+       const record = requireSession(brandString<SessionId>(params.sessionId))
++      if (nativePromptAdmission !== undefined && nativeModelAdmission === undefined) {
++        throw invalidParams('native model assignment requires its original startup owner')
++      }
++      const requireOwner = (): void => {
++        assertOpen()
++        signal.throwIfAborted()
++        if (sessions.get(record.agent.session.id) !== record
++            || config.nativePromptAdmission !== nativePromptAdmission || config.nativeModelAdmission !== nativeModelAdmission) {
++          throw invalidParams('native model assignment bridge changed')
++        }
++      }
++      const nativeAssignment = nativeModelAdmission === undefined ? undefined : (selection: Readonly<ModelSelection>) => {
++        requireOwner()
++        if (typeof params.value !== 'string') throw invalidParams('native model assignment requires an exact select value')
++        const admitted: unknown = nativeModelAdmission(Object.freeze({
++          agent: record.agent, requestId, configId: params.configId, value: params.value,
++          selection: Object.freeze({ ...selection }),
++        }))
++        if (isPromise(admitted)) {
++          void admitted.catch(() => {})
++          throw invalidParams('native model assignment admission must be synchronous')
++        }
++        if (admitted === null || typeof admitted !== 'object'
++            || !('signal' in admitted) || !(admitted.signal instanceof AbortSignal)
++            || !('assertCurrent' in admitted) || typeof admitted.assertCurrent !== 'function') {
++          throw invalidParams('native model assignment permit is invalid')
++        }
++        const lifetime = admitted.signal, check = admitted.assertCurrent.bind(admitted)
++        const requireCurrent = (): void => {
++          requireOwner()
++          lifetime.throwIfAborted()
++          const allowed: unknown = check()
++          if (isPromise(allowed)) void allowed.catch(() => {})
++          if (allowed !== true) throw invalidParams('native model assignment authority is no longer current')
++          lifetime.throwIfAborted()
++          requireOwner()
++        }
++        requireCurrent()
++        return requireCurrent
++      }
+       try {
+-        return { configOptions: await record.setConfig(params.configId, params.value, signal) }
++        return { configOptions: await record.setConfig(params.configId, params.value, signal, nativeAssignment) }
+       } catch (error: unknown) {
+         if (error instanceof AcpModelConfigError) throw invalidParams(error.message)
+         throw error
+@@ -362,13 +491,74 @@
        return {}
      },
  
@@ -188,11 +275,13 @@
        sessions.get(brandString<SessionId>(params.sessionId))?.cancel()
        return Promise.resolve()
      },
-@@ -390,8 +518,38 @@
+@@ -389,9 +579,39 @@
+     .onRequest(methods.agent.session.list, ({ params, signal }) => implementation.listSessions(params, signal))
      .onRequest(methods.agent.session.resume, ({ params, signal }) => implementation.resumeSession(params, signal))
      .onRequest(methods.agent.session.close, ({ params }) => implementation.closeSession(params))
-     .onRequest(methods.agent.session.setConfigOption, ({ params, signal }) => implementation.setSessionConfigOption(params, signal))
+-    .onRequest(methods.agent.session.setConfigOption, ({ params, signal }) => implementation.setSessionConfigOption(params, signal))
 -    .onRequest(methods.agent.session.prompt, ({ params, signal }) => implementation.prompt(params, signal))
++    .onRequest(methods.agent.session.setConfigOption, ({ params, signal, requestId }) => implementation.setSessionConfigOption(params, signal, requestId))
 +    .onRequest(methods.agent.session.prompt, ({ params, signal, requestId }) => implementation.prompt(params, signal, requestId))
      .onNotification(methods.agent.session.cancel, ({ params }) => implementation.cancel(params))
 +  if (nativePromptAdmission !== undefined) {
@@ -228,7 +317,7 @@
    const connection = app.connect(stream)
    const conn: AgentContext = connection.client
  
-@@ -438,6 +596,131 @@
+@@ -438,6 +658,131 @@
    /* v8 ignore stop */
  
    ctx.effect(() => quiesce, 'acp.connection')
@@ -360,6 +449,67 @@
  }
  
  /**
+--- a/packages/acp/acp/src/model-control.ts
++++ b/packages/acp/acp/src/model-control.ts
+@@ -27,6 +27,12 @@
+     this.name = 'AcpModelConfigError'
+   }
+ }
++
++/**
++ * Original native operation check at assignment, returning a non-authorizing
++ * currentness check for the existing post-assignment option-discovery await.
++ */
++export type ModelAssignmentGuard = (selection: Readonly<ModelSelection>) => () => void
+ 
+ /** Project and mutate one Agent's provider/model/reasoning selection through ACP config options. */
+ export class AcpModelControl {
+@@ -100,16 +106,20 @@
+    * @param signal - optional catalog and exact-model cancellation.
+    * @returns all standard options after the serialized mutation.
+    */
+-  set(configId: string, value: unknown, signal?: AbortSignal): Promise<SessionConfigOption[]> {
++  set(configId: string, value: unknown, signal?: AbortSignal, nativeAssignment?: ModelAssignmentGuard): Promise<SessionConfigOption[]> {
+     return this.serialize(async () => {
+       if (typeof value !== 'string') throw new AcpModelConfigError(`${configId} requires a select value`)
+       const current = this.selected
++      let requireAssignedCurrent: (() => void) | undefined
+       if (current === undefined) throw new AcpModelConfigError('this session has no model selection')
+       if (configId === MODEL_CONFIG_ID) {
+         const state = await this.state(signal)
+         const selected = state.choices.get(value)
+         if (selected === undefined) throw new AcpModelConfigError(`unknown model option: ${value}`)
+         await this.resolveSelection(selected, signal)
++        if (nativeAssignment !== undefined) {
++          requireAssignedCurrent = nativeAssignment(Object.freeze(selected))
++        }
+         this.selected = selected
+       } else if (configId === REASONING_CONFIG_ID) {
+         const info = await this.llm.resolveModelInfo(current.provider, current.model, signal)
+@@ -121,15 +131,21 @@
+         ) {
+           throw new AcpModelConfigError(`unknown reasoning effort for ${current.provider}/${current.model}: ${value}`)
+         }
+-        this.selected = await this.resolveSelection({
++        const selected = await this.resolveSelection({
+           provider: current.provider,
+           model: current.model,
+           ...providerDefault ? {} : { reasoningEffort: ReasoningEffortId(value) },
+         }, signal)
++        if (nativeAssignment !== undefined) {
++          requireAssignedCurrent = nativeAssignment(Object.freeze(selected))
++        }
++        this.selected = selected
+       } else {
+         throw new AcpModelConfigError(`unknown session config option: ${configId}`)
+       }
+-      return (await this.state(signal)).options
++      const options = (await this.state(signal)).options
++      requireAssignedCurrent?.()
++      return options
+     })
+   }
+ 
 --- a/packages/acp/acp/src/session.ts
 +++ b/packages/acp/acp/src/session.ts
 @@ -1,8 +1,9 @@
@@ -373,6 +523,15 @@
    type McpServer,
    type PromptRequest,
    type PromptResponse,
+@@ -16,7 +17,7 @@
+ import { AcpContentError, admitAcpPrompt } from './content.ts'
+ import { turnEndToStopReason } from './codec.ts'
+ import { mountAcpMcpServers } from './mcp.ts'
+-import { AcpModelControl } from './model-control.ts'
++import { AcpModelControl, type ModelAssignmentGuard } from './model-control.ts'
+ import { assistantUpdates, toolCallUpdate, toolResultUpdate } from './updates.ts'
+ 
+ /** Subagent completion and teardown without depending on the subagent package. */
 @@ -47,7 +48,63 @@
    sessionId: SessionId
  }
@@ -437,12 +596,10 @@
    resolve: (reason: StopReason) => void
    reject: (error: Error) => void
    messageId: string | undefined
-@@ -187,6 +244,35 @@
-    */
-   ownsSession(session: Session): boolean {
+@@ -189,6 +246,35 @@
      return this.agent.session === session
-+  }
-+
+   }
+ 
 +  /** Retain the original idle owner while an installed observer awaits facts. */
 +  observationSnapshot(): { readonly facts: NativeObservationFacts; readonly requireCurrent: () => void } {
 +    const agent = this.agent, session = agent.session
@@ -470,10 +627,65 @@
 +      facts: Object.freeze({ agent, selection: selected === undefined ? undefined : Object.freeze(selected) }),
 +      requireCurrent,
 +    })
++  }
++
+   /**
+    * Return the complete standard model configuration state.
+    * @param signal - optional request cancellation.
+@@ -206,9 +292,50 @@
+    * @param signal - optional request cancellation.
+    * @returns the complete resulting option state.
+    */
+-  setConfig(configId: string, value: unknown, signal?: AbortSignal): Promise<SessionConfigOption[]> {
++  setConfig(configId: string, value: unknown, signal?: AbortSignal, nativeAssignment?: ModelAssignmentGuard): Promise<SessionConfigOption[]> {
+     this.assertActive()
+-    return this.modelControl.set(configId, value, signal)
++    if (nativeAssignment === undefined) return this.modelControl.set(configId, value, signal)
++    const prior = this.observationSnapshot()
++    const control = this.modelControl, agent = this.agent, session = agent.session, sequence = session.seq
++    const serviceIdentity = <T extends object>(service: T): T =>
++      (service as T & { [symbols.original]?: T })[symbols.original] ?? service
++    const agents = serviceIdentity(this.ctx.agents), sessions = serviceIdentity(this.ctx.sessions)
++    const llm = serviceIdentity(this.ctx.llm)
++    const requireOwner = (): void => {
++      signal?.throwIfAborted()
++      if (this.closing !== undefined || this.inflight !== undefined || agent.status !== 'idle'
++          || this.modelControl !== control || agent.session !== session || session.seq !== sequence
++          || serviceIdentity(this.ctx.agents) !== agents || serviceIdentity(this.ctx.sessions) !== sessions
++          || serviceIdentity(this.ctx.llm) !== llm || this.ctx.agents.get(agent.id) !== agent
++          || this.ctx.sessions.get(session.id) !== session) {
++        throw invalidParams('native model assignment owner changed or is busy')
++      }
++    }
++    requireOwner()
++    return control.set(configId, value, signal, selected => {
++      prior.requireCurrent()
++      requireOwner()
++      const expected = Object.freeze({ ...selected })
++      const requireAuthority = nativeAssignment(expected)
++      if (typeof requireAuthority !== 'function') throw invalidParams('native model assignment lacks retained currentness')
++      requireAuthority()
++      prior.requireCurrent()
++      requireOwner()
++      const requireAssigned = (): void => {
++        requireOwner()
++        const current = control.snapshot()
++        if (control.selection.current !== selected || current === undefined
++            || current.provider !== expected.provider || current.model !== expected.model
++            || current.reasoningEffort !== expected.reasoningEffort) {
++          throw invalidParams('native model assignment changed after commit')
++        }
++      }
++      return () => {
++        requireAssigned()
++        requireAuthority()
++        requireAssigned()
++      }
++    })
    }
  
-   /**
-@@ -247,6 +333,7 @@
+   /** Resolve topology state off-chain, then serialize its notification without blocking execution updates. */
+@@ -247,6 +374,7 @@
      params: PromptRequest,
      imageEnabled: boolean,
      requestSignal?: AbortSignal,
@@ -481,7 +693,7 @@
    ): Promise<PromptResponse> {
      this.assertActive()
      if (this.inflight !== undefined) throw invalidParams('a prompt is already in flight for this session')
-@@ -254,6 +341,11 @@
+@@ -254,6 +382,11 @@
      const admission = Promise.withResolvers<void>()
      const admissionController = new AbortController()
      const inflight: InflightPrompt = {
@@ -493,7 +705,7 @@
        resolve: completion.resolve,
        reject: completion.reject,
        messageId: undefined,
-@@ -270,7 +362,30 @@
+@@ -270,7 +403,30 @@
        agentError: undefined,
      }
      this.inflight = inflight
@@ -525,7 +737,7 @@
      requestSignal?.addEventListener('abort', onRequestAbort, { once: true })
      /* v8 ignore next -- the SDK dispatches a live signal, then notifies abort through its listener. */
      if (requestSignal?.aborted === true) onRequestAbort()
-@@ -278,6 +393,8 @@
+@@ -278,6 +434,8 @@
        let admissionFailure: unknown
        const promptSelection = this.modelControl.snapshot()
        try {
@@ -534,7 +746,7 @@
          if (this.ctx.agents.get(this.agent.id) !== this.agent) {
            throw internalError('prompt was not queued: the agent was disposed outside the bridge')
          }
-@@ -289,6 +406,8 @@
+@@ -289,6 +447,8 @@
            admissionController.signal,
          )
          admissionController.signal.throwIfAborted()
@@ -543,7 +755,7 @@
          if (this.ctx.agents.get(this.agent.id) !== this.agent) {
            throw internalError('prompt was not queued: the agent was disposed outside the bridge')
          }
-@@ -297,9 +416,11 @@
+@@ -297,9 +457,11 @@
            source: { kind: 'user' },
          })
          inflight.messageId = message.id
@@ -556,7 +768,7 @@
            this.agent.followup(message)
          } catch (error: unknown) {
            inflight.messageQueued = false
-@@ -314,7 +435,7 @@
+@@ -314,7 +476,7 @@
  
        if (inflight.admissionController.signal.aborted) {
          this.settleAfterQuiescence(inflight)
@@ -565,7 +777,7 @@
        }
        if (admissionFailure !== undefined) {
          this.inflight = undefined
-@@ -328,10 +449,37 @@
+@@ -328,10 +490,37 @@
        }
  
        this.settleAfterQuiescence(inflight)
@@ -604,7 +816,7 @@
    }
  
    /** Cancel the active prompt, or autonomous work when no ACP prompt exists. */
-@@ -347,6 +495,17 @@
+@@ -347,6 +536,17 @@
     * @param event - committed durable event.
     */
    onSessionEvent(session: Session, event: SessionEvent): void {
@@ -622,7 +834,7 @@
      if (event.type === 'turn/start' && this.inflight?.turn !== undefined) {
        this.inflight.turn = event.data.turn
        this.inflight.endReason = undefined
-@@ -403,7 +562,33 @@
+@@ -403,7 +603,33 @@
     * @param turn - allocated Agent turn.
     */
    onInboxClaimed(message: UserMessage, turn: number): void {
@@ -657,7 +869,7 @@
      const selection = this.pendingSelections.get(message.id)
      this.pendingSelections.delete(message.id)
      if (selection !== undefined) this.modelControl.pinTurn(turn, selection)
-@@ -490,7 +675,37 @@
+@@ -490,7 +716,37 @@
      if (this.closing !== undefined) throw invalidParams(`session is closing: ${this.agent.session.id}`)
    }
  
@@ -696,7 +908,7 @@
      const inflight = this.inflight
      if (inflight === undefined) return
      const firstCancellation = !inflight.admissionController.signal.aborted
-@@ -501,7 +716,8 @@
+@@ -501,7 +757,8 @@
        inflight.cancellationDone.resolve()
        return
      }
@@ -706,7 +918,7 @@
      if (firstCancellation) {
        const done = inflight.cancellationDone
        // Plugin disposal can detach status observers before this activity retires.
-@@ -527,9 +743,18 @@
+@@ -527,9 +784,18 @@
            if (isCancelled()) break
            if (children || !idleAt(idleSeq)) continue
            await this.outputTail

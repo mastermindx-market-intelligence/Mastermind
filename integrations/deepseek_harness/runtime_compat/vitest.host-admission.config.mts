@@ -18,7 +18,7 @@ const donorRequire=createRequire(resolve(donor,"package.json")),ts=donorRequire(
 const parsed=ts.readConfigFile(resolve(donor,"tsconfig.base.json"),ts.sys.readFile);
 if(parsed.error)throw Error("Native paths unavailable");
 const roots=["packages/core/agent/src","packages/core/agent-loop/src","apps/cli/src",
-  "packages/typert/protocol/src","packages/api/remote-access/src","packages/api/gateway/src","packages/client/connection/src"];
+  "packages/typert/protocol/src","packages/api/remote-access/src","packages/api/gateway/src","packages/client/connection/src","packages/llm/llm/src","packages/llm/llm-deepseek/src"];
 const redirect=(path:string)=>roots.some(root=>path===resolve(donor,root)||path.startsWith(resolve(donor,root)+"/"))
   ?resolve(candidate,path.slice(donor.length+1)):path;
 const aliases=Object.entries(parsed.config.compilerOptions.paths).filter(([name])=>!name.includes("*")).map(([name,paths])=>({

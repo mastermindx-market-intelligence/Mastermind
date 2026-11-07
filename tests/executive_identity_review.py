@@ -346,7 +346,7 @@ def reviewed_literal_spans(path: str, source: str):
     # byte and identity token; no generic HTTP or patch-file exemption.
     if path == "integrations/deepseek_harness/runtime_compat/native-host-admission.patch":
         if hashlib.sha256(source.encode()).hexdigest() != (
-                "381e548e33b388a069220d9acf4dc0583a1e39974fbcc2b34ff5ff972ef22ace"):
+                "294011e6038b3d0f247d8fa892a6d447cab4fbc6a92e165a23fbeb1aadcfddcc"):
             return ()
         anchors = (
             "-          if (peer.principal.kind !== 'owner') return Promise.resolve(new Response('forbidden', { status: 403 }))",
