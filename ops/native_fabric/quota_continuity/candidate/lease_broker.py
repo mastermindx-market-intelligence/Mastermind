@@ -621,15 +621,21 @@ class Broker:
                     or opened.st_nlink != 1 or opened.st_mode & 0o022):
                 raise ValueError('qualification_guard_lock')
             fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            def held_current():
+                if not alive[0] or time.monotonic() - entered >= 30:
+                    raise ValueError('qualification_guard_retired_or_expired')
+                if (identity(os.fstat(fd)) != identity(opened)
+                        or identity(os.stat(lock_path, follow_symlinks=False)) != identity(opened)):
+                    raise ValueError('qualification_guard_retired_or_changed')
             class LiveGuard:
                 def require_current(self):
-                    if not alive[0] or time.monotonic() - entered >= 30:
-                        raise ValueError('qualification_guard_retired_or_expired')
-                    if identity(os.stat(lock_path, follow_symlinks=False)) != identity(opened):
-                        raise ValueError('qualification_guard_retired_or_changed')
+                    held_current()
                     result = Broker.inspect_qualification_quiescence(
                         orchestrator_id=orchestrator_id, pool=pool, host=host,
                         db_path=db_path, lock_path=lock_path)
+                    # The read may block and may have used a replacement named
+                    # lock. Rejoin OUR held inode and deadline before handoff.
+                    held_current()
                     if result['state'] != 'QUIESCENT_IN_SCOPE':
                         raise ValueError('qualification_guard_not_quiescent')
                     return result

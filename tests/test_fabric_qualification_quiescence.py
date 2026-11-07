@@ -160,6 +160,36 @@ class Quiescence(unittest.TestCase):
                 self.lock.unlink();self.lock.write_bytes(b'');self.lock.chmod(0o600)
                 guard.require_current()
 
+    def test_guard_rejoins_held_lock_after_blocking_inspector(self):
+        import fcntl
+        original=broker.Broker.inspect_qualification_quiescence
+        def replaced(**kwargs):
+            self.lock.unlink();self.lock.write_bytes(b'');self.lock.chmod(0o600)
+            result=original(**kwargs)
+            with self.lock.open('r') as replacement:
+                fcntl.flock(replacement,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            return result
+        handoff=[]
+        with self.assertRaisesRegex(ValueError,'changed'):
+            with broker.Broker.qualification_maintenance_guard(**self.args) as guard:
+                with mock.patch.object(broker.Broker,'inspect_qualification_quiescence',side_effect=replaced):
+                    guard.require_current()
+                    handoff.append('unsafe action could begin before context exit')
+        self.assertEqual(handoff,[])
+
+    def test_guard_rejoins_deadline_after_blocking_inspector(self):
+        clock={'now':0.0};original=broker.Broker.inspect_qualification_quiescence
+        def delayed(**kwargs):
+            result=original(**kwargs);clock['now']=31.0;return result
+        handoff=[]
+        with mock.patch.object(broker.time,'monotonic',side_effect=lambda:clock['now']):
+            with self.assertRaisesRegex(ValueError,'expired'):
+                with broker.Broker.qualification_maintenance_guard(**self.args) as guard:
+                    with mock.patch.object(broker.Broker,'inspect_qualification_quiescence',side_effect=delayed):
+                        guard.require_current()
+                        handoff.append('unsafe action could begin after deadline')
+        self.assertEqual(handoff,[])
+
     def test_cli_does_not_construct_broker_or_gc_or_write_snapshot(self):
         out=io.StringIO()
         with mock.patch.object(broker,'default_broker',side_effect=AssertionError('constructor forbidden')),mock.patch.dict(os.environ,{'POOL_BROKER_DB':str(self.db),'POOL_BROKER_LOCK':str(self.lock)}),contextlib.redirect_stdout(out):
