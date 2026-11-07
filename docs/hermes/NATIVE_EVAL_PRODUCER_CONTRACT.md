@@ -44,7 +44,9 @@ provider selection. Missing original admissions retain `EFFECT_UNKNOWN`.
 
 The existing `run_draft` requires observed model, actual process/session/workspace/
 environment and policy fingerprints, effective instruction/context/tool evidence,
-and timing. The retained native read does not yet supply those facts. Marking a
+and timing. Terminal metadata alone does not supply those facts. The v3
+contribution below adds selected transport and execution facts, with explicit
+coverage gaps. Marking a
 run invalid does not make invented schema-required values truthful. Neither a
 configured model label nor a digest of an empty placeholder fills that gap.
 
@@ -86,8 +88,83 @@ commit return facts. Correlation requires a unique complete native identity,
 valid observer ordering and no relevant coverage gap; it never substitutes for
 selected-child effect evidence. The reader preserves historical v1 unchanged.
 
-These observations still do not supply actual provider dispatch, response-model
+The v2 observations do not supply actual provider dispatch, response-model
 facts, process/workspace/policy fingerprints, complete timing or model weights.
 They therefore do not themselves create an EVAL run draft. Missing seed,
 effective sampling or other required facts must remain missing until their
 original native execution owner supplies them.
+
+## Transport and execution contribution in v3
+
+`mastermind.hermes_request_observation/v3` extends the same retained outer
+document with `transport`, schema
+`mastermind.hermes_native_transport_observation/v1`. The historical reader keeps
+v1 and v2 as exact, separate shapes; neither inherits transport fields.
+
+The selected path is the pinned Hermes nonstream chat-completions request through
+the original request-local synchronous HTTPX client. The observer qualifies and
+binds both `agent.turn_api_call.perform_api_call` and the conversation loop's
+imported alias. It preserves the function signature used by `_run_phase`. It
+observes logical execution around execution middleware, the original nonstream
+dispatch, and `httpx.Client._send_single_request` below SDK retries and HTTPX
+redirect handling. A middleware-synthesized response may have a logical call and
+no dispatch. Multiple middleware callbacks remain distinct dispatches.
+
+These records identify **HTTPX single-request invocations**, not every TCP
+connection attempt, all network activity, provider delivery, or model weights.
+Request-client construction, streaming, async clients, Codex, Anthropic, Bedrock,
+MoA and custom transports are not complete covered paths. A changed/unqualified
+source or binding closes this observation leaf without replacing the original
+request, client, result, retry or cleanup owner.
+
+Only already-materialized request bytes and already-consumed response bytes are
+projected. The observer never calls `read`, `json`, stream iteration or `close`.
+HTTPX redirects may reconstruct a request around its original stream, leaving
+`.content` unavailable at entry; the new invocation is retained with unavailable
+body evidence. Returned headers and subsequently consumed response bodies are
+different states. Raw URL, headers, prompts, tools, bodies and error text are not
+retained. Model strings are byte digests; only a closed reasoning-effort
+vocabulary can remain raw. Missing seed is absent, never defaulted to zero.
+Explicitly supplied seed zero is retained as observed zero. Provider defaults,
+effective model identity and effective sampling are not inferred.
+
+Execution wall-time witnesses and monotonic duration describe the actual original
+admission wrapper. Process evidence reuses `_NativeGatewayLaunch.observe_child`
+and its existing held image/identity/source checks. The projection includes
+observed PID, boot/birth identity, real/effective UID/GID, image hash, held release
+and manifest digest. Missing clocks/process reads remain unavailable. The
+existing scope/event locks seal all contributions before slow end-process I/O;
+late copied worker contexts cannot append, finish or move records into a later
+admission. Bound dispatch identity comes from its captured logical call, not a
+later mutable agent label.
+
+All arrays share the incumbent 16-KiB outer metadata budget. Truncation and
+observation failures remain explicit. The original admission result is the only
+carrier. Cancellation or an exception with no original pending result produces
+no synthetic result or zero-effect conclusion. `complete_evaluation`,
+`provider_delivery_proven` and `model_identity_verified` remain false.
+
+The source fixtures contain unmodified complete upstream files with Git blob,
+SHA-256, byte length, commit and license provenance: Hermes
+`1c0cd667746d3395fe9e1b6c74f8f85952486f18` and HTTPX 0.28.1
+`26d48e0634e6ee9cdc0533996db289ce4b430177`. The tests execute the pinned caller,
+phase dispatcher, logical call, nonstream worker body, context copier, SDK bypass
+and native dispatch. Actual OpenAI 2.54.0 and HTTPX 0.28.1 use an in-process
+`MockTransport`; phase dependencies, watchdog registry, process custody and
+admission storage are declared test edges. This is source/SDK integration proof,
+not a live provider, private Control socket, host service, cleanup attestation or
+EVAL efficacy claim.
+
+### Remaining complete-producer requirements
+
+An eligible draft still needs independently qualified model/seed/effort facts,
+complete instruction/context/source and tool coverage, actual workspace and
+environment identity, enforced policy/network/sandbox evidence, and original
+effect/cleanup results. Missing fields must prevent draft creation; the existing
+validity helper's subset comparisons are not a completeness check. A complete
+run must pass the incumbent finalizer and create-only ArtifactStore/run-graph
+checks before any Trial is given to the existing Harness2 refinement port.
+Memory comparisons remain a separate factor from its skill-only configuration
+lock. No new EVAL validity/store/runner, production Harness2Port, learning
+adoption, profile activation or release of Learning #398/PR #409 is introduced
+by this contribution.

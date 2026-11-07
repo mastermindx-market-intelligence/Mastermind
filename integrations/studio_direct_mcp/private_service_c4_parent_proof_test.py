@@ -25,8 +25,11 @@ RETAINED_GENERATION = "28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd45
 
 
 class C4CompletedParentProofTests(unittest.TestCase):
+    FIXTURE = fixtures.C4PublisherSuccessorTests
+    EXPECTED_WRITES = ["git-publish.mjs", "workspace-access.mjs", "manifest.json"]
+
     def setUp(self):
-        self.f = fixtures.C4PublisherSuccessorTests()
+        self.f = self.FIXTURE()
         self.f.native_successor_digest = RETAINED_DIGEST
         self.f.native_target_generation = RETAINED_GENERATION
         self.addCleanup(self.f.doCleanups)
@@ -113,6 +116,9 @@ class C4CompletedParentProofTests(unittest.TestCase):
 
         self.patch(svc.subprocess, "run", native_run)
         self.patch(svc, "_pin_native_context", REAL_NATIVE_CONTEXT)
+        native_lock = self.store / ".publication.lock"
+        self.native_lock_before = ((native_lock.stat().st_ino, native_lock.read_bytes())
+                                   if native_lock.exists() else None)
 
     def patch(self, obj, name, value):
         patcher = mock.patch.object(obj, name, value)
@@ -127,6 +133,12 @@ class C4CompletedParentProofTests(unittest.TestCase):
     def assert_native_released(self):
         with self.generation.publication_lock(self.store):
             pass
+
+    def assert_native_lock_unmodified(self):
+        native_lock = self.store / ".publication.lock"
+        observed = ((native_lock.stat().st_ino, native_lock.read_bytes())
+                    if native_lock.exists() else None)
+        self.assertEqual(observed, self.native_lock_before)
 
     def native_args(self, operation):
         return SimpleNamespace(
@@ -165,7 +177,7 @@ class C4CompletedParentProofTests(unittest.TestCase):
             pd, record = self.f.apply()
         self.assertEqual(record["effect"], "APPLIED")
         self.assertTrue(record["durabilityConfirmed"])
-        self.assertEqual(writes, ["git-publish.mjs", "workspace-access.mjs", "manifest.json"])
+        self.assertEqual(writes, self.EXPECTED_WRITES)
         self.assertTrue(applied["final_fingerprint"])
         self.assertEqual(set(self.operations), {"status"})
         self.assertEqual((self.store / "CURRENT.json").read_bytes(), selected_before)
@@ -176,10 +188,10 @@ class C4CompletedParentProofTests(unittest.TestCase):
 
     def test_preview_and_status_do_not_create_native_lock(self):
         pd = self.f.call("preview")["planSha256"]
-        self.assertFalse((self.store / ".publication.lock").exists())
+        self.assert_native_lock_unmodified()
         with self.assertRaises(FileNotFoundError):
             self.f.call("status", pd)
-        self.assertFalse((self.store / ".publication.lock").exists())
+        self.assert_native_lock_unmodified()
         self.assertEqual(self.f.snapshot(), self.f.before)
 
     def test_generic_native_apply_and_reconcile_still_refuse_pruned_bootstrap(self):
@@ -188,7 +200,7 @@ class C4CompletedParentProofTests(unittest.TestCase):
                 with self.assertRaisesRegex(SystemExit, "NATIVE_POOL_PIN_SUCCESSOR_REFUSED"):
                     with REAL_NATIVE_CONTEXT(self.native_args(operation)):
                         self.fail("generic native modification was admitted")
-        self.assertFalse((self.store / ".publication.lock").exists())
+        self.assert_native_lock_unmodified()
         self.assertFalse(self.f.target.exists())
         self.assertEqual(self.f.snapshot(), self.f.before)
 
@@ -251,6 +263,11 @@ class C4CompletedParentProofTests(unittest.TestCase):
         self.assertTrue(checked)
         self.f.assert_parents_unchanged()
         self.assert_native_released()
+
+
+class C4InventoryCompletedParentProofTests(C4CompletedParentProofTests):
+    FIXTURE = fixtures.C4InventorySuccessorTests
+    EXPECTED_WRITES = ["git-publish.mjs", "manifest.json"]
 
 
 if __name__ == "__main__":

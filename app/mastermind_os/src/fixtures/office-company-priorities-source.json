@@ -1,0 +1,231 @@
+{
+  "schema": "mastermind.office_company_source_fixture.v1",
+  "clock": {
+    "verified_at": 1800000000
+  },
+  "response": {
+    "schema": "mastermind.company_priorities.v1",
+    "source": {
+      "owner": "STRATEGIC_STATE",
+      "revision": "c36cebf2a9a103943edadf119256d46e07db54a1",
+      "path": "config/strategic_state.yml",
+      "observed_at": "2026-11-07T13:54:43Z"
+    },
+    "owner_context": {
+      "principal_scope": "746ea62009ffa72215a1792dff1053e74f985463ecc1fbfe69a0744e3cf6e7c4",
+      "verified_expiry": 1800000300
+    },
+    "authority": "advisory_and_orientation_only",
+    "as_of": "2026-11-06",
+    "company_phase": "PRE_REVENUE_LAUNCH_CONVERGENCE",
+    "north_star": [
+      "Turn differentiated, trustworthy market intelligence into recurring customer value and durable revenue without weakening evidence, uncertainty, correction, or paper-only boundaries.\n",
+      "Make Prophet, Macro Dashboard, Sector Intelligence, Research Vault, Terminal, and Options Intelligence production-ready, interoperable, and valuable enough that the combined product is sellable.\n",
+      "Deliver one coherent premium desktop/mobile experience whose navigation and state flow make the intelligence feel like one investment desk, not a collection of unrelated tools.\n",
+      "Establish a repeatable acquisition -> activation -> retention -> revenue loop and let distribution become the dominant company bias after the SELL_READY gate.\n",
+      "Use governed AI autonomy as a force multiplier for product, research, and growth; autonomy infrastructure is a means to company throughput, not an endless product category of its own.\n"
+    ],
+    "priorities": [
+      {
+        "id": "CORE_INTELLIGENCE_PRODUCTIZATION",
+        "department": "product",
+        "objective": "Bring Prophet, Macro Dashboard, Sector Intelligence, Research Vault, Terminal, and Options Intelligence to measured production-ready, sellable states. Maximize end-user decision value, frequency of useful use, differentiation, trust, and cross-product compounding; connect them into a Market -> Sector -> Opportunity -> Security -> Thesis -> Positioning workflow. New product-category expansion stays constrained until SELL_READY unless it directly closes a measured core gap.",
+        "status": "active"
+      },
+      {
+        "id": "PREMIUM_PRODUCT_EXPERIENCE",
+        "department": "product",
+        "objective": "Unify customer-facing Mastermind into one fast, premium, user-friendly desktop/mobile product with a coherent design language, information architecture, navigation model, state continuity, accessibility, and real-path acceptance. Remove dead ends, inconsistent UX/CSS, AI-generated residue, and slow or confusing mobile paths rather than polishing isolated screens in place.",
+        "status": "active"
+      },
+      {
+        "id": "DISTRIBUTION_AND_REVENUE",
+        "department": "marketing",
+        "objective": "Build the commercial spine and distribution foundations now: signup, onboarding, activation, trial, billing, entitlement, conversion, retention and attribution; product-led shareability; creator, affiliate and partnership channels; and high-velocity AI-assisted growth experiments. After SELL_READY, shift the company resource bias toward distribution. Scale paid acquisition only when retained value and contribution economics justify it.",
+        "status": "active"
+      },
+      {
+        "id": "AUTONOMY_FORCE_MULTIPLIER",
+        "department": "executive",
+        "objective": "Production-prove a governed objective -> decomposition -> routing -> worker execution -> independent review/repair -> integration/recovery/continuation loop that removes routine Chairman message shuttling, session hunting, watcher repair, and account selection. ChatGPT Web is an optional execution surface, not a completion dependency. After AUTONOMY_BASELINE passes, autonomy infrastructure defaults to maintenance unless a concrete active-P0 blocker requires expansion.",
+        "status": "active"
+      },
+      {
+        "id": "US_PROPHET_ENTRY_TIMING",
+        "department": "prophet",
+        "objective": "Retired as a company P0 on 2026-11-06 and subsumed by CORE_INTELLIGENCE_PRODUCTIZATION. Historical objective: reduce structural late-entry behavior in US Prophet without unacceptable false-positive cost.",
+        "status": "retired"
+      },
+      {
+        "id": "PRODUCT_TRUST_COHERENCE",
+        "department": "product",
+        "objective": "Retired as a company P0 on 2026-11-06 and subsumed by PREMIUM_PRODUCT_EXPERIENCE. Historical objective: remove unfinished-product signals, inconsistent UX/CSS, dead surfaces, and confusing structure.",
+        "status": "retired"
+      },
+      {
+        "id": "MONETIZATION_AND_ONBOARDING",
+        "department": "product",
+        "objective": "Retired as a company P0 on 2026-11-06 and subsumed by DISTRIBUTION_AND_REVENUE. Historical objective: complete signup, trial, billing, entitlement, paywall, activation, analytics, and lifecycle paths for revenue.",
+        "status": "retired"
+      },
+      {
+        "id": "ZERO_TO_ONE_ACQUISITION",
+        "department": "marketing",
+        "objective": "Retired as a company P0 on 2026-11-06 and subsumed by DISTRIBUTION_AND_REVENUE. Historical objective: prove the first repeatable path from zero traffic to qualified prospects and paying users.",
+        "status": "retired"
+      },
+      {
+        "id": "EXECUTIVE_OS",
+        "department": "executive",
+        "objective": "Retired as a company P0 on 2026-11-06 and subsumed by AUTONOMY_FORCE_MULTIPLIER. Existing Executive OS remains the canonical lifecycle and admission owner; this retirement changes company-priority classification, not runtime authority or accepted implementation ownership.",
+        "status": "retired"
+      },
+      {
+        "id": "CHAIRMAN_COGNITION_AUTONOMY",
+        "department": "executive",
+        "objective": "Retired as a company P0 on 2026-11-06 and subsumed by AUTONOMY_FORCE_MULTIPLIER. The existing Meta-CEO Chairman Cognition capability and constitutional Chairman boundaries remain intact as subordinate autonomy capabilities rather than a separate company objective.",
+        "status": "retired"
+      }
+    ],
+    "phase_review_criteria": {
+      "AUTONOMY_BASELINE": {
+        "purpose": "End autonomy-infrastructure critical-path mode once the organization can reliably execute and recover governed multi-worker work without routine Chairman orchestration.",
+        "criteria": [
+          "the accepted Autonomy V1 production-proof matrix, or its accepted successor, is satisfied",
+          "governed decomposition and multi-worker routing are production-proven",
+          "independent review, bounded repair, and exact parent consumption are proven",
+          "worker or session failure recovery is proven without routine Chairman shuttling",
+          "at least one durable non-ChatGPT-Web execution path is production-proven",
+          "current lifecycle, effect, source-custody, and continuation owners remain singular"
+        ],
+        "on_pass": "Review autonomy allocation downward toward maintenance. New provider, host, browser, or orchestration infrastructure must then name the active P0 and concrete production limitation it unlocks."
+      },
+      "SELL_READY": {
+        "purpose": "Mark the point where Mastermind is coherent and valuable enough to sell, so the company can shift from build-dominant launch convergence toward distribution-dominant growth.",
+        "criteria": [
+          "all six core intelligence products clear production-readiness and user-value review",
+          "premium desktop and mobile cross-product journeys pass real-path acceptance",
+          "the Market -> Sector -> Opportunity -> Security -> Thesis -> Positioning workflow is coherent",
+          "signup, onboarding, activation, trial, billing, entitlement, conversion, and analytics are live",
+          "freshness, sources, uncertainty, corrections, falsifiers, and material limitations are visible"
+        ],
+        "on_pass": "Trigger an explicit Chairman/CEO resource-policy review in which distribution becomes the dominant company bias. Do not wait for product perfection; continue product work where retention, trust, or measured user value shows a real gap."
+      }
+    }
+  },
+  "combined_response": {
+    "schema": "mastermind.company_priorities.v1",
+    "source": {
+      "owner": "STRATEGIC_STATE",
+      "revision": "c36cebf2a9a103943edadf119256d46e07db54a1",
+      "path": "config/strategic_state.yml",
+      "observed_at": "2026-11-07T13:54:43Z"
+    },
+    "owner_context": {
+      "principal_scope": "746ea62009ffa72215a1792dff1053e74f985463ecc1fbfe69a0744e3cf6e7c4",
+      "verified_expiry": 1800000300
+    },
+    "authority": "advisory_and_orientation_only",
+    "as_of": "2026-11-06",
+    "company_phase": "PRE_REVENUE_LAUNCH_CONVERGENCE",
+    "north_star": [
+      "Turn differentiated, trustworthy market intelligence into recurring customer value and durable revenue without weakening evidence, uncertainty, correction, or paper-only boundaries.\n",
+      "Make Prophet, Macro Dashboard, Sector Intelligence, Research Vault, Terminal, and Options Intelligence production-ready, interoperable, and valuable enough that the combined product is sellable.\n",
+      "Deliver one coherent premium desktop/mobile experience whose navigation and state flow make the intelligence feel like one investment desk, not a collection of unrelated tools.\n",
+      "Establish a repeatable acquisition -> activation -> retention -> revenue loop and let distribution become the dominant company bias after the SELL_READY gate.\n",
+      "Use governed AI autonomy as a force multiplier for product, research, and growth; autonomy infrastructure is a means to company throughput, not an endless product category of its own.\n"
+    ],
+    "priorities": [
+      {
+        "id": "CORE_INTELLIGENCE_PRODUCTIZATION",
+        "department": "product",
+        "objective": "Bring Prophet, Macro Dashboard, Sector Intelligence, Research Vault, Terminal, and Options Intelligence to measured production-ready, sellable states. Maximize end-user decision value, frequency of useful use, differentiation, trust, and cross-product compounding; connect them into a Market -> Sector -> Opportunity -> Security -> Thesis -> Positioning workflow. New product-category expansion stays constrained until SELL_READY unless it directly closes a measured core gap.",
+        "status": "active"
+      },
+      {
+        "id": "PREMIUM_PRODUCT_EXPERIENCE",
+        "department": "product",
+        "objective": "Unify customer-facing Mastermind into one fast, premium, user-friendly desktop/mobile product with a coherent design language, information architecture, navigation model, state continuity, accessibility, and real-path acceptance. Remove dead ends, inconsistent UX/CSS, AI-generated residue, and slow or confusing mobile paths rather than polishing isolated screens in place.",
+        "status": "active"
+      },
+      {
+        "id": "DISTRIBUTION_AND_REVENUE",
+        "department": "marketing",
+        "objective": "Build the commercial spine and distribution foundations now: signup, onboarding, activation, trial, billing, entitlement, conversion, retention and attribution; product-led shareability; creator, affiliate and partnership channels; and high-velocity AI-assisted growth experiments. After SELL_READY, shift the company resource bias toward distribution. Scale paid acquisition only when retained value and contribution economics justify it.",
+        "status": "active"
+      },
+      {
+        "id": "AUTONOMY_FORCE_MULTIPLIER",
+        "department": "executive",
+        "objective": "Production-prove a governed objective -> decomposition -> routing -> worker execution -> independent review/repair -> integration/recovery/continuation loop that removes routine Chairman message shuttling, session hunting, watcher repair, and account selection. ChatGPT Web is an optional execution surface, not a completion dependency. After AUTONOMY_BASELINE passes, autonomy infrastructure defaults to maintenance unless a concrete active-P0 blocker requires expansion.",
+        "status": "active"
+      },
+      {
+        "id": "US_PROPHET_ENTRY_TIMING",
+        "department": "prophet",
+        "objective": "Retired as a company P0 on 2026-11-06 and subsumed by CORE_INTELLIGENCE_PRODUCTIZATION. Historical objective: reduce structural late-entry behavior in US Prophet without unacceptable false-positive cost.",
+        "status": "retired"
+      },
+      {
+        "id": "PRODUCT_TRUST_COHERENCE",
+        "department": "product",
+        "objective": "Retired as a company P0 on 2026-11-06 and subsumed by PREMIUM_PRODUCT_EXPERIENCE. Historical objective: remove unfinished-product signals, inconsistent UX/CSS, dead surfaces, and confusing structure.",
+        "status": "retired"
+      },
+      {
+        "id": "MONETIZATION_AND_ONBOARDING",
+        "department": "product",
+        "objective": "Retired as a company P0 on 2026-11-06 and subsumed by DISTRIBUTION_AND_REVENUE. Historical objective: complete signup, trial, billing, entitlement, paywall, activation, analytics, and lifecycle paths for revenue.",
+        "status": "retired"
+      },
+      {
+        "id": "ZERO_TO_ONE_ACQUISITION",
+        "department": "marketing",
+        "objective": "Retired as a company P0 on 2026-11-06 and subsumed by DISTRIBUTION_AND_REVENUE. Historical objective: prove the first repeatable path from zero traffic to qualified prospects and paying users.",
+        "status": "retired"
+      },
+      {
+        "id": "EXECUTIVE_OS",
+        "department": "executive",
+        "objective": "Retired as a company P0 on 2026-11-06 and subsumed by AUTONOMY_FORCE_MULTIPLIER. Existing Executive OS remains the canonical lifecycle and admission owner; this retirement changes company-priority classification, not runtime authority or accepted implementation ownership.",
+        "status": "retired"
+      },
+      {
+        "id": "CHAIRMAN_COGNITION_AUTONOMY",
+        "department": "executive",
+        "objective": "Retired as a company P0 on 2026-11-06 and subsumed by AUTONOMY_FORCE_MULTIPLIER. The existing Meta-CEO Chairman Cognition capability and constitutional Chairman boundaries remain intact as subordinate autonomy capabilities rather than a separate company objective.",
+        "status": "retired"
+      }
+    ],
+    "phase_review_criteria": {
+      "AUTONOMY_BASELINE": {
+        "purpose": "End autonomy-infrastructure critical-path mode once the organization can reliably execute and recover governed multi-worker work without routine Chairman orchestration.",
+        "criteria": [
+          "the accepted Autonomy V1 production-proof matrix, or its accepted successor, is satisfied",
+          "governed decomposition and multi-worker routing are production-proven",
+          "independent review, bounded repair, and exact parent consumption are proven",
+          "worker or session failure recovery is proven without routine Chairman shuttling",
+          "at least one durable non-ChatGPT-Web execution path is production-proven",
+          "current lifecycle, effect, source-custody, and continuation owners remain singular"
+        ],
+        "on_pass": "Review autonomy allocation downward toward maintenance. New provider, host, browser, or orchestration infrastructure must then name the active P0 and concrete production limitation it unlocks."
+      },
+      "SELL_READY": {
+        "purpose": "Mark the point where Mastermind is coherent and valuable enough to sell, so the company can shift from build-dominant launch convergence toward distribution-dominant growth.",
+        "criteria": [
+          "all six core intelligence products clear production-readiness and user-value review",
+          "premium desktop and mobile cross-product journeys pass real-path acceptance",
+          "the Market -> Sector -> Opportunity -> Security -> Thesis -> Positioning workflow is coherent",
+          "signup, onboarding, activation, trial, billing, entitlement, conversion, and analytics are live",
+          "freshness, sources, uncertainty, corrections, falsifiers, and material limitations are visible"
+        ],
+        "on_pass": "Trigger an explicit Chairman/CEO resource-policy review in which distribution becomes the dominant company bias. Do not wait for product perfection; continue product work where retention, trust, or measured user value shows a real gap."
+      }
+    }
+  },
+  "premises": [
+    "actual canonical loader and strategy bytes in disposable committed Git source",
+    "actual boot/executive_state and signed RS256 READ/combined verifiers",
+    "inprocess ASGI; no installed source seal/native auth/host service/Runtime effect; no evaluated gate/critical-path projection"
+  ]
+}
