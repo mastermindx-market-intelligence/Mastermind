@@ -703,6 +703,7 @@ _GATEWAY_ADMISSION_CODES = frozenset(
     {
         "gateway_audit_directory_invalid",
         "gateway_bundle_digest_mismatch",
+        "gateway_capability_profiles_invalid",
         "gateway_compiler_contract_invalid",
         "gateway_compiler_unavailable",
         "gateway_grant_invalid",
@@ -6031,6 +6032,17 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
     # itself.  No flattened attribute expectation is invented here.
     # ------------------------------------------------------------------
 
+    def derive_capability_profile_digests(
+        self, release_sha: str, profile_ids: tuple[str, ...]
+    ) -> dict[str, str]:
+        from control_plane import executive_installed_peer as installed
+        from ops.executive_os.mcp_component_update import (
+            derive_sealed_capability_profile_digests,
+        )
+        return derive_sealed_capability_profile_digests(
+            release_sha, profile_ids,
+            installed._Budget(installed._SERVICE_BUDGET_SECONDS))
+
     def _compile_gateway_candidates(
         self,
         prior_mcp_config_bytes: bytes,
@@ -6040,6 +6052,7 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         helper_hashes: Mapping[str, str],
         expected_sha: str,
         bundle_digest: str,
+        capability_profile_digests: dict[str, str] | None = None,
     ) -> Mapping[str, Any]:
         try:
             from ops.executive_os import os_gateway_publication as compiler
@@ -6051,6 +6064,7 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
                 prior_mcp_plist_bytes,
                 expected_release_sha=expected_sha,
                 expected_bundle_digest=bundle_digest,
+                capability_profile_digests=capability_profile_digests,
                 qualified_publication_inputs={
                     "publication_document": publication_document,
                     "auth_helper_sha256": helper_hashes["auth_helper_sha256"],
@@ -7091,11 +7105,16 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
     def qualify_gateway_predecessor(
         self, predecessor: GatewayPredecessorReceipt, preparation: GatewayPreparation
     ) -> None:
+        self._qualify_gateway_predecessor_release(predecessor, preparation.prior_release)
+
+    def _qualify_gateway_predecessor_release(
+        self, predecessor: GatewayPredecessorReceipt, prior_release: str
+    ) -> None:
         document = predecessor.document
-        if document["expected_sha"] != preparation.prior_release:
+        if document["expected_sha"] != prior_release:
             raise GatewayPublicationError("gateway_receipt_invalid")
-        tree = self._gateway_release_tree(preparation.prior_release)
-        _raw, _launch, bundle = self.qualify_launch_publication(preparation.prior_release, tree)
+        tree = self._gateway_release_tree(prior_release)
+        _raw, _launch, bundle = self.qualify_launch_publication(prior_release, tree)
         if bundle != document["release_bundle_digest"]:
             raise GatewayPublicationError("gateway_receipt_invalid")
         try:
@@ -8060,7 +8079,8 @@ def validate_gateway_receipt_document(
 
 
 def prepare_gateway_publication(
-    host: ProductionGatewayPublicationHost, request: GatewayPublicationRequest
+    host: ProductionGatewayPublicationHost, request: GatewayPublicationRequest,
+    *, predecessor: GatewayPredecessorReceipt | None = None,
 ) -> GatewayPreparation:
     """Qualify every publication input BEFORE any marker or target effect."""
 
@@ -8113,6 +8133,16 @@ def prepare_gateway_publication(
             raise GatewayPublicationError("gateway_grant_state_conflict")
     else:
         raise GatewayPublicationError("gateway_grant_state_conflict")
+    # Join the actual old receipt/config/grant before deriving any successor
+    # configuration. The existing final check still runs before durable intent.
+    if predecessor is not None:
+        host._qualify_gateway_predecessor_release(predecessor, prior_release)
+    from ops.executive_os.mcp_component_update import _mission_capability_profile_digests
+    try:
+        capability_profile_digests = _mission_capability_profile_digests(
+            host, request.expected_sha, prior_mcp_config)
+    except Exception as exc:
+        raise GatewayPublicationError("gateway_capability_profiles_invalid") from exc
     studio = host.observe_studio(request.expected_sha)
     audit_directory = host.observe_gateway_audit_directory(
         studio_uid=studio.studio_uid, studio_gid=studio.studio_gid
@@ -8153,6 +8183,7 @@ def prepare_gateway_publication(
         helper_hashes=helper_hashes,
         expected_sha=request.expected_sha,
         bundle_digest=bundle_digest,
+        capability_profile_digests=capability_profile_digests,
     )
     _verify_gateway_postimages(
         host,
@@ -8165,6 +8196,7 @@ def prepare_gateway_publication(
         derived_policy=derived_policy,
         commission_templates=templates,
         helper_hashes=helper_hashes,
+        capability_profile_digests=capability_profile_digests,
     )
     mcp_auth_audit = host._observe_mcp_auth_audit_directories(candidate["mcp_config_bytes"])
     candidate_configs = CandidateConfigs(
@@ -11142,6 +11174,7 @@ def _verify_gateway_postimages(
     derived_policy: Mapping[str, Any],
     commission_templates: Sequence[Mapping[str, Any]],
     helper_hashes: Mapping[str, str],
+    capability_profile_digests: dict[str, str] | None = None,
 ) -> None:
     """Hold the publication's own preservation law before any target write.
 
@@ -11180,6 +11213,17 @@ def _verify_gateway_postimages(
     if config.get("release_sha") != expected_sha:
         raise GatewayPublicationError("gateway_target_invalid")
     prior = json.loads(prior_mcp_config.decode("utf-8"))
+    from ops.executive_os.mcp_component_update import _apply_capability_profile_digests
+    expected = copy.deepcopy(prior)
+    try:
+        _apply_capability_profile_digests(prior, expected, capability_profile_digests)
+    except (TypeError, ValueError) as exc:
+        raise GatewayPublicationError("gateway_capability_profiles_invalid") from exc
+    if (config.get("coo") != expected.get("coo")
+            or ("coo" in config) != ("coo" in expected)
+            or config.get("selected_child_target") != prior.get("selected_child_target")
+            or ("selected_child_target" in config) != ("selected_child_target" in prior)):
+        raise GatewayPublicationError("gateway_target_invalid")
     for block in ("policies", "workspace"):
         if block in prior and config.get(block) != prior[block]:
             raise GatewayPublicationError("gateway_target_invalid")
@@ -11237,7 +11281,7 @@ def execute_gateway_publication(
     host.require_gateway_module_origin(request.expected_sha)
     predecessor = host.gateway_receipt_admission(request)
     host.require_transaction_absent()
-    preparation = prepare_gateway_publication(host, request)
+    preparation = prepare_gateway_publication(host, request, predecessor=predecessor)
     if predecessor is not None:
         host.qualify_gateway_predecessor(predecessor, preparation)
     transaction = TransactionContext(
