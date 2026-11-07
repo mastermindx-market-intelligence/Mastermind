@@ -126,7 +126,9 @@ def _identity_guard_source_path(path: str) -> bool:
 def _identity_guard_evidence_json_path(path: str) -> bool:
     parts = Path(path).parts
     return (not Path(path).is_absolute() and ".." not in parts
-            and parts[:2] == ("research", "evidence") and Path(path).suffix == ".json")
+            and Path(path).suffix == ".json" and (
+                parts[:2] == ("research", "evidence")
+                or path == "integrations/deepseek_harness/runtime_compat/evidence/native-runtime-port-20261107.json"))
 
 
 def _scan_evidence_identity_literals(document: str) -> list[str]:
@@ -3455,3 +3457,39 @@ def test_d8_nonrecursive_publisher_mkdir_modes_keep_identity_operands_guarded():
     )
     for line in guarded:
         assert _scan_identity_source_lines([line], path_identity=True), line
+
+
+_NATIVE_RUNTIME_EVIDENCE = "integrations/deepseek_harness/runtime_compat/evidence/native-runtime-port-20261107.json"
+
+
+@pytest.mark.parametrize("fault", ["none", "peer_uid", "nested_identity", "duplicate", "malformed"])
+def test_d8_native_runtime_receipt_uses_structural_evidence_guard(tmp_path, monkeypatch, fault):
+    # Retain the actual immutable receipt and its numeric test count. Only the
+    # disposable negative candidate changes; identity values are still refused.
+    content = (ROOT / _NATIVE_RUNTIME_EVIDENCE).read_text()
+    value = json.loads(content)
+    assert value["qualification"]["tests"]["tests"] == 645
+    if fault == "peer_uid":
+        value["peer_uid"] = 645
+        content = json.dumps(value)
+    elif fault == "nested_identity":
+        value["qualification"]["allowed_peer_uids"] = [645]
+        content = json.dumps(value)
+    elif fault == "duplicate":
+        content = '{"peer_uid":645,"peer_uid":null}'
+    elif fault == "malformed":
+        content = '{"qualification":'
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, _NATIVE_RUNTIME_EVIDENCE, content, fault != "none")
+
+
+@pytest.mark.parametrize("path", [
+    "integrations/deepseek_harness/runtime_compat/evidence-lookalike/native-runtime-port-20261107.json",
+    "integrations/deepseek_harness/runtime_compat/config/native-runtime-port-20261107.json",
+    "integrations/deepseek_harness/runtime_compat/evidence/native-runtime-port-20261107.py",
+    "integrations/deepseek_harness/runtime_compat/evidence/other.json",
+])
+def test_d8_native_evidence_path_does_not_exempt_configuration_or_source(tmp_path, monkeypatch, path):
+    assert not _identity_guard_evidence_json_path(path)
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, path, '{"peer_uid":645}', True)

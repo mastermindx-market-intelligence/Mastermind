@@ -11,6 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -37,10 +38,19 @@ def context_child(j, monkeypatch, *, after=lambda: None):
         return value[0], value[1], hashlib.sha256(value[2].encode()).hexdigest(), value[3]
     monkeypatch.setattr(collector, "_snapshot_pair", lambda *a, **kw: fixture_seal(snapshot(*a, **kw)))
     monkeypatch.setattr(collector, "_generation_pair", lambda *a, **kw: fixture_seal(generation(*a, **kw)))
-    site = Path(yaml.__file__).resolve().parent.parent
+    # The qualified child may use another Python ABI than this pytest runner.
+    # Observe that exact interpreter's package metadata; never feed the parent
+    # runner's extension-module directory to the isolated source compiler.
+    metadata = json.loads(subprocess.run(
+        [str(collector._python), "-I", "-B", "-c",
+         "import json,pathlib,sys,yaml; print(json.dumps(dict("
+         "site=str(pathlib.Path(yaml.__file__).resolve().parent.parent),"
+         "python=sys.version.split()[0],pyyaml=yaml.__version__)))"],
+        check=True, capture_output=True, text=True, timeout=10).stdout)
+    site = Path(metadata["site"])
     runtime = SimpleNamespace(site_packages=site, python_binary=collector._python,
-        python_version=sys.version.split()[0], python_binary_sha256="a" * 64,
-        pyyaml_version=yaml.__version__, pyyaml_record_sha256="b" * 64,
+        python_version=metadata["python"], python_binary_sha256="a" * 64,
+        pyyaml_version=metadata["pyyaml"], pyyaml_record_sha256="b" * 64,
         runtime_tree_sha256="c" * 64)
     monkeypatch.setattr(ceo_boot_packet, "_capacity_runtime_contract", lambda: runtime)
     monkeypatch.setattr(ceo_boot_packet, "attest_capacity_boot_runtime", lambda *a, **kw: site)

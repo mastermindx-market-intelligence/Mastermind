@@ -115,7 +115,7 @@ function jsonData(value:unknown,seen=new Set<object>(),depth=0,nodes={count:0}):
     if(![Object.prototype,null].includes(Object.getPrototypeOf(value)))fail();
     const out:Record<string,unknown>=Object.create(null);
     for(const key of Reflect.ownKeys(value)){
-      if(typeof key!=='string')fail();const field=Object.getOwnPropertyDescriptor(value,key);
+      if(typeof key!=='string')fail();for(const point of key){const code=point.codePointAt(0)!;if(code>=0xd800&&code<=0xdfff)fail();}const field=Object.getOwnPropertyDescriptor(value,key);
       if(!field||!field.enumerable||!('value'in field))fail();out[key]=jsonData(field.value,seen,depth+1,nodes);
     }result=out;
   }
