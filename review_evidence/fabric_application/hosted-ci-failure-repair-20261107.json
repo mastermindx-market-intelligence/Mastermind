@@ -1,0 +1,47 @@
+{
+  "changes": {
+    "evidence": "Preserve the exact two inert GitHub references as structured repository/revision/path and PR/comment fields. The acquisition guard and its exemptions are unchanged.",
+    "namespace": "Extract the existing manifest-bounded test namespace context and use it around Hermes disposable enrollment. Restore the exact prior module objects and import path. Production source/module identity checks are unchanged."
+  },
+  "failures": {
+    "classes": [
+      "two inert report citations classified as anonymous reads",
+      "Hermes disposable enrollment collides with a preloaded native module"
+    ],
+    "main_run": 42384692689,
+    "rwe_run": 42384692658
+  },
+  "files": {
+    "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py": {
+      "git_blob": "84a4bc98e37648e87c4b75e44841a3f68f30f4d5",
+      "sha256": "18c46ad90514db94ae9f817d7baaef8b8a56c5a2cf7017a8ca9adfbf5c373317"
+    },
+    "review_evidence/fabric_application/hermes-macro-current-pair-qualification-20261107.json": {
+      "git_blob": "d402a10cb6e9a29c861e1176444e38d27ec70e8c",
+      "sha256": "76deef9f651de0048b24fec6d00b88b2100741ad8bfdfdb77ba331746e33160d"
+    },
+    "tests/test_hermes_primary_application_enrollment.py": {
+      "git_blob": "174800064a610b2fc41f3cb953b1fb5ba73b28c5",
+      "sha256": "32a5521964f161ba7e098bac717e9b3f6cb8a5d5acd37bb11985c48df331c6c9"
+    },
+    "tests/test_hermes_primary_retained_enrollment.py": {
+      "git_blob": "ca73c0697055b69109a8b438a08cb0fabfd4fd81",
+      "sha256": "5b31725ba9747f71b23b0b68794d7e1ac65736852dc12243dfda388f474fd436"
+    }
+  },
+  "proof": {
+    "log_sha256": "44b16bd4498527359b7306cf117766f1369b635407ced40dd9e734294358b5c2",
+    "preloaded_native_owner_restored": true,
+    "strict_foreign_module_rejection_test": true,
+    "tests": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 77
+    },
+    "xml_sha256": "a3b53a3e3bf7d202bcc78f12af12af538302fafb8b2f53fb4b4272efc9d9f530"
+  },
+  "schema": "mastermind.fabric_application.hosted_ci_repair.v1",
+  "scope": "Source/test qualification only. No native publication, selection, runtime grant, deployment or production acceptance.",
+  "source_parent": "552375cd288ebe3c417d10afa17f47114c6319db"
+}

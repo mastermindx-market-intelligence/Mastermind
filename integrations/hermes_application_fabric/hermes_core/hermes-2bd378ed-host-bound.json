@@ -1,0 +1,32 @@
+{
+  "core_files": {
+    "gateway/run.py": "86fb8733e839f66442fc8219ce236ec5123151a855cc88265a7e3c7f1093cd8c",
+    "gateway/run_turn_prepare.py": "804d9c2ab6438594f7f996ab4d2bdc24bbf6b24cdf5441a84bbbb24151eee2ad",
+    "gateway/run_turn_runner.py": "4d775d0cf16e11838710ff87b62153c010f9c67f30932b0d2695acacb1c7103a",
+    "gateway/session_authority.py": "e4b1dcb9e61a94f39ca620c2349d35d4713b1b4d56943186296ce352cb9816be",
+    "gateway/session_provider_context.py": "6b6f20519b940e473cd72827c9ffe6534d8c8bc297f9d84cf4a9b44959b7c833",
+    "hermes_cli/cli_agent_setup_mixin.py": "2aef5fda6f5bd6687bd675027d12ed0a7c867d17c642569fa5f7496d8d133d66",
+    "hermes_cli/plugins.py": "56503d6897b570b3c8ff8d568f8c1a5952c5207131319b883ea910744b3436f5",
+    "hermes_cli/runtime_provider.py": "b85334ca6ef45a24c7c37a311b66b4ec5f700ed2a3b9b55d097f01dd19fae515",
+    "hermes_cli/runtime_provider_host.py": "39caeb4b4653b3db25b8a237912f6fcc2b3f0529f8f9f3899a41a4fb7fa8f6cc",
+    "providers/base.py": "018fb53d9213b4e3a5fe79522bca60e920569a7ddbbadecf79c55e64328d13fe"
+  },
+  "hermes": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+  "installed": false,
+  "live_provider_acceptance": false,
+  "original_contribution": "a664a288a3791bda3ea2b43af08278f1d8fb0d9b",
+  "patch_sha256": "0029f3c8cba4ad16a66f47af20a9efb6186eb1745db2d2436c2eeaa9218c61ba",
+  "preimages": {
+    "gateway/run.py": "f2eabc2972822df232375a4e32b22e79daafcec9bc2f66a6cfb305c255cf11d3",
+    "gateway/run_turn_prepare.py": "71512a46ac5f361eb75ff3c455ada7f8486e2f28a12fec30fe8e8f7f90f44461",
+    "gateway/run_turn_runner.py": "c20474c99ae171882f5524646b60cf5d877e596b6f753051134ce1b8840edbb6",
+    "gateway/session_authority.py": "7902f0cdca329c229a41328bec2c84103d3c5adc01bea7020b7bc76e4b26404d",
+    "gateway/session_provider_context.py": null,
+    "hermes_cli/cli_agent_setup_mixin.py": "7d3db020acfa411909c4cfac240795950919545be7a302598b72a595db3c7231",
+    "hermes_cli/plugins.py": "0da0ebe88da76f4a73d77fcc6942ef549154abbc573d52d74c1608bcb61efce4",
+    "hermes_cli/runtime_provider.py": "7a742d2c3cd759ebfb5a3321b48bec80d1faa2d15c6fd09e595e0ed1a6fc9376",
+    "hermes_cli/runtime_provider_host.py": null,
+    "providers/base.py": "d0a8c867ae0e870ad617b4da2ab49b3302cc7f107508ebf9828c96a5aeb000dc"
+  },
+  "schema": "mastermind.hermes_gateway_patch_fixture.v1"
+}

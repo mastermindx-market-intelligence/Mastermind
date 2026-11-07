@@ -1,0 +1,19 @@
+{
+  "files": {
+    "integrations/hermes_application_fabric/qualification/qualify_live_preimages.py": "9bd739402db36931e52024f2156b1d21b00783c95e6ca337d4173f87849b728f",
+    "integrations/hermes_omh/capacity_bridge.py": "242c19aec6f13db182e5b51c2bf560d48e1280cba87e9410bed17848b0e0e832",
+    "tests/test_hermes_h4_native_preparation.py": "71c5295debc70285d061b9053fefc146cd8d0d39e4bd71aa723c7fc145a6635f"
+  },
+  "installed_bridge_preimage_sha256": "4d3f88a1b0ef0cbb501439acacebcbb5aa874cbd84c27755e87becda4b8a245c",
+  "interpreter": "/opt/homebrew/bin/python3",
+  "live_install": false,
+  "log_sha256": "0b94f650eb7c1019e26b0553f39a6342901c8360285fd0953bd982eef1a05e44",
+  "mode": "existing-capacity-mcp-interpreter-offline",
+  "provider_request": false,
+  "returncode": 0,
+  "schema": "mastermind.hermes_h4_native_preparation_tests.v1",
+  "test_count": 7,
+  "worker_dispatch": false,
+  "yaml_owner": "existing user site used by configured MCP command; not the primary APPLICATION release closure",
+  "yaml_version": "6.0.3"
+}

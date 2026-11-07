@@ -1,0 +1,59 @@
+{
+  "base": "39bd39aaa8c5fa1f6112fc34c593815323428b2f",
+  "law_pin": "e37dc82f070fd391e29f0dbd0bf46b022166beea",
+  "limits": [
+    "Actual retained-Go host preview and final current applicability still owed",
+    "No live native selection, Go apply, Studio config or service activation",
+    "Hosted original-J synthetic preflight remains separately unresolved",
+    "Grok package guard and Metabolism lanes retain their scopes"
+  ],
+  "original_return_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6705938266",
+  "original_worker_artifact_sha256": "84e52d2ecfcabfc36aab7ac43e515365464eee4a82e9d3ea659485caf29ac1a9",
+  "postimages": {
+    "integrations/studio_direct_mcp/private_service.py": {
+      "blob": "d37cd998b8634edddc9d876c98a1aaf2aaf818c1",
+      "sha256": "6e85c5e1393157ffa453d39b8c4b892fedd41dc542bc7f9dfcc0f26d7ec7939d"
+    },
+    "integrations/studio_direct_mcp/private_service_pin.py": {
+      "blob": "e1d45d6fc5962dd57cce985016d34b6f626387a0",
+      "sha256": "0b9deb1b6486acf694d11a77b1f8fb236ff400f1ef9839ac7c25d929e3db04a8"
+    },
+    "integrations/studio_direct_mcp/private_service_pin_forward_selection_test.py": {
+      "blob": "ba6a7eae8e18c346f1f0d00fcc269da82f2b1467",
+      "sha256": "69653ce276856a59075b93579664310a78560c7651601dfa0535759ea10b95f0"
+    },
+    "integrations/studio_direct_mcp/private_service_pin_transition_test.py": {
+      "blob": "56639fc61259d1f3580cfee51e96fc672d2c5e2c",
+      "sha256": "0181c25e08652e4ab4d53505d499540a6ccfe08b30f273f7859a22d14c62debe"
+    },
+    "integrations/studio_direct_mcp/private_service_test.py": {
+      "blob": "38b14b13c632bb727d9bd4e24de0ed78b7b6a8af",
+      "sha256": "eb2a252e6620bc4937134f40210d57978da5677334e77206a51e3cdd26018ec1"
+    }
+  },
+  "repair": [
+    "Authenticate original completeAPPLIEDhistory through incumbent read_transaction and actual native predecessor projection",
+    "Preserve exact existing original applied or closed Paper/C1 successor pair",
+    "Revalidate original history before partial writes and positive receipt/start",
+    "Permit same-original complete-pair receipt-only recovery afterGoSELECTED",
+    "Reuse existing strict inode/file/parent sync before pair writes and positive receipt/status/start",
+    "Generate complete original test records via incumbent owner; inject real file and parent sync failures"
+  ],
+  "root_correction_ownership_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706085235",
+  "schema": "mastermind.fabric_application.studio_forward_source_proof.v1",
+  "source_only": true,
+  "utc": "2026-11-07T11:28:00.010659+00:00",
+  "verification": {
+    "TMPDIR": "/private/tmp",
+    "errors": 0,
+    "executed": 644,
+    "failed": 0,
+    "intact_go_owner_path": true,
+    "log_sha256": "d50156e58b243658e3b84922aa365cbf26abf702727cdf9c8f6e58c7785b8269",
+    "passed": 644,
+    "python": "3.12",
+    "seconds": 59.215,
+    "skipped": 0,
+    "strict_retained_go_host_positive": false
+  }
+}

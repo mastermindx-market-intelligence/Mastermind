@@ -1,0 +1,4 @@
+name: mastermind-fabric
+kind: model-provider
+version: 0.1.0
+description: Host-bound Hermes primary inference through the existing APPLICATION owner

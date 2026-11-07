@@ -196,6 +196,12 @@ GO_PARTICIPANT_OPERATOR = "90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f
 GO_PARTICIPANT_OPERATOR_PREIMAGE = "f81b4f053a22ba973b06214f6d06ed2d66e3fc471c781311f074718683cf4675"
 GO_BASE_ORIGINAL_COLLECTOR_SHA256 = "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183"
 GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256 = "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83"
+# Exact committed successor of the closed original-collection collector: the J
+# repair that preserves completed/uncertain original results. It replaces
+# exactly one member of the complete current107 closure, so every parent
+# closure below is re-derived for that lineage while the prior lineage and the
+# historical collector stay accepted. No other source or entrypoint hash moves.
+GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256 = "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d"
 
 
 GO_ORIGINAL_ARTIFACT_ADDITIONS = {
@@ -217,11 +223,16 @@ GO_REMOTE_CWD_TASK_DIGEST = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6
 # Older namespaces and the frozen Ubuntu4/poll generations retain their bytes.
 GO_REQUEST_REFUSAL_TASK_DIGEST = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
 
-# One complete successor of the captured protected107 WORKER closure. This
-# historical view is validation-only: emitted manifests retain the repaired
-# bytes. Future APPLICATION or policy cohorts must compose this exact delta,
-# not relabel their unrelated parent as this captured generation.
+# The same two-member repair has two separately qualified 107-member parents:
+# the protected WORKER closure and the installed APPLICATION carrier closure.
+# Temporary inverse views never replace the actual emitted repaired bytes;
+# unrelated or mixed complete parents remain ineligible.
 ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256 = "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
+ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256 = "3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9"
+# The same APPLICATION carrier closure with the one committed
+# original-collection successor member. The protected WORKER closure above is
+# a frozen historical fixture and keeps its own exact parent.
+ADMISSION_INTEGRITY_APPLICATION_SUCCESSOR_PARENT_MANIFEST_SHA256 = "6d8adb18ece5b01dadb8ea60aa868e490f78d4371898934d63ea2e30b66eab82"
 ADMISSION_INTEGRITY_PREIMAGES = {
     "ext/fabric_task.py": GO_REQUEST_REFUSAL_TASK_DIGEST,
     "ext/lane_runtime.py": GO_CENSUS_EXIT_RUNTIME_DIGEST,
@@ -244,8 +255,47 @@ def before_admission_integrity(manifest):
         raise ValueError("native admission integrity cohort is incomplete or foreign")
     previous = dict(manifest)
     previous.update(ADMISSION_INTEGRITY_PREIMAGES)
-    if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256:
-        raise ValueError("native admission integrity parent closure differs")
+    parent_identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if parent_identity == ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256:
+        return previous
+    if (parent_identity in (ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256,
+                            ADMISSION_INTEGRITY_APPLICATION_SUCCESSOR_PARENT_MANIFEST_SHA256)
+            and all(previous.get("ext/" + name) == digest
+                    for name, digest in APPLICATION_CARRIER_DIGESTS.items())):
+        return previous
+    raise ValueError("native admission integrity parent closure differs")
+
+
+# The complete host-pull repair composes only on the current protected107
+# admission-integrity closure. This inverse is a validation view; emitted
+# manifests and staged payloads keep the repaired source identities.
+HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+HOST_PULL_INTEGRITY_PREIMAGES = {
+    "ext/host_pull.sh": "b58b4cf4932b801df45d4a70fdd99aaaee800e7e57cc06501aa5c21b20ea8a1c",
+    "ext/host_pull_backend.py": "d00ff264dcb1a51b73d1e1f772da22a2130873f517299e8c430f060a8191f248",
+    "ext/host_pull_daemon.sh": "826aed96db81ecbfee1b647a1d5e4842414d43961b6daaea5a77606e9e679345",
+}
+HOST_PULL_INTEGRITY_DIGESTS = {
+    "ext/host_pull.sh": "464d9a5522a61311d5e8c2b7495a6297c86300d611903ad56524d4aa2e574e72",
+    "ext/host_pull_backend.py": "822226666c479137afe8f357d43032a805066a71a5b90d38f2051b40230c2ae9",
+    "ext/host_pull_daemon.sh": "842c12036b7bcd1a7101747a522efa272a893474342d57817fb06ecee3e73f0b",
+}
+
+
+def before_host_pull_integrity(manifest):
+    """Validate the complete host-pull successor without changing its identity."""
+    if type(manifest) is not dict:
+        raise ValueError("native host-pull integrity manifest invalid")
+    if not any(manifest.get(name) == digest
+               for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        raise ValueError("native host-pull integrity cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(HOST_PULL_INTEGRITY_PREIMAGES)
+    if sha((json.dumps(previous, sort_keys=True, indent=2) + '\n').encode()) not in {HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256, 'bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e'}:
+        raise ValueError("native host-pull integrity parent closure differs")
     return previous
 
 
@@ -269,8 +319,12 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     Ubuntu4 and poll cohorts. Every other member/key stays bound to actual395b.
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
+    The committed successor of that collector is accepted the same way, so the
+    prior published generation keeps validating and no historical namespace can
+    be relabeled with either forward collector.
     """
-    manifest = before_admission_integrity(manifest)
+    actual_manifest = manifest
+    manifest = normalize_application_carrier_base_manifest(before_host_pull_integrity(manifest))
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -340,7 +394,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         for name in GO_POST_FAILURE_ADDITIONS:
             del historical["ext/" + name]
     for name, original in GO_BASE_DEPENDENCIES.items():
-        if manifest["ext/" + name] != dependency_hashes[name]:
+        if actual_manifest["ext/" + name] != dependency_hashes[name]:
             raise ValueError("native Go base differs from captured application dependency")
         historical["ext/" + name] = original
     if manifest["ext/pick.py"] not in {
@@ -361,8 +415,10 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     historical["ext/provider_outcome.py"] = GO_BASE_PROVIDER_OUTCOME_SHA256
     collector = manifest["ext/original_delivery_collector.py"]
     if (collector not in {GO_BASE_ORIGINAL_COLLECTOR_SHA256,
-                          GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256}
-            or (collector == GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256
+                          GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256,
+                          GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256}
+            or (collector in {GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256,
+                              GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256}
                 and set(manifest) != expected)):
         raise ValueError("native Go original collector is not the exact current source")
     historical["ext/original_delivery_collector.py"] = GO_BASE_ORIGINAL_COLLECTOR_SHA256
@@ -534,6 +590,196 @@ def compose_go_stage(root, output, manifest, files, component):
             "installed_preimage_sha256": None, "bytes": len(raw)}
 
 
+
+# One complete APPLICATION carrier successor of the exact qualified 107-file
+# base. Historical Grok and native cohort guards remain unchanged below.
+APPLICATION_CARRIER_DIGESTS = {
+    "native_remote.py": "f94689bbbf5f567b6d27e64965379ad4992a188b452d5bc593f41e925ebc411a",
+    "remote_sub_exec.py": "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea",
+    "remote_sub.sh": "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
+    "remote_sub_helpers.py": "cacbb576e82c57d625143610b858714dc37135acf28a82ccb9aec297c49bff2a",
+    "support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822"
+}
+APPLICATION_CARRIER_PREIMAGES = {
+    "native_remote.py": "2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6",
+    "remote_sub_exec.py": "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db",
+    "remote_sub.sh": "0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c",
+    "remote_sub_helpers.py": "f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93",
+    "support_bundle.py": "212df1af82652235ea10c9cabe95400aa40f8e819c6d5ef4c15666dbbfca3a4b"
+}
+APPLICATION_CARRIER_BASE_SHA256 = "e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4"
+# The same APPLICATION carrier base with the one committed original-collection
+# successor member; the prior lineage stays accepted for the published
+# generation and its frozen fixtures.
+APPLICATION_CARRIER_SUCCESSOR_BASE_SHA256 = "a68a4af9834da02d85ac00300ccaf0540c0fbccedd9c3a7c883157696558df35"
+
+
+# One complete successor of #2194's exact two-repair APPLICATION closure.
+# It composes #2182's publisher into APPLICATION's support owner and preserves
+# #2175/d5df6b2's scoped-model dependencies. The publisher-only WORKER closure
+# is not this precursor. Each accepted parent binds all other 104 members. The second complete
+# parent is the already qualified sparse-executor successor; older pins stay fixed.
+APPLICATION_POOL_COMPOSITION_PARENT_SHA256 = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+APPLICATION_POOL_COMPOSITION_SPARSE_PARENT_SHA256 = "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+# The original-collection successor has exact parents with and without the
+# qualified sparse executor. Historical parent identities remain unchanged.
+APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256 = "4f6a64b8b22188c324923b4575dcc1b6490ca59df21ba303d9f16db0f6fd6552"
+APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256 = "2ebfb9435053b90e4ce3bf9dfc6780460f6b2669f070c40c16f5772e928c9608"
+APPLICATION_POOL_COMPOSITION_PREIMAGES = {
+    "ext/support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
+    "ext/go_lease_gateway.py": "df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1",
+    "ext/lease_broker.py": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
+}
+APPLICATION_POOL_COMPOSITION_DIGESTS = {
+    "ext/support_bundle.py": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+    "ext/go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "ext/lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+}
+
+
+def before_application_pool_composition(manifest):
+    """Validate the exact complete successor; return its private parent view."""
+    if type(manifest) is not dict:
+        return manifest
+    if not any(manifest.get(name) == digest
+               for name, digest in APPLICATION_POOL_COMPOSITION_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in APPLICATION_POOL_COMPOSITION_DIGESTS.items()):
+        raise ValueError("application pool composition cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(APPLICATION_POOL_COMPOSITION_PREIMAGES)
+    identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if identity not in (APPLICATION_POOL_COMPOSITION_PARENT_SHA256,
+                        APPLICATION_POOL_COMPOSITION_SPARSE_PARENT_SHA256,
+                        APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256,
+                        APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256):
+        raise ValueError("application pool composition parent closure differs")
+    return previous
+
+
+# Exact adoption of #2007's two-hunk sparse preflight repair on the already
+# qualified APPLICATION admission-repair parent. Historical carrier hashes stay
+# frozen; this inverse is only a validation view of the new actual executor.
+SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE = "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea"
+SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST = "d15238fa70942463de99ca4f7679ad9e27d6b91f9034ac792f903efd1c22cafc"
+SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256 = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+SPARSE_COMMIT_PREFLIGHT_SUCCESSOR_PARENT_MANIFEST_SHA256 = APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256
+
+
+# Exact published scoped-model successor from APPLICATION d5df6b2. Only the
+# two current dependency members change in this base107 transition. Historical
+# parents stay frozen; normalization never rewrites captured dependency bytes.
+EXACT_SCOPED_MODEL_PREIMAGES = {
+    "ext/go_lease_gateway.py": "df0fc6cb3ae0771ea2bcb122bf331e0cfd3ca089b41506a18ae39de37ec021d1",
+    "ext/lease_broker.py": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
+}
+EXACT_SCOPED_MODEL_DIGESTS = {
+    "ext/go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "ext/lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+}
+EXACT_SCOPED_MODEL_PARENT_MANIFEST_SHA256 = "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+EXACT_SCOPED_MODEL_SUCCESSOR_PARENT_MANIFEST_SHA256 = APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256
+
+
+def before_exact_scoped_models(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("native scoped-model manifest invalid")
+    if not any(manifest.get(name) == digest
+               for name, digest in EXACT_SCOPED_MODEL_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in EXACT_SCOPED_MODEL_DIGESTS.items()):
+        raise ValueError("native scoped-model cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(EXACT_SCOPED_MODEL_PREIMAGES)
+    identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if identity not in (EXACT_SCOPED_MODEL_PARENT_MANIFEST_SHA256,
+                        EXACT_SCOPED_MODEL_SUCCESSOR_PARENT_MANIFEST_SHA256):
+        raise ValueError("native scoped-model parent closure differs")
+    return previous
+
+
+def before_sparse_commit_preflight(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("native sparse commit preflight manifest invalid")
+    if manifest.get("ext/remote_sub_exec.py") != SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST:
+        return dict(manifest)
+    previous = dict(manifest)
+    previous["ext/remote_sub_exec.py"] = SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE
+    identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if identity not in (SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256,
+                        SPARSE_COMMIT_PREFLIGHT_SUCCESSOR_PARENT_MANIFEST_SHA256):
+        raise ValueError("native sparse commit preflight parent closure differs")
+    return previous
+
+
+def application_carrier_candidate_digests(root):
+    sparse = {**APPLICATION_CARRIER_DIGESTS,
+              "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
+    publisher = {**APPLICATION_CARRIER_DIGESTS,
+                 "support_bundle.py": APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]}
+    combined = {**publisher,
+                "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
+    cohorts = (APPLICATION_CARRIER_DIGESTS, sparse, publisher, combined)
+    # Observe regular candidate files before selecting a complete reviewed
+    # cohort. A missing, symlinked or foreign forward member must fail its
+    # named guard, never silently reselect an historical base.
+    observed = {}
+    for name in APPLICATION_CARRIER_DIGESTS:
+        source = root / "candidate" / name
+        observed[name] = (None if source.is_symlink() or not source.is_file()
+                          else sha(source.read_bytes()))
+        if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
+            accepted = {cohort[name] for cohort in cohorts}
+            accepted.add(GROK47_CANDIDATE_COMPOSITION_DIGESTS[name])
+            if observed[name] not in accepted:
+                raise ValueError("accepted Grok forward composition mismatch: " + name)
+    if any(observed == cohort for cohort in cohorts):
+        return observed
+    if any(observed[name] in {cohort[name] for cohort in cohorts}
+           for name in APPLICATION_CARRIER_DIGESTS):
+        raise ValueError("application carrier candidate cohort is incomplete")
+    return {}
+
+
+def application_carrier_candidate_cohort(root):
+    return bool(application_carrier_candidate_digests(root))
+
+
+def normalize_application_carrier_base_manifest(manifest):
+    """Validate the complete new base; return a temporary historical view.
+
+    The caller's manifest and published generation keep their actual hashes.
+    A historical namespace cannot be relabeled as an APPLICATION generation.
+    """
+    if type(manifest) is not dict:
+        return manifest
+    # Qualify the exact repaired parent before the existing APPLICATION inverse.
+    # main() and Go validation share this ordering and retain actual output hashes.
+    if manifest.get("ext/support_bundle.py") == APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]:
+        manifest = before_application_pool_composition(manifest)
+    else:
+        manifest = before_exact_scoped_models(manifest)
+    manifest = before_sparse_commit_preflight(manifest)
+    manifest = before_admission_integrity(manifest)
+    present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
+               if manifest.get("ext/" + name) == expected}
+    if not present:
+        return manifest
+    if any(manifest.get("ext/" + name) != expected
+           for name, expected in APPLICATION_CARRIER_DIGESTS.items()):
+        raise ValueError("application carrier manifest cohort is incomplete")
+    historical = dict(manifest)
+    historical.update({"ext/" + name: expected
+                       for name, expected in APPLICATION_CARRIER_PREIMAGES.items()})
+    identity = sha((json.dumps(historical, sort_keys=True, indent=2) + "\n").encode())
+    if identity not in (APPLICATION_CARRIER_BASE_SHA256,
+                        APPLICATION_CARRIER_SUCCESSOR_BASE_SHA256):
+        raise ValueError("application carrier cannot relabel a prior or mixed native base")
+    return historical
+
+
 def main():
     draft = Path(__file__).resolve().parent
     root = draft.parent
@@ -557,8 +803,23 @@ def main():
     (stage / "ext").mkdir(parents=True, exist_ok=True)
     manifest = {}
     files = {}
+    application_carrier = application_carrier_candidate_digests(root)
     for name in sorted(BASE_FILES | ADDITIONS):
-        if name in GROK47_MERGED_SOURCE_DIGESTS:
+        if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
+            # Carrier successors still authenticate their immutable accepted
+            # overlay. Hash the exact regular candidate bytes being staged.
+            if name in GROK47_MERGED_SOURCE_DIGESTS:
+                historical = root.parent / "grok47" / "overlay" / name
+                if (historical.is_symlink() or not historical.is_file()
+                        or sha(historical.read_bytes()) != GROK47_MERGED_SOURCE_DIGESTS[name]):
+                    raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
+            source = root / "candidate" / name
+            if source.is_symlink() or not source.is_file():
+                raise ValueError("application carrier source is not a regular file: " + name)
+            raw = source.read_bytes()
+            if sha(raw) != application_carrier[name]:
+                raise ValueError("application carrier source changed during build")
+        elif name in GROK47_MERGED_SOURCE_DIGESTS:
             source = root.parent / "grok47" / "overlay" / name
             if source.is_symlink() or not source.is_file():
                 raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
@@ -591,7 +852,7 @@ def main():
         relative = "ext/" + name
         (stage / relative).write_bytes(raw)
         manifest[relative] = sha(raw)
-        source_ref = ("../grok47/overlay/" + name if name in GROK47_MERGED_SOURCE_DIGESTS
+        source_ref = ("../grok47/overlay/" + name if not (application_carrier and name in APPLICATION_CARRIER_DIGESTS) and name in GROK47_MERGED_SOURCE_DIGESTS
                       and name not in GROK47_CANDIDATE_COMPOSITION_DIGESTS
                       else str(source.relative_to(root)))
         files[relative] = {"source": source_ref, "sha256": sha(raw),
@@ -623,8 +884,7 @@ def main():
             if (name not in {'LICENSE','METADATA'} and not (name.startswith('yaml/') and name.endswith('.py'))
                     or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
                 raise ValueError('qualified pure YAML member differs')
-    # Qualify the complete repair cohort even when no APPLICATION pair is added.
-    before_admission_integrity(manifest)
+    normalize_application_carrier_base_manifest(before_host_pull_integrity(manifest))
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)

@@ -1,0 +1,26 @@
+{
+  "schema": "fabric_application.protected_ai_delta_composition.v1",
+  "prior_head": "dd68784fbb94c61266f1daac4148c53a5d7168bc",
+  "merged_protected_master": "ca0dd928f45f4f7a77399f6a1d92a0f68895c2ba",
+  "procedure_pin": "e37dc82f070fd391e29f0dbd0bf46b022166beea",
+  "procedure_delta": [],
+  "resolutions": {
+    "brain/cli_bridge.py": "Retain all Fabric dispatch and credential/config fences; compose upstream cognition read MCP import and SDKserver registration.",
+    "tests/executive_fabric_release_identity_review.py": "Only app/main full-source hash changed for incoming public error sanitization; same two finite400 spans652/689 col44:47. No identity mask expanded."
+  },
+  "validation": {
+    "cases": 279,
+    "passed": 239,
+    "failures": 3,
+    "skipped": 37,
+    "errors": 0,
+    "log_sha256": "5a1fb210b49ff979774e78ea49e3f3868b8747ec63170eab8cd47a66d21fc643",
+    "failed_causes": [
+      "missing paired Macro lib dependency in two health cases",
+      "missing pinned Anthropic SDK in one direct-provider escape negative"
+    ],
+    "status": "fixture environment repair and hosted CI pending"
+  },
+  "new_census_delta": "Cognition MCP adds no new model caller. Seven existing read-only aliases are not yet included in the selected Fabric inference tool catalog; bounded join remains owed.",
+  "runtime_effects": false
+}

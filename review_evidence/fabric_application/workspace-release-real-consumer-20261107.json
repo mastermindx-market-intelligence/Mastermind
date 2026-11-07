@@ -1,0 +1,52 @@
+{
+  "schema": "workspace-release-installed-consumer-proof.v1",
+  "operation_id": "fabric-app-scoped-fixture-pin-20261107-sol-001",
+  "started_at": "2026-11-07T11:21:00.988885+00:00",
+  "original_workspace": "/Volumes/Mastermind 2/agent-workspaces/macro/web/fabric-app-scoped-fixture-pin-20261107-sol-001",
+  "original_native_registration": "/Users/chriswong/Documents/Cluade/Macro Dashboard/.git/worktrees/fabric-app-scoped-fixture-pin-20261107-sol-001",
+  "head": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+  "branch": "sol/web-fabric-app-scoped-fixture-pin-20261107-sol-001",
+  "installed_source": "8ca19391143ef870249a684ab29ffaa57671e248",
+  "state": "APPLIED",
+  "retry_authorized": false,
+  "exit_code": 0,
+  "log": "/tmp/mmx-macro-workspace-release-installed.log",
+  "log_sha256": "00e936a81c83aa8e712c7f29d496e9c4888ae9cba97cd6ca9cb7dc1bbc28fdcc",
+  "workspace_exists": false,
+  "native_registration_exists": false,
+  "output": "{\"action\": \"release\", \"effect\": \"APPLIED\", \"receipt\": {\"branch\": \"sol/web-fabric-app-scoped-fixture-pin-20261107-sol-001\", \"dirty\": false, \"head_sha\": \"9eb5cb6b28b510ea9e2bf05ae9040528523339df\", \"reason\": \"clean recoverable linked worktree removed; branch/ref history retained\", \"recoverability\": \"HEAD_PUBLISHED_TO_ORIGIN_BRANCH\", \"removed\": true, \"source_repository\": \"/Users/chriswong/Documents/Cluade/macro-main\", \"state\": \"REMOVED\", \"workspace_path\": \"/Volumes/Mastermind 2/agent-workspaces/macro/web/fabric-app-scoped-fixture-pin-20261107-sol-001\"}, \"repository\": \"macro\", \"schema_version\": \"mastermind.workspace_cli/v2\"}",
+  "stderr": "",
+  "canonical_receipt": {
+    "action": "release",
+    "effect": "APPLIED",
+    "receipt": {
+      "branch": "sol/web-fabric-app-scoped-fixture-pin-20261107-sol-001",
+      "dirty": false,
+      "head_sha": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+      "reason": "clean recoverable linked worktree removed; branch/ref history retained",
+      "recoverability": "HEAD_PUBLISHED_TO_ORIGIN_BRANCH",
+      "removed": true,
+      "source_repository": "/Users/chriswong/Documents/Cluade/macro-main",
+      "state": "REMOVED",
+      "workspace_path": "/Volumes/Mastermind 2/agent-workspaces/macro/web/fabric-app-scoped-fixture-pin-20261107-sol-001"
+    },
+    "repository": "macro",
+    "schema_version": "mastermind.workspace_cli/v2"
+  },
+  "completed_at": "2026-11-07T11:21:08.096659+00:00",
+  "original_branch_publication": {
+    "schema": "attended-existing-source-branch-publication.v1",
+    "operation_id": "fabric-app-scoped-fixture-pin-20261107-sol-001",
+    "workspace": "/Volumes/Mastermind 2/agent-workspaces/macro/web/fabric-app-scoped-fixture-pin-20261107-sol-001",
+    "head": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+    "branch": "sol/web-fabric-app-scoped-fixture-pin-20261107-sol-001",
+    "expected_remote": "ABSENT",
+    "state": "APPLIED",
+    "retry_authorized": false,
+    "reason": "Original paired PR advanced to a descendant; canonical release requires exact head on an admitted ref. Publish the existing owned branch without changing source or the original paired PR.",
+    "push_exit_code": 0,
+    "remote_readback": "9eb5cb6b28b510ea9e2bf05ae9040528523339df\trefs/heads/sol/web-fabric-app-scoped-fixture-pin-20261107-sol-001",
+    "remote_readback_exit": 0
+  },
+  "source_delivery": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2206"
+}

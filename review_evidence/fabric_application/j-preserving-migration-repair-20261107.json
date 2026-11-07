@@ -1,0 +1,71 @@
+{
+  "base": "3ec62ffe02f277e3bab530e3ba069f2f86dcd18d",
+  "compressed_sha256": "4e6c61cdc049aa7f0f24f7b55d1de48158e0fe8eb1ebc175d67c87e9a62c460c",
+  "first_caller_receipt_sha256": "b57873f0eb0ec730191154cdde0fdf4224b4b1703f78fe69489df6bd839be6e9",
+  "live_effects": "NONE",
+  "original_J": "UNKNOWN; unchanged",
+  "patch_bytes": 141833,
+  "patch_sha256": "5c54b72a5582490f2047ef97b06f1a3b7b6acc957b0ced9ce0e10338fca75f36",
+  "paths": [
+    {
+      "after_sha256": "37e7cee03652f79e7cd9751651683f048e222ede22792171af465d33a87b3f75",
+      "before_sha256": "00df4ca0fb7994ca307dedfb8c2f1a8477e033caea89dd7dc7c0f29d3b94a753",
+      "path": "integrations/studio_direct_mcp/original-delivery.mjs"
+    },
+    {
+      "after_sha256": "d4224d1e655ad1373f46e4ea1298c024cd1ef9a3956fc8d142d0b9357e509303",
+      "before_sha256": "98cbcae8e8e6356849333a36fc631415169a2fe4462e9c4b4de1f4093e85dac0",
+      "path": "integrations/studio_direct_mcp/original-delivery.test.mjs"
+    },
+    {
+      "after_sha256": "82d876d278c7c3aebc99bbd1ce1393250c3631e110912a2457822f48337cc606",
+      "before_sha256": "1f0389dc50a1e6c16f652e0eea625e5aaf6124183da5e417cb5b894f1dd98706",
+      "path": "integrations/studio_direct_mcp/private_service.py"
+    },
+    {
+      "after_sha256": "ab9d233b0f333aa9c70689712f16593c13b6e1f69dac6960711f32c6c520577f",
+      "before_sha256": "d46a3bc85732c94d349e99b3c5b1657a60fd07deb1d0cb5499159833337ef17b",
+      "path": "integrations/studio_direct_mcp/private_service_original_delivery_test.py"
+    },
+    {
+      "after_sha256": "f790e95373d30ea5bb1da7c399ca0c202586677852b6a3116860126b9dcfed3b",
+      "before_sha256": "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83",
+      "path": "ops/native_fabric/quota_continuity/candidate/original_delivery_collector.py"
+    },
+    {
+      "after_sha256": "180c355bca3462b33e6359bec251a8436d9b8074b20454a562a367895563b9c7",
+      "before_sha256": "6689b85985145cae7729fee0132ce6ecefb2342692f82c98d05f184adc81c1ea",
+      "path": "ops/native_fabric/quota_continuity/rollout/test_application_original_collection_bridge.py"
+    }
+  ],
+  "retained_original_candidate_patch_sha256": "55abc3c1c0b71a49c8e5240d633d2d7b1d33fa107154328cd32f4146bf409c28",
+  "source_blob": "59004a991ed644dd26c21eac2c39a7b00ce59861",
+  "source_candidate_only": true,
+  "source_receipt": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703879773",
+  "tests": [
+    {
+      "log": "s3-j-private-final.log",
+      "sha256": "1192e217a0a8ec473dc159fa9c5bc0a208aecb1cba4a96a7b7c2d4cecf8ce2fd",
+      "state": "passed",
+      "tests": 28
+    },
+    {
+      "log": "s3-j-collector-final.log",
+      "sha256": "493eb8423df45dff1b9b9aaa672b360136c06674af2ca46620f6291ac8dfa278",
+      "state": "passed",
+      "tests": 44
+    },
+    {
+      "log": "s3-j-node-owner-final.log",
+      "sha256": "38c9123ad85dcb2843f9d9b38003af2a9b55de299e8fa601d05a96947d0d4307",
+      "state": "passed",
+      "tests": 1
+    },
+    {
+      "log": "s3-j-node-sdk.log",
+      "sha256": "cc385f36236b18fa467f9ce4d9688aad40b8ea85bdb4f2c24a56e25a7d4854c2",
+      "state": "collection_blocked_missing_preinstalled_MCP_client",
+      "tests": null
+    }
+  ]
+}

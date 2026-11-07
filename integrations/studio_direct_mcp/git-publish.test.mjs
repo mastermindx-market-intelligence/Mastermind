@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { execFile as execFileCallback, execFileSync } from 'node:child_process';
+import { execFile as execFileCallback, execFileSync, spawn } from 'node:child_process';
+import { renameSync, symlinkSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -16,7 +19,7 @@ import {
 } from './git-publish.mjs';
 
 const execFile = promisify(execFileCallback);
-const GIT = '/usr/bin/git';
+const GIT = process.env.STUDIO_DIRECT_TEST_GIT_BINARY || '/usr/bin/git';
 
 async function run(file, args, options = {}) {
   return execFile(file, args, {
@@ -30,7 +33,7 @@ async function git(cwd, ...args) {
   return run(GIT, args, { cwd });
 }
 
-async function fixture() {
+async function fixture(options = {}) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'studio-git-publish-')));
   const sourceRepo = path.join(root, 'source');
   const workspace = path.join(root, 'workspace');
@@ -47,6 +50,14 @@ async function fixture() {
   await writeFile(path.join(workspace, 'proof.txt'), 'v1\n');
   await git(workspace, 'add', 'proof.txt');
   await git(workspace, 'commit', '-m', 'test: initial');
+  if (options.largeIndex) {
+    const blob = (await git(workspace, 'rev-parse', 'HEAD:proof.txt')).stdout.trim();
+    const entries = Array.from({length: 7000}, (_,i) =>
+      `100644 ${blob}\ttracked/${String(i).padStart(5, '0')}-${'x'.repeat(170)}\n`).join('');
+    // A real Git index/tree, without thousands of unnecessary working files.
+    execFileSync(GIT, ['update-index', '--index-info'], {cwd: workspace, input: entries});
+    await git(workspace, 'commit', '--quiet', '-m', 'test: large recovery inventory');
+  }
   await git(workspace, 'remote', 'add', 'origin', remote);
   const { stdout: headOut } = await git(workspace, 'rev-parse', 'HEAD');
   const head = headOut.trim();
@@ -1949,7 +1960,7 @@ async function lockIdentityOf(lockPath) {
 }
 
 async function recoveryFixture(options = {}) {
-  const f = await fixture();
+  const f = await fixture(options);
   const indexPath = path.join(f.workspace, '.git', 'index');
   const lockPath = indexPath + '.lock';
   if (options.lockKind === 'symlink') {
@@ -2049,6 +2060,185 @@ test('index recovery preview reads the current state back and writes nothing', a
     assert.equal((await git(f.workspace, 'status', '--porcelain')).stdout, '');
   } finally { await f.cleanup(); }
 });
+
+test('recovery inventory streaming preserves every byte beyond the ordinary 1 MiB buffer', async () => {
+  const f = await recoveryFixture();
+  try {
+    const inventories = [
+      ['ls-files', '--stage', '-z'], ['ls-files', '-v', '-z'],
+      ['diff-files', '--name-status', '-z'],
+      ['ls-files', '--others', '--exclude-standard', '-z'],
+    ];
+    const fields = ['staged_state_sha256', 'sparse_state_sha256',
+      'dirty_state_sha256', 'untracked_state_sha256'];
+    const count = 2 * 1024 * 1024 + 17;
+    const program = `const {writeSync}=require('node:fs');
+      const n=Number(process.argv[1]), salt=Number(process.argv[2]);
+      const block=Buffer.from(Array.from({length:65536},(_,i)=>(i+salt)%256));
+      for(let done=0;done<n;) done+=writeSync(1,block,0,Math.min(block.length,n-done));`;
+    // The old capture rejects these same bytes, including NUL/non-UTF8 data.
+    await assert.rejects(execFile(process.execPath, ['-e', program, String(count), '0'],
+      {maxBuffer: 1024 * 1024, encoding: 'buffer'}),
+    error => error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
+    const seen = new Set();
+    const publisher = createGitPublisher(f.config, {spawn: (file, args, options) => {
+      const index = inventories.findIndex(value => JSON.stringify(value) === JSON.stringify(args));
+      assert.equal(file, GIT);
+      assert.ok(index >= 0, 'only the four fixed inventories may use streaming');
+      assert.equal(options.env.GIT_OPTIONAL_LOCKS, '0');
+      assert.equal(options.env.GIT_TERMINAL_PROMPT, '0');
+      assert.equal(options.shell, false);
+      assert.deepEqual(options.stdio, ['ignore', 'pipe', 'pipe']);
+      seen.add(index);
+      return spawn(process.execPath, ['-e', program, String(count), String(index)], options);
+    }});
+    const result = await publisher.commit(await f.fences({mode: 'PREVIEW'}));
+    assert.equal(result.code, 'INDEX_RECOVERY_PREVIEW');
+    assert.equal(seen.size, 4);
+    for (let i = 0; i < 4; i++) {
+      const complete = Buffer.from(Array.from({length: count}, (_,j) => (j+i)%256));
+      assert.equal(result.unchanged_head[fields[i]],
+        createHash('sha256').update(complete).digest('hex'));
+      assert.notEqual(result.unchanged_head[fields[i]],
+        createHash('sha256').update(complete.subarray(0, 1024 * 1024)).digest('hex'));
+    }
+    assert.equal(await sha256OfFile(f.indexPath), f.indexSha256);
+    assert.equal((await f.lockIdentity()).inode, f.lock.inode);
+    assert.equal(await pathExists(f.receiptDir), false);
+  } finally { await f.cleanup(); }
+});
+
+test('recovery inventory streaming handles a real Git index exceeding both ordinary inventory buffers', async () => {
+  const f = await recoveryFixture({largeIndex: true});
+  try {
+    const expected = {};
+    for (const [flag, field] of [['--stage', 'staged_state_sha256'], ['-v', 'sparse_state_sha256']]) {
+      await assert.rejects(run(GIT, ['ls-files', flag, '-z'],
+        {cwd: f.workspace, encoding: 'buffer'}),
+      error => error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
+      const complete = (await run(GIT, ['ls-files', flag, '-z'],
+        {cwd: f.workspace, encoding: 'buffer', maxBuffer: 8 * 1024 * 1024})).stdout;
+      assert.ok(complete.length > 1024 * 1024);
+      expected[field] = createHash('sha256').update(complete).digest('hex');
+    }
+    const publisher = createGitPublisher(f.config);
+    const result = await publisher.commit(await f.fences({mode: 'PREVIEW'}));
+    assert.equal(result.code, 'INDEX_RECOVERY_PREVIEW');
+    for (const [key, digest] of Object.entries(expected)) assert.equal(result.unchanged_head[key], digest);
+    assert.equal(await sha256OfFile(f.indexPath), f.indexSha256);
+    assert.equal((await f.lockIdentity()).inode, f.lock.inode);
+    assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+    assert.equal((await git(f.workspace, 'rev-parse', 'HEAD^{tree}')).stdout.trim(), f.tree);
+    assert.equal(await pathExists(f.receiptDir), false);
+  } finally { await f.cleanup(); }
+});
+
+test('recovery inventory streaming accepts exactly the byte ceiling and remains tail-sensitive', async () => {
+  const f = await recoveryFixture();
+  try {
+    const block = Buffer.alloc(65536, 37);
+    const expected = createHash('sha256');
+    for (let i = 0; i < 1024; i++) expected.update(block);
+    const publisher = createGitPublisher(f.config, {spawn: (file, args, options) => {
+      if (!args.includes('--stage')) return spawn(file, args, options);
+      return spawn(process.execPath, ['-e',
+        `const {writeSync}=require('node:fs'); const b=Buffer.alloc(65536,37);
+         for(let n=0;n<1024;n++) writeSync(1,b);`], options);
+    }});
+    const result = await publisher.commit(await f.fences({mode: 'PREVIEW'}));
+    assert.equal(result.code, 'INDEX_RECOVERY_PREVIEW');
+    assert.equal(result.unchanged_head.staged_state_sha256, expected.digest('hex'));
+    const changed = createGitPublisher(f.config, {spawn: (file, args, options) => {
+      if (!args.includes('--stage')) return spawn(file, args, options);
+      return spawn(process.execPath, ['-e',
+        `const {writeSync}=require('node:fs'); const b=Buffer.alloc(65536,37);
+         for(let n=0;n<1023;n++) writeSync(1,b); b[b.length-1]=38; writeSync(1,b);`], options);
+    }});
+    const tail = await changed.commit(await f.fences({mode: 'PREVIEW'}));
+    assert.equal(tail.code, 'INDEX_RECOVERY_PREVIEW');
+    assert.notEqual(tail.unchanged_head.staged_state_sha256, result.unchanged_head.staged_state_sha256);
+  } finally { await f.cleanup(); }
+});
+
+for (const kind of ['stdout-limit', 'stderr-limit', 'timeout', 'nonzero', 'spawn-error']) {
+  test(`recovery inventory streaming refuses ${kind} without a partial fingerprint or effect`, async () => {
+    const f = await recoveryFixture();
+    try {
+      let closed;
+      let child;
+      const programs = {
+        'stdout-limit': `const {writeSync}=require('node:fs'); const b=Buffer.alloc(65536);
+          for(let n=0;n<1024;n++) writeSync(1,b); writeSync(1,Buffer.from([0])); setInterval(()=>{},1000);`,
+        'stderr-limit': `const {writeSync}=require('node:fs'); const b=Buffer.alloc(65536);
+          for(let n=0;n<17;n++) writeSync(2,b); setInterval(()=>{},1000);`,
+        timeout: `process.stdout.write('partial\\0'); setInterval(()=>{},1000);`,
+        nonzero: `process.stdout.write('partial\\0',()=>process.exit(7));`,
+      };
+      const publisher = createGitPublisher({...f.config, commandTimeoutMs: 1000}, {
+        spawn: (file, args, options) => {
+          if (!args.includes('--stage')) return spawn(file, args, options);
+          child = kind === 'spawn-error'
+            ? spawn(path.join(f.root, 'missing-executable'), [], options)
+            : spawn(process.execPath, ['-e', programs[kind]], options);
+          closed = new Promise(resolve => child.once('close', (code, signal) => resolve({code, signal})));
+          return child;
+        },
+      });
+      const result = await publisher.commit(await f.fences({mode: 'PREVIEW'}));
+      assert.equal(result.effect_state, 'NOT_APPLIED');
+      assert.equal(result.code, 'INDEX_RECOVERY_STATE_UNAVAILABLE');
+      assert.equal(result.receipt_recorded, false);
+      assert.equal(result.unchanged_head.staged_state_sha256, null);
+      const terminal = await closed;
+      if (['stdout-limit', 'stderr-limit', 'timeout'].includes(kind)) {
+        assert.equal(terminal.signal, 'SIGKILL');
+        assert.equal(child.killed, true);
+      }
+      if (kind === 'nonzero') assert.equal(terminal.code, 7);
+      assert.equal(await sha256OfFile(f.indexPath), f.indexSha256);
+      assert.equal((await f.lockIdentity()).inode, f.lock.inode);
+      assert.equal(await pathExists(f.receiptDir), false);
+    } finally { await f.cleanup(); }
+  });
+}
+
+for (const killFailure of ['returns-false', 'throws']) {
+  test(`recovery inventory streaming settles cleanup uncertainty when kill ${killFailure} and close never arrives`,
+    {timeout: 6000}, async () => {
+      const f = await recoveryFixture();
+      try {
+        let reader;
+        let attempted = 0;
+        const publisher = createGitPublisher({...f.config, commandTimeoutMs: 1000}, {
+          spawn: (file, args, options) => {
+            if (!args.includes('--stage')) return spawn(file, args, options);
+            // Inert event source: deliberately no real child and no close.
+            reader = new EventEmitter();
+            reader.stdout = new PassThrough();
+            reader.stderr = new PassThrough();
+            reader.kill = signal => {
+              attempted += 1;
+              assert.equal(signal, 'SIGKILL');
+              if (killFailure === 'throws') throw new Error('kill unavailable');
+              return false;
+            };
+            queueMicrotask(() => reader.stdout.write(Buffer.from('partial\0')));
+            return reader;
+          },
+        });
+        const result = await publisher.commit(await f.fences({mode: 'PREVIEW'}));
+        assert.equal(attempted, 1);
+        assert.equal(result.code, 'INDEX_RECOVERY_STATE_UNAVAILABLE');
+        assert.equal(result.effect_state, 'NOT_APPLIED');
+        assert.equal(result.receipt_recorded, false);
+        assert.equal(result.unchanged_head.staged_state_sha256, null);
+        assert.equal(reader.stdout.destroyed, true);
+        assert.equal(reader.stderr.destroyed, true);
+        assert.equal((await f.lockIdentity()).inode, f.lock.inode);
+        assert.equal(await pathExists(f.receiptDir), false);
+      } finally { await f.cleanup(); }
+    });
+}
 
 test('index recovery quarantines exactly the fenced orphan lock and leaves the index and source unchanged', async () => {
   const f = await recoveryFixture();
@@ -2712,11 +2902,11 @@ test('a reconcile whose live state cannot be read still reports the retained ter
     assert.equal(applied.effect_state, 'APPLIED');
     // The live state read fails while the owner itself still resolves, so
     // the retained record is read before the current observation is trusted.
-    const degraded = createGitPublisher(f.config, { execFile: async (file, args, options) => {
+    const degraded = createGitPublisher(f.config, { spawn: (file, args, options) => {
       if (file === GIT && args.includes('--stage')) {
         throw new Error('simulated live state read failure');
       }
-      return execFile(file, args, options);
+      return spawn(file, args, options);
     } });
     const reconciled = await degraded.commit({
       operation_id: f.operationId,
@@ -3092,12 +3282,12 @@ for (const retained of ['applied', 'unresolved']) {
           recoveryWire(recoveryRecordFor(f, preview.action_ref)), {mode: 0o600});
       }
       let injected = 0;
-      const publisher = createGitPublisher(f.config, {execFile: async (file, argv, options) => {
+      const publisher = createGitPublisher(f.config, {spawn: (file, argv, options) => {
         if (file === GIT && argv.includes('--stage')) {
           injected += 1;
           throw new Error('settlement current index observation unavailable');
         }
-        return execFile(file, argv, options);
+        return spawn(file, argv, options);
       }});
       const result = await publisher.commit(args);
       assert.ok(injected > 0);
@@ -3129,13 +3319,13 @@ test('settlement rechecks retained receipt ancestry before a terminal replacemen
     const externalFile = path.join(outside, preview.action_ref + '.json');
     await writeFile(externalFile, wire, {mode: 0o600});
     let injected = 0;
-    const publisher = createGitPublisher(f.config, {execFile: async (file, argv, options) => {
+    const publisher = createGitPublisher(f.config, {spawn: (file, argv, options) => {
       if (file === GIT && argv.includes('--stage') && injected === 0) {
         injected += 1;
-        await rename(f.receiptDir, f.receiptDir + '.retained-test');
-        await symlink(outside, f.receiptDir);
+        renameSync(f.receiptDir, f.receiptDir + '.retained-test');
+        symlinkSync(outside, f.receiptDir);
       }
-      return execFile(file, argv, options);
+      return spawn(file, argv, options);
     }});
     const result = await publisher.commit(args);
     assert.equal(injected, 1);

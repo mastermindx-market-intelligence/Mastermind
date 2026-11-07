@@ -14,61 +14,78 @@ REVIEWED_FILES = {
         'sites': ((204, 43, 46, 'int', '512'),),
     },
     # Reviewed application HTTP statuses, permission modes and bounded limits.
-    # These exact 56 spans contain no account/principal identity. Byte drift
+    # These exact spans contain no account/principal identity. Byte drift
     # exposes the source to the original guard again.
     'app/main.py': {
-        "sha256": '8abf77434627687cfde819dd8096d0ada754c3c42ff5ec195d36ff5343d43388',
+        "sha256": '5c4ff5854aca04bb1f7395c2afdcf72ae319ee8fe82041f679d1bf16addcc081',
         "sites": (
-            (624, 44, 47, 'int', '400'),
-            (661, 44, 47, 'int', '400'),
+            (652, 44, 47, 'int', '400'),
+            (689, 44, 47, 'int', '400'),
         ),
     },
     'ops/native_fabric/quota_continuity/candidate/go_shim.py': {
-        "sha256": '47d1ee9df7705d8552efe26af561773d59441be2a488a09f89bef0124d4bc4b4',
+        "sha256": '1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7',
         "sites": (
-            (1466, 32, 37, 'int', '0o700'),
-            (1817, 140, 143, 'int', '900'),
-            (1819, 33, 36, 'int', '900'),
-            (1882, 22, 25, 'int', '429'),
-            (2070, 79, 82, 'int', '500'),
-            (2148, 34, 37, 'int', '400'),
-            (2163, 33, 36, 'int', '500'),
-            (2183, 34, 37, 'int', '502'),
-            (2421, 92, 95, 'int', '400'),
-            (2428, 99, 102, 'int', '503'),
-            (2431, 80, 83, 'int', '409'),
-            (2436, 91, 94, 'int', '401'),
-            (2440, 96, 99, 'int', '400'),
-            (2460, 113, 116, 'int', '512'),
-            (2464, 94, 97, 'int', '400'),
-            (2476, 106, 109, 'int', '503'),
-            (2489, 101, 104, 'int', '409'),
-            (2505, 109, 112, 'int', '400'),
-            (2508, 96, 99, 'int', '400'),
-            (2528, 118, 121, 'int', '503'),
-            (2534, 108, 111, 'int', '409'),
-            (2540, 109, 112, 'int', '409'),
-            (2551, 100, 103, 'int', '409'),
-            (2554, 103, 106, 'int', '503'),
-            (2557, 96, 99, 'int', '429'),
-            (2567, 102, 105, 'int', '503'),
-            (2575, 106, 109, 'int', '429'),
-            (2612, 103, 106, 'int', '503'),
-            (2631, 74, 77, 'int', '502'),
-            (2732, 23, 26, 'int', '400'),
-            (2805, 35, 38, 'int', '429'),
-            (2834, 37, 40, 'int', '404'),
-            (2865, 27, 30, 'int', '400'),
-            (2868, 27, 30, 'int', '400'),
-            (2871, 27, 30, 'int', '400'),
-            (2877, 31, 34, 'int', '400'),
-            (2884, 31, 34, 'int', '429'),
+            (487, 66, 69, 'int', '502'),
+            (1707, 32, 37, 'int', '0o700'),
+            (2058, 140, 143, 'int', '900'),
+            (2060, 33, 36, 'int', '900'),
+            (2123, 22, 25, 'int', '429'),
+            (2311, 79, 82, 'int', '500'),
+            (2389, 34, 37, 'int', '400'),
+            (2404, 33, 36, 'int', '500'),
+            (2424, 34, 37, 'int', '502'),
+            (2733, 92, 95, 'int', '400'),
+            (2740, 99, 102, 'int', '503'),
+            (2743, 80, 83, 'int', '409'),
+            (2775, 110, 113, 'int', '503'),
+            (2781, 100, 103, 'int', '409'),
+            (2788, 101, 104, 'int', '409'),
+            (2804, 31, 34, 'int', '409'),
+            (2804, 51, 54, 'int', '503'),
+            (2812, 73, 76, 'int', '409'),
+            (2816, 99, 102, 'int', '503'),
+            (2923, 107, 110, 'int', '503'),
+            (2932, 102, 105, 'int', '400'),
+            (2953, 96, 99, 'int', '429'),
+            (2963, 103, 106, 'int', '503'),
+            (2980, 105, 108, 'int', '503'),
+            (3018, 27, 30, 'int', '503'),
+            (3023, 101, 104, 'int', '502'),
+            (3031, 91, 94, 'int', '401'),
+            (3035, 96, 99, 'int', '400'),
+            (3065, 113, 116, 'int', '512'),
+            (3069, 94, 97, 'int', '400'),
+            (3083, 101, 104, 'int', '409'),
+            (3085, 110, 113, 'int', '503'),
+            (3099, 101, 104, 'int', '409'),
+            (3107, 105, 108, 'int', '409'),
+            (3110, 101, 104, 'int', '409'),
+            (3115, 104, 107, 'int', '400'),
+            (3126, 105, 108, 'int', '409'),
+            (3135, 94, 97, 'int', '400'),
+            (3155, 109, 112, 'int', '400'),
+            (3158, 96, 99, 'int', '400'),
+            (3178, 96, 99, 'int', '429'),
+            (3188, 102, 105, 'int', '503'),
+            (3196, 106, 109, 'int', '429'),
+            (3237, 103, 106, 'int', '503'),
+            (3256, 74, 77, 'int', '502'),
+            (3350, 23, 26, 'int', '400'),
+            (3423, 35, 38, 'int', '429'),
+            (3452, 37, 40, 'int', '404'),
+            (3483, 27, 30, 'int', '400'),
+            (3486, 27, 30, 'int', '400'),
+            (3489, 27, 30, 'int', '400'),
+            (3495, 31, 34, 'int', '400'),
+            (3502, 31, 34, 'int', '429'),
         ),
     },
     'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
-        "sha256": 'd6705a98d6f211b38d98dc5f49514dac066cac2b2a49cc283d1d8eb910247291',
+        # v9 keeps the original private account directory permission check.
+        "sha256": 'ada5c451254f6186acdee100725e1f5517b9e446e863b6f125308485d203e055',
         "sites": (
-            (555, 60, 65, 'int', '0o700'),
+            (831, 60, 65, 'int', '0o700'),
         ),
     },
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
@@ -791,9 +808,19 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
-    "sha256": "85a0164e5a35c3a334a68c30d967f78096856227875915766a6033052d4cc6f9",
-    "sites": ((48, 65, 68, "int", "500"), (250, 60, 63, "int", "500")),
+    "sha256": "8217cc69b66849e96d06058ae9b2d942b15e85ff6a27630083ca63b7e997af67",
+    "sites": ((48, 65, 68, "int", "500"), (260, 60, 63, "int", "500")),
 }
+
+# Hermes primary APPLICATION codec: fixed input-byte and conversation-count
+# bounds, never OS accounts, principals, permissions or service selection.
+# Attended source self-review under the CEO-Web waiver. Full source hash and
+# complete typed tokens remain required; any drift restores the ordinary guard.
+REVIEWED_FILES["integrations/hermes_application_fabric/codec.py"] = {
+    "sha256": "62005182643a5e6312ca6c2169898839ebc15e49a1aefe6ddaf0f39f75f5de27",
+    "sites": ((15, 20, 23, "int", "512"), (141, 63, 66, "int", "512")),
+}
+
 
 # Native Agent OS v2 adds private readback and projects an optional real child.
 # Existing enrollment/admission functions and MAX_WIRE_BYTES AST are unchanged;
@@ -818,3 +845,69 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
            (183, 19, 22, 'int', '460'),
            (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
            (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}
+
+# Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
+# Full-source or token-site drift restores the ordinary identity guard.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
+] = {'sha256': 'ed3ff43271312af878fcdb06bf8407939d40e4c844e5222d7be935fdcc1d31fc', 'sites': ((364, 37, 40, 'int', '409'),)}
+
+# Original H4 f008 receipts record the existing Darwin host's ownership.
+# These are observed identities, not runtime defaults, service enrollment or
+# authorization. Preserve the receipts byte-for-byte. Only these fifteen
+# typed integer tokens in the two exact files are reviewed; any byte or path
+# drift restores the original identity guard for the complete receipt.
+REVIEWED_FILES["review_evidence/hermes_h4/profile-mapping-20261107.json"] = {
+    "sha256": "6df7896d56bc9b2098914fb945e314369d360f9f87f7d2f5d1d414f796aded53",
+    "sites": (),
+    "utf8_sites": (
+        (20, 20, 23, "int", "501"),
+        (47, 20, 23, "int", "501"),
+        (70, 20, 23, "int", "501"),
+    ),
+}
+REVIEWED_FILES["review_evidence/hermes_h4/native-preimage-qualification-20261107.json"] = {
+    "sha256": "eaa5796f0000713bc83e6fac6962a40b7c367cf311022bf81452334ed83bfdee",
+    "sites": (),
+    "utf8_sites": (
+        (29, 18, 21, "int", "501"),
+        (42, 18, 21, "int", "501"),
+        (55, 18, 21, "int", "501"),
+        (68, 18, 21, "int", "501"),
+        (85, 18, 21, "int", "501"),
+        (98, 18, 21, "int", "501"),
+        (111, 18, 21, "int", "501"),
+        (128, 18, 21, "int", "501"),
+        (141, 18, 21, "int", "501"),
+        (154, 18, 21, "int", "501"),
+        (167, 18, 21, "int", "501"),
+        (180, 18, 21, "int", "501"),
+    ),
+}
+
+# Exact HTTPS port excluded by the disposable Chisel fixture.
+# This is not a general port exemption or permission to use a live listener.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_chisel_protocol.py"
+] = {
+    "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
+    "sites": ((27, 26, 29, "int", "443"),),
+}
+
+# Retained source qualification records the observed proof parent UID only.
+# It grants no runtime identity or enrollment. Exact bytes and the sole complete
+# UTF-8 integer token are required; drift restores the ordinary identity guard.
+REVIEWED_FILES["review_evidence/fabric_application/shared-relay-source-qualification-20261107.json"] = {
+    "sha256": "3629a7a963e9621aa1b190c1b946c6a3d8a1277caaa3ffac6dd129a4c984b5b3",
+    "sites": (),
+    "utf8_sites": ((296, 26, 29, "int", "501"),),
+}
+
+# Exact retained readiness qualification records the observed proof parent UID.
+# This grants no runtime identity. Any source, path or token drift exposes it
+# to the incumbent guard again; the original receipt is preserved unchanged.
+REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json'] = {
+    "sha256": 'ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33',
+    "sites": (),
+    "utf8_sites": ((61, 13, 16, "int", "501"),),
+}

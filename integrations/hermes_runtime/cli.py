@@ -283,7 +283,8 @@ def _enroll_native_session(profile_path: Path, hermes_bin: Path, *, expected_rol
             or not profile_path.is_absolute()
             or native_launch.recipe.get("schema") not in (
                 "mastermind.hermes_native_gateway_installation/v2",
-                "mastermind.hermes_native_gateway_installation/v3")):
+                "mastermind.hermes_native_gateway_installation/v3",
+                "mastermind.hermes_native_gateway_installation/v4")):
         raise RuntimeRefusal("NATIVE_ENROLLMENT_INSTALLATION_REQUIRED")
     capability = validate_enrollment_capability(native_launch.recipe.get("session_enrollment"), role=expected_role)
     request_id = capability["request_id"]
@@ -301,9 +302,14 @@ def _enroll_native_session(profile_path: Path, hermes_bin: Path, *, expected_rol
         assert_root_service_cgroup(current.role)
         assert_role_network_profile(current)
         assert_role_credential_isolation(current)
-        enforce_role_tcp_ports(current)
-        expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"),
-                              evaluation_inputs=native_launch.recipe.get("evaluation_inputs"))
+        primary = native_launch.recipe.get("primary_application")
+        evaluation = native_launch.recipe.get("evaluation_inputs")
+        evaluation_args = {"evaluation_inputs": evaluation} if evaluation is not None else {}
+        enforce_role_tcp_ports(current, **({"native_launch": native_launch} if primary is not None else {}))
+        if primary is not None:
+            expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"), primary, **evaluation_args)
+        else:
+            expected_disabled_mcp(current, native_launch.recipe.get("executive_consumer"), **evaluation_args)
 
     qualify_profile()
     home = (profile.hermes_home.resolve(strict=True) / "profiles" / profile.role).resolve(strict=True)
@@ -437,7 +443,8 @@ def _supervise(args: argparse.Namespace, *,
         from .role_isolation import assert_role_credential_isolation
         from .tcp_sandbox import enforce_role_tcp_ports
         assert_role_credential_isolation(profile)
-        enforce_role_tcp_ports(profile)
+        enforce_role_tcp_ports(profile, **({"native_launch": native_launch}
+            if profile.model_provider == "mastermind-fabric" else {}))
         from .role_status_publisher import publisher_from_process
         publisher = publisher_from_process(profile, custody_observer=custody_observer)
         if profile.gateway_backend == "native-session-authority":
@@ -484,3 +491,4 @@ def _supervise(args: argparse.Namespace, *,
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

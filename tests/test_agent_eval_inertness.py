@@ -785,6 +785,9 @@ NATIVE_EVAL_INTEGRATION_PATHS = frozenset({
     "ops/executive_os/native_gateway_sources.py",
     "scripts/enroll_linux_secondary_worker.py",
     "tests/executive_fabric_release_identity_review.py",
+    # Chairman native integration; hermes-eval-producer-compose-20261107-sol-001:
+    # explicit APPLICATION selection must not take the shared legacy fallback.
+    "tests/test_hermes_primary_application_host.py",
     "ops/hermes_egress/squid.conf",
     "ops/hermes_egress/README.md",
     "ops/hermes_egress/tests/test_proxy_policy.py",
@@ -1484,6 +1487,7 @@ def _bind_root_to_private_fixture(monkeypatch, repo: Path) -> None:
 ])
 def test_native_eval_owned_delta_reaches_real_fences_with_shared_connections(tmp_path, monkeypatch, owned):
     files = [(owned, "fixture\n"), ("integrations/hermes_runtime/supervisor.py", "fixture\n"),
+             ("tests/test_hermes_primary_application_host.py", "fixture\n"),
              ("ops/hermes_egress/squid.conf", "fixture\n")]
     repo = _standalone_prefix_delta_repo(tmp_path, "native_eval_owned", files)
     _bind_root_to_private_fixture(monkeypatch, repo)
@@ -1494,6 +1498,7 @@ def test_native_eval_owned_delta_reaches_real_fences_with_shared_connections(tmp
 
 def test_shared_native_changes_do_not_claim_eval_program_ownership(tmp_path, monkeypatch):
     files = [("integrations/hermes_runtime/supervisor.py", "fixture\n"),
+             ("tests/test_hermes_primary_application_host.py", "fixture\n"),
              ("ops/hermes_egress/squid.conf", "fixture\n"),
              ("integrations/hermes_runtime/unrelated_hermes_owner.py", "fixture\n")]
     repo = _standalone_prefix_delta_repo(tmp_path, "shared_native_only", files)
@@ -1509,6 +1514,7 @@ def test_shared_native_changes_do_not_claim_eval_program_ownership(tmp_path, mon
 
 @pytest.mark.parametrize("foreign", [
     "integrations/hermes_runtime/unlisted_native_owner.py",
+    "tests/test_hermes_primary_application_unlisted.py",
     "integrations/hermes_qualification/native_eval_inputs/extra.py",
     "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/unlisted.source",
     "control_plane/bypass.py", "config/agent_eval.yaml", ".github/workflows/agent-eval.yml", "requirements/new.in",

@@ -1,0 +1,147 @@
+{
+  "phase": "accepted_transport_host_source_composition",
+  "head": "48eca96012c38bc8892c7fb1a1db3d9d240d2dd8",
+  "merge_head": "28cbe35a87a2575b57d8a2d7a4721dcdf13a5d6a",
+  "source_only": true,
+  "checks": [
+    {
+      "label": "private_service",
+      "returncode": 0,
+      "seconds": 55.309,
+      "log_sha256": "3597fac5a0dac4b6ca3261c3afd01615c02ceb5afdaf748b47a0ebdab5b621a6",
+      "junit_sha256": "5cf09c8acc47ad679e18a26d9a63b2924a5157fedcc06d00f9f2ef1dfb3134d1",
+      "junit": {
+        "tests": 385,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "testcase_nodes": {
+        "failure": 0,
+        "error": 0,
+        "skipped": 0,
+        "total": 182,
+        "passed": 182
+      },
+      "suite_headers": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "385",
+          "time": "54.958",
+          "timestamp": "2026-11-07T10:25:07.733248-07:00"
+        }
+      ]
+    },
+    {
+      "label": "host_cohorts",
+      "returncode": 0,
+      "seconds": 25.026,
+      "log_sha256": "9c324ed59908e8d786825fa4a57ae7fcc11d2d090a02750ea2ab1e381f592164",
+      "junit_sha256": "f530ee98ef0926eee5bf6f69e54696b25a7f3310e24df947d5fab75b99734d10",
+      "junit": {
+        "tests": 232,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "testcase_nodes": {
+        "failure": 0,
+        "error": 0,
+        "skipped": 0,
+        "total": 232,
+        "passed": 232
+      },
+      "suite_headers": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "232",
+          "time": "23.481",
+          "timestamp": "2026-11-07T10:26:03.923995-07:00"
+        }
+      ]
+    }
+  ],
+  "builds": [
+    {
+      "cohort": "107",
+      "returncode": 0,
+      "stdout": "{\"native_files\": 107, \"total_bytes\": 3240763, \"manifest_sha256\": \"59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a\", \"source_inventory_sha256\": \"d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47\"}\n",
+      "stderr": "",
+      "manifest_sha256": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+      "matches_accepted": true
+    },
+    {
+      "cohort": "109",
+      "returncode": 0,
+      "stdout": "{\"native_files\": 109, \"total_bytes\": 3483962, \"manifest_sha256\": \"f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2\", \"source_inventory_sha256\": \"b614541ff709ec062b9fead189cc413fb3ccb7beb912841e95aadc912e4586cf\"}\n",
+      "stderr": "",
+      "manifest_sha256": "f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2",
+      "matches_accepted": true
+    },
+    {
+      "cohort": "112",
+      "returncode": 0,
+      "stdout": "{\"native_files\": 112, \"total_bytes\": 3567137, \"manifest_sha256\": \"38368f3a7d2438a191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44\", \"source_inventory_sha256\": \"eb0c8984da72c40d044a36f2cbd069ef19194198c079a9cbf8c84e392cb9a76b\"}\n",
+      "stderr": "",
+      "manifest_sha256": "38368f3a7d2438a191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44",
+      "matches_accepted": true
+    }
+  ],
+  "schema": "mastermind.hermes_transport_host_source_join.v1",
+  "governing_pin": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c",
+  "preserved_native_source_sha256": {
+    "ops/native_fabric/quota_continuity/candidate/native_go_entry.py": "ada5c451254f6186acdee100725e1f5517b9e446e863b6f125308485d203e055",
+    "ops/native_fabric/quota_continuity/rollout/native_install.py": "fa6286a2b742dda1d1d79e4f57b32ab7c8c1063a2243f01e0593407f5ae90283"
+  },
+  "worker_source_relation": "byte-identical to qualified c71/c07",
+  "counting_note": "Report emitted testcase nodes separately from JUnit suite headers. The private-service header reports385 while182 testcase nodes were emitted. Both have zero failures/errors/skips. Do not sum them.",
+  "production_effects": {
+    "installed": false,
+    "native_selected": false,
+    "grants_issued": false,
+    "provider_called": false,
+    "original_j_reconciled": false,
+    "accepted": false
+  },
+  "original_carrier_join": {
+    "source": "0d8174951141b1790e6121e13202e4036d1bdc20",
+    "publication_comment": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6710623283",
+    "original_mutation_fence": "retained by its active root; contribution only",
+    "status_successor_test_resolution": "Both parents have identical ASTs; retain exact incoming published bytes. Prior414 emitted testcase nodes remain applicable.",
+    "new_hosted_failure": "c71 merged into bd exposes missing exact host inverse in one historical H1 fixture",
+    "repair": {
+      "baseline_h1_rc": 1,
+      "baseline_h1_log_sha256": "a5066ed0b0a06331fd69a1ffbaa681b2b4a97b60923cb7a8c5af252fef0efdd9",
+      "retained_receipt": "review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json",
+      "retained_receipt_sha256": "ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33",
+      "exact_site": [
+        61,
+        13,
+        16,
+        "int"
+      ],
+      "production_builder_changed": false,
+      "qualification": {
+        "returncode": 0,
+        "seconds": 2.249,
+        "log_sha256": "585ba42829657b9e2d56f8614be6c3365a8405474eed008559511ab50f2ffcfb",
+        "junit_sha256": "95eab22becea2b3bd11269a33babc9e01c4f7323852bdf0272317334113b4553",
+        "cases": {
+          "total": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "baseline_identity_findings": 1
+    },
+    "production_native_sources": "unchanged from the tested441ac5f composition",
+    "release_and_runtime_acceptance": false
+  }
+}

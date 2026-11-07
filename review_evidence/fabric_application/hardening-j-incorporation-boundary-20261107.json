@@ -1,0 +1,54 @@
+{
+  "actual_new_builder_qualification": false,
+  "at": "2026-11-07T08:27:32.254884+00:00",
+  "candidate_patch_sha256": "5c54b72a5582490f2047ef97b06f1a3b7b6acc957b0ced9ce0e10338fca75f36",
+  "classification": "HISTORICAL_STATIC_PROJECTION_SUPERSEDED",
+  "consumed_original_source": "41e86c7aa89905f9b4592d57fbf32c2d7c0f1458",
+  "contribution_operation": "fabric-app-admission-compose-20261107-sol-001",
+  "current_cohort_identity": false,
+  "installed_effects": "NONE",
+  "manifest_composition": [
+    {
+      "changed_members": [
+        "ext/original_delivery_collector.py"
+      ],
+      "expected_successor_sha256": "981ccb955f92b0f49a929e60ba18bd9eed90efff9506d7c19a443f68d7f3ea32",
+      "full_parent_sha256": "0084f7d0a3b78f3c434c872c9bbf2c5ab764f54cf565d5f24c00480a1855cbfe",
+      "inverse_reproduces_complete_parent_bytes": true,
+      "members": 107,
+      "variant": "base"
+    },
+    {
+      "changed_members": [
+        "ext/original_delivery_collector.py"
+      ],
+      "expected_successor_sha256": "39fe40008b3269d62c82033ece1826a5224f7d2da49916fa509c1eff8dbcc14b",
+      "full_parent_sha256": "4be0e9c3658fb46d15a795615bf4dc4f7f1502e25e544c00a339d3a5057f5e8a",
+      "inverse_reproduces_complete_parent_bytes": true,
+      "members": 109,
+      "variant": "go"
+    },
+    {
+      "changed_members": [
+        "ext/original_delivery_collector.py"
+      ],
+      "expected_successor_sha256": "fe7dc7c71f9f05129f48fcd1f032d92c1ba1e9a0d202217cb64f3bfe0d2029e7",
+      "full_parent_sha256": "f7b15466dc9e42c20a28814462ecb05c9327d9f12312ff1c5cb45eda0d416ff6",
+      "inverse_reproduces_complete_parent_bytes": true,
+      "members": 112,
+      "variant": "http"
+    }
+  ],
+  "original_J_effects": "UNKNOWN; unchanged",
+  "original_carrier": 2175,
+  "six_preimages_and_prior_qualified_postimages_verified": true,
+  "source": "17ed69ab0ee309fd1ed97e7540dcc0c0793578cf",
+  "source_edits": 0,
+  "superseded_by": {
+    "collector_sha256": "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d",
+    "custody": "Original #2175; pending companion effect is preserved. No competing inverse implemented here.",
+    "native_companion": "fabric-app-j-native-cohort-20261107-01",
+    "reason": "The retained f790 collector candidate is no longer the current original collector. Retained successor digests are historical static calculations only.",
+    "source": "2cf01336ba7f7e5bc2011f50c0319892ddebb292"
+  }
+}

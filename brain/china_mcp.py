@@ -183,11 +183,13 @@ async def get_my_book(args):
                                     "description": "the most likely way this book loses money"}},
        "required": ["holdings", "summary"]}))
 async def submit_book(args):
+    context = autonomous_mcp.fabric_context(PORTFOLIO_ID)
     try:
         payload, audit = decision_submission.normalize(
             PORTFOLIO_ID, args, venue_of=china_intake._venue,
             allowed_venues=ALLOWED_VENUES, stock_only=True,
-            deterministic_sizing=True)
+            deterministic_sizing=True,
+            **({"decision_asof": context["asof"]} if context is not None else {}))
     except decision_submission.DecisionBoundaryFreeze as exc:
         return bot_mcp._ok(
             f"SUBMISSION REJECTED; prior paper book preserved unchanged. Trusted-boundary reason: {exc}"
@@ -195,7 +197,12 @@ async def submit_book(args):
     cleaned = payload["holdings"]
     gross = float(payload["gross"])
     p = submission_path()
-    decision_submission.write_atomic(p, payload)
+    if context is None:
+        decision_submission.write_atomic(p, payload)
+    else:
+        payload, correlation = context["prepare_submission"](payload, audit)
+        receipt = decision_submission.write_atomic(p, payload, correlation=correlation)
+        context["accept_submission"](receipt)
     cash_pct = max(0.0, 1.0 - gross) * 100
     note = (f"China book submitted: {len(cleaned)} holdings, {gross * 100:.0f}% invested, "
             f"{cash_pct:.0f}% cash" + (" (scaled to remove leverage)" if payload.get("scaled_to_no_leverage") else "")
@@ -431,8 +438,11 @@ async def get_neural_web_packet(args):
        "required": ["plane", "reason"], "additionalProperties": False})
 async def request_context_upgrade(args):
     from brain import portfolio_learning
+    context = autonomous_mcp.fabric_context(PORTFOLIO_ID)
     return bot_mcp._json(portfolio_learning.request_context(
-        PORTFOLIO_ID, args.get("plane"), args.get("reason"), args.get("ticker")))
+        PORTFOLIO_ID, args.get("plane"), args.get("reason"), args.get("ticker"),
+        **({"correlation": {"run_id": context["run_id"], "tool_id": context["tool_id"]}}
+           if context is not None else {})))
 
 
 _DESK_TOOLS = [get_my_book, submit_book]

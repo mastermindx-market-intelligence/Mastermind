@@ -457,6 +457,65 @@ def test_selected_recipe_and_config_refuse_unsupported_role_and_streaming_downgr
         expected_disabled_mcp(profile, document, evaluation_inputs=recipe["evaluation_inputs"])
 
 
+def test_application_profile_cannot_install_eval_recipe_before_credentials_or_state(tmp_path, monkeypatch):
+    from integrations.hermes_runtime import install as installer
+    from integrations.hermes_runtime.profile import dump_profile
+    from tests.test_hermes_primary_application_host import profile as application_profile
+    from ops.executive_os import release_manifest as release
+
+    installation, recipe, _ = selected_recipe()
+    # Both inputs are valid on their own; their combination is not a native
+    # EVAL launch. Refuse at the public installer before credential/source work.
+    release.validate_hermes_runtime_installation(installation)
+    selected = application_profile(tmp_path, "mmmeta")
+    profile_path = tmp_path / "application-profile.yaml"
+    profile_path.write_text(dump_profile(selected))
+    monkeypatch.setattr(installer, "load_secrets",
+                        lambda *a, **kw: pytest.fail("unqualified selection reached credentials"))
+    monkeypatch.setattr(installer, "assert_checkout_sha",
+                        lambda *a, **kw: pytest.fail("unqualified selection reached vendor source"))
+    with pytest.raises(RuntimeRefusal, match="NATIVE_EVAL_INPUTS_UNQUALIFIED"):
+        installer.install(
+            profile_path=profile_path, state_dir=selected.state_dir,
+            systemd_user_dir=tmp_path / "uncreated-units",
+            secrets_file=selected.secrets_file, hermes_bin=tmp_path / "unread-launcher",
+            upstream_source=Path(recipe["vendor_root"]), native_installation=recipe,
+        )
+    assert not selected.state_dir.exists()
+    assert not (tmp_path / "uncreated-units").exists()
+
+
+@pytest.mark.parametrize("profile_kind,with_publication", [
+    ("application", False), ("application", True), ("direct", True),
+])
+def test_eval_and_application_selection_refuses_before_config_or_release(
+        tmp_path, profile_kind, with_publication):
+    from integrations.hermes_harness.stack import compose_profile
+    from integrations.hermes_runtime import install as installer
+    from integrations.hermes_runtime.supervisor import expected_disabled_mcp
+    from tests.test_hermes_primary_application_host import (
+        document as application_document, profile as application_profile,
+    )
+
+    _, recipe, consumer = selected_recipe()
+    selected = (application_profile(tmp_path, "mmmeta") if profile_kind == "application"
+                else compose_profile("mmmeta", state_dir=tmp_path / "state",
+                                     secrets_file=tmp_path / "unread-secrets.env"))
+    publication = application_document("mmmeta") if with_publication else None
+    native = {"executive_consumer": consumer, "evaluation_inputs": recipe["evaluation_inputs"]}
+    if publication is not None:
+        native["primary_application"] = publication
+    release = tmp_path / "uncreated-release"
+    with pytest.raises(RuntimeRefusal, match="NATIVE_EVAL_INPUTS_UNQUALIFIED"):
+        installer._write_release(selected, release, tmp_path / "unread-launcher", False,
+                                 native_installation=native)
+    assert not release.exists()
+    with pytest.raises(RuntimeRefusal, match="NATIVE_EVAL_INPUTS_UNQUALIFIED"):
+        expected_disabled_mcp(selected, consumer, publication,
+                              evaluation_inputs=recipe["evaluation_inputs"])
+    assert not selected.hermes_home.exists()
+
+
 def qualified_sources():
     from integrations.hermes_qualification.native_eval_inputs import qualify
     root = Path(__file__).resolve().parents[2] / "hermes_qualification/workspace_oauth_privacy/fixtures"

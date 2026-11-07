@@ -1,0 +1,44 @@
+{
+  "live_effects": "NONE",
+  "mission": "fabric-application-integration-20261104-sol",
+  "native_package": {
+    "builder_log_sha256": "866833dfd0a0e1a44877e221151c8194c36037e112a11fcfb9b2b655bfede54e",
+    "reason": "application pool composition parent closure differs",
+    "state": "COMPANION_COHORT_REPAIR_REQUIRED"
+  },
+  "original_J": "UNKNOWN; unchanged",
+  "paths": [
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/original_delivery_collector.py",
+      "sha256": "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/test_application_original_collection_bridge.py",
+      "sha256": "85f9cfb52acb4cbc92a5a1819a718f8fe526e6994e3e787c474d4bdc01c6ed6c"
+    }
+  ],
+  "private_gateway": {
+    "remaining": "Recover same original installation after a partial module/config/plist/manifest replacement.",
+    "state": "ROOT_REPAIR_IN_PROGRESS"
+  },
+  "production_coverage_proven": false,
+  "qualification": {
+    "failures": 0,
+    "log_sha256": "c8bce11a907924fb9dd329c3f6bdb6720099a302512362639aa7891f877854e7",
+    "skipped": 0,
+    "test_executions": 90
+  },
+  "regression": {
+    "before": "FAIL: ABSENT != UNKNOWN",
+    "log_sha256": "d7ed631a7097a903b50c0bf19b2287b43af2b162d49c677252c191c1509cf912",
+    "prior_harness_error": "The first selector named the base class before the new test was moved there; it executed no behavior and is not negative proof."
+  },
+  "retained_candidate_patch_sha256": "5c54b72a5582490f2047ef97b06f1a3b7b6acc957b0ced9ce0e10338fca75f36",
+  "root_correction": "A completed remote read whose final local destination disappears is retained as UNKNOWN; both fixed run fixtures exercise the regression.",
+  "schema": "mastermind.fabric_original_collector_source_proof.v1",
+  "source_base": "41e86c7aa89905f9b4592d57fbf32c2d7c0f1458",
+  "source_scope": [
+    "ops/native_fabric/quota_continuity/candidate/original_delivery_collector.py",
+    "ops/native_fabric/quota_continuity/rollout/test_application_original_collection_bridge.py"
+  ]
+}

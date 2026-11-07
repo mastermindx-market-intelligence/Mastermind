@@ -157,3 +157,63 @@ recipe/derivation/launcher/profile comparison. No EVAL-specific rollback receipt
 or alternate maintenance path is introduced. Installed acceptance must prove the
 same source-qualified maintenance owner, original enrollment, original carrier,
 actual constraints and source receipt before trial execution or efficacy claims.
+
+## Native APPLICATION composition proof — 2026-11-07
+
+Operation `hermes-eval-producer-compose-20261107-sol-001` joins published native
+EVAL source `6280c656e71d3ec88e58031c857a17c465660502` and published APPLICATION /
+transport source `ce625f44bb200b04df9590e9b07df3eae55102f3`. Both histories remain
+parents of the normal integration merge.
+
+The shared installer, CLI, gateway and supervisor preserve the two closed launch
+contracts: native EVAL selects the v3 direct-provider recipe; APPLICATION selects
+the v4 primary publication. Their coexistence in a source release does not make
+both selectors valid in one launch. EVAL request/transport/session owners retain
+their original mandatory input checks, original admission and combined evidence
+budget.
+
+Two regressions were reproduced before correction:
+
+- A valid APPLICATION profile paired with a valid EVAL recipe reached
+  `load_secrets` before the leaf installer refused it. The public installer now
+  refuses this combination before credentials, vendor source, or state creation;
+  the leaf guard remains in place.
+- An explicitly supplied APPLICATION publication could take the legacy-config
+  shortcut in the shared supervisor helper. The shortcut now requires both
+  selectors to be absent. Historical unselected configuration still qualifies.
+
+The five-module joint qualification passed **141 tests and 7 subtests**, with
+zero failures, errors or skips. JUnit reports 148 including those subtests;
+it contains 141 testcase nodes. This invocation includes native input lifecycle,
+actual SDK serialization through in-process HTTP, APPLICATION host qualification,
+gateway entry, BYOK configuration and held native source inventory. Its log
+SHA-256 is `c0f71cbb9889d08be9c35cd8bd63a5d95cc20418ce9987e7e48370c49afa179c`;
+JUnit SHA-256 is
+`11f5d4fc7cf2aa961c7666ed2ac9cbddceb8c01f1f96660c3e6da14521c0e2bd`.
+
+The existing source-identity tests plus finite EVAL connection-path controls
+passed **229 tests**, with zero failures, errors or skips. The one additional
+shared test path is `tests/test_hermes_primary_application_host.py`, which owns
+the reproduced explicit-selection fallback regression. Its admission does not
+make unrelated APPLICATION changes EVAL-owned; an adjacent unlisted test and
+the original forbidden control/config/workflow/dependency paths remain refused.
+Log SHA-256:
+`3745f1195da6c92f4e34ea5f3ce5b27c5ea72961295ffb6c530803956598754f`.
+JUnit SHA-256:
+`b51dc0e2466cbed6d82a6ac608a41c84486c509334183f02d80f8aad3399eee5`.
+
+The public-installation failing-baseline log is
+`a29da4b43abd000ed81ec1d53fa66481e2590b2280a063f26efae036b98d4f3e`;
+the explicit-publication failing-baseline log is
+`158d6dbebc238c4ef0af390e9535e66207875188169a17b3b32978b52c190454`.
+Qualified production postimages include installer
+`992603bc184b1b116d75f71fea117b811aac392c88882d35aed8f5be9e81b742`,
+supervisor `df4daee852735590de6440f5502d6c4bdfb652445303f3557da00a886809eb8c`,
+and gateway `4fa1f325f01e75f666d9956970fc6ee6a3f90bf3d87ad1c32016aed1ea8fd73e`.
+
+These are source-composition proofs. The active original-result publisher on
+#2234 remains a separate continuation. Whole-PR EVAL fences still apply to the
+actual hosted candidate after original prerequisite integration; the finite
+fixture proofs above do not claim that whole candidate has passed. No installed
+role, provider/account call, complete EVAL receipt, learned-skill efficacy,
+promotion or measured fleet availability is established here.

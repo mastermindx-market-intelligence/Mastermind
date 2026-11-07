@@ -158,7 +158,11 @@ def test_shared_inference_prompt_keeps_cognition_guidance_conditional():
     from brain import bot_mcp
 
     tools = {row["name"] for row in bot_mcp.inference_tool_catalog()}
-    assert not any(name.startswith("mcp__cognition__") for name in tools)
+    # The selected Fabric route now carries the cognition owner's own reads.
+    # The roster is exact, not a floor: the incumbent bot roster plus the
+    # cognition namespace the cognition owner already publishes.
+    assert tools == set(bot_mcp.TOOL_NAMES) | set(cognition_mcp.TOOL_NAMES)
+    assert len(tools) == 32
     prompt = advisor.inference_system()
     assert "ONLY WHEN get_context_catalog" in prompt
     assert "Never call an unlisted tool" in prompt
@@ -167,6 +171,90 @@ def test_shared_inference_prompt_keeps_cognition_guidance_conditional():
     assert "evaluate_gate remains first in every backend" in prompt
     assert "External web search, arbitrary file access and web fetch are unavailable" in prompt
     assert "INDEPENDENT EVIDENCE FAMILIES" in prompt
+
+
+COGNITION_READ_NAMES = [
+    "mcp__cognition__get_market_packet",
+    "mcp__cognition__get_prophet_board",
+    "mcp__cognition__get_sector_rotation",
+    "mcp__cognition__get_technical_lab",
+    "mcp__cognition__get_context_catalog",
+    "mcp__cognition__get_surface_packet",
+    "mcp__cognition__get_neural_web_packet",
+]
+
+
+def test_fabric_inference_view_is_exact_bot_roster_plus_cognition_reads():
+    """The Fabric inference view is derived from existing owners, not a new roster."""
+    from brain import autonomous_mcp, bot_mcp
+
+    catalog = bot_mcp.inference_tool_catalog()
+    names = [row["name"] for row in catalog]
+    # The exact intended 32 names: the 25 incumbent bot tools followed by the
+    # seven cognition reads under the cognition owner's own namespace.
+    assert len(names) == 32
+    assert names == list(bot_mcp.TOOL_NAMES) + COGNITION_READ_NAMES
+    assert set(cognition_mcp.TOOL_NAMES) == set(COGNITION_READ_NAMES)
+
+    # Handler identity: the view holds the cognition owner's own decorated
+    # objects, not wrappers, copies or relabelled mcp__bot__ entries.
+    view = bot_mcp._inference_tool_view()
+    for name in COGNITION_READ_NAMES:
+        owner_name = name.split("__", 2)[2]
+        assert view[name] is getattr(cognition_mcp, owner_name)
+        assert view[name] is getattr(autonomous_mcp, owner_name)
+    for name in bot_mcp.TOOL_NAMES:
+        assert view[name] is getattr(bot_mcp, name.split("__", 2)[2])
+
+    # No additional authority: the legacy bot roster is untouched, the
+    # cognition namespace exposes only its seven reads, and the cognition
+    # reads are not reachable through the bot namespace.
+    assert len(bot_mcp._ALL) == 25
+    assert len(bot_mcp.TOOL_NAMES) == 25
+    assert bot_mcp.armed_allowed_tools() == (
+        bot_mcp.TOOL_NAMES + bot_mcp.WEB_TOOLS + ["Read", "Grep", "Glob"])
+    assert not any(
+        name in names
+        for name in (
+            "mcp__cognition__submit_book",
+            "mcp__cognition__request_context_upgrade",
+            "mcp__cognition__get_my_book",
+            "mcp__bot__get_market_packet",
+            "mcp__bot__get_context_catalog",
+            "mcp__bot__get_neural_web_packet",
+        )
+    )
+
+
+def test_cognition_import_order_does_not_close_an_import_cycle():
+    """brain.bot_mcp -> brain.cognition_mcp -> brain.autonomous_mcp -> brain.bot_mcp."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = (
+        "import sys\n"
+        "first = sys.argv[1]\n"
+        "if first == 'cognition':\n"
+        "    from brain import cognition_mcp\n"
+        "elif first == 'autonomous':\n"
+        "    from brain import autonomous_mcp\n"
+        "else:\n"
+        "    from brain import bot_mcp\n"
+        "from brain import bot_mcp, cognition_mcp\n"
+        "view = bot_mcp._inference_tool_view()\n"
+        "assert len(view) == 32, len(view)\n"
+        "assert view['mcp__cognition__get_market_packet'] is cognition_mcp.get_market_packet\n"
+    )
+    root = Path(__file__).resolve().parent.parent
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(root)] + [p for p in sys.path if p and p != str(root)])
+    for first in ("cognition", "autonomous", "bot"):
+        result = subprocess.run([sys.executable, "-c", script, first],
+                                capture_output=True, text=True, cwd=str(root), env=env)
+        assert result.returncode == 0, (first, result.stderr[-2000:])
 
 
 @pytest.mark.parametrize("partial_text", [False, True])
