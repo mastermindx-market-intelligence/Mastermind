@@ -249,6 +249,23 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.model.prompts, [])
         self.assertEqual(self.send_count(), 0)
 
+    async def test_scope_drift_without_generation_change_refuses_model_entry(self):
+        original = self.resolver.binding
+        def change_scope():
+            self.resolver.binding = dataclasses.replace(
+                original, context=dataclasses.replace(
+                    original.context, work_ref="WS:OUT-OF-SCOPE"))
+        self.service.on_read = change_scope
+        with self.assertRaises(ConsumerRefusal) as cm:
+            await self.consumer(model=self.synchronous_model).run(
+                operation_key=OP, in_reply_to=REQUEST)
+        self.assertEqual(cm.exception.code, "BINDING_CHANGED_BEFORE_MODEL_TURN")
+        self.assertEqual(self.resolver.binding.native_session_id, original.native_session_id)
+        self.assertEqual(self.resolver.binding.binding_generation, original.binding_generation)
+        self.assertEqual(self.resolver.binding.process_generation_id, original.process_generation_id)
+        self.assertEqual(self.model.prompts, [])
+        self.assertEqual(self.send_count(), 0)
+
     async def test_binding_unavailable_after_read_refuses_model_entry(self):
         self.service.on_read = lambda: setattr(self.resolver, "binding", None)
         with self.assertRaises(BridgeError) as cm:
