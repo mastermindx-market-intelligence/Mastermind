@@ -2579,6 +2579,15 @@ class ExecutiveWorkerBroker:
             if (method != expected_method or operation != state.materialization_operation
                     or getattr(adapter, "current", None) is not None):
                 raise BrokerStateError("original native materialization operation differs")
+        elif method == "session/set_config_option":
+            if (operation != state.materialization_operation or actual_session is None
+                    or state.materialization_receipt is not None
+                    or getattr(adapter, "current", None) is not None
+                    or getattr(adapter, "close_operation", None) is not None
+                    or getattr(native, "_closing", None) is not None
+                    or state.current_begin is not None or state.pending_begin is not None
+                    or state.current_interrupt is not None):
+                raise BrokerStateError("original native model-selection operation differs")
         elif method in {"session/prompt", "_mastermind/native_cancel"}:
             current = getattr(adapter, "current", None)
             if method == "session/prompt":

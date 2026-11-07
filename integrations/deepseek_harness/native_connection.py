@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
+import json
 import math
 from importlib.metadata import version
 from pathlib import Path
@@ -16,7 +17,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from control_plane.worker_execution_contract import BinaryAttestation, ProcessInspector
 from integrations.acp_worker.process_resource import NativeProcessResource, NativeProcessSettlement
-from integrations.acp_worker.turn import AcpProfile, _model_option
+from integrations.acp_worker.turn import AcpProfile, _model_option, _option_values
 from integrations.deepseek_harness.native_protocol import (
     EXTENSION_V2, OBSERVATION_REQUEST_SCHEMA, NativeClaim, NativeProtocolError, NativeResult,
     document, integer, native_extension, native_id, native_observation,
@@ -44,6 +45,18 @@ class _Prompt:
     dispatch_binding: tuple[Any, ...] | None = None
 
 
+@dataclasses.dataclass
+class _ModelSelection:
+    session_id: str
+    config_id: str
+    value: str
+    request_id: str | int | None = None
+    task: asyncio.Task | None = None
+    result: dict[str, Any] | None = None
+    updates: int = 0
+    wire_updates: int = 0
+
+
 class NativeClient(ProbeClient):
     """Finite native observations; permissions and unrelated extensions deny."""
 
@@ -56,10 +69,12 @@ class NativeClient(ProbeClient):
         self.on_update = on_update
         self.before_send, self.before_write = before_send, before_write
         self.advertised = False
+        self.selection: _ModelSelection | None = None
 
     def begin_native_prompt(self, operation_id: str) -> _Prompt:
         native_id(operation_id)
         if (self.violation or not self.advertised or self.session_id is None or self.turns >= 64
+                or (self.selection is not None and self.selection.result is None)
                 or (self.current is not None and (self.current.result is None
                     or (self.current.cancel_task is not None and self.current.cancel_status is None)))):
             raise NativeProtocolError("NATIVE_PROMPT_OWNER_NOT_READY")
@@ -96,6 +111,24 @@ class NativeClient(ProbeClient):
         return claim
 
     def admit_extension_frame(self, message: dict[str, Any]) -> bool:
+        # Reuse the original trusted consumer's finite frame policy for the
+        # one standard setup notice; the generic prompt window stays closed.
+        params = message.get("params")
+        if (message.get("method") == "session/update" and type(params) is dict
+                and type(params.get("update")) is dict
+                and params["update"].get("sessionUpdate") == "config_option_update"):
+            try:
+                if (set(message) != {"jsonrpc", "method", "params"}
+                        or set(params) != {"sessionId", "update"}):
+                    raise NativeProtocolError("NATIVE_MODEL_SELECTION_UPDATE_REFUSED")
+                selected = self._selection_update_owner(params["sessionId"], params["update"])
+                if selected.wire_updates >= 4:
+                    raise NativeProtocolError("NATIVE_MODEL_SELECTION_UPDATE_REFUSED")
+            except Exception:
+                self.poison("NATIVE_MODEL_SELECTION_UPDATE_REFUSED")
+                raise NativeProtocolError(self.violation) from None
+            selected.wire_updates += 1
+            return True
         if set(message) != {"jsonrpc", "method", "params"} or message["method"] != "_mastermind/native_claim":
             return False
         self._matching_claim(message["params"])
@@ -117,7 +150,28 @@ class NativeClient(ProbeClient):
         current.claim = claim
         current.claim_ready.set_result(claim)
 
+    def reserve_model_selection(self, config_id: str, value: str) -> _ModelSelection:
+        if (self.violation or not self.advertised or self.session_id is None
+                or self.selection is not None or self.current is not None or self._active
+                or type(config_id) is not str or not 0 < len(config_id) <= 128
+                or type(value) is not str or not 0 < len(value.encode()) <= 4096):
+            raise NativeProtocolError("NATIVE_MODEL_SELECTION_OWNER_NOT_READY")
+        self.selection = _ModelSelection(self.session_id, config_id, value)
+        return self.selection
+
     def bind_outgoing(self, message: dict[str, Any]) -> None:
+        if message.get("method") == "session/set_config_option":
+            selected, params = self.selection, message.get("params")
+            if (self.violation or not self.advertised or self.current is not None or self._active
+                    or selected is None or selected.request_id is not None or selected.result is not None
+                    or selected.session_id != self.session_id
+                    or type(params) is not dict or set(params) != {"sessionId", "configId", "value"}
+                    or params != {"sessionId": selected.session_id,
+                                  "configId": selected.config_id, "value": selected.value}):
+                self.poison("NATIVE_MODEL_SELECTION_REPLAY_OR_OWNER_MISMATCH")
+                raise NativeProtocolError(self.violation)
+            selected.request_id = checked_request_id(message.get("id"))
+            return
         if message.get("method") != "session/prompt":
             return
         current, params = self.current, message.get("params")
@@ -160,7 +214,37 @@ class NativeClient(ProbeClient):
         # NativeResult hashes native terminal facts. Session remains body owner.
         pass
 
+    def _selection_update_owner(self, session_id, data):
+        selected = self.selection
+        if (self.violation or self.current is not None or self._active
+                or selected is None or selected.request_id is None or selected.result is not None
+                or session_id != self.session_id or session_id != selected.session_id
+                or set(data) != {"sessionUpdate", "configOptions"}
+                or len(json.dumps(data, separators=(",", ":")).encode()) > 64 * 1024):
+            raise NativeProtocolError("NATIVE_MODEL_SELECTION_UPDATE_REFUSED")
+        option = _model_option(data["configOptions"], selected.config_id)
+        if option.get("currentValue") != selected.value or selected.value not in _option_values(option):
+            raise NativeProtocolError("NATIVE_MODEL_SELECTION_UPDATE_REFUSED")
+        return selected
+
     async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
+        try:
+            data = document(update)
+        except (ValueError, TypeError):
+            self.poison("UPDATE_NOT_ADMITTED")
+            return
+        if data.get("sessionUpdate") == "config_option_update":
+            # Consume only a notice admitted below the one SDK decoder. This
+            # cannot grant prompt, tool or progress callbacks during startup.
+            try:
+                selected = self._selection_update_owner(session_id, data)
+                if not selected.updates < selected.wire_updates <= 4:
+                    raise NativeProtocolError("NATIVE_MODEL_SELECTION_UPDATE_REFUSED")
+            except Exception:
+                self.poison("NATIVE_MODEL_SELECTION_UPDATE_REFUSED")
+                return
+            selected.updates += 1
+            return
         before = self._updates
         await super().session_update(session_id, update, **kwargs)
         if self._updates != before and self.on_update is not None:
@@ -306,10 +390,7 @@ class NativeAcpProcess:
                     session_id=provider_session_id, cwd=str(cwd), mcp_servers=[]), 30))
                 self.provider_session_id = provider_session_id
             self.client.bind_session(self.provider_session_id)
-            option = _model_option(selected.get("configOptions"), protocol_profile.model_option_id)
-            if option.get("currentValue") != protocol_profile.model_option_value(model):
-                raise NativeProtocolError("NATIVE_MODEL_SELECTION_MISMATCH")
-            self.session_options = selected
+            await self._select_model(selected, protocol_profile=protocol_profile, model=model)
         except BaseException:
             if self.resource is not None:
                 await self.close("startup failed")
@@ -318,6 +399,48 @@ class NativeAcpProcess:
             child.close()
             if self.writer is None:
                 parent.close()
+
+
+    async def _select_model(self, selected, *, protocol_profile, model):
+        """One setter in the existing materialization coroutine and SDK task set."""
+        client, connection, session_id, resource = (
+            self.client, self.connection, self.provider_session_id, self.resource)
+        def require_current():
+            if (connection is None or resource is None or session_id is None
+                    or self.client is not client or self.connection is not connection
+                    or self.resource is not resource or self.provider_session_id != session_id
+                    or client.session_id != session_id or not client.advertised
+                    or self._closing is not None or client.violation or client.current is not None
+                    or self.session_options is not None):
+                raise NativeProtocolError("NATIVE_MODEL_SELECTION_OWNER_CHANGED")
+        require_current()
+        target = protocol_profile.model_option_value(model)
+        option = _model_option(selected.get("configOptions"), protocol_profile.model_option_id)
+        if target not in _option_values(option):
+            raise NativeProtocolError("NATIVE_MODEL_SELECTION_UNAVAILABLE")
+        if option.get("currentValue") == target:
+            self.session_options = selected
+            return
+        if self.native_extension != EXTENSION_V2:
+            raise NativeProtocolError("NATIVE_MODEL_SELECTION_EXTENSION_REQUIRED")
+        selection = client.reserve_model_selection(protocol_profile.model_option_id, target)
+        selection.task = self._own(connection.set_config_option(
+            session_id=session_id, config_id=selection.config_id, value=target))
+        # The original adapter/broker deadline returns EFFECT_UNKNOWN while this
+        # same materialization future keeps custody. No inner deadline tears
+        # down a possibly written setter or permits a second configuration call.
+        changed = document(await asyncio.shield(selection.task))
+        require_current()
+        if (client.selection is not selection or selection.request_id is None
+                or selection.updates != selection.wire_updates):
+            raise NativeProtocolError("NATIVE_MODEL_SELECTION_OWNER_CHANGED")
+        option = _model_option(changed.get("configOptions"), selection.config_id)
+        if option.get("currentValue") != target or target not in _option_values(option):
+            raise NativeProtocolError("NATIVE_MODEL_SELECTION_MISMATCH")
+        if client.before_send is not None:
+            client.before_send("session/set_config_option")
+        selection.result = changed
+        self.session_options = dict(selected, configOptions=changed["configOptions"])
 
 
     async def observe(self, *, timeout_seconds: float = 30):

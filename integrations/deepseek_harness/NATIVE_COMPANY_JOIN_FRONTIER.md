@@ -731,3 +731,76 @@ same literal value; no guard or custody check changed. The final focused
 profile/factory tests and the actual current-source scanner pass. Their exact
 receipts and the diagnostic are preserved in the C26 evidence. The 154-test run
 and PSF compatibility proof precede only this semantic constant naming.
+
+
+## C27 — one-shot native account-model selection (2026-11-07)
+
+Parent source: 0e27ef6fd430f45d627d6bbdb1b520cff70a2151.
+Evidence: [native model-selection qualification](../../research/evidence/deepseek-native-model-selection-20261107.json).
+
+Native startup now uses the original ACP SDK's session/set_config_option exactly
+once when the advertised current option differs from the requested account-backed
+model. It binds the original Session, model config ID, exact encoded provider/model
+value and SDK-generated request ID before the transport can yield. If the exact
+option is absent, it refuses without a setter. If it is already selected, it sends
+no setter. A changed or mismatched response refuses; later native observation
+remains the independent original-owner attestation.
+
+The original materialization coroutine retains the setter's SDK task and awaits
+it shielded. Its existing outer broker/adapter deadline can report uncertainty
+without closing/replaying the original selection. Late completion rejoins the
+same materialization future and receipt. No new operation, Session, retry or
+configuration owner is created.
+
+Both the existing before-send guard and physical SDK write guard qualify the
+setter under the original launch operation. The broker accepts that method only
+for its retained native connection and already bound Session, before a
+materialization receipt or turn exists. Source, authority and protocol invalidation
+prevent queued configuration bytes from being written. Configuration changes
+after materialization are refused.
+
+Startup configuration notices use the existing trusted consumer frame policy.
+Only the exact matching standard config-option notification is admitted; a closed
+four-frame wire budget precedes the SDK callback and its consumption count. The
+generic prompt callback window remains closed: text, tool and permission
+callbacks are still denied. Notifications do not become turn progress. The
+pinned SDK schedules the earlier notification callback before the later response
+future; the current admitted callback does not suspend. Startup checks that all
+admitted notices were consumed before accepting the selection result.
+
+Qualification: **244 passed**, all **4441** recorded inputs unchanged, including
+real ACP SDK socketpair selection, no-set and unadvertised-option cases, wrong
+response/notice, one-shot request binding, lost waiters, original broker late
+receipt recovery, queued authority/protocol withdrawal, closed callback windows,
+the full existing ACP framing/turn tests and native Worker factory tests. The
+actual canonical Python 3.12.10 also compiles all four changed production sources.
+
+Final test receipt:
+/private/tmp/mmx-dsh-c27-model-selection-20261107-pro3.json,
+SHA-256 087f2cfe8e233ff653d49186a9d02ce73ede2a80bc271b414fa403bb9de4ac5d.
+Log SHA-256:
+5ea1acd96c022257efdd835d03967bb312e9aaff7d5c70954b841ae59b8d0f7f.
+The first real SDK test found the preexisting frame reader's callback fence ran
+before session_update; that real boundary was joined through its original
+semantic policy. The diagnostic is preserved. Original assertions remain.
+
+This is provider-free protocol and owner qualification with an explicitly inert
+process principal. It is not installed DeepSeek/account acceptance. No active
+service, real provider, production Session or accepted canary was touched.
+
+### C28 immediate continuation
+
+Complete the counterpart final native model-control check immediately before the
+original AcpModelControl assigns its selected value after catalog resolution.
+Compose the original native-host and ACP patches for exact one-use inbox input
+admission and unowned pending-input resume refusal, preserving ordinary Web and
+private loop-owned tool contexts. Use a combined host+ACP test overlay.
+
+Add the original account owner's local nonsecret snapshot/currentness witness,
+truthful Node-owner-facts envelope and original Worker factory join. Build the
+fixed same-process native_worker entry through the existing production
+session -> host/owner-access -> ACP -> build/package owner. Preserve actual
+full-Web/plugin ownership; do not transplant the fixture's synthetic facts.
+Qualify the original enforcing capability/policy ceilings and installed
+Worker/quota/host/account/profile/router join before the real packaged journey.
+All prior production holds and DO_NOT_REDO constraints remain in force.

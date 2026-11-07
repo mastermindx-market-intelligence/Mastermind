@@ -293,13 +293,16 @@ class StrictFrameReader:
         params = obj.get("params", {})
         method = obj.get("method")
         if method is not None:
+            # A trusted native consumer may admit an exact finite setup notice
+            # through its existing semantic frame policy. Without that explicit
+            # acceptance, every standard callback keeps the original prompt fence.
+            try:
+                if (self.extension_policy is not None
+                        and self.extension_policy.admit_extension_frame(obj) is True):
+                    return line
+            except (ValueError, TypeError, UnicodeError):
+                pass
             if method not in {"session/update", "session/request_permission"}:
-                try:
-                    if (self.extension_policy is not None
-                            and self.extension_policy.admit_extension_frame(obj) is True):
-                        return line
-                except (ValueError, TypeError, UnicodeError):
-                    pass
                 self.client.poison("TOOL_NOT_GRANTED")
                 raise BoundaryViolation(self.client.violation)
             if not self.client._callback_allowed(params.get("sessionId")):

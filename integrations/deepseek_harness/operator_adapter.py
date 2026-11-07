@@ -197,10 +197,12 @@ class NativeOperatorAdapter:
                                            identity.process_start_identity, identity.boot_session_id)
 
     def _before_send(self, method: str) -> None:
-        if method not in {"session/new", "session/resume", "session/prompt", "_mastermind/native_cancel"}:
+        if method not in {"session/new", "session/resume", "session/set_config_option", "session/prompt", "_mastermind/native_cancel"}:
             return  # ordinary protocol observations and original cleanup stay available
         if self.epoch is None or self.generation is None:
             raise NativeOperatorError("original generation is unbound")
+        if self.native is None or getattr(getattr(self.native, "client", None), "violation", None):
+            raise NativeOperatorError("original native protocol is unavailable")
         operation = self.launch_operation
         if method in {"session/prompt", "_mastermind/native_cancel"}:
             if self.current is None:
@@ -228,6 +230,9 @@ class NativeOperatorAdapter:
         # cleanup call never changes this guard to a weaker cleanup permission.
         if self.current is None:
             self._before_send(self.launch_method)
+            selection = getattr(getattr(self.native, "client", None), "selection", None)
+            if selection is not None and selection.request_id is not None and selection.result is None:
+                self._before_send("session/set_config_option")
         else:
             self._before_send("session/prompt")
             if self.current.interrupt_operation is not None:
