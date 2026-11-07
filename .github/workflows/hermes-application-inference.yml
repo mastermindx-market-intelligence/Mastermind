@@ -253,7 +253,7 @@ jobs:
       - name: Verify committed source fixture boundaries
         run: >-
           .ci-hermes-native/.venv/bin/python -B
-          integrations/hermes_application_fabric/qualification/test_source_materialization.py
+          integrations/hermes_application_fabric/qualification/verify_source_materialization.py
       - name: Qualify the exact source-support proposal without overriding support flags
         env:
           HERMES_HOME: ${{ runner.temp }}/hermes-source-support-native-fixture

@@ -18,7 +18,9 @@ lacked the original corpus anchor. This workflow now acquires that same
 immutable anchor and full event history. The repaired complete diagnostic,
 general CI and this successor's qualification remain separate evidence.
 
-The385-case enrollment receipt remains attributed to earlier c821 source and
+The385-case enrollment gate also passed on322 in1250.88s in
+[job128430305067](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42381637833/job/128430305067).
+The earlier c821 receipt remains attributed to
 [run42376517671](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42376517671).
 Focused success is not general-CI, source-release or live-account acceptance.
 
@@ -41,8 +43,10 @@ in job128439397143. Its proposal preparation then failed at Git archive before
 patch application; that underlying cause remains unproved because stderr was
 not surfaced. The successor exports verified local committed blobs instead,
 with three passing Git boundary tests and the same pre/postimage checks.
-Hosted proposal383+21 proof remains pending. Neither context qualifies a real
-account, installs a service or
+Hosted proposal383+21 proof then passed on90fb/2d9acf5 in job128444807247,
+with no support-flag override; the original-a57721 context passed too. Exact
+receipts are in review_evidence/hermes_primary/source-support-hosted-20261107.json.
+Neither context qualifies a real account, installs a service or
 authenticates a live attended host. The separate patched-gateway suite covers
 native route/admission projection. The shared paired gate still consumes its
 original CI-owned pin.
@@ -59,7 +63,7 @@ Only one acquisition path is used; no original assertion or guard is changed.
 | Original primary runtime predecessor | 08b8daf9 digest1ae0d896; its installed69-case proof is retained but does not qualify the two amended current runtime files |
 | APPLICATION factory/client | Original Macro#10740 at a577dbbf605474f97bbafa4ceeb0daf841292421; client blob323953c2030ce45b3a889bbb6e7a6a6751c90702 and SHA2560817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e are unchanged fromc164 |
 | Published Hermes declarations | a577 factory bloba8d1b7a8d86946eb9870c56a54e1599eae5fa5c5; all five Hermes transports remain source-disabled; workload blobf9f0bd26af3f543aaee8d05fb465a4ea53219660 is unchanged |
-| Proposed Hermes source support | Exact four-file proposal and383-case local proof in qualification/application_owner_support/; patch SHA2569ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d; original#10740 adoption and hosted native proof remain pending |
+| Proposed Hermes source support | Exact four-file proposal in qualification/application_owner_support/; patch SHA2569ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d;383 owner cases and21 native cases pass in the hosted proposal context; original#10740 adoption remains pending |
 | Attended owner qualification | The31-case attended test from#10832 is already incorporated in a577 as exact blob3725f43f67f17e4e290c5c7b9791f65b85f692eb. Its historical hosted126/local197 results and#10832 CI-authority refusal retain their original scope |
 | Native APPLICATION installer/entry | Original #2175 plus qualified v9 contribution in #2186; current Go ingress/account/service publishers remain authoritative |
 | Role Hermes ABI | Qualified upstream1c0cd667 and installed2bd378ed; existing held role installation and source closure |

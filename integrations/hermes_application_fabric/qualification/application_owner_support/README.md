@@ -68,8 +68,8 @@ the native cases. The positive proposal path does not override the source
 support flags. Only the disposable endpoint/model and runtime qualification
 inputs are synthetic. The unmodified-owner path is reported separately.
 
-Hosted proposal/native results remain pending until their exact run receipts
-exist. The older12-case c164 native proof is not relabelled as this21-case proof.
+The hosted receipts below establish each exact source context. The older12-case
+c164 native proof is not relabelled as this21-case proof.
 
 The original-a577 context passed all21 cases on composed d7/173b224 in hosted
 job128439397143. Its subsequent proposal preparation failed at `git archive`
@@ -80,8 +80,22 @@ and refuses missing local blobs without lazy fetch or working-tree substitution.
 Three actual local-Git boundary cases pass, covering committed bytes/modes,
 link refusal and missing-object refusal with the object still absent afterward.
 The exact source/patch contract, original-clean-source readbacks and complete
-four-file postimage delta remain mandatory. Hosted proposal383+21 proof remains
-pending its own successful receipt.
+four-file postimage delta remain mandatory.
+
+Hosted proposal qualification now passes on90fb/2d9acf5 in job128444807247:
+383 owner cases in3.63s, then21 actual native APPLICATION/Broker cases in134.653s
+without overriding source flags. The original-a577 context also passes21 cases
+in133.916s. All have zero failures, errors or skips. The export verifies2538
+committed files; the four-file patch yields2539 fixture files. Its original
+checkout remains unchanged, and native network/SDK counters are zero.
+[The full source-bound receipts](../../../../review_evidence/hermes_primary/source-support-hosted-20261107.json)
+retain the distinct source contexts and their fixture/live acceptance boundary.
+
+The three Git boundary cases execute explicitly through
+`qualification/verify_source_materialization.py`. They are outside the gateway's
+`test_*.py` discovery: its original100-case contract remains unchanged. The
+preceding103-case execution passed every case but correctly refused its exact
+suite-size contract; renaming the unchanged boundary entry resolves that scope.
 
 ## Owner consumption
 
