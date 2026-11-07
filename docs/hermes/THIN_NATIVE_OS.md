@@ -916,3 +916,71 @@ unqualified. The unimported S1 Stop patch and advanced remote/worker scopes rema
 separate holds. The mounted organization consumer has no new selected-mission
 source qualification. Retained installed fca, backend 09b/call 5913 and all accepted
 canary evidence remain untouched.
+
+## Final candidate qualification and existing release lane
+
+The presentation follow-up is built and observed as compiled source
+`6e59cfeb6b00e1508eae51ec0a9dc5c03b8c193a`, build
+`hermes-thin-native-6e59cfeb6b00-20261107-pro-06`, application tree
+`d27925e195d5649ca1fd0cf723cda54b756a0dd7`.
+The build completed at 09:16:50Z with unchanged source and the original public
+profile, client and Terminal input. Raw build receipt SHA256:
+`d105373a3a37875034e4eb2f795f2847a7a843be6c6eeaf673fef0df8629b3d7`;
+raw binary:
+`a43bd5cde4bc45950ae9fb6781c4e03b0da239a8ea91a4894c9aa1a26ee3b20e`.
+
+C1 completed its existing finite internal qualification of a copy.
+[Exact 6e package receipt](evidence/thin-native-os-20261107/6e59cfeb6b00-package-receipt.json)
+SHA256 is `d28ab41f39c02fc1fabde8d06271036090845b98da72c4fdfe52ee03c2d76472`;
+qualified bundle is
+`b2b5f4c2755869e9a45288a427623ebace1f4fc78b7eaf4dd59edcff8db7ebb6`.
+Nested/main/deep strict checks pass, original entitlements and public inputs are
+preserved, and the raw artifact is unchanged. This copy remains unselected and
+uninstalled; it has not performed authentication or any runtime operation.
+
+Root normally closed the settled 1f app and launched raw 6e once at 09:21:28Z.
+The single app is PID 23348. At 09:23:59Z, actual UI readback confirmed Signed in,
+exact 6e source/build and the original native-client reference. Connect and Local
+history reopened both original messages at 09:25:49Z, each matching the retained
+canonical transcript. No additional create, submit or cancel occurred.
+
+The changed logout presentation is now proven in the actual 6e package.
+One Sign out at 09:25:59Z produced Welcome back/Sign in at 09:26:12Z, removed all
+private conversation content, and **did not display the false sign-in failure**.
+The app is left signed out, with no pending auth or original-request effect.
+The changed unresolved-send wording is qualified by the current 19-case panel
+regression and compiled package; no live model effect was manufactured to repeat
+the accepted request.
+
+[Final candidate acceptance](evidence/thin-native-os-20261107/native-ui-acceptance-6e59cfeb6b00.json),
+SHA256 `0c31d66063205603bd76b8b1224a3a288778525b501c75b3b95fe10befbd6d40`,
+explicitly separates:
+
+- original creation recovery on 386 and full functional journey on 1f;
+- the four changed frontend/presentation/test files;
+- eight byte-identical auth, native host/bridge, contract, port and pointer-owner
+  bindings between 1f and 6e;
+- actual 6e authenticated identity, retained history and corrected logout proof.
+
+[Current original-history readback](evidence/thin-native-os-20261107/6e59cfeb6b00-uat-retained-original-answer.json)
+SHA256 is `8feae160775054128860488ebd5296c73bb87d8405b89bf3052bd8b0c5331043`.
+[Corrected logout readback](evidence/thin-native-os-20261107/6e59cfeb6b00-uat-corrected-logout.json)
+SHA256 is `4a943c121a39c20e6752a1ed93df76d2264f17900bcce0835ed8d3fd237637e8`.
+All raw source paths and copied-file hashes are in the existing manifest.
+
+The next action belongs to the **existing C1 protected queue/app-only installation
+lane**, whose custody was recorded in PR comment 6702850319. Root retains the sole
+native UI cutover and installed-path proof. There must be no parallel queue
+request, signer, installer, app controller or service restart. C1 consumes the
+final published evidence head, rechecks both native queue fields, preserves any
+existing effect, and uses the normal head-leased protected request when qualified.
+The prepared installer must bind actual successful head/integrated checks and
+the protected merged tree; its compiled application tree must match in full.
+Retain the compiled 6e identity separately from the eventual merge SHA.
+
+At the 6e qualification boundary, OS 42359029013, Hermes 42359029011 and
+CodeQL 42359025742 succeeded; general CI 42359029152 was running with no observed
+failed step. These results are exact 6e evidence, not a claim about a later
+documentation head or integrated queue candidate. The pending release still needs
+canonical queue/merge/install receipts. Candidate acceptance does not itself
+establish installation, Developer ID, notarization or updater qualification.
