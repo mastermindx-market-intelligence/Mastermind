@@ -135,3 +135,62 @@ Source publication alone does not install the descriptor or enable the tool. Ins
 ### Existing conversations
 
 After native activation, use `/mmx-omh status` or `/mmx-omh quick Inspect the failing test`. These commands use the existing gateway command registry and the same read-only bridge, so they do not require resetting an ongoing conversation. The Python `mmx_omh` tool becomes available to the model in a fresh session according to Hermes' prompt-cache contract. An activated command is not a worker start or provider call; all outputs retain the proposal/advice boundary.
+
+### Canonical Capacity routing preview
+
+The native `mmx_omh` tool also accepts `action: route`, with `message`,
+`category`, `task_class` and `complexity`. For example:
+
+```json
+{"action":"route","category":"quick","message":"Inspect the existing capacity contracts","task_class":"census","complexity":"C1_ROUTINE_BOUNDED"}
+```
+
+The existing command offers the same path:
+
+```text
+/mmx-omh route census C1_ROUTINE_BOUNDED quick Inspect the existing capacity contracts
+```
+
+This runs OMH's existing recommendation and calls
+`mastermind-fabric-capacity/fabric_route_preview` once through Hermes'
+`PluginContext.call_mcp`. The host must already enroll that read-only MCP server
+and authorize it in `plugins.entries.mastermind-omh.mcp_allowlist`. The plugin
+does not edit that grant or create another client, connection manager, selector,
+account ledger or execution endpoint.
+
+Task class and complexity are explicit requirements in the incumbent Capacity
+wire schema. An OMH category such as `quick` is **not** evidence that work is
+mechanical or low risk, so there is no invented category-to-complexity mapping.
+OMH aliases and reasoning efforts remain advice; they are never forwarded as a
+model, pool, account, fallback or entitlement. Only the two task requirements
+are sent to the capacity preview. The prompt itself is not sent.
+
+A successful result is `ROUTE_PREVIEW_NOT_ADMITTED`, with separate
+`recommendation`, `routing_requirements` and `capacity_preview` fields.
+The canonical preview must say `PREVIEW_ONLY`, `reserved: false` and
+`selection_rechecked_at_request: true`. The outer result retains
+`selected_model: null`, `admitted: false` and `dispatched: false`.
+The preview may disagree with OMH; that does not authorize an OMH fallback.
+
+Missing MCP permission, owner refusal, missing capacity, malformed/truncated
+output, or profile/source/registration drift produces a closed refusal without
+returning a locally selected model. A closed canonical refusal code is preserved
+as `capacity_reason` when supplied. The adapter makes no additional retry;
+native MCP trust, transport recovery and uncertain-effect rules remain owned by
+Hermes.
+
+This completes the native advisory-to-canonical-preview connection. Actual
+delegated work still uses the existing `mmx_fabric_worker` or Executive-selected
+`mmx_delegate` under its real native admission. Primary conversation inference
+uses the separate APPLICATION integration. Ordinary Hermes `delegate_task`
+creates another agent/model-call loop and does not inherit an authorized
+APPLICATION child binding merely by copying a provider name. Neither a preview,
+a local child-count setting nor an estimated subscription allowance proves that
+concurrent calls share the accepted physical-account ledger.
+
+For native qualification, the existing `qualification/native_canary.py` accepts
+`--capacity-config /Users/chriswong/.hermes/config.yaml`. It reuses only the
+observed M2 read-only MCP declaration in an isolated profile, exercises the real
+native loader/registry/client and verifies forced-pool refusal. No production
+profile, provider credential, admission or worker request is changed by the
+canary.
