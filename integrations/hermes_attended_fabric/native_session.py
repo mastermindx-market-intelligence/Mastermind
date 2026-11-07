@@ -76,6 +76,10 @@ class NativeSessionBinding:
                 or contract.get("native_session_owner") != "Hermes SessionDB"
                 or contract.get("request_admission_owner") != "fabric_task.request"
                 or contract.get("root_policy") != "native_conversation_namespace_v1"
+                or type(contract.get("source_revision")) is not str
+                or re.fullmatch(r"[0-9a-f]{40}", contract["source_revision"]) is None
+                or type(contract.get("package_sha256")) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", contract["package_sha256"]) is None
                 or type(contract.get("generation")) is not str
                 or re.fullmatch(r"[0-9a-f]{64}", contract["generation"]) is None):
             raise FabricNativeRefusal("HERMES_NATIVE_ORIGIN_NOT_ENROLLED")
@@ -244,12 +248,17 @@ class NativeSessionBinding:
         reply = self.ctx.call_mcp(CAPACITY_SERVER, "fabric_route_preview",
                                  {"task_class": task_class, "complexity": complexity}, timeout=20)
         document = reply.get("structuredContent") or reply.get("result")
+        if type(document) is str and len(document) <= 65536:
+            try:
+                document = json.loads(document)
+            except (TypeError, ValueError):
+                raise FabricNativeRefusal("FABRIC_PREVIEW_NOT_PROVEN") from None
         if (reply.get("ok") is not True or reply.get("truncated") is True
                 or not isinstance(document, Mapping)
-                or document.get("state") != "PREVIEW_ONLY"
+                or document.get("proof") != "PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH"
                 or document.get("reserved") is not False or not self.current(grant)):
             raise FabricNativeRefusal("FABRIC_PREVIEW_NOT_PROVEN")
-        return document
+        return {**document, "owner_state": document.get("state"), "state": "PREVIEW_ONLY"}
 
 
 class _NativeFacadePort(FabricFacadePort):

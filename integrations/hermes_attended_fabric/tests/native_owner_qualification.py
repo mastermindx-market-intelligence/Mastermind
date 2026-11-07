@@ -8,6 +8,7 @@ This file is intentionally outside automatic offline test discovery.
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -27,6 +28,7 @@ from integrations.hermes_attended_fabric.native import (
 )
 from integrations.hermes_attended_fabric.native_evidence import (
     read_enrollment, verify_origin, native_root, ENROLLMENT_SCHEMA,
+    RUNTIME_FILES, PLUGIN_SOURCE, package_fingerprint,
 )
 from integrations.hermes_attended_fabric.native_session import (
     NativeSessionBinding, register,
@@ -39,6 +41,16 @@ class NativeOwnerQualification(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.token = set_hermes_home_override(str(self.home))
         self._config(True)
+        # Fixture installation layout and native record, not an installer claim.
+        self.plugin_dir = self.home / "plugins" / "mastermind-fabric-worker"
+        self.plugin_dir.mkdir(parents=True)
+        for name in RUNTIME_FILES:
+            shutil.copy2(Path(__file__).parents[1] / name, self.plugin_dir / name)
+        self.release_revision = "f" * 40
+        self.expected_package = package_fingerprint(self.plugin_dir)
+        (self.plugin_dir.parent / ".install-metadata.json").write_text(json.dumps({
+            "mastermind-fabric-worker": {"source": PLUGIN_SOURCE,
+                                       "revision": self.release_revision, "pinned": True}}))
         self.db = SessionDB(self.home / "state.db")
         self.sid = "native-attended-parent"
         self.db.create_session(self.sid, source="cli")
@@ -59,7 +71,7 @@ class NativeOwnerQualification(unittest.TestCase):
         self.manager._cli_ref = object()
         self.manifest = PluginManifest(
             name="mastermind-fabric-worker", version="1.0.0", source="user",
-            path=str(Path(__file__).parents[1]))
+            path=str(self.plugin_dir))
         self.manager._plugins[self.manifest.name] = LoadedPlugin(
             self.manifest, enabled=True)
         self.ctx = PluginContext(self.manifest, self.manager)
@@ -171,6 +183,17 @@ class NativeOwnerQualification(unittest.TestCase):
         result = self.invoke(handler, "call-1", args)
         self.assertEqual(result["state"], "CONTROLLER_CREATED", result)
 
+    def test_real_directory_loader_registers_from_installed_subdirectory(self):
+        from hermes_cli.plugins_manifest import parse_manifest_file
+        manifest = parse_manifest_file(
+            self.plugin_dir / "plugin.yaml", self.plugin_dir, "user", "")
+        self.assertIsNotNone(manifest)
+        self.manager._load_plugin(manifest)
+        loaded = self.manager._plugins["mastermind-fabric-worker"]
+        self.assertIsNone(loaded.error, loaded.error)
+        self.assertIsNotNone(registry.snapshot_registration(TOOL, scope=self.manager.scope_key))
+        self.assertEqual(self.mcp_actions, [])
+
     def test_first_current_invocation_attests_before_request(self):
         args = self.args()
         self.persist("call-1", args)
@@ -186,6 +209,30 @@ class NativeOwnerQualification(unittest.TestCase):
         with self.assertRaisesRegex(FabricNativeRefusal, "NOT_ENROLLED"):
             register(self.ctx)
         self.assertIsNone(registry.snapshot_registration(TOOL, scope=self.manager.scope_key))
+        self.assertEqual(self.requests, [])
+
+    def test_capacity_preview_uses_actual_native_text_envelope(self):
+        from mcp.types import CallToolResult, TextContent
+        from tools.mcp_tool_handlers import _render_call_tool_result
+        cfg = json.loads((self.home / "config.yaml").read_text())
+        cfg["plugins"]["entries"]["mastermind-fabric-worker"]["mcp_allowlist"].append(
+            "mastermind-fabric-capacity")
+        (self.home / "config.yaml").write_text(json.dumps(cfg))
+        selected = {"pool": "minimax", "model": "qualified-model",
+                    "state": "PREVIEW", "reserved": False,
+                    "proof": "PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH"}
+        def capacity(server, action, args, timeout=30):
+            self.assertEqual(server, "mastermind-fabric-capacity")
+            self.assertEqual(action, "fabric_route_preview")
+            result = CallToolResult(content=[TextContent(type="text", text=json.dumps(selected))])
+            return PluginContext._mcp_envelope(_render_call_tool_result(result, server))
+        self.ctx.call_mcp = capacity
+        args = {k: v for k, v in self.args("route-preview").items() if k != "work_packet"}
+        args["action"] = "preview"
+        self.persist("preview-1", args)
+        result = self.invoke(self.mount(), "preview-1", args)
+        self.assertEqual(result["state"], "PREVIEW_ONLY", result)
+        self.assertFalse(result["worker_started"])
         self.assertEqual(self.requests, [])
 
     def test_direct_handler_without_native_execution_context_refuses(self):
@@ -315,7 +362,9 @@ class NativeOwnerQualification(unittest.TestCase):
                 outputs.append({"kind": "text", "value": text})
         spec = {"action": action, "arguments": args, "adapter_outputs": outputs,
                 "hermes_native": {"home": str(self.home), "python": sys.executable,
-                                  "source": str(Path(run_agent.__file__).parent)}}
+                                  "source": str(Path(run_agent.__file__).parent),
+                                  "revision": getattr(self, "wire_revision", self.release_revision),
+                                  "packageSha256": self.expected_package}}
         if action == "fabric_request" and getattr(self, "revoke_in_preflight", False):
             spec["revoke_native_after_call"] = 1
         completed = subprocess.run(
@@ -326,8 +375,12 @@ class NativeOwnerQualification(unittest.TestCase):
         if not hasattr(self, "wire_calls"):
             self.wire_calls = []
         self.wire_calls.append((action, captured))
-        return {"ok": not captured["reply"].get("isError", False),
-                "structuredContent": captured["reply"]["structuredContent"]}
+        # Execute the installed MCP renderer and PluginContext envelope too.
+        # Hermes removes duplicate structured JSON and returns its text form.
+        from mcp.types import CallToolResult
+        from tools.mcp_tool_handlers import _render_call_tool_result
+        model = CallToolResult.model_validate(captured["reply"])
+        return PluginContext._mcp_envelope(_render_call_tool_result(model, server))
 
     def test_real_facade_native_verifier_request_and_result_path(self):
         self.ctx.call_mcp = self.mcp_wire
@@ -364,6 +417,30 @@ class NativeOwnerQualification(unittest.TestCase):
             **request["native_origin"], "profile_id": "foreign-profile"}}
         self.assertFalse(self.mcp_wire("mastermind-fabric-exec", "fabric_request", foreign)["ok"])
         self.assertEqual(self.wire_last["calls"], [])
+
+    def test_installed_pin_and_byte_drift_refuse_before_request_engine(self):
+        self.ctx.call_mcp = self.mcp_wire
+        args = self.args()
+        self.persist("wire-submit", args)
+        self.assertEqual(self.invoke(self.mount(), "wire-submit", args)["state"],
+                         "CONTROLLER_CREATED")
+        request = self.requests[0]
+        self.wire_revision = "e" * 40
+        self.assertFalse(self.mcp_wire("mastermind-fabric-exec", "fabric_request", request)["ok"])
+        self.assertEqual(self.wire_last["calls"], [])
+        self.wire_revision = self.release_revision
+        target = self.plugin_dir / "native.py"
+        target.write_bytes(target.read_bytes() + b"\n# changed installed source\n")
+        self.assertFalse(self.mcp_wire("mastermind-fabric-exec", "fabric_request", request)["ok"])
+        self.assertEqual(self.wire_last["calls"], [])
+
+    def test_native_plugin_slot_link_cannot_redirect_qualifier(self):
+        moved = self.home / "different-plugin-slot"
+        self.plugin_dir.rename(moved)
+        self.plugin_dir.symlink_to(moved, target_is_directory=True)
+        with self.assertRaisesRegex(FabricNativeRefusal, "NOT_ENROLLED"):
+            register(self.ctx)
+        self.assertEqual(self.requests, [])
 
     def test_server_rechecks_enrollment_after_async_preflight(self):
         self.ctx.call_mcp = self.mcp_wire

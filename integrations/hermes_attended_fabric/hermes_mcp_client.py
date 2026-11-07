@@ -8,6 +8,7 @@ bind the original session grant and original-effect admission authority.
 from __future__ import annotations
 
 import inspect
+import json
 import re
 from collections.abc import Mapping
 from typing import Any, Callable
@@ -66,12 +67,18 @@ def bind_native_mcp_client(ctx: Any) -> Callable[[str, Mapping[str, Any]], Mappi
             raise FabricNativeRefusal("HERMES_FABRIC_MCP_RESPONSE_INVALID")
         if reply.get("ok") is not True:
             raise FabricNativeRefusal("HERMES_FABRIC_MCP_RESPONSE_REFUSED")
-        # Trust only Hermes's structuredContent or the parsed canonical
-        # result object, never arbitrary text, logs, nested tool errors, or
-        # a generic JSON-looking blob supplied by a different MCP server.
+        # Native Hermes removes duplicate structuredContent when its JSON is
+        # already in a text block. Decode that one exact result string from
+        # this enrolled client, then apply the same canonical schema checks.
+        # Never scrape logs, nested responses or another server's text.
         document = reply.get("structuredContent")
         if document is None:
             document = reply.get("result")
+            if type(document) is str and len(document) <= _MAX_RETURN_CHARS:
+                try:
+                    document = json.loads(document)
+                except (TypeError, ValueError):
+                    raise FabricNativeRefusal("HERMES_FABRIC_MCP_SCHEMA_INVALID") from None
         if (not isinstance(document, Mapping)
                 or document.get("schema") != FABRIC_SCHEMA
                 or document.get("action") != (

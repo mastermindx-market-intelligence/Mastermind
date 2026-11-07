@@ -33,6 +33,49 @@ def native_root(contract: Mapping[str, Any], origin: str) -> str:
         [contract["namespace"], contract["profile_id"], origin])[:40]
 
 
+PLUGIN_SOURCE = ("https://github.com/mastermindx-market-intelligence/Mastermind.git"
+                 "#integrations/hermes_attended_fabric")
+RUNTIME_FILES = tuple(sorted((
+    "__init__.py", "plugin.yaml", "native.py", "facade_port.py",
+    "hermes_mcp_client.py", "native_session.py", "native_evidence.py",
+    "enrollment_check.py",
+)))
+
+
+def package_fingerprint(directory: Path) -> str:
+    """Closed runtime file projection; not a second installation manifest."""
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError("HERMES_NATIVE_PACKAGE_PATH_REFUSED")
+    if any(p.suffix in {".py", ".so", ".pyd"} and p.name not in RUNTIME_FILES
+           for p in directory.iterdir()):
+        raise ValueError("HERMES_NATIVE_PACKAGE_MEMBER_REFUSED")
+    rows = []
+    for name in RUNTIME_FILES:
+        path = directory / name
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 2 * 1024 * 1024:
+            raise ValueError("HERMES_NATIVE_PACKAGE_MEMBER_REFUSED")
+        rows.append([name, hashlib.sha256(path.read_bytes()).hexdigest()])
+    return digest(rows)
+
+
+def installed_package_identity(home: Path) -> dict[str, str]:
+    """Read the incumbent native installer record and actual package bytes."""
+    plugins = home.resolve() / "plugins"
+    if plugins.is_symlink() or not plugins.is_dir():
+        raise ValueError("HERMES_NATIVE_PACKAGE_PATH_REFUSED")
+    metadata_path = plugins / ".install-metadata.json"
+    if (metadata_path.is_symlink() or not metadata_path.is_file()
+            or metadata_path.stat().st_size > 1024 * 1024):
+        raise ValueError("HERMES_NATIVE_INSTALL_RECORD_UNAVAILABLE")
+    entry = json.loads(metadata_path.read_text()).get(PLUGIN_ID, {})
+    revision = entry.get("revision")
+    if (entry.get("source") != PLUGIN_SOURCE or entry.get("pinned") is not True
+            or type(revision) is not str or re.fullmatch(r"[0-9a-f]{40}", revision) is None):
+        raise ValueError("HERMES_NATIVE_INSTALL_RECORD_REFUSED")
+    return {"source_revision": revision,
+            "package_sha256": package_fingerprint(plugins / PLUGIN_ID)}
+
+
 def read_enrollment(home: Path) -> dict[str, Any]:
     from hermes_cli.config import load_config_readonly
     from hermes_cli.profiles import get_active_profile_name
@@ -68,6 +111,7 @@ def read_enrollment(home: Path) -> dict[str, Any]:
         "request_admission_owner": "fabric_task.request",
         "root_policy": "native_conversation_namespace_v1",
         "manual_routes": sorted(manual, key=lambda x: (x["pool"], x["model"])),
+        **installed_package_identity(home),
     }
     contract["generation"] = digest([hermes_home_key(home), contract])
     return contract

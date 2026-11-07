@@ -11,6 +11,7 @@ import { resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import {spawn} from 'node:child_process';
+import {lstatSync,readFileSync,readdirSync,realpathSync} from 'node:fs';
 
 // Native policy stays inside the incumbent sealed, standalone backend blob.
 // Only explicit native mode reads the separately composed Hermes package.
@@ -24,19 +25,60 @@ const NATIVE_ORIGIN_SCHEMA=Object.freeze({
     'generation','turn_id','tool_call_id','task_key','tool_action','arguments_digest',
     'lease_holder_digest','enrollment_generation'].map(k=>[k,{type:'string',minLength:1,maxLength:256}])),
 });
-const CHECK=fileURLToPath(new URL('../hermes_attended_fabric/enrollment_check.py',import.meta.url));
+const NATIVE_PLUGIN='mastermind-fabric-worker';
+const NATIVE_PLUGIN_SOURCE='https://github.com/mastermindx-market-intelligence/Mastermind.git#integrations/hermes_attended_fabric';
+const NATIVE_PACKAGE_FILES=Object.freeze([
+  '__init__.py','plugin.yaml','native.py','facade_port.py','hermes_mcp_client.py',
+  'native_session.py','native_evidence.py','enrollment_check.py'].sort());
 const NATIVE_HERMES_TOOLS=Object.freeze([
   'fabric_capabilities','fabric_request','fabric_status','fabric_result']);
 const ACTIONS=new Set(NATIVE_HERMES_TOOLS.slice(1));
 
+function ordinaryHermesWorkerEnvironment() {
+  return (process.env.POOL_OPERATOR_CHILD_BUDGET??'0')==='0'
+    && ['FABRIC_OPERATOR_CHILD_ID','FABRIC_OPERATOR_CAPSULE','FABRIC_OPERATOR_CAPABILITY',
+      'FABRIC_OPERATOR_PRELEASE_CONTINUATION','FABRIC_OPERATOR_POST_SUPPORT_CONTINUATION',
+      'FABRIC_CANONICAL_PAID_MODE','FABRIC_CANONICAL_PAID_NONCE',
+      'FABRIC_CANONICAL_PAID_PAYLOAD_SHA256','FABRIC_CANONICAL_PAID_HOST',
+      'POOL_PRELEASE_HANDOFF'].every(k=>!process.env[k]);
+}
+
 function createHermesOriginAdmission(config=null) {
   if(config!==null && (typeof config!=='object' || Array.isArray(config)
-      || Object.keys(config).sort().join(',')!=='home,python,source'
-      || Object.values(config).some(x=>typeof x!=='string' || !isAbsolute(x) || x.includes('\0'))))
+      || Object.keys(config).sort().join(',')!=='home,packageSha256,python,revision,source'
+      || ['home','python','source'].some(k=>typeof config[k]!=='string'
+          || !isAbsolute(config[k]) || config[k].includes('\0'))
+      || !/^[0-9a-f]{40}$/.test(config.revision??'')
+      || !/^[0-9a-f]{64}$/.test(config.packageSha256??'')))
     throw new TypeError('invalid native Hermes enrollment configuration');
+  if(config!==null && !ordinaryHermesWorkerEnvironment())
+    throw new TypeError('native Hermes requires ordinary worker context');
   if(config!==null)config=Object.freeze({...config});
   const scoped=config!==null;
+  function installedHelper() {
+    if(!ordinaryHermesWorkerEnvironment())return null;
+    try {
+      const plugins=resolve(realpathSync(config.home),'plugins');
+      const root=resolve(plugins,NATIVE_PLUGIN);
+      if(!lstatSync(plugins).isDirectory() || !lstatSync(root).isDirectory())return null;
+      if(readdirSync(root).some(n=>/\.(py|so|pyd)$/.test(n) && !NATIVE_PACKAGE_FILES.includes(n)))return null;
+      const rows=NATIVE_PACKAGE_FILES.map(name=>{
+        const path=resolve(root,name),st=lstatSync(path);
+        if(!st.isFile() || st.size>2*1024*1024)throw new Error('package member unavailable');
+        return [name,createHash('sha256').update(readFileSync(path)).digest('hex')];
+      });
+      if(createHash('sha256').update(JSON.stringify(rows)).digest('hex')!==config.packageSha256)return null;
+      const record=resolve(plugins,'.install-metadata.json'),st=lstatSync(record);
+      if(!st.isFile() || st.size>1024*1024)return null;
+      const entry=JSON.parse(readFileSync(record,'utf8'))[NATIVE_PLUGIN];
+      if(entry?.source!==NATIVE_PLUGIN_SOURCE || entry?.pinned!==true
+          || entry?.revision!==config.revision)return null;
+      return resolve(root,'enrollment_check.py');
+    }catch{return null;}
+  }
   async function check(action,args) {
+    const checker=installedHelper();
+    if(checker===null)return null;
     const payload=JSON.stringify({action,arguments:args});
     if(Buffer.byteLength(payload)>65536) return null;
     return await new Promise(resolve=>{
@@ -48,14 +90,14 @@ function createHermesOriginAdmission(config=null) {
       };
       const timer=setTimeout(()=>{child?.kill('SIGKILL');finish(null);},10000);
       try {
-        child=spawn(config.python,[CHECK,config.source,config.home],{
+        child=spawn(config.python,[checker,config.source,config.home,config.revision,config.packageSha256],{
           stdio:['pipe','pipe','ignore'],windowsHide:true,
           env:{PATH:process.env.PATH??'',PYTHONNOUSERSITE:'1'},
         });
         child.on('error',()=>finish(null));
         child.stdout.on('data',chunk=>{
           size+=chunk.length;
-          if(size>8192){child.kill('SIGKILL');finish(null);}
+          if(size>32768){child.kill('SIGKILL');finish(null);}
           else chunks.push(chunk);
         });
         child.on('close',code=>{
@@ -66,11 +108,14 @@ function createHermesOriginAdmission(config=null) {
                 || value.authorized!==true || value.contract?.schema!==ENROLLMENT_SCHEMA
                 || value.contract.enabled!==true
                 || value.contract.kind!=='hermes_attended_session'
+                || value.contract.source_revision!==config.revision
+                || value.contract.package_sha256!==config.packageSha256
+                || installedHelper()!==checker
                 || !/^[0-9a-f]{64}$/.test(value.contract.generation??'')) return finish(null);
             finish(value.contract);
           }catch{finish(null);}
         });
-        child.stdin.on('error',()=>finish(null));
+        child.stdin.on('error',()=>{child.kill('SIGKILL');finish(null);});
         child.stdin.end(payload);
       }catch{child?.kill('SIGKILL');finish(null);}
     });
@@ -918,11 +963,14 @@ async function main() {
   const engineEntry=process.env.MMX_FABRIC_ENGINE_ENTRY??resolve(homedir(),'.local/share/desktop-commander-service/vendor/node_modules/@wonderwhy-er/desktop-commander/dist/index.js');
   if(!isAbsolute(engineEntry)) throw new Error('ENGINE_ENTRY_MUST_BE_ABSOLUTE');
   const engine=new Client({name:'mastermind-fabric-process-transport',version:VERSION},{capabilities:{}});
-  await engine.connect(new StdioClientTransport({command:process.execPath,args:[engineEntry],cwd:homedir(),env:{...process.env},stderr:'inherit'}));
-  const hermesFields=[process.env.MMX_FABRIC_HERMES_HOME,process.env.MMX_FABRIC_HERMES_SOURCE,process.env.MMX_FABRIC_HERMES_PYTHON];
+  const hermesFields=[process.env.MMX_FABRIC_HERMES_HOME,process.env.MMX_FABRIC_HERMES_SOURCE,
+    process.env.MMX_FABRIC_HERMES_PYTHON,process.env.MMX_FABRIC_HERMES_REVISION,
+    process.env.MMX_FABRIC_HERMES_PACKAGE_SHA256];
   const hermesNative=hermesFields.some(x=>x!==undefined)
-    ? {home:hermesFields[0],source:hermesFields[1],python:hermesFields[2]} : null;
+    ? {home:hermesFields[0],source:hermesFields[1],python:hermesFields[2],
+       revision:hermesFields[3],packageSha256:hermesFields[4]} : null;
   const facade=createFabricFacade(engine,{adapterPath:process.env.MMX_FABRIC_ADAPTER_PATH??DEFAULT_ADAPTER,python:process.env.MMX_FABRIC_PYTHON??'python3',workerCwd:process.env.MMX_FABRIC_WORKER_CWD??'~',quotaFallback:true,hermesNative});
+  await engine.connect(new StdioClientTransport({command:process.execPath,args:[engineEntry],cwd:homedir(),env:{...process.env},stderr:'inherit'}));
   const server=new Server({name:'mastermind-subagent-fabric',version:VERSION},{capabilities:{tools:{}}});
   const advertised=hermesNative ? FABRIC_TOOLS.filter(t=>NATIVE_HERMES_TOOLS.includes(t.name)) : FABRIC_TOOLS;
   server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:advertised}));

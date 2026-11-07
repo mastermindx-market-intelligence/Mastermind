@@ -33,14 +33,35 @@ The release must contain this complete package, including `plugin.yaml`,
 The same release must contain the existing
 `integrations/studio_direct_mcp/fabric-backend.mjs` and its incumbent dependencies.
 The native JavaScript admission verifier is contained in that existing sealed
-backend blob, preserving ordinary operator deployment. Native mode additionally
-requires the complete Python package above; the checker resolves it from that
-same release. Mixing package files from unrelated heads is unsupported.
+backend blob, preserving ordinary operator deployment. Native mode derives its
+checker from `<HERMES_HOME>/plugins/mastermind-fabric-worker/enrollment_check.py`.
+It verifies the existing native install record and the closed runtime file digest
+before starting that checker, and rechecks after its return. Both the backend
+blob and plugin pin must come from the same selected protected release.
 
-Publish through the existing protected source and release workflow. Install
-the plugin directory using the existing Hermes plugin lifecycle after its
-release identity has been verified. Preserve native active turns and the H4
-gateway custody; source verification is not authorization to force a reload.
+The closed runtime file projection consists of `__init__.py`, `plugin.yaml`,
+`native.py`, `facade_port.py`, `hermes_mcp_client.py`, `native_session.py`,
+`native_evidence.py` and `enrollment_check.py`. `package_fingerprint()` in
+`native_evidence.py` computes the digest from exact bytes in sorted filename
+order. This is a projection of the selected release; no additional installation
+record or publication owner is created.
+
+Publish through the existing protected source and release workflow. The native
+installation owner accepts the source
+`mastermindx-market-intelligence/Mastermind#integrations/hermes_attended_fabric`
+with `--ref <full-40-character-selected-release-SHA>` under `hermes plugins install`.
+Use that existing installer in the qualified profile and H4 activation window.
+It holds `plugin_update_lock`, uses `plugins_transaction.publish_plugin` and
+`pm.client.sync_venv(StagedUpdate)`, and retains its existing rollback and target
+digest checks. Do not copy live plugin files or write its metadata independently.
+
+Read back `<HERMES_HOME>/plugins/.install-metadata.json`: the
+`mastermind-fabric-worker` entry must contain source
+`https://github.com/mastermindx-market-intelligence/Mastermind.git#integrations/hermes_attended_fabric`,
+the selected exact `revision`, and `pinned: true`. Verify the installed runtime
+file digest against the same release projection. A valid-looking native pin
+alone is not proof of unchanged installed bytes. Preserve native active turns
+and H4 gateway custody; source verification does not authorize a forced reload.
 
 ## Existing profile configuration
 
@@ -73,6 +94,8 @@ mcp_servers:
       MMX_FABRIC_HERMES_HOME: /absolute/path/to/native-profile
       MMX_FABRIC_HERMES_SOURCE: /absolute/path/to/native-hermes-source
       MMX_FABRIC_HERMES_PYTHON: /absolute/path/to/native-python
+      MMX_FABRIC_HERMES_REVISION: <full-selected-protected-release-SHA>
+      MMX_FABRIC_HERMES_PACKAGE_SHA256: <closed-runtime-package-SHA256>
       MMX_FABRIC_ADAPTER_PATH: /absolute/path/to/incumbent/fabric_task.py
     tools:
       include: []
@@ -83,10 +106,27 @@ restarts, compression and source upgrades so original task identities remain
 recoverable. Changing namespace or moving a profile requires reconciling
 existing tasks before a new origin is used.
 
-The three `MMX_FABRIC_HERMES_*` values are all-or-none and must be absolute.
-They select the existing native owner; no model input can change them. A
-native-scoped backend never falls back to broad operator authority if native
-enrollment or the database is unavailable.
+The five `MMX_FABRIC_HERMES_*` values are all-or-none. The first three are
+absolute installed paths; `REVISION` is the selected full 40-character commit,
+and `PACKAGE_SHA256` is the selected release's closed runtime digest. These
+are source/deployment identity fields, not credentials or model arguments.
+
+Compute the package digest from the exact qualified release with
+`package_fingerprint(Path("integrations/hermes_attended_fabric"))`, imported
+from its `integrations.hermes_attended_fabric.native_evidence` module. The
+backend independently computes the same closed file map before helper execution.
+It rejects replaced plugin-slot links, foreign/missing install records, revision
+mismatch and changed runtime bytes. The helper imports the installed directory
+as a private package; it does not require an ambient repository checkout.
+
+The existing release owner supplies these identities together with the backend's
+existing blob seal. Native enrollment also refuses inherited operator-child,
+operator-capability, canonical-paid-control or prelease-handoff context and a
+nonzero operator-child budget. It never clears or borrows another operation's
+identity. The existing request owner receives an ordinary WORKER request with
+the explicit native root/parent; no Executive Job or `--native-return` identity
+is invented. A native-scoped backend never falls back to broad operator authority
+if the package, enrollment or database is unavailable.
 
 `tools.include: []` uses Hermes's existing MCP inventory filter to keep raw
 Fabric tools out of ordinary model discovery. The native plugin uses
@@ -191,9 +231,9 @@ backend blob:
 
 | Check | Observed result |
 | --- | --- |
-| Existing package unittest discovery | 67 passed; exit 0 |
-| Existing Fabric backend, capacity and diagnostic Node suites | 132 passed; 0 failed/skipped; exit 0 |
-| Explicit native owner and actual server-verifier suite | 18 passed; 0 failed/skipped; exit 0 |
+| Existing package unittest discovery | 68 passed; exit 0 |
+| Existing Fabric backend, capacity and diagnostic Node suites | 135 passed; 0 failed/skipped; exit 0 |
+| Explicit native owner, installed layout, actual MCP formatter and server-verifier suite | 22 passed; 0 failed/skipped; exit 0 |
 | Selected canonical pytest package and exact identity-review cases | Command completed; exit 0 |
 | Compile, whitespace and the unchanged escalation-limit source review pin | Passed; exit 0 |
 
@@ -202,13 +242,45 @@ The selected pytest command was
 The repository's quiet pytest settings did not emit a final case count, so none
 is inferred here.
 
-The native suite includes cold discovery before MCP readiness, first-use
-attestation, unpersisted calls, duplicate logical tasks, interruption, response
-loss, compression lineage, current lease loss, server rejection of missing or
-foreign origin, original result recovery, and policy revocation during async
-preflight. It uses real native owners with temporary profiles and a fixture
-at the final Fabric execution boundary.
+The native suite includes actual directory-plugin loading before MCP readiness,
+first-use attestation, the installed MCP formatter and JSON-text envelope,
+read-only capacity preview, unpersisted calls, duplicate tasks, interruption,
+response loss, compression, lease loss, foreign origin, result recovery and
+revocation during async preflight. It also rejects mismatched installed source
+pins, changed runtime bytes and replaced plugin-slot links. The Node suite
+independently proves that an unsealed helper cannot execute, using a real child
+process as its positive control.
+
+These checks use temporary profiles, a copied runtime package and fixture native
+install metadata. They exercise the real native loader and APIs; they do not
+claim that the native installer transaction ran. The final paid execution
+boundary remains a fixture. The qualified runtime file projection is
+`c099a74d4ec0f68a4623ba56191e93c0a64e7d3384e6bdd9773793887e7de927`.
 
 This is author source qualification with focused principal integration
 judgment. It is not a formal GitHub APPROVED review, protected merged-source
 proof, a native install, or a provider/worker acceptance receipt.
+
+### Hosted baseline repair retained from its original source
+
+The first contribution head13b5 hit the existing
+`ComposedPreservingMigrationTests.test_composed_preserving_migration_imports_then_observes_once`
+failure in [CI shard0](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42381586802/job/128430824459).
+That run reported684 Studio cases with one failure; it is not counted as green.
+
+The original H6/C2 fix is adopted unchanged from primary contribution
+`c40f58b42383684e0ded1db7a7cb48741ddb7abf` as a coherent pair:
+
+- `control_bundle_closure_test.py`: Git blob `dc17d077a6a0f787db857a6c1f66f0ad354ea857`.
+- `private_service_original_delivery_test.py`: Git blob `41dae1f1e0f29b542137ebf53f01a3e16b7f473d`.
+
+[The existing hosted observation job](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42381637919/job/128430305746)
+shows that exact case passing in three contexts. That diagnostic job remains red
+because other full-discovery fixtures lacked their historical Git inputs; it
+is not relabeled as a passing whole job.
+
+The pair requires the current application target's original service API.
+Running it alone on the older protected parent reports missing
+`ORIGINAL_COLLECTION_LEGACY_SCHEMA`, so it must be qualified on the actual
+composed target. The production guard and original assertions are preserved;
+no new parallel fixture repair, skip, or runtime relaxation is introduced.

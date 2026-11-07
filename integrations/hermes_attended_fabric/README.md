@@ -1,7 +1,7 @@
 # Native Hermes → Mastermind Fabric
 
 **Source status:** native plugin composition, profile enrollment, and server-side
-origin verification are implemented. The installed M2 profile is not enrolled
+origin and installed-package verification are implemented. The installed M2 profile is not enrolled
 for worker execution by this change. No live worker START, paid-model inference,
 terminal result, or product acceptance is claimed.
 
@@ -61,8 +61,10 @@ single-use dispatch and Fabric's retained exclusive request reservation remain
 the actual effect fences. A transcript read or process-local flag is not
 described as atomic durable admission.
 
-The same existing Fabric facade has an optional native-scoped mode.
-Its native-origin verifier invokes a bounded read-only projection of the
+The same existing Fabric facade has an optional native-scoped mode. Its sealed
+backend verifies the selected release revision, native installer record and
+closed runtime-file digest before invoking the fixed installed checker.
+Its native-origin verifier then reads a bounded read-only projection of the
 installed profile and SessionDB. It checks the profile, origin, live turn lease,
 runtime generation, persisted call, exact packet, and manual-route grant before
 any request effect, again after asynchronous preflight, and before releasing
@@ -91,8 +93,11 @@ entitlement, availability and consent checks. Existing pre-task quota
 continuation is preserved; ambiguous effects never authorize model switching
 or task replay.
 
-The preview action uses the installed read-only capacity MCP. It makes no
-reservation. It can be unavailable independently of execution enrollment.
+The preview action uses the installed read-only capacity MCP and its explicit
+`PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH` proof. Both clients handle Hermes's
+actual MCP normalization, which can remove duplicated structured content and
+retain a single canonical JSON-text result. Preview makes no reservation and
+can be unavailable independently of execution enrollment.
 
 ## Results, interruption and recovery
 
