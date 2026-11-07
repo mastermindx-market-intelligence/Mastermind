@@ -40,7 +40,7 @@ def call(awaitable):
     return asyncio.run(awaitable)
 
 
-def principal(*,subject="a"*64,scopes=("mastermind.executive.read",CANARY_SCOPE)):
+def principal(*,subject="a"*64,scopes=(CANARY_SCOPE,)):
     return neutral_principal_projection(
         policy_id="mmx-chris-dot",issuer=ISSUER,
         issuer_digest=hashlib.sha256(ISSUER.encode()).hexdigest(),
@@ -61,7 +61,8 @@ def resources():
         unknown_kid_refresh_cooldown_seconds=30,fetch_failure_backoff_seconds=5)
     accepted=load_resource_policy(raw)
     alt=load_resource_policy({**raw,"policy_id":"mmx-chris-dot-submit",
-        "required_scopes":["mastermind.executive.read"]})
+        "required_scopes":sorted(["mastermind.executive.read",
+                                   "mastermind.executive.intent.submit"])})
     return ReplyPolicySelection((AppPolicies(read=accepted,submit=alt),))
 
 
@@ -132,7 +133,7 @@ def test_account_owner_and_scope_deny_before_callback_or_write(tmp_path):
     assert call(handler.policy_for(foreign)) is None
     with pytest.raises(Exception):
         call(handler.subscribe(foreign,request()))
-    wrong_scope=principal(scopes=("mastermind.executive.read",))
+    wrong_scope=principal(scopes=())
     assert call(handler.policy_for(wrong_scope)) is None
     with pytest.raises(Exception):
         call(handler.subscribe(wrong_scope,request()))
