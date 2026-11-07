@@ -503,15 +503,12 @@ class NativeRuntime:
         with self.readonly_database() as db:
             owner, receipt, row, logical = self.owned_history(db, session_id,
                 expected_request_id=expected_request_id)
-            visible, exhausted = [], False
-            for offset in range(0, 1000, 200):
-                page = db.get_messages(row["id"], include_compacted=True, include_ancestors=True,
-                                       limit=200, offset=offset, latest=True)
-                visible = [{"role": item["role"], "text": message_text(item.get("content", ""))}
-                           for item in page if item.get("role") in {"user", "assistant"}] + visible
-                exhausted = len(page) < 200
-                if len(visible) > 100 or exhausted:
-                    break
+            # A single bounded owner read avoids shifting newest-relative offsets
+            # when messages arrive between separate autocommit queries.
+            page = db.get_messages(row["id"], include_compacted=True, include_ancestors=True,
+                                   limit=1000, offset=0, latest=True)
+            visible = [{"role": item["role"], "text": message_text(item.get("content", ""))}
+                       for item in page if item.get("role") in {"user", "assistant"}]
             pending = list_session_admissions(db, session_id=owner)
             if len(pending) > 1000:
                 raise BridgeRefusal("NATIVE_RESPONSE_INVALID")
@@ -525,7 +522,7 @@ class NativeRuntime:
                 "canSend": False, "toolAccess": "UNQUALIFIED", "sendCheckRequired": True,
                 "running": None, "executionGeneration": integer(logical.get("runtime_generation")),
                 "messageCount": count, "messages": visible[-100:],
-                "historyTruncated": len(visible) > 100 or not exhausted, "pending": projected,
+                "historyTruncated": len(visible) > 100 or len(page) == 1000, "pending": projected,
                 "promptsPending": None}
         return {"session": result}
 

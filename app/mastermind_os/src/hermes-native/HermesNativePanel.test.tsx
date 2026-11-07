@@ -252,6 +252,22 @@ describe("existing stored native conversations", () => {
     expect(p.request.mock.calls.find(([r]) => r.operation === "send")?.[0]).toMatchObject({ sessionId: "session-one", text: "  original follow-up\n 中文" });
     expect((screen.getByRole("textbox", { name: "Message Hermes" }) as HTMLTextAreaElement).value).toBe("  original follow-up\n 中文");
   });
+  it("refreshes the logical conversation after its physical transcript rotates", async () => {
+    const p = await openSaved();
+    p.request.mockResolvedValueOnce(view({ operation: "read", session: {
+      ...savedSession(), storedId: "physical-old", messages: [{ role: "assistant", text: "Before rotation." }] } }));
+    fireEvent.click(screen.getByRole("button", { name: "Read original conversation" }));
+    await screen.findByText("Before rotation.");
+    p.request.mockImplementation(async request => {
+      if (request.operation !== "read" || request.sessionId !== "session-one") throw new Error("NATIVE_RESPONSE_INVALID");
+      return view({ operation: "read", session: { ...savedSession(), storedId: "physical-new",
+        messages: [{ role: "assistant", text: "The same conversation after rotation." }] } });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Read original conversation" }));
+    await screen.findByText("The same conversation after rotation.");
+    expect(p.request).toHaveBeenLastCalledWith({ operation: "read", sessionId: "session-one" });
+    expect(p.request.mock.calls.filter(([r]) => r.operation === "create" || r.operation === "send")).toHaveLength(0);
+  });
   it("keeps a durable unknown admission held when live state is unobserved", async () => {
     const p = await openSaved();
     p.request.mockResolvedValueOnce(view({ operation: "read", session: { ...savedSession(),

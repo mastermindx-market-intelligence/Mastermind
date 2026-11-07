@@ -127,7 +127,7 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(result["pending"], [{"id": "original-admission", "status": "unknown"}])
         self.assertNotIn("private", str(result))
         self.db.get_messages.assert_called_once_with(TIP, include_compacted=True, include_ancestors=True,
-                                                     limit=200, offset=0, latest=True)
+                                                     limit=1000, offset=0, latest=True)
         self.assertFalse(result["historyTruncated"])
         self.assertGreaterEqual(self.lineage.call_count, 2)
 
@@ -171,14 +171,31 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(result["messages"][0]["text"], "answer-140")
         self.assertEqual(result["messages"][-1]["text"], "answer-239")
         self.assertTrue(result["historyTruncated"])
-        self.assertLessEqual(self.db.get_messages.call_count, 5)
+        self.assertEqual(self.db.get_messages.call_count, 1)
         self.assertNotIn("private", str(result))
         self.messages = [{"role": "tool", "content": "private"}] * 2000
         self.db.get_messages.reset_mock()
         result = self.runtime.read_history(SID)["session"]
         self.assertEqual(result["messages"], [])
         self.assertTrue(result["historyTruncated"])
-        self.assertEqual(self.db.get_messages.call_count, 5)
+        self.assertEqual(self.db.get_messages.call_count, 1)
+
+    def test_concurrent_append_does_not_overlap_visible_history(self):
+        self.messages = [item for i in range(120) for item in (
+            {"role": "assistant", "content": f"answer-{i}"},
+            *({"role": "tool", "content": "private trace"} for _ in range(4)))]
+        expected = [{"role": "assistant", "text": f"answer-{i}"} for i in range(20, 120)]
+
+        def append_after_snapshot(sid, **options):
+            page = self.message_page(sid, **options)
+            self.messages.extend({"role": "assistant", "content": "later append"} for _ in range(35))
+            return page
+
+        self.db.get_messages.side_effect = append_after_snapshot
+        result = self.runtime.read_history(SID)["session"]
+        self.assertEqual(result["messages"], expected)
+        self.assertTrue(result["historyTruncated"])
+        self.assertNotIn("later append", str(result["messages"]))
 
     def test_storage_identity_and_mode_fail_before_exposing_history(self):
         self.path.chmod(0o622)

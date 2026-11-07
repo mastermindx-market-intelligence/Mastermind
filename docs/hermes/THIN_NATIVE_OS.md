@@ -436,3 +436,49 @@ including disabled refresh, Executive resource, launch catalogue and the same
 Terminal public-key derivation. Apple Developer ID/notarization/updater and
 broader remote-company acceptance remain separate holds. No active Hermes
 service restart, original-canary replay or fabricated pending record is permitted.
+
+
+## History consistency follow-up after e7b26baf
+
+The clean published history checkpoint
+`e7b26bafc24bb63a6078a930ac7a56360cbc1ce9` was consumed without changing its
+completed package. Two bounded edge cases were reproduced in focused regressions:
+concurrent appends shifted newest-relative offsets between autocommit history
+pages, and a refresh using an old physical transcript ID failed after rotation.
+
+The adapter now takes one bounded incumbent history read (at most 1,000 rows),
+then filters and retains the latest 100 visible messages. It preserves owner,
+profile, lineage and receipt checks. The panel refreshes the stable logical
+session ID, preserving the port's strict target validation. The existing durable
+uncertainty hold, request binding and explicit send preflight remain unchanged.
+Neither fix creates a session, sends a prompt or introduces a state owner.
+
+Both new regression tests failed against e7 before the fixes and passed after.
+Their retained negative logs are
+`/tmp/hermes-thin-history-append-red-20261107-c1.log` and
+`/tmp/hermes-thin-history-rotation-red-20261107-c1.log`.
+
+| Current combined check | Actual result | Retained receipt |
+|---|---|---|
+| Native bridge and read-only history | 40 passed; 25 subtests passed | `/tmp/hermes-thin-history-final-python-20261107-c1.log` |
+| Contract, native port and panel | 42 passed across 3 files | `/tmp/hermes-thin-history-final-web-20261107-c1.log` |
+| TypeScript | Passed | `/tmp/hermes-thin-history-final-typecheck-20261107-c1.log` |
+| Exact paired translation composition, Macro f0375acf | 23 passed | `/tmp/hermes-thin-realm-fixture-composition-20261107-c1.log` |
+| Commercial realm source boundaries | 16 passed | `/tmp/hermes-thin-commercial-realm-source-20261107-c1.log` |
+
+The inherited composition-fixture pin repair in e7 retains every source guard;
+only the reviewed protected #1824 realm blob changed. The separate broad local
+Codex-realm suite produced eight passes and one installed-binary hash mismatch
+before native Codex execution (`88133672…` versus pinned `16593cc2…`). That
+unrelated installed-Codex qualification is not claimed or altered; the relevant
+commercial-realm source checks and exact paired composition above pass.
+The first disposable provider test invocation lacked `ops.executive_os`; its
+collection error is retained separately from the subsequent complete-context run.
+
+The e7 debug candidate build completed with its actual source and full existing
+public profile at 06:29:22Z, under
+`/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-e7b26bafc24b/`.
+It does not contain these later history edge-case fixes. The active native UI lane
+retains that immutable artifact and original canary; final package equivalence,
+installed acceptance and protected release must bind the subsequent exact source.
+No new canary or synthetic pending pointer was created.

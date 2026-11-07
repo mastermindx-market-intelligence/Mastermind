@@ -135,7 +135,7 @@ export function HermesNativePanel({ locale, port = nativeHermesPort }: { locale:
   };
   const readOriginal = async () => {
     if (heldRef.current) { await checkPrevious(); return; }
-    const target = session?.storedId ?? receipt?.sessionId;
+    const target = session?.id ?? receipt?.sessionId;
     if (!target) return;
     if (receipt && receipt.status !== "terminal") await perform({ operation: "receipt", sessionId: receipt.sessionId, admissionId: receipt.id });
     await perform({ operation: "read", sessionId: target });
