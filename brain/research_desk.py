@@ -385,17 +385,52 @@ def ingest_proposals(asof: str | None = None, *, blocked: set[str] | None = None
                 thesis=r.get("thesis", ""), state_asof=asof, evidence=r.get("evidence", []),
                 dissent=clamp_note, sleeve="conviction",
             ).finalize()                 # engine-derives the falsifier + check_by + time_stop_by
-            appended = ledger.append(doc.to_json())
-            if con is not None:
+            receipt = ledger.append_receipt(doc.to_json())
+            appended = receipt["appended"]
+            thesis_id = receipt["thesis_id"]
+            # The SQL store is a projection of a real canonical ledger effect. Never create a row
+            # for a proposed DecisionDoc that the one-open-subject ledger invariant refused.
+            if con is not None and appended:
                 try:
                     from data_layer import store
                     store.insert_thesis(con, doc.to_json())
                 except Exception:
                     pass
-            out.append({"id": doc.id, "subject": doc.subject, "lean": doc.lean,
-                        "clamped": bool(clamp_note), "appended": appended,
-                        "falsifier_kind": doc.falsifier["check"]["kind"]})
-            kept.append({**r, "status": "ingested", "thesis_id": doc.id})
+            item = {
+                "id": thesis_id, "subject": doc.subject,
+                "clamped": bool(clamp_note), "appended": appended,
+            }
+            if appended:
+                item["lean"] = doc.lean
+                item["falsifier_kind"] = doc.falsifier["check"]["kind"]
+            else:
+                # These values describe the rejected proposal, not the existing canonical thesis.
+                item["deduplicated"] = True
+                item["proposed_id"] = doc.id
+                item["proposed_lean"] = doc.lean
+                item["proposed_falsifier_kind"] = doc.falsifier["check"]["kind"]
+            out.append(item)
+            if appended:
+                kept.append({**r, "status": "ingested", "thesis_id": thesis_id})
+            else:
+                kept.append({
+                    **r,
+                    "status": "deduplicated",
+                    "thesis_id": thesis_id,
+                    "proposed_thesis_id": doc.id,
+                    "dedup_reason": receipt["reason"],
+                })
+
+        ingested_count = sum(1 for o in out if o["appended"])
+        deduplicated_count = len(out) - ingested_count
+        result = {
+            "ingested": ingested_count,
+            "clamped": sum(1 for o in out if o["clamped"]),
+            "theses": out,
+            "asof": asof,
+        }
+        if deduplicated_count:
+            result["deduplicated"] = deduplicated_count
 
         try:
             _atomic_write_proposals(queue, kept)
@@ -404,10 +439,7 @@ def ingest_proposals(asof: str | None = None, *, blocked: set[str] | None = None
             # Preserve known ledger effects independently of queue publication.
             # An attempted replacement without a success receipt requires reconciliation.
             return {
-                "ingested": len(out),
-                "clamped": sum(1 for o in out if o["clamped"]),
-                "theses": out,
-                "asof": asof,
+                **result,
                 "proposal_queue_status": "unavailable" if not_committed else "unknown",
                 "proposal_rows_marked": False if not_committed else None,
                 "error": (
@@ -419,7 +451,7 @@ def ingest_proposals(asof: str | None = None, *, blocked: set[str] | None = None
                     "ledger and proposal queue before considering a retry."
                 ),
             }
-        return {"ingested": len(out), "clamped": sum(1 for o in out if o["clamped"]), "theses": out, "asof": asof}
+        return result
 
 
 def daily_research_and_ingest(asof: str | None = None, *, blocked: set[str] | None = None) -> dict:
