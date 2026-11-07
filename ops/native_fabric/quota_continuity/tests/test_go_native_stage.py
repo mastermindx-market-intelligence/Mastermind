@@ -105,10 +105,18 @@ def loaded_entry(published, *, clean_yaml=False):
         sys.modules.update(previous)
         sys.path[:] = path_before
 
+def before_sparse_commit_preflight(manifest):
+    previous = dict(manifest)
+    if previous.get("ext/remote_sub_exec.py") == builder.SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST:
+        previous["ext/remote_sub_exec.py"] = builder.SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE
+        assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256
+    return previous
+
+
 def before_admission_integrity(manifest):
     # Historical-generation cases retain their exact parent, while the current
     # build and the new successor tests below inspect the actual repaired bytes.
-    previous = dict(manifest)
+    previous = before_sparse_commit_preflight(manifest)
     if any(previous.get(name) == digest
            for name, digest in builder.ADMISSION_INTEGRITY_DIGESTS.items()):
         assert {name: previous[name] for name in builder.ADMISSION_INTEGRITY_DIGESTS} == builder.ADMISSION_INTEGRITY_DIGESTS
@@ -819,8 +827,8 @@ def test_application_carrier_cannot_relabel_another_complete_base(builds, mutati
 
 def test_application_carrier_inventory_retains_actual_candidate_provenance(builds):
     inventory = json.loads((builds.default / "native-source-inventory.json").read_bytes())
-    current = application_carrier_parent_manifest(builds)
-    for name, expected in builder.APPLICATION_CARRIER_DIGESTS.items():
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    for name, expected in builder._application_carrier_candidate_digests(ROOT).items():
         row = inventory["files"]["ext/" + name]
         raw = (builds.default / "native-code-stage/ext" / name).read_bytes()
         assert row["source"] == "candidate/" + name
@@ -842,7 +850,7 @@ def test_application_carrier_source_requires_all_five_exact_members(builds, tmp_
 
 
 def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent(builds):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_sparse_commit_preflight(json.loads((builds.default / "native-manifest.json").read_bytes()))
     original = dict(current)
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     previous = before_admission_integrity(current)
@@ -868,7 +876,7 @@ def test_admission_integrity_successor_binds_actual_sources_and_preserves_parent
     "historical106", "historical104", "historical102",
 ])
 def test_admission_integrity_rejects_partial_foreign_and_backdated_closures(builds, corruption):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_sparse_commit_preflight(json.loads((builds.default / "native-manifest.json").read_bytes()))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     bad = dict(current)
     if corruption in ("old-task", "old-runtime"):
@@ -939,7 +947,8 @@ def test_both_exact_admission_repair_lineages_remain_distinct(builds, lineage):
         parent_identity = "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
         historical_identity = parent_identity
     else:
-        raw = (builds.default / "native-manifest.json").read_bytes()
+        actual = json.loads((builds.default / "native-manifest.json").read_bytes())
+        raw = (json.dumps(before_sparse_commit_preflight(actual), sort_keys=True, indent=2) + "\n").encode()
         current_identity = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
         parent_identity = "3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9"
         historical_identity = "e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4"
@@ -969,7 +978,7 @@ def test_both_exact_admission_repair_lineages_remain_distinct(builds, lineage):
 ])
 @pytest.mark.parametrize("replacement", ["worker", "foreign"])
 def test_repaired_application_rejects_change_to_any_preserved_member(builds, member, replacement):
-    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    current = before_sparse_commit_preflight(json.loads((builds.default / "native-manifest.json").read_bytes()))
     worker_raw = (ROOT.parents[2] / "tests/fixtures/fabric-admission-integrity-worker107-3b2338d.json").read_bytes()
     assert g.digest(worker_raw) == "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
     worker = json.loads(worker_raw)
@@ -986,8 +995,69 @@ def test_repaired_application_rejects_change_to_any_preserved_member(builds, mem
 @pytest.mark.parametrize("extended", ["application", "http"])
 def test_repaired_base_cannot_relabel_an_extended_namespace(builds, extended):
     manifest = json.loads((getattr(builds, extended) / "native-manifest.json").read_bytes())
+    assert manifest["ext/remote_sub_exec.py"] == builder.SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST
+    manifest["ext/remote_sub_exec.py"] = builder.SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE
     original = dict(manifest)
     captured = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     with pytest.raises(ValueError, match="admission integrity parent closure"):
         builder.validate_go_base_manifest(manifest, captured)
     assert manifest == original
+
+
+
+def test_sparse_preflight_is_one_exact_successor_of_the_repaired_application_parent(builds):
+    raw = (builds.default / "native-manifest.json").read_bytes()
+    assert g.digest(raw) == "1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0"
+    current = json.loads(raw)
+    original = dict(current)
+    previous = builder.before_sparse_commit_preflight(current)
+    assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+    assert {name for name in current if current[name] != previous[name]} == {"ext/remote_sub_exec.py"}
+    installed_parent = builder.before_admission_integrity(previous)
+    assert {name for name in current if current[name] != installed_parent[name]} == {
+        "ext/fabric_task.py", "ext/lane_runtime.py", "ext/remote_sub_exec.py",
+    }
+    captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    for value in (current, previous):
+        unchanged = dict(value)
+        builder.validate_go_base_manifest(value, captured)
+        assert value == unchanged
+    assert builder.normalize_application_carrier_base_manifest(current) == builder.normalize_application_carrier_base_manifest(previous)
+    for output in (builds.default, builds.application, builds.http):
+        manifest = json.loads((output / "native-manifest.json").read_bytes())
+        raw = (output / "native-code-stage/ext/remote_sub_exec.py").read_bytes()
+        assert manifest["ext/remote_sub_exec.py"] == g.digest(raw) == builder.SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST
+    assert current == original
+
+
+@pytest.mark.parametrize("corruption", [
+    "old-task", "old-runtime", "old-application-parent", "worker-lineage",
+    "foreign-member", "missing-member", "extra-member", "application109", "http112",
+])
+def test_sparse_preflight_cannot_relabel_a_different_complete_parent(builds, corruption):
+    current = json.loads((builds.default / "native-manifest.json").read_bytes())
+    bad = dict(current)
+    if corruption in {"old-task", "old-runtime"}:
+        name = "ext/fabric_task.py" if corruption == "old-task" else "ext/lane_runtime.py"
+        bad[name] = builder.ADMISSION_INTEGRITY_PREIMAGES[name]
+    elif corruption == "old-application-parent":
+        bad.update(builder.ADMISSION_INTEGRITY_PREIMAGES)
+    elif corruption == "worker-lineage":
+        fixture = ROOT.parents[2] / "tests/fixtures/fabric-admission-integrity-worker107-3b2338d.json"
+        assert g.digest(fixture.read_bytes()) == "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+        bad = json.loads(fixture.read_bytes())
+        bad["ext/remote_sub_exec.py"] = builder.SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST
+    elif corruption == "foreign-member":
+        bad["ext/lease_broker.py"] = "f" * 64
+    elif corruption == "missing-member":
+        del bad["ext/original_advertised_artifact.py"]
+    elif corruption == "extra-member":
+        bad["ext/foreign.py"] = "f" * 64
+    else:
+        output = builds.application if corruption == "application109" else builds.http
+        bad = json.loads((output / "native-manifest.json").read_bytes())
+    unchanged = dict(bad)
+    captured = {name: bad["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+    with pytest.raises(ValueError, match="sparse commit preflight parent closure"):
+        builder.validate_go_base_manifest(bad, captured)
+    assert bad == unchanged

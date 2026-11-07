@@ -40,7 +40,7 @@ def test_historical_four_plus_three_exact_bounded_forward_compositions():
         'native_remote.py', 'remote_sub.sh', 'remote_sub_exec.py',
         'remote_sub_helpers.py', 'support_bundle.py',
     }
-    for name, expected in m.APPLICATION_CARRIER_DIGESTS.items():
+    for name, expected in m._application_carrier_candidate_digests(DRAFT.parent).items():
         raw = (DRAFT.parent / 'candidate' / name).read_bytes()
         row = inventory['files']['ext/' + name]
         assert hashlib.sha256(raw).hexdigest() == manifest['ext/' + name] == expected

@@ -472,3 +472,28 @@ Qualification:
 - The broader local native-security module reported 35 passes and 32 failures at the existing FABRIC_SPARSE_GIT_OBSERVATION_UNQUALIFIED boundary. That is not a green security receipt. Hosted Linux qualification remains required; no guard, assertion, Git binary, environment contract or CI gate was weakened.
 
 No live generation was published or selected, no provider task was dispatched, and no APPLICATION profile or service was activated. Final acceptance requires incorporation into #2175 at its then-current head, the original #2187 protected-source integration, exact-head hosted checks, the final protected merge, fresh installed predecessor verification, the existing immutable publisher/selector, and authenticated consumer proof. The installed M2/C26, #398 and original APPLICATION operation holds remain distinct.
+
+
+### Existing sparse preflight repair composed on the APPLICATION successor — 2026-11-07
+
+The preceding two-member composition was published as #2194 at 4d0b4979711759bfe23725246daeae27a7ff94ca, targeting #2175's original branch. This additive follow-up consumes only the existing two-hunk executor repair and behavioral tests from #2007 source 0e20d9b2eaba16219495e4a9489d4e2ae88900fc. It does not import that carrier's older whole executor, fleet operations, account-binding changes, historical effects, or release claims.
+
+The bounded reproducer established that the actual /usr/bin/git observation returned 0 and valid stdout but emitted the sparse-index-expansion advisory on stderr. The original strict observer therefore refused. The adopted source uses only the invocation-scoped advice.sparseIndexExpanded=false setting. Every other stderr, nonzero exit, donor/index/dirty-content check, configuration drift, timeout, output bound and cleanup-unknown classification remains intact. No persisted Git configuration or Git executable was changed.
+
+The same existing repair verifies the exact local commit through the original bounded observer before the effectful workspace helper starts. Missing/noncommit objects produce a known pre-helper refusal; uncertain observations stay uncertain, helper identity is checked again, and a later mint failure retains its existing hold. This consumes accepted source work instead of implementing another preflight or reconciliation owner.
+
+The original patch and test files are byte-identical to their source blobs 7e4d334aa1cf4cee0056cefacb6faff74726d9a9 and dce94f7b2feee2c4420740fa57e954c9ad531e0a. Patch SHA256 is 34d3cbbe2033bc8a1a68d6d711407ad57ee892a951f4ef68303c719f3585a9c9. Its exact application to the current APPLICATION executor yields d15238fa70942463de99ca4f7679ad9e27d6b91f9034ac792f903efd1c22cafc; the historical bb036914 executor remains an immutable predecessor.
+
+The existing builder qualifies this one-member forward delta against the complete repaired parent b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4 before the earlier admission/APPLICATION/Go normalization chain. Candidate selection captures one of the two exact five-member source maps and compares the staged read to that captured map. Historical cohort constants and all actual-output provenance remain intact. The final 107-member output differs from the original installed 3ad8c699 parent in exactly three members: task, lane runtime, and the explicitly adopted executor successor. All other 104 entries remain identical.
+
+Current actual builder receipts:
+
+| Variant | Members | Manifest SHA-256 |
+| --- | ---: | --- |
+| Native base | 107 | 1bb6f2ec3af603e44c345558931d3bf5daec28fa7bc9db14cbad830674ea84d0 |
+| Go APPLICATION | 109 | 78435663a79524b1134b95ba4046feba6c7fc76e697745ae2acfeec3583a56ed |
+| APPLICATION HTTP | 112 | 13ebee6da996713ec363ddbed73164be9b92045070b676e403c9e9d419aaef20 |
+
+The current combined run passed 440 tests with zero failures, errors or skips (process 98608, pytest 122.980 seconds, terminal exit 0). It includes the full native-security and adopted sparse-preflight suites, actual index/config/rules byte preservation, refusal of unrelated stderr, unsafe contents and invalid pins, uncertainty preservation, immutable support publication, the actual inert execution seam, Go generations, historical launcher paths, exact lineage/mixed-parent refusals, packaging and source-identity review. The earlier 35/32 security result remains a retained counterexample and is superseded by this current successful source qualification, not erased.
+
+This change does not reconcile any of #2007's historical Ubuntu2 holds, alter cache or disk guards, activate APPLICATION profiles, or install a live generation. #2175 remains the final composition carrier; #2187 remains the original independent admission-repair carrier. Exact-head hosted checks, coordinated source incorporation, protected merge, existing publication/selection and authenticated live proof remain owed.

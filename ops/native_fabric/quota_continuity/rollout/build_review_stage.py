@@ -555,14 +555,42 @@ APPLICATION_CARRIER_PREIMAGES = {
 APPLICATION_CARRIER_BASE_SHA256 = "e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4"
 
 
-def application_carrier_candidate_cohort(root):
+# Exact adoption of #2007's two-hunk sparse preflight repair on the already
+# qualified APPLICATION admission-repair parent. Historical carrier hashes stay
+# frozen; this inverse is only a validation view of the new actual executor.
+SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE = "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea"
+SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST = "d15238fa70942463de99ca4f7679ad9e27d6b91f9034ac792f903efd1c22cafc"
+SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256 = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
+
+
+def before_sparse_commit_preflight(manifest):
+    if type(manifest) is not dict:
+        raise ValueError("native sparse commit preflight manifest invalid")
+    if manifest.get("ext/remote_sub_exec.py") != SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST:
+        return dict(manifest)
+    previous = dict(manifest)
+    previous["ext/remote_sub_exec.py"] = SPARSE_COMMIT_PREFLIGHT_EXECUTOR_PREIMAGE
+    identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if identity != SPARSE_COMMIT_PREFLIGHT_PARENT_MANIFEST_SHA256:
+        raise ValueError("native sparse commit preflight parent closure differs")
+    return previous
+
+
+def _application_carrier_candidate_digests(root):
     observed = {name: sha((root / "candidate" / name).read_bytes())
                 for name in APPLICATION_CARRIER_DIGESTS}
-    present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
-               if observed[name] == expected}
-    if present and observed != APPLICATION_CARRIER_DIGESTS:
+    successor = {**APPLICATION_CARRIER_DIGESTS,
+                 "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
+    if observed == APPLICATION_CARRIER_DIGESTS or observed == successor:
+        return observed
+    if any(observed[name] in {APPLICATION_CARRIER_DIGESTS[name], successor[name]}
+           for name in APPLICATION_CARRIER_DIGESTS):
         raise ValueError("application carrier candidate cohort is incomplete")
-    return bool(present)
+    return {}
+
+
+def application_carrier_candidate_cohort(root):
+    return bool(_application_carrier_candidate_digests(root))
 
 
 def normalize_application_carrier_base_manifest(manifest):
@@ -575,6 +603,7 @@ def normalize_application_carrier_base_manifest(manifest):
         return manifest
     # Qualify the exact repaired parent before the existing APPLICATION inverse.
     # main() and Go validation share this ordering and retain actual output hashes.
+    manifest = before_sparse_commit_preflight(manifest)
     manifest = before_admission_integrity(manifest)
     present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
                if manifest.get("ext/" + name) == expected}
@@ -615,12 +644,12 @@ def main():
     (stage / "ext").mkdir(parents=True, exist_ok=True)
     manifest = {}
     files = {}
-    application_carrier = application_carrier_candidate_cohort(root)
+    application_carrier = _application_carrier_candidate_digests(root)
     for name in sorted(BASE_FILES | ADDITIONS):
         if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
             source = root / "candidate" / name
             raw = source.read_bytes()
-            if sha(raw) != APPLICATION_CARRIER_DIGESTS[name]:
+            if sha(raw) != application_carrier[name]:
                 raise ValueError("application carrier source changed during build")
         elif name in GROK47_MERGED_SOURCE_DIGESTS:
             source = root.parent / "grok47" / "overlay" / name
