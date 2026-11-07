@@ -23,20 +23,27 @@ _REPOSITORY = "mastermindx-market-intelligence/Mastermind"
 _WORKFLOW = ".github/workflows/ci.yml"
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _JOB_NAMES = {f"pytest shard {index}" for index in range(6)} | {
-    "test", "Source qualification", "PR test scope", "PR fast checks",
+    "test", "Source qualification", "Source qualification Fabric",
+    "Source qualification native", "PR test scope", "PR fast checks",
 }
-_QUALIFICATION_STEPS = {
-    "Verify event source and immutable fixture anchor",
-    "Fast source-bound release preflight",
-    "Verify Paper direct pinned MCP SDK",
-    "Verify Paper Studio prepare guard",
-    "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
-    "Compile source", "Validate shell scripts",
-    "Verify native application admission and dispatch custody",
-    "Verify closed application transport in isolated root fixtures",
-    "Checkout paired Brain production owner fixture",
-    "Verify actual Brain Fabric and production inference composition",
-}
+_QUALIFICATION_STEPS_BY_JOB = {'Source qualification': {'Checkout paired Brain production owner fixture',
+                          'Compile source',
+                          'Fast source-bound release preflight',
+                          'Validate shell scripts',
+                          'Verify Paper Studio prepare guard',
+                          'Verify Paper direct pinned MCP SDK',
+                          'Verify actual Brain Fabric and production inference composition',
+                          'Verify closed application transport in isolated root fixtures',
+                          'Verify event source and immutable fixture anchor',
+                          'Verify native application admission unittest contracts'},
+ 'Source qualification Fabric': {'Fast source-bound release preflight',
+                                 'Verify event source and immutable fixture anchor',
+                                 'Verify private Fabric HTTP compatibility and incumbent backend '
+                                 'lifetime'},
+ 'Source qualification native': {'Fast source-bound release preflight',
+                                 'Verify event source and immutable fixture anchor',
+                                 'Verify native application admission and dispatch custody'}}
+
 _API = "https://api.github.com"
 _MAX_RESPONSE = 256_000
 
@@ -209,8 +216,8 @@ def find_reusable_run(
         # Verify the actual executable steps in the prior integrated run.
         if name == "test":
             required = {"Run repository test gate"}
-        elif name == "Source qualification":
-            required = _QUALIFICATION_STEPS
+        elif name in _QUALIFICATION_STEPS_BY_JOB:
+            required = _QUALIFICATION_STEPS_BY_JOB[name]
         elif name == "PR test scope":
             required = {"Classify integrated source diff using protected base code"}
         elif skipped_fast:

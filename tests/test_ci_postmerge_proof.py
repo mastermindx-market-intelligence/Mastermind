@@ -70,18 +70,24 @@ def _steps(index: int) -> list[dict]:
         ["Fast source-bound release preflight", "Run repository test shard"]
     )
     if index == 7:
-        names = [
-            "Verify event source and immutable fixture anchor",
-            "Fast source-bound release preflight",
-            "Verify Paper direct pinned MCP SDK",
-            "Verify Paper Studio prepare guard",
-            "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
-            "Compile source", "Validate shell scripts",
-            "Verify native application admission and dispatch custody",
-            "Verify closed application transport in isolated root fixtures",
-            "Checkout paired Brain production owner fixture",
-            "Verify actual Brain Fabric and production inference composition",
-        ]
+        names = ['Verify event source and immutable fixture anchor',
+ 'Fast source-bound release preflight',
+ 'Verify Paper direct pinned MCP SDK',
+ 'Verify Paper Studio prepare guard',
+ 'Compile source',
+ 'Validate shell scripts',
+ 'Verify native application admission unittest contracts',
+ 'Verify closed application transport in isolated root fixtures',
+ 'Checkout paired Brain production owner fixture',
+ 'Verify actual Brain Fabric and production inference composition']
+    if index == 10:
+        names = ['Fast source-bound release preflight',
+ 'Verify event source and immutable fixture anchor',
+ 'Verify private Fabric HTTP compatibility and incumbent backend lifetime']
+    if index == 11:
+        names = ['Fast source-bound release preflight',
+ 'Verify event source and immutable fixture anchor',
+ 'Verify native application admission and dispatch custody']
     if index == 8:
         names = ["Classify integrated source diff using protected base code"]
     if index == 9:
@@ -97,9 +103,10 @@ def _steps(index: int) -> list[dict]:
 def _jobs() -> dict:
     names = [f"pytest shard {index}" for index in range(6)] + [
         "test", "Source qualification", "PR test scope", "PR fast checks",
+        "Source qualification Fabric", "Source qualification native",
     ]
     return {
-        "total_count": 10,
+        "total_count": 12,
         "jobs": [
             {
                 "id": 117196531521 + index,
@@ -385,14 +392,14 @@ def test_verified_output_requires_exact_five_api_reads(
 
 _REQUIRED_STEPS = [
     (index, name)
-    for index in range(10)
+    for index in range(12)
     for name in [step["name"] for step in _steps(index)]
 ]
 
 
 @pytest.mark.parametrize(("index", "name"), _REQUIRED_STEPS)
 @pytest.mark.parametrize("mode", ["missing", "skipped", "duplicate"])
-def test_all_ten_jobs_require_unique_successful_mandatory_steps(index, name, mode):
+def test_all_twelve_jobs_require_unique_successful_mandatory_steps(index, name, mode):
     subject = _subject()
     steps = subject["jobs"]["jobs"][index]["steps"]
     selected = next(step for step in steps if step["name"] == name)
@@ -405,16 +412,16 @@ def test_all_ten_jobs_require_unique_successful_mandatory_steps(index, name, mod
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 
-@pytest.mark.parametrize("index", range(10))
+@pytest.mark.parametrize("index", range(12))
 def test_each_full_scope_job_record_is_mandatory(index):
     subject = _subject()
     subject["jobs"]["jobs"].pop(index)
-    subject["jobs"]["total_count"] = 9
+    subject["jobs"]["total_count"] = 11
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 
 @pytest.mark.parametrize("case", ["old-three-shard-proof", "incomplete-page", "noninteger-count"])
-def test_ten_job_proof_refuses_legacy_or_incomplete_job_shape(case):
+def test_twelve_job_proof_refuses_legacy_or_incomplete_job_shape(case):
     subject = _subject()
     if case == "old-three-shard-proof":
         subject["jobs"]["jobs"] = subject["jobs"]["jobs"][:3] + subject["jobs"]["jobs"][6:]
@@ -422,7 +429,7 @@ def test_ten_job_proof_refuses_legacy_or_incomplete_job_shape(case):
     elif case == "incomplete-page":
         subject["jobs"]["total_count"] = 8
     else:
-        subject["jobs"]["total_count"] = 10.0
+        subject["jobs"]["total_count"] = 12.0
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 
@@ -532,9 +539,20 @@ def test_skipped_fast_job_timestamp_order_does_not_relax_executed_jobs():
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 
-@pytest.mark.parametrize("count", [7, 9])
+@pytest.mark.parametrize("count", [7, 9, 10, 11])
 def test_legacy_scope_or_shard_zero_shape_cannot_authorize_current_reuse(count):
     subject = _subject()
     subject["jobs"]["jobs"] = subject["jobs"]["jobs"][:count]
     subject["jobs"]["total_count"] = count
+    assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
+
+@pytest.mark.parametrize("index", [7, 10, 11])
+def test_qualification_mandatory_step_in_another_job_cannot_substitute(index):
+    subject = _subject()
+    jobs = subject["jobs"]["jobs"]
+    common = {"Verify event source and immutable fixture anchor", "Fast source-bound release preflight"}
+    step = next(value for value in jobs[index]["steps"] if value["name"] not in common)
+    jobs[index]["steps"].remove(step)
+    destination = 10 if index != 10 else 11
+    jobs[destination]["steps"].append(step)
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None

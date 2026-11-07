@@ -13,7 +13,7 @@ from scripts import ci_pytest as cip
 _WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml"
 
 
-@pytest.mark.parametrize("job", ["pr_fast", "pytest_shards", "source_qualification"])
+@pytest.mark.parametrize("job", ["pr_fast", "pytest_shards", "source_qualification", "source_qualification_fabric", "source_qualification_native"])
 @pytest.mark.parametrize("unsafe_status", ["always()", "true"])
 def test_work_job_cannot_ignore_workflow_cancellation(job, unsafe_status):
     text = _WORKFLOW.read_text(encoding="utf-8")

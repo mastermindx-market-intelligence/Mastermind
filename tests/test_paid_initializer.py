@@ -952,8 +952,8 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     value=yaml.load(text,Loader=policy._WorkflowYAMLLoader)
     # PR qualification adds two jobs, but full-mode H1 security checks and
     # the required fan-in remain enforced by the canonical validator above.
-    assert set(value['jobs'])=={'pr_scope','pr_fast','pytest_shards','source_qualification','test'}
-    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pytest_shards','source_qualification']
+    assert set(value['jobs'])=={'pr_scope','pr_fast','pytest_shards','source_qualification','source_qualification_fabric','source_qualification_native','test'}
+    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pytest_shards','source_qualification','source_qualification_fabric','source_qualification_native']
     steps=value['jobs']['pytest_shards']['steps']
     preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
     positive=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 required real Linux no-ACL positive journey']

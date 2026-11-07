@@ -20,11 +20,13 @@ def test_heavy_jobs_cancel_and_final_gate_keeps_aggregating():
     assert jobs["pr_fast"]["if"] == fan._REQUIRED_PR_FAST_IF
     assert jobs["pytest_shards"]["if"] == fan._REQUIRED_SHARDS_IF
     assert jobs["source_qualification"]["if"] == fan._REQUIRED_SHARDS_IF
+    assert jobs["source_qualification_fabric"]["if"] == fan._REQUIRED_SHARDS_IF
+    assert jobs["source_qualification_native"]["if"] == fan._REQUIRED_SHARDS_IF
     assert jobs["test"]["if"] == "${{ always() }}"
-    assert jobs["test"]["needs"] == ["pr_scope", "pr_fast", "pytest_shards", "source_qualification"]
+    assert jobs["test"]["needs"] == ["pr_scope", "pr_fast", "pytest_shards", "source_qualification", "source_qualification_fabric", "source_qualification_native"]
 
 
-@pytest.mark.parametrize("job", ["pr_fast", "pytest_shards", "source_qualification"])
+@pytest.mark.parametrize("job", ["pr_fast", "pytest_shards", "source_qualification", "source_qualification_fabric", "source_qualification_native"])
 @pytest.mark.parametrize("replacement", ["always()", "success()", "true"])
 def test_validator_rejects_uncancellable_or_incomplete_heavy_job_selector(job, replacement):
     source = WORKFLOW.read_text(encoding="utf-8")
