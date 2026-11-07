@@ -140,3 +140,60 @@ on 429, restart duplicate-send refusal, and retained reconciliation handles.
 The 116-file composed release compiles and both shell entrypoints pass syntax
 checks. The legacy relative packet-root bound is preserved while real absolute
 workspace roots are supported.
+
+## Ordinary AUTO consumer successor
+
+The explicit-route implementation is source-delivered by PR #2220 at
+`7bc8a208d5cf867fcc269d9c049d53e52445347b`. Its selected native generation is
+`205b8321c22858b568fe37b7f11b861ee9aeed9c6615bd47847d986b14dfea08`, sequence 36.
+Activation and remaining live acceptance state are recorded on
+[parent issue #983](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6710686251).
+At this source checkpoint, no provider inference or accepted model result is
+claimed.
+
+A consumer audit found that ordinary unpinned requests still used the previous
+provider list. The successor now considers eligible supported BytePlus coding
+work and explicitly consented response-only Experiential free chat work through
+the incumbent picker. Paid and typed native protocols remain explicit. The
+original request/launch/send artifacts bind the AUTO facts, exact selected route
+and resolved local cwd. Existing physical, shared account, cooldown and quality
+gates remain in force.
+
+Twenty-one focused request-to-picker tests passed before protected submission,
+including a real read-only occupancy reader against the publisher-style shared
+state symlink. The committed fixture reconstructs the exact 116-file predecessor
+and applies the production composer. AUTO live acceptance requires fresh unpinned
+native requests after this successor completes protected delivery.
+
+## Local result and terminal handoff
+
+The first actual request, `provider-plan-proof-20261107-byteplus-glm`, returned
+78 at the original slot's host-load gate before provider acquisition. The
+accepted M2 shortcut had bypassed the ordinary result capture and terminal
+publication, leaving a misleading ACTIVE_OR_WAITING projection. The provider
+worker also appended a generated ledger run ID rather than the original run.
+
+The successor repairs those existing owner joins. The local controller captures
+stdout privately into the established result path and retains stderr separately.
+It publishes LOCAL_RETURNED after the actual subprocess exits. A successful
+terminal requires the original request/send reservation, process cleanup,
+provider-frame digest and rendered answer, original Broker quota observation,
+released provider lease and absent physical hold. Only then does one strict
+original-run ledger publication precede DONE. The worker and slot no longer
+publish duplicate random-ID telemetry for these two plan paths.
+
+An actual pre-acquisition slot refusal writes a source-bound phase witness;
+missing files and exit75/78 alone do not establish no-send. Unknown provider
+responses remain EFFECT_UNKNOWN. Ledger publication failure remains SETTLING;
+no append, send or model fallback is retried. An occupied result/capture preserves
+the original log and terminal unchanged. Caller stdout failure does not undo a
+previously durable result and terminal.
+
+Validation: 96 focused tests passed against the exact 116-file predecessor and
+the actual production composer. Six exercise the real request, local shell,
+slot, owned provider process, Broker observation/release and original ledger
+using only a controlled local Claude executable and physical-load observation.
+They cover AUTO success, deterministic acceptance, duplicate request/helper
+refusal, positive no-send host refusal, malformed provider response, missing
+phase proof, publication failure and result tampering. These tests perform no
+external inference and do not substitute for the pending live model checks.
