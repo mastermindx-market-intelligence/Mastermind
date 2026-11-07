@@ -352,3 +352,36 @@ absent from the current #2175/#2007 changed-path lists. Shared historical releas
 manifests remain owned by their original carriers; qualify changes through the
 existing immutable forward-composition builder without rewriting old receipts.
 These fixes do not clear held attempts, re-enroll hosts or claim measured uptime.
+
+
+### Current operational and learning boundary
+
+The consolidated reader plus explicit-admission guard passed 350 focused
+runtime and identity tests before incoming ancestry reconciliation. The later
+local qualification attempt produced no terminal test receipt; its process
+and log writer were no longer present, so it is not counted as a pass. A bounded
+M2 observation found load averages 56.52/57.60/38.74 on 24 logical CPUs. This is
+one host-load sample, not an uptime metric or proof of the process exit cause.
+Further heavy qualification belongs in the already-running hosted CI; no
+unowned host processes are terminated.
+
+The installed native store was verified at generation
+ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46,
+selection sequence 35, with 107 members and the exact pre-repair task/runtime
+hashes. No Go/HTTP APPLICATION entry is present in that selected generation.
+PR #2187 supplies the complete repaired source successor; publication and
+installed-path proof remain separate.
+
+Executive v3 server 1.5.0 returned backend_unavailable on its read-only state
+operation at 2026-11-07T04:40:10Z. This is an installed backend-readiness failure,
+not permission to mint a root or another orchestrator.
+
+The existing Harness2 refinement loop, EVAL finalizer/artifact graph and Agent OS
+discovery producer already exist. The next learning join must retain actual
+native execution/provider-attempt, effective context/tool/output, environment
+and timing evidence, then satisfy the existing EVAL Trial contract. Request
+assembly metadata alone cannot manufacture provider/model proof or a VALID
+NO_EFFECT trial. Keep the native producer and APPLICATION #2155 carrier as
+owners; do not replay the refused standalone native EVAL leaf or build another
+memory/refinement plane. #2188 owns the concurrent authenticated Agent OS
+receiver composition. Outcome Learning #398 and C26 retain their exact holds.
