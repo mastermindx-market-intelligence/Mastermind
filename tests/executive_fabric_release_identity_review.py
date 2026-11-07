@@ -726,7 +726,9 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # 2026-11-07 attended source check: native Hermes composition and exact pending
 # auth-timer expiry move these unchanged three operands. Preserve whole-file and
 # exact-token qualification; this supplies no runtime or formal release approval.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '2842f2dc712cb1b8718a2dfcba592bb390c153d4666b73c3a797f0d67380b499', 'sites': ((3613, 68, 71, 'int', '503'), (3618, 69, 72, 'int', '503'), (3622, 67, 70, 'int', '503'))}
+# Accepted Office READ adds only one module declaration; all prior bytes and
+# three HTTP-status operands are exact Root6a. Source-only pin, no runtime grant.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'ddbeb7e61ad3112edd798bddc47c35a3bd2deeea41d426e0bec1555f0475499e', 'sites': ((3614, 68, 71, 'int', '503'), (3619, 69, 72, 'int', '503'), (3623, 67, 70, 'int', '503'))}
 
 # Reviewed Session Unicode-scalar input bound, never an OS identity.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/native_session_send.rs'] = {'sha256': 'e290af30b07536060bbeaa26e1c4dab59dd6d10becedfe40ce33f9cc6fac4d2c', 'sites': ((13, 118, 121, 'int', '700'),)}
