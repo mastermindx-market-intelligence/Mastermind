@@ -10,6 +10,10 @@ import dataclasses
 from enum import Enum
 from typing import Callable, Protocol, runtime_checkable
 
+from common.agent_dialogue_consultation_contract import (
+    CONSULTATION_PACKET_DISCRIMINATOR,
+    parse_consultation_packet,
+)
 from control_plane.session_targets import (
     RuntimeBinding,
     SessionTargetError,
@@ -160,7 +164,9 @@ class DialogueTurnObserver:
 
     async def _accepted_history(
         self, context: DialogueContextV2
-    ) -> tuple[dict[str, object], tuple[dict[str, object], ...], str]:
+    ) -> tuple[
+        dict[str, object], tuple[dict[str, object], ...], str, int
+    ]:
         normalized = context.normalized()
         channel = await self._page(
             self.client.fetch_channel_history(
@@ -220,12 +226,25 @@ class DialogueTurnObserver:
             )
         )
         messages: list[dict[str, object]] = []
+        consultation_packet_count = 0
         for transport in thread.messages:
             if transport.ts == parent_transport.ts:
                 continue
             if transport.thread_ts != parent_transport.ts:
                 continue
             raw = self._created_text(transport)
+            if raw.startswith(CONSULTATION_PACKET_DISCRIMINATOR):
+                # Packet physical-origin authority is established before body
+                # parsing. Unauthorized packet-shaped frames are definitive
+                # non-evidence and cannot poison trusted observer history.
+                if transport.author_user_id != self.policy.relay_bot_user_id:
+                    continue
+                try:
+                    parse_consultation_packet(raw)
+                except DialogueContractError:
+                    raise _HistoryRefused("THREAD_MESSAGE_INVALID") from None
+                consultation_packet_count += 1
+                continue
             if not raw.startswith(MESSAGE_DISCRIMINATOR_V2):
                 continue
             sender_known = (
@@ -251,7 +270,12 @@ class DialogueTurnObserver:
             ):
                 continue
             messages.append(message)
-        return parent, tuple(messages), parent_transport.ts
+        return (
+            parent,
+            tuple(messages),
+            parent_transport.ts,
+            consultation_packet_count,
+        )
 
     @staticmethod
     def _receipt(
@@ -277,7 +301,12 @@ class DialogueTurnObserver:
         routing: TurnRoutingFacts,
     ) -> ObservationReceipt:
         try:
-            parent, messages, parent_thread_ts = await self._accepted_history(context)
+            (
+                parent,
+                messages,
+                parent_thread_ts,
+                _consultation_packet_count,
+            ) = await self._accepted_history(context)
         except _HistoryIncomplete as exc:
             return self._receipt(
                 ObservationOutcome.RECONCILIATION_INCOMPLETE, str(exc)

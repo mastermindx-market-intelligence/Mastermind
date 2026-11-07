@@ -1,0 +1,23 @@
+# Risk-tiered review relief — source task tree
+
+**Commission:** Chairman, 2026-11-02 Pacific: sharply reduce independent review as a bottleneck for routine builds, PRs, and small edits.
+**Owning source:** `mastermindx-market-intelligence/Mastermind`; protected procedure pin `b2326bbe30e9988d26199f5e774a482b9c09068a`; source operation `review-risk-relief-20261102-sol-001`.
+**Related existing work:** administrative friction #917; GitHub review ingress #1740; active automatic-coverage PR #1977 (separate writer and changed paths).
+**Record:** 2026-11-02 Pacific. This draft source tree is not an Agent OS accepted wave, GitHub approval, or Executive Job.
+
+## Original outcome / DONE_WHEN
+
+A small, genuinely low-risk change reaches the protected integration path after focused author checks and required CI, **without** a mandatory second agent/independent GitHub approval unless an actual branch rule requires it. Material changes receive proportionate independent scrutiny. Unknown/stale source, active holds, CI failures, permissions and irreversible effects remain fenced. The existing GitHub/Fabric review ingress must *not* blanket-review every PR. A real recent-PR cohort demonstrates which tier receives the no-review fast lane, followed by observed release behavior across enrolled repositories.
+
+## Tasks and gates
+
+- **R0 — source census** (complete for this initial scope): Confirm active Mastermind ruleset has a merge queue but no approval-count rule; macro evaluate-only ruleset has zero required approvals; branch-protection read for Mastermind is forbidden to this connector (unknown). Identify unconditional non-author wording in `docs/DELIVERY_WORKFLOW.md`, the multi-phase plan companion, and active #1977. No admin-rule mutation.
+- **R1 — pure tier classifier and tests** (implementation_complete, PR #1989; pending source review): Create one advisory, deterministic classifier using fully verified current GitHub changed paths and diff metrics. Small routine source, tests and docs get `FAST` with 0 independent reviews; significant behavior `STANDARD` with 1; trust boundaries, protected policy, security, privileged delivery or money/trading execution `CRITICAL` with 2; incomplete/unknown source `HOLD`. Author-provided PR labels cannot downgrade. Prove sensitive-small, CI/auth, coverage absence, size limits and case adversaries. This classifier adds no merge/review/permission authority.
+- **R2 — delivery procedure** (depends R1, ready): Replace blanket non-author approval language for routine changes with risk-policy qualification, while retaining branch-required checks, independent review for higher tiers, separate merge authority, provenance and production checks. Keep protected source-law conflict explicit until reviewed integration.
+- **R3 — incumbent automatic ingress alignment** (depends accepted R1, active PR #1977 has preserved dirty custody): Coordinate the source writer via the original PR, then bind the accepted risk policy to its existing authorized admission path before any auto-enrollment. It must skip low-risk reviews, classify unknown inputs as HOLD, and never create a second queue/worker registry. Do not edit #1977's owned paths from this branch or duplicate the started reviewer.
+- **R4 — protected law/Agent OS adoption and rollout** (depends R2/R3): Reconcile the broader `ACTIVE_EXECUTION` and `CEO_PROJECT_PLAN_CONTINUITY` language after overlapping active #1967 is resolved. Update authentic Agent OS workstream/decision and installed instruction consumers, including Macro and Terminal, under their separate source writers. Only qualify/enable actual host enrollment after review of the rule and signed GitHub/Fabric real-path proof.
+- **R5 — performance and safety acceptance** (depends R4): Sample a source-verified PR cohort across repositories. Record FAST fraction, independently reviewed fraction, post-merge defect escapes, CI failures, elapsed PR-ready-to-merge distribution and actual Fabric spend. Audit a bounded sample of FAST changes post-merge without a blocking second-review cycle. Do not assert measured savings before these receipts exist.
+
+## Non-goals and invariants
+
+No bypass of native branch protection, CI, security holds, Executive resource admission, source custody or unknown effects. No author self-approval/self-merge; preserve the existing authorized sweeper/queue. The classifier never pretends to be the review adjudicator, reviewer identity, Code Owners, CI, or release authority. PR #1977 owns the ingress source; this branch owns only new classifier, tests, documentation and risk-policy integration specification.
