@@ -602,16 +602,17 @@ merge, runner activation or product acceptance is claimed.
 
 | Carrier | Exact source or evidence | Observed outcome and remaining gate |
 | --- | --- | --- |
-| [Mastermind #2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065) | Published head **6659ab2ce6b56390d9f3ca74dfe22f4fcd03c4e4**, tree `f157cc907938cdca99565258034efd081f013667`; closes two adapter cancellation gaps | One local invocation: **217 passed**, zero failures/errors/skips. Prior b549 required/serial completed **19m54s / 37m53s**; its opt-in four-process shadow failed one initializer custody case. Fresh [required 42377942847](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42377942847) has a failed process-concurrency case in shard 4; other jobs and [serial 42377942886](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42377942886) remain in progress. Gateway Release HOLD remains separate. |
+| [Mastermind #2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065) | Published head **c85441b0d717ca8a429672d87e820aae2ad95f9c**, tree `71cb15cadbcb8abd2c441c4232a2e1b6322d84da`; exact module case/outcome companion plus bounded actuator-test failure codes | **473 passed** in one final local invocation. Prior 6659 required **FAILURE, 28m09s** and serial **SUCCESS, 45m43s**. New [required 42385010390](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42385010390) and [serial 42385010193](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42385010193) were queued at first readback. Actual new-head native parity, actuator cause and independent gateway Release HOLD remain open. |
 | [Terminal #1297](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1297) | Accepted merge **90ddc1390e89f60677a55ed854e8368accbc252d**, merged 10:25:31Z; original head `689757a5…` | **MERGED; DO_NOT_REDO.** Its native run 42344305342 was green in 64m13s. The session's earlier rule-read 403 remains a closed capability; it did not prevent an independently authorized receiver's accepted merge and must not be presented as an open source-delivery gate. |
-| [Terminal #1334](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1334) | Accepted merge **81ff9cb82bc90e166746802b83ed9daa0df4a97c**, merged 12:47:04Z; spec blob `8e637f42f188ac0d2048586ac1b75a3778f6aded` | **MERGED; DO_NOT_REDO.** Native PR run 42364524142: **SUCCESS, 55m20s**, all 19 jobs, including one flaky tablet J1 journey. Exact merge-group run 42372715075 succeeded. Retained trace proves first-link context loss; an independent source repair is now scoped below. Neither green nor merge proves the five-minute target or zero-retry reliability. |
+| [Terminal #1334](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1334) | Accepted merge **81ff9cb82bc90e166746802b83ed9daa0df4a97c**, merged 12:47:04Z; spec blob `8e637f42f188ac0d2048586ac1b75a3778f6aded` | **MERGED; DO_NOT_REDO.** Native PR run 42364524142: **SUCCESS, 55m20s**, all 19 jobs, including one flaky tablet J1 journey. Exact merge-group run 42372715075 succeeded. Retained trace proves first-link context loss; the independent repair is published as #1338 below. Neither green nor merge proves the five-minute target or zero-retry reliability. |
+| [Terminal #1338](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1338) | Published head **030c84c98944a6d4c145695e7aeda5bd32eac015**, based on accepted 81ff; three-file first-link context repair | Actual initial-render red proof; **116 unit tests**, ESLint and full typecheck pass. Original browser suite: **60 selected, 22 passed, 38 expected skips**, zero failures/flakes/retries, all three original viewports and 15 retained crops. [Native 42382143589](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42382143589) remains pending; local proof does not establish hosted speed or release. |
 | [Macro #10825](https://github.com/mastermindx-market-intelligence/macro/pull/10825) | Accepted merge `efdf3577bb35607bb02a4a0a1900adb91a3784c6`, observed at 08:42:15Z; preceding source `d49837ea333bfef114466139d410ee217ed1c999` | **MERGED by the existing delivery process.** Preserve as accepted work. The session did not issue its merge, label or queue action and will not reuse its completed branch. |
-| [Macro #10788](https://github.com/mastermindx-market-intelligence/macro/pull/10788) | Original FIF carrier updated once to **7bb27547804acb3e80df103e47f18358ae73f68b**, parents `8e7a1de…` and `53e1da35…` | Accepted #10781 code/data routing is verified. Fresh run 42375466781 has a failed commodity browser constituent in pack 7; eight packs have passed and three remain in progress at the 13:56Z observation. Contract-delta took **559s**, planner **94s**. Actual failed-pack checkout is `33adac3070ee9d951aa6cfbeb27d93950ad0a4a9`. Diagnosis and final proof remain owed; no protected merge or queue request. |
-| [Macro #10827](https://github.com/mastermindx-market-intelligence/macro/pull/10827) | Additional continuity delta `fb137dbdbac6853890ba7bb3dd69511e924c8973`, workstream blob `a37f61d61b8d712d3d328bf4b6d0eb2fbb2207b0` | Fresh registered follow-up from accepted `efdf3577…`; published and byte-verified. Agent OS validation: **0 errors**, 193 existing warnings, 2,205 records. Changes only the existing workstream pointer/delta. The older unpublished local commit remains separately preserved. Branch-protection GET 403 still blocks this session’s release verification. |
-| [Mastermind #2191](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2191) | This architecture carrier; preceding checkpoint `d98118196386975f112587c0b9cc4c8ff2de5afc` | Source-backed master plan, measured experiments and staged execution contract. This milestone records adapter qualification, failed native cases, accepted Terminal source and the retained-trace repair boundary. Normal integration and program acceptance remain owed. |
+| [Macro #10788](https://github.com/mastermindx-market-intelligence/macro/pull/10788) | Published original carrier **eb3077311d4e819a26c04466774c76bd68db9a5c**, parents 7bb and accepted b481; accepted #10834 composed plus test-only NBBO contention repair | Prior native run **FAILURE, 64m48s**: canonical aggregate **320 jobs / 690 passed steps / one pr_regression / one unknown / zero infrastructure**. Current local: **231 passed + 110 subtests**, **252 routing passes / two sparse skips**, **30 commodity DOM journeys** and presentation proof. [New CI 42385192083](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42385192083) created; native aggregate and acceptance owed. No queue or protected merge. |
+| [Macro #10827](https://github.com/mastermindx-market-intelligence/macro/pull/10827) | Preceding continuity checkpoint **17cfd29c27497a968fbf45c8b4e0f9909703da94**, workstream blob `bc0b3408a10266f245d39778472c43af94d0c935`; this milestone continues the same follow-up | Registered follow-up from accepted efdf; last published validation **0 errors**, 193 existing warnings, 2,205 records. Preserve all other waves and global next action. The older unpublished local commit and release-rule GET 403 remain separate. |
+| [Mastermind #2191](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2191) | This architecture carrier; preceding checkpoint **01a4bf1ac0e0001bb674cc696fd98710dae1b91f** | Source-backed master plan, published case evidence, Terminal context repair, Macro composition and measured next performance boundary. Normal integration and full program acceptance remain owed. |
 
 The protected procedure pin `615146aac6a1b0c0933bc9b815517a2fd285ed4a` remains
-compatible through protected master `4fb0d3825b5b4b4439e65e7382660112b7c2ef8c`.
+compatible through protected master `7ccb72a1f751f8012190a7deda90ea7ec1db1ecb`.
 The bounded comparison found no change in AGENTS, sol_skills, session review,
 delivery workflow or active-execution law, or the owned CI/capacity/gateway paths.
 Three later accepted commits changed product/COO/workspace code and corrected the
@@ -633,6 +634,11 @@ for the checkout receipt. The next two protected commits, `57a20fc…` and
 the bounded comparison again found no governing-law or owned CI/capacity/gateway
 change. The 6659 shard-4 receipt executes native merge
 `fe34727abd6f725c4c5a894a05e42a1ce98ff319`, combining that protected base and 6659.
+The subsequent ten-commit comparison through 7ccb contains 145 files without a
+file-list truncation. It changes product, Hermes, Studio and portfolio source,
+including a separate Hermes workflow, but not the governing instructions or the
+owned CI, actuator-test and gateway-publication paths. The procedure pin remains
+usable; current source growth must still be reflected in native execution identity.
 
 An explicit [Release HOLD on #2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065#issuecomment-6704040875)
 requires the gateway successor failure to be diagnosed/repaired and fresh native
@@ -1242,7 +1248,12 @@ caught an owner journal refusal. The finite error codes were not rendered by the
 assertion. Recover those codes and bounded owner location before choosing a
 cold-root, lock-initialization or actual-contention repair; do not precreate the
 root, widen timers or assume queue deadlock.
-The other jobs and final native results remain pending at this checkpoint.
+The complete required run ended **FAILURE in 28m09s**; the serial shadow ended
+**SUCCESS in 45m43s**. A single original six-process local diagnostic passed and
+did not reproduce the native refusal. The published c854 test assertion now
+renders only the phase and the already-returned finite journal codes on failure.
+Cold-root creation, lock identity, production owner, timeouts and all original
+assertions remain intact. Recover the native code before selecting a repair.
 No manual four-process dispatch has been repeated on 6659.
 
 #### Completed b549 native receipts and comparison limits
@@ -1302,49 +1313,56 @@ The realized environment and lock remain `0f7510c26e5c8586`, CPython 3.12.16,
 raw lock `c9042dda681e54c2ac2a53e2231658332cca360ed9d9d7244de1656a192f23ad`;
 all execution shards verify Macro vendor `256c757b3c4f0ec759571c29a30a71387d0a18f8`.
 
-#### Exact case/outcome evidence: next bounded implementation
+#### Exact case/outcome evidence: published c854 implementation
 
-Extend incumbent `ci_pytest_timing` with one versioned companion
-`CI_MODULE event=case_evidence, schema=ci.module-case-evidence.v1` row per selected
-whole file. Preserve legacy timing output, FixedDiagnostics' closed summary
-shape, private guard-v1 receipt and ci-profile's metadata-only boundary.
+Original carrier [c85441b0](https://github.com/mastermindx-market-intelligence/Mastermind/commit/c85441b0d717ca8a429672d87e820aae2ad95f9c)
+adds one bounded `CI_MODULE event=case_evidence,
+schema=ci.module-case-evidence.v1` row per explicitly selected whole file inside
+`ci_pytest_timing`. The legacy timing stream, FixedDiagnostics' closed schema,
+private guard-v1 receipt and ci-profile metadata boundary remain unchanged.
 
-Activation must require both the parsed `--ci-case-evidence` flag and that
-literal flag in `config.invocation_params.args`; inherited environment or ini
-addopts must not enable it. Append it only to actual completion-proof child argv
-in `ci_pytest.run_shards` and the final serial subprocess argv in
-`ci_parallel_shard`, never generic `pytest_argv(progress=True)`. Disable evidence
-on every xdist controller/worker, even with the flag. No workflow or outer RWE
-command changes are needed.
+Activation requires parsed `--ci-case-evidence` and that literal flag in the
+actual invocation's argv. Only completion-proof children and the final serial
+shard subprocess receive it. Environment/ini/addopts, generic progress, xdist
+controllers and xdist workers cannot activate it. No workflow or outer RWE command
+changes are needed.
 
-Record bounded collection outcomes, collected/finished node-ID multisets,
-deselection, and per-invocation setup/call/teardown dispositions. Retain duplicate
-multiplicity and phase association; exclude reasons, tokens, private paths,
-durations and PIDs from hashes. Emit one row for empty or collection-gated files.
-Null unavailable observations must differ from defined empty digests. Overflow,
-partial collection or missing completion remains incomplete. Reuse the incumbent
-canonical ASCII JSON/item-digest convention behind explicit activation. Do not
-change pytest selection, order or exit.
+The observer retains collected/finished node-ID multiplicity, separate deselection
+and collection reports, and each invocation's associated setup/call/teardown
+outcomes, xfail presence and repeated subtest reports. Hashes omit durations,
+reasons, repr, locals and PID. PID is nonhashed attribution joined to the original
+private child receipt. Empty/import-skipped files remain observable. Unobserved
+or failed collection is unavailable. Count, node, phase and total-size overflow
+make counts and digests unavailable rather than hashing a truncated subset.
 
-Require exactly one evidence row for every canonical selected module, bound to
-actual checkout and plan. Report duplicates rather than summing, taking the last
-row or deduplicating by pathname. Reconcile four-child totals with the existing
-valid receipts. The Boolean flag prevents accidental nested activation; it does
-not authenticate arbitrary stdout. If attribution is required, reuse the existing
-child PID as non-hashed metadata rather than creating a token or receipt plane.
+A consuming comparison must require `complete=true`, exact selected-file coverage,
+unique per-module observations attributable to valid original children, and equal
+actual source/plan. Non-null hashes on incomplete observations do not establish
+parity. Duplicate rows are errors, not summable or last-wins data. Per-module
+hashes do not reconstruct the global guard digest. The Boolean opt-in prevents
+accidental nested activation; it does not authenticate arbitrary stdout or create
+a second signature, admission or receipt plane.
 
-The adversarial proof must relay a nested timing-plugin invocation with the same
-relative module path but different case count: legacy contamination should be
-visible, while exactly one outer evidence row and the original completion count
-remain. Cover env/ini-only negatives, explicit serial positive, xdist negatives,
-changed identities with same count, changed outcomes with same identities,
-duplicate multiplicity, phase-association counterexample, skips/xfail/xpass and
-setup/teardown/collection failure. Existing default-off exact timing assertions
-must stay unchanged. This extension is **not implemented in 6659**.
+One final five-file invocation passed **473 cases**, zero failures/errors/skips,
+in **191.87s** pytest / **193.557s** controller time. Real subprocess coverage
+includes same-path nested pytest with different cases, ambient and both xdist
+negatives, identical counts with changed identities/outcomes, duplicate IDs and
+phase-association counterexamples, empty/skipped/failed/unobserved collection,
+interruption, setup/teardown failure, xfail/xpass and actual subtests. Default-off
+legacy timing assertions remain unchanged. Review exposed an overlong-node
+subset-digest defect; its new regression failed before the final correction.
 
-Publication, opt-in native canary, same-source exact outcome parity and default
-promotion remain separate. Neither the switch nor later green runs rescind the
-independent gateway Release HOLD or establish five-minute acceptance.
+Final observer blob: `4628ee400062c358fb21f006919e3c49d0223b0d`; new regression
+blob: `4963eb70b51c554d111cb46308fe5183fe3e467f`. The exact six-file source was
+committed and nonforce-pushed on the original branch, then read back. The unrelated
+pre-existing egg-info directory remains. Natural required **42385010390** and
+serial **42385010193** were created and queued at first readback. Their actual
+checkouts, full companion coverage, existing receipts and final results remain
+owed before exact outcome parity is claimed.
+
+Publication, opt-in native canary, same-source outcome parity and default
+promotion remain separate. This instrumentation does not itself reduce test
+service or clear the gateway, initializer or actuator cause requirements.
 
 ### Bounded Terminal runtime work independent of held delivery
 
@@ -1438,23 +1456,74 @@ unpublished tree `8a95165da4779cbbee961f6fc903de02afd1e27f`. This clears only
 these two leaves, not shared runtime/workflow/fixture paths or the original
 EFFECT_UNKNOWN commit creation.
 
-Fresh incumbent workspace operation
-`ci-lightning-terminal-context-20261107-c2` is acquired from exact 81ff.
-The bounded repair will derive validated context synchronously from the route,
-require a valid explicit company matching the displayed company, and preserve
-immediate picker clearing even for the same company while the query hook lags.
-An ephemeral clear keyed to the observed query must expire when another query is
-observed so later Back can restore a legitimate context arrival. Preserve existing
-URL stripping, invalid-symbol behavior, parser grammar and navigation owners.
+Fresh incumbent workspace operation `ci-lightning-terminal-context-20261107-c2`
+started from exact 81ff. The three-file repair is now published as
+[Terminal #1338](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1338),
+head **030c84c98944a6d4c145695e7aeda5bd32eac015**.
 
-Prove the old failure with the real component's initial `renderToStaticMarkup`
-before effects; then test valid/invalid/duplicate context, absent company,
-same-company picker lag, changed company and return to the original URL. Retain
-J1's immediate visible-link click and its complete Save → B → Back → reload →
-exact-return journey at original viewports, zero retries. Do not wait for the
-context strip before clicking or modify Save/Back to synthesize missing context.
-At this checkpoint the workspace/dependencies are ready; no source repair or
-browser acceptance is yet claimed.
+The existing owner derives validated origin synchronously from the current route,
+requires a valid explicit company matching the displayed company, and immediately
+clears origin when the picker selects even the same company while the route hook
+lags. That ephemeral clear expires after a different query is observed, allowing
+later legitimate Back restoration. URL stripping, parser grammar, invalid-symbol
+behavior, navigation and persistence owners remain unchanged.
+
+The actual component's initial `renderToStaticMarkup` proof failed three cases on
+the original owner before effects. After repair **116 unit tests**, ESLint and full
+typecheck pass. Original J1 still clicks the visible link immediately; four added
+post-click assertions require NVDA and all origin fields before Save. Its original
+Save → B → Back → reload → exact-return journey and all project choices remain.
+
+The complete browser spec selected **60 cases: 22 passed, 38 expected skips**,
+zero unexpected/flaky cases and zero retries, at desktop/tablet/mobile with one
+worker. Report duration was **82.42645s**; all three J1 attempts passed first time
+in **4.039 / 3.368 / 3.326s**. Inventory SHA256:
+`761a1e4f0d2d4c8c411be67779c27e71e662ff3e641ea2513cdafa75473022bc`.
+All **15 crops** were retained in the original private proof directory; desktop,
+tablet and mobile reopened-origin captures were visually inspected. Generated
+tracked crop files were restored after preservation, leaving only the intended
+owner/unit/browser source changes.
+
+Exact owner/unit/browser blobs are respectively
+`c46861f6d1519eccc63ce44eb67c6c936a8bb982`,
+`4510b08823ecf0a64dbaeb356a3778f1edf9b50f`, and
+`1d16741d9132a284156dde05df26fa070245af4e`.
+Typed commit/push and canonical source readback agree. Native CI **42382143589**
+is still pending at this milestone. Local Node **26.5.0** and Next **16.2.9**
+are not the native Node **20.20.2** environment. This is a proven local original
+journey repair, not hosted latency or release acceptance.
+
+#### Options next-step measurement
+
+The unchanged Options spec `e0d52bab777ad2c52dd200d0e54a278717da4423` is identical
+across protected 81ff and the held published/unpublished source. Its private
+`prepare()` opens `/terminal?symbol=SPY`, requires the original visible canvas and
+positive chart row count, and later opens the panel through its existing UI.
+The three subsequent reloads establish changed archive/session/build states and
+remain meaningful. Shared Playwright configuration differs in held #1223 and
+remains fenced by its original uncertain commit.
+
+One original English desktop journey on 030c, with one worker and zero retries,
+passed with private `--trace=on`: **31.722s case / 46.210961s report**. The retained
+trace/API log puts DOMContentLoaded-to-load at roughly **221ms**; preparation is
+about **3.68–4.08s**. It does not justify a navigation wait change. Larger costs
+are original canvas acquisition and pin/chart-type input intervals. Three explicit
+product screenshots total about **0.382s**; removing them would not address the
+observed long actions.
+
+A separate original-journey observation control changed only private CLI tracing
+to `--trace=off`, retaining API logging, assertions, explicit crops, source,
+fixture profile and zero retries. It passed in approximately **8.6s case /
+14.616631s report**. This is one pair under different run/load/cache conditions,
+not a causal or hosted speed acceptance. The trace-on diagnostic retained 1,048
+screencast frames and 271 snapshots. Next isolate recording overhead with an
+original trace-on control and compare preparation, chart actions and teardown.
+Do not globally disable native failure evidence or change fenced shared config.
+
+The expanded read-only ZIP diagnostic received an explicit device “Command not
+allowed” denial and was not retried through a different spelling or carrier.
+The successful initial trace summary and already-readable API log remain evidence;
+the unmeasured end-of-case interval stays unattributed.
 
 ### Terminal compiled-runtime decision and proving slice
 
@@ -1574,48 +1643,87 @@ and PR readback prove head **`7bb27547804acb3e80df103e47f18358ae73f68b`**, tree
 `4c7af74c5733046d8c606127b1b75c4af126aa0b`, with exactly those two parents.
 Source readback confirms both data-gate markers and the code/data run commands.
 
-Natural [CI 42375466781](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42375466781),
-[fences 42375466748](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42375466748)
-and [authority 42375464027](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42375464027)
-were created for the new head. Contract-delta completed successfully in **559s**
-and planning in **94s**. At 13:56Z eight packs had passed, three were still running,
-and [pack 7](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42375466781/job/128412406521)
-had failed its `commodities-research-workspace` rendered browser constituent.
-Its actual checkout is `33adac3070ee9d951aa6cfbeb27d93950ad0a4a9`; the original
-diagnostic also exercises base `53e1da35…` and reproduces the missing
-`[data-cw-company-href]` assertion. Matching visible failures do not prove the
-incumbent semantic classifier emitted inherited-base: this Node stack may yield
-no supported atom, so UNKNOWN remains possible until the result artifact is read.
+[CI 42375466781](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42375466781)
+completed **FAILURE in 64m48s** on actual merge
+`33adac3070ee9d951aa6cfbeb27d93950ad0a4a9`, exact base `53e1da35…`.
+The consumed canonical aggregate reports **320 logical jobs, 690 passed steps,
+one pr_regression, one unknown and zero infrastructure failures**. Ten packs
+succeeded; packs 6 and 7 failed. Artifact **13577581734** was downloaded once and
+validated: ZIP SHA256
+`bd04750bba12c9d7f4f07421b10321095bb08fb6bb2c305045d59c464b1c5bcd`;
+semantic aggregate SHA256
+`c55b379d0f318133b8a7311f158195f9de15d46ac38153af585bd911d0385ffe`.
+
+The NBBO job is canonically **pr_regression**: head failed its two-second
+first-publication wait before submitting the second writer, while exact base
+passed. Identical test/owner blobs do not override that classification. The
+old helper hid whether the first worker failed early or merely had not reached
+publication. The commodity job is canonically **unknown**: both executions failed
+the missing company-link assertion but supported failure signatures were
+unavailable. It is not relabeled inherited-base.
 
 Accepted [#10834](https://github.com/mastermindx-market-intelligence/macro/pull/10834)
-merged at 13:51:48Z as `dabd1169a7cd1b2518d94fc199888bc00103ca27`.
-Root read back the exact one-file +124/-2 patch, new test blob
-`f664cf6549b2a1669626504adef6befe3093eca6`. It renders the actual Jinja component
-with explicitly synthetic linked/empty/unavailable cohorts, retains original
-return-state assertions and verifies absent cohorts never fabricate company
-links. Its receipt separates synthetic and published fingerprints. The legitimate
-published page need not contain a company cohort for this positive contract test.
-Do not reproduce that accepted repair or modify source data to make a link appear.
-After the original native run settles, integrate accepted source on #10788 with
-its expected head and writer/effect fences, then consume fresh proof. This does
-not release held product #10086 or any other original carrier. Full selected-pack
-and final aggregate proof remain owed. The request updated the feature branch; the PR
-remains open and unmerged. It did not repeat or resolve held operation 26751,
-activate main admission, bypass the denied release-rule lookup, or request a
-protected-branch merge.
+merged as `dabd1169a7cd1b2518d94fc199888bc00103ca27`. Its actual-template
+linked/empty/unavailable-cohort fixture and original assertions are preserved
+verbatim as test blob `f664cf6549b2a1669626504adef6befe3093eca6`. No product data
+was changed to manufacture a positive company link.
+
+The original workspace was reconciled and fast-forwarded to 7bb, then cleanly
+merged with accepted main **b48181718f0e08fb1b73bdfdc43c03e3aa20229c**. The only new
+authored repair is the NBBO test handshake: observe actual first publication,
+probe second-descriptor `LOCK_EX|LOCK_NB` and require real would-block before
+the original blocking lock, transfer early worker exceptions, release the
+test-controlled pause in `finally`, and consume every submitted worker. A missing-
+first-lock negative control must raise the precise isolation failure. The
+original file/0600 assertions remain, plus exact bodies, nlink one and empty
+staging. Production owner blob `b84426de82c9d55caa26e9dd95092460be6dda1b` is unchanged.
+
+One composed owner invocation passed **231 tests and 110 subtests**, zero skips/
+failures, in **10.71s** pytest / **11.974s** controller time. Routing/ownership
+passed **252 tests with two existing mockups sparse skips** in **615.39s** pytest.
+The first 360s local controller deadline was reconciled before the successful
+1200s diagnostic allowance; native timeouts were unchanged. Both skipped P0B
+receipt-pin cases remain skips, not passes. Accepted commodity proof passed
+**30 rendered-DOM journeys** in 13.723s; presentation proof passed in 2.737s.
+Local Python 3.14.7 / Node 26.5.0 / npm 11.17.0 / Jinja2 3.1.6 / jsdom 26.1.0
+does not establish native Linux or visual-layout acceptance.
+
+Only five paths differ from b481: the existing split manifest/table/two routing
+test files and `tests/test_options_nbbo_cohort.py` blob
+`38f7c91dc6d3e771451ced79c4284be30a2f0520`.
+Current main advanced to b94d during proof. The comparison hits the 300-file cap,
+but complete nontruncated root subtrees independently prove governing, CI, test,
+engine, template and delivery sources unchanged. The NBBO and commodity declared
+closures and relevant published inputs are also unchanged. Unrelated data churn
+does not require restarting the tested composition.
+
+The exact composition is published on original #10788 as
+**eb3077311d4e819a26c04466774c76bd68db9a5c**, tree
+`ba1b84541bf02c23c7ec87c1cb2911fd36da9654`, parents 7bb and b481.
+Commit/push were applied once with source/index/remote fences; canonical PR and
+source readback match, and the worktree is clean. New native CI **42385192083**,
+fences **42385192004** and authority **42385188589** were created; authority passed
+at first readback. Full new-head selected-pack and aggregate proof remain owed.
+
+Contract-delta took **559s**, planner **94s**, failed pack 6 **54m57s**, including
+**51m32s** validation and **179s** checkout. The final gate spent **253s queued**
+and **8s executing**. These measured costs, remaining FIF constituent granularity,
+source acquisition and admitted capacity still prevent a five-minute claim.
+No protected merge, queue, main-admission activation, held #10086 release, or
+retry of operation 26751 or the denied rule lookup occurred.
 
 ### Remaining cross-repository execution order
 
 | Ready or held lane | Next concrete action | Completion proof / blocker |
 | --- | --- | --- |
-| Mastermind source qualification | Diagnose the 6659 process-concurrency failure on its original carrier; consume complete current required/serial receipts | Preserve proven 217-case local adapter repair, actual checkout, strict aggregate and gateway Release HOLD; no blind rerun |
-| Mastermind collection/placement | Implement explicit-argv exact-outcome diagnostics; diagnose first initializer custody refusal before location changes; then measure bounded fixture work reduction | Same-source identity/outcome conservation, valid receipts and lower complete critical path; default RWE serial and full-p95 targets remain |
+| Mastermind source qualification | Consume c854 required/serial receipts and its finite actuator refusal code if it recurs; keep the separate gateway/initializer diagnosis | Preserve 473-case local evidence qualification, exact actual checkout, strict aggregate and gateway Release HOLD; no blind rerun |
+| Mastermind collection/placement | Consume published explicit-argv case/outcome rows; diagnose first initializer custody refusal before location changes, then measure bounded fixture work reduction | Same-source identity/outcome conservation, valid receipts and lower complete critical path; default RWE serial and full-p95 targets remain |
 | Mastermind qualification chain | Preserve the concrete native-custody extraction design, aggregate and eleven-job proof contract | Take it when the native critical path makes its added setup/concurrency worthwhile |
 | Terminal scope | Preserve **accepted #1297 / 90ddc139** and selector/fanin behavior | DO_NOT_REDO; actual accepted merge is recorded independently from this session's denied rule lookup |
-| Terminal News runtime | Preserve **accepted #1334 / 81ff9cb8**; repair the independently localized first-link context defect | Initial-render red/green plus original J1 zero-retry journey; no wait hiding the race, no accepted News reimplementation |
+| Terminal News runtime | Preserve accepted #1334/81ff; consume native proof for published #1338/030c first-link repair and continue the measured Options tracing-cost experiment | Proven initial-render red/green and complete original local browser suite; hosted acceptance still owed; no accepted News reimplementation |
 | Terminal held topology | Preserve #1223’s original uncertain create-commit, authored 7/5/5 placement, Node discovery, trace and attempt-timing work | Reconcile that original effect before any further publication; independent profiling need not wait |
 | Macro integration | Preserve **#10755 already merged (cap 640) + #10674 held → #10745 → #10735** | Original #10674 operation26751 remains EFFECT_UNKNOWN; #10656 remains held and main admission OFF. Rule-read 403 blocks this session’s release path |
-| Macro duration truth | Integrate accepted commodity fixture correction #10834 on original #10788 after current native/effect reconciliation | Preserve FIF inventory/closure and accepted S1 routing; record current 559s contract/94s planner and final pack evidence without estimate-as-runtime claims |
+| Macro duration truth | Consume new eb307/42385192083 native aggregate after accepted #10834 composition and NBBO proof repair; then use retained slow-pack constituent evidence | Preserve 120 FIF modules, 1,139-path closures and accepted S1 routing; record 559s contract, 94s planner, 179s checkout and 253s final-gate queue distinctly |
 | Source continuity | Update #2191 and the fresh #10827 follow-up at material milestones | Exact readback, Agent OS validation and preserved accepted #10825; actual handoff only at a real continuity boundary |
 | Program acceptance | Measure successive eligible natural cohorts per risk class and cold/warm mix | At least 30 initial observations/class, failures/fallback/cancellation and original journeys included; all final p95 targets remain unproved |
 
