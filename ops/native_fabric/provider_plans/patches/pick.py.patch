@@ -1,0 +1,11 @@
+--- a/ext/pick.py
++++ b/ext/pick.py
+@@ -2071,7 +2071,7 @@
+     "go": ("go-codex",), "bailian": ("qwen",), "minimax": ("minimax",),
+     "glm": ("glm-codex", "glm"), "cursor": ("cursor",), "grok": ("grok",),
+     "codex-native": ("codex-native",), "claude-native": ("claude-native",),
+-    "ocfree": ("oc-free",),
++    "ocfree": ("oc-free",), "byteplus": ("byteplus",), "experiential": ("experiential",),
+ }
+ 
+ 
