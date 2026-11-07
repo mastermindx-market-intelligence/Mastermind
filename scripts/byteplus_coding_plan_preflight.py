@@ -107,6 +107,10 @@ def source_preflight() -> dict[str, object]:
         "canary_source_blockers": list(canary),
         "autonomous_start_authorized": False,
         "production_source_blockers": list(autonomous),
+        "required_quota_windows": ["session", "weekly", "monthly"],
+        "quota_scope": "ONE_SUBSCRIPTION_ALL_MODELS_AND_KEYS",
+        "additional_key_creates_capacity": False,
+        "additional_subscription_requires_distinct_owner_identity": True,
         "actual_concurrent_worker_limit": None,
         "estimated_startable_jobs": None,
         "additional_owner_proofs_required": [
