@@ -58,7 +58,7 @@ Primary source evidence: #983, #2060, #2082/#2085; #983 comments6672146510 and66
 | C4 | Existing publisher activation, key-reference rotation, drain/rollback and original-request recovery | Actual source/config grants and provider qualification required; no standalone installer. |
 | C5 | Migrate all named consumers and prove installed operations | Real product paths, not source assertions. |
 
-Current implementation priority: C1 configuration safety and consumer inventory. Paid Fabric is preferred for independently bounded extraction/build work. Principal retains C3 architectural decisions and integration. Direct work justification: PRINCIPAL_JUDGMENT for reconciling independent owner schemas and active writers, then LOWER_TOTAL_OVERHEAD for the smallest non-overlapping consumer join. No discretionary test suites are launched under the Chairman's current no-tests instruction; native required CI/security gates remain unchanged and unrun proof must be labelled unrun.
+Current implementation priority: complete H5/C3–C5 under the Chairman's 2026-11-07 handoff. Paid Fabric is preferred for independently bounded extraction/build work. Principal retains source-owner reconciliation and the bounded consumer integration under PRINCIPAL_JUDGMENT / LOWER_TOTAL_OVERHEAD. The earlier no-discretionary-tests phase is historical; the current H5 assignment requires focused checks, required CI and mounted authenticated path proof. Never substitute fixture or source results for live acceptance.
 
 ## Explicit active-source exclusions
 
@@ -67,3 +67,17 @@ Do not edit queued #2060 source or original workers' `lease_broker.py`, `go_leas
 ## Current frontier
 
 Source workspace is managed by the existing Studio mmx-workspace publisher on operation `shared-model-pool-control-20261105-c4`. Reuse this operation and source branch. Preserve #2085 as merged DO_NOT_REDO and the existing Grok Secretary binding audit. This expansion is tied to #983, not a replacement programme or a second Fabric. Agent OS organizational link remains PLAN_NOT_ORG_LINKED until recorded by its normal source writer.
+
+## H5 continuation — 2026-11-07
+
+Assignment: [H5 OS capacity and routing experience](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2109#issuecomment-6705878970). Original programme and carrier remain #983 / #2109, with #2182 owning the compatible publisher contribution and #2175 owning the final native APPLICATION composition.
+
+C3 now separates configured model aliases, provider-policy enablement, qualification, current eligibility and real-path proof. The local routing inspector preserves workload/tier/alias order, exposes declared capability and policy exclusions, and never selects an account, reserves capacity or infers a served model. Inspecting an alias outside a route does not silently substitute another. Browser-local observation times carry the time zone; acquisition revocation discards late data. Account identity/allowances, quota windows/reset, local caps/reservations, budgets and wait reasons remain explicitly unobserved until authoritative producers join them. The current closed v1 backend/native wire remains unchanged.
+
+The ten focused component/route tests pass against these candidate bytes in a disposable source harness with the existing pinned frontend dependencies. This is component proof, not the deployed authenticated OS path. The protected Company listener and exact136-node Fabric response subtree were verified AST-identical during the protected779fc3be composition; unchanged Rust Programs response tokens are re-bound to their new whole source and exact positions.
+
+H2 is actively implementing account entitlement/quota/reset truth on its original new contribution ([pickup6706283300](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706283300)); H3 owns atomic actual-account selection and original claim/settlement ([contract6706341131](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706341131)). H5 must consume those typed authoritative projections instead of matching provider/alias strings, counting aliases as independent quota, or wrapping the broker's garbage-collecting snapshot as a pure read.
+
+C4's installed publisher still needs the original #2175 combined generation and release proof. #2182's remaining native Go CI regression is repaired in its own existing workspace by restoring the exact retained publisher predecessor in historical fixtures; no production closure guard or manifest is relaxed. Source publication and hosted results are recorded on the original PR.
+
+C3–C5 remain **incomplete** until these joins, current-head CI/release evidence, actual physical model/account execution, original-request recovery/drain/rollback, and the mounted authenticated browser journey are proven. Preserve the existing release hold, Draft/queue states and active owners. No new watcher, registry, installer, credential surface or admission authority is introduced.

@@ -34,8 +34,8 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Model READ and selected-child admission coexist in the joined ingress.
         # The original Fabric reply operands and Company listener remain unchanged.
-        "source_sha256": "3e52425c2bc8ff14e988a7579f28a54ea6b258f994feed9de37e6e8f0a34f0cc",
-        "ast_sha256": "973e0e4440b041bc384a56c5024bb6f3a443981f6b9c7d6af8ff0241497aaa93",
+        "source_sha256": "7e185e31ee5994534eaa311923e63393fb26a4965dcf4a500c9d79a1b5db8e3a",
+        "ast_sha256": "f75ff58f72f493250f5a776e24c4a9d4f2deb4c31f252a8f3612636cfbf31648",
         "sites": (
             (("body", 3, "body", 58, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
@@ -63,3 +63,11 @@ REVIEWED_ANCHORS = {
 # not inherited native SEND approval or installation/release authority.
 
 # Parent C17 dispatch composition retains the protected821 ingress AST and exact operands.
+
+# Authenticated Agent OS context adds one 47-line read branch after the existing
+# catalog branch. Removing that exact insertion reproduces the previous source
+# bytes; the Company method, all three catalog operands and their AST paths are
+# unchanged. The new whole-source/method pins qualify that bounded composition.
+
+# H5 joins protected779fc3be: exact Company listener and Fabric response subtree
+# remain AST-identical; only the composed full-source and ingress pins change.

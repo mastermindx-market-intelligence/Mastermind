@@ -302,6 +302,7 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
             # Active-row absence is not proof of nonexecution or permission to resend.
             return _result("EFFECT_UNKNOWN", role=role)
         if (row.get("principal_id") != principal or row.get("target_session_id") != sid
+                or (params["admission_id"] is not None and row.get("admission_id") != params["admission_id"])
                 or row.get("request_id") != submission or row.get("intent") != "queue"
                 or type(row.get("payload")) is not dict or set(row["payload"]) != {"text", "finite"}
                 or row["payload"].get("finite") is not True
@@ -531,7 +532,7 @@ def _consumer_extension(runner, home: Path) -> dict:
     from tools.registry import registry
     from integrations.hermes_harness.native_executive_consumer import (
         CONSUMER_SLOT_ATTRIBUTE, CONSUMER_PLUGIN_NAME, ConsumerSlot,
-        NativeConsumerCurrentness, schema_digest)
+        NativeConsumerCurrentness, schema_digest, selected_child_publication)
     from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
     descriptor = runner.session_runtime_descriptor
     if descriptor.get("state") != "ready" or runner._draining:
@@ -542,7 +543,7 @@ def _consumer_extension(runner, home: Path) -> dict:
         raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     with slot._lock:
         registration = slot.registration
-        binding = slot.startup.binding
+        binding = slot.delegate_binding
         loaded = getattr(manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME)
         if (slot.manager is not manager or slot.scope != manager.scope_key
                 or slot.owner != current_runtime_owner() or str(slot.scope) != str(home)
@@ -554,7 +555,9 @@ def _consumer_extension(runner, home: Path) -> dict:
                 or getattr(slot.registration_context, "_manager", None) is not manager):
             raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     guard = binding.currentness_guard
-    publication = slot.publication
+    publication = selected_child_publication(slot.publication)
+    if publication is None:
+        raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     if (not isinstance(guard, NativeConsumerCurrentness) or guard() is not True
             or guard.session_id != binding.session_id
             or guard.instance_id != descriptor.get("instance_id")
@@ -577,7 +580,7 @@ def _consumer_extension(runner, home: Path) -> dict:
     if guard() is not True or registration.check_fn() is not True:
         raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     with slot._lock:
-        if (slot.registration is not registration or slot.startup.binding is not binding
+        if (slot.registration is not registration or slot.delegate_binding is not binding
                 or slot.load_outcome != "REGISTERED"
                 or getattr(manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME) is not loaded
                 or getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None) is not slot):
@@ -601,6 +604,46 @@ def _consumer_extension(runner, home: Path) -> dict:
         "mcp_tools_schema_sha256": publication.tools_schema_digest,
     }
 
+
+
+def _consumer_capabilities(runner, home: Path) -> dict:
+    """Read v2 capability stages from this same native process and enrollment."""
+    from hermes_cli.plugins import get_plugin_manager
+    from integrations.hermes_harness.native_executive_consumer import (
+        CONSUMER_SLOT_ATTRIBUTE, ConsumerSlot, ExecutiveContextConsumerPublication,
+        selected_child_publication)
+    from .native_agentos_memory import NativeAgentOsMemoryFactory, validate_consumer_readback
+    manager = get_plugin_manager()
+    slot = getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None)
+    descriptor = runner.session_runtime_descriptor
+    if (not isinstance(slot, ConsumerSlot) or type(slot.publication) is not ExecutiveContextConsumerPublication
+            or type(slot.memory_factory) is not NativeAgentOsMemoryFactory
+            or slot.manager is not manager or slot.owner != current_runtime_owner()
+            or str(slot.scope) != str(home) or descriptor.get("state") != "ready" or runner._draining):
+        raise RuntimeRefusal("NATIVE_AGENTOS_READBACK_UNAVAILABLE")
+    publication = slot.publication
+    def enrollment():
+        value = read_enrolled_session(runner, home, slot.owner, publication.session.request_id,
+                                      publication.session.principal_id, role=publication.session.role)
+        if value["status"] != "ENROLLED":
+            raise RuntimeRefusal("NATIVE_AGENTOS_READBACK_UNAVAILABLE")
+        return value["target"]
+    before = enrollment()
+    expected = {"implementation_sha": slot.owner,
+        "publication_sha256": slot.memory_factory.publication_sha256, "profile_id": str(home),
+        "instance_id": before["instance_id"], "authority_epoch": before["authority_epoch"],
+        "enrollment_request_id": publication.session.request_id,
+        "principal_id": publication.session.principal_id, "session_id": before["session_id"]}
+    if (expected["instance_id"] != descriptor.get("instance_id")
+            or expected["authority_epoch"] != descriptor.get("authority_epoch")):
+        raise RuntimeRefusal("NATIVE_AGENTOS_READBACK_UNAVAILABLE")
+    value = slot.memory_factory.readback()
+    if selected_child_publication(publication) is not None:
+        value["selected_child"] = _consumer_extension(runner, home)
+    if (enrollment() != before or getattr(manager, CONSUMER_SLOT_ATTRIBUTE, None) is not slot
+            or not slot.memory_factory.registered_current()):
+        raise RuntimeRefusal("NATIVE_AGENTOS_READBACK_UNAVAILABLE")
+    return validate_consumer_readback(value, publication=publication, expected_binding=expected)
 
 
 def _implementation(value):
@@ -944,13 +987,15 @@ def install_private_control(runner, home: Path, role: str, *,
                 return role_result("TARGET", target=_target(runner, home, _id(params["session_id"]), peer_subject))
             if operation == "read_original":
                 return _read_original(home, params, peer_subject, role=role)
-            if operation == "consumer_extension":
+            if operation in {"consumer_extension", "consumer_capabilities"}:
                 # A finite read-only qualification of the serving process. The
                 # caller selects no target and no route: the profile is the
                 # one this private socket belongs to.
                 if set(params) != {"operation", "profile_id"} or params["profile_id"] != str(home):
                     raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_REQUEST_INVALID")
                 async def observe_extension():
+                    if operation == "consumer_capabilities":
+                        return role_result("OBSERVED", consumer=_consumer_capabilities(runner, home))
                     return role_result("OBSERVED", extension=_consumer_extension(runner, home))
                 coroutine = observe_extension()
                 try:
@@ -972,7 +1017,8 @@ def install_private_control(runner, home: Path, role: str, *,
             if type(params["ticket"]) is not str or not 1 <= len(params["ticket"]) <= 256:
                 raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
         except Exception:
-            return role_result("UNAVAILABLE" if operation in {"observe", "read_original", "consumer_extension"} else "REFUSED")
+            return role_result("UNAVAILABLE" if operation in {
+                "observe", "read_original", "consumer_extension", "consumer_capabilities"} else "REFUSED")
         # This is the native control server's existing executor. The native
         # loop owns the bounded coroutine; never create a new event loop.
         coroutine = _submit(runner, home, params, peer_subject, role=role)
@@ -1140,3 +1186,7 @@ class NativeSecretaryClient:
         owner, creates no session and mutates nothing.
         """
         return self._call({"operation": "consumer_extension", "profile_id": str(self.home)})
+
+    def consumer_capabilities(self):
+        """Private v2 capability observation; not a role HTTP dispatch verb."""
+        return self._call({"operation": "consumer_capabilities", "profile_id": str(self.home)})

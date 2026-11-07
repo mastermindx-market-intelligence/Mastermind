@@ -129,10 +129,11 @@ def render_qualified_native_byok(profile: RuntimeProfile, publication) -> str:
     """Compose the exact native config of a *qualified* optional consumer.
 
     The Steward MCP server stays disabled and every other member of the
-    reviewed disarmed config is unchanged. Two members are added: the exact
+    reviewed disarmed model and tool config is unchanged. The exact
     MCP/OAuth entry of the Executive connection, whose tool filter is empty so
     no raw Executive tool becomes model-facing, and the plugin grant that
-    names exactly that one server.
+    names exactly that one server. V2 also selects the native Agent OS memory
+    provider and disables the two independent file-memory stores.
 
     The bearer token and any client secret stay with the incumbent OAuth
     owner and its token storage. This config never carries one.
@@ -155,6 +156,18 @@ def render_qualified_native_byok(profile: RuntimeProfile, publication) -> str:
     plugins = render_consumer_plugin_config(publication)
     native["mcp_servers"][publication.mcp.server] = server
     native["plugins"] = plugins
+    from integrations.hermes_harness.native_executive_consumer import ExecutiveContextConsumerPublication
+    if type(publication) is ExecutiveContextConsumerPublication:
+        # Keep native MemoryManager/loader ownership. The held loader resolves
+        # this fixed provider to the original non-bundled consumer package.
+        memory = native.setdefault("memory", {})
+        if type(memory) is not dict:
+            raise RuntimeRefusal("NATIVE_BYOK_CONFIG_INVALID")
+        memory["provider"] = publication.context.provider
+        # Agent OS is the sole durable memory owner for this composition.
+        # Native defaults otherwise also load independent MEMORY.md / USER.md.
+        memory["memory_enabled"] = False
+        memory["user_profile_enabled"] = False
     import yaml  # no PyYAML import for the unrelated Secretary shadow scanner
 
     rendered = (

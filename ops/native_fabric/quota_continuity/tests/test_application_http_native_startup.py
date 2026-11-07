@@ -95,6 +95,11 @@ def test_http_build_adds_only_closed_three_and_keeps_historical_evidence_inert(b
     historical = (ROOT / "source/application_http_transports.py.preimage").read_bytes()
     assert hashlib.sha1(b"blob %d\0" % len(historical) + historical).hexdigest() == "a116d8c671594552dd5c14f46f91981cd7c15f43"
     assert g.digest(historical) != manifest["ext/application_http_transports.py"]
+    realm_preimage = (ROOT / "source/codex_provider_realm.py.preimage").read_bytes()
+    assert hashlib.sha1(b"blob %d\0" % len(realm_preimage) + realm_preimage).hexdigest() == "eeea4c0fafc7e6df5c534c731cb6046bbe4d3f37"
+    document = json.loads(sources["ext/application_http_realms.v1.json"][0])
+    assert [row["realm_id"] for row in document["drivers"]] == [
+        "alibaba-token-plan-sg", "minimax-token-plan"]
     assert g._entrypoints_for(manifest) == g._entrypoints_for(baseline)
 
 
@@ -107,9 +112,32 @@ def test_partial_http_group_never_becomes_valid_generation(builds, member):
 
 
 def test_arbitrary_metadata_or_runtime_preimage_is_not_admitted():
-    for relative in ("ext/application_http_realms.other.json", "ext/application_http_transports.py.preimage"):
+    for relative in ("ext/application_http_realms.other.json", "ext/application_http_transports.py.preimage",
+                     "ext/codex_provider_realm.py.preimage"):
         with pytest.raises(ValueError):
             g.file_name(relative)
+
+
+def test_builder_uses_pinned_realm_evidence_and_rejects_tampering(monkeypatch):
+    expected = builder.application_http_sources(ROOT)
+    original_read = Path.read_bytes
+    current_realm = ROOT.parents[2] / "control_plane/codex_provider_realm.py"
+    historical_realm = ROOT / "source/codex_provider_realm.py.preimage"
+
+    def guard_current(path):
+        assert path != current_realm, "historical projection read mutable current realm"
+        return original_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guard_current)
+    assert builder.application_http_sources(ROOT) == expected
+
+    def tamper_historical(path):
+        raw = guard_current(path)
+        return raw + b"\n# altered evidence\n" if path == historical_realm else raw
+
+    monkeypatch.setattr(Path, "read_bytes", tamper_historical)
+    with pytest.raises(ValueError, match="source_blob_mismatch"):
+        builder.application_http_sources(ROOT)
 
 
 def test_builder_executes_exact_captured_reader_not_cached_same_path_object(monkeypatch):

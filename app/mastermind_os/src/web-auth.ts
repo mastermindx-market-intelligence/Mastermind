@@ -428,6 +428,38 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       signal.removeEventListener("abort", abort);
     }
   }
+  // Keep a prior interactive workspace grant usable while its replacement is
+  // obtained silently. Auth0 access-token expiry is not a user logout.
+  // Tokens stay private and memory-only; no bearer or refresh secret is persisted.
+  function scheduleTokenLifetime(resource: Resource, token: Token, ticket: number, restored: boolean) {
+    const owns = () => ticket === generation && tokens[resource] === token;
+    const remaining = Math.max(0, token.expires - now());
+    if (resource === "acquisition" || resource === "content") {
+      // Refresh ahead of common 5-minute Auth0 lifetimes, before the signed-in
+      // UI can flicker to the sign-in screen. A rejected silent attempt does
+      // not invalidate a still-live token or initiate a redirect.
+      const headroom = Math.min(60_000, Math.floor(remaining / 5));
+      if (headroom > 0) later(() => {
+        if (owns() && !flow && !explicitlySignedOut && !loggedOutElsewhere()) {
+          void restore(true).catch(() => {});
+        }
+      }, Math.max(0, remaining - headroom));
+    }
+    later(() => {
+      if (!owns()) return;
+      tokens[resource] = null;
+      if (resource === "executive") advanceExecutive();
+      if (resource === "research") invalidateResearch();
+      emit();
+      // Browser sleep/blocked iframes may delay pre-expiry renewal. Recover
+      // once again on expiry, with the existing one-attempt navigation guard.
+      // Research is an explicitly user-granted scope, never auto-restored.
+      if (resource === "acquisition" || resource === "content" ||
+          (restored && resource === "executive")) {
+        void restore(true).catch(() => {});
+      }
+    }, Math.max(0, token.expires - now()));
+  }
   async function transaction(
     resource: Resource,
     current: NonNullable<typeof flow>,
@@ -545,17 +577,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       check(ticket);
       tokens[resource] = token;
       if (resource === "executive") advanceExecutive();
-      later(
-        () => {
-          if (ticket === generation && tokens[resource] === token) {
-            tokens[resource] = null;
-            if (resource === "executive") advanceExecutive();
-            if (resource === "research") invalidateResearch();
-            emit();
-          }
-        },
-        Math.max(0, token.expires - now()),
-      );
+      scheduleTokenLifetime(resource, token, ticket, false);
       emit();
     } finally {
       remove("message", listener);
@@ -619,14 +641,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       tokens[resource] = token;
       if (resource === "acquisition") rememberSignedIn();
       if (resource === "executive") advanceExecutive();
-      later(() => {
-        if (ticket === generation && tokens[resource] === token) {
-          tokens[resource] = null;
-          if (resource === "executive") advanceExecutive();
-          emit();
-          void restore(true);
-        }
-      }, Math.max(0, token.expires - now()));
+      scheduleTokenLifetime(resource, token, ticket, true);
       emit();
     };
     const restoreOne = async (resource: "acquisition" | "content" | "executive") => {

@@ -5825,6 +5825,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const privateEntryState = authState && !authState.acquisition && !authState.content &&
     (authState.status === "signed_out" || authState.status === "signing_in" ||
       authState.status === "error" || authState.status === "unconfigured") ? authState.status : null;
+  const successfulSignOut = privateEntryState === "signed_out" && authState?.reason === "USER_SIGNED_OUT";
   useEffect(() => {
     // Leaving the product shell must release its existing drawer focus owner.
     if (privateEntryState) setNavigationOpen(false);
@@ -5832,7 +5833,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   if (privateEntryState) return <AuthEntry state={privateEntryState} locale={locale} theme={theme}
     illustrationSrc={privateEntryArt} authenticationControl={authenticationControl}
     preferencesControl={preferencesControl}
-    feedback={authState?.reason && privateEntryState !== "signing_in" && privateEntryState !== "unconfigured" ? <p role="alert">{
+    feedback={authState?.reason && !successfulSignOut && privateEntryState !== "signing_in" && privateEntryState !== "unconfigured" ? <p role="alert">{
       authState.reason === "POPUP_BLOCKED" ? copy.allowPopup :
       authState.reason === "POPUP_CLOSED" ? copy.popupClosed :
       authState.reason.includes("EXPIRED") || authState.reason.includes("TIMEOUT") ? copy.signInTimeout : copy.signInFailed
