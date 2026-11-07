@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
@@ -77,8 +78,11 @@ def apply_to_owned_tree(tree: Path, donor: Path) -> dict:
         raise ValueError("partial native ACP patch requires original-effect reconciliation")
     if not all(states):
         patch = str(ROOT / "native-acp-lifecycle.patch")
-        subprocess.run(["git", "apply", "--check", patch], cwd=tree, check=True, timeout=15)
-        subprocess.run(["git", "apply", patch], cwd=tree, check=True, timeout=15)
+        # Keep patch path resolution inside this qualified owned source tree.
+        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        env["GIT_CEILING_DIRECTORIES"] = str(tree.parent)
+        subprocess.run(["git", "-c", "gc.auto=0", "apply", "--check", patch], cwd=tree, env=env, check=True, timeout=15)
+        subprocess.run(["git", "-c", "gc.auto=0", "apply", patch], cwd=tree, env=env, check=True, timeout=15)
     for name, digest in expected["output_sha256"].items():
         if sha(tree / name) != digest:
             raise ValueError("native ACP patched output differs")
@@ -89,7 +93,7 @@ def apply_to_owned_tree(tree: Path, donor: Path) -> dict:
 def prepare(supplied: str) -> dict:
     expected = manifest()
     donor = donor_source(supplied, expected)
-    tree = ROOT / ".cache/native-acp"
+    tree = ROOT / (".cache/native-acp-" + expected["patch_sha256"])
     if tree.resolve(strict=False) != tree:
         raise ValueError("native ACP artifact directory redirected")
     tree.mkdir(parents=True, exist_ok=True)

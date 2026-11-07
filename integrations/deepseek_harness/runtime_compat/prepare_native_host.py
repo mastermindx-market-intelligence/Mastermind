@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
@@ -14,7 +15,8 @@ PACKAGES = ("packages/core/agent", "packages/core/agent-loop", "apps/cli",
 CHANGED = frozenset((PACKAGES[0] + "/src/index.ts", PACKAGES[1] + "/src/index.ts",
                     PACKAGES[2] + "/src/profile-boot.ts", PACKAGES[3] + "/src/index.ts",
                     PACKAGES[4] + "/src/index.ts", PACKAGES[5] + "/src/index.ts",
-                    PACKAGES[6] + "/src/rpc-host.ts"))
+                    PACKAGES[6] + "/src/rpc-host.ts", PACKAGES[1] + "/src/agent.ts",
+                    PACKAGES[1] + "/src/inbox.ts"))
 
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -82,8 +84,12 @@ def apply_to_owned_tree(tree: Path, donor: Path) -> dict:
         raise ValueError("partial native host patch requires original-effect reconciliation")
     if not all(states):
         patch = str(ROOT / "native-host-admission.patch")
-        subprocess.run(["git", "apply", "--check", patch], cwd=tree, check=True, timeout=15)
-        subprocess.run(["git", "apply", patch], cwd=tree, check=True, timeout=15)
+        # This owned tree may be ignored inside the original source worktree.
+        # Prevent Git from treating its paths as filters relative to that parent.
+        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        env["GIT_CEILING_DIRECTORIES"] = str(tree.parent)
+        subprocess.run(["git", "-c", "gc.auto=0", "apply", "--check", patch], cwd=tree, env=env, check=True, timeout=15)
+        subprocess.run(["git", "-c", "gc.auto=0", "apply", patch], cwd=tree, env=env, check=True, timeout=15)
     for name, digest in expected["output_sha256"].items():
         if sha(tree / name) != digest:
             raise ValueError("native host patched output differs")
@@ -94,7 +100,7 @@ def apply_to_owned_tree(tree: Path, donor: Path) -> dict:
 def prepare(supplied: str) -> dict:
     expected = manifest()
     donor = donor_source(supplied, expected)
-    tree = ROOT / ".cache/native-host"
+    tree = ROOT / (".cache/native-host-" + expected["patch_sha256"])
     if tree.resolve(strict=False) != tree:
         raise ValueError("native host artifact directory redirected")
     tree.mkdir(parents=True, exist_ok=True)

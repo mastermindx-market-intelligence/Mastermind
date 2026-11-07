@@ -1,0 +1,174 @@
+{
+  "acp_output_sha256": {
+    "packages/acp/acp/src/index.ts": "626ef7a67380d8a6538585a10538afb52cf361bfdf30636f347233c388cdea29",
+    "packages/acp/acp/src/session.ts": "20fbc863c15409708fdd63e9642969548969f1c5d87367ecc321ec87d12cf90e"
+  },
+  "behavior": [
+    "Captured original lifecycle permit may require retained native input capability; no mutable Context slot can disable it after capture.",
+    "Private Agent-to-Inbox writer closures convey actual Send or original running-step tool-context provenance. Public Inbox operations cannot supply that provenance.",
+    "Nonempty native insertion rejects accessors, freezes exact data, consumes the original external candidate once, rechecks lifetime/generation and Session offset, then appends through the original Session. Removal-only mutations retain original behavior.",
+    "Native resume replays the original Inbox fold before semantic crash repair and refuses either pending queue. Native seed/setup/publication refuse unowned input. Ordinary donor recovery and internal tool contexts remain compatible.",
+    "Existing ACP callback observes the exact immutable enqueue object. Non-authorizing retirement reaches only the captured original callback after the original prompt settles or fails; consumed effects remain consumed. Async callbacks cannot grant or create unhandled rejections.",
+    "Existing package manifests retain all previously qualified host/owner-access/Session composition. Content-addressed source caches preserve prior accepted artifacts."
+  ],
+  "diagnostics": [
+    {
+      "finding": "Git discovered the enclosing workspace and skipped every owned-tree patch path. All observed candidate outputs still equaled their donor preimages. The preparers now constrain Git discovery to the exact owned tree and verify all output hashes.",
+      "log_sha256": "c001626397c3f109c309bd3d4bcd3bd7bde7616889c5441195065235035ab37b",
+      "receipt": "/private/tmp/mmx-dsh-c28-input-host-20261107-pro1.json",
+      "receipt_sha256": "cfa8f2cb58e5f2355146b85d9908d945e55845be0d5f8c8c78635d68e9fd27d7"
+    },
+    {
+      "finding": "206 tests passed; the new accessor fixture tried to alter a message already frozen by the original constructor. The fixture now clones that message before attaching the hostile getter; assertions and production behavior were not relaxed.",
+      "log_sha256": "485e1d4656ff52127780a7dc9849fbab66202a5efe41d000d53d636b5795be89",
+      "receipt": "/private/tmp/mmx-dsh-c28-input-host-20261107-pro2.json",
+      "receipt_sha256": "61f217607669500c3dc3236128020ab1878ad77ed908e4cb9336a0d474d014c9"
+    },
+    {
+      "finding": "Native AgentLoop's strict types required contextual generic parameters for frozen callbacks and Session['seq'] (SessionLogOffset), not SessionSeq. All corrections are type-only; final exact-source tests and checks pass.",
+      "log_sha256": "4fbf760b9f065201684041363ff3237804e82b3a3e5dbc75557b23e93e65cffa",
+      "receipt": "/private/tmp/mmx-dsh-c28-native-typecheck-20261107-pro1.json",
+      "receipt_sha256": "8ab7ce22a34db7a47dba9c48fd8915c66cf765dfa10d9abd06774f26e9417e8b"
+    }
+  ],
+  "donor_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "host_output_sha256": {
+    "apps/cli/src/profile-boot.ts": "7356fa6ee510041b3d3506398e6305deedd6833187cb3f336b7ffd30b0431259",
+    "packages/api/gateway/src/index.ts": "4bf4df5da1d4b9b12216976ed8cfa6948caa2b0c11995cd6327c8fee0c91f184",
+    "packages/api/remote-access/src/index.ts": "13219e4765f893f2a7063f9ecac39af63eff25033fab1b28b5419cabc8ba911e",
+    "packages/client/connection/src/rpc-host.ts": "00ceca82899b88367f4df9ac69811c2f97dc840f191ba769b9b22d78c5fe4bb6",
+    "packages/core/agent-loop/src/agent.ts": "7865abe18a83effea73aeb666bb57b4125bbf00a476c8412e8a82e146295dea8",
+    "packages/core/agent-loop/src/inbox.ts": "dd12671aa16abb4ae619beb3ae5b3ce6109641cd51e49c10aa6b17024b7ab41f",
+    "packages/core/agent-loop/src/index.ts": "0b40a4f3a5632c05a8227cd49818ee3640eded3f545953694e39abd679da4c0d",
+    "packages/core/agent/src/index.ts": "0a6b0480dfbf30bbe769f71079eaa92dcda63fcdcd0ffd60a33fe9069ed86522",
+    "packages/typert/protocol/src/index.ts": "3148c1d928c7f2cf9b3bd51346d67d13eabb36434e1353c8729aa5515f750021"
+  },
+  "law_pin": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+  "operation": "deepseek-mastermind-chat-20261106-c2",
+  "qualified_at": "2026-11-07T23:08:31.972631+00:00",
+  "release": {
+    "accepted_physical_canary_repeated": false,
+    "external_provider_calls": 0,
+    "installed": false,
+    "new_production_session": false,
+    "production_armed": false,
+    "service_changes": false
+  },
+  "remaining": [
+    "Native final model assignment and actual resolved-provider dispatch enforcement.",
+    "Original account-owner local snapshot/currentness witness, truthful Node owner facts and original Worker factory join.",
+    "Fixed same-process native_worker entry through the existing complete production package and explicit qualified listener configuration.",
+    "Existing capability/sandbox/approval/tool ceilings and exact original Worker/quota/host/account/profile/router installation.",
+    "Real signed-in packaged DeepSeek send/history/answer/Stop/resume and eligible governed-tool execution; original production and release holds remain."
+  ],
+  "schema": "mastermind.deepseek_native_input_qualification/v1",
+  "source_parent": "844e072595207e46f775a1f0aa5d2a8c88d0211b",
+  "source_sha256": {
+    "integrations/deepseek_harness/runtime_compat/check-native-acp.mjs": "c88ae0da8c4a96c2ed7ac9d3f81ff81d20c50544190509431f467ec0e69ab716",
+    "integrations/deepseek_harness/runtime_compat/check-native-host.mjs": "ffce7d20eae6f55cfa5efb8c90fe5adee97caf92c433ec8a7495a4aace5f5293",
+    "integrations/deepseek_harness/runtime_compat/native-access-source.json": "4adf7251b63e60bd79189c23a164e29433c5459ad8f8dc330d5a114344b86a4b",
+    "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.patch": "3393bf6e8bb6425bb99e61276ec2b8111fc471c39122213649a45881dbf2bb0d",
+    "integrations/deepseek_harness/runtime_compat/native-acp-lifecycle.test.ts": "da020e7615e79f569fbafae6201c5c78eac9c966e2d74075bde720d313bb74b7",
+    "integrations/deepseek_harness/runtime_compat/native-acp-source.json": "b31baf7ea78d139595f24f1a395bcbd3eb33e2cb0ccdf8e991f5d118fa9ade0d",
+    "integrations/deepseek_harness/runtime_compat/native-host-admission.patch": "9acf1f7d9cf7d26076f7a0a076aa55244e079a4cb10e867afede245dfec3f216",
+    "integrations/deepseek_harness/runtime_compat/native-host-admission.test.ts": "7008f25706d6c07740ba4d0de5e0afbbfb523b02401f7eb305371d9fbafc6e3d",
+    "integrations/deepseek_harness/runtime_compat/native-host-source.json": "8f23b9147c8bc2d3f5dd6a48de2ed5c314b9ed8785456f557ac08061bd992732",
+    "integrations/deepseek_harness/runtime_compat/prepare_native_acp.py": "47c9ff4a4dac0216ef7d576d27766236684c2b0349dd2cf3b5e1f8387535fc60",
+    "integrations/deepseek_harness/runtime_compat/prepare_native_host.py": "78add25038fdada4e7afb6fbb9fd352a63a061ee95c2c6263dfe025a073c858f",
+    "integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts": "1b0ee5af1f59a7b7fcf3289af3b91a1bd4738c09ba31c328d226b70f72f3b088",
+    "integrations/deepseek_harness/runtime_compat/vitest.host-admission.config.mts": "3299347d5cb4ff8a5c4becee74abd199eca5cc5cc1ad0dd978e24f7d1f2052ce"
+  },
+  "tests": {
+    "combined_acp": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.acp-lifecycle.config.mts",
+        "--reporter=verbose",
+        "--reporter=junit",
+        "--outputFile.junit=/private/tmp/mmx-dsh-c28-input-acp-20261107-pro2.xml"
+      ],
+      "completed_at": "2026-11-07T23:05:54.237631+00:00",
+      "errors": 0,
+      "failures": 0,
+      "input_count": 4544,
+      "inputs_unchanged": true,
+      "junit_sha256": "f71195fbddd57cf8caa68086f447acfab38af119af0a5c08f6670872bba59485",
+      "log_sha256": "0ec7f800459aac6cc6834ecb63db078d26b0ddd19b2467585bdb491f7103a7a9",
+      "passed": 199,
+      "receipt": "/private/tmp/mmx-dsh-c28-input-acp-20261107-pro2.json",
+      "receipt_sha256": "720521a2454b436cb92c2688d341c99fb8bf8ce212948957021b81f08f623038",
+      "returncode": 0,
+      "started_at": "2026-11-07T23:05:39.236061+00:00"
+    },
+    "host": {
+      "argv": [
+        "/opt/homebrew/Cellar/node/26.5.0/bin/node",
+        "/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022/node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        "/Volumes/Mastermind/agent-workspaces/web/deepseek-mastermind-chat-20261106-c2/integrations/deepseek_harness/runtime_compat/vitest.host-admission.config.mts",
+        "--reporter=verbose",
+        "--reporter=junit",
+        "--outputFile.junit=/private/tmp/mmx-dsh-c28-input-host-20261107-pro4.xml"
+      ],
+      "completed_at": "2026-11-07T23:05:42.640084+00:00",
+      "errors": 0,
+      "failures": 0,
+      "input_count": 4544,
+      "inputs_unchanged": true,
+      "junit_sha256": "d5f4edf29704a7da6e11dd81fc04c6682101cb9ed2de8e21056b0b0c64403ef9",
+      "log_sha256": "f2d6b20c6d25f160fe34ec55345299b93ef12f51e7e2ec783a81bfe142c98ab3",
+      "passed": 207,
+      "receipt": "/private/tmp/mmx-dsh-c28-input-host-20261107-pro4.json",
+      "receipt_sha256": "fe685b1e69df892d4568feb3de184f4a21759225ae008984ffde73864640a194",
+      "returncode": 0,
+      "started_at": "2026-11-07T23:05:35.955898+00:00"
+    },
+    "package": {
+      "argv": [
+        "/private/tmp/mmx-dsh-c17-test-env-20261107-pro1/bin/python",
+        "-m",
+        "pytest",
+        "-vv",
+        "-x",
+        "--junitxml=/private/tmp/mmx-dsh-c28-native-package-20261107-pro1.xml",
+        "tests/test_dsh_native_acp_package.py",
+        "tests/test_dsh_native_owner_package.py",
+        "tests/test_dsh_native_session_package.py",
+        "tests/test_native_deepseek_worker_factory.py"
+      ],
+      "completed_at": "2026-11-07T23:06:35.488931+00:00",
+      "errors": 0,
+      "failures": 0,
+      "input_count": 4441,
+      "inputs_unchanged": true,
+      "junit_sha256": "309fea39219289003d42ced37e2a54a7da756607a039400111e5f67f8e304825",
+      "log_sha256": "c6e54deacb38fe7d99bf77d3a9764b2ac56dd15fd34e1ef93180fb82329e65f0",
+      "passed": 54,
+      "receipt": "/private/tmp/mmx-dsh-c28-native-package-20261107-pro1.json",
+      "receipt_sha256": "9db60d187449d828547ef0f4f2a731b8f658f3679f2180b7ca6414aabf2c3bef",
+      "returncode": 0,
+      "started_at": "2026-11-07T23:06:25.448337+00:00"
+    }
+  },
+  "typescript": {
+    "diagnostics": 0,
+    "log_sha256": "6716e6cebf23ab3f05f978b16763fa69fdb04a93da7549e2c1a4366577b427de",
+    "projects": [
+      "Agent",
+      "AgentLoop",
+      "ACP"
+    ],
+    "receipt": "/private/tmp/mmx-dsh-c28-native-typecheck-20261107-pro2.json",
+    "receipt_sha256": "813c0a52e68d7cae4f83b45e250419e6105a1e10fb38e6dd28f1db5db9c387b2",
+    "reproducible_host_checker": {
+      "log_sha256": "0d9669c549a6edd52f1f727b05ba89dcfcd083dabfaa0a59393ac9b445f0cd38",
+      "receipt": "/private/tmp/mmx-dsh-c28-host-checker-20261107-pro1.json",
+      "receipt_sha256": "9d09f82973c886dd384cdc7d13f2aed81373dfe8630a9f6556203a4497795532",
+      "source_sha256": "ffce7d20eae6f55cfa5efb8c90fe5adee97caf92c433ec8a7495a4aace5f5293"
+    }
+  }
+}

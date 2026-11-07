@@ -8,7 +8,7 @@ import {createHash} from "node:crypto";
 const here=dirname(fileURLToPath(import.meta.url)),donor=process.env.DSH_SOURCE;
 if(!donor||!donor.startsWith("/"))throw Error("DSH_SOURCE must name the pinned native donor");
 const manifest=JSON.parse(readFileSync(resolve(here,"native-acp-source.json"),"utf8"));
-const candidate=resolve(here,".cache/native-acp");
+const candidate=resolve(here,".cache/native-acp-"+manifest.patch_sha256);
 for(const [name,digest] of Object.entries({...manifest.source_sha256,...manifest.output_sha256})){
   if(createHash("sha256").update(readFileSync(resolve(candidate,name))).digest("hex")!==digest)
     throw Error("Native ACP source differs: "+name);

@@ -9,7 +9,13 @@ if(!donor||!donor.startsWith("/"))throw Error("DSH_SOURCE must name the pinned n
 const here=dirname(fileURLToPath(import.meta.url));
 const manifest=JSON.parse(readFileSync(resolve(here,"native-acp-source.json"),"utf8"));
 const preimage=process.env.MMX_NATIVE_ACP_PREIMAGE==="1";
-const candidate=preimage?donor:resolve(here,".cache/native-acp");
+const candidate=preimage?donor:resolve(here,".cache/native-acp-"+manifest.patch_sha256);
+const hostManifest=JSON.parse(readFileSync(resolve(here,"native-host-source.json"),"utf8"));
+const hostCandidate=preimage?donor:resolve(here,".cache/native-host-"+hostManifest.patch_sha256);
+for(const [name,digest] of Object.entries(preimage?hostManifest.source_sha256:{...hostManifest.source_sha256,...hostManifest.output_sha256})){
+  if(createHash("sha256").update(readFileSync(resolve(hostCandidate,name))).digest("hex")!==digest)
+    throw Error("Native ACP host source differs: "+name);
+}
 for(const [name,digest] of Object.entries(preimage?manifest.source_sha256:{...manifest.source_sha256,...manifest.output_sha256})){
   if(createHash("sha256").update(readFileSync(resolve(candidate,name))).digest("hex")!==digest)
     throw Error("Native ACP source differs: "+name);
@@ -18,7 +24,11 @@ const donorRequire=createRequire(resolve(donor,"package.json")),ts=donorRequire(
 const parsed=ts.readConfigFile(resolve(donor,"tsconfig.base.json"),ts.sys.readFile);
 if(parsed.error)throw Error("Native paths unavailable");
 const root=resolve(donor,"packages/acp/acp/src");
-const redirect=(path:string)=>path===root||path.startsWith(root+"/")?resolve(candidate,path.slice(donor.length+1)):path;
+const hostRoots=["packages/core/agent/src","packages/core/agent-loop/src","apps/cli/src",
+  "packages/typert/protocol/src","packages/api/remote-access/src","packages/api/gateway/src","packages/client/connection/src"];
+const redirect=(path:string)=>path===root||path.startsWith(root+"/")?resolve(candidate,path.slice(donor.length+1)):
+  hostRoots.some(name=>path===resolve(donor,name)||path.startsWith(resolve(donor,name)+"/"))
+    ?resolve(hostCandidate,path.slice(donor.length+1)):path;
 const aliases=Object.entries(parsed.config.compilerOptions.paths).filter(([name])=>!name.includes("*")).map(([name,paths])=>({
   find:new RegExp("^"+RegExp.escape(name)+"$"),replacement:redirect(resolve(donor,(paths as string[])[0])),
 }));

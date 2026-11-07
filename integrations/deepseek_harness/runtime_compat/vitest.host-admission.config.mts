@@ -9,7 +9,7 @@ if(!donor||!donor.startsWith("/"))throw Error("DSH_SOURCE must name the pinned n
 const here=dirname(fileURLToPath(import.meta.url));
 const manifest=JSON.parse(readFileSync(resolve(here,"native-host-source.json"),"utf8"));
 const preimage=process.env.MMX_NATIVE_HOST_PREIMAGE==="1";
-const candidate=preimage?donor:resolve(here,".cache/native-host");
+const candidate=preimage?donor:resolve(here,".cache/native-host-"+manifest.patch_sha256);
 for(const [name,digest] of Object.entries(preimage?manifest.source_sha256:{...manifest.source_sha256,...manifest.output_sha256})){
   if(createHash("sha256").update(readFileSync(resolve(candidate,name))).digest("hex")!==digest)
     throw Error("Native host source differs: "+name);
@@ -39,6 +39,6 @@ export default defineConfig({
     const path=id.startsWith(".")&&importer?resolve(dirname(importer),id):id.startsWith("/")?id:undefined;
     if(path){const mapped=redirect(path);if(mapped!==path)return mapped;}
   }},shared.standardDecoratorPlugin()],
-  test:{environment:"node",include:["native-host-admission.test.ts","native-owner-hold.test.ts"],maxWorkers:1,fileParallelism:false,
+  test:{environment:"node",include:["native-host-admission.test.ts","native-owner-hold.test.ts",resolve(donor,"packages/core/agent-loop/tests/inbox.spec.ts"),resolve(donor,"packages/core/agent-loop/tests/loop.spec.ts"),resolve(donor,"packages/core/agent-loop/tests/resume.spec.ts"),resolve(donor,"packages/core/agent-loop/tests/tool-calls.spec.ts")],maxWorkers:1,fileParallelism:false,
     testTimeout:15000,hookTimeout:15000,execArgv:shared.vitestExecArgv},
 });

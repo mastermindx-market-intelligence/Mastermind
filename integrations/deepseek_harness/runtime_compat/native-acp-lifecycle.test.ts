@@ -2,8 +2,10 @@
 import {afterEach,expect,it,vi} from "vitest";
 import {Context} from "@deepseek-ai/cordis";
 import {client as createClient,methods,ndJsonStream,PROTOCOL_VERSION,type SendRequestOptions} from "@agentclientprotocol/sdk";
-import {LlmAdapter,createUserMessage,type GenerateOptions,type StreamChunk} from "@deepseek-ai/dsh-llm";
+import {LlmAdapter,createUserMessage,ToolCallId,type GenerateOptions,type StreamChunk} from "@deepseek-ai/dsh-llm";
 import AgentLoop from "@deepseek-ai/dsh-agent-loop";
+import {defineContentToolFixture} from "@deepseek-ai/dsh-tools";
+import type {AgentInputCapability} from "@deepseek-ai/dsh-agent";
 import {mountAgentLoopTestDependencies} from "@deepseek-ai/dsh-agent-loop-testkit";
 import * as Persistence from "@deepseek-ai/dsh-session-persistence-jsonl";
 import TokenMeter from "@deepseek-ai/dsh-token-meter";
@@ -41,9 +43,20 @@ class FixtureAdapter extends LlmAdapter{
     }else for(const chunk of next){options.signal?.throwIfAborted();yield chunk;}
   }
 }
-async function host(script:(StreamChunk[]|"hang")[],opted=true,guard?:(facts:any)=>boolean,observer?:(facts:any,signal:AbortSignal)=>any){
+async function host(script:(StreamChunk[]|"hang")[],opted=true,guard?:(facts:any)=>boolean,observer?:(facts:any,signal:AbortSignal)=>any,nativeInput?:AgentInputCapability){
   const ctx=new Context(),root=await mkdtemp(join(tmpdir(),"mmx-native-acp-"));
   cleanup.push(async()=>{await ctx.fiber.dispose();await rm(root,{recursive:true,force:true});});
+  let nativeOwner:Context["fiber"]|undefined,selectedId:SessionId|undefined;
+  const nativeGeneration=new AbortController();
+  if(nativeInput!==undefined)ctx.provide("agentLifecycleAdmission",{admit(caller,operation,id){
+    if(caller.fiber!==nativeOwner||operation!=="create"||selectedId!==undefined)
+      throw Error("Not the original ACP lifecycle owner");
+    selectedId=id;
+    return{signal:nativeGeneration.signal,input:nativeInput,assertCurrent(){
+      if(caller.fiber!==nativeOwner||id!==selectedId)throw Error("Native lifecycle changed");
+      return true;
+    }};
+  }});
   await mountAgentLoopTestDependencies(ctx,{systemPrompt:{personaPrefix:""}});
   await ctx.plugin(Persistence,{root,compression:"none"});
   await ctx.plugin(TokenMeter);await ctx.plugin(AgentLoop,{agents:[]});
@@ -53,7 +66,7 @@ async function host(script:(StreamChunk[]|"hang")[],opted=true,guard?:(facts:any
   const config:any={provider:"fixture",model:"fixture",stream:ndJsonStream(a.writable,b.readable)};
   if(opted)config.nativePromptAdmission=guard??(()=>true);
   if(observer!==undefined)config.nativeObservation=observer;
-  await ctx.plugin({name:"native-acp-fixture",inject:[...Acp.inject],apply(inner:Context){Acp.apply(inner,config);}});
+  await ctx.plugin({name:"native-acp-fixture",inject:[...Acp.inject],apply(inner:Context){nativeOwner=inner.fiber;Acp.apply(inner,config);}});
   const app=createClient({name:"original-native-acp-client"})
     .onNotification(methods.client.session.update,({params})=>{updates.push(params);})
     .onRequest(methods.client.session.requestPermission,()=>({outcome:{outcome:"cancelled" as const}}))
@@ -437,4 +450,136 @@ it("cancels only the observation waiter and retains its idle native owner",async
   const response:any=await h.client.request("_mastermind/native_observe",observationRequest(h.sessionId));
   expect(response.sessionId).toBe(h.sessionId);expect(h.ctx.agents.get(h.agent.id)).toBe(h.agent);
   expect(cancel).not.toHaveBeenCalled();expect(h.adapter.requests).toHaveLength(0);expect(h.claims).toHaveLength(0);
+});
+
+
+/** Private fixture operation slot, consumed only by the original Inbox writer. */
+async function inputHost(script:(StreamChunk[]|"hang")[],onEnqueue?:(facts:any,owner:any)=>boolean){
+  let current=true;
+  let candidate:any;
+  const enqueues:any[]=[],retirements:any[]=[],consumed:any[]=[];
+  const capability:AgentInputCapability={
+    assertCurrent(){if(!current)throw Error("Original input owner retired");return true;},
+    consume(attempt){
+      const owned=candidate;
+      if(owned===undefined||owned.consumed||owned.retired||attempt.agent!==owned.facts.agent
+          ||attempt.session!==owned.session||attempt.sessionSeq!==owned.seq
+          ||attempt.target!=="next-turn"||attempt.start!==0||attempt.removedCount!==0
+          ||attempt.inserted.length!==1||attempt.inserted[0]!==owned.facts.message
+          ||attempt.send?.message!==owned.facts.message||attempt.send.requestedTarget!=="next-turn"
+          ||attempt.send.wakeup!==true||attempt.agent.inbox.hasPending)
+        throw Error("No original ACP enqueue candidate");
+      owned.consumed=true;consumed.push(owned);
+      return true;
+    },
+  };
+  const owner:any={enqueues,retirements,consumed,capability,candidate:()=>candidate,retire(){current=false;}};
+  const guard=(facts:any)=>{
+    if(facts.action==="retire"){
+      retirements.push(facts);
+      if(candidate!==undefined&&candidate.facts.agent===facts.agent&&candidate.session===facts.agent.session
+          &&candidate.facts.operationId===facts.operationId&&candidate.facts.requestId===facts.requestId
+          &&candidate.facts.message===facts.message)candidate.retired=true;
+      return true;
+    }
+    if(!current)return false;
+    if(facts.action==="enqueue"){
+      if(candidate!==undefined&&!candidate.retired)throw Error("Original candidate still owned");
+      candidate={facts,session:facts.agent.session,seq:facts.agent.session.seq,consumed:false,retired:false};
+      enqueues.push(facts);
+      return onEnqueue?.(facts,owner)??true;
+    }
+    return true;
+  };
+  const h=await host(script,true,guard,undefined,capability);
+  return{...h,owner,originalGuard:guard};
+}
+it("joins real ACP enqueue to the original native Inbox once",async()=>{
+  const h=await inputHost([text("admitted native answer")],facts=>{
+    expect(Object.isFrozen(facts.message)).toBe(true);
+    expect(()=>facts.agent.inbox.append("next-turn",facts.message)).toThrow("No original ACP enqueue candidate");
+    return true;
+  });
+  expect(()=>h.agent.followup(createUserMessage({content:[{type:"text",text:"outside ACP"}],source:{kind:"user"}})))
+    .toThrow("No original ACP enqueue candidate");
+  const result=await h.prompt("joined-original-enqueue");
+  expect(result.stopReason).toBe("end_turn");
+  expect(h.owner.enqueues).toHaveLength(1);expect(h.owner.consumed).toHaveLength(1);
+  expect(h.owner.retirements).toHaveLength(1);expect(h.owner.candidate().consumed).toBe(true);
+  const facts=h.owner.enqueues[0],claim=h.claims[0];
+  expect(facts.agent).toBe(h.agent);expect(facts.message.id).toBe(claim.messageId);
+  expect(facts.requestId).toBe(claim.requestId);expect(facts.operationId).toBe(claim.operationId);
+  expect(()=>h.agent.followup(facts.message)).toThrow("No original ACP enqueue candidate");
+  expect(h.adapter.requests).toHaveLength(1);
+});
+it.each(["false","throw","retire-generation","replace-callback"] as const)(
+  "retires the exact unused enqueue after %s without clearing or replaying another operation",async(failure)=>{
+    let h:any;
+    h=await inputHost([text("later original operation")],(facts,owner)=>{
+      if(facts.operationId!=="failed-enqueue")return true;
+      if(failure==="throw")throw Error("original enqueue authority failure");
+      if(failure==="retire-generation")owner.retire();
+      if(failure==="replace-callback")h.config.nativePromptAdmission=vi.fn(()=>true);
+      return false;
+    });
+    await expect(h.prompt("failed-enqueue")).rejects.toThrow();
+    expect(h.owner.enqueues).toHaveLength(1);expect(h.owner.retirements).toHaveLength(1);
+    expect(h.owner.candidate()).toMatchObject({consumed:false,retired:true});
+    expect(h.owner.retirements[0].message).toBe(h.owner.enqueues[0].message);
+    expect(h.agent.inbox.hasPending).toBe(false);expect(h.adapter.requests).toHaveLength(0);
+    if(failure==="replace-callback")expect(h.config.nativePromptAdmission).not.toHaveBeenCalled();
+    if(failure==="false"||failure==="throw"){
+      await h.prompt("next-original-enqueue");
+      expect(h.owner.consumed).toHaveLength(1);expect(h.adapter.requests).toHaveLength(1);
+      expect(h.owner.consumed[0].facts.operationId).toBe("next-original-enqueue");
+    }
+  },
+);
+it("does not retire an earlier prompt when a concurrent prompt is refused before enqueue",async()=>{
+  const h=await inputHost(["hang"]);
+  const pending=h.prompt("still-original").then(value=>({value}),error=>({error}));
+  const claim=await h.claimed();
+  await expect(h.prompt("unadmitted-concurrent")).rejects.toThrow("already in flight");
+  expect(h.owner.retirements).toEqual([]);expect(h.owner.enqueues).toHaveLength(1);
+  expect(h.owner.candidate().facts.operationId).toBe("still-original");
+  await h.cancel(claim);expect(await pending).toHaveProperty("value");
+  expect(h.owner.retirements.map((x:any)=>x.operationId)).toEqual(["still-original"]);
+  expect(h.owner.consumed).toHaveLength(1);
+});
+it("contains accidental asynchronous enqueue and retirement callbacks",async()=>{
+  const actions:string[]=[];
+  const h=await host([text("must not run")],true,((facts:any)=>{
+    actions.push(facts.action);
+    if(facts.action==="enqueue"||facts.action==="retire")return Promise.reject(Error("No asynchronous authority"));
+    return true;
+  }) as any);
+  await expect(h.prompt("async-enqueue-refused")).rejects.toThrow("authority is not current");
+  await Promise.resolve();
+  expect(actions.filter(x=>x==="admit")).toHaveLength(2);
+  expect(actions.slice(-2)).toEqual(["enqueue","retire"]);expect(h.adapter.requests).toHaveLength(0);
+});
+it("preserves original internal tool contexts without granting public inject",async()=>{
+  const toolResponse:StreamChunk[]=[
+    {type:"block-start",index:0,blockType:"tool-call"},
+    {type:"block-end",index:0,block:{type:"tool-call",id:ToolCallId("native-c1"),name:"native_context",arguments:'{"id":"one"}'}},
+    {type:"block-start",index:1,blockType:"tool-call"},
+    {type:"block-end",index:1,block:{type:"tool-call",id:ToolCallId("native-c2"),name:"native_context",arguments:'{"id":"two"}'}},
+    {type:"finish",reason:{kind:"tool-calls"}},
+  ];
+  const h=await inputHost([toolResponse,text("original contexts joined")]);
+  h.ctx.tools.register(defineContentToolFixture({name:"native_context",description:"Inert context fixture",
+    parameters:{id:{type:"string",required:true}},isConcurrencySafe:()=>true,
+    execute:async(args)=>[{type:"text",text:"result-"+args.id}]}));
+  h.ctx.on("tools/post-execute",async(exec,_result)=>{
+    const message=createUserMessage({content:[{type:"text",text:"context-"+exec.callId}],source:{kind:"user"}});
+    expect(()=>h.agent.inject(message)).toThrow("No original ACP enqueue candidate");
+    return{kind:"accept",additionalContexts:[message]};
+  });
+  const result=await h.prompt("internal-contexts-same-operation");
+  expect(result.stopReason).toBe("end_turn");expect(h.adapter.requests).toHaveLength(2);
+  expect(h.owner.consumed).toHaveLength(1);
+  const events=h.agent.session.snapshotEvents();
+  const contexts=events.filter(e=>e.type==="user/message"&&(e.data.content[0] as any)?.text?.startsWith("context-"));
+  expect(contexts.map(e=>(e.data as any).content[0].text)).toEqual(["context-native-c1","context-native-c2"]);
+  expect(events.findLastIndex(e=>e.type==="tool/result")).toBeLessThan(events.indexOf(contexts[0]));
 });

@@ -2,7 +2,8 @@ import {afterEach,expect,it,vi} from "vitest";
 import {Context} from "@deepseek-ai/cordis";
 import AgentLoop from "@deepseek-ai/dsh-agent-loop";
 import {mountAgentLoopTestDependencies} from "@deepseek-ai/dsh-agent-loop-testkit";
-import {LlmAdapter,type GenerateOptions,type StreamChunk} from "@deepseek-ai/dsh-llm";
+import {LlmAdapter,createUserMessage,type GenerateOptions,type StreamChunk} from "@deepseek-ai/dsh-llm";
+import type {Agent,AgentInputAttempt,AgentInputCapability,InboxTarget} from "@deepseek-ai/dsh-agent";
 import {Session,SessionId} from "@deepseek-ai/dsh-session";
 import * as JsonlPersistence from "@deepseek-ai/dsh-session-persistence-jsonl";
 import TypertRegistry from "@deepseek-ai/dsh-typert-registry";
@@ -19,7 +20,7 @@ const outcome=<T,>(promise:Promise<T>)=>promise.then(value=>({value}),error=>({e
 async function reached(entered:Promise<void>,pending:Promise<unknown>){
   await Promise.race([entered,pending.then(()=>{throw Error("Native operation missed the delayed boundary");})]);
 }
-async function harness({ordinary=false,configured=[],invalidAdmission,isolate=false}:{ordinary?:boolean,configured?:any[],invalidAdmission?:(...args:any[])=>unknown,isolate?:boolean}={}){
+async function harness({ordinary=false,configured=[],invalidAdmission,isolate=false,input}:{ordinary?:boolean,configured?:any[],invalidAdmission?:(...args:any[])=>unknown,isolate?:boolean,input?:AgentInputCapability}={}){
   const root=await mkdtemp(join(tmpdir(),"mmx-native-host-admission-"));
   cleanup.push(()=>rm(root,{recursive:true,force:true}));
   const ctx=new Context();cleanup.push(()=>ctx.fiber.dispose());
@@ -31,7 +32,7 @@ async function harness({ordinary=false,configured=[],invalidAdmission,isolate=fa
     if(!current||caller.fiber!==owner||action!==operation||(selected!==undefined&&id!==selected))
       throw Error("Original operation does not admit this native caller");
     selected=id;
-    return{signal:generation.signal,assertCurrent(){
+    return{signal:generation.signal,...input===undefined?{}:{input},assertCurrent(){
       if(!current||caller.fiber!==owner||id!==selected)throw Error("Original operation retired");
       return true as const;
     }};
@@ -208,4 +209,172 @@ it("rechecks retirement caused synchronously by the original authority callback"
   const h=await harness({invalidAdmission:()=>({signal:generation.signal,assertCurrent(){generation.abort(Error("retired in check"));return true;}})});
   const result=await outcome(h.caller.agents.create({sessionId:SessionId("retired-inside-check")}));
   expect("error" in result).toBe(true);expect(h.prepare).not.toHaveBeenCalled();expect(h.create).not.toHaveBeenCalled();
+});
+
+
+/** Inert original-operation fixture: no serializable value can mint its input grant. */
+function inputOwner(){
+  let live=true,grant:{agent:Agent,message:ReturnType<typeof createUserMessage>,target:InboxTarget,wakeup:boolean}|undefined;
+  let consumed=0,hook:((attempt:AgentInputAttempt)=>void)|undefined;
+  const attempts:AgentInputAttempt[]=[];
+  const capability:AgentInputCapability={
+    assertCurrent(){if(!live)throw Error("Input generation retired");return true;},
+    consume(attempt){
+      attempts.push(attempt);
+      const owned=grant;
+      if(owned===undefined||attempt.agent!==owned.agent||attempt.session!==owned.agent.session
+          ||attempt.sessionSeq!==owned.agent.session.seq||attempt.removedCount!==0
+          ||attempt.inserted.length!==1||attempt.inserted[0]!==owned.message
+          ||attempt.send?.message!==owned.message||attempt.send.requestedTarget!==owned.target
+          ||attempt.send.wakeup!==owned.wakeup||attempt.target!==owned.target
+          ||attempt.start!==(owned.target==="next-turn"?owned.agent.inbox.nextTurn:owned.agent.inbox.nextStep).length)
+        throw Error("No exact original input grant");
+      grant=undefined;consumed++;
+      expect(Object.isFrozen(attempt)).toBe(true);expect(Object.isFrozen(attempt.inserted)).toBe(true);
+      expect(Object.isFrozen(owned.message)).toBe(true);
+      hook?.(attempt);
+      return true;
+    },
+  };
+  return{capability,attempts,consumed:()=>consumed,
+    allow(agent:Agent,message:ReturnType<typeof createUserMessage>,target:InboxTarget="next-turn",wakeup=true){
+      if(grant!==undefined)throw Error("Original input already reserved");grant={agent,message,target,wakeup};
+    },
+    retire(){live=false;},onConsume(callback:(attempt:AgentInputAttempt)=>void){hook=callback;},
+  };
+}
+const inputMessage=()=>createUserMessage({content:[{type:"text",text:"Original admitted input"}],source:{kind:"user"}});
+
+it.each(["send","followup","steer","inject","append","prepend","splice"] as const)(
+  "refuses native %s without an original input grant at the durable Inbox",async(method)=>{
+    const owner=inputOwner(),h=await harness({input:owner.capability}),id=SessionId("native-input-"+method);
+    h.allow(h.caller.fiber,"create",id);
+    const handle=await h.caller.agents.create({sessionId:id,meta:{cwd:h.root}}),agent=handle.agent;
+    const before=agent.session.snapshotEvents(),message=inputMessage();
+    expect(()=>{
+      switch(method){
+        case"send":agent.send(message,"next-turn",true);break;
+        case"followup":agent.followup(message);break;
+        case"steer":agent.steer(message);break;
+        case"inject":agent.inject(message);break;
+        case"append":agent.inbox.append("next-turn",message);break;
+        case"prepend":agent.inbox.prepend("next-turn",message);break;
+        case"splice":agent.inbox.splice("next-turn",Infinity,0,[message]);break;
+      }
+    }).toThrow("No exact original input grant");
+    expect(agent.session.snapshotEvents()).toEqual(before);expect(agent.inbox.hasPending).toBe(false);
+    expect(h.modelCalls()).toBe(0);expect(owner.consumed()).toBe(0);await handle.dispose();
+  },
+);
+it("allows only the exact private send path to consume an input once",async()=>{
+  const owner=inputOwner(),h=await harness({input:owner.capability}),id=SessionId("one-native-input");
+  h.allow(h.caller.fiber,"create",id);
+  const handle=await h.caller.agents.create({sessionId:id,meta:{cwd:h.root},agentOptions:{provider:"fixture",model:"fixture"}});
+  const agent=handle.agent,message=inputMessage();owner.allow(agent,message);
+  expect(()=>agent.inbox.append("next-turn",message)).toThrow("No exact original input grant");
+  expect(owner.attempts.at(-1)?.send).toBeUndefined();expect(owner.consumed()).toBe(0);
+  agent.followup(message);
+  await vi.waitFor(()=>{expect(h.modelCalls()).toBe(1);expect(agent.status).toBe("idle");});
+  expect(owner.consumed()).toBe(1);
+  expect(()=>agent.followup(message)).toThrow("No exact original input grant");
+  expect(agent.session.snapshotEvents().filter(event=>event.type==="user/message")).toHaveLength(1);
+  expect(h.modelCalls()).toBe(1);await handle.dispose();
+});
+it("does not let public replace or forged source labels reuse a consumed insertion",async()=>{
+  const owner=inputOwner(),h=await harness({input:owner.capability}),id=SessionId("native-replace-fence");
+  h.allow(h.caller.fiber,"create",id);
+  const handle=await h.caller.agents.create({sessionId:id,meta:{cwd:h.root}}),agent=handle.agent,message=inputMessage();
+  owner.allow(agent,message,"next-step",false);agent.inject(message);
+  const before=agent.session.snapshotEvents();
+  expect(()=>agent.inbox.replace(message.id,inputMessage())).toThrow("No exact original input grant");
+  expect(agent.session.snapshotEvents()).toEqual(before);expect(agent.inbox.nextStep[0].id).toBe(message.id);
+  expect(owner.consumed()).toBe(1);expect(h.modelCalls()).toBe(0);
+  agent.inbox.remove(message.id);expect(agent.inbox.hasPending).toBe(false);await handle.dispose();
+});
+it("prevents reentrant admission from borrowing the original private insertion",async()=>{
+  const owner=inputOwner(),h=await harness({input:owner.capability}),id=SessionId("native-input-reentry");
+  h.allow(h.caller.fiber,"create",id);
+  const handle=await h.caller.agents.create({sessionId:id,meta:{cwd:h.root}}),agent=handle.agent,message=inputMessage();
+  owner.allow(agent,message,"next-step",false);
+  owner.onConsume(()=>{
+    expect(()=>agent.inject(message)).toThrow("native input admission is reentrant");
+    expect(()=>agent.inbox.append("next-step",message)).toThrow("native input admission is reentrant");
+  });
+  agent.inject(message);
+  expect(owner.consumed()).toBe(1);expect(agent.inbox.nextStep.map(x=>x.id)).toEqual([message.id]);
+  expect(h.modelCalls()).toBe(0);await handle.dispose();
+});
+it.each(["lifetime","generation","session"] as const)("rechecks %s after consuming the exact input",async(drift)=>{
+  const owner=inputOwner(),h=await harness({input:owner.capability}),id=SessionId("native-input-drift-"+drift);
+  h.allow(h.caller.fiber,"create",id);
+  const handle=await h.caller.agents.create({sessionId:id,meta:{cwd:h.root}}),agent=handle.agent,message=inputMessage();
+  owner.allow(agent,message,"next-step",false);
+  owner.onConsume(()=>{
+    if(drift==="lifetime")owner.retire();
+    if(drift==="generation")h.generation.abort(Error("Generation retired inside input consume"));
+    if(drift==="session")agent.session.append("agent/inbox/spliced",{target:"next-step",start:0,inserted:[]});
+  });
+  expect(()=>agent.inject(message)).toThrow();
+  expect(owner.consumed()).toBe(1);expect(agent.inbox.hasPending).toBe(false);
+  expect(agent.session.snapshotEvents().filter(event=>event.type==="agent/inbox/spliced"&&event.data.inserted.length>0)).toEqual([]);
+  expect(h.modelCalls()).toBe(0);await handle.dispose();
+});
+it("retains captured input methods after the mutable permit is replaced",async()=>{
+  const owner=inputOwner(),h=await harness({input:owner.capability}),id=SessionId("captured-native-input");
+  h.allow(h.caller.fiber,"create",id);
+  const handle=await h.caller.agents.create({sessionId:id,meta:{cwd:h.root}});
+  owner.capability.consume=()=>true;
+  expect(()=>handle.agent.inject(inputMessage())).toThrow("No exact original input grant");
+  expect(h.modelCalls()).toBe(0);await handle.dispose();
+});
+it.each(["next-turn","next-step"] as const)("refuses native cold pending %s before crash repair",async(target)=>{
+  const owner=inputOwner(),h=await harness({input:owner.capability}),id=SessionId("native-pending-"+target);
+  const session=Session.create(id);
+  session.append("agent/inbox/spliced",{target,start:0,inserted:[inputMessage()]});
+  session.append("turn/start",{turn:1});session.append("step/start",{turn:1,step:1});
+  const writer=await h.ctx.sessionPersistence.create({...session.header,cwd:h.root});
+  try{await writer.append(session.snapshotEvents());await writer.flush();}finally{await writer.close();}
+  const before=await readNativeFiles(h.root);h.allow(h.caller.fiber,"resume",id);
+  await expect(h.caller.agents.resume({resumeSessionId:id})).rejects.toThrow("cannot adopt pending input");
+  expect(await readNativeFiles(h.root)).toEqual(before);expect(h.ctx.agents.get(id)).toBeUndefined();
+  expect(h.ctx.sessions.get(id)).toBeUndefined();expect(h.modelCalls()).toBe(0);
+});
+it("refuses seeded native input before taking a fresh writer",async()=>{
+  const owner=inputOwner(),h=await harness({input:owner.capability}),id=SessionId("native-seed-pending");
+  const session=Session.create(id);session.append("agent/inbox/spliced",{target:"next-step",start:0,inserted:[inputMessage()]});
+  h.allow(h.caller.fiber,"create",id);
+  await expect(h.caller.agents.create({sessionId:id,seed:session.snapshotEvents()})).rejects.toThrow("cannot adopt pending input");
+  expect(h.create).not.toHaveBeenCalled();expect(h.modelCalls()).toBe(0);
+});
+it("refuses pending input added by unpublished setup before source publication",async()=>{
+  const owner=inputOwner(),h=await harness({input:owner.capability}),id=SessionId("native-setup-pending");
+  h.allow(h.caller.fiber,"create",id);
+  await expect(h.caller.agents.create({sessionId:id,setup:(_ctx,agent)=>{
+    agent.session.append("agent/inbox/spliced",{target:"next-step",start:0,inserted:[inputMessage()]});
+  }})).rejects.toThrow("cannot adopt pending input");
+  expect(h.ctx.agents.get(id)).toBeUndefined();expect(h.ctx.sessions.get(id)).toBeUndefined();
+  expect(await h.ctx.sessionPersistence.stat(id)).toBeUndefined();expect(h.modelCalls()).toBe(0);
+});
+
+it("rejects changing accessors before they can become native input facts",async()=>{
+  const owner=inputOwner(),h=await harness({input:owner.capability}),id=SessionId("native-input-accessor");
+  h.allow(h.caller.fiber,"create",id);
+  const handle=await h.caller.agents.create({sessionId:id,meta:{cwd:h.root}}),agent=handle.agent,message=structuredClone(inputMessage());
+  const getter=vi.fn(()=>"mutable getter");
+  Object.defineProperty(message.content[0],"text",{enumerable:true,get:getter});
+  owner.allow(agent,message,"next-step",false);
+  const before=agent.session.snapshotEvents();
+  expect(()=>agent.inject(message)).toThrow("native input cannot contain accessors");
+  expect(getter).not.toHaveBeenCalled();expect(owner.consumed()).toBe(0);
+  expect(agent.session.snapshotEvents()).toEqual(before);expect(h.modelCalls()).toBe(0);await handle.dispose();
+});
+it("keeps removal and cancellation available from an original insertion observer",async()=>{
+  const owner=inputOwner(),h=await harness({input:owner.capability}),id=SessionId("native-input-remove-reentry");
+  h.allow(h.caller.fiber,"create",id);
+  const handle=await h.caller.agents.create({sessionId:id,meta:{cwd:h.root}}),agent=handle.agent,message=inputMessage();
+  owner.allow(agent,message,"next-step",false);
+  h.ctx.on("agent/inbox/inserted",({agent:seen})=>{if(seen===agent)agent.cancel({kind:"user"});});
+  agent.inject(message);
+  expect(owner.consumed()).toBe(1);expect(agent.inbox.hasPending).toBe(false);expect(h.modelCalls()).toBe(0);
+  await handle.dispose();
 });

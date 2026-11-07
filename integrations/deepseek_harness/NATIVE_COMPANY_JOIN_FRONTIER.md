@@ -788,7 +788,7 @@ This is provider-free protocol and owner qualification with an explicitly inert
 process principal. It is not installed DeepSeek/account acceptance. No active
 service, real provider, production Session or accepted canary was touched.
 
-### C28 immediate continuation
+### C27 recorded continuation
 
 Complete the counterpart final native model-control check immediately before the
 original AcpModelControl assigns its selected value after catalog resolution.
@@ -804,3 +804,88 @@ full-Web/plugin ownership; do not transplant the fixture's synthetic facts.
 Qualify the original enforcing capability/policy ceilings and installed
 Worker/quota/host/account/profile/router join before the real packaged journey.
 All prior production holds and DO_NOT_REDO constraints remain in force.
+
+
+## C28 — original native Inbox admission and ACP enqueue join (2026-11-07)
+
+Parent source: 844e072595207e46f775a1f0aa5d2a8c88d0211b.
+Evidence: [native input qualification](../../research/evidence/deepseek-native-input-qualification-20261107.json).
+
+The existing runtime-only Agent lifecycle permit can now retain an input
+capability for its original native generation. The factory validates and captures
+its methods once. Ordinary hosts and historical ACP hosts without this input
+requirement retain their prior behavior.
+
+The original Agent receives private writer closures from its Inbox constructor.
+They carry actual Send provenance or the original running turn/step's internal
+tool context. Public append, prepend, replace and splice have no such provenance.
+Every nonempty native insertion rejects accessors and freezes exact data before
+admission. The original owner consumes its exact external candidate once; the
+Inbox rechecks lifetime/generation and the original Session offset after callbacks
+and immediately before its existing durable append. Reentrant insertion cannot
+borrow that candidate. Removal-only operations and cancellation stay available.
+
+The existing ACP admission callback now supplies an enqueue fact containing the
+exact message, original Agent, operation and SDK request. Its two existing admit
+checks remain. A non-authorizing retirement notification reaches the captured
+original callback after the original prompt finishes or fails, even after
+configuration replacement or generation withdrawal. It cannot grant or rearm
+input, and the entry must match the original candidate before closing it.
+Asynchronous callbacks refuse and their rejection is contained. A concurrent
+prompt rejected before enqueue cannot retire another operation's candidate.
+
+Native resume folds the original persisted Inbox before any semantic crash
+closers and refuses pending input in either queue. Seeded creation and
+unpublished setup/publication also refuse unowned pending input. This is not a
+claim that opening a persistence writer never performs physical torn-tail repair.
+The source does not discard or adopt pending messages to make recovery pass.
+
+Qualification on exact final patch bytes:
+
+- **207 host tests passed**, including original donor Inbox, loop, pending-input
+  resume, reentrant publication and tool-context order assertions.
+- **199 combined host + ACP tests passed**, including actual SDK request/claim
+  correlation, one input consumed once, public bypass refusal, exact unused
+  candidate retirement, callback replacement, concurrent refusal and native
+  internal tool contexts through the original loop.
+- **54 package and native Worker factory tests passed**.
+- **Zero TypeScript diagnostics** in original Agent, AgentLoop and ACP projects;
+  the host checker is now reproducible from the source carrier.
+
+Exact final test receipts and hashes are in the evidence JSON. Host receipt:
+fe685b1e69df892d4568feb3de184f4a21759225ae008984ffde73864640a194.
+Combined ACP receipt:
+720521a2454b436cb92c2688d341c99fb8bf8ce212948957021b81f08f623038.
+Package receipt:
+9db60d187449d828547ef0f4f2a731b8f658f3679f2180b7ca6414aabf2c3bef.
+TypeScript receipt:
+813c0a52e68d7cae4f83b45e250419e6105a1e10fb38e6dd28f1db5db9c387b2.
+
+The first preparation diagnostic found that Git silently skipped patch paths
+inside the enclosing source worktree. Both original preparers now constrain
+discovery to their exact owned trees and retain full preimage/output checks.
+Caches are addressed by the patch digest, preserving earlier accepted artifacts.
+A new hostile-getter fixture needed a mutable clone of the donor's already
+frozen message. Strict type corrections use the actual Session log offset and
+contextual callback types. These diagnostics are retained; no original assertion
+or admission guard was weakened. Unified-patch context lines are syntax, so the
+source whitespace check excludes patch blobs while preparation independently
+validates their exact application and outputs.
+
+No real provider call, active service change, installed release, production
+Session or accepted physical canary occurred in this source qualification.
+
+### C29 immediate continuation
+
+Complete the counterpart final native model-control check immediately before
+the original AcpModelControl assignment after resolution, and the final actual
+provider-route check at original LLM dispatch after middleware awaits. Preserve
+ordinary concurrent/future-turn ACP configuration and original retry ownership.
+
+Then complete the original account owner's local nonsecret snapshot/witness,
+truthful Node-owner facts and original Worker factory join, fixed same-process
+native_worker entry, complete package, enforcing capability ceilings and the
+installed real signed-in journey. Reuse qualified listener configuration and
+actual listener readback; no automatic port fallback, service restart, duplicate
+Session owner or rerun of accepted canaries. All recorded production holds
+remain active; the mission continues beyond this source milestone.

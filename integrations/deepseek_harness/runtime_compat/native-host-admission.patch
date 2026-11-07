@@ -1,300 +1,4 @@
---- a/packages/core/agent/src/index.ts
-+++ b/packages/core/agent/src/index.ts
-@@ -27,7 +27,33 @@
- declare module '@deepseek-ai/cordis' {
-   interface Context {
-     agents: AgentRegistry
--  }
-+    /** Runtime-only host requirement, installed before any Agent factory mounts. */
-+    agentLifecycleAdmission?: AgentLifecycleAdmission
-+  }
-+}
-+
-+/** Runtime-only key; no declarative plugin configuration can install a grant. */
-+export const AGENT_LIFECYCLE_ADMISSION_KEY = 'agentLifecycleAdmission'
-+
-+/**
-+ * A permit from the original host operation. Its signal belongs to the original
-+ * process generation, not a transient request. The factory adds it to its
-+ * existing cancellation and teardown chain; it creates no new lifecycle owner.
-+ */
-+export interface AgentLifecyclePermit {
-+  readonly signal: AbortSignal
-+  /** Recheck the original operation and exact caller; only literal true admits. */
-+  assertCurrent(): true
-+}
-+
-+/** Programmatic host admission before Session preparation or writer acquisition. */
-+export interface AgentLifecycleAdmission {
-+  /**
-+   * The registry passes the actual caller Context, including its fiber/scope.
-+   * Cordis may shadow the Context object; match the original caller fiber, not
-+   * object equality with the factory or an untraced plugin Context.
-+   */
-+  admit(ownerCtx: Context, operation: 'create' | 'resume', sessionId: SessionId): AgentLifecyclePermit
- }
- 
- /**
---- a/packages/core/agent-loop/src/index.ts
-+++ b/packages/core/agent-loop/src/index.ts
-@@ -8,6 +8,7 @@
- 
- import { Context, FiberState, Service } from '@deepseek-ai/cordis'
- import { randomUUID } from 'node:crypto'
-+import { isPromise } from 'node:util/types'
- import z from '@deepseek-ai/schemastery'
- import { z as zod } from 'zod'
- import { brandString } from '@deepseek-ai/dsh-brand'
-@@ -15,6 +16,8 @@
-   Agent,
-   AgentFactory,
-   AgentHandle,
-+  AgentLifecycleAdmission,
-+  AgentLifecyclePermit,
-   AgentOptions,
-   AgentSetup,
-   CreateAgentOptions,
-@@ -22,6 +25,7 @@
-   SessionStartSource,
-   TurnBoundaryProjection,
- } from '@deepseek-ai/dsh-agent'
-+import { AGENT_LIFECYCLE_ADMISSION_KEY } from '@deepseek-ai/dsh-agent'
- import { errorChain, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
- import { interruptedTurnClosers, SessionLogOffset, SessionPreparation, SessionSeq } from '@deepseek-ai/dsh-session'
- import type { Session, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
-@@ -360,7 +364,7 @@
-   readonly config: Config
-   private readonly ownership: FactoryOwnership
-   /** Plain holder prevents Cordis from re-tracing the factory's dependency context through a caller shadow. */
--  private readonly runtime: { ctx: Context }
-+  private readonly runtime: { ctx: Context; admission: AgentLifecycleAdmission | undefined }
- 
-   constructor(ctx: Context, config: Config) {
-     super(ctx, 'agentLoop')
-@@ -373,7 +377,14 @@
-     // Register only after every config validation above has passed, so a
-     // rejected constructor leaves no projection unit behind.
-     const ownership = this.ownership = new FactoryOwnership(ctx.fiber)
--    this.runtime = { ctx }
-+    // Capture the requirement before declarative startup. Removing or replacing
-+    // the provided service later must never restore a permissive factory.
-+    const admission = ctx.root.get(AGENT_LIFECYCLE_ADMISSION_KEY)
-+    if (admission !== undefined && (admission === null || typeof admission.admit !== 'function')) {
-+      throw new Error('agent lifecycle admission requirement is invalid')
-+    }
-+    this.runtime = { ctx, admission: admission === undefined ? undefined
-+      : Object.freeze({ admit: admission.admit.bind(admission) }) }
-     ctx.effect(function* () {
-       const unregisterTurnBoundary = ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
-       yield unregisterTurnBoundary
-@@ -421,6 +432,47 @@
-     }
-   }
- 
-+  /** Capture one original operation permit before any native Session effect. */
-+  private admitLifecycle(ownerCtx: Context, operation: 'create' | 'resume', id: SessionId): AgentLifecyclePermit | undefined {
-+    const required = this.runtime.admission
-+    if (required === undefined) return undefined
-+    const admitted = required.admit(ownerCtx, operation, id)
-+    if (isPromise(admitted)) {
-+      void admitted.catch(() => {})
-+      throw new Error('agent lifecycle admission must be synchronous')
-+    }
-+    if (admitted === null || typeof admitted !== 'object'
-+      || !(admitted.signal instanceof AbortSignal) || typeof admitted.assertCurrent !== 'function') {
-+      throw new Error('agent lifecycle admission permit is invalid')
-+    }
-+    const signal = admitted.signal
-+    const check = admitted.assertCurrent.bind(admitted)
-+    const permit: AgentLifecyclePermit = {
-+      signal,
-+      assertCurrent() {
-+        ownerCtx.fiber.assertActive()
-+        signal.throwIfAborted()
-+        const current: unknown = check()
-+        if (current !== true) {
-+          if (isPromise(current)) void current.catch(() => {})
-+          throw new Error('agent lifecycle admission is no longer current')
-+        }
-+        // A synchronous authority callback may retire the generation or owner.
-+        signal.throwIfAborted()
-+        ownerCtx.fiber.assertActive()
-+        return true
-+      },
-+    }
-+    permit.assertCurrent()
-+    return permit
-+  }
-+
-+  /** Keep the original caller cancellation as well as the host generation. */
-+  private admittedSignal(signal: AbortSignal | undefined, permit: AgentLifecyclePermit | undefined): AbortSignal | undefined {
-+    return permit === undefined ? signal
-+      : signal === undefined ? permit.signal : AbortSignal.any([signal, permit.signal])
-+  }
-+
-   /** Report a contained declarative-start failure to identity-bound consumers. */
-   private reportConfiguredStartupFailure(
-     configId: string,
-@@ -502,7 +554,9 @@
-     callerSignal?: AbortSignal,
-     handle?: SessionHandle,
-     parentAgent?: Agent,
-+    admission?: AgentLifecyclePermit,
-   ): PreparedAgent {
-+    admission?.assertCurrent()
-     assertAgentOptions(options)
-     ownerCtx.fiber.assertActive()
-     // Every caller reaches prepare() synchronously from a service method
-@@ -631,6 +685,7 @@
-     /* v8 ignore stop */
- 
-     const assertLive = (): void => {
-+      admission?.assertCurrent()
-       if (!abort.signal.aborted) return
-       // Every fused abort source carries an Error reason: onCallerAbort and
-       // raceAbort wrap non-Error caller reasons, and the factory/lifecycle
-@@ -686,17 +741,21 @@
-    * @returns the published running agent.
-    */
-   async create(id: SessionId, options: AgentOptions = {}, meta: Pick<SessionHeader, 'cwd'> = {}): Promise<Agent> {
-+    const admission = this.admitLifecycle(this.ctx, 'create', id)
-     using preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, { meta }))
--    const stored = await this.createStoredSession(preparation.session)
-+    const stored = await this.createStoredSession(preparation.session, admission?.signal)
-     let prepared: PreparedAgent
-     try {
--      prepared = this.prepare(this.ctx, id, options, preparation.session, undefined, stored?.handle)
-+      admission?.assertCurrent()
-+      prepared = this.prepare(this.ctx, id, options, preparation.session, admission?.signal, stored?.handle, undefined, admission)
-     } catch (error: unknown) {
-       await stored?.handle.close().catch(() => {})
-       throw error
-     }
-     return (await this.initializeAgent(prepared, async () => {
-+      admission?.assertCurrent()
-       await this.appendUnstoredSuffix(stored, preparation.session)
-+      admission?.assertCurrent()
-       return await prepared.publish('startup')
-     })).agent
-   }
-@@ -748,6 +807,8 @@
-    * @returns the published handle.
-    */
-   async createAgent(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle> {
-+    const admission = this.admitLifecycle(ownerCtx, 'create', options.sessionId)
-+    const signal = this.admittedSignal(options.signal, admission)
-     const preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(options.sessionId, {
-       ...options.seed === undefined ? {} : { seed: options.seed },
-       ...options.meta === undefined ? {} : { meta: options.meta },
-@@ -758,11 +819,11 @@
-       try {
-         // raceAbortCall normalizes a pre-aborted or mid-create abort and
-         // closes a handle that finishes creating after abandonment.
--        stored = options.signal === undefined
-+        stored = signal === undefined
-           ? await this.createStoredSession(preparation.session)
-           : await raceAbortCall(
--            () => this.createStoredSession(preparation.session, options.signal),
--            options.signal,
-+            () => this.createStoredSession(preparation.session, signal),
-+            signal,
-             options.sessionId,
-             (abandoned) => { void abandoned?.handle.close().catch(() => {}) },
-           )
-@@ -776,10 +837,11 @@
-         preparation,
-         options.agentOptions ?? {},
-         options.setup,
--        options.signal,
-+        signal,
-         'startup',
-         stored,
-         options.parentAgent,
-+        admission,
-       )
-     })()
-     this.ownership.trackWrapper(published)
-@@ -797,20 +859,25 @@
-     source: SessionStartSource,
-     stored?: StoredSession,
-     parentAgent?: Agent,
-+    admission?: AgentLifecyclePermit,
-   ): Promise<AgentHandle> {
-     using ownedPreparation = preparation
-     const session = ownedPreparation.session
-     let prepared: PreparedAgent
-     try {
--      prepared = this.prepare(ownerCtx, id, agentOptions, session, signal, stored?.handle, parentAgent)
-+      admission?.assertCurrent()
-+      prepared = this.prepare(ownerCtx, id, agentOptions, session, signal, stored?.handle, parentAgent, admission)
-     } catch (error: unknown) {
-       await stored?.handle.close().catch(() => {})
-       throw error
-     }
-     return await this.initializeAgent(prepared, async () => {
-       const setupCommit = await raceAbort(setup?.(prepared.agent.ctx, prepared.agent), prepared.signal, id)
-+      admission?.assertCurrent()
-       setupCommit?.commit()
-+      admission?.assertCurrent()
-       await this.appendUnstoredSuffix(stored, session)
-+      admission?.assertCurrent()
-       return await prepared.publish(source)
-     })
-   }
-@@ -855,6 +922,8 @@
-     options: ResumeAgentOptions,
-   ): Promise<AgentHandle> {
-     const id = options.resumeSessionId
-+    const admission = this.admitLifecycle(ownerCtx, 'resume', id)
-+    const signal = this.admittedSignal(options.signal, admission)
-     const published = (async () => {
-       // The open and read may outlive their owner: race them against caller
-       // cancellation, owner-fiber unload, and factory teardown so a
-@@ -864,7 +933,7 @@
-         ownerAbort.abort(new Error(`agent "${id}" setup aborted: owner disposed during setup`))
-       }, `agentLoop.resume-load(${id})`)
-       const fused = AbortSignal.any([
--        ...options.signal === undefined ? [] : [options.signal],
-+        ...signal === undefined ? [] : [signal],
-         ownerAbort.signal,
-         this.ownership.signal,
-       ])
-@@ -875,6 +944,7 @@
-         try {
-           // Taking write ownership FIRST excludes a concurrent resume of the
-           // same id (in this process, a live agent's handle holds the claim).
-+          admission?.assertCurrent()
-           handle = await raceAbortCall(
-             () => persistence.open(id, 'write', { signal: fused }),
-             fused,
-@@ -885,11 +955,14 @@
-           // back the physically valid log; an interrupted final turn receives
-           // synthetic closers (missing tool errors, step/end, turn/end) that
-           // are appended through the same handle as an ordinary batch.
-+          admission?.assertCurrent()
-           const coldRead = await handle.read(0, undefined, { signal: fused })
-           fused.throwIfAborted()
-+          admission?.assertCurrent()
-           const persisted = coldRead.events
-           const closers = interruptedTurnClosers(persisted)
-           if (closers.length > 0) await handle.append(closers)
-+          admission?.assertCurrent()
-           preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, {
-             seed: [...persisted, ...closers],
-             meta: structuredClone(handle.header),
-@@ -911,10 +984,11 @@
-           preparation,
-           options.agentOptions ?? {},
-           options.setup,
--          options.signal,
-+          signal,
-           'resume',
-           owned,
-           options.parentAgent,
-+          admission,
-         )
-       } finally {
-         preparation?.[Symbol.dispose]()
+diff --git a/apps/cli/src/profile-boot.ts b/apps/cli/src/profile-boot.ts
 --- a/apps/cli/src/profile-boot.ts
 +++ b/apps/cli/src/profile-boot.ts
 @@ -259,6 +259,12 @@
@@ -323,32 +27,51 @@
        await hostCtx.plugin(PluginPackages, {
          resolution: composed.resolution,
        })
---- a/packages/typert/protocol/src/index.ts
-+++ b/packages/typert/protocol/src/index.ts
-@@ -20,6 +20,23 @@
- export { createTypertRemoteInfo, isTypertRemoteMethod } from './remote-info.ts'
- export { principalOf } from './principal.ts'
- export type { RemoteAccessResource, RemoteAccessResourceKind, RemoteAccessResourceOf } from './remote-access.ts'
-+
-+/** Runtime-only host hold: company hosts do not inherit browser-owner privilege. */
-+export const OWNER_ACCESS_RESTRICTION_KEY = 'remoteAccessOwnerRestricted'
-+
-+declare module '@deepseek-ai/cordis' {
-+  interface Context {
-+    /** Installed on the root before tree boot; never a public or declarative grant. */
-+    remoteAccessOwnerRestricted?: true
+diff --git a/packages/api/gateway/src/index.ts b/packages/api/gateway/src/index.ts
+--- a/packages/api/gateway/src/index.ts
++++ b/packages/api/gateway/src/index.ts
+@@ -471,6 +471,16 @@
+     return cancellableStream(source, prepared.endpoint, prepared.invocation)
+   }
+ 
++  /** Company launch holds stock-owner commands before lookup or event ownership. */
++  private assertOwnerRoute(peer: PeerScope, endpoint: string): void {
++    if (peer.principal.kind === 'owner' && this.ctx.remoteAccess.ownerRestricted
++      && endpoint !== 'remoteAccess/follow') {
++      throw new RemoteError('remote-access/denied', 'native company commands require the admitted company operation', {
++        action: endpoint, reason: 'owner-restricted',
++      })
++    }
 +  }
-+}
 +
-+/** Read the original host root, ignoring child service-isolation labels. */
-+export function readOwnerAccessRestriction(ctx: Context): boolean {
-+  const required: unknown = ctx.root.get(OWNER_ACCESS_RESTRICTION_KEY)
-+  if (required !== undefined && required !== true) throw new Error('invalid host owner access restriction')
-+  return required === true
-+}
- 
- const TYPERT_REMOTE_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/
- 
+   private async dispatchRpc(
+     endpoint: string,
+     payload: unknown,
+@@ -480,6 +490,7 @@
+     if (endpoint === REMOTE_EVENT_RESULT_ENDPOINT) {
+       try {
+         assertPeerLive(peer, endpoint)
++        this.assertOwnerRoute(peer, endpoint)
+         requireInteractions(peer, endpoint)
+         // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+         if (peer.principal.kind !== 'owner') {
+@@ -518,6 +529,7 @@
+       // A Gateway-owned stream reads no uplink: releasing it now keeps its items out of the bounded inbox.
+       releaseUplink(uplink)
+       assertPeerLive(peer, endpoint)
++      this.assertOwnerRoute(peer, endpoint)
+       requireInteractions(peer, endpoint)
+       return this.openRemoteEvents(payload, signal, peer)
+     }
+@@ -779,6 +791,7 @@
+   ): Promise<PreparedInvocation> {
+     const endpoint = endpointOf(request.namespace, request.method)
+     assertPeerLive(request.peer, endpoint)
++    this.assertOwnerRoute(request.peer, endpoint)
+     const descriptor = this.resolveDescriptor(request.namespace, request.method, endpoint)
+     assertExactArguments(request.args, descriptor, endpoint)
+     const validated = validateArguments(descriptor, request.args, endpoint)
+diff --git a/packages/api/remote-access/src/index.ts b/packages/api/remote-access/src/index.ts
 --- a/packages/api/remote-access/src/index.ts
 +++ b/packages/api/remote-access/src/index.ts
 @@ -12,7 +12,7 @@
@@ -430,49 +153,7 @@
        yield this.snapshotFor(OWNER)
        await abortion(generation)
        return
---- a/packages/api/gateway/src/index.ts
-+++ b/packages/api/gateway/src/index.ts
-@@ -471,6 +471,16 @@
-     return cancellableStream(source, prepared.endpoint, prepared.invocation)
-   }
- 
-+  /** Company launch holds stock-owner commands before lookup or event ownership. */
-+  private assertOwnerRoute(peer: PeerScope, endpoint: string): void {
-+    if (peer.principal.kind === 'owner' && this.ctx.remoteAccess.ownerRestricted
-+      && endpoint !== 'remoteAccess/follow') {
-+      throw new RemoteError('remote-access/denied', 'native company commands require the admitted company operation', {
-+        action: endpoint, reason: 'owner-restricted',
-+      })
-+    }
-+  }
-+
-   private async dispatchRpc(
-     endpoint: string,
-     payload: unknown,
-@@ -480,6 +490,7 @@
-     if (endpoint === REMOTE_EVENT_RESULT_ENDPOINT) {
-       try {
-         assertPeerLive(peer, endpoint)
-+        this.assertOwnerRoute(peer, endpoint)
-         requireInteractions(peer, endpoint)
-         // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
-         if (peer.principal.kind !== 'owner') {
-@@ -518,6 +529,7 @@
-       // A Gateway-owned stream reads no uplink: releasing it now keeps its items out of the bounded inbox.
-       releaseUplink(uplink)
-       assertPeerLive(peer, endpoint)
-+      this.assertOwnerRoute(peer, endpoint)
-       requireInteractions(peer, endpoint)
-       return this.openRemoteEvents(payload, signal, peer)
-     }
-@@ -779,6 +791,7 @@
-   ): Promise<PreparedInvocation> {
-     const endpoint = endpointOf(request.namespace, request.method)
-     assertPeerLive(request.peer, endpoint)
-+    this.assertOwnerRoute(request.peer, endpoint)
-     const descriptor = this.resolveDescriptor(request.namespace, request.method, endpoint)
-     assertExactArguments(request.args, descriptor, endpoint)
-     const validated = validateArguments(descriptor, request.args, endpoint)
+diff --git a/packages/client/connection/src/rpc-host.ts b/packages/client/connection/src/rpc-host.ts
 --- a/packages/client/connection/src/rpc-host.ts
 +++ b/packages/client/connection/src/rpc-host.ts
 @@ -2,7 +2,7 @@
@@ -509,3 +190,680 @@
            return route.fetch(request)
          }
          const endpoint = endpointFromPath(channel, pathname)
+diff --git a/packages/core/agent-loop/src/agent.ts b/packages/core/agent-loop/src/agent.ts
+--- a/packages/core/agent-loop/src/agent.ts
++++ b/packages/core/agent-loop/src/agent.ts
+@@ -8,6 +8,7 @@
+   Agent,
+   AgentCancelCause,
+   AgentEventDispatch,
++  AgentInputCapability,
+   AgentOptions,
+   AgentStatus,
+   CancelOptions,
+@@ -33,7 +34,7 @@
+ import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
+ import type {} from '@deepseek-ai/dsh-session-projection'
+ import type { Context } from '@deepseek-ai/cordis'
+-import { ReactLoopInbox } from './inbox.ts'
++import { ReactLoopInbox, type InboxDriverWriters } from './inbox.ts'
+ import { RuntimeContextProjection } from './runtime-context.ts'
+ import { AssistantStreamAttempt } from './assistant-stream.ts'
+ import { SystemPromptProjection } from './runtime-context.ts'
+@@ -97,6 +98,7 @@
+ /** Drives one session through turn and step boundaries. */
+ export class ReactLoopAgent implements Agent {
+   readonly inbox: ReactLoopInbox
++  #inputWriters!: Readonly<InboxDriverWriters>
+   private phase: Phase
+   private activityDone: Promise<void> = Promise.resolve()
+ 
+@@ -124,12 +126,32 @@
+     public readonly id: SessionId,
+     public readonly options: AgentOptions,
+     public readonly session: Session,
++    input?: AgentInputCapability,
+   ) {
+     this.requestSurfaceGeneration = session.surface.contentGeneration
+     this.dispatch = agentEvents(loopCtx, this)
+     this.scope = createScope(loopCtx, this)
+     this.ctx = this.scope.ctx
+-    this.inbox = new ReactLoopInbox(this.ctx.sessionProjections, session, this.dispatch)
++    this.inbox = new ReactLoopInbox(this.ctx.sessionProjections, session, this.dispatch,
++      input === undefined ? undefined : (attempt, origin) => {
++        input.assertCurrent()
++        if (origin?.kind === 'context') {
++          origin.assertCurrent()
++        } else {
++          input.consume(Object.freeze({
++            ...attempt, agent: this, session,
++            ...origin === undefined ? {} : {
++              send: Object.freeze({
++                message: origin.message, requestedTarget: origin.requestedTarget, wakeup: origin.wakeup,
++              }),
++            },
++          }))
++        }
++        input.assertCurrent()
++        if (origin?.kind === 'context') origin.assertCurrent()
++      },
++      writers => { this.#inputWriters = writers },
++    )
+     /* v8 ignore next -- the loop registers its own turnBoundary unit, so the key is always present */
+     const lastTurn = this.loopCtx.sessionProjections.stateOf(session, 'turnBoundary')?.lastTurn ?? 0
+     this.phase = { kind: 'idle', lastTurn }
+@@ -156,7 +178,7 @@
+     // Captured before the insertion so a reentrant cancel from a splice observer cannot reclassify it.
+     const wakingAfterAbort = wakeup && this.phase.kind !== 'idle' && this.phase.abort.signal.aborted
+     const resolvedTarget = wakingAfterAbort ? 'next-turn' : target
+-    this.inbox.splice(resolvedTarget, Infinity, 0, [message])
++    this.#inputWriters.send(message, target, resolvedTarget, wakeup)
+     if (wakeup) this.wakeDriver(wakingAfterAbort)
+   }
+ 
+@@ -400,7 +422,8 @@
+   private async step(decision: Extract<PreparedStep, { kind: 'enter' }>): Promise<StepEndReason | null> {
+     /* v8 ignore next -- private callers establish the running phase before executing a step */
+     if (this.phase.kind !== 'running') throw new Error(`agent "${this.id}": step outside running phase`)
+-    const { turn, step, abort: { signal } } = this.phase
++    const phase = this.phase
++    const { turn, step, abort: { signal } } = phase
+     signal.throwIfAborted()
+ 
+     const { assembly } = decision
+@@ -550,7 +573,12 @@
+         if (toolCalls.length === 0) return { kind: 'completed' }
+         const { concluded } = await executeToolCalls(
+           this.loopCtx, turn, step, toolCalls, signal,
+-          context => this.inbox.splice('next-step', this.inbox.nextStep.length, 0, [context]),
++          context => this.#inputWriters.context(context, () => {
++            signal.throwIfAborted()
++            if (this.phase !== phase || phase.turn !== turn || phase.step !== step) {
++              throw new Error('native tool context no longer belongs to the original step')
++            }
++          }),
+         )
+         return concluded ? { kind: 'completed' } : null
+       } catch (error: unknown) {
+diff --git a/packages/core/agent-loop/src/inbox.ts b/packages/core/agent-loop/src/inbox.ts
+--- a/packages/core/agent-loop/src/inbox.ts
++++ b/packages/core/agent-loop/src/inbox.ts
+@@ -10,12 +10,34 @@
+ import type { Session, SessionEventMap, UserMessage } from '@deepseek-ai/dsh-session'
+ import type {
+   AgentEventDispatch,
++  AgentInputAttempt,
+   Inbox as InboxContract,
+   InboxState,
+   InboxTarget,
+   InboxWireState,
+ } from '@deepseek-ai/dsh-agent'
+ import { z } from 'zod'
++import { deepFreeze } from '@deepseek-ai/dsh-util-values'
++
++/** Frozen accessors are still executable; native grants require data-only input. */
++function nativeInputData(messages: UserMessage[]): UserMessage[] {
++  const pending: unknown[] = [messages]
++  const seen = new WeakSet<object>()
++  while (pending.length > 0) {
++    const value = pending.pop()
++    if (value === null || typeof value !== 'object' || seen.has(value)) continue
++    seen.add(value)
++    const prototype = Object.getPrototypeOf(value)
++    if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null) {
++      throw new Error('native input requires plain data')
++    }
++    for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
++      if (!('value' in descriptor)) throw new Error('native input cannot contain accessors')
++      pending.push(descriptor.value)
++    }
++  }
++  return deepFreeze(messages)
++}
+ 
+ /** Wire validation for pending agent input reconstructed from durable inbox splices. */
+ export const inboxProjectionSchema = z.object({
+@@ -71,12 +93,40 @@
+  * @param session - session whose durable events store pending input.
+  * @param dispatch - agent-scoped notifications for Inbox lifecycle events.
+  */
++type InboxInsertion = Omit<AgentInputAttempt, 'agent' | 'session' | 'send'>
++type InboxInsertionOrigin =
++  | { readonly kind: 'send'; readonly message: UserMessage; readonly requestedTarget: InboxTarget; readonly wakeup: boolean }
++  | { readonly kind: 'context'; readonly assertCurrent: () => void }
++
++/** Private driver capabilities, handed directly to the original Agent constructor. */
++export interface InboxDriverWriters {
++  send(message: UserMessage, requestedTarget: InboxTarget, resolvedTarget: InboxTarget, wakeup: boolean): void
++  context(message: UserMessage, assertCurrent: () => void): void
++}
++
+ export class ReactLoopInbox implements InboxContract {
++  readonly #admitInput: ((attempt: InboxInsertion, origin: InboxInsertionOrigin | undefined) => void) | undefined
++  #inserting = false
++
+   constructor(
+     private readonly projections: SessionProjectionRegistry,
+     private readonly session: Session,
+     private readonly dispatch: AgentEventDispatch,
+-  ) {}
++    admitInput?: (attempt: InboxInsertion, origin: InboxInsertionOrigin | undefined) => void,
++    bindDriver?: (writers: Readonly<InboxDriverWriters>) => void,
++  ) {
++    this.#admitInput = admitInput
++    bindDriver?.(Object.freeze<InboxDriverWriters>({
++      send: (message, requestedTarget, resolvedTarget, wakeup) => {
++        this.#mutate(resolvedTarget, Infinity, 0, [message], true,
++          Object.freeze({ kind: 'send', message, requestedTarget, wakeup }))
++      },
++      context: (message, assertCurrent) => {
++        this.#mutate('next-step', this.nextStep.length, 0, [message], true,
++          Object.freeze({ kind: 'context', assertCurrent }))
++      },
++    }))
++  }
+ 
+   /** Prompts awaiting individual turns. */
+   get nextTurn(): readonly UserMessage[] {
+@@ -107,8 +157,8 @@
+    * @returns next-step input followed by the queued turn, when requested.
+    */
+   claim(target: InboxTarget, turn: number): UserMessage[] {
+-    const claimed = this.mutate('next-step', 0, this.nextStep.length, [], false)
+-    if (target === 'next-turn') claimed.push(...this.mutate('next-turn', 0, 1, [], false))
++    const claimed = this.#mutate('next-step', 0, this.nextStep.length, [], false)
++    if (target === 'next-turn') claimed.push(...this.#mutate('next-turn', 0, 1, [], false))
+     for (const message of claimed) this.dispatch.emit('agent/inbox/claimed', { message, turn })
+     return claimed
+   }
+@@ -170,7 +220,7 @@
+     deleteCount: number,
+     inserted: UserMessage[],
+   ): UserMessage[] {
+-    return this.mutate(target, start, deleteCount, inserted, true)
++    return this.#mutate(target, start, deleteCount, inserted, true)
+   }
+ 
+   /** Locate one pending identity across both owned lists. */
+@@ -194,14 +244,38 @@
+     return state
+   }
+ 
+-  /** Commit one normalized mutation and publish its live events. */
+-  private mutate(
++  /** Keep an authority callback or input accessor from borrowing an insertion in progress. */
++  #mutate(
+     target: InboxTarget,
+     start: number,
+     deleteCount: number,
+     inserted: UserMessage[],
+     discardRemoved: boolean,
++    origin?: InboxInsertionOrigin,
+   ): UserMessage[] {
++    if (this.#admitInput === undefined || inserted.length === 0) {
++      return this.#commit(target, start, deleteCount, inserted, discardRemoved, origin)
++    }
++    if (this.#inserting) throw new Error('native input admission is reentrant')
++    this.#inserting = true
++    try {
++      return this.#commit(target, start, deleteCount, inserted, discardRemoved, origin)
++    } finally {
++      this.#inserting = false
++    }
++  }
++
++  /** Commit one normalized mutation and publish its live events. */
++  #commit(
++    target: InboxTarget,
++    start: number,
++    deleteCount: number,
++    inserted: UserMessage[],
++    discardRemoved: boolean,
++    origin?: InboxInsertionOrigin,
++  ): UserMessage[] {
++    // A native authority sees exactly the immutable input later appended.
++    if (this.#admitInput !== undefined && inserted.length > 0) inserted = nativeInputData([...inserted])
+     const state = this.current()
+     const inbox = state[target]
+     const truncatedStart = Math.trunc(start)
+@@ -232,6 +306,13 @@
+       ...(outcome === undefined ? {} : { outcome }),
+     }
+     const removed = inbox.slice(actualStart, actualStart + actualDeleteCount)
++    if (this.#admitInput !== undefined && inserted.length > 0) {
++      const sessionSeq = this.session.seq
++      this.#admitInput(Object.freeze({
++        sessionSeq, target, start: actualStart, removedCount: actualDeleteCount, inserted,
++      }), origin)
++      if (this.session.seq !== sessionSeq) throw new Error('native input Session changed during admission')
++    }
+     const event = this.session.append('agent/inbox/spliced', splice)
+     if (discardRemoved) {
+       for (const message of removed) this.dispatch.emit('agent/inbox/discarded', { message })
+diff --git a/packages/core/agent-loop/src/index.ts b/packages/core/agent-loop/src/index.ts
+--- a/packages/core/agent-loop/src/index.ts
++++ b/packages/core/agent-loop/src/index.ts
+@@ -8,6 +8,7 @@
+ 
+ import { Context, FiberState, Service } from '@deepseek-ai/cordis'
+ import { randomUUID } from 'node:crypto'
++import { isPromise } from 'node:util/types'
+ import z from '@deepseek-ai/schemastery'
+ import { z as zod } from 'zod'
+ import { brandString } from '@deepseek-ai/dsh-brand'
+@@ -15,6 +16,9 @@
+   Agent,
+   AgentFactory,
+   AgentHandle,
++  AgentInputCapability,
++  AgentLifecycleAdmission,
++  AgentLifecyclePermit,
+   AgentOptions,
+   AgentSetup,
+   CreateAgentOptions,
+@@ -22,9 +26,10 @@
+   SessionStartSource,
+   TurnBoundaryProjection,
+ } from '@deepseek-ai/dsh-agent'
++import { AGENT_LIFECYCLE_ADMISSION_KEY } from '@deepseek-ai/dsh-agent'
+ import { errorChain, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+ import { interruptedTurnClosers, SessionLogOffset, SessionPreparation, SessionSeq } from '@deepseek-ai/dsh-session'
+-import type { Session, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
++import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+ import type {} from '@deepseek-ai/dsh-system-prompt'
+ import type {} from '@deepseek-ai/dsh-tools'
+ import type {} from '@deepseek-ai/dsh-session-projection'
+@@ -360,7 +365,7 @@
+   readonly config: Config
+   private readonly ownership: FactoryOwnership
+   /** Plain holder prevents Cordis from re-tracing the factory's dependency context through a caller shadow. */
+-  private readonly runtime: { ctx: Context }
++  private readonly runtime: { ctx: Context; admission: AgentLifecycleAdmission | undefined }
+ 
+   constructor(ctx: Context, config: Config) {
+     super(ctx, 'agentLoop')
+@@ -373,7 +378,14 @@
+     // Register only after every config validation above has passed, so a
+     // rejected constructor leaves no projection unit behind.
+     const ownership = this.ownership = new FactoryOwnership(ctx.fiber)
+-    this.runtime = { ctx }
++    // Capture the requirement before declarative startup. Removing or replacing
++    // the provided service later must never restore a permissive factory.
++    const admission = ctx.root.get(AGENT_LIFECYCLE_ADMISSION_KEY)
++    if (admission !== undefined && (admission === null || typeof admission.admit !== 'function')) {
++      throw new Error('agent lifecycle admission requirement is invalid')
++    }
++    this.runtime = { ctx, admission: admission === undefined ? undefined
++      : Object.freeze({ admit: admission.admit.bind(admission) }) }
+     ctx.effect(function* () {
+       const unregisterTurnBoundary = ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
+       yield unregisterTurnBoundary
+@@ -419,6 +431,87 @@
+         return fiber.dispose
+       }, `agentLoop.resume(${id})`)
+     }
++  }
++
++  /** Capture one original operation permit before any native Session effect. */
++  private admitLifecycle(ownerCtx: Context, operation: 'create' | 'resume', id: SessionId): AgentLifecyclePermit | undefined {
++    const required = this.runtime.admission
++    if (required === undefined) return undefined
++    const admitted = required.admit(ownerCtx, operation, id)
++    if (isPromise(admitted)) {
++      void admitted.catch(() => {})
++      throw new Error('agent lifecycle admission must be synchronous')
++    }
++    if (admitted === null || typeof admitted !== 'object'
++      || !(admitted.signal instanceof AbortSignal) || typeof admitted.assertCurrent !== 'function') {
++      throw new Error('agent lifecycle admission permit is invalid')
++    }
++    const signal = admitted.signal
++    const check = admitted.assertCurrent.bind(admitted)
++    const suppliedInput = admitted.input
++    let input: AgentInputCapability | undefined
++    if (suppliedInput !== undefined) {
++      if (suppliedInput === null || typeof suppliedInput !== 'object'
++          || typeof suppliedInput.assertCurrent !== 'function' || typeof suppliedInput.consume !== 'function') {
++        throw new Error('agent input admission capability is invalid')
++      }
++      const current = suppliedInput.assertCurrent.bind(suppliedInput)
++      const consume = suppliedInput.consume.bind(suppliedInput)
++      const requireTrue = (callback: () => unknown): true => {
++        ownerCtx.fiber.assertActive()
++        signal.throwIfAborted()
++        const result = callback()
++        if (result !== true) {
++          if (isPromise(result)) void result.catch(() => {})
++          throw new Error('agent input admission is no longer current')
++        }
++        signal.throwIfAborted()
++        ownerCtx.fiber.assertActive()
++        return true
++      }
++      input = Object.freeze<AgentInputCapability>({
++        assertCurrent: () => requireTrue(current),
++        consume: (attempt) => requireTrue(() => consume(attempt)),
++      })
++      input.assertCurrent()
++    }
++    const permit: AgentLifecyclePermit = {
++      signal,
++      ...input === undefined ? {} : { input },
++      assertCurrent() {
++        ownerCtx.fiber.assertActive()
++        signal.throwIfAborted()
++        const current: unknown = check()
++        if (current !== true) {
++          if (isPromise(current)) void current.catch(() => {})
++          throw new Error('agent lifecycle admission is no longer current')
++        }
++        // A synchronous authority callback may retire the generation or owner.
++        signal.throwIfAborted()
++        ownerCtx.fiber.assertActive()
++        return true
++      },
++    }
++    permit.assertCurrent()
++    return Object.freeze(permit)
++  }
++
++  /** Native attachment cannot adopt input that has no original current enqueue owner. */
++  private requireNativeInboxEmpty(admission: AgentLifecyclePermit | undefined, events: () => readonly SessionEvent[]): void {
++    if (admission?.input === undefined) return
++    admission.input.assertCurrent()
++    let state = inboxProjectionDefinition.init()
++    for (const event of events()) state = inboxProjectionDefinition.apply(state, event)
++    if (state['next-turn'].length !== 0 || state['next-step'].length !== 0) {
++      throw new Error('native lifecycle cannot adopt pending input')
++    }
++    admission.input.assertCurrent()
++  }
++
++  /** Keep the original caller cancellation as well as the host generation. */
++  private admittedSignal(signal: AbortSignal | undefined, permit: AgentLifecyclePermit | undefined): AbortSignal | undefined {
++    return permit === undefined ? signal
++      : signal === undefined ? permit.signal : AbortSignal.any([signal, permit.signal])
+   }
+ 
+   /** Report a contained declarative-start failure to identity-bound consumers. */
+@@ -502,7 +595,9 @@
+     callerSignal?: AbortSignal,
+     handle?: SessionHandle,
+     parentAgent?: Agent,
++    admission?: AgentLifecyclePermit,
+   ): PreparedAgent {
++    admission?.assertCurrent()
+     assertAgentOptions(options)
+     ownerCtx.fiber.assertActive()
+     // Every caller reaches prepare() synchronously from a service method
+@@ -601,7 +696,7 @@
+     const untrack = this.ownership.track(dispose)
+     try {
+       unfollowOwner = ownerCtx.effect(function* () {
+-        const created = machine = new ReactLoopAgent(loopCtx, id, options, session)
++        const created = machine = new ReactLoopAgent(loopCtx, id, options, session, admission?.input)
+         machineReady.resolve()
+         // Adopt the scope on its original fiber so it cannot unload before teardown.
+         // A loop already unloading during minting owns the provisional scope itself.
+@@ -631,6 +726,7 @@
+     /* v8 ignore stop */
+ 
+     const assertLive = (): void => {
++      admission?.assertCurrent()
+       if (!abort.signal.aborted) return
+       // Every fused abort source carries an Error reason: onCallerAbort and
+       // raceAbort wrap non-Error caller reasons, and the factory/lifecycle
+@@ -686,17 +782,21 @@
+    * @returns the published running agent.
+    */
+   async create(id: SessionId, options: AgentOptions = {}, meta: Pick<SessionHeader, 'cwd'> = {}): Promise<Agent> {
++    const admission = this.admitLifecycle(this.ctx, 'create', id)
+     using preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, { meta }))
+-    const stored = await this.createStoredSession(preparation.session)
++    const stored = await this.createStoredSession(preparation.session, admission?.signal)
+     let prepared: PreparedAgent
+     try {
+-      prepared = this.prepare(this.ctx, id, options, preparation.session, undefined, stored?.handle)
++      admission?.assertCurrent()
++      prepared = this.prepare(this.ctx, id, options, preparation.session, admission?.signal, stored?.handle, undefined, admission)
+     } catch (error: unknown) {
+       await stored?.handle.close().catch(() => {})
+       throw error
+     }
+     return (await this.initializeAgent(prepared, async () => {
++      admission?.assertCurrent()
+       await this.appendUnstoredSuffix(stored, preparation.session)
++      admission?.assertCurrent()
+       return await prepared.publish('startup')
+     })).agent
+   }
+@@ -748,6 +848,8 @@
+    * @returns the published handle.
+    */
+   async createAgent(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle> {
++    const admission = this.admitLifecycle(ownerCtx, 'create', options.sessionId)
++    const signal = this.admittedSignal(options.signal, admission)
+     const preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(options.sessionId, {
+       ...options.seed === undefined ? {} : { seed: options.seed },
+       ...options.meta === undefined ? {} : { meta: options.meta },
+@@ -756,13 +858,15 @@
+     const published = (async () => {
+       let stored: StoredSession | undefined
+       try {
++        // oxlint-disable-next-line typescript/no-deprecated -- Reuse the original durable Inbox fold.
++        this.requireNativeInboxEmpty(admission, () => preparation.session.snapshotEvents())
+         // raceAbortCall normalizes a pre-aborted or mid-create abort and
+         // closes a handle that finishes creating after abandonment.
+-        stored = options.signal === undefined
++        stored = signal === undefined
+           ? await this.createStoredSession(preparation.session)
+           : await raceAbortCall(
+-            () => this.createStoredSession(preparation.session, options.signal),
+-            options.signal,
++            () => this.createStoredSession(preparation.session, signal),
++            signal,
+             options.sessionId,
+             (abandoned) => { void abandoned?.handle.close().catch(() => {}) },
+           )
+@@ -776,10 +880,11 @@
+         preparation,
+         options.agentOptions ?? {},
+         options.setup,
+-        options.signal,
++        signal,
+         'startup',
+         stored,
+         options.parentAgent,
++        admission,
+       )
+     })()
+     this.ownership.trackWrapper(published)
+@@ -797,20 +902,29 @@
+     source: SessionStartSource,
+     stored?: StoredSession,
+     parentAgent?: Agent,
++    admission?: AgentLifecyclePermit,
+   ): Promise<AgentHandle> {
+     using ownedPreparation = preparation
+     const session = ownedPreparation.session
+     let prepared: PreparedAgent
+     try {
+-      prepared = this.prepare(ownerCtx, id, agentOptions, session, signal, stored?.handle, parentAgent)
++      admission?.assertCurrent()
++      prepared = this.prepare(ownerCtx, id, agentOptions, session, signal, stored?.handle, parentAgent, admission)
+     } catch (error: unknown) {
+       await stored?.handle.close().catch(() => {})
+       throw error
+     }
+     return await this.initializeAgent(prepared, async () => {
+       const setupCommit = await raceAbort(setup?.(prepared.agent.ctx, prepared.agent), prepared.signal, id)
++      admission?.assertCurrent()
+       setupCommit?.commit()
++      admission?.assertCurrent()
++      // oxlint-disable-next-line typescript/no-deprecated -- Reuse the original durable Inbox fold.
++      this.requireNativeInboxEmpty(admission, () => session.snapshotEvents())
+       await this.appendUnstoredSuffix(stored, session)
++      admission?.assertCurrent()
++      // oxlint-disable-next-line typescript/no-deprecated -- Recheck setup writes across the persistence await.
++      this.requireNativeInboxEmpty(admission, () => session.snapshotEvents())
+       return await prepared.publish(source)
+     })
+   }
+@@ -855,6 +969,8 @@
+     options: ResumeAgentOptions,
+   ): Promise<AgentHandle> {
+     const id = options.resumeSessionId
++    const admission = this.admitLifecycle(ownerCtx, 'resume', id)
++    const signal = this.admittedSignal(options.signal, admission)
+     const published = (async () => {
+       // The open and read may outlive their owner: race them against caller
+       // cancellation, owner-fiber unload, and factory teardown so a
+@@ -864,7 +980,7 @@
+         ownerAbort.abort(new Error(`agent "${id}" setup aborted: owner disposed during setup`))
+       }, `agentLoop.resume-load(${id})`)
+       const fused = AbortSignal.any([
+-        ...options.signal === undefined ? [] : [options.signal],
++        ...signal === undefined ? [] : [signal],
+         ownerAbort.signal,
+         this.ownership.signal,
+       ])
+@@ -875,6 +991,7 @@
+         try {
+           // Taking write ownership FIRST excludes a concurrent resume of the
+           // same id (in this process, a live agent's handle holds the claim).
++          admission?.assertCurrent()
+           handle = await raceAbortCall(
+             () => persistence.open(id, 'write', { signal: fused }),
+             fused,
+@@ -885,11 +1002,15 @@
+           // back the physically valid log; an interrupted final turn receives
+           // synthetic closers (missing tool errors, step/end, turn/end) that
+           // are appended through the same handle as an ordinary batch.
++          admission?.assertCurrent()
+           const coldRead = await handle.read(0, undefined, { signal: fused })
+           fused.throwIfAborted()
++          admission?.assertCurrent()
+           const persisted = coldRead.events
++          this.requireNativeInboxEmpty(admission, () => persisted)
+           const closers = interruptedTurnClosers(persisted)
+           if (closers.length > 0) await handle.append(closers)
++          admission?.assertCurrent()
+           preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, {
+             seed: [...persisted, ...closers],
+             meta: structuredClone(handle.header),
+@@ -911,10 +1032,11 @@
+           preparation,
+           options.agentOptions ?? {},
+           options.setup,
+-          options.signal,
++          signal,
+           'resume',
+           owned,
+           options.parentAgent,
++          admission,
+         )
+       } finally {
+         preparation?.[Symbol.dispose]()
+diff --git a/packages/core/agent/src/index.ts b/packages/core/agent/src/index.ts
+--- a/packages/core/agent/src/index.ts
++++ b/packages/core/agent/src/index.ts
+@@ -11,9 +11,9 @@
+ import { isPromise } from 'node:util/types'
+ import { scopeTarget } from '@deepseek-ai/dsh-scope'
+ import type { Scoped } from '@deepseek-ai/dsh-scope'
+-import type { SessionEvent, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
++import type { Session, SessionEvent, SessionId, SessionLogOffset, UserMessage } from '@deepseek-ai/dsh-session'
+ import { installTurnArchiveAdmission } from './archive-admission.ts'
+-import type { Agent } from './types.ts'
++import type { Agent, InboxTarget } from './types.ts'
+ import type { AgentOptions, SessionStartSource } from './runtime-types.ts'
+ 
+ export * from './runtime-types.ts'
+@@ -27,7 +27,59 @@
+ declare module '@deepseek-ai/cordis' {
+   interface Context {
+     agents: AgentRegistry
+-  }
++    /** Runtime-only host requirement, installed before any Agent factory mounts. */
++    agentLifecycleAdmission?: AgentLifecycleAdmission
++  }
++}
++
++/** Runtime-only key; no declarative plugin configuration can install a grant. */
++export const AGENT_LIFECYCLE_ADMISSION_KEY = 'agentLifecycleAdmission'
++
++/**
++ * A permit from the original host operation. Its signal belongs to the original
++ * process generation, not a transient request. The factory adds it to its
++ * existing cancellation and teardown chain; it creates no new lifecycle owner.
++ */
++export interface AgentLifecyclePermit {
++  readonly signal: AbortSignal
++  /** Recheck the original operation and exact caller; only literal true admits. */
++  assertCurrent(): true
++  /** Retained input authority for this native generation; absent for ordinary hosts. */
++  readonly input?: AgentInputCapability
++}
++
++/** The final original Inbox insertion, with provenance from its private driver path. */
++export interface AgentInputAttempt {
++  readonly agent: Agent
++  readonly session: Session
++  readonly sessionSeq: Session['seq']
++  readonly target: InboxTarget
++  readonly start: number
++  readonly removedCount: number
++  readonly inserted: readonly UserMessage[]
++  readonly send?: {
++    readonly message: UserMessage
++    readonly requestedTarget: InboxTarget
++    readonly wakeup: boolean
++  }
++}
++
++/** Runtime-only capability subordinate to the original native operation owner. */
++export interface AgentInputCapability {
++  /** Generation/lifetime check that remains meaningful after create/resume returns. */
++  assertCurrent(): true
++  /** Consume one exact external input once, before the durable append. */
++  consume(attempt: AgentInputAttempt): true
++}
++
++/** Programmatic host admission before Session preparation or writer acquisition. */
++export interface AgentLifecycleAdmission {
++  /**
++   * The registry passes the actual caller Context, including its fiber/scope.
++   * Cordis may shadow the Context object; match the original caller fiber, not
++   * object equality with the factory or an untraced plugin Context.
++   */
++  admit(ownerCtx: Context, operation: 'create' | 'resume', sessionId: SessionId): AgentLifecyclePermit
+ }
+ 
+ /**
+diff --git a/packages/typert/protocol/src/index.ts b/packages/typert/protocol/src/index.ts
+--- a/packages/typert/protocol/src/index.ts
++++ b/packages/typert/protocol/src/index.ts
+@@ -20,6 +20,23 @@
+ export { createTypertRemoteInfo, isTypertRemoteMethod } from './remote-info.ts'
+ export { principalOf } from './principal.ts'
+ export type { RemoteAccessResource, RemoteAccessResourceKind, RemoteAccessResourceOf } from './remote-access.ts'
++
++/** Runtime-only host hold: company hosts do not inherit browser-owner privilege. */
++export const OWNER_ACCESS_RESTRICTION_KEY = 'remoteAccessOwnerRestricted'
++
++declare module '@deepseek-ai/cordis' {
++  interface Context {
++    /** Installed on the root before tree boot; never a public or declarative grant. */
++    remoteAccessOwnerRestricted?: true
++  }
++}
++
++/** Read the original host root, ignoring child service-isolation labels. */
++export function readOwnerAccessRestriction(ctx: Context): boolean {
++  const required: unknown = ctx.root.get(OWNER_ACCESS_RESTRICTION_KEY)
++  if (required !== undefined && required !== true) throw new Error('invalid host owner access restriction')
++  return required === true
++}
+ 
+ const TYPERT_REMOTE_SEGMENT_PATTERN = /^[A-Za-z0-9_$.-]+$/
+ 
