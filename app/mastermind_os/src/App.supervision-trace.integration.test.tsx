@@ -20,7 +20,7 @@ beforeEach(()=>{
  delete window.MastermindMissionHost;
 });
 afterEach(()=>{cleanup();disposals.splice(0).forEach(dispose=>dispose());vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals();delete window.MastermindMissionHost;});
-async function setup(){
+async function setup(locale: "en" | "zh-CN" = "en"){
  expect(decodeMissionv3(actual.mission,pair)).not.toBeNull();
  const events=new Map<string,Set<(event:{payload:unknown})=>void>>();
  let nextMission:Promise<unknown>|null=null;
@@ -44,13 +44,13 @@ async function setup(){
   projects:[{ref:"executive-infrastructure",label:"Infrastructure"}],profiles:[{ref:"research_only",label:"Research"},{ref:"native_research_only",label:"Native research"}]}))!;
  const composed=composeMissionHost(raw,config,new IDBFactory(),"native");disposals.push(composed.dispose);
  await composed.ready;await composed.sessionReady;window.MastermindMissionHost=composed.host;
- render(<App/>);
+ render(<App locale={locale}/>);
  await waitFor(()=>expect(invoke.mock.calls.some(([name])=>name==="read_mission_v3")).toBe(true));
  const advanced=document.querySelector<HTMLDetailsElement>("details.nav-advanced")!;
  if(!advanced.open)fireEvent.click(advanced.querySelector("summary")!);
- fireEvent.click(screen.getByRole("button",{name:"Session Estate"}));
- const trace=await screen.findByRole("region",{name:"Supervision and trace"});
- await within(trace).findByRole("heading",{name:"Orchestration trace"});
+ fireEvent.click(screen.getByRole("button",{name:locale === "zh-CN" ? "会话工作区" : "Session Estate"}));
+ const trace=await screen.findByRole("region",{name:locale === "zh-CN" ? "监督与追踪" : "Supervision and trace"});
+ await within(trace).findByRole("heading",{name:locale === "zh-CN" ? "编排追踪" : "Orchestration trace"});
  return {trace,invoke,host:composed.host,store:composed.host.commandBinding!.store,hold(){let resolve!:(value:unknown)=>void;nextMission=new Promise(r=>{resolve=r;});return(value:unknown=actual.mission)=>resolve(structuredClone(value));},
   withdraw(){events.get("mastermind-auth-state")?.forEach(fn=>fn({payload:{status:"signed_out",reason:"NATIVE_TOKEN_EXPIRED",acquisition:false,content:false}}));}};
 }
@@ -98,5 +98,27 @@ it("rejects a foreign selected-source response without guessing or issuing anoth
  await act(async()=>{finish(foreign);});
  expect(within(e.trace).queryByRole("heading",{name:"Orchestration trace"})).toBeNull();
  expect(e.trace.textContent).not.toContain("WS:FOREIGN");expect(reads(e)).toBe(before+1);
+ expect(await e.store.read("c".repeat(64))).toBeNull();noCommands(e);
+});
+
+it("localizes the ZH trace read notice and unavailable chip through read and return without changing source scope",async()=>{
+ const e=await setup("zh-CN"),before=reads(e),query=location.search;
+ const notice="来源时间和观测时间按已有记录显示；本次显示未刷新这些时间。";
+ const localized=()=>{
+  expect(screen.getByText(notice)).toBeTruthy();
+  expect(screen.queryByText("Source and observation clocks are displayed as projected; this render did not refresh them.")).toBeNull();
+  const state=document.querySelector(".workspace-header .facts .state")!;
+  expect(state.textContent).toBe("暂不可用");expect(state.classList.contains("state-unavailable")).toBe(true);
+ };
+ await waitFor(localized);
+ fireEvent.click(within(e.trace).getByRole("button",{name:"读取当前任务"}));
+ await waitFor(()=>expect(reads(e)).toBe(before+1));
+ await within(e.trace).findByRole("heading",{name:"编排追踪"});await waitFor(localized);
+ expect(e.trace.textContent).toContain(actual.mission.generated_at);
+ fireEvent.click(screen.getByRole("button",{name:"今天"}));
+ fireEvent.click(screen.getByRole("button",{name:"会话工作区"}));
+ const returned=screen.getByRole("region",{name:"监督与追踪"});await waitFor(localized);
+ expect(returned.textContent).toContain(pair.workRef);expect(returned.textContent).toContain(pair.rootJobId);
+ expect(location.search).toBe(query);expect(reads(e)).toBe(before+1);
  expect(await e.store.read("c".repeat(64))).toBeNull();noCommands(e);
 });
