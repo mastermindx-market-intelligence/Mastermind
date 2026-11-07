@@ -385,3 +385,12 @@ NO_EFFECT trial. Keep the native producer and APPLICATION #2155 carrier as
 owners; do not replay the refused standalone native EVAL leaf or build another
 memory/refinement plane. #2188 owns the concurrent authenticated Agent OS
 receiver composition. Outcome Learning #398 and C26 retain their exact holds.
+
+
+### Protected integration and installed-parent constraint — 2026-11-07
+
+PR #2181 merged as 1d86f77633100e7c8fe2be4c3dcc4d8ff8c735bf. This branch has now composed protected master 0bf1d891e6e22a938f184e7df02481c52f3aa2a4, retaining its other source-identity pins. Focused original-read/producer/native-identity tests and the full Executive Fabric identity review both passed with terminal exit 0 (processes 97509 and 704). The current code delta to that master is the explicit-admission mismatch guard and its regression; the original projection remains #2181's one implementation. New-head hosted CI and protected queue admission remain separate.
+
+PR #2187's CI-discovered current-manifest and historical reconstruction assertions are repaired at 3b2338d3946209b6f6ce6a0b694cf609015fb07f. Focused affected tests passed; its new hosted CI is run 42341854901. Historical fixtures remain unchanged.
+
+Full installed comparison found that the selected 107-member generation has manifest 3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9, matching the active APPLICATION composer #2175. It contains eight additional component successors. Selecting #2187's protected107 baseline would replace those bytes and is prohibited for this installed predecessor. The safe contribution is an isolated composition against current #2175 source, preserving the eight members and changing only the two repaired leaves. Its exact-parent inverse must qualify the installed APPLICATION lineage before the existing APPLICATION and Go historical validation. Keep #2175 as the one final carrier; do not mutate its live writer or publish a competing release.
