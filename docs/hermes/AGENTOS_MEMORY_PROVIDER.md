@@ -294,9 +294,27 @@ the read observation to match the original read:
 
 The owner's bytes are then wrapped in a small envelope that states plainly
 that the content is organizational evidence and **not execution authority**.
-The complete envelope is bounded at 32 KiB, consistent with the existing
-SessionStart consumer. An oversized bundle is **refused in full** — mandatory
-owner constraints are never trimmed to fit.
+The complete envelope defaults to 32 KiB, consistent with the existing
+SessionStart consumer. The trusted host may explicitly set
+`AgentOsBinding.max_context_bytes` for one bound consumer to a positive integer
+up to 128 KiB. This is part of the immutable host binding, never a model argument
+or an environment override. Any changed binding remains subject to the existing
+generation/currentness checks. Invalid, boolean, non-integer or over-ceiling
+limits refuse before an owner read.
+
+A real Control Room compiler read on 2026-11-07 returned 108,257 bytes at the
+unchanged compiler budget of 4,000. Mandatory law, acceptance declarations and
+accounting can exceed that advisory token budget. The larger explicit envelope
+accommodates such a bundle without selecting, reserializing or trimming it.
+The total rendered bytes include the evidence wrapper; even a raw bundle below
+128 KiB can therefore refuse. An oversized bundle is **refused in full**.
+
+The host must separately prove that the actual native request has room for the
+complete envelope alongside existing OMH, instructions, tools and response
+reserve. The compiler's character-based token estimate is not that proof.
+The raw reader's 128 KiB/25 s ceilings and compiler budget stay unchanged.
+This option does not wire a host, change M2's OMH selection, install a provider,
+or replace the first-turn preparation barrier.
 
 A no-answer bundle (`no_answer_reason` set) is not delivered: the owner's
 validator refuses it and the provider reports the closed reason.
@@ -324,6 +342,7 @@ model-visible string.
 | `AGENTOS_OBSERVATION_MISMATCH` | The observation did not match the read. |
 | `AGENTOS_CONTEXT_HELPER_UNAVAILABLE` | The upstream base or context helper is absent. |
 | `AGENTOS_FRESHNESS_INVALID` | The freshness budget was not a finite, positive value inside the 300 s ceiling. |
+| `AGENTOS_CONTEXT_LIMIT_INVALID` | The trusted host delivery limit was not a positive integer at or below 128 KiB. |
 | `AGENTOS_SESSION_CLOSED` | The provider was shut down. |
 | `AGENTOS_HOST_PORTS_ALREADY_INSTALLED` | A second, different host port pair was installed. |
 

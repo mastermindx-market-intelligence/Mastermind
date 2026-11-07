@@ -43,6 +43,7 @@ __all__ = [
     "AgentOsRefusal",
     "DEFAULT_FRESHNESS_SECONDS",
     "MAX_CONTEXT_BYTES",
+    "MAX_HOST_CONTEXT_BYTES",
     "MAX_FRESHNESS_SECONDS",
     "PROVIDER_NAME",
     "build_provider_class",
@@ -58,6 +59,7 @@ SCHEMA = "mastermind.hermes_agentos_memory.v1"
 # bundle is refused above this size rather than trimmed. Mandatory owner
 # constraints are never dropped to fit.
 MAX_CONTEXT_BYTES = 32 * 1024
+MAX_HOST_CONTEXT_BYTES = 128 * 1024
 DEFAULT_BUDGET = 4000
 DEFAULT_FRESHNESS_SECONDS = 120.0
 # A snapshot older than this is refused rather than delivered. The ceiling is
@@ -86,6 +88,7 @@ REASON_CONTEXT_TOO_LARGE = "AGENTOS_CONTEXT_DELIVERY_TOO_LARGE"
 REASON_OBSERVATION_MISMATCH = "AGENTOS_OBSERVATION_MISMATCH"
 REASON_HELPER_UNAVAILABLE = "AGENTOS_CONTEXT_HELPER_UNAVAILABLE"
 REASON_FRESHNESS_INVALID = "AGENTOS_FRESHNESS_INVALID"
+REASON_CONTEXT_LIMIT_INVALID = "AGENTOS_CONTEXT_LIMIT_INVALID"
 REASON_CLOSED = "AGENTOS_SESSION_CLOSED"
 REASON_HOST_PORTS_INSTALLED = "AGENTOS_HOST_PORTS_ALREADY_INSTALLED"
 
@@ -105,6 +108,7 @@ PROVIDER_CODES = frozenset({
     REASON_OBSERVATION_MISMATCH,
     REASON_HELPER_UNAVAILABLE,
     REASON_FRESHNESS_INVALID,
+    REASON_CONTEXT_LIMIT_INVALID,
     REASON_CLOSED,
     REASON_HOST_PORTS_INSTALLED,
 })
@@ -178,6 +182,9 @@ class AgentOsBinding:
     workstream: str
     owner_root: str
     generation: str
+    # Explicit host delivery policy for this binding, not a model argument.
+    # The host also proves total native request/context-window fit separately.
+    max_context_bytes: int = MAX_CONTEXT_BYTES
 
 
 @runtime_checkable
@@ -259,6 +266,8 @@ def _freshness_seconds(value: Any) -> float:
     are refused rather than silently poisoning the expiry comparison.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise AgentOsRefusal(REASON_FRESHNESS_INVALID)
+    if value <= 0 or value > MAX_FRESHNESS_SECONDS:
         raise AgentOsRefusal(REASON_FRESHNESS_INVALID)
     number = float(value)
     if not math.isfinite(number):
@@ -623,6 +632,9 @@ class AgentOsMemoryProviderCore:
                 raise AgentOsRefusal(REASON_BINDING_UNAVAILABLE)
         if type(binding.workstream) is not str or not WORKSTREAM_RE.fullmatch(binding.workstream):
             raise AgentOsRefusal(REASON_BINDING_UNAVAILABLE)
+        if (type(binding.max_context_bytes) is not int
+                or not 0 < binding.max_context_bytes <= MAX_HOST_CONTEXT_BYTES):
+            raise AgentOsRefusal(REASON_CONTEXT_LIMIT_INVALID)
 
     def _rebind(self) -> bool:
         """Re-resolve after a scope change. The role can never change here."""
@@ -765,7 +777,7 @@ class AgentOsMemoryProviderCore:
             text = _render(observation, raw)
         except (ValueError, TypeError):
             raise AgentOsRefusal(REASON_OBSERVATION_MISMATCH) from None
-        if len(text.encode("utf-8")) > MAX_CONTEXT_BYTES:
+        if len(text.encode("utf-8")) > binding.max_context_bytes:
             # The complete oversized bundle is refused; mandatory owner
             # constraints are never trimmed to fit.
             raise AgentOsRefusal(REASON_CONTEXT_TOO_LARGE)

@@ -22,10 +22,12 @@ import unittest
 from integrations.hermes_harness.agentos_memory_provider import (
     DEFAULT_FRESHNESS_SECONDS,
     MAX_CONTEXT_BYTES,
+    MAX_HOST_CONTEXT_BYTES,
     MAX_FRESHNESS_SECONDS,
     REASON_CONTEXT_EXPIRED,
     REASON_CONTEXT_PENDING,
     REASON_CONTEXT_TOO_LARGE,
+    REASON_CONTEXT_LIMIT_INVALID,
     REASON_CONTEXT_UNAVAILABLE,
     REASON_FRESHNESS_INVALID,
     REASON_OBSERVATION_MISMATCH,
@@ -181,7 +183,8 @@ class ScriptedGuard:
 
 def _binding(session_id="session-alpha", *, role="role-alpha", profile="profile-alpha",
              hermes_home="/tmp/hermes-alpha", workstream="WS:ALPHA",
-             owner_root="/tmp/owner-alpha", generation="gen-1"):
+             owner_root="/tmp/owner-alpha", generation="gen-1",
+             max_context_bytes=MAX_CONTEXT_BYTES):
     return AgentOsBinding(
         session_id=session_id,
         role=role,
@@ -190,6 +193,7 @@ def _binding(session_id="session-alpha", *, role="role-alpha", profile="profile-
         workstream=workstream,
         owner_root=owner_root,
         generation=generation,
+        max_context_bytes=max_context_bytes,
     )
 
 
@@ -615,6 +619,70 @@ class OwnerFailureTests(unittest.TestCase):
         self.assertEqual(provider.prefetch("q"), "")
         self.assertEqual(provider.readiness()["reason"],
                          "AGENTOS_EXACT_WORKSTREAM_UNRESOLVED")
+
+
+class HostDeliveryEnvelopeTests(unittest.TestCase):
+    def _read(self, raw, limit=MAX_CONTEXT_BYTES):
+        owner = FakeOwner({"WS:ALPHA": (raw, _observation(raw, "WS:ALPHA"))})
+        binding = _binding(max_context_bytes=limit)
+        ports = AgentOsHostPorts(StaticResolver({"session-alpha": binding}), StaticGuard())
+        spawn = ManualSpawn()
+        provider = _provider(ports, owner, spawn)
+        provider.initialize(session_id="session-alpha", hermes_home="/tmp/hermes-alpha",
+                            agent_identity="profile-alpha")
+        provider.prepare_context()
+        spawn.run_all()
+        return provider, owner
+
+    def test_explicit_host_envelope_delivers_large_owner_bytes_verbatim(self):
+        raw = _bundle_bytes("WS:ALPHA", sections=[{"body": "X" * 108_257}],
+                            omitted=[{"id": "omitted-record"}], excluded=[{"id": "excluded-record"}],
+                            degraded=[{"id": "degraded-record"}])
+        default, _ = self._read(raw)
+        self.assertEqual(default.prefetch("q"), "")
+        self.assertEqual(default.readiness()["reason"], REASON_CONTEXT_TOO_LARGE)
+        explicit, owner = self._read(raw, MAX_HOST_CONTEXT_BYTES)
+        text = explicit.prefetch("q")
+        self.assertTrue(text.endswith(raw.decode("utf-8")))
+        self.assertEqual(explicit.readiness()["bundle_sha256"], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(owner.calls[0]["budget"], 4000)
+        self.assertEqual(len(owner.calls), 1)
+
+    def test_envelope_counts_wrapper_bytes_at_exact_boundary(self):
+        raw = _bundle_bytes("WS:ALPHA")
+        measured, _ = self._read(raw)
+        rendered_bytes = len(measured.prefetch("q").encode("utf-8"))
+        exact, _ = self._read(raw, rendered_bytes)
+        self.assertTrue(exact.prefetch("q").endswith(raw.decode("utf-8")))
+        short, _ = self._read(raw, rendered_bytes - 1)
+        self.assertEqual(short.prefetch("q"), "")
+        self.assertEqual(short.readiness()["reason"], REASON_CONTEXT_TOO_LARGE)
+
+    def test_native_ceiling_never_trims_a_large_bundle(self):
+        empty = _bundle_bytes("WS:ALPHA", sections=[{"body": ""}])
+        raw = _bundle_bytes("WS:ALPHA", sections=[{"body": "X" * (MAX_HOST_CONTEXT_BYTES - len(empty))}])
+        self.assertEqual(len(raw), MAX_HOST_CONTEXT_BYTES)
+        provider, _ = self._read(raw, MAX_HOST_CONTEXT_BYTES)
+        self.assertEqual(provider.prefetch("q"), "")
+        self.assertEqual(provider.readiness()["reason"], REASON_CONTEXT_TOO_LARGE)
+
+    def test_invalid_host_limits_refuse_before_owner_read(self):
+        for limit in (True, False, 0, -1, 32_768.0, "131072", None,
+                      float("nan"), float("inf"), MAX_HOST_CONTEXT_BYTES + 1):
+            with self.subTest(limit=limit):
+                owner = FakeOwner({})
+                binding = _binding(max_context_bytes=limit)
+                ports = AgentOsHostPorts(StaticResolver({"session-alpha": binding}), StaticGuard())
+                provider = _provider(ports, owner, ManualSpawn())
+                with self.assertRaisesRegex(AgentOsRefusal, REASON_CONTEXT_LIMIT_INVALID):
+                    provider.initialize(session_id="session-alpha", hermes_home="/tmp/hermes-alpha",
+                                        agent_identity="profile-alpha")
+                self.assertEqual(owner.calls, [])
+                self.assertEqual(provider.prefetch("q"), "")
+
+    def test_huge_integer_freshness_refuses_with_closed_code(self):
+        with self.assertRaisesRegex(AgentOsRefusal, REASON_FRESHNESS_INVALID):
+            create_provider(freshness_seconds=10 ** 1000)
 
 
 class CorrectionTests(unittest.TestCase):
