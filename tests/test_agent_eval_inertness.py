@@ -757,6 +757,19 @@ ALLOWED_PATHS = frozenset(
         "docs/HERMES_NATIVE_EVAL_RUN_V2.md",
         "tests/test_agent_eval_run_v2.py",
         "scripts/agent_eval/hermes_memory_grounding.py",
+        # Assigned-principal finite contribution amendment under the Chairman
+        # commission, hermes-eval-producer-compose-20261107-sol-001:
+        # git:mastermindx-market-intelligence/Mastermind@1f1c218874691c6a3682a4571db7913be0f00ffc
+        # docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md, finite contribution scope.
+        # These exact evidence/doc/test paths are EVAL-owned, not shared-owner
+        # exemptions; inherited dependency/control/config deltas remain fenced.
+        "docs/hermes/MEMORY_LEARNING_QUALIFICATION.md",
+        "tests/test_agent_eval_hermes_memory_grounding.py",
+        "review_evidence/hermes_eval/current-primary-context-trial-composition-20261107.json",
+        "review_evidence/hermes_eval/harness2-original-run-recovery-20261107.json",
+        "review_evidence/hermes_eval/native-history-selective-composition-20261107.json",
+        "review_evidence/hermes_eval/private-harness2-trial-handoff-20261107.json",
+        "review_evidence/hermes_eval/native-memory-grounding-source-pairs-20261107.json",
     }
 )
 
@@ -1527,10 +1540,34 @@ def test_shared_native_changes_do_not_claim_eval_program_ownership(tmp_path, mon
             fence()
 
 
+@pytest.mark.parametrize("owned", [
+    "docs/hermes/MEMORY_LEARNING_QUALIFICATION.md",
+    "tests/test_agent_eval_hermes_memory_grounding.py",
+    "review_evidence/hermes_eval/current-primary-context-trial-composition-20261107.json",
+    "review_evidence/hermes_eval/harness2-original-run-recovery-20261107.json",
+    "review_evidence/hermes_eval/native-history-selective-composition-20261107.json",
+    "review_evidence/hermes_eval/private-harness2-trial-handoff-20261107.json",
+    "review_evidence/hermes_eval/native-memory-grounding-source-pairs-20261107.json",
+])
+def test_native_eval_contribution_evidence_reaches_both_real_fences(tmp_path, monkeypatch, owned):
+    repo = _standalone_prefix_delta_repo(tmp_path, "native_eval_contribution", [(owned, "fixture\n")])
+    _bind_root_to_private_fixture(monkeypatch, repo)
+    changed = compute_pr_diff_paths(repo)
+    assert changed == {owned}
+    assert _is_program_surface_path(owned)
+    assert _fence_not_applicable_reason(changed) is None
+    assert owned not in NATIVE_EVAL_INTEGRATION_PATHS
+    assert _real_fence_outcome(test_changed_paths_are_within_the_allowed_r0_surface) == "PASS"
+    assert _real_fence_outcome(test_no_control_plane_config_dependency_or_workflow_file_touched) == "PASS"
+
+
 @pytest.mark.parametrize("foreign", [
     "integrations/hermes_runtime/unlisted_native_owner.py",
     "tests/test_hermes_primary_application_unlisted.py",
     "tests/test_linux_secondary_worker_unlisted.py",
+    "review_evidence/hermes_eval/unlisted.json",
+    "tests/test_agent_eval_hermes_memory_grounding_unlisted.py",
+    "docs/hermes/MEMORY_LEARNING_UNLISTED.md",
     "integrations/hermes_qualification/native_eval_inputs/extra.py",
     "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/unlisted.source",
     "control_plane/bypass.py", "config/agent_eval.yaml", ".github/workflows/agent-eval.yml", "requirements/new.in",

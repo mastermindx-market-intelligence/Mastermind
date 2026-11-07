@@ -845,3 +845,42 @@ The source was stable during the run. Log SHA-256:
 JUnit SHA-256:
 `c8ad471de5ba3e7c020795a0dd7be4fe883b35a40ef89845ea5724229bd40020`.
 This is a focused source proof, not a passing hosted whole-PR gate.
+
+
+### Finite gate qualification and remaining hosted boundary
+
+The seven-path amendment was first committed in
+`1f1c218874691c6a3682a4571db7913be0f00ffc`. Seven actual temporary-Git-repository
+cases then failed before the allowlist correction, demonstrating the missing
+owned-surface accounting. After adding only those seven exact paths,
+**23 contextual fence cases passed**, with zero failures, errors or skips under
+CPython3.12.13. Each new evidence/doc/test path independently triggers both real
+fences as EVAL-owned; unlisted report, test and document neighbors remain refused.
+The APPLICATION and enrollment shared connections retain their separate ownership.
+
+The ASTs of both real fence entry points, effective-delta computation,
+merge-queue identity qualification, allowed-path classification and applicability
+helpers are unchanged from the amendment commit. No forbidden prefix, corpus
+prefix or core runtime/import restriction was changed.
+
+Baseline log SHA-256:
+`4bdbc7019863f1f9fa211741fccf217a07f99ae6a753369f4f0adcf7fd51f903`;
+baseline JUnit SHA-256:
+`462424f1b3c7563208cb8d9de6ce2a29ad687f8712301f6a8287c0ac659c912f`.
+Passing log SHA-256:
+`d0134f972c9a318eafc4f0e46b8092aa955542217db3f825354650c70360d14a`;
+passing JUnit SHA-256:
+`465be2887d41927487944f228b5425a2aba1d7f411cef596596ef0cb416754e3`.
+Qualified inertness-test SHA-256:
+`2e0dcbc9beca0b6c357425f70e433a8276e7d0dc563fe3b2b932195659cfb5ca`.
+
+The original hosted PR2255 run
+[42425882946](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42425882946)
+at head336c failed its source-bound preflight. Jobs128563986526 and128563986491
+independently show the same two whole-PR scope failures; the normal pytest
+partitions did not execute in those jobs. Dependency installation completed.
+The candidate93987135df7074b1bfb72b7fdcbefd0007ef6ce7 correctly compares against
+original base52cb, so this is a real feature-base integration boundary, not a
+reason to alter merge-parent interpretation or rerun an unchanged candidate.
+The seven-path repair does not admit the inherited context/discovery/control
+changes and therefore does not itself establish a green integrated PR.
