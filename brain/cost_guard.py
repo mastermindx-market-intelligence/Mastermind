@@ -654,7 +654,8 @@ def record_fabric(book: str, operation_id: str, asof: str, observations: list[di
     """One original observation set and its contribution in the same book ledger."""
     from brain import runlog
     operation_id = runlog.portfolio_id(operation_id)
-    if book != "autonomous" or type(observations) is not list or len(observations) > 32:
+    book = runlog.portfolio_book(book)
+    if type(observations) is not list or len(observations) > 32:
         raise runlog.PortfolioRunError("fabric_cost_observations_invalid")
     ids = set()
     for observation in observations:
@@ -675,6 +676,10 @@ def record_fabric(book: str, operation_id: str, asof: str, observations: list[di
                "digest": runlog.digest(observations), "cost_usd": None, "cost_basis": "unknown"}
     with _cost_receipt_lock(asof):
         raw, current = _strict_cost(asof)
+        for other_book, other in current.items():
+            if (other_book != book and isinstance(other, dict)
+                    and operation_id in (other.get("fabric_operations") or {})):
+                raise runlog.PortfolioRunError("fabric_cost_book_conflict")
         row = _ensure_book_dict(current.get(book))
         operations = row.setdefault("fabric_operations", {})
         prior = operations.get(operation_id)
@@ -695,7 +700,7 @@ def record_fabric(book: str, operation_id: str, asof: str, observations: list[di
             row["unpriced_provider_calls"] = int(row.get("unpriced_provider_calls", 0)) + len(observations)
             row["unknown_usage_calls"] = int(row.get("unknown_usage_calls", 0)) + sum(
                 item["input_tokens"] is None or item["output_tokens"] is None for item in observations)
-            seat = row.setdefault("seats", {}).setdefault("autonomous_brain", {})
+            seat = row.setdefault("seats", {}).setdefault(book + "_brain", {})
             for key, value in known.items():
                 seat[key] = int(seat.get(key, 0)) + value
             seat["calls"] = int(seat.get("calls", 0)) + 1

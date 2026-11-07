@@ -2131,6 +2131,25 @@ def _context_correlation(correlation: dict) -> dict:
     return dict(correlation)
 
 
+def _context_original_identity(book: str, correlation: dict, *, pending: bool = False) -> dict:
+    """Resolve the trusted book's saved effect, without opening another original."""
+    from brain import runlog, fabric_portfolio
+    book = runlog.portfolio_book(book)
+    with runlog.portfolio_lock():
+        original = (runlog.portfolio_pending_locked(book) if pending else
+                    runlog.portfolio_original_locked(correlation["run_id"], book=book))
+        effect = next((row for row in (original or {}).get("state", {}).get("tools", [])
+                       if row.get("id") == correlation["tool_id"]), None)
+        if (original is None or original["state"]["run_id"] != correlation["run_id"]
+                or effect is None or effect.get("state") not in {"pending", "complete"}
+                or effect.get("name") != fabric_portfolio.tool_name(book, "request_context_upgrade")):
+            raise runlog.PortfolioRunError("fabric_context_intent_missing")
+        args = effect["input"]
+        return {"book": book, "plane": str(args.get("plane") or "").strip().lower(),
+                "reason": " ".join(str(args.get("reason") or "").split())[:_MAX_REASON],
+                "ticker": str(args.get("ticker") or "").upper().strip()[:16] or None}
+
+
 def _context_receipt_from_rows(rows: list[dict], correlation: dict) -> dict | None:
     from brain import runlog
     matches = [row for row in rows if row.get("schema") == "portfolio.context_receipt.v1"
@@ -2156,24 +2175,21 @@ def _context_receipt_from_rows(rows: list[dict], correlation: dict) -> dict | No
     return {"ok": True, "deduped": receipt["deduped"], "request": base, "receipt": receipt}
 
 
-def reconcile_context_request(correlation: dict) -> dict:
+def reconcile_context_request(correlation: dict, *, book: str = "autonomous") -> dict:
     """Read/re-sync one committed base+receipt; no append or semantic re-request."""
     from brain import runlog
     correlation = _context_correlation(correlation)
+    identity = _context_original_identity(book, correlation)
     path = _DIR / "context_requests.jsonl"
     with _context_receipt_lock():
         before = runlog.strict_read(path)
         result = _context_receipt_from_rows(runlog.strict_rows(path), correlation)
         if result is None:
             raise runlog.PortfolioRunError("fabric_context_effect_unsettled")
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        runlog.sync_directory(path.parent)
-        if runlog.strict_read(path) != before:
-            raise runlog.PortfolioRunError("fabric_context_readback_failed")
+        if (result["request"].get("book") != identity["book"]
+                or result["receipt"]["requested_input_digest"] != runlog.digest(identity)):
+            raise runlog.PortfolioRunError("fabric_context_input_conflict")
+        runlog.durable_existing(path, before)
         return result
 
 
@@ -2181,23 +2197,10 @@ def _request_context_selected(book: str, plane: str, reason: str, ticker: str | 
                               correlation: dict) -> dict:
     from brain import runlog
     correlation = _context_correlation(correlation)
-    if book != "autonomous":
-        raise runlog.PortfolioRunError("fabric_context_book_invalid")
-    with runlog.portfolio_lock():
-        original = runlog.portfolio_pending_locked()
-        effect = next((row for row in (original or {}).get("state", {}).get("tools", [])
-                       if row.get("id") == correlation["tool_id"]), None)
-        if (original is None or original["state"]["run_id"] != correlation["run_id"]
-                or effect is None or effect.get("state") != "pending"
-                or effect.get("name") != "mcp__desk__request_context_upgrade"):
-            raise runlog.PortfolioRunError("fabric_context_intent_missing")
-        args = effect["input"]
-        normalized = {"book": book, "plane": str(args.get("plane") or "").strip().lower(),
-                      "reason": " ".join(str(args.get("reason") or "").split())[:_MAX_REASON],
-                      "ticker": str(args.get("ticker") or "").upper().strip()[:16] or None}
-        if normalized != {"book": book, "plane": plane, "reason": reason, "ticker": ticker}:
-            raise runlog.PortfolioRunError("fabric_context_input_conflict")
+    book = runlog.portfolio_book(book)
     identity = {"book": book, "plane": plane, "reason": reason, "ticker": ticker}
+    if _context_original_identity(book, correlation, pending=True) != identity:
+        raise runlog.PortfolioRunError("fabric_context_input_conflict")
     path = _DIR / "context_requests.jsonl"
     with _context_receipt_lock():
         old = runlog.strict_read(path, absent=True)

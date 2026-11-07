@@ -204,6 +204,8 @@ def _run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool
             from brain.fabric_portfolio import _held
             return _held(_fabric_session.state, "fabric_portfolio_tool_effect_unsettled")
         submission = _fabric_session.submission()
+        if "frozen" not in _fabric_session.state and "local_gate" not in _fabric_session.state:
+            _fabric_session.stop_unstarted(brain)
         _fabric_session.state["phase"] = "business"
         _fabric_session.save()
     else:

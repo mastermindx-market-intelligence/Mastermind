@@ -32,11 +32,25 @@ _FABRIC_INVOCATION = ContextVar("autonomous_fabric_invocation", default=None)
 
 @contextmanager
 def fabric_invocation(context: dict):
+    from brain import runlog
+    if type(context) is not dict:
+        raise runlog.PortfolioRunError("fabric_tool_context_invalid")
+    context = {**context, "book": runlog.portfolio_book(context.get("book", PORTFOLIO_ID))}
     token = _FABRIC_INVOCATION.set(context)
     try:
         yield
     finally:
         _FABRIC_INVOCATION.reset(token)
+
+
+def fabric_context(book: str = PORTFOLIO_ID):
+    """Read the existing trusted invocation; a handler cannot borrow another book."""
+    from brain import runlog
+    book = runlog.portfolio_book(book)
+    context = _FABRIC_INVOCATION.get()
+    if context is not None and context.get("book") != book:
+        raise runlog.PortfolioRunError("fabric_tool_book_conflict")
+    return context
 
 
 # Marker the builder / any streaming layer can scan a tool result for.
@@ -80,10 +94,10 @@ def submission_path(portfolio_id: str = PORTFOLIO_ID) -> Path:
 
 def clear_submission(portfolio_id: str = PORTFOLIO_ID) -> None:
     """Remove a stale decision file before a fresh run so a no-op turn can't replay yesterday."""
-    if portfolio_id == PORTFOLIO_ID:
+    if portfolio_id in ("autonomous", "china", "hk"):
         from brain import runlog
         with runlog.portfolio_lock():
-            if runlog.portfolio_pending_locked() is not None:
+            if runlog.portfolio_pending_locked(portfolio_id) is not None:
                 raise runlog.PortfolioRunError("fabric_submission_owned")
             try:
                 submission_path(portfolio_id).unlink()
@@ -99,9 +113,9 @@ def clear_submission(portfolio_id: str = PORTFOLIO_ID) -> None:
 
 
 def read_submission(portfolio_id: str = PORTFOLIO_ID) -> dict | None:
-    if portfolio_id == PORTFOLIO_ID:
+    if portfolio_id in ("autonomous", "china", "hk"):
         from brain import runlog
-        if runlog.portfolio_lookup() is not None:
+        if runlog.portfolio_lookup(book=portfolio_id) is not None:
             return None  # Selected callers consume their exact correlated receipt.
     p = submission_path(portfolio_id)
     try:
@@ -222,7 +236,7 @@ async def get_my_book(args):
                     "cash_rationale", "decision_memo"]})
 async def submit_book(args):
     from brain import decision_submission
-    context = _FABRIC_INVOCATION.get()
+    context = fabric_context(PORTFOLIO_ID)
     try:
         payload, audit = decision_submission.normalize(
             PORTFOLIO_ID, args, stock_only=True, early_exit_hysteresis=True,
@@ -309,7 +323,7 @@ async def get_neural_web_packet(args):
        "ticker": {"type": "string"}}, "required": ["plane", "reason"]})
 async def request_context_upgrade(args):
     from brain import portfolio_learning
-    context = _FABRIC_INVOCATION.get()
+    context = fabric_context(PORTFOLIO_ID)
     return bot_mcp._json(portfolio_learning.request_context(
         PORTFOLIO_ID, args.get("plane"), args.get("reason"), args.get("ticker"),
         **({"correlation": {"run_id": context["run_id"], "tool_id": context["tool_id"]}}

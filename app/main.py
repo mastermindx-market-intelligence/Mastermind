@@ -149,13 +149,15 @@ if FastAPI is not None:
         from app.auth import serve_only as _serve_only
         from brain import client as _brain_client, codex_bridge as _codex_bridge
         from brain import fabric_portfolio
-        fabric_policy = fabric_portfolio.readiness() if fabric_portfolio.selected() else None
+        fabric_policies = ({book: fabric_portfolio.readiness(book) for book in ("autonomous", "china", "hk")}
+                           if fabric_portfolio.selected() else None)
+        fabric_policy = fabric_policies["autonomous"] if fabric_policies is not None else None
         if fabric_policy is not None:
             reasoning_backend = "fabric"
-            shared_reasoning_available = fabric_policy["eligible"] is True
+            shared_reasoning_available = all(item["eligible"] is True for item in fabric_policies.values())
             reasoning_policy_ok = shared_reasoning_available
             codex_available = None
-            reasoning_policy = "fabric_us_portfolio_typed"
+            reasoning_policy = "fabric_portfolio_typed"
             reasoning_primary = "fabric_policy_eligible" if reasoning_policy_ok else "unavailable"
         else:
             reasoning_backend = _brain_client.backend()
@@ -196,7 +198,8 @@ if FastAPI is not None:
         }
         if fabric_policy is not None:
             out["reasoning_policy_evidence"] = fabric_policy
-            out["reasoning_policy_scope"] = "typed_us_portfolio_policy_only"
+            out["reasoning_policy_scope"] = "typed_portfolio_policy_only"
+            out["scheduled_portfolio_reasoning_by_book"] = fabric_policies
             out["advisor_chat_backend"] = "fabric"
             out["advisor_chat_readiness_inferred"] = False
         if _git_sha:
@@ -504,6 +507,7 @@ if FastAPI is not None:
         from control_plane import run_ledger, locks
         from app.scheduler import _brain_job_outcome
         from bot import china
+        from brain import fabric_portfolio
         if wait:
             import asyncio as _aio
             handle = run_ledger.start_run("china_daily", book="china", trigger="http")
@@ -513,11 +517,13 @@ if FastAPI is not None:
                 return {"skipped": True, "reason": "lock_held"}
             try:
                 with lock:
-                    out = await _aio.to_thread(china.run_china, force=force)
+                    from brain.fabric_chat import _observe_thread
+                    kwargs = fabric_portfolio.caller_kwargs(handle, book="china")
+                    out = await _observe_thread(lambda: china.run_china(force=force, **kwargs))
                 _status, _severity, _extra = _brain_job_outcome(out)
                 run_ledger.end_run(handle, _status, severity=_severity, extra=_extra)
                 return _manual_brain_response(out, _status, _extra)
-            except Exception:
+            except BaseException:
                 run_ledger.end_run(handle, "error")
                 raise
 
@@ -529,7 +535,8 @@ if FastAPI is not None:
                 return
             try:
                 with lock:
-                    out = china.run_china(force=force)
+                    out = china.run_china(
+                        force=force, **fabric_portfolio.caller_kwargs(handle, book="china"))
                 _status, _severity, _extra = _brain_job_outcome(out)
                 run_ledger.end_run(handle, _status, severity=_severity, extra=_extra)
             except Exception:
@@ -548,6 +555,7 @@ if FastAPI is not None:
         from control_plane import run_ledger, locks
         from app.scheduler import _brain_job_outcome
         from bot import hk
+        from brain import fabric_portfolio
         if wait:
             import asyncio as _aio
             handle = run_ledger.start_run("hk_daily", book="hk", trigger="http")
@@ -557,11 +565,13 @@ if FastAPI is not None:
                 return {"skipped": True, "reason": "lock_held"}
             try:
                 with lock:
-                    out = await _aio.to_thread(hk.run_hk, force=force)
+                    from brain.fabric_chat import _observe_thread
+                    kwargs = fabric_portfolio.caller_kwargs(handle, book="hk")
+                    out = await _observe_thread(lambda: hk.run_hk(force=force, **kwargs))
                 _status, _severity, _extra = _brain_job_outcome(out)
                 run_ledger.end_run(handle, _status, severity=_severity, extra=_extra)
                 return _manual_brain_response(out, _status, _extra)
-            except Exception:
+            except BaseException:
                 run_ledger.end_run(handle, "error")
                 raise
 
@@ -573,7 +583,8 @@ if FastAPI is not None:
                 return
             try:
                 with lock:
-                    out = hk.run_hk(force=force)
+                    out = hk.run_hk(
+                        force=force, **fabric_portfolio.caller_kwargs(handle, book="hk"))
                 _status, _severity, _extra = _brain_job_outcome(out)
                 run_ledger.end_run(handle, _status, severity=_severity, extra=_extra)
             except Exception:

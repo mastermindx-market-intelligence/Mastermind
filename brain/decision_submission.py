@@ -1052,31 +1052,35 @@ def normalize(
     return payload, audit
 
 
-def _us_submission_path(path: Path) -> bool:
+def _submission_book(path: Path) -> str | None:
     from portfolio import registry
-    return Path(path).absolute() == (
-        registry.data_dir("autonomous") / "_pending_decision.json").absolute()
+    candidate = Path(path).absolute()
+    for book in ("autonomous", "china", "hk"):
+        if candidate == (registry.data_dir(book) / "_pending_decision.json").absolute():
+            return book
+    return None
 
 
 def _selected_submission_locked(path: Path, correlation: dict) -> tuple[dict, dict]:
-    from brain import runlog
-    if (not _us_submission_path(path) or type(correlation) is not dict
+    from brain import runlog, fabric_portfolio
+    book = _submission_book(path)
+    if (book is None or type(correlation) is not dict
             or set(correlation) != {"run_id", "tool_id"}):
         raise runlog.PortfolioRunError("fabric_submission_correlation_invalid")
-    doc = runlog.portfolio_pending_locked()
+    doc = runlog.portfolio_pending_locked(book)
     if doc is None or doc["state"]["run_id"] != correlation["run_id"]:
         raise runlog.PortfolioRunError("fabric_submission_original_missing")
     effect = next((row for row in doc["state"].get("tools", [])
                    if row.get("id") == correlation["tool_id"]), None)
     prepared = effect.get("submission") if effect is not None else None
-    if (effect is None or effect.get("name") != "mcp__desk__submit_book"
+    if (effect is None or effect.get("name") != fabric_portfolio.tool_name(book, "submit_book")
             or type(prepared) is not dict or effect.get("state") not in {"pending", "complete"}
             or prepared.get("payload_digest") != runlog.digest(prepared.get("payload"))):
         raise runlog.PortfolioRunError("fabric_submission_intent_missing")
     payload = prepared["payload"]
     if payload.get("_fabric_submission") != {
             "schema": "mastermind.submission_origin.v1", "run_id": correlation["run_id"],
-            "tool_id": correlation["tool_id"], "book": "autonomous",
+            "tool_id": correlation["tool_id"], "book": book,
             "asof": doc["state"]["asof"],
             "normalized_digest": runlog.digest({k: v for k, v in payload.items()
                                                if k != "_fabric_submission"})}:
@@ -1093,23 +1097,17 @@ def reconcile_submission(path: Path, correlation: dict) -> dict:
         if runlog.strict_json(raw) != payload:
             raise runlog.PortfolioRunError("fabric_submission_effect_unsettled")
         # A prior visible replace whose fsync/ACK failed is not durable until this succeeds.
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        runlog.sync_directory(path.parent)
-        if runlog.strict_read(path) != raw:
-            raise runlog.PortfolioRunError("fabric_submission_readback_failed")
+        runlog.durable_existing(path, raw)
         return {"schema": "mastermind.submission_receipt.v1", **correlation,
-                "book": "autonomous", "asof": payload["_fabric_submission"]["asof"],
+                "book": payload["_fabric_submission"]["book"], "asof": payload["_fabric_submission"]["asof"],
                 "payload_digest": prepared["payload_digest"],
                 "written_sha256": __import__("hashlib").sha256(raw).hexdigest()}
 
 
 def write_atomic(path: Path, payload: dict, *, correlation: dict | None = None):
     from brain import runlog
-    if not _us_submission_path(path):
+    book = _submission_book(path)
+    if book is None:
         if correlation is not None:
             raise runlog.PortfolioRunError("fabric_submission_book_invalid")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1120,7 +1118,7 @@ def write_atomic(path: Path, payload: dict, *, correlation: dict | None = None):
         os.replace(tmp, path)
         return None
     with runlog.portfolio_lock():
-        original = runlog.portfolio_pending_locked()
+        original = runlog.portfolio_pending_locked(book)
         if correlation is None:
             if original is not None:
                 raise runlog.PortfolioRunError("fabric_submission_owned")

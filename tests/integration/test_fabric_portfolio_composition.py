@@ -170,7 +170,8 @@ class USPortfolioApplicationTests(unittest.TestCase):
         self.config_paths[0].write_text(json.dumps(document))
         self.config_paths[1].write_text(yaml.safe_dump({"capabilities": [{
             "capability_id": selected.capability_id, "secret_ref": selected.secret_ref,
-            "kill_state": "active", "allowed_lanes": [F.LANE]}]}))
+            "kill_state": "active", "allowed_lanes": [F.lane(book) for book in
+                getattr(self, "books", ("autonomous",))]}]}))
 
     def run_book(self, **kwargs):
         return autonomous.run_autonomous(self.day, run_id=self.run_id, **kwargs)
@@ -633,7 +634,11 @@ class USPortfolioApplicationTests(unittest.TestCase):
              patch.object(app.state, "scheduler", None, create=True):
             result = endpoint()
         self.assertEqual(result["reasoning_backend"], "fabric")
-        self.assertEqual(result["reasoning_policy_scope"], "typed_us_portfolio_policy_only")
+        self.assertEqual(result["reasoning_policy_scope"], "typed_portfolio_policy_only")
+        self.assertEqual(set(result["scheduled_portfolio_reasoning_by_book"]), {"autonomous", "china", "hk"})
+        self.assertTrue(result["scheduled_portfolio_reasoning_by_book"]["autonomous"]["eligible"])
+        self.assertFalse(result["scheduled_portfolio_reasoning_by_book"]["china"]["eligible"])
+        self.assertFalse(result["scheduled_portfolio_reasoning_available"])
         self.assertTrue(result["reasoning_policy_evidence"]["eligible"])
         self.assertFalse(result["reasoning_policy_evidence"]["live_provider_verified"])
         self.assertFalse(result["scheduled_runtime_ok"])

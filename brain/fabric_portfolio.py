@@ -1,4 +1,4 @@
-"""Typed US portfolio inference through the incumbent Fabric application owner.
+"""Typed portfolio inference through the incumbent Fabric application owner.
 
 Runlog owns original identity and continuity; registered desk handlers own tools;
 Macro owns admission, model/account selection, global usage and close. The paper
@@ -30,7 +30,7 @@ _CLOSED = {"disposition": "closed", "closed": True, "effect_unknown": False, "at
 _LOCAL = {"disposition": "local_only", "closed": False, "effect_unknown": False, "attempted": False}
 _UNKNOWN = {"disposition": "effect_unknown", "closed": False, "effect_unknown": True, "attempted": True}
 _TYPED_SYSTEM = (
-    "\n\nAPPLICATION CONTRACT: this run uses only the declared typed bot and US desk tools. "
+    "\n\nAPPLICATION CONTRACT: this run uses only the declared typed tools for this portfolio. "
     "External web search/fetch, Task/subagents, shell, raw files, media and custom MCP servers "
     "are unavailable. Use the existing dated dashboard/Neural Web evidence and report missing "
     "or stale evidence explicitly. Never invent a source or a tool result. Book, run, status "
@@ -50,11 +50,33 @@ def _transport():
     return fabric_inference_client
 
 
-def _factory():
+def lane(book: str = "autonomous") -> str:
+    return {"autonomous": LANE, "china": "mastermind-china-portfolio",
+            "hk": "mastermind-hk-portfolio"}[runlog.portfolio_book(book)]
+
+
+def tool_name(book: str, name: str) -> str:
+    if name not in {"submit_book", "request_context_upgrade"}:
+        raise runlog.PortfolioRunError("fabric_portfolio_effect_kind_invalid")
+    server = {"autonomous": "desk", "china": "china", "hk": "hk"}[runlog.portfolio_book(book)]
+    return f"mcp__{server}__{name}"
+
+
+def _book_mcp(book: str):
+    import importlib
+    return importlib.import_module("brain." + runlog.portfolio_book(book) + "_mcp")
+
+
+def _book_owner(book: str):
+    import importlib
+    return importlib.import_module("bot." + runlog.portfolio_book(book))
+
+
+def _factory(book: str = "autonomous"):
     from brain.fabric_inference import _owner
     owner, shared, root = _owner()
     chosen, factory = owner.configured_application_fabric(
-        lane=LANE, workload_profile=WORKLOAD, root=root, service_mode_id=SERVICE)
+        lane=lane(book), workload_profile=WORKLOAD, root=root, service_mode_id=SERVICE)
     if chosen is not True or type(factory) is not owner.ApplicationFabricFactory:
         raise runlog.PortfolioRunError("fabric_portfolio_policy_unavailable")
     inspection = factory.inspect(CFG)
@@ -67,14 +89,16 @@ def _factory():
     return shared, factory.with_inspection(inspection), inspection
 
 
-def readiness() -> dict:
+def readiness(book: str = "autonomous") -> dict:
+    book = runlog.portfolio_book(book)
+    label = "us" if book == "autonomous" else book
     result = {"selected": selected(), "eligible": False,
-              "scope": "typed_us_portfolio_policy_only", "live_provider_verified": False}
+              "scope": f"typed_{label}_portfolio_policy_only", "live_provider_verified": False}
     if not result["selected"]:
         return result
     try:
-        _, _, inspection = _factory()
-        catalog()
+        _, _, inspection = _factory(book)
+        catalog(book)
         result.update(eligible=True, workload=WORKLOAD, service=SERVICE,
                       output_limit_mode=inspection["output_limit_mode"])
     except Exception:
@@ -82,24 +106,30 @@ def readiness() -> dict:
     return result
 
 
-def available() -> bool:
-    return readiness()["eligible"] is True
+def available(book: str = "autonomous") -> bool:
+    return readiness(book)["eligible"] is True
 
 
-def caller_kwargs(handle) -> dict:
+def caller_kwargs(handle, book: str = "autonomous") -> dict:
     """Keep legacy caller shape; job telemetry never invents a valid original ID."""
-    if not selected() and runlog.portfolio_lookup() is None:
+    book = runlog.portfolio_book(book)
+    if not selected() and runlog.portfolio_lookup(book=book) is None:
         return {}
     value = getattr(handle, "run_id", None)
     return {"run_id": value} if isinstance(value, str) and value != "error" else {}
 
 
-def catalog() -> tuple[list[dict], dict]:
-    from brain import autonomous_mcp, bot_mcp
+def catalog(book: str = "autonomous") -> tuple[list[dict], dict]:
     from jsonschema import Draft202012Validator
+    book = runlog.portfolio_book(book)
+    mcp = _book_mcp(book)
+    if book == "autonomous":
+        from brain import bot_mcp
+        groups = ((bot_mcp.SERVER_NAME, mcp._READ_TOOLS), (mcp.SERVER_NAME, mcp._DESK_TOOLS))
+    else:
+        groups = ((mcp.SERVER_NAME, mcp._ALL_TOOLS),)
     declarations, handlers = [], {}
-    for server, objects in ((bot_mcp.SERVER_NAME, autonomous_mcp._READ_TOOLS),
-                            (autonomous_mcp.SERVER_NAME, autonomous_mcp._DESK_TOOLS)):
+    for server, objects in groups:
         for obj in objects:
             name = f"mcp__{server}__{obj.name}"
             if name == "mcp__bot__get_portfolio" or name in handlers:
@@ -191,15 +221,60 @@ def _validate(doc):
     state = doc["state"]
     required = {"schema", "run_id", "book", "request", "asof", "phase", "steps", "tools"}
     optional = {"frozen", "brain", "close", "inference_status", "cost_receipt", "cost_error",
-                "business", "out", "error", "binding_intent", "publication"}
+                "business", "out", "error", "binding_intent", "publication", "entry_context", "local_gate", "local_failure"}
     if (type(state) is not dict or not required <= set(state) or set(state) - required - optional
-            or state["schema"] != SCHEMA or state["book"] != "autonomous"
+            or state["schema"] != SCHEMA or type(state["book"]) is not str
+            or state["book"] not in ("autonomous", "china", "hk")
             or state["phase"] not in {"claimed", "inference", "business_ready", "business",
                                      "settlement_intent", "settlement_observed", "held", "complete"}
             or type(state["steps"]) is not list or len(state["steps"]) > MAX_STEPS
             or type(state["tools"]) is not list or len(state["tools"]) > MAX_TOOLS):
         raise runlog.PortfolioRunError("fabric_portfolio_state_invalid")
     runlog.portfolio_id(state["run_id"])
+    if "entry_context" in state:
+        entry = state["entry_context"]
+        if (type(entry) is not dict
+                or not {"portfolio_id", "asof", "ran_at", "trading_day", "inaugural", "feed_health"} <= set(entry)
+                or set(entry) - {"portfolio_id", "asof", "ran_at", "trading_day", "inaugural",
+                                 "feed_health", "feed_aborted", "cost_capped"}
+                or entry["portfolio_id"] != state["book"] or entry["asof"] != state["asof"]
+                or type(entry["inaugural"]) is not bool or type(entry["feed_health"]) is not dict
+                or entry["trading_day"] is not None and type(entry["trading_day"]) is not bool
+                or type(entry["ran_at"]) is not str
+                or any(type(entry[key]) is not bool for key in ("feed_aborted", "cost_capped") if key in entry)):
+            raise runlog.PortfolioRunError("fabric_portfolio_entry_invalid")
+    if (state["book"] in {"china", "hk"} and "entry_context" not in state
+            and ({"frozen", "business", "local_gate", "local_failure"} & set(state))):
+        raise runlog.PortfolioRunError("fabric_portfolio_entry_missing")
+    if "out" in state and (type(state["out"]) is not dict
+            or state["out"].get("portfolio_id") != state["book"]
+            or state["out"].get("asof") != state["asof"]):
+        raise runlog.PortfolioRunError("fabric_portfolio_output_identity_invalid")
+    if "local_gate" in state:
+        gate = state["local_gate"]
+        entry = state.get("entry_context", {})
+        expected = ("feed_down" if entry.get("feed_aborted") is True else
+                    "cost_capped" if entry.get("cost_capped") is True else None)
+        if (state["book"] not in {"china", "hk"} or gate != expected or expected is None
+                or state.get("close") != _LOCAL or state.get("inference_status") != "skipped"
+                or state["steps"] or state["tools"]
+                or any(key in state for key in ("frozen", "binding_intent", "business", "cost_receipt", "cost_error"))
+                or state.get("brain") != _local_brain(state, gate)):
+            raise runlog.PortfolioRunError("fabric_portfolio_local_gate_invalid")
+        if "out" in state and (state["out"].get("decision_effective") is True
+                                or state["out"].get("decided") is True):
+            raise runlog.PortfolioRunError("fabric_portfolio_local_gate_acceptance")
+    if "local_failure" in state:
+        if (state["local_failure"] is not True or state.get("close") != _LOCAL
+                or state.get("inference_status") != "failed"
+                or state["steps"] or state["tools"]
+                or any(key in state for key in ("frozen", "binding_intent", "business", "local_gate"))
+                or type(state.get("brain")) is not dict or state["brain"].get("ok") is not False
+                or state["brain"].get("run_id") != state["run_id"]):
+            raise runlog.PortfolioRunError("fabric_portfolio_local_failure_invalid")
+        if "out" in state and (state["out"].get("decision_effective") is True
+                                or state["out"].get("decided") is True):
+            raise runlog.PortfolioRunError("fabric_portfolio_local_failure_acceptance")
     _transport().validate_native_operation_id(state["run_id"])
     if state["request"] != _request(**state["request"]) or date.fromisoformat(state["asof"]).isoformat() != state["asof"]:
         raise runlog.PortfolioRunError("fabric_portfolio_state_invalid")
@@ -218,14 +293,15 @@ def _validate(doc):
                     and state.get("close") != _CLOSED):
             raise runlog.PortfolioRunError("fabric_portfolio_completion_unsettled")
     if "publication" in state:
-        _validate_publication(state["publication"])
+        _validate_publication(state["publication"], book=state["book"])
         if state["publication"]["state"] == "superseded" and (
                 state.get("out", {}).get("settlement_receipt_acknowledged") is not True
                 or state.get("out", {}).get("settlement_receipt_finalization", {}).get("transaction_id") !=
                     state["publication"]["superseded_by_receipt"]):
             raise runlog.PortfolioRunError("fabric_publication_supersession_unproved")
     if "frozen" not in state:
-        if state["steps"] or state["tools"] or "business" in state or "publication" in state:
+        if (state["steps"] or state["tools"] or "business" in state
+                or "publication" in state and not ({"local_gate", "local_failure"} & set(state))):
             raise runlog.PortfolioRunError("fabric_portfolio_input_missing")
         return
     frozen = state["frozen"]
@@ -239,8 +315,15 @@ def _validate(doc):
             or runlog.digest(frozen["roster"]) != frozen["roster_digest"]
             or runlog.digest({k: v for k, v in frozen.items() if k != "digest"}) != frozen["digest"]):
         raise runlog.PortfolioRunError("fabric_portfolio_frozen_invalid")
+    if "entry_context" in state and frozen["inaugural"] != state["entry_context"]["inaugural"]:
+        raise runlog.PortfolioRunError("fabric_portfolio_entry_frozen_conflict")
     transport = _transport()
     transport.validate_auto_inspection(frozen["inspection"])
+    prefixes = (("mcp__bot__", "mcp__desk__") if state["book"] == "autonomous"
+                else ("mcp__" + state["book"] + "__",))
+    if any(type(row) is not dict or type(row.get("name")) is not str
+           or not row["name"].startswith(prefixes) for row in frozen["roster"]):
+        raise runlog.PortfolioRunError("fabric_portfolio_roster_book_conflict")
     if len(state["steps"]) > frozen["max_turns"]:
         raise runlog.PortfolioRunError("fabric_portfolio_step_limit")
     route = None
@@ -318,14 +401,22 @@ def _validate(doc):
             raise runlog.PortfolioRunError("fabric_portfolio_tool_result_missing")
         if "submission" in effect:
             prepared = effect["submission"]
-            if (effect["name"] != "mcp__desk__submit_book" or type(prepared) is not dict
+            if (effect["name"] != tool_name(state["book"], "submit_book") or type(prepared) is not dict
                     or set(prepared) != {"payload", "payload_digest", "audit", "before_sha256"}
                     or runlog.digest(prepared["payload"]) != prepared["payload_digest"]):
                 raise runlog.PortfolioRunError("fabric_portfolio_submission_invalid")
+            payload = prepared["payload"]
+            if type(payload) is not dict or payload.get("_fabric_submission") != {
+                    "schema": "mastermind.submission_origin.v1", "run_id": state["run_id"],
+                    "tool_id": effect["id"], "book": state["book"], "asof": state["asof"],
+                    "normalized_digest": runlog.digest({k: v for k, v in payload.items()
+                                                       if k != "_fabric_submission"})}:
+                raise runlog.PortfolioRunError("fabric_portfolio_submission_origin_invalid")
         if "submission_receipt" in effect:
             receipt = effect["submission_receipt"]
             if (type(receipt) is not dict or receipt.get("run_id") != state["run_id"]
-                    or receipt.get("tool_id") != effect["id"]
+                    or receipt.get("tool_id") != effect["id"] or receipt.get("book") != state["book"]
+                    or receipt.get("asof") != state["asof"]
                     or receipt.get("payload_digest") != effect.get("submission", {}).get("payload_digest")):
                 raise runlog.PortfolioRunError("fabric_portfolio_submission_receipt_invalid")
         seen.add(effect["id"])
@@ -349,19 +440,25 @@ def _validate_business(state):
             or business["digest"] != runlog.digest(
                 {k: v for k, v in business.items() if k not in {"digest", "result"}})):
         raise runlog.PortfolioRunError("fabric_portfolio_business_invalid")
+    entry = state.get("entry_context")
+    if (business["out"].get("portfolio_id") != state["book"]
+            or business["out"].get("asof") != state["asof"]
+            or entry is not None and (not set(entry) <= set(business["out"])
+                                      or any(business["out"][key] != value for key, value in entry.items()))):
+        raise runlog.PortfolioRunError("fabric_portfolio_business_entry_conflict")
     accepted = _accepted(state)
     if (accepted is None or decision_rows.submission_sha256(business["submission"]) !=
             decision_rows.submission_sha256(accepted)):
         raise runlog.PortfolioRunError("fabric_portfolio_business_origin_invalid")
-    target = paper_account.validate_target_weights(business["target"], portfolio_id="autonomous")
+    target = paper_account.validate_target_weights(business["target"], portfolio_id=state["book"])
     if (target != business["target"] or business["identity"] !=
             decision_rows.accepted_identity_fields(
-                "autonomous", business["asof"], business["submission"], target, "queued")):
+                state["book"], business["asof"], business["submission"], target, "queued")):
         raise runlog.PortfolioRunError("fabric_portfolio_business_identity_invalid")
     return business["identity"]
 
 
-def _validate_publication(plan):
+def _validate_publication(plan, *, book="autonomous"):
     from bridge import build_portfolio
     if (type(plan) is not dict or not {
             "payload", "paths", "content", "sha256", "before", "state"} <= set(plan)
@@ -373,8 +470,10 @@ def _validate_publication(plan):
             or "superseded_by_receipt" in plan and (type(plan["superseded_by_receipt"]) is not str
                 or re.fullmatch(r"[0-9a-f]{64}", plan["superseded_by_receipt"]) is None)):
         raise runlog.PortfolioRunError("fabric_publication_invalid")
-    paths, encoded = build_portfolio.prepare(plan["payload"], portfolio_id="autonomous")
-    if (plan["paths"] != paths or plan["content"].encode("utf-8") != encoded
+    book = runlog.portfolio_book(book)
+    paths, encoded = build_portfolio.prepare(plan["payload"], portfolio_id=book)
+    if (json.loads(encoded).get("portfolio_id") != book
+            or plan["paths"] != paths or plan["content"].encode("utf-8") != encoded
             or plan["sha256"] != hashlib.sha256(encoded).hexdigest()
             or set(plan["before"]) != set(paths)
             or any(value is not None and (type(value) is not str or
@@ -383,10 +482,10 @@ def _validate_publication(plan):
     return paths, encoded
 
 
-def _publication_receipt(plan, *, repair=False):
+def _publication_receipt(plan, *, book="autonomous", repair=False):
     """Reconcile only these original bytes at the incumbent writer's exact targets."""
     from bridge import build_portfolio
-    paths, encoded = _validate_publication(plan)
+    paths, encoded = _validate_publication(plan, book=book)
     observed = {}
     # Inspect both originals before repairing either: a foreign writer fences all.
     for key, raw_path in paths.items():
@@ -419,6 +518,11 @@ def _observations(state) -> list[dict]:
     return values
 
 
+def _local_brain(state, reason):
+    return {"ok": False, "skipped": True, "error": reason, "backend": "fabric",
+            "run_id": state["run_id"], "tools_used": []}
+
+
 def _brain(state, *, error=None):
     observations = _observations(state)
     known = {key: sum(row[key] for row in observations if row[key] is not None)
@@ -447,11 +551,11 @@ def _accepted(state):
     return copy.deepcopy(accepted[-1]["submission"]["payload"]) if accepted else None
 
 
-def _held(state=None, reason="fabric_portfolio_unsettled"):
+def _held(state=None, reason="fabric_portfolio_unsettled", *, book="autonomous"):
     state = state or {}
     submission = _accepted(state) if "tools" in state else None
     prior = copy.deepcopy(state.get("out") or {})
-    return {**prior, "portfolio_id": "autonomous", "asof": state.get("asof"), "paper_only": True,
+    return {**prior, "portfolio_id": state.get("book", book), "asof": state.get("asof"), "paper_only": True,
             "run_id": state.get("run_id"), "fabric_held": True,
             "skipped": reason, "mark_skipped": "fabric_original_unsettled",
             "brain": copy.deepcopy(state.get("brain") or
@@ -475,6 +579,10 @@ class Session:
     def state(self):
         return self.doc["state"]
 
+    @property
+    def book(self):
+        return runlog.portfolio_book(self.state["book"])
+
     def save(self):
         if self.persistence_failed:
             raise runlog.PortfolioRunError("fabric_portfolio_persistence_unsettled")
@@ -484,6 +592,21 @@ class Session:
         except BaseException:
             self.persistence_failed = True
             raise
+
+    def stop_locally(self, reason):
+        """Persist an existing feed/cost gate without creating provider authority."""
+        self.state.update(local_gate=reason, brain=_local_brain(self.state, reason),
+                          close=copy.deepcopy(_LOCAL), inference_status="skipped")
+        self.save()
+
+    def stop_unstarted(self, brain):
+        """Retain a source-proven pre-provider failure as the same local original."""
+        if (self.provider is not None or self.state["steps"] or self.state["tools"]
+                or any(key in self.state for key in ("frozen", "binding_intent", "business", "local_gate"))):
+            raise runlog.PortfolioRunError("fabric_portfolio_provider_absence_unproved")
+        self.state.update(local_failure=True, close=copy.deepcopy(_LOCAL), inference_status="failed",
+                          brain=_brain(self.state, error=brain.get("error") or "fabric_portfolio_unstarted"))
+        self.save()
 
     def submission(self):
         if self.persistence_failed:
@@ -496,12 +619,12 @@ class Session:
             if veto and self.before_provider_start is not None:
                 self.before_provider_start()
         except cli_bridge.ProviderStartRefused as exc:
-            cli_bridge._bind_provider_refusal_run(exc, self.state["run_id"], "autonomous", "deep")
+            cli_bridge._bind_provider_refusal_run(exc, self.state["run_id"], self.book, "deep")
             raise
         # Re-evaluate after the veto, using the same immutable service/inspection.
         if not selected():
             raise runlog.PortfolioRunError("fabric_portfolio_selection_removed")
-        _, current, inspection = _factory()
+        _, current, inspection = _factory(self.book)
         if inspection != self.state["frozen"]["inspection"]:
             raise runlog.PortfolioRunError("fabric_portfolio_identity_changed")
         current.inspect(CFG)
@@ -511,8 +634,7 @@ class Session:
             if "brain" not in self.state:
                 raise runlog.PortfolioRunError("fabric_portfolio_original_unsettled")
             return copy.deepcopy(self.state["brain"])
-        from bot.autonomous import _run_coro
-        return _run_coro(self._reason(prompt, system, prior=prior, inaugural=inaugural,
+        return _book_owner(self.book)._run_coro(self._reason(prompt, system, prior=prior, inaugural=inaugural,
             perception_input=perception_input, max_turns=max_turns))
 
     async def _reason(self, prompt, system, *, prior, inaugural, perception_input, max_turns):
@@ -520,7 +642,7 @@ class Session:
         from brain.fabric_chat import _observe_thread, _plain_response, _valid_close
         error = None
         try:
-            roster, _ = catalog()
+            roster, _ = catalog(self.book)
             if (type(max_turns) is not int or not 1 <= max_turns <= MAX_STEPS
                     or type(prompt) is not str or not prompt.strip()):
                 raise runlog.PortfolioRunError("fabric_portfolio_contract_invalid")
@@ -535,7 +657,7 @@ class Session:
             self._guard(veto=False)
             self.provider = self.shared.build_fabric_provider(
                 self.factory.with_inspection(inspection), request_id=self.state["run_id"], workload_cfg=CFG)
-            self.provider.update(usage_lane=LANE, usage_stage="autonomous_brain",
+            self.provider.update(usage_lane=lane(self.book), usage_stage=self.book + "_brain",
                                  usage_cycle_id=self.state["run_id"])
             if self.provider.get("_fabric_auto_inspection") is None:
                 raise runlog.PortfolioRunError("fabric_portfolio_auto_contract_required")
@@ -556,7 +678,7 @@ class Session:
                         def create(client, model):
                             response = client.messages.create(model=model, **kwargs)
                             return response, None, response
-                        response, reason, _ = self.shared.make_call([self.provider], create, context=LANE)
+                        response, reason, _ = self.shared.make_call([self.provider], create, context=lane(self.book))
                         if response is None or reason:
                             raise runlog.PortfolioRunError("fabric_portfolio_provider_unavailable")
                         return response
@@ -614,10 +736,12 @@ class Session:
                 self.state["inference_status"] = "held"
             if not self.persistence_failed:
                 self.state["brain"] = _brain(self.state, error=error)
+                if "frozen" not in self.state:
+                    self.state["local_failure"] = True
                 self.state["phase"] = "business_ready"
                 try:
                     self.state["cost_receipt"] = cost_guard.record_fabric(
-                        "autonomous", self.state["run_id"], self.state["asof"], _observations(self.state))
+                        self.book, self.state["run_id"], self.state["asof"], _observations(self.state))
                 except Exception:
                     self.state["cost_error"] = "fabric_book_cost_unsettled"
                 self.save()
@@ -650,7 +774,7 @@ class Session:
 
     async def invoke_tool(self, step, call):
         from brain import autonomous_mcp
-        roster, handlers = catalog()
+        roster, handlers = catalog(self.book)
         if roster != self.state["frozen"]["roster"]:
             raise runlog.PortfolioRunError("fabric_portfolio_roster_changed")
         effect = {"id": call["id"], "name": call["name"], "input": copy.deepcopy(call["input"]),
@@ -659,6 +783,7 @@ class Session:
         self.state["tools"].append(effect)
         self.save()
         context = {"run_id": self.state["run_id"], "tool_id": call["id"], "asof": self.state["asof"],
+                   "book": self.book,
                    "prepare_submission": lambda payload, audit: self.prepare_submission(effect, payload, audit),
                    "accept_submission": lambda receipt: self.accept_submission(effect, receipt)}
         with autonomous_mcp.fabric_invocation(context):
@@ -670,13 +795,13 @@ class Session:
         self.save()
 
     def prepare_submission(self, effect, payload, audit):
-        from brain import autonomous_mcp
+        mcp = _book_mcp(self.book)
         payload = copy.deepcopy(payload)
         payload["_fabric_submission"] = {
             "schema": "mastermind.submission_origin.v1", "run_id": self.state["run_id"],
-            "tool_id": effect["id"], "book": "autonomous", "asof": self.state["asof"],
+            "tool_id": effect["id"], "book": self.book, "asof": self.state["asof"],
             "normalized_digest": runlog.digest(payload)}
-        raw = runlog.strict_read(autonomous_mcp.submission_path(), absent=True)
+        raw = runlog.strict_read(mcp.submission_path(), absent=True)
         effect["submission"] = {"payload": payload, "payload_digest": runlog.digest(payload),
                                 "audit": copy.deepcopy(audit),
                                 "before_sha256": hashlib.sha256(raw).hexdigest() if raw is not None else None}
@@ -696,7 +821,7 @@ class Session:
                     "skipped": copy.deepcopy(skipped), "packet_id": packet_id,
                     "out": copy.deepcopy(out), "asof": self.state["asof"],
                     "identity": decision_rows.accepted_identity_fields(
-                        "autonomous", self.state["asof"], submission, target, "queued")}
+                        self.book, self.state["asof"], submission, target, "queued")}
         business["digest"] = runlog.digest(business)
         self.state.update(business=business, phase="settlement_intent")
         self.save()
@@ -713,8 +838,8 @@ class Session:
             raise runlog.PortfolioRunError("fabric_publication_already_owned")
         # Stable dict order matters because the existing writer preserves JSON order.
         payload = runlog.strict_json(runlog.canonical(payload))
-        paths, encoded = build_portfolio.prepare(payload, portfolio_id="autonomous")
-        with paper_account._paper_transaction_lock("autonomous"):
+        paths, encoded = build_portfolio.prepare(payload, portfolio_id=self.book)
+        with paper_account._paper_transaction_lock(self.book):
             before = {}
             for key, path in paths.items():
                 raw = runlog.strict_read(Path(path), absent=True)
@@ -723,16 +848,19 @@ class Session:
                 "payload": payload, "paths": paths, "content": encoded.decode("utf-8"),
                 "sha256": hashlib.sha256(encoded).hexdigest(), "before": before, "state": "pending"}
             self.save()  # The original exact publication, before either existing target changes.
-            returned = build_portfolio.write(payload, portfolio_id="autonomous")
+            returned = build_portfolio.write(payload, portfolio_id=self.book)
             if returned != paths:
                 raise runlog.PortfolioRunError("fabric_publication_paths_changed")
-            result = _publication_receipt(self.state["publication"])
+            result = _publication_receipt(self.state["publication"], book=self.book)
             self.state["publication"]["state"] = "complete"
             self.save()
             return result
 
     def finish(self, result):
         result = copy.deepcopy(result)
+        if result.get("portfolio_id", self.book) != self.book:
+            raise runlog.PortfolioRunError("fabric_portfolio_result_book_conflict")
+        result.setdefault("portfolio_id", self.book)
         result["run_id"] = self.state["run_id"]
         boundary = self.state.get("business", {}).get("result", {})
         unknown = (self.persistence_failed or self.state.get("inference_status") == "held"
@@ -755,23 +883,24 @@ class Session:
 
 
 def _recover_tools(session):
-    from brain import autonomous_mcp, bot_mcp, decision_submission, portfolio_learning
+    from brain import bot_mcp, decision_submission, portfolio_learning
+    mcp = _book_mcp(session.book)
     for effect in session.state["tools"]:
         if effect["state"] != "pending":
             continue
         correlation = {"run_id": session.state["run_id"], "tool_id": effect["id"]}
-        if effect["name"] == "mcp__desk__submit_book" and "submission" in effect:
-            receipt = decision_submission.reconcile_submission(autonomous_mcp.submission_path(), correlation)
+        if effect["name"] == tool_name(session.book, "submit_book") and "submission" in effect:
+            receipt = decision_submission.reconcile_submission(mcp.submission_path(), correlation)
             session.accept_submission(effect, receipt)
             result = bot_mcp._json({"ok": True, "reconciled": True, "submission_receipt": receipt})
-        elif effect["name"] == "mcp__desk__request_context_upgrade":
-            result = bot_mcp._json(portfolio_learning.reconcile_context_request(correlation))
+        elif effect["name"] == tool_name(session.book, "request_context_upgrade"):
+            result = bot_mcp._json(portfolio_learning.reconcile_context_request(correlation, book=session.book))
         else:
             raise runlog.PortfolioRunError("fabric_portfolio_tool_effect_unsettled")
         effect.update(state="complete", result=result)
         session.save()
     # Only a fully saved, validated response can authorize its still-unstarted tools.
-    from bot.autonomous import _run_coro
+    _run_coro = _book_owner(session.book)._run_coro
     for step in session.state["steps"]:
         if step["state"] != "complete":
             continue
@@ -792,25 +921,25 @@ def _known_refusal(boundary):
             and not boundary.get("retry_queue_error"))
 
 
-def _same_submission(snapshot, intent):
+def _same_submission(snapshot, intent, *, book="autonomous"):
     from bot import decision_rows
-    return (type(snapshot) is dict and snapshot.get("portfolio_id") == "autonomous"
+    return (type(snapshot) is dict and snapshot.get("portfolio_id") == book
             and snapshot.get("accepted_asof") == intent["asof"]
             and type(snapshot.get("submission")) is dict
             and decision_rows.submission_sha256(snapshot["submission"]) ==
                 intent["identity"]["submission_sha256"]
-            and decision_rows.decision_id("autonomous", intent["asof"], snapshot["submission"]) ==
+            and decision_rows.decision_id(book, intent["asof"], snapshot["submission"]) ==
                 intent["identity"]["decision_id"])
 
 
-def _snapshot_target(snapshot, target, intent):
+def _snapshot_target(snapshot, target, intent, *, book="autonomous"):
     """Bind this accepted root through only the incumbent deterministic rewrite chain."""
     from bot import decision_rows
     from portfolio import paper_account
     original = intent["identity"]["target_sha256"]
     current = decision_rows.target_sha256(
-        paper_account.validate_target_weights(target, portfolio_id="autonomous"))
-    if (not _same_submission(snapshot, intent)
+        paper_account.validate_target_weights(target, portfolio_id=book))
+    if (not _same_submission(snapshot, intent, book=book)
             or snapshot.get("schema_version") != paper_account.PENDING_DECISION_SCHEMA_V1
             or snapshot.get("decision_log_required") is not True
             or snapshot.get("accepted_target_sha256") != original
@@ -838,13 +967,13 @@ def _snapshot_target(snapshot, target, intent):
     return current
 
 
-def _archive_proof(receipt, fills, intent):
+def _archive_proof(receipt, fills, intent, *, book="autonomous"):
     from bot import decision_rows
     from portfolio import registry
     snapshot = receipt["decision_snapshot"]
-    current = _snapshot_target(snapshot, receipt["target"], intent)
+    current = _snapshot_target(snapshot, receipt["target"], intent, book=book)
     identity = intent["identity"]
-    rows = runlog.strict_rows(registry.data_dir("autonomous") / "decisions.jsonl")
+    rows = runlog.strict_rows(registry.data_dir(book) / "decisions.jsonl")
     matches = [row for row in rows if row.get("settlement_transaction_id") == receipt["transaction_id"]]
     if len(matches) != 1:
         raise runlog.PortfolioRunError("fabric_settlement_archive_projection_missing")
@@ -874,7 +1003,7 @@ def _recover_publication(session):
     # Caller retains the incumbent paper lock. Claim the current revision before
     # repairing only absent/preimage components of this original exact output.
     session.save()
-    paths = _publication_receipt(plan, repair=True)
+    paths = _publication_receipt(plan, book=session.book, repair=True)
     plan["state"] = "complete"
     session.save()
     return paths
@@ -882,11 +1011,14 @@ def _recover_publication(session):
 
 def _recover_settlement(session):
     """Reconcile queue/outbox/archive originals; never enter execute_or_queue again."""
-    from bot import autonomous, decision_rows, settle
+    from bot import decision_rows, settle
     from portfolio import paper_account, registry
     state, intent = session.state, session.state["business"]
     identity = _validate_business(state)
-    pid = "autonomous"
+    pid = session.book
+    owner = _book_owner(pid)
+    book_kwargs = ({"feed_health": copy.deepcopy(intent["out"].get("feed_health"))}
+                   if pid != "autonomous" else {})
     boundary = intent.get("result", {})
     known_id = boundary.get("settlement_receipt_id")
     if known_id is not None and (type(known_id) is not str or
@@ -920,7 +1052,7 @@ def _recover_settlement(session):
                     continue
                 receipt = runlog.strict_json(raw)
                 snapshot = receipt.get("decision_snapshot") if type(receipt) is dict else None
-                if not _same_submission(snapshot, intent):
+                if not _same_submission(snapshot, intent, book=pid):
                     if known_id:
                         raise runlog.PortfolioRunError("fabric_settlement_known_receipt_conflict")
                     continue
@@ -930,7 +1062,7 @@ def _recover_settlement(session):
                         or re.fullmatch(r"[0-9a-f]{64}", transaction) is None
                         or path.name != transaction + ".json"):
                     raise runlog.PortfolioRunError("fabric_settlement_receipt_invalid")
-                current = _snapshot_target(snapshot, receipt.get("target"), intent)
+                current = _snapshot_target(snapshot, receipt.get("target"), intent, book=pid)
                 if receipt.get("target_sha256") != current:
                     raise runlog.PortfolioRunError("fabric_settlement_receipt_target_conflict")
                 candidates.append((receipt, active, raw))
@@ -953,7 +1085,7 @@ def _recover_settlement(session):
                 if finalized.get("ok") is not True or finalized.get("receipt_acknowledged") is not True:
                     raise runlog.PortfolioRunError("fabric_settlement_finalization_unsettled")
             else:
-                _archive_proof(receipt, fills, intent)
+                _archive_proof(receipt, fills, intent, book=pid)
                 finalized = {"ok": True, "receipt_acknowledged": True, "archived_original": True,
                              "transaction_id": transaction_id}
             result = {**(saved or intent["out"]), "decided": True, "decision_effective": True,
@@ -977,7 +1109,7 @@ def _recover_settlement(session):
         if queued is None or paper_account.pending_target_contract_error(queued, pid):
             raise runlog.PortfolioRunError("fabric_settlement_effect_unsettled")
         snapshot = queued.get("decision_snapshot")
-        _snapshot_target(snapshot, queued["target"], intent)
+        _snapshot_target(snapshot, queued["target"], intent, book=pid)
         try:
             partner = decision_rows.validate_queued_decision_snapshot(pid, snapshot)
         except decision_rows.DecisionSettlementConflict:
@@ -987,9 +1119,9 @@ def _recover_settlement(session):
                        row.get("decision_effective") is True or row.get("target_status") in {"queued", "executed"})
                    for row in rows):
                 raise runlog.PortfolioRunError("fabric_settlement_decision_conflict")
-            autonomous._append_decision_log(intent["asof"], intent["submission"], [],
+            owner._append_decision_log(intent["asof"], intent["submission"], [],
                 intent["skipped"], intent["brain"], packet_id=intent["packet_id"],
-                target_status="queued", effective_target=intent["target"], _locked=True)
+                target_status="queued", effective_target=intent["target"], _locked=True, **book_kwargs)
             partner = decision_rows.validate_queued_decision_snapshot(pid, snapshot)
         if partner.get("ok") is not True or partner.get("required") is not True:
             raise runlog.PortfolioRunError("fabric_settlement_required_partner_missing")
@@ -1001,8 +1133,8 @@ def _recover_settlement(session):
         if paths is None:
             # No publication intent ever existed, so this is its first write.
             # Freeze that first projection before calling the same owner.
-            payload = autonomous._build_payload(intent["asof"], intent["submission"],
-                intent["prices"], [], intent["skipped"], intent["brain"], target_status="queued")
+            payload = owner._build_payload(intent["asof"], intent["submission"],
+                intent["prices"], [], intent["skipped"], intent["brain"], target_status="queued", **book_kwargs)
             paths = session.publish(payload)
         result["paths"] = paths
         result.pop("write_error", None)
@@ -1018,9 +1150,23 @@ def _recover(doc, runner):
     if state.get("cost_error") and "close" in state:
         from brain import cost_guard
         state["cost_receipt"] = cost_guard.record_fabric(
-            "autonomous", state["run_id"], state["asof"], _observations(state))
+            state["book"], state["run_id"], state["asof"], _observations(state))
         state.pop("cost_error", None)
         session.save()
+    if "local_gate" in state or "local_failure" in state:
+        if "out" in state:
+            from portfolio import paper_account
+            with paper_account._paper_transaction_lock(state["book"]):
+                result = copy.deepcopy(state["out"])
+                paths = _recover_publication(session)
+                if paths is not None:
+                    result["paths"] = paths
+                    result.pop("write_error", None)
+                return session.finish(result)
+        request = state["request"]
+        result = runner(state["asof"], force=request["force"], armed=request["armed"],
+                        directive=request["directive"], _fabric_session=session)
+        return session.finish(result)
     if "business" in state:
         return _recover_settlement(session)
     provider_pending = any(step["state"] == "pending" for step in state["steps"])
@@ -1037,7 +1183,7 @@ def _recover(doc, runner):
         state.pop("out", None)  # Business never started while its tool custody was unknown.
     if "out" in state:
         from portfolio import paper_account
-        with paper_account._paper_transaction_lock("autonomous"):
+        with paper_account._paper_transaction_lock(state["book"]):
             session.save()
             paths = _recover_publication(session)
             result = copy.deepcopy(state["out"])
@@ -1057,11 +1203,12 @@ def _recover(doc, runner):
 
 
 def route(*, asof=None, force=False, armed=True, directive=None, run_id=None,
-          runner, before_provider_start=None):
+          runner, before_provider_start=None, book="autonomous"):
     """Return (handled, result); original custody always precedes mutable routing."""
     original = None
     try:
-        original = runlog.portfolio_lookup(run_id)
+        book = runlog.portfolio_book(book)
+        original = runlog.portfolio_lookup(run_id, book=book)
         if original is not None:
             _validate(original)
             if run_id == original["state"]["run_id"] and original["state"]["request"] != _request(
@@ -1071,11 +1218,12 @@ def route(*, asof=None, force=False, armed=True, directive=None, run_id=None,
         if not selected() or not armed:
             return False, None
         request = _request(asof, force, armed, directive)
-        ident = runlog.portfolio_id(run_id if run_id is not None else "us-portfolio-" + uuid.uuid4().hex)
+        label = "us" if book == "autonomous" else book
+        ident = runlog.portfolio_id(run_id if run_id is not None else label + "-portfolio-" + uuid.uuid4().hex)
         _transport().validate_native_operation_id(ident)
-        shared, factory, _ = _factory()
-        catalog()
-        state = {"schema": SCHEMA, "run_id": ident, "book": "autonomous", "request": request,
+        shared, factory, _ = _factory(book)
+        catalog(book)
+        state = {"schema": SCHEMA, "run_id": ident, "book": book, "request": request,
                  "asof": asof or date.today().isoformat(), "phase": "claimed", "steps": [], "tools": []}
         original = runlog.portfolio_claim(state)
         session = Session(original, factory=factory, shared=shared, before_provider_start=before_provider_start)
@@ -1083,4 +1231,4 @@ def route(*, asof=None, force=False, armed=True, directive=None, run_id=None,
         return True, session.finish(result)
     except Exception as exc:
         reason = str(exc) if isinstance(exc, runlog.PortfolioRunError) else "fabric_portfolio_unsettled"
-        return True, _held(original["state"] if original is not None else None, reason)
+        return True, _held(original["state"] if original is not None else None, reason, book=book)

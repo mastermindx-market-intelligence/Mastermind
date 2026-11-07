@@ -190,6 +190,18 @@ class PortfolioRunError(RuntimeError):
     pass
 
 
+def portfolio_book(value: str = "autonomous") -> str:
+    """Closed active-book identity; model arguments never choose an owner."""
+    if type(value) is not str or value not in ("autonomous", "china", "hk"):
+        raise PortfolioRunError("fabric_portfolio_book_invalid")
+    return value
+
+
+def portfolio_title(book: str) -> str:
+    return {"autonomous": "US portfolio Fabric", "china": "China portfolio Fabric",
+            "hk": "Hong Kong portfolio Fabric"}[portfolio_book(book)]
+
+
 def portfolio_id(value: str) -> str:
     if (type(value) is not str or value == "error"
             or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}", value)
@@ -371,7 +383,8 @@ def _portfolio_index() -> list[dict]:
         value = row["_fabric_portfolio"]
         if (type(value) is not dict
                 or set(value) != {"schema", "book", "request_digest"}
-                or value["schema"] != _PORTFOLIO_INDEX_SCHEMA or value["book"] != "autonomous"
+                or value["schema"] != _PORTFOLIO_INDEX_SCHEMA
+                or type(value["book"]) is not str or value["book"] not in ("autonomous", "china", "hk")
                 or not re.fullmatch(r"[0-9a-f]{64}", str(value["request_digest"]))):
             raise PortfolioRunError("fabric_run_index_invalid")
         ids.append(portfolio_id(row.get("run_id")))
@@ -406,8 +419,8 @@ def _portfolio_projection(doc: dict, anchor: dict) -> dict:
                 and out.get("target_status") in {"queued", "executed"} else "unaccepted")
     phase = state["phase"]
     return {
-        "run_id": state["run_id"], "ts": anchor["ts"], "kind": "autonomous",
-        "title": "US portfolio Fabric", "projection_revision": doc["revision"],
+        "run_id": state["run_id"], "ts": anchor["ts"], "kind": state["book"],
+        "title": portfolio_title(state["book"]), "projection_revision": doc["revision"],
         "status": phase, "n_steps": len(public_steps), "cost_usd": None,
         "summary": (f'{len(state["steps"])} inference intents; {len(state["tools"])} tool intents; '
                     f'{phase}; decision {decision}'),
@@ -420,8 +433,9 @@ def _portfolio_public_read(entry: dict) -> dict:
     try:
         return _portfolio_projection(_portfolio_read(entry), entry)
     except Exception:
-        return {"run_id": entry.get("run_id"), "ts": entry.get("ts"), "kind": "autonomous",
-                "title": "US portfolio Fabric", "status": "unavailable", "n_steps": None,
+        return {"run_id": entry.get("run_id"), "ts": entry.get("ts"),
+                "kind": entry["_fabric_portfolio"]["book"],
+                "title": portfolio_title(entry["_fabric_portfolio"]["book"]), "status": "unavailable", "n_steps": None,
                 "cost_usd": None, "summary": "Original run record is unavailable",
                 "model": None, "models": [], "decision_status": "unknown", "steps": []}
 
@@ -439,7 +453,8 @@ def _portfolio_read(entry: dict) -> dict:
             or digest(envelope["state"]) != envelope["digest"]):
         raise PortfolioRunError("fabric_run_protocol_invalid")
     state = envelope["state"]
-    if (state.get("run_id") != entry["run_id"] or state.get("book") != "autonomous"
+    if (state.get("run_id") != entry["run_id"]
+            or state.get("book") != entry["_fabric_portfolio"]["book"]
             or digest(state.get("request")) != entry["_fabric_portfolio"]["request_digest"]
             or rows[0]["_meta"].get("run_id") != entry["run_id"]):
         raise PortfolioRunError("fabric_run_protocol_identity_conflict")
@@ -451,18 +466,37 @@ def _portfolio_read(entry: dict) -> dict:
     return doc
 
 
-def portfolio_lookup(run_id: str | None = None) -> dict | None:
-    """The unresolved original wins over current flags, dates and new IDs."""
+def portfolio_original_locked(run_id: str, *, book: str = "autonomous") -> dict | None:
+    """Read this exact anchored original; caller owns portfolio_lock."""
+    run_id, book = portfolio_id(run_id), portfolio_book(book)
+    for entry in _portfolio_index():
+        if entry.get("run_id") != run_id or "_fabric_portfolio" not in entry:
+            continue
+        if entry["_fabric_portfolio"]["book"] != book:
+            raise PortfolioRunError("fabric_run_book_conflict")
+        return _portfolio_read(entry)
+    return None
+
+
+def portfolio_lookup(run_id: str | None = None, *, book: str = "autonomous") -> dict | None:
+    """Recover this book's original; explicit foreign IDs always conflict."""
+    book = portfolio_book(book)
+    if run_id is not None:
+        portfolio_id(run_id)
     with portfolio_lock():
         rows = _portfolio_index()
-        records = [_portfolio_read(row) for row in rows if "_fabric_portfolio" in row]
+        for row in rows:
+            if (row.get("run_id") == run_id and "_fabric_portfolio" in row
+                    and row["_fabric_portfolio"]["book"] != book):
+                raise PortfolioRunError("fabric_run_book_conflict")
+        records = [_portfolio_read(row) for row in rows if "_fabric_portfolio" in row
+                   and row["_fabric_portfolio"]["book"] == book]
         pending = [doc for doc in records if doc["state"].get("phase") != "complete"]
         if len(pending) > 1:
             raise PortfolioRunError("fabric_multiple_unsettled_originals")
         if pending:
             return pending[0]
         if run_id is not None:
-            portfolio_id(run_id)
             return next((doc for doc in records if doc["state"]["run_id"] == run_id), None)
         return None
 
@@ -470,21 +504,23 @@ def portfolio_lookup(run_id: str | None = None) -> dict | None:
 def portfolio_claim(state: dict) -> dict:
     """Anchor identity before its run file; a missing anchored file remains held."""
     run_id = portfolio_id(state.get("run_id"))
-    if state.get("book") != "autonomous" or type(state.get("request")) is not dict:
+    book = portfolio_book(state.get("book"))
+    if type(state.get("request")) is not dict:
         raise PortfolioRunError("fabric_run_claim_invalid")
     with portfolio_lock():
         rows = _portfolio_index()
         for row in rows:
-            if "_fabric_portfolio" in row:
-                old = _portfolio_read(row)
-                if row["run_id"] == run_id or old["state"].get("phase") != "complete":
-                    raise PortfolioRunError("fabric_original_already_owned")
+            if row.get("run_id") == run_id:
+                raise PortfolioRunError("fabric_original_already_owned")
+            if ("_fabric_portfolio" in row and row["_fabric_portfolio"]["book"] == book
+                    and _portfolio_read(row)["state"].get("phase") != "complete"):
+                raise PortfolioRunError("fabric_original_already_owned")
         if strict_read(_run_path(run_id), absent=True) is not None:
             raise PortfolioRunError("fabric_run_identity_conflict")
-        meta = {"run_id": run_id, "ts": _now(), "kind": "autonomous",
-                "title": "US portfolio Fabric", "n_steps": 0, "cost_usd": None, "summary": ""}
+        meta = {"run_id": run_id, "ts": _now(), "kind": book,
+                "title": portfolio_title(book), "n_steps": 0, "cost_usd": None, "summary": ""}
         entry = {**meta, "_fabric_portfolio": {"schema": _PORTFOLIO_INDEX_SCHEMA,
-                 "book": "autonomous", "request_digest": digest(state["request"])}}
+                 "book": book, "request_digest": digest(state["request"])}}
         old_index = strict_read(_INDEX, absent=True)
         durable_replace(_INDEX, b"".join(canonical(row) + b"\n" for row in [*rows, entry]),
                         expected=old_index)
@@ -509,8 +545,16 @@ def portfolio_save(doc: dict) -> None:
         old = _portfolio_read(entry)
         if old["revision"] != doc["revision"]:
             raise PortfolioRunError("fabric_run_revision_conflict")
-        if digest(state["request"]) != entry["_fabric_portfolio"]["request_digest"]:
+        if (state.get("book") != entry["_fabric_portfolio"]["book"]
+                or digest(state["request"]) != entry["_fabric_portfolio"]["request_digest"]):
             raise PortfolioRunError("fabric_run_request_changed")
+        if ("entry_context" in old["state"]
+                and state.get("entry_context") != old["state"]["entry_context"]):
+            raise PortfolioRunError("fabric_run_entry_changed")
+        if "local_gate" in old["state"] and state.get("local_gate") != old["state"]["local_gate"]:
+            raise PortfolioRunError("fabric_run_gate_changed")
+        from brain.fabric_portfolio import _validate
+        _validate(doc)
         path = _run_path(state["run_id"])
         raw = strict_read(path)
         next_doc = {"revision": doc["revision"] + 1, "state": copy.deepcopy(state)}
@@ -523,9 +567,11 @@ def portfolio_save(doc: dict) -> None:
         doc["revision"] = next_doc["revision"]
 
 
-def portfolio_pending_locked() -> dict | None:
-    """Internal cross-owner guard; the caller already holds portfolio_lock."""
-    records = [_portfolio_read(row) for row in _portfolio_index() if "_fabric_portfolio" in row]
+def portfolio_pending_locked(book: str = "autonomous") -> dict | None:
+    """Internal per-book guard; the caller already holds portfolio_lock."""
+    book = portfolio_book(book)
+    records = [_portfolio_read(row) for row in _portfolio_index() if "_fabric_portfolio" in row
+               and row["_fabric_portfolio"]["book"] == book]
     pending = [doc for doc in records if doc["state"].get("phase") != "complete"]
     if len(pending) > 1:
         raise PortfolioRunError("fabric_multiple_unsettled_originals")
