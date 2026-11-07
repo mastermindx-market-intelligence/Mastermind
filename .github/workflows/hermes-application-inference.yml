@@ -31,6 +31,56 @@ permissions:
   contents: read
 
 jobs:
+  native-original-owner:
+    name: Hermes native conversation through APPLICATION handler and Broker
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 1c0cd667746d3395fe9e1b6c74f8f85952486f18
+          path: .ci-hermes-native
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 6612f6aba4ac431d38432b500ed5c5d66122f1d0
+          path: .ci-hermes-application-owner
+          sparse-checkout: |
+            engine
+            lib
+            config
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - uses: actions/checkout@v4
+        with:
+          ref: f5c4a2365e4ec83bb5de92e7e64213264ada9324
+          path: .ci-native-application-owner
+          sparse-checkout: |
+            ops/native_fabric/quota_continuity
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install exact native lock and declared overrides
+        run: |
+          python -m pip install --disable-pip-version-check 'uv==0.13.5'
+          uv sync --project .ci-hermes-native --locked --no-default-groups --python 3.14
+          uv pip install --python .ci-hermes-native/.venv/bin/python 'jsonschema==4.26.0'
+      - name: Verify actual native tool history, owner limits and unknown effects
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-original-owner-fixture
+          PYTHONPATH: .ci-hermes-native
+          HERMES_STARTUP_WARMUP_TIMEOUT: '0'
+        run: >-
+          .ci-hermes-native/.venv/bin/python -B
+          integrations/hermes_application_fabric/qualification/qualify_application_owner.py
+          --adapter-root . --macro-root .ci-hermes-application-owner
+          --native-owner-root .ci-native-application-owner --hermes-root .ci-hermes-native
   original-tunnel-owner:
     name: Hermes aliases through original tunnel custody
     runs-on: ubuntu-latest
