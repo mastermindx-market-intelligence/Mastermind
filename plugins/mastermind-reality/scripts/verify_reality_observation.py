@@ -844,6 +844,15 @@ def _check_source_relationship(record, add):
     protected = relationship.get("protected_sha")
     deployed = relationship.get("observed_deployed_sha")
     comparison = relationship.get("revision_comparison")
+    for field, revision in (("protected_sha", protected), ("observed_deployed_sha", deployed)):
+        if field == "observed_deployed_sha" and revision is None:
+            continue
+        if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+            add(
+                "SOURCE_RELATION_INVALID",
+                "source_relationship." + field,
+                "source revision must be a 40-character lowercase hexadecimal Git SHA",
+            )
     if relation == "MATCH":
         if not isinstance(protected, str) or not isinstance(deployed, str):
             add(

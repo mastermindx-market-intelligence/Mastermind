@@ -867,3 +867,32 @@ def test_healed_renaming_old_effect_bytes_cannot_support_a_state_change(tmp_path
     assert 'EFFECT_INVALID' not in codes(result)
     assert 'ARTIFACT_DIGEST_MISMATCH' not in codes(result)
     assert sha((root/new_ref).read_bytes())==sha(original_bytes)
+
+
+def test_primary_source_sha_newline_cannot_fake_distinct_revision(tmp_path):
+    r, root, _ = fixture(tmp_path)
+    r['source_relationship']['observed_deployed_sha'] = r['source_relationship']['protected_sha'] + '\n'
+    result = verify_record(root, r)
+    assert_closed_invalid(result)
+    assert codes(result) == {'SOURCE_RELATION_INVALID'}
+    assert {'name': 'SOURCE_RELATION_CONSISTENCY', 'status': 'FAIL'} in result['checks']
+
+
+@pytest.mark.parametrize('malformed_protected', [False, True])
+def test_primary_unknown_source_requires_strict_protected_sha(tmp_path, malformed_protected):
+    r, root, _ = fixture(tmp_path)
+    r['source_relationship'].update(
+        observed_deployed_sha=None, observed_at=None,
+        relation='UNKNOWN', revision_comparison='UNOBSERVABLE',
+    )
+    r['negative_controls']['different_build'].update(status='NOT_EXERCISED', evidence_refs=[])
+    if malformed_protected:
+        r['source_relationship']['protected_sha'] += '\n'
+    result = verify_record(root, r)
+    if malformed_protected:
+        assert_closed_invalid(result)
+        assert codes(result) == {'SOURCE_RELATION_INVALID'}
+        assert {'name': 'SOURCE_RELATION_CONSISTENCY', 'status': 'FAIL'} in result['checks']
+    else:
+        assert result['verdict'] == 'VALID' and result['errors'] == []
+        assert {'name': 'SOURCE_RELATION_CONSISTENCY', 'status': 'PASS'} in result['checks']

@@ -331,7 +331,7 @@ REALITY_CONTENT_DIGESTS = {
     "references/catalog.fragment.json": "fdd7d053e98bcb94f485ada78bf968ae224c8297b79599962fee3a40ce2d94b2",
     "references/reality-boundary.md": "661c17ec8050de20f1c0e65091183c7ab83506cab980b47e5f09c0949a345628",
     "references/reality-observation.schema.json": "b2628bd4ca674f9bd1f796209251e3df5dd879a0a90e7b0d48bf313a02c50ecb",
-    "scripts/verify_reality_observation.py": "b7c63d9a27f4b60a512d62fd3eb1417445e0bc388aad3691e6c0d3f533f1f87b",
+    "scripts/verify_reality_observation.py": "b446352978a31632b5be61d5f543c51f276e97191ff8f5a5d1c50e03b913ba8d",
     "skills/inspect-product-journey/SKILL.md": "7f2ba1722de05605ab910cf6ebd10894934637372d39223290cb202ebccc0f0b"
 }
 REALITY_CORRECTION_PATHS = frozenset({
