@@ -54,7 +54,7 @@ def commit(store, record, auth, *, secret=KEY, expected="empty"):
 
 
 def test_sealed_subscription_survives_restart_and_hides_all_secrets(tmp_path):
-    runtime, store, record, auth = setup(tmp_path)
+    runtime, store, record, auth = make_case(tmp_path)
     assert commit(store,record,auth) == record
     snapshot = run(store.snapshot(record.subscription_id))
     assert snapshot.record == record
