@@ -213,6 +213,40 @@ GO_CENSUS_EXIT_RUNTIME_DIGEST = "a2d1ebea4ee948cd9e34fc9268ae3c043297619c8135459
 # Exact current107 remote-cwd successor of the protected Ubuntu4 task member.
 # The complete Ubuntu4 cohort must still validate after this normalization.
 GO_REMOTE_CWD_TASK_DIGEST = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
+# Closed refusal diagnostics compose on the exact remote-cwd source in raw107.
+# Older namespaces and the frozen Ubuntu4/poll generations retain their bytes.
+GO_REQUEST_REFUSAL_TASK_DIGEST = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
+
+# One complete successor of the captured protected107 WORKER closure. This
+# historical view is validation-only: emitted manifests retain the repaired
+# bytes. Future APPLICATION or policy cohorts must compose this exact delta,
+# not relabel their unrelated parent as this captured generation.
+ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256 = "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
+ADMISSION_INTEGRITY_PREIMAGES = {
+    "ext/fabric_task.py": GO_REQUEST_REFUSAL_TASK_DIGEST,
+    "ext/lane_runtime.py": GO_CENSUS_EXIT_RUNTIME_DIGEST,
+}
+ADMISSION_INTEGRITY_DIGESTS = {
+    "ext/fabric_task.py": "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68",
+    "ext/lane_runtime.py": "b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b",
+}
+
+
+def before_admission_integrity(manifest):
+    """Validate one exact forward cohort without mutating caller identity."""
+    if type(manifest) is not dict:
+        raise ValueError("native admission integrity manifest invalid")
+    if not any(manifest.get(name) == digest
+               for name, digest in ADMISSION_INTEGRITY_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in ADMISSION_INTEGRITY_DIGESTS.items()):
+        raise ValueError("native admission integrity cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(ADMISSION_INTEGRITY_PREIMAGES)
+    if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) != ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256:
+        raise ValueError("native admission integrity parent closure differs")
+    return previous
 
 
 def validate_go_base_manifest(manifest, dependency_hashes):
@@ -229,13 +263,14 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     advertised-artifact recovery pair extends that closure to107 and is
     projected back to106 before historical validation; it grants no new
     application artifact access.
-    The two exact current107 census successors and the exact remote-cwd
-    task successor are normalized without changing any historical namespace
+    The two exact current107 census successors and the exact remote-cwd and
+    refusal task successors are normalized without changing any historical namespace
     or the caller manifest. The task successor still requires the complete
     Ubuntu4 and poll cohorts. Every other member/key stays bound to actual395b.
     The closed original-collection successor is accepted only in the complete
     current107 namespace; historical106/104/102 retain the original collector.
     """
+    manifest = before_admission_integrity(manifest)
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -254,7 +289,11 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         normalized["ext/lane_runtime.py"] = GO_CENSUS_RUNTIME_PREIMAGE
     elif runtime != GO_CENSUS_RUNTIME_PREIMAGE:
         raise ValueError("native Go census is not the exact protected source")
-    if manifest["ext/fabric_task.py"] == GO_REMOTE_CWD_TASK_DIGEST:
+    if manifest["ext/fabric_task.py"] == GO_REQUEST_REFUSAL_TASK_DIGEST:
+        if set(manifest) != expected:
+            raise ValueError("native Go refusal task cannot relabel historical namespace")
+        normalized["ext/fabric_task.py"] = GO_REMOTE_CWD_TASK_DIGEST
+    if normalized["ext/fabric_task.py"] == GO_REMOTE_CWD_TASK_DIGEST:
         if set(manifest) != expected:
             raise ValueError("native Go remote-cwd task cannot relabel historical namespace")
         normalized["ext/fabric_task.py"] = GO_UBUNTU4_DIGESTS["fabric_task.py"]
@@ -346,9 +385,11 @@ def validate_go_base_manifest(manifest, dependency_hashes):
 def application_http_sources(root):
     """Compile immutable metadata from the exact three historical inputs.
 
-    The H preimage is explicitly mapped as AST evidence only. The independently
-    sealed CURRENT H is the sole transport code in the flat runtime closure.
-    No Git history, credential, provider or repository import is consulted.
+    Realm and H preimages are explicitly mapped as AST evidence only. New
+    candidate realms must not rewrite the accepted two-driver metadata or
+    invalidate its historical input closure. The independently sealed CURRENT
+    H is the sole transport code in the flat runtime closure. No preimage is
+    imported or staged; no Git history, credential or provider is consulted.
     """
     root = Path(root)
     reader = root / "rollout/application_http_realm_projection.py"
@@ -361,8 +402,11 @@ def application_http_sources(root):
     # same-path module in a reused builder process is not source evidence.
     compiler = {"__name__": "mastermind_http_projection_compiler", "__file__": str(reader)}
     exec(compile(reader_raw, str(reader), "exec"), compiler)
-    inputs = {row["path"]: read(root / "source/application_http_transports.py.preimage"
-        if row["path"] == compiler["TRANSPORT_SOURCE_PATH"] else root.parents[2] / row["path"])
+    evidence = {
+        compiler["REALM_SOURCE_PATH"]: root / "source/codex_provider_realm.py.preimage",
+        compiler["TRANSPORT_SOURCE_PATH"]: root / "source/application_http_transports.py.preimage",
+    }
+    inputs = {row["path"]: read(evidence.get(row["path"], root.parents[2] / row["path"]))
         for row in compiler["INPUT_SOURCES"]}
     payload = compiler["compile_projection_bytes"](inputs)
     compiler["validate_projection"](payload, expected_sha256=sha(payload))
@@ -579,6 +623,8 @@ def main():
             if (name not in {'LICENSE','METADATA'} and not (name.startswith('yaml/') and name.endswith('.py'))
                     or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
                 raise ValueError('qualified pure YAML member differs')
+    # Qualify the complete repair cohort even when no APPLICATION pair is added.
+    before_admission_integrity(manifest)
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)

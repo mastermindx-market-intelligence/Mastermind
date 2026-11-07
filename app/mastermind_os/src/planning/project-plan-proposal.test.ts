@@ -16,7 +16,7 @@ import {
   qualifyPlanProposalStatus,
   type PreparedPlanProposal,
 } from "./project-plan-proposal-port";
-import { createIndexedDbPendingPointerStore } from "../orchestration/indexeddb-pending-pointer-store";
+import { createIndexedDbPendingPointerStore, PENDING_POINTER_DB_NAME, PENDING_POINTER_STORE_NAME } from "../orchestration/indexeddb-pending-pointer-store";
 import { OperationController } from "../orchestration/operation-controller";
 import {
   projectJourneyUrl,
@@ -203,7 +203,7 @@ describe("closed S24 original and actual unchanged supplier operands", () => {
     expect(h.source.submitSourceOperation).not.toHaveBeenCalled();
   });
 });
-describe("incumbent v13 IDB original-operation recovery", () => {
+describe("incumbent v15 IDB original-operation recovery", () => {
   it("retains UNKNOWN, reopens only the original read/reconcile, never submits twice", async () => {
     const h = harness(),
       p = await h.prepare(),
@@ -283,3 +283,60 @@ it.each(["request_id", "expected_commit", "result_digest"] as const)(
     expect(() => decodePlanProposalOriginal(raw)).toThrow();
   },
 );
+
+
+// Released native13/14 and historical execution12 retain their original lookup.
+async function durableRecord(factory: IDBFactory, scope: string, value?: unknown): Promise<unknown> {
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const open = factory.open(PENDING_POINTER_DB_NAME, 1);
+    open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error);
+  });
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(PENDING_POINTER_STORE_NAME, value === undefined ? "readonly" : "readwrite");
+      const records = tx.objectStore(PENDING_POINTER_STORE_NAME);
+      const request = value === undefined ? records.get(scope) : records.put(value, scope);
+      let result: unknown;
+      request.onsuccess = () => { result = request.result; };
+      tx.oncomplete = () => resolve(result); tx.onabort = () => reject(tx.error);
+    });
+  } finally { db.close(); }
+}
+
+it.each([
+  { v: 12, kind: "launch" as const, operationKey: "mmos-project-execute-" + "1".repeat(40), targetKey: "WS:ORIGINAL" },
+  { v: 13, kind: "conversation_create" as const, operationKey: "mmos-hermes-create-" + "2".repeat(32), targetKey: "hermes-native-local.v1" },
+  { v: 14, kind: "conversation_turn" as const, operationKey: "mmos-hermes-send-" + "3".repeat(32), targetKey: "original-session" },
+])("retains original v$v bytes and reservation while new PLAN15 reopens separately", async record => {
+  const factory = new IDBFactory(), store = createIndexedDbPendingPointerStore(factory);
+  const { v, ...originalPointer } = record;
+  const plan = proposalPointer(await harness().prepare());
+  await store.reserve(E, originalPointer);
+  expect(await durableRecord(factory, E)).toEqual(record);
+  await store.reserve(W, plan);
+  expect(await durableRecord(factory, W)).toEqual({ v: 15, ...plan });
+  const reopened = createIndexedDbPendingPointerStore(factory);
+  expect(await reopened.read(E)).toEqual(originalPointer);
+  expect(await reopened.read(W)).toEqual(plan);
+  await expect(reopened.reserve(E, plan)).rejects.toThrow("PENDING_POINTER_INVALID_POINTER");
+  await expect(reopened.clearIfEqual(E, plan)).rejects.toThrow("PENDING_POINTER_INVALID_POINTER");
+  expect(await durableRecord(factory, E)).toEqual(record);
+  const occupiedFactory = new IDBFactory();
+  const occupied = createIndexedDbPendingPointerStore(occupiedFactory);
+  await occupied.reserve(W, originalPointer);
+  expect(await occupied.reserve(W, plan)).toEqual({ reserved: false, pointer: originalPointer });
+  expect(await occupied.clearIfEqual(W, plan)).toBe(false);
+  expect(await durableRecord(occupiedFactory, W)).toEqual(record);
+});
+
+it.each([12, 13, 14, 16])("refuses PLAN metadata mislabeled v%i without rewriting it", async v => {
+  const factory = new IDBFactory(), store = createIndexedDbPendingPointerStore(factory);
+  const plan = proposalPointer(await harness().prepare());
+  await store.reserve(W, plan);
+  const malformed = { v, ...plan };
+  await durableRecord(factory, W, malformed);
+  await expect(store.read(W)).rejects.toThrow("PENDING_POINTER_CORRUPT_RECORD");
+  await expect(store.reserve(W, plan)).rejects.toThrow("PENDING_POINTER_CORRUPT_RECORD");
+  await expect(store.clearIfEqual(W, plan)).rejects.toThrow("PENDING_POINTER_CORRUPT_RECORD");
+  expect(await durableRecord(factory, W)).toEqual(malformed);
+});

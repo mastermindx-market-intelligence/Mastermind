@@ -32,10 +32,10 @@ REVIEWED_ANCHORS = {
         "node_type": "AsyncFunctionDef",
         # Existing section-sign/em-dash prose needs an exact full-source pin
         # in addition to the method AST; all three literal lines are ASCII.
-        # Qualified Knowledge/Archive READ additions change the enclosing ingress AST.
-        # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": "de7f3502204c76403b8f5e94fe640f8b883c21a143db30717e127e2a2765cf38",
-        "ast_sha256": "bfeed80a98cf1e20152070659d1397600a2597921c38b938799ce2e095a879eb",
+        # Selected-child App-peer admission changes the enclosing ingress AST.
+        # The original Fabric reply operands and Company listener remain unchanged.
+        "source_sha256": "08c71c0e79126c003db57b3c3bb2c77c20858331451edd7436751dd634e4340d",
+        "ast_sha256": "597fb0de3f70a6e820946f7b64dd5712a38f66aa14d92d4c3a9482e5ee36d10c",
         "sites": (
             (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
@@ -63,3 +63,8 @@ REVIEWED_ANCHORS = {
 # not inherited native SEND approval or installation/release authority.
 
 # Parent C17 dispatch composition retains the protected821 ingress AST and exact operands.
+
+# Authenticated Agent OS context adds one 47-line read branch after the existing
+# catalog branch. Removing that exact insertion reproduces the previous source
+# bytes; the Company method, all three catalog operands and their AST paths are
+# unchanged. The new whole-source/method pins qualify that bounded composition.

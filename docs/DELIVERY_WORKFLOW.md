@@ -216,14 +216,22 @@ adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.m
 7. Deploy only when the assigned change requires runtime rollout and release is authorized.
    A source-only, research, documentation or instruction task must not restart an unrelated
    application. For a required deployment, resolve this operation's actual merge commit from
-   GitHub; the newest default-branch commit may belong to another operation:
+   GitHub using the accepted `pr_number`; the newest default-branch commit may belong
+   to another operation:
 
    ```bash
-   git fetch origin master
-   merge_sha="$(gh pr view --json mergeCommit --jq '.mergeCommit.oid')"
-   test -n "$merge_sha" && test "$merge_sha" != null
-   ./scripts/deploy_from_git.sh "$merge_sha"
+   merge_sha="$(gh pr view "${pr_number:?set the accepted PR number}" \
+     --repo mastermindx-market-intelligence/Mastermind \
+     --json mergeCommit --jq '.mergeCommit.oid')" &&
+     [[ "$merge_sha" =~ ^[0-9a-f]{40}$ ]] &&
+     ./scripts/deploy_from_git.sh "$merge_sha"
    ```
+
+   Missing, malformed or unreadable merge evidence blocks deployment. The unchanged
+   wrapper fetches and refuses a receipt that is no longer current `origin/master`.
+   Reconcile the new release identity and its authorization; never substitute the
+   moving branch tip for this PR's receipt. Merge acceptance does not itself
+   authorize deployment.
 
 The deploy wrapper archives `origin/master` into a temporary clean release
 directory. Local uncommitted files cannot enter the release. The VPS deploy

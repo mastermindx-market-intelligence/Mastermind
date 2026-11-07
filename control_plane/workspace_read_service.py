@@ -1431,12 +1431,23 @@ class WorkspaceReadService:
         try:
             if not _qualified(before, selected):
                 return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
-            policy_before = CooCyclePolicy.load().policy_sha256
+            def policy_digest(version):
+                try:
+                    return CooCyclePolicy.load(version=version).policy_sha256
+                except Exception:
+                    return None
+            # The admitted version is known only after the single Runtime read.
+            # Capture both existing policy owners beforehand, then recheck only
+            # the selected version; an unavailable unrelated policy is no grant
+            # and must not invalidate an otherwise qualified legacy read.
+            policies_before = {version: policy_digest(version) for version in (1, 2)}
             bounded = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
             with bounded.observe_bounded_read() as observation:
                 snapshot = observation.read_admitted_plan_bounded(selected["root_job_id"])
             receipt = observation.receipt  # finalized only after physical close
-            policy_after = CooCyclePolicy.load().policy_sha256
+            admitted_policy = CooCyclePolicy.for_digest(snapshot.admission.get("policy_sha"))
+            policy_before = policies_before.get(admitted_policy.schema_version)
+            policy_after = admitted_policy.policy_sha256
             if (not isinstance(snapshot, BoundedAdmittedPlanSnapshot)
                     or not isinstance(snapshot.root_metadata, BoundedRoleResultRootMetadata)
                     or snapshot.root_job_id != selected["root_job_id"]
@@ -1475,6 +1486,117 @@ class WorkspaceReadService:
             return plan_unavailable(selected, exc.code)
         except Exception:
             return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
+
+    def capture_selected_child_target(self, *, work_ref, root_job_id, child_job_ids):
+        """Freeze one trusted host's chosen children through the incumbent read.
+
+        This is a HOST-INTERNAL entry, not an HTTP frame: it takes no
+        principal, it admits nothing and it never dispatches a Job. It
+        reuses the incumbent bounded admitted-plan observation, its VM
+        budget, its one-selection discipline, its identity joins and its
+        close receipt, so the admitted plan and the chosen children are
+        always ONE coherent observation.
+
+        The observation is BRACKETED by the same current Control Room
+        evidence the incumbent admitted-plan read uses: the owner, the
+        instance, the publication, the published document, the source
+        validity and the cache currentness are read before and after the
+        Runtime observation and must be one coherent source. A missing,
+        unqualified or changing Workspace source refuses the capture even
+        when the COO row itself is unchanged, so a CCR responsibility or
+        root publication change can never freeze an old root.
+        """
+        from common.executive_workspace_contract import _check_job_id, _check_work_ref
+        from control_plane.coo_principal_host import SELECTED_CHILD_SOURCE_SCHEMA
+        from control_plane.executive_coo_policy import CooCyclePolicy, CooCyclePolicyError
+        from control_plane.executive_runtime import (
+            BoundedSelectedChildCapture,
+        )
+        if not _check_work_ref(work_ref) or not _check_job_id(root_job_id):
+            raise ValueError("invalid_input")
+        if type(child_job_ids) not in (list, tuple):
+            raise ValueError("invalid_input")
+        chosen = tuple(child_job_ids)
+        if not 1 <= len(chosen) <= 16 or len(set(chosen)) != len(chosen):
+            raise ValueError("invalid_input")
+        if any(type(item) is not str or not _check_job_id(item) for item in chosen):
+            raise ValueError("invalid_input")
+        selection = {"work_ref": work_ref, "root_job_id": root_job_id}
+        try:
+            before = self.cache.snapshot()
+        except Exception:
+            raise ValueError("source_unavailable") from None
+        try:
+            _join(before.document, selection)
+        except LookupError:
+            raise ValueError("selection_not_found") from None
+        if not _qualified(before, selection):
+            raise ValueError("source_unavailable")
+        try:
+            policy_before = CooCyclePolicy.load()
+        except CooCyclePolicyError:
+            raise ValueError("source_unavailable") from None
+        bounded = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
+        with bounded.observe_bounded_read() as observation:
+            capture = observation.read_selected_child_target_bounded(
+                root_job_id, child_job_ids=chosen)
+        # The receipt exists only after the physical close of the observation.
+        receipt = observation.receipt
+        try:
+            policy_after = CooCyclePolicy.load()
+        except CooCyclePolicyError:
+            raise ValueError("source_unavailable") from None
+        try:
+            after = self.cache.snapshot()
+        except Exception:
+            raise ValueError("source_unavailable") from None
+        try:
+            _join(after.document, selection)
+        except LookupError:
+            raise ValueError("source_unavailable") from None
+        if not _qualified(after, selection):
+            raise ValueError("source_unavailable")
+        if (before.owner is not after.owner
+                or before.instance != after.instance
+                or before.publication != after.publication
+                or digest(before.document) != digest(after.document)
+                or digest(_plan_validity_identity(before.validity))
+                != digest(_plan_validity_identity(after.validity))
+                or digest(before.currentness) != digest(after.currentness)):
+            raise ValueError("source_unavailable")
+        plan = getattr(capture, "plan", None)
+        admission = getattr(plan, "admission", None)
+        if (not isinstance(capture, BoundedSelectedChildCapture)
+                or plan.root_job_id != root_job_id
+                or plan.root_metadata.work_ref not in (None, work_ref)
+                or type(admission) is not dict
+                or policy_before.policy_sha256 != policy_after.policy_sha256
+                or policy_before.source_sha256 != policy_after.source_sha256
+                or receipt.state not in {"SAME", "UNKNOWN"}):
+            raise ValueError("source_unavailable")
+        try:
+            # The admitted policy is the CURRENT policy of its own version.
+            # An unrecognized or stale policy digest is a refusal, never an
+            # upgrade of an existing root.
+            admitted = CooCyclePolicy.for_digest(admission.get("policy_sha"))
+        except CooCyclePolicyError:
+            raise ValueError("source_unavailable") from None
+        if admitted.policy_sha256 != admission.get("policy_sha"):
+            raise ValueError("source_unavailable")
+        return {
+            "work_ref": work_ref,
+            "root_job_id": root_job_id,
+            "children": [dict(child) for child in capture.children],
+            "source": {
+                "schema": SELECTED_CHILD_SOURCE_SCHEMA,
+                "plan_attempt_id": admission["plan_attempt_id"],
+                "plan_digest": admission["plan_digest"],
+                "policy_sha": admission["policy_sha"],
+                "reservation_digest": admission["reservation_digest"],
+                "observation_state": receipt.state,
+                "observation_source_identity": receipt.source_identity,
+            },
+        }
 
     async def _handle_v3_frame(self, frame):
         try:

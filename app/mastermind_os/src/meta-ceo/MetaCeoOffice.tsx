@@ -7,6 +7,7 @@ import { OfficeWorkRead, type OfficeWorkReadState } from "./OfficeWorkRead";
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
 import { ByokRolesPanel } from "./ByokRolesPanel";
+import { HermesNativePanel } from "../hermes-native/HermesNativePanel";
 import type { ByokRoleView } from "./byok-role-view";
 import { registerUnsavedNavigationHold } from "../auth-navigation-guard";
 import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
@@ -15,6 +16,7 @@ import { AttendedFabricWorkspace } from "../fabric/AttendedFabricWorkspace";
 import { AdmittedPlanInspector } from "../planning/AdmittedPlanInspector";
 import type { PlanSelection } from "../planning/admitted-plan";
 import type { ActivitySelection } from "../planning/retained-activity";
+import { OrganizationWorkspace, type OrganizationObservation } from "../organization/OrganizationWorkspace";
 
 // Stable presentation callbacks: parent render churn cannot invalidate an acquired plan.
 // Each call resolves the *current* installed host; neither reference conveys authorization.
@@ -34,6 +36,8 @@ export interface MetaCeoOfficeProps {
   projection: OfficeProjection;
   /** Current presentation from the existing authenticated BYOK read owner. */
   byokObservation?: ByokRoleView;
+  /** Optional owner-qualified Hermes read; no browser-side team lookup or enrollment. */
+  organizationObservation?: OrganizationObservation;
   canRefreshByok?: boolean;
   onRefreshByok?: () => void;
   /** Existing canonical Agent OS reader; authored objectives never confer adoption. */
@@ -204,7 +208,7 @@ function SourceBadge({ source }: { source: SourceClaim }) {
 
 export function MetaCeoOffice({
   projection, draft, onDraftChange, nativeContinuation, onInspectWorkerResult, programmeDirection,
-  selectedProject, onOpenProjects, acceptedDirection, workRead, onInspectWork, projectJournal,
+  selectedProject, onOpenProjects, acceptedDirection, organizationObservation, workRead, onInspectWork, projectJournal,
   onOpenProject, onStartNewWork, byokObservation = { state: "SOURCE_UNBOUND" },
   canRefreshByok = false, onRefreshByok, locale = "en",
 }: MetaCeoOfficeProps) {
@@ -379,6 +383,11 @@ export function MetaCeoOffice({
       <p className="office-muted">{t("Read the accepted direction for this project. Its authored objective is a separate source record.")}</p>
       {acceptedDirection}
     </details> : null}
+    <details className="office-disclosure office-organization">
+      <summary>{locale === "zh-CN" ? "组织架构与目标关联" : "Organization and goal lineage"}</summary>
+      <OrganizationWorkspace binding={projection.context} missionState={projection.mission.source.state}
+        observation={organizationObservation} locale={locale} />
+    </details>
     <details className="office-disclosure office-objective">
       <summary>{t("Authored project objective")}</summary>
       <p className="office-muted">{t("This is the authored objective of the selected project from the existing Agent OS reader. It is project source, not accepted company direction. Reading it adopts nothing.")}</p>
@@ -387,6 +396,8 @@ export function MetaCeoOffice({
         {...programmeDirection}
         locale={locale} /> : <p>{t("Source unavailable")} · {t("Authored objective not supplied.")}</p>}
     </details>
+
+    <HermesNativePanel key={`hermes:${projection.context.authGeneration}`} locale={locale} />
 
     <details className="office-disclosure office-config">
       <summary>{t("Configuration")}</summary>

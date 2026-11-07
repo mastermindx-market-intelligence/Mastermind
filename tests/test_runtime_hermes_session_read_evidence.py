@@ -77,8 +77,8 @@ class Service:
                                        "mutated_count": 0}}
 
 
-@pytest.fixture
-def runtime(tmp_path, monkeypatch):
+@pytest.fixture(params=nc.HERMES_KINDS)
+def runtime(tmp_path, monkeypatch, request):
     """One real Runtime with one legacy and one native continuation request."""
     store = Runtime.at(tmp_path / "runtime")
     store.workers.register_worker("worker-01", provider="codex", account_label="test",
@@ -124,7 +124,8 @@ def runtime(tmp_path, monkeypatch):
                        stop_condition="Return one finding.")
     legacy_ref = owner.bind_request(principal_projection(principal), legacy_args)
     root = store.store.unique_root_created_event(job.job_id)
-    native_binding = {**BINDING, "root_job_id": job.job_id}
+    family = nc.hermes_family(request.param)
+    native_binding = {**BINDING, "root_job_id": job.job_id, "schema": family.binding_schema}
     native_target = nc.build_hermes_continuation_target(
         binding=native_binding, root_event=root, native_target=NATIVE_TARGET)
     native_payload = nc.build_hermes_continuation_request(
@@ -142,7 +143,7 @@ def runtime(tmp_path, monkeypatch):
             job_id=native_payload["root_job_id"], attempt_id=None, worker_id=None,
             payload=native_payload,
             command_id=nc._PREFIX + request_key)
-    return SimpleNamespace(runtime=store, owner=owner, job=job, root=root,
+    return SimpleNamespace(runtime=store, owner=owner, job=job, root=root, family=family,
                             legacy_ref=legacy_ref, native_ref=native_payload["read_ref"],
                             native_payload=native_payload, native_target=native_target,
                             request_key=request_key, binding=native_binding)
@@ -179,7 +180,7 @@ def test_native_original_request_is_readable_with_a_valid_principal(runtime):
     assert event.attempt_id is None and event.worker_id is None
     assert event.job_id == runtime.native_payload["root_job_id"]
     assert value == runtime.native_payload
-    assert value["schema"] == nc.HERMES_REQUEST_SCHEMA
+    assert value["schema"] == runtime.family.request_schema
 
 
 def test_native_original_request_refuses_a_foreign_or_missing_principal(runtime, monkeypatch):
@@ -245,7 +246,7 @@ def test_native_reply_evidence_returns_the_closed_five_field_shape(runtime):
     assert len(result) == 5
     event, value, aggregate, indexed_commit, indexed_native = result
     assert event.event_id > 0
-    assert value["schema"] == nc.HERMES_REQUEST_SCHEMA
+    assert value["schema"] == runtime.family.request_schema
     assert len(aggregate) == 1 and aggregate[0].event_type == nc._EVENT
     assert indexed_commit is None
     assert indexed_native is None
@@ -452,3 +453,32 @@ def test_the_native_readers_require_an_explicit_principal_filter(runtime):
     with runtime.runtime.observe_bounded_read() as observation:
         with pytest.raises(er.RuntimeReadUnavailable):
             observation.read_session_live_writer_bounded(read_ref=runtime.native_ref)
+
+def test_one_history_page_keeps_legacy_secretary_and_meta_originals(runtime):
+    other = nc.hermes_family("hermes_meta" if runtime.family.kind == "hermes_secretary"
+                             else "hermes_secretary")
+    binding = dict(runtime.binding, schema=other.binding_schema)
+    target = nc.build_hermes_continuation_target(
+        binding=binding, root_event=runtime.root, native_target=NATIVE_TARGET)
+    payload = nc.build_hermes_continuation_request(
+        principal=OFFICE_PRINCIPAL, binding=binding, root_event=runtime.root,
+        native_target=NATIVE_TARGET, arguments={
+            "target_ref": target["target_ref"], "operation_key": target["continuation_operation_key"],
+            "instruction": "Read the other exact role.", "stop_condition": "Return its original answer."})
+    key = nc._request_key(payload["operation_key"])
+    with runtime.runtime.store.transaction() as connection:
+        runtime.runtime.store.append_event(
+            connection, aggregate_type="session_bridge_continue", aggregate_id=key,
+            event_type=nc._EVENT, actor=nc._ACTOR, job_id=runtime.job.job_id,
+            attempt_id=None, worker_id=None, payload=payload, command_id=nc._PREFIX + key)
+    with runtime.runtime.observe_bounded_read() as observation:
+        _, _, rows = observation.read_session_reply_references_bounded(
+            work_ref="WS:WORKSPACE-AGENT-PROGRAM", root_job_id=runtime.job.job_id,
+            original_principals=(identity(),), high_water=None,
+            before_event_id=None, page_size=32)
+    _ = observation.receipt
+    assert {row["read_ref"] for row in rows} == {
+        runtime.legacy_ref, runtime.native_ref, payload["read_ref"]}
+    assert {row["target_ref"].split(":", 1)[0] for row in rows} == {
+        "codex", "hermes_secretary", "hermes_meta"}
+    assert all(row["reference_only"] is True for row in rows)

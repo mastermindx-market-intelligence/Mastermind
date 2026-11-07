@@ -1,0 +1,152 @@
+{
+  "sourceHead": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "originalRequestId": "5226a1441f084477a0fc523796fbe55f",
+  "originalAdmissionId": "d901546607d64c1e9c7cd195e4ddf532",
+  "observation": {
+    "at": "2026-11-07T09:02:06.800Z",
+    "pid": 80261,
+    "groups": [
+      {
+        "index": 6,
+        "names": [
+          "Outcome unknown. Check the previous request before sending again."
+        ],
+        "values": [
+          "Outcome unknown. Check the previous request before sending again."
+        ],
+        "nested": [
+          {
+            "index": 0,
+            "names": []
+          }
+        ]
+      },
+      {
+        "index": 7,
+        "names": [
+          "Original request",
+          ": ",
+          null
+        ],
+        "values": [
+          "Original request",
+          ": ",
+          ""
+        ],
+        "nested": [
+          {
+            "index": 0,
+            "names": []
+          },
+          {
+            "index": 1,
+            "names": []
+          },
+          {
+            "index": 2,
+            "names": [
+              "5226a1441f084477a0fc523796fbe55f"
+            ]
+          }
+        ]
+      },
+      {
+        "index": 9,
+        "names": [
+          "Native admission",
+          ": ",
+          null,
+          " \u00b7 ",
+          "started"
+        ],
+        "values": [
+          "Native admission",
+          ": ",
+          "",
+          " \u00b7 ",
+          "started"
+        ],
+        "nested": [
+          {
+            "index": 0,
+            "names": []
+          },
+          {
+            "index": 1,
+            "names": []
+          },
+          {
+            "index": 2,
+            "names": [
+              "d901546607d64c1e9c7cd195e4ddf532"
+            ]
+          },
+          {
+            "index": 3,
+            "names": []
+          },
+          {
+            "index": 4,
+            "names": []
+          }
+        ]
+      },
+      {
+        "index": 12,
+        "names": [
+          "Configured model",
+          ": ",
+          "qwen3:14b",
+          " \u00b7 ",
+          "Tool scope not qualified for sending"
+        ],
+        "values": [
+          "Configured model",
+          ": ",
+          "qwen3:14b",
+          " \u00b7 ",
+          "Tool scope not qualified for sending"
+        ],
+        "nested": [
+          {
+            "index": 0,
+            "names": []
+          },
+          {
+            "index": 1,
+            "names": []
+          },
+          {
+            "index": 2,
+            "names": []
+          },
+          {
+            "index": 3,
+            "names": []
+          },
+          {
+            "index": 4,
+            "names": []
+          }
+        ]
+      },
+      {
+        "index": 13,
+        "names": [
+          null
+        ],
+        "values": [
+          ""
+        ],
+        "nested": [
+          {
+            "index": 0,
+            "names": [
+              "The native conversation is ready. Start with your question or project context."
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -82,8 +82,8 @@ class NativeReplyReadTool:
             # verified type; a caller-supplied dict is never authentication.
             principal_projection(principal)
             data = await self._reader(principal, validated)
-            from .hermes_native import RESULT_SCHEMA as HERMES_RESULT_SCHEMA, validate_public_result
-            if type(data) is dict and data.get("schema") == HERMES_RESULT_SCHEMA:
+            from .hermes_native import RESULT_SCHEMAS as HERMES_RESULT_SCHEMAS, validate_public_result
+            if type(data) is dict and data.get("schema") in HERMES_RESULT_SCHEMAS:
                 data = validate_public_result(data)
                 if any(data[field] != value for field, value in validated.items()):
                     raise ValueError

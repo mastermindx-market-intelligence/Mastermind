@@ -35,7 +35,9 @@ it("preserves the exact reference selector and source witness; no legacy key is 
   await waitFor(()=>expect(h.transport.consume).toHaveBeenCalledTimes(1));
   const calls=h.transport.consume.mock.calls as unknown as readonly[Record<string,unknown>,AbortSignal][];
   expect(calls[0]?.[0]).toEqual(fixture.consume_request);expect(calls[0]?.[0]).not.toHaveProperty("operation_key");
-  expect(h.peek()?.kind).toBe("conversation_consume");expect(h.props.onUnresolvedChange).toHaveBeenLastCalledWith(true);
+  expect(h.peek()?.kind).toBe("conversation_consume");
+  // The transport call precedes the after-commit unresolved-state effect.
+  await waitFor(()=>expect(h.props.onUnresolvedChange).toHaveBeenLastCalledWith(true));
 });
 it("passes an actual initial-key read through without converting it to a reference",async()=>{
   const h=setup();render(<FreshConversationContinuation {...h.props} entry={{kind:"initial",read:h.initial}}/>);
