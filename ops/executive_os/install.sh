@@ -1936,7 +1936,18 @@ defaults = {
 }
 if source:
     source_path = pathlib.Path(source)
-    value = json.loads(source_path.read_text(encoding="utf-8"))
+    def unique_source_object(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("duplicate control config key")
+            result[key] = item
+        return result
+    try:
+        value = json.loads(source_path.read_text(encoding="utf-8"),
+                           object_pairs_hook=unique_source_object)
+    except (ValueError, RecursionError):
+        raise SystemExit("control config source must contain unambiguous finite UTF-8 JSON") from None
     if not isinstance(value, dict):
         raise SystemExit("control config source must contain an object")
     if value.get("python_runtime_provenance_digest") not in (None, python_runtime_provenance_digest):
@@ -1995,7 +2006,16 @@ if missing or unknown:
         f"control config schema drift; missing={sorted(missing)}, unknown={sorted(unknown)}"
     )
 for key, expected_value in expected.items():
-    if value.get(key) != expected_value:
+    # Python equality aliases booleans/integers and integers/floats, including
+    # nested policy fields. Preserve the Control loader's JSON type boundary
+    # before replacing the config; matching host values must also match types.
+    try:
+        matches = json.dumps(value.get(key), sort_keys=True, allow_nan=False) == (
+            json.dumps(expected_value, sort_keys=True, allow_nan=False)
+        )
+    except (TypeError, ValueError):
+        matches = False
+    if not matches:
         raise SystemExit(f"control config {key} differs from the reviewed host policy")
 blocked = re.compile(
     r"(?i)(password|credential|lease[_-]?token|api[_-]?key|access[_-]?token|secret_value)"
@@ -2004,12 +2024,17 @@ for key in value:
     if blocked.search(str(key)):
         raise SystemExit(f"control config contains forbidden secret-bearing key: {key}")
 
+# Validate the complete output before opening even the temporary file.
+# Strict serialization catches both non-finite tokens and exponent overflow;
+# UTF-8 encoding also refuses unpaired surrogates before any destination effect.
+try:
+    encoded = (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False,
+                          allow_nan=False) + "\n").encode("utf-8")
+except (TypeError, ValueError, RecursionError):
+    raise SystemExit("control config source must contain unambiguous finite UTF-8 JSON") from None
 path = pathlib.Path(destination)
 temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-temporary.write_text(
-    json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False) + "\n",
-    encoding="utf-8",
-)
+temporary.write_bytes(encoded)
 os.chmod(temporary, 0o440)
 os.replace(temporary, path)
 PY
