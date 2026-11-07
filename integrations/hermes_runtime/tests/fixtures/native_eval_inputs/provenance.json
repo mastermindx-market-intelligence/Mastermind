@@ -19,9 +19,9 @@
     },
     "hermes_state_runtime.py": {
       "fixture": "hermes_state_runtime.py.source",
-      "sha256": "1553a9e5091413092dd30d7613b9aaa7338919bfc5a5d3ac3f4cf8c57de4411b",
+      "bytes": 56549,
       "git_blob": "516e3ea46152226e320dc0b6236e6af0b2a00ccb",
-      "bytes": 56549
+      "sha256": "1553a9e5091413092dd30d7613b9aaa7338919bfc5a5d3ac3f4cf8c57de4411b"
     },
     "hermes_state_mutation_retirement.py": {
       "fixture": "hermes_state_mutation_retirement.py.source",
@@ -46,6 +46,18 @@
       "sha256": "b948b1369e80690fe36bbedef5c5d4871c748bc34a0e31a64fc012fb5c99f0b1",
       "git_blob": "5995a833a39173b88f25fcdcf7cdd20f2b82e0db",
       "bytes": 21489
+    },
+    "hermes_state_common.py": {
+      "fixture": "hermes_state_common.py.source",
+      "bytes": 74542,
+      "git_blob": "c31526f02c6516cdd25cd611df8a388098564366",
+      "sha256": "1e089e97c9440647a91e0c559d9a7691c61290cc72a0c337ccfcd1c39d97b1b7"
+    },
+    "hermes_state_schema.py": {
+      "fixture": "hermes_state_schema.py.source",
+      "bytes": 83019,
+      "git_blob": "c83e6b21566121ec5c39f1a2893a6d7921aa036c",
+      "sha256": "08abad090492db461eca6205f2791e47fa0b6238065c1c4f284420420ca45b37"
     }
   }
 }

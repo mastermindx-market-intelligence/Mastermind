@@ -18,6 +18,7 @@ import inspect
 import json
 import os
 from pathlib import Path
+import re
 import stat
 
 from scripts.agent_eval import contracts, validity
@@ -30,7 +31,8 @@ from scripts.agent_eval.verification import verify_configuration_graph, verify_e
 from .errors import RuntimeRefusal
 
 RECIPE_SCHEMA = "mastermind.hermes_native_eval_inputs/v1"
-MARKER_SCHEMA = "mastermind.hermes_native_eval_admission/v1"
+LEGACY_MARKER_SCHEMA = "mastermind.hermes_native_eval_admission/v1"
+MARKER_SCHEMA = "mastermind.hermes_native_eval_admission/v2"
 MARKER_KEY = "mastermind_eval_inputs_v1"
 RESULT_KEY = "mastermind_eval_inputs"
 RESULT_SCHEMA = "mastermind.hermes_native_eval_input_observation/v1"
@@ -46,9 +48,50 @@ _PRIVATE = object()
 _REQUEST_FIELDS = {"run_id", "scenario_id", "scenario_version", "scenario_digest",
     "configuration_id", "configuration_digest", "experiment_id", "experiment_digest",
     "arm_id", "pair_key", "replicate_index", "candidate_files", "context_text"}
-_MARKER_FIELDS = {"schema", "run_id", "source", "input", "scenario", "configuration",
+_LEGACY_MARKER_FIELDS = {"schema", "run_id", "source", "input", "scenario", "configuration",
     "experiment", "comparison", "candidate_files", "context_text", "renderer",
     "rendered_sha256", "binding_sha256"}
+_MARKER_FIELDS = _LEGACY_MARKER_FIELDS | {"producer", "publication"}
+RUNNER_ID = "mastermind.hermes_native_admission.v1"
+EXECUTION_SURFACE = "hermes-native"
+
+
+def producer_descriptor(release, base_sha, patch_sha256):
+    """Describe the already-qualified source; this grants no execution."""
+    if (type(release) is not str or re.fullmatch(r"[0-9a-f]{40}", release) is None
+            or type(base_sha) is not str or re.fullmatch(r"[0-9a-f]{40}", base_sha) is None
+            or type(patch_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", patch_sha256) is None):
+        _refuse("NATIVE_EVAL_PRODUCER_UNQUALIFIED")
+    return {"runner_id": RUNNER_ID,
+            "runner_code_ref": "git:mastermindx-market-intelligence/Mastermind@" + release,
+            "execution_surface": EXECUTION_SURFACE,
+            "execution_surface_version": "hermes@" + base_sha + "+native_eval_inputs@" + patch_sha256}
+
+
+def _validate_publication_binding(marker):
+    producer, publication = marker["producer"], marker["publication"]
+    if (type(producer) is not dict or set(producer) != {
+            "runner_id", "runner_code_ref", "execution_surface", "execution_surface_version"}
+            or producer["runner_id"] != RUNNER_ID or producer["execution_surface"] != EXECUTION_SURFACE
+            or producer["runner_code_ref"] != "git:mastermindx-market-intelligence/Mastermind@" + marker["source"]["release"]
+            or type(producer["execution_surface_version"]) is not str
+            or re.fullmatch(r"hermes@[0-9a-f]{40}\+native_eval_inputs@[0-9a-f]{64}",
+                            producer["execution_surface_version"]) is None
+            or type(publication) is not dict or set(publication) != {"artifact_root", "root_identity"}):
+        _refuse("NATIVE_EVAL_PRODUCER_UNQUALIFIED")
+    root = publication["artifact_root"]
+    _bytes(root, 1024)
+    if (not Path(root).is_absolute() or str(Path(root)) != root or ".." in Path(root).parts
+            or any(ord(char) < 32 for char in root)):
+        _refuse("NATIVE_EVAL_STORE_UNQUALIFIED")
+    identity = publication["root_identity"]
+    if (type(identity) is not dict or set(identity) != {"device", "inode", "uid", "mode"}
+            or any(type(value) is not int or value < 0 for value in identity.values())
+            or identity["inode"] == 0 or identity["mode"] != 0o700):
+        _refuse("NATIVE_EVAL_STORE_UNQUALIFIED")
+    expected = marker["configuration"]["execution"]
+    if any(producer[key] != expected[key] for key in ("execution_surface", "execution_surface_version")):
+        _refuse("NATIVE_EVAL_SURFACE_MISMATCH")
 
 
 def _refuse(code="NATIVE_EVAL_INPUTS_UNQUALIFIED"):
@@ -148,8 +191,11 @@ def _comparison(scenario, configuration, experiment, comparison):
 def validate_marker(marker, *, text=None):
     """Closed historical byte validation. This alone never authenticates a marker."""
     marker = _detach(marker)
-    if (type(marker) is not dict or set(marker) != _MARKER_FIELDS
-            or marker["schema"] != MARKER_SCHEMA or marker["renderer"] != RENDERER):
+    if type(marker) is not dict:
+        _refuse()
+    fields = (_MARKER_FIELDS if marker.get("schema") == MARKER_SCHEMA else
+              _LEGACY_MARKER_FIELDS if marker.get("schema") == LEGACY_MARKER_SCHEMA else None)
+    if fields is None or set(marker) != fields or marker["renderer"] != RENDERER:
         _refuse()
     try:
         contracts.parse_run_id(marker["run_id"])
@@ -171,6 +217,8 @@ def validate_marker(marker, *, text=None):
             or len(identity["text_sha256"]) != 64 or any(c not in "0123456789abcdef" for c in identity["text_sha256"])):
         _refuse()
     scenario, config = marker["scenario"], marker["configuration"]
+    if marker["schema"] == MARKER_SCHEMA:
+        _validate_publication_binding(marker)
     _comparison(scenario, config, marker["experiment"], marker["comparison"])
     if identity["submission_id"] != submission_id_for_run(marker["run_id"]):
         _refuse("NATIVE_EVAL_REQUEST_ID_MISMATCH")
@@ -308,6 +356,10 @@ class NativeEvalInputOwner:
         # Existing trusted-root/create-only store; never initialize another root.
         self.store = ArtifactStore(root, create_root=False)
         self.root_identity = (info.st_dev, info.st_ino, info.st_uid, stat.S_IMODE(info.st_mode))
+        derivation = launch.recipe["vendor_derivation"]
+        self.producer = producer_descriptor(self.release, derivation["base_sha"], derivation["patch_sha256"])
+        self.publication = {"artifact_root": str(root), "root_identity": dict(zip(
+            ("device", "inode", "uid", "mode"), self.root_identity))}
         launch.check()
 
     def check(self):
@@ -317,6 +369,11 @@ class NativeEvalInputOwner:
         if (self.binding.evaluation_owner is not self
                 or self.launch.recipe.get("evaluation_inputs") != self.recipe
                 or self.launch.owner.root.name != self.release
+                or self.producer != producer_descriptor(self.release,
+                    self.launch.recipe["vendor_derivation"]["base_sha"],
+                    self.launch.recipe["vendor_derivation"]["patch_sha256"])
+                or self.publication != {"artifact_root": str(self.store.root), "root_identity": dict(zip(
+                    ("device", "inode", "uid", "mode"), self.root_identity))}
                 or self.store.root.resolve(strict=True) != self.store.root
                 or not stat.S_ISDIR(info.st_mode)
                 or (info.st_dev, info.st_ino, info.st_uid, stat.S_IMODE(info.st_mode)) != self.root_identity):
@@ -382,6 +439,7 @@ class NativeEvalInputOwner:
         _comparison(scenario, configuration, experiment, comparison)
         marker = {"schema": MARKER_SCHEMA, "run_id": specification["run_id"],
             "source": {"release": self.release, "profile_id": self.profile_id, "profile_digest": self.profile_digest},
+            "producer": copy.deepcopy(self.producer), "publication": copy.deepcopy(self.publication),
             "input": {"principal_id": principal, "session_id": session_id,
                 "submission_id": submission_id, "text_sha256": _sha(_bytes(text, MAX_INPUT_BYTES))},
             "scenario": scenario, "configuration": configuration, "experiment": experiment,
@@ -411,6 +469,8 @@ class NativeEvalInputOwner:
         self.require_unretained_run(marker["run_id"])
         self.require_enrollment(marker["input"]["principal_id"], scope.session_id)
         if (marker["source"] != {"release": self.release, "profile_id": self.profile_id, "profile_digest": self.profile_digest}
+                or marker["schema"] != MARKER_SCHEMA or marker["producer"] != self.producer
+                or marker["publication"] != self.publication
                 or marker["input"]["session_id"] != scope.session_id
                 or marker["input"]["principal_id"] != row.get("principal_id")
                 or marker["input"]["submission_id"] != row.get("request_id")

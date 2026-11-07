@@ -2,6 +2,8 @@
 
 Status: source implementation and component qualification. This selection is not
 an installed fleet grant, complete EVAL producer, efficacy result or promotion.
+The original native control now also finalizes retained terminal attempts as
+honest, incomplete v2 run receipts; see the publication section below.
 The incumbent complete-producer contract remains
 `docs/hermes/NATIVE_EVAL_PRODUCER_CONTRACT.md`.
 
@@ -18,9 +20,11 @@ The held release explicitly selects `evaluation_inputs` with schema
 existing directory must be canonical, owned by the role, mode `0700`, and separate
 from the vendor/import/inventory/pristine-source paths. The exact cumulative
 `native_eval_inputs` vendor derivation is mandatory; its manifest is the source of
-the patch and eleven postimage hashes. Nine prior Workspace OAuth/privacy
-postimages are unchanged. Only the original native authority and retirement owner
-receive additional changes.
+the patch and fourteen qualified file hashes. Nine prior Workspace OAuth/privacy
+postimages are unchanged. The original authority and retirement owner receive
+additional changes; the original schema gains one nullable private publication
+column, and the original admission projection hides that column. The pinned
+schema reconciler is qualified unchanged and performs its normal column upgrade.
 
 This version selects **mmmeta with the existing `zai.glm-5.3` provider choice**,
 consumer publication v3 or v4, and native gateway installation v3. The recipe
@@ -42,6 +46,17 @@ The receiver verifies the complete immutable artifact graph and exact selector
 joins. Experimental trials must match the selected scenario reference and arm's
 configuration digest, the original finalizer's pairing rule and replicate bound.
 Standalone trials require null comparison fields.
+
+New admissions carry `mastermind.hermes_native_eval_admission/v2` under the
+unchanged `mastermind_eval_inputs_v1` payload key. It binds the actual selected
+release/derivation producer descriptor and the original artifact root's canonical
+path, device, inode, UID and mode before the original payload fingerprint is
+computed. The configuration's surface/version must match that held descriptor.
+`NativeSecretaryClient.evaluation_capabilities()` reads the current producer and
+profile descriptor on the existing private control carrier for configuration
+authoring; it grants no admission or inference. Historical v1 markers retain
+their original byte contract and remain readable. They cannot acquire missing
+publication provenance from today's process.
 
 The first slice requires an honestly authored warm-session scenario:
 `fresh_process_required`, `fresh_workspace_required`, and
@@ -157,3 +172,100 @@ recipe/derivation/launcher/profile comparison. No EVAL-specific rollback receipt
 or alternate maintenance path is introduced. Installed acceptance must prove the
 same source-qualified maintenance owner, original enrollment, original carrier,
 actual constraints and source receipt before trial execution or efficacy claims.
+
+## Terminal publication on the original carrier
+
+`NativeSecretaryClient.publish_evaluation(...)` sends one finite
+`publish_evaluation` operation through the existing same-UID native private
+handler. The caller supplies the original profile/session/submission/input digest,
+mandatory admission ID, and `{run_id, binding_sha256}`. It cannot supply a root,
+receipt, observation, timestamp, finalizer reference, alternative request or
+execution ticket. This verb is not exposed by generic role HTTP dispatch.
+
+The current original authority owns the SQLite writer. Its current runtime epoch
+is fenced inside the existing write transaction; the original admission's epoch
+and generation remain historical. The transaction joins the exact principal and
+input marker, requires a recognized stable terminal outcome, and loads result
+siblings coherently. A raw `terminal/steering` row can still return to queued, so
+both steering and steered outcomes are refused.
+
+The original admission's nullable `eval_publication_json` freezes one closed,
+canonical receipt of at most 64 KiB. An active terminal row owns that column; after
+retirement, its original admission tombstone owns the same field. There is no new
+table, prefix, result envelope, publication journal, queue or retry loop. The
+existing declarative schema reconciler adds the nullable column at normal startup,
+and `_row` removes it from public admission projections.
+
+An existing frozen record is validated and returned before examining the result,
+which may since have expired. Retirement copies the field with the original row;
+pruning preserves it with the EVAL input identity while normal output expiry
+continues. The frozen record contains the finalized run, original native outcome,
+producer/root binding and run digest. It contains no answer, transcript, reasoning,
+raw error or raw provider-usage copy. A retained answer is referenced at the
+original native receipt with its exact redacted-output digest; this is an external
+reference with normal expiry, not a content-verification or perpetual-output grant.
+
+After commit, the operation reads back the original frozen record before calling
+the same `ArtifactStore.create`. All created, identical and concurrent-identical
+publication paths validate and fsync the final artifact inode, sync its canonical
+directory chain, and verify exact bytes, shape, graph and population on readback.
+An identical replay repairs a prior incomplete durability barrier before success.
+Failures retain the original file and record; they never overwrite or select a new
+run ID/root. Merely resolving a shape-valid run is not publication authentication
+or durability proof. A lost commit or publication response remains
+`EFFECT_UNKNOWN`; the only recovery is this same original publication operation,
+without re-executing the admission.
+
+Known pre-write refusals remain `REFUSED`; unavailable preflight source reads
+remain `UNAVAILABLE`. A known different artifact returns a specific conflict
+refusal with `frozen_record_retained: true`. None of these known outcomes is
+relabeled as mutation uncertainty.
+
+### Conservative evidence mapping
+
+The original selected marker supplies mandatory procedure/context/profile and
+producer identity. Today's held release supplies separate finalizer provenance.
+The fixed native-outcome mapping is:
+
+| Native outcome | Completion status | Termination reason |
+| --- | --- | --- |
+| completed | COMPLETED, or PARTIAL when the retained native partial flag is true | NATIVE_COMPLETED or NATIVE_PARTIAL |
+| failed | FAILED | NATIVE_FAILED |
+| cancelled | CANCELLED | NATIVE_CANCELLED |
+| interrupted | FAILED | NATIVE_INTERRUPTED |
+| rejected | FAILED | NATIVE_REJECTED |
+
+Interrupted/rejected are unsuccessful selected trials; these coarse statuses do
+not claim a user cancellation or that a model ran. Unknown or transfer outcomes
+cannot be published by this version.
+
+Retained validated transport can contribute original same-process provenance and
+actual timing. The process release must equal the original marker's release.
+Wall-clock regression, impossible timestamps or times after the actual finalizer
+clock become unavailable/conflicting; valid monotonic duration remains independent.
+No clock is advanced to make a receipt fit.
+
+Request-model, explicit seed and supported effort scalars additionally require an
+exact, unambiguous join across original request events, EVAL assemblies, logical
+calls, dispatches and every retained wire attempt. The request-event key includes
+physical agent session, turn, API request, API-call count and retry count. There
+must be no unused/duplicate event, missing EVAL assembly, changed content digest,
+unsupported client, unfinished span, error or overflow. Uniform observed values
+remain measured even if they disagree with configuration; they are never filled
+from it. An observed request label is identified only by an exact byte-digest
+match to the frozen public label. A differing label stays unavailable/conflicting.
+Exactly one correlated physical session can yield the fingerprint of
+`[original_profile_id, native_agent_session_id]`; multiple IDs stay conflicting.
+
+Provider request coverage remains partial. Response-reported labels do not prove
+the serving model. Explicit wire sampling digests remain in the trace and are not
+relabeled as complete effective sampling. Network-origin hashes are not EVAL
+destination-string digests. Unobserved provider/auth, effective environment,
+freshness, capability/source/network coverage, effects and cleanup stay missing or
+unknown. This first publisher therefore creates invalid v2 evidence of attempts,
+never a valid Harness2 trial or learning promotion.
+
+Result absence at first publication is `NOT_RETAINED`, not an inferred expiry.
+Malformed retained results are conflicting; results above the 2 MiB bounded
+projection budget are limited. The original owner retains/expunges those results
+normally; this publication path only freezes its bounded evidence projection.

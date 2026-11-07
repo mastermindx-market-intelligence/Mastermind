@@ -732,6 +732,8 @@ ALLOWED_PATHS = frozenset(
         # below are contextual allowances, not additional program ownership.
         "integrations/hermes_runtime/native_eval_inputs.py",
         "integrations/hermes_runtime/tests/test_native_eval_inputs.py",
+        "integrations/hermes_runtime/native_eval_publication.py",
+        "integrations/hermes_runtime/tests/test_native_eval_publication.py",
         "docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md",
         "integrations/hermes_qualification/native_eval_inputs/README.md",
         "integrations/hermes_qualification/native_eval_inputs/UPSTREAM_LICENSE",
@@ -744,6 +746,9 @@ ALLOWED_PATHS = frozenset(
         "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_cli__runtime_provider_custom.py.source",
         "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_state_mutation_retirement.py.source",
         "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_state_runtime.py.source",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_state_common.py.source",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_state_schema.py.source",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/legacy_marker_v1.json",
         "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/plugins__model-providers__custom____init__.py.source",
         "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/provenance.json",
         "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/providers__base.py.source",

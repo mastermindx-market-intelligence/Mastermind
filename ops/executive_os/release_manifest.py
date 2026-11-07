@@ -297,7 +297,7 @@ def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
                     ("computer_env_guard", "d17af87e60a1f92a52ef446ad393ce2841c876a28e2ae0580bc7e6db09d6721f"),
                     ("diagnostic_privacy", "ded504ad2d660f14c89527ec74593fcc459485666fbb0994bb92f7b02c878bce"),
                     ("workspace_oauth_privacy", "1d1df9a1fde6654d1690715e52ed10524c6b1b4d9af24b406243324d212146ce"),
-                    ("native_eval_inputs", "ef85e2546fb69b735b87f1dc72b492e22fdb20ea20ad6d11db1aceebffa5c17c"))):
+                    ("native_eval_inputs", "8c2a20ab5b7dde2bda052ad275a0defe5f5e689b1cabf6e5882c412d948a9211"))):
             raise ReleaseManifestError("Hermes vendor derivation is invalid")
         derivation = dict(derivation, source_root=_safe_installation_path(derivation["source_root"]))
     version = value.get("schema")
