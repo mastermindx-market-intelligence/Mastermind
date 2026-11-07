@@ -194,3 +194,38 @@ evidence. The current native worktree contains active fallback/TUI edits; its
 tracked-byte snapshot and committed environment selection remained unchanged
 across this test attempt. Preserve those writers. Exact current evidence is in
 current-worker-composition.json and the three retained logs.
+
+
+## H5 configured-model consumer qualification
+
+Frozen H5 source4fd801e is composed with current H2/final-carrier/worker source.
+The existing signed HTTP and Unix path exposed a missing outer Executive route;
+the fixed query-free GET now joins the incumbent route list. The original auth,
+permission-currentness, source identity and closed-wire fences remain in force.
+The current ProjectExecutionHistory listener/focus repair is preserved.
+
+The broad run passed544 existing cases. Its three failures were new negative-wire
+fixtures lacking a real permission stamp; after using the actual signed transport,
+all18 new integration cases passed. These include the real ModelRouter read,
+missing/foreign scope, fixed method/path/body/query shape, permission/expiry
+changes, Executive binding replacement, unsupported capacity/admission claims,
+ambiguous/nonfinite JSON and atomic source replacement. This is not a claim that
+the initial562-case invocation was green. The UI's10 cases, type check and
+production build passed. Existing large-chunk/dynamic-import warnings remain.
+
+The actual CLI read reports10 provider aliases,19 model aliases and5 workload
+routes at revision2104a81e045277b40246030d8ef83756ef0097ac7a6fefa475bd8c337a3bfe43.
+An unchanged change-preview retained both policy files byte-for-byte. Physical
+account pools remain NOT_JOINED, live capacity NOT_OBSERVED and admission false.
+The active H5 physical-pool consumer writer retains its lane. These disposable
+transport tests are not installed/authenticated browser acceptance.
+
+## Current primary core preimages and reversible artifact
+
+A fresh read of the existing Hermes2bd378ed worktree matched all8 regular-file
+preimages and confirmed both new paths absent. The exact0029f3c8 patch applied
+in a disposable ten-path copy, yielded all10 manifest postimages with valid Python
+syntax and reversed exactly to the original preimages. The live native tree was
+not modified. The receipt is primary-core-preimages.json. Recheck these inputs
+and current live custody at any actual install boundary; this observation is not
+an installation CAS or release authorization.

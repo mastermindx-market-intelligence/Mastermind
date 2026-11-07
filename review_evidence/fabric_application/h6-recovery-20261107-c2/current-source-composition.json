@@ -29,7 +29,7 @@
     "compatible_law_pin": "4fb0d3825b5b4b4439e65e7382660112b7c2ef8c",
     "current_h2_parent": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
     "governing_diff": "none",
-    "h5_baseline_incorporated": false,
+    "h5_baseline_incorporated": true,
     "hosted_current_head": "NOT_YET_RUN",
     "incoming_ci_preserved": true,
     "native_junit_suite_counter": 542,
@@ -48,11 +48,13 @@
   "h3_patch_sha256": "5d3ad02f01e6c68184e66a7077ee67c14c7f8ff1213920a899d967d92b54fbf2",
   "h3_strict_scope_qualified": false,
   "h5_inputs": {
-    "baseline_2109_at_4fd_incorporated": false,
+    "baseline_2109_at_4fd_incorporated": true,
     "contract": "h2-h5-consumer-contract.md",
     "historical_projection": "h5-historical-derived-view.json",
     "live_capacity": "NOT_OBSERVED",
-    "physical_account_join": "NOT_JOINED"
+    "outer_route_repaired": true,
+    "physical_account_join": "NOT_JOINED",
+    "qualification": "h5-composition-qualification.json"
   },
   "housekeeping": "Commit applied and read back; automatic Git housekeeping reported a permission refusal against an unrelated worktree index. No housekeeping retry or permission mutation was attempted.",
   "incoming_ci_script_blob": "7eb889d42f46724c939f1d7e62b3655ebc84c0f9",
@@ -67,6 +69,7 @@
   "native_loader_repair": "native-loader-qualification.json",
   "original_carrier_at_join": "da2db3909544137ca8b0602304a9b574b18f5277",
   "original_root": "fabric-application-integration-20261104-sol",
+  "primary_core_preimage_qualification": "primary-core-preimages.json",
   "provider_calls": false,
   "qualified_base": "a88488670bc99f7156eff193101b76795c16733f",
   "qualified_merge_commit": "ab4732a81e7101d137f6fe31dea2f17f8a536e1d",
@@ -80,6 +83,8 @@
     "backend_sha256": "bcdf8f1900f07fd096da1e242cdda8d3860518db9e1964c747d3b45b19d023c5",
     "current_native_abi_qualification": "IMPORT_FAILED_BEFORE_CASES",
     "live_acceptance": false,
+    "newer_completed_checker_contribution": "c07bc8544caa498a65b49f12c17b79dba13f8c40",
+    "newer_completed_checker_incorporated": false,
     "qualification": "current-worker-composition.json",
     "runtime_package_sha256": "c099a74d4ec0f68a4623ba56191e93c0a64e7d3384e6bdd9773793887e7de927",
     "source": "7425d029c7e2afbe38d07abfa3cf95c1527d4439"

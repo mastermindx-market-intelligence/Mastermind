@@ -256,3 +256,32 @@ unchanged replay is attempted. The author's prior22-case native proof is not
 relabeled as a current integrated run. Native installation/enrollment, actual
 worker START, retained result and original-parent consumption remain separate
 H4-custody acceptance. H5 baseline composition continues in this assignment.
+
+
+### H6 H5 configured-read integration and primary preimage proof — 2026-11-07
+
+Composed frozen H5 baseline4fd801e, preserving the current ProjectExecutionHistory
+focus/listener fix and the complete identity-pin union. The actual signed mounted
+HTTP path reproduced404: the inner H5 route was absent from the outer Executive
+fixed GET list. Added that exact query-free read through the incumbent router.
+
+Qualified544 existing router/permission/identity cases and18 new signed HTTP/Unix
+integration cases. The initial broad invocation had3 new fixture failures;
+those fixtures were corrected to use the real permission-stamped transport and
+the18-case module then passed. UI10 cases, typecheck and production build passed.
+CLI inspect/unchanged-preview retained the source files and explicitly reported
+physical pools NOT_JOINED, capacity NOT_OBSERVED and admission false. Installed
+browser and the active H5 physical consumer join remain separate acceptance.
+
+Fresh read-only native qualification matched8 current Hermes core preimages and
+2 absent paths. The exact patch applied to a disposable copy, produced all10
+manifest postimages and reversed exactly. No live source, profile, generation,
+service, account or provider effect occurred. Evidence is in
+h5-composition-qualification.json and primary-core-preimages.json under the H6
+recovery evidence directory.
+
+A newer completed worker checker contributionc07bc854 now supersedes the earlier
+worker source tuple; incorporate that bounded delta while preserving #2225's
+active AUTO/catalog/PyYAML writer. Current exact-head hosted CI, final-carrier
+adoption, qualified release/account/enrollment and original primary/worker/OS
+acceptance remain open. Agent OS plan linkage remains unproven. MISSION_COMPLETE=false.

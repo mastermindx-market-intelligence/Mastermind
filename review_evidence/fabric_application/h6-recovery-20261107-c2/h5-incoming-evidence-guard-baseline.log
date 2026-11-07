@@ -1,0 +1,9 @@
+F..........................                                              [100%]
+=================================== FAILURES ===================================
+________ test_no_anonymous_macro_reads_in_executable_or_config_surfaces ________
+tests/test_no_anonymous_macro_reads.py:292: in test_no_anonymous_macro_reads_in_executable_or_config_surfaces
+    assert not violations, (
+E   AssertionError: Anonymous Macro repo read(s) found outside the allowlist: {'review_evidence/fabric_application/hermes-macro-current-pair-qualification-20261107.json': [('bare_clone_url', 'https://github.com/mastermindx-market-intelligence/macro'), ('bare_clone_url', 'https://github.com/mastermindx-market-intelligence/macro')]}
+E   assert not {'review_evidence/fabric_application/hermes-macro-current-pair-qualification-20261107.json': [('bare_clone_url', 'http...stermindx-market-intelligence/macro'), ('bare_clone_url', 'https://github.com/mastermindx-market-intelligence/macro')]}
+=========================== short test summary info ============================
+FAILED tests/test_no_anonymous_macro_reads.py::test_no_anonymous_macro_reads_in_executable_or_config_surfaces
