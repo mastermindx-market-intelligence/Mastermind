@@ -13,6 +13,11 @@ import stat
 import subprocess
 from urllib.parse import urlsplit
 
+if __package__:
+    from .runtime_compat import prepare_native_session as native_session
+else:
+    from runtime_compat import prepare_native_session as native_session
+
 PIN = "687f282e8625c6b8d11ff58211a90524be2e4317"
 HERE = Path(__file__).resolve().parent
 
@@ -58,6 +63,75 @@ def inventory(root):
     return result
 
 
+def company_host_exports(root, build, *, required=False):
+    """Verify the fixed private host leaf; it does not install a company carrier."""
+    if "host_exports" not in build:
+        if required:
+            raise ValueError("Company host reader build required")
+        return None
+    exports = build["host_exports"]
+    if type(exports) is not dict or set(exports) != {"./company-peer"}:
+        raise ValueError("Company host export mapping refused")
+    row = exports["./company-peer"]
+    if (type(row) is not dict or set(row) != {"file", "sha256"}
+            or row["file"] != "company-peer.js" or type(row["sha256"]) is not str
+            or not re.fullmatch(r"[0-9a-f]{64}", row["sha256"])):
+        raise ValueError("Company host export identity refused")
+    file = root / row["file"]
+    if file.resolve(strict=True) != file or sha(file) != row["sha256"]:
+        raise ValueError("Company host export differs from compiled source mapping")
+    return exports
+
+
+NATIVE_SESSION_SOURCE_PATH = "integrations/deepseek_harness/runtime_compat/native-session-source.json"
+NATIVE_SESSION_PATCH_PATH = "integrations/deepseek_harness/runtime_compat/native-session-generation.patch"
+
+
+def package_native_session(release, donor):
+    """Consume the qualified patch in the existing owned native build tree."""
+    source_path = HERE / "runtime_compat/native-session-source.json"
+    source_raw = source_path.read_bytes()
+    expected = native_session.validate_manifest(
+        json.loads(source_raw), (HERE / "runtime_compat/native-session-generation.patch").read_bytes())
+    receipt = native_session.apply_to_owned_tree(release / "app", donor)
+    if receipt != native_session.prepared_receipt(expected) or source_path.read_bytes() != source_raw:
+        raise ValueError("Native session source changed during preparation")
+    receipt_path = release / "native-session-receipt.json"
+    with receipt_path.open("x") as stream:
+        stream.write(json.dumps(receipt, sort_keys=True) + "\n")
+    return {"source_sha256": hashlib.sha256(source_raw).hexdigest(),
+            "patch_sha256": expected["patch_sha256"], "receipt_sha256": sha(receipt_path)}
+
+
+def verify_native_session_package(release, config, accepted, source_repo, source_sha):
+    # An older accepted package remains identified by its older protected receipt.
+    if "native_session_patch" not in config and "native_session_patch" not in accepted:
+        return
+    identity = config.get("native_session_patch")
+    if (type(identity) is not dict or set(identity) != {"source_sha256", "patch_sha256", "receipt_sha256"}
+            or any(type(value) is not str or not re.fullmatch(r"[0-9a-f]{64}", value)
+                   for value in identity.values())
+            or identity != accepted.get("native_session_patch")):
+        raise ValueError("Native session patch differs from protected build qualification")
+    source_raw = subprocess.check_output(["git", "-C", str(source_repo), "show",
+                                          source_sha + ":" + NATIVE_SESSION_SOURCE_PATH])
+    patch_raw = subprocess.check_output(["git", "-C", str(source_repo), "show",
+                                         source_sha + ":" + NATIVE_SESSION_PATCH_PATH])
+    expected = native_session.validate_manifest(json.loads(source_raw), patch_raw)
+    receipt_path = release / "native-session-receipt.json"
+    if (hashlib.sha256(source_raw).hexdigest() != identity["source_sha256"]
+            or expected["patch_sha256"] != identity["patch_sha256"]
+            or receipt_path.resolve(strict=True) != receipt_path
+            or sha(receipt_path) != identity["receipt_sha256"]
+            or json.loads(receipt_path.read_bytes()) != native_session.prepared_receipt(expected)):
+        raise ValueError("Native session preparation differs from protected source")
+    for name, before in expected["source_sha256"].items():
+        file = release / "app" / name
+        if (file.resolve(strict=True) != file
+                or sha(file) != expected["output_sha256"].get(name, before)):
+            raise ValueError("Native session package source differs from protected patch")
+
+
 def stage(args):
     donor = exact_path(args.donor)
     release = exact_path(args.release, exists=False)
@@ -89,6 +163,8 @@ def stage(args):
     for file, digest in build["source_sha256"].items():
         if not re.fullmatch(r"src/(?:client/)?[a-z.-]+\.ts", file) or sha(company / file) != digest:
             raise ValueError("Company plugin changed after compilation")
+    host_exports = company_host_exports(company / "lib", build, required=True)
+    native_session.manifest()  # Refuse changed patch inputs before creating the package.
     # Inspect links before copying. Nothing is copied from a user credential store.
     for parent, dirs, files in os.walk(donor, followlinks=False):
         dirs[:] = [name for name in dirs if name not in (".git", ".cache", ".turbo")]
@@ -99,6 +175,7 @@ def stage(args):
     release.mkdir(mode=0o700, parents=True)
     shutil.copytree(donor, release / "app", symlinks=True,
                     ignore=shutil.ignore_patterns(".git", ".cache", ".turbo"))
+    session_patch = package_native_session(release, donor)
     # Rebuild only this owned copy through the upstream dependency-aware graph.
     # The native title is a build value, not a DOM override or copied UI owner.
     build_env = {key: os.environ[key] for key in ("HOME", "PATH", "TMPDIR", "LANG", "LC_ALL", "SDKROOT", "DEVELOPER_DIR") if key in os.environ}
@@ -129,6 +206,8 @@ def stage(args):
         "node": str(node), "node_sha256": sha(node),
         "public_url": public_url, "port": args.port, "relay_port": args.relay_port,
         "company_client_sha256": build["client_sha256"],
+        "company_host_exports": host_exports,
+        "native_session_patch": session_patch,
         "native_client_build_sha256": sha(native_build),
         "pnpm_sha256": sha(pnpm),
         "company_patch_sha256": sha(company_patch),
@@ -269,6 +348,11 @@ def export_publication(*, release, source_repo, source_sha, out):
             or build.get("client_sha256") != sha(company / "client.js")
             or build["client_sha256"] != config["company_client_sha256"]):
         raise ValueError("Company client qualification differs")
+    host_exports = company_host_exports(company, build)
+    if (host_exports != config.get("company_host_exports")
+            or host_exports != accepted_build.get("company_host_exports")):
+        raise ValueError("Company host export differs from protected build qualification")
+    verify_native_session_package(release, config, accepted_build, source_repo, source_sha)
     for name, expected in build["source_sha256"].items():
         if not re.fullmatch(r"src/(?:client/)?[a-z.-]+\.ts", name):
             raise ValueError("Company source path refused")

@@ -64,6 +64,50 @@ owner abort without inherited-tool reappearance. The refusal preserves the
 adapter's conservative original-operation classification while independently
 proving child and task cleanup.
 
+## Native command admission and cancellation
+
+`prepare_native_session.py` prepares a separate four-file patch to the original
+SessionController, command, Agent-resolution and history owners. It verifies the
+same clean donor pin, lockfile, all 34 tracked TypeScript package inputs, exact
+patch scope and four postimages. It refuses partial patch states and never edits
+the donor. The original resume map, factory, request-ID deduplication, inbox,
+streaming events and native Stop `keepInbox: true` behavior remain the owners.
+
+The patch carries the admitted operation's cancellation signal through existing
+asynchronous resolution, preset composition and attachment work, into the
+factory's supported creation-only signal, and checks it before native inbox
+admission. Stop checks the actual Gateway invocation before its synchronous
+command. A retired follow opening cannot promote a cold writer. Cancelling a
+joining waiter cannot cancel the original shared-resume initiator. Generic
+Gateway unary semantics are unchanged.
+
+Run this additional gate with the same already-built donor:
+
+```sh
+python3 integrations/deepseek_harness/runtime_compat/prepare_native_session.py "$DSH_SOURCE"
+cd integrations/deepseek_harness/runtime_compat
+DSH_SOURCE="$DSH_SOURCE" node "$DSH_SOURCE/node_modules/vitest/vitest.mjs" run --config vitest.session.config.mts
+DSH_SOURCE="$DSH_SOURCE" node check-native-session.mjs
+```
+
+The eight cases exercise the actual native Connection/Gateway, session
+controllers, AgentLoop and JSONL owner with an explicit fixture model. They cover
+revocation during attachment admission; original request-ID deduplication;
+retired and current Stop; cold-resume cancellation during composition and
+unpublished setup; independently cancelled shared-resume waiters; and retired
+follow promotion. The two prompt/Stop regressions fail against the unchanged
+preimage (`MMX_NATIVE_SESSION_PREIMAGE=1`, restricted to those cases). The patched
+portable source passed all eight, and the donor-strict host TypeScript program
+plus the company reader reported zero diagnostics. Generated receipts and test
+logs stay in `.cache/native-session/`.
+
+Native resume may retain legitimate crash-repair bytes before cancellation. The
+qualified claim is no new prompt/model admission and no surviving newly acquired
+writer in the tested cases, not blanket absence of storage effects. Stop remains
+an acknowledgment, not terminal-turn proof. This patch consumes an existing
+trusted operation signal; it does not authenticate the stock browser, establish
+a company session association or authorize a provider.
+
 ## Evidence boundary
 
 The native fixture uses a deterministic test model and a synthetic registry

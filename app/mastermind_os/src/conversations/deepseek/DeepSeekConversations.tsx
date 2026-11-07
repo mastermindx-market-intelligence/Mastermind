@@ -24,15 +24,17 @@ export function readDeepSeekAppConfig(): DeepSeekAppConfig | null {
   return deepSeekAppConfig(document.querySelector('meta[name="mastermind-dsh-app"]')?.getAttribute("content"), window.location.origin);
 }
 function presentation(props: Props, generation: number): CompanyView {
-  const projects = props.signedIn && props.model.projectsState === "CURRENT"
+  const current = props.model.authGeneration === props.authGeneration && props.model.projectsState === "CURRENT";
+  const projects = props.signedIn && current
     ? props.model.projects.slice(0, MAX_PROJECTS).flatMap(row => {
+      if (row.locator.authGeneration !== props.authGeneration) return [];
       const title = (row.title ?? row.locator.workRef).replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 256);
       return validWorkRef(row.locator.workRef) && title ? [{workRef: row.locator.workRef, title}] : [];
     }) : [];
   const unique = projects.filter((row, index) => projects.findIndex(other => other.workRef === row.workRef) === index);
   return {
     generation,
-    state: !props.signedIn ? "SIGNED_OUT" : props.model.projectsState === "CURRENT" ? "CURRENT" : "UNAVAILABLE",
+    state: !props.signedIn ? "SIGNED_OUT" : current ? "CURRENT" : "UNAVAILABLE",
     locale: props.locale ?? "en", theme: props.theme ?? "dark", projects: unique,
     selectedProject: unique.some(row => row.workRef === props.selectedProject) ? props.selectedProject! : null,
   };
@@ -54,8 +56,10 @@ function NativeChatFrame(props: Props & {config: DeepSeekAppConfig}) {
       onState: setState,
       onOpenProject: workRef => {
         const current = live.current;
-        if (!current.signedIn || current.model.projectsState !== "CURRENT") return false;
-        const matches = current.model.projects.filter(row => row.locator.workRef === workRef);
+        if (!current.signedIn || current.model.authGeneration !== current.authGeneration ||
+          current.model.projectsState !== "CURRENT") return false;
+        const matches = current.model.projects.filter(row => row.locator.workRef === workRef &&
+          row.locator.authGeneration === current.authGeneration);
         return matches.length === 1 && current.onOpenProject(matches[0].locator);
       },
     });

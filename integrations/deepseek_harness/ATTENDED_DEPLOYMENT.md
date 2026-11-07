@@ -29,6 +29,15 @@ the copied dependencies from the pinned lockfile before building. The package
 retains the native client build record, compiled company plugin, upstream MIT
 notice, file/link inventory and exact Node identity, and creates private
 persistent state. No provider credential is copied from the host environment.
+Before the native build, the packager applies the qualified four-file native
+session cancellation patch only to its owned copy. `native-session-receipt.json`
+binds the exact patch and native postimages; `app.json` also binds its source
+manifest and the compiled private company reader. The protected publication
+export compares those identities to the same accepted source revision and
+refuses stale host output, altered patch input or native source drift. Older
+packages remain tied to their older qualification; a new build must earn its
+own `attended-build.json` record.
+
 The donor remains intact. The explicit `--check-only` verifies the complete
 closure; normal launches verify immutable controls, app entries and company
 artifacts so startup does not reread every development dependency.
@@ -49,6 +58,7 @@ filesystem or network sandbox.
 | --- | --- |
 | `app.json` | Exact package, Node, state, public URL and listener identity |
 | `package-manifest.json` | Hashes/modes and internal dependency-link inventory |
+| `native-session-receipt.json` | Exact native command patch and four source postimages |
 | `company.patch.yml` | Immutable native company plugin insertion |
 | `com.mastermind.deepseek.web.plist` | One native app launchd definition; no auto-retry |
 | `public-edge.caddy` | Candidate root host route with native auth/cookie/frame semantics |

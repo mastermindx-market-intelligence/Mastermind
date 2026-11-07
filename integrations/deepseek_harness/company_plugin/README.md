@@ -73,6 +73,46 @@ bridge. The native snapshot store clears revoked data. Supported slot additions
 are `sidebar.brand.mark`, `sidebar.brand.name`, `sidebar.panellist`, and a fresh
 `main["mastermind-projects"]` entry. Native `main["conversation"]` is untouched.
 
+## Private native history consumer
+
+The separate host export `@mastermind/dsh-company/company-peer` provides
+`createCompanySessionReadBridge(ctx)`. The default Cordis entry remains
+presentation-only; loading the client plugin does not activate this export.
+
+The existing installed Executive composition must supply each reader's exact
+principal scope, authorization generation, project, native session, retirement
+signal and synchronous `requireCurrent` guard. The guard owns current verified
+principal, expiry, project and session-association checks. This is an in-process
+capability contract, not a public request format or a new authentication source.
+Do not construct it from iframe context, a native launch cookie or a caller's
+session ID.
+
+One registered non-owner policy allows only `session/projections` and
+`session/page` on that exact native session. The reader keeps the donor Peer
+private, joins caller/generation/Peer cancellation, and checks the incumbent
+guard before dispatch and after each await. A retired reader cannot revive when
+the same principal returns. Disposal retires that reader's connection scope; it
+does not claim to cancel a model turn or settle an original operation.
+
+`snapshotPage()` obtains its inclusive cut from an actual sequenced native
+projection and returns the original page envelope. An absent or
+migration-required projection returns no invented page or cursor. Native
+`follow` is deliberately excluded because it can acquire the original writer;
+this reader never invokes it just to obtain history.
+
+Run the source qualification from this directory with the same pinned donor:
+
+```sh
+DSH_SOURCE=/absolute/pinned/donor /absolute/pinned/donor/node_modules/.bin/vitest run --config vitest.host.config.mts
+```
+
+The fixture uses the original Connection, Gateway, access policy, Session
+Controller and JSONL/zstd persistence. It checks unchanged cold history while a
+native writer is held, foreign-session and write refusal, late-result withholding,
+generation retirement, caller cancellation and captured-identity mutation. The
+fixture supplies inert company authority and makes no provider call. Its existence
+does not supply the still-missing installed company session association.
+
 ## Runtime boundary and remaining delivery
 
 This package does **not** admit company work or supply provider credentials.
