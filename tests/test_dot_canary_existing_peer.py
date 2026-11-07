@@ -13,7 +13,7 @@ from integrations.session_bridge.dot_canary_mcp_route import (
 from integrations.session_bridge.runtime_reply_subscriptions import ExecutiveReplyCipher
 from integrations.session_bridge.web_reply_subscription_owner import owner_key
 from integrations.session_bridge.installed_reply_events import RuntimeReplyEventHost
-from tests.test_session_bridge_reply_event_host_integration import (
+from test_session_bridge_reply_event_host_integration import (
     event_case, short_socket_root, with_peer, URL, SECRET,
 )
 
