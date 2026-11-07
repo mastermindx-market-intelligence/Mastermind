@@ -82,6 +82,15 @@
       "workstream": "executive",
       "target_enabled": false
     },
+    "EXECUTIVE-COO-CODEX-A": {
+      "session_alias": "EXECUTIVE-COO-CODEX-A",
+      "target_seat": "coo",
+      "reasoning_surface": "codex",
+      "wake_transport": "codex-app-server",
+      "allowed_transports": ["codex-app-server"],
+      "workstream": "executive",
+      "target_enabled": false
+    },
     "EXECUTIVE-CHAIRMAN-A": {
       "session_alias": "EXECUTIVE-CHAIRMAN-A",
       "target_seat": "chairman",

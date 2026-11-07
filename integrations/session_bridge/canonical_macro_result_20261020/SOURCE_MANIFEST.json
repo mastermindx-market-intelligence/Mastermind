@@ -1,0 +1,46 @@
+{
+  "changes": {
+    "remote_sub.sh": {
+      "candidate_git_blob_sha": "07e5e7f4c0d17c47e350eb55d477b207e9acfeb7",
+      "candidate_sha256": "16c1deae02121b24061c2312a4481535e2e88e4766073fb3f7b19eccc6856755",
+      "patch_bytes": 3418,
+      "source_git_blob_sha": "051362d28807094a6970010fe9b3726bb83262a1",
+      "source_sha256": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17"
+    },
+    "remote_sub_helpers.py": {
+      "candidate_git_blob_sha": "40b998e594548bad0875e868a298e79bfd2ecaf8",
+      "candidate_sha256": "0e00281ff206801cc4ae6b13d45d942e5e348e5727f7d3f8058f04723168719c",
+      "patch_bytes": 12424,
+      "source_git_blob_sha": "757a6af5a8b47968abb9024f7b8c2deb31728c18",
+      "source_sha256": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b"
+    }
+  },
+  "protected_source_sha": "2b3429d9aca0d539e7ac2b097a199fb86de2d329",
+  "schema": "mastermind.fabric.canonical_result_candidate.v2",
+  "source_repo_paths": {
+    "remote_sub.sh": "ops/native_fabric/quota_continuity/source/remote_sub.sh",
+    "remote_sub_helpers.py": "ops/native_fabric/quota_continuity/source/remote_sub_helpers.py"
+  },
+  "source_test_sha256": "74c113a890b58b5bd6426dcd3cad1f417acf5f287ad72d0b8803997b80742897",
+  "status": "SOURCE_ONLY_NOT_INSTALLED",
+  "verification": {
+    "candidate_regression_cases": 35,
+    "direct_function_cases_passed": 13,
+    "direct_function_scope": "exact in-memory candidate functions and tests; real test-owned temporary files",
+    "fixture_only": true,
+    "historical_prior_receipt": {
+      "candidate_head": "ae555fb0a85a845a677c6763c575ceb085fe1940",
+      "reported_local_pytest": "74 passed",
+      "reused_for_this_candidate": false
+    },
+    "hosted_full_package": "pending at source publication; require exact-head qualification receipt",
+    "installation": false,
+    "negative_controls": {
+      "prior_false_success": 10,
+      "prior_foreign_temp_cleanup": 1,
+      "prior_success_controls": 2
+    },
+    "patch_reconstruction": "strict exact-preimage hunks and candidate fingerprints; Git parser accepts blank context without trailing spaces",
+    "syntax": "PASS: helper/test/wrapper compile and unchanged launcher bash -n"
+  }
+}

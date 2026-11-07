@@ -1,0 +1,162 @@
+# Ubuntu Fabric thermal headroom — 2026-10-13
+
+> **Current-state supersession (2026-10-16 09:33 UTC): `DO_NOT_REAPPLY_COMBINED_PATCH`.** Macro #9194 was merged on 2026-10-15 (`40abd9bd`), and the incumbent M2 `fabric_task.py`, `remote_sub.sh`, `remote_sub_exec.py`, and `support_bundle.py` already contain the scoped sparse/CPU-worker integration. The original 31-source support generation `8172955c...` was independently observed on all four Ubuntu hosts. Do **not** replay the historical combined patch, replace an immutable generation, or equate source installation with a qualified/accepted paid worker. Ubuntu0/2 donor helpers were observed at reviewed blob `75297acb...`; Ubuntu1/3 donors remained dirty on older `296e47ba...`, so no force reset, unreviewed overlay, or old-worktree conversion. Current new-job host ceilings remain 12/18/12/12; Ubuntu2/3 Tctl admission is 80°C, with all physical thermal, disk, load, provider, lease, root/parent, and effect-unknown gates retained. No 12-way CPU-heavy acceptance or attended BIOS/cooler acceptance is claimed.
+>
+> **Source-owner correction:** Earlier prose calling the combined patch prospective, or treating old policy snapshots as current derates, is historical. The adjacent installed-source regression and PR #1404 own source convergence; Web Fabric integration #1457 owns only its separate Web/Worker MCP surface.
+
+
+**Current security release status (2026-10-18):** The independent review of
+`ba3938c79eedbb8f590dfed106b8e0876ee88e91` returned **CHANGES_REQUIRED**.
+The [repaired donor source contract](CLEAN_LINKED_DONOR_SOURCE_REVIEW_20261017.md)
+supersedes its config/index validation and provenance claims. The revised patch
+is tested source awaiting immutable-head review, protected CI, merge and a new
+support generation; it is not installed or accepted live-worker proof.
+
+**Historical installation status:** The earlier thermal/backend changes below
+were installed and observed on the existing M2 controller. This is not proof of
+sustained physical cooling, nor the separate held Ubuntu 0/3 telemetry deployment
+in PR #1363. No denied host-side activation is retried and no worker, lease or
+provider is migrated by this source record.
+
+## Verified current-policy fence — 2026-10-15 23:44 UTC
+
+**HISTORICAL_POLICY_ONLY_DO_NOT_APPLY**. The October 13-14 original installation, emergency thermal derates and rollback digests below are incident history, **not** instructions to reinstall old `hosts.json` bytes.
+
+Current ORIGINAL M2 `hosts.json` SHA-256: `726ce27f38ecc8ce407cc0496e61ea66db3e731eb4ce3a60f9ae291a0321e048`. Verified configured `max_active` values: Ubuntu0 **12**, Ubuntu1 **18**, Ubuntu2 **12**, Ubuntu3 **12** (12/18/12/12). Ubuntu2/3 still have `load_gate=4` and an **80°C new-job thermal admission limit**. The previous Ubuntu2/Ubuntu3 `1/1` derate has already been removed; **DO_NOT_REDO_STATIC_RESTORE**. These values are historical observed pins, **not** an automatic restoration target: if the incumbent thermal owner has deliberately re-derated a hot host since this snapshot, preserve the newer lower limit. Never silently raise capacity, freeze emergency derates, or infer twelve sustainable heavy-CPU workers.
+
+The only combined sparse/cgroup **prospective release candidate** here is `FABRIC_COMBINED_SPARSE_AND_CPU_SCOPE_20261015.patch`; the separate accepted-worktree reclaim plan is `FABRIC_ACCEPTED_WORKTREE_RECLAIM_PLAN_20261015.patch`. Neither is a registry policy installer. The following older source snapshots **contain `hosts.json` hunks and are not release candidates**:
+
+- `intel_package_thermal_admission.patch` — **HISTORICAL ONLY / DO NOT APPLY TO LIVE REGISTRY**
+- `precheckout_disk_admission.patch` — **HISTORICAL ONLY / DO NOT APPLY TO LIVE REGISTRY**
+
+The owner of the actual M2 controller must compare the latest original host registry, policy/temperature gates and the exact source preimage, preserve concurrent writers and worker custody, and use authorized exact-hash CAS for any separately justified policy change. **No published source patch, passing CI or stale file digest authorizes a policy replay or overrides an emergency thermal reduction.** The 9950X cooling/BIOS check and matched CPU-heavy throughput acceptance remain outstanding.
+
+## Why and owner
+
+The Chairman observed bursts around 95–97°C on the Ryzen 9 9950X Ubuntu 2/3 machines and roughly 90–94°C on Ubuntu 0. The installed Fabric already had one host telemetry puller, a 90°C temperature admission check for Ubuntu 0/2/3, cache-aware host selection, and an atomic live last-mile check inside `lane_runtime.LaneLease.acquire`. Existing CPU-heavy jobs can still boost while in flight. This change conservatively reduces **new** worker pressure and routes toward cooler eligible hosts without inventing another scheduler or worker-process controller.
+
+The original M2 Fabric deployment is under:
+`~/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext`
+
+Existing owners:
+- `hosts.json`: host roles/limits/qualification; both `host_pick.py` and `remote_sub.sh` use this, and new launches pass limits to `LaneLease`.
+- `host_pull.sh` + existing LaunchAgent `com.mastermind.host-pull`: exclusive telemetry loop and per-host snapshot files `state/hosts/*.json`.
+- `host_pick.py`: provider-neutral placement evaluation and eligible-host ranking.
+- `lane_runtime.py`: last-mile physical admission; **not modified**.
+
+## Installed operational changes (Oct 13 UTC)
+
+| Target | Before | After |
+|---|---|---|
+| Ubuntu 0/2/3 `max_active` | 32 | 12 |
+| Ubuntu 0/2/3 `load_gate` (1m load) | 16 | 8 |
+| Ubuntu 0/2/3 `cpu_tctl_limit_c` | 90°C | 85°C |
+| `host_pull.sh` interval | 150 seconds | 60 seconds |
+| `host_pick.py` default max age | 600 seconds | 180 seconds |
+| Eligible hot-host ranking | load and free lane fraction only | existing rank minus up to 0.20 as CPU approaches thermal cutoff |
+
+Temperature penalty begins 25°C below the configured cutoff and increases linearly toward the cutoff; it applies only to hosts explicitly enrolled in the existing thermal gate and only **after** eligibility has passed. It does not authorize dispatch, expand capacity, or override native source/worker reservation checks. No existing worker is stopped or paused. Ubuntu 1's original policy is preserved: its package telemetry is observed but **not** last-mile temperature-gated by the current AMD-only `lane_runtime._linux_cpu_tctl_c` reader.
+
+The script delta is in [host_pick_collector.patch](host_pick_collector.patch). The host-registry change is a data-only policy adjustment to the three keys on each of the three hosts, **not** a wholesale registry replacement.
+
+### Installation/rollback identities
+
+| Installed object | Before SHA-256 | After SHA-256 | Exact local backup |
+|---|---|---|---|
+| `hosts.json` | `1fb365f982c19f94e4241e5e8cbc1c449f3fce5051d70f235205868cdd9b8393` | `8ac7c8ff4fe20cbc006767384c071732538bbde5dfecc084648edd23cdce7014` | `hosts.json.bak-thermal-headroom-20261013` |
+| `host_pull.sh` | `22c68f40ef4bb2e7157c29979141aa867d53a97e9ab0572a8280c27a51a47f1c` | `65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad` | `host_pull.sh.bak-thermal-headroom-20261013` |
+| `host_pick.py` | `c0cf204cf9edddaddee60973a83ab180275a5416e333e89c206ca3e5d67e462c` | `4342ad60605208ccce2b6fb558811fcd0f72391b09dd7abcb3b0a2ea8445be04` | `host_pick.py.bak-thermal-headroom-20261013` (base) and `host_pick.py.bak-thermal-score-20261013` (cadence-only variant) |
+
+**Rollback fence:** Before any rollback, compare actual current file hashes and current source/owner work. Restore only known target files with CAS/atomic replacement while preserving all intervening accepted updates. For the collector, reload the **same** `com.mastermind.host-pull` LaunchAgent, not a new daemon. A late source writer or active dependent transition invalidates automatic rollback.
+
+## Verification performed
+
+1. A candidate `host_pick.py` was compiled prior to publication; collector replacement passed `bash -n`.
+2. Deterministic in-memory fixtures verified that for equally loaded eligible hosts 60°C ranks above 80°C (penalty 0.16), temperatures above 85°C remain ineligible, and stale thermal evidence remains ineligible.
+3. Compared old/new picker on the **same** live snapshot across all 15 registry hosts: all existing admission gates and eligibility outcomes were identical. Only advisory rank of eligible thermal-enrolled hosts differed.
+4. Current picker readback showed `max_active=12` and `load_gate=8` on the target hosts and refused Ubuntu 0 at Tctl 90.625°C against 85°C. No worker dispatch was performed.
+5. The existing LaunchAgent was restarted in place and read back with the log entry `2026-10-13T08:42Z [pull] daemon start pid=87840 interval=60s`. All four Ubuntu cache files refreshed afterward with `reachable=true`. The picker parser returned default max age 180 seconds.
+6. Observed Ubuntu CPU readings following this restart included ~75.6°C (Ubuntu 0), 62°C (Ubuntu 1), 62.9°C (Ubuntu 2), and 60.9°C (Ubuntu 3). These are point readings, **not** controlled comparative proof that the new policy reduced peak CPU temperature.
+
+**Capability state:** `PROVEN_LIVE` for installed collector cadence and new-job admission/ranking at M2, `NOT_PROVEN` for sustained temperature reduction / throughput performance under representative load. This branch is a source/evidence record; creating this PR does **not** install anything across all accounts or hosts.
+
+## Continuous thermal trend in the original Fabric log
+
+The existing `host_pull_backend.py` now prints **only validated numeric fields** (`tctl_c`, `load1`, `cpu_busy_pct`, `active_lanes`) alongside its existing per-host `reachable` response. These lines are captured by the same supervised `state/host_pull.log`, at the 60-second collector cadence. The canonical host snapshot `state/hosts/<host>.json` remains the sole host picker input; this log adds no scheduler, history authority, remote agent, listening socket or admission condition. Its text diff is in [collector_trend_logging.patch](collector_trend_logging.patch).
+
+The backend's installed SHA-256 changed from `6c10385be89c32627bbb87a5f088e36e849de84b0635f02d460138d8e6884ad5` to `fb68aa42f8b06c7a8929f68b066953e12dc42efa219ae30d1c674b0e346bf87b`; original backup `host_pull_backend.py.bak-thermal-trend-20261013` is retained on M2. Validated candidate code in an isolated temporary telemetry state, then ran the original host collector against Ubuntu 2/3 using a second **isolated temporary state directory** (without touching their Fabric state or workers). Result: `reachable=true`, observed Tctl/load/CPU busy/active lanes with matching generated JSON. Later, the **already-running original LaunchAgent** wrote real lines for all four Ubuntu nodes at 08:57Z on October 13, 2026. LaunchAgent PID 87840 stayed unchanged; no restart or extra collector was needed.
+
+This retains periodic snapshots sufficient to inspect future under-load trends, not high-resolution millisecond thermal telemetry, a persistent remote streaming connection or proof of active CPU heat control. The existing log's long-term rotation/retention should be checked by its owner before interpreting it as unlimited historical storage.
+
+## Remaining in-scope work and honest boundary
+
+The 9950X is a 170W TDP desktop CPU with a 95°C Tjmax. Boosting toward 95°C under sustained CPU workloads can be normal, but offers little reserved headroom. New-job gating does not reduce the power consumed by incumbents. To improve **physical thermal headroom** on Ubuntu 2/3, inspect each host's real BIOS/PBO/Eco Mode, cooler and case airflow, and actual available Linux `amd-pstate` governor/EPP support through an authorized host administrator. Favor a reversible BIOS **105W Eco Mode** (if supported) with baseline settings recorded before any change; avoid unverified undervolting, custom firmware writes, or untested OS-side power caps. Ubuntu 0 has a different CPU/thermal envelope: do not apply desktop 9950X settings to it.
+
+After hardware tuning, run a bounded representative CPU-heavy worker workload at known concurrency (and idle baseline), capture at least 10 minutes of Tctl, frequency, fan RPM where exposed, load, PSI, worker throughput, errors, and cooldown recovery, then adjust the 12/8/85 policy conservatively only with evidence. Check Ubuntu 1 independently before enabling Intel last-mile thermal admission because the installed `lane_runtime` reader currently targets AMD k10temp. PR #1363's separate collector activation remains held under its original source/carrier rules.
+
+There is no guarantee that monitoring itself cools the CPUs: monitoring steers **future** placements; OS/BIOS power and physical cooling govern sustained heat.
+
+## Follow-up — continuous heat recovery and host power authorization
+
+**Live M2 additions in this same original collector/picker (October 13 UTC):** `host_pull_backend.py` SHA-256 `fb68aa42f8b06c7a8929f68b066953e12dc42efa219ae30d1c674b0e346bf87b` → `3438939de34fc9279d7c84f1d064285467f27c4dee1ebb874fb598141bb9c798`; `host_pick.py` SHA-256 `4342ad60605208ccce2b6fb558811fcd0f72391b09dd7abcb3b0a2ea8445be04` → `7ee0ef91ede57053ce3e2af45b966e43c227413f3accc0e08a0af6914a486042`. Existing-file backups: `host_pull_backend.py.bak-thermal-recovery-20261013`, `host_pick.py.bak-thermal-recovery-20261013`. Exact follow-up diff: [thermal_recovery.patch](thermal_recovery.patch).
+
+A *single existing per-host telemetry snapshot* now carries bounded, validated `thermal.risk`, `thermal.cooldown_until`, and `thermal.rise_c_per_min`. The incumbent host picker treats cooldown as an **additional** admission hold for enrolled thermal hosts only: Tctl ≥92°C holds automatic placement 600s; ≥85°C holds 240s; Tctl ≥75°C with an observed rise ≥10°C/min holds 180s. A hot spike extends but never cancels an existing longer hold. Missing legacy cooldown is backward-compatible; malformed present cooldown fails closed. Last-mile `LaneLease` and worker custody remain unchanged. Existing workers are neither stopped nor moved.
+
+**Deterministic acceptance exercised on M2:** critical, recovering, hold expired, baseline, rapid rise, malformed present field, optional missing field, and unchanged eligibility on 15 live host snapshots before candidate installation. A live-path CLI smoke verified a 94°C sample sets a 600s hold; subsequent existing collector snapshots were read back with the new risk and cooldown fields. There is no claim of longitudinal temperature improvement yet.
+
+**Measured heat despite first mitigation:** 403 one-minute Ubuntu host observations over 08:57–10:47 UTC. Ubuntu 0 mean 64.4°C, peak 95.25°C (16 readings ≥90°C); Ubuntu 1 mean 66.5°C, peak 87°C (none ≥90°C); Ubuntu 2 mean 69.1°C, peak 97°C (22 readings ≥90°C); Ubuntu 3 mean 64.9°C, peak 96.625°C (24 readings ≥90°C). Multiple ≥90°C samples on Ubuntu 2/3 had **zero Fabric active lanes**, so active heat must not be attributed solely to Fabric workers. Simulating the cooldown against ~108 historical observations per AMD host found 17 additional safe admission pauses on Ubuntu 0, 24 on Ubuntu 2, and 14 on Ubuntu 3; this is a hypothetical placement count, not a live cooling benchmark.
+
+**Physical host power finding and permission boundary:** Ubuntu 2 Ryzen 9 9950X was configured with `amd-pstate-epp` `performance` governor, EPP `performance`, and `powerprofilesctl get=performance`, while otherwise similar Ubuntu 3 used `powersave`/`balance_performance` and system `balanced`. The ordinary Ubuntu 2 `powerprofilesctl set balanced` change was **denied** by `org.freedesktop.DBus.Error.AccessDenied: Not Authorized: org.freedesktop.UPower.PowerProfiles.switch-profile`. **No power-profile modification occurred. Do not bypass that denial through sudo, a different carrier or untrusted D-Bus impersonation.** The required administration action is an authorized local profile change (interactive login/approved host-administration pathway); then verify readback and benchmark thermals/throughput. A BIOS AMD 105W Eco Mode/PBO limit also requires hardware-specific admin access and baseline/reversion, and Ubuntu 0 is a mobile 9955HX, not a desktop 9950X. AMD's published 9950X Tjmax is 95°C and it recommends liquid cooling for optimal performance: https://www.amd.com/en/products/processors/desktops/ryzen/9000-series/amd-ryzen-9-9950x.html.
+
+**Independent capacity gate discovered after installation:** both previous and current host picker returned no automatically eligible Grok host because of untouched **disk** floors, not a new thermal regression: Ubuntu 0 297.6GiB available vs 300GiB minimum; Ubuntu 1 143.4 vs 150; Ubuntu 2 140.7 vs 150; Ubuntu 3 202 vs 300. Do not reduce safety floors merely to show placement. Any cleanup must preserve active worktrees, other writers and source/storage leases. The disk dependency is a distinct issue from CPU thermal headroom.
+
+**Next physical proof:** when the authorized host-power channel is available, capture idle and 15-minute equivalent CPU-heavy representative loads on Ubuntu 2/3 with profile, governor, Tctl, frequency, utilization, power where exposed, thermal warnings and worker throughput. Determine board cooling/fan telemetry; do not invent fan RPM where hwmon does not expose it. Only then qualify relaxed/new Fabric host concurrency limits. This PR remains draft and does not close the parent physical-headroom outcome.
+
+## Live process attribution without extra agents (11:09 UTC)
+
+The existing `host_pull_probe.template` now performs a bounded ~150 ms, process-start-identity-fenced `/proc/<pid>/stat` CPU delta sample during a warm host probe (Tctl ≥75°C), returning only up to five `pid/start_ticks/cpu_pct/comm` records; no argv, environment, open files or credential material. The existing `host_pull_backend.py` validates the field and stores nonauthoritative `thermal.top_cpu_processes` inside the same current snapshot. The collector's normal log includes a bounded top-CPU summary only when the CPU is already HOT or CRITICAL. Source diff: [hot_process_diagnostics.patch](hot_process_diagnostics.patch). This is not another host daemon or admission authority.
+
+**Installed M2 identities:** `host_pull_probe.template` SHA-256 `2db9af35d7ae0262c94e49b21d318e11e0d58fd4a62e5601453c3403874ced8a` → `10ff206fb7050210e502d03c6916c092b2d82a2b8929d4b54b9cfe5b97bbea72`; `host_pull_backend.py` `3438939de34fc9279d7c84f1d064285467f27c4dee1ebb874fb598141bb9c798` → `a67d02455984992c64ac1a380abe01509ddcdbd12a800897fa1831601bca0f1e`. Backups are `host_pull_probe.template.bak-hot-process-20261013` and `host_pull_backend.py.bak-hot-process-20261013`. Original LaunchAgent `com.mastermind.host-pull` was restarted in place, PID 42014, with `2026-10-13T11:09Z [pull] daemon start pid=42014 interval=60s`. All Ubuntu snapshots refreshed with the new field.
+
+**Proof:** new embedded sampler Python compiled, whole shell parsed, read-only probe executed on actual Ubuntu 2, synthetic hotter branch returned bounded process data, and parser accepted a valid record while rejecting malformed input. The first live sample at 11:09 UTC recorded Ubuntu 2 rising at +54.26°C/min to 76.5°C and triggered a three-minute rising-heat cooldown. Sample process CPU percentages: `bluetoothd` 97.9%, `python3` 91.8%, two `chrome-headless` processes 49% and 36.7%. A second 0.8-second targeted sample found `bluetoothd` at **0%** and `python3` at **100%**; thus the first short Bluetooth sample does **not** prove a sustained runaway daemon. The sustained Python PID traced through `bash → claude → slot.py → sub.sh`, working within `/home/ubuntu2/lanes/wt/fif-a0-se-r2-20261013`. M2 `fabric_task.py status fif-a0-se-r2-20261013` was `NOT_FOUND`; the worktree name alone is not a canonical controller run identity. No processes or workers were stopped.
+
+**Interpretation and held effects:** A minority of heavy processes can boost specific CPU cores even with modest machine-average utilization. For true physical heat reduction, preserve the authenticated OS/BIOS host-admin gate, check BIOS Eco Mode/cooler/fan and power profiles, and benchmark worker throughput versus Tctl under matched load. The evidence is sufficient to improve awareness and decline new hot/rising placements, not to claim resolved cooling, host profile changes, or server-wide worker-run attribution.
+
+## Operator thermal and effective-capacity display
+
+To make the live sensors usable in normal Fabric operations, the incumbent `pool_status.py` now exposes a dedicated read-only table using existing host snapshots, with two direct commands:
+
+```sh
+python3 -B "$FABRIC_EXT/pool_status.py" --thermal
+python3 -B "$FABRIC_EXT/pool_status.py" --hosts
+```
+
+`--thermal` shows the four Linux lane hosts' temperature, aggregate CPU percentage, risk, cooldown and sample age. `--hosts` also shows the legacy host-capacity view with true effective `min(lane_ceiling,max_active)`, explicit `!` on disk-free amounts below their registered reserve, and stale telemetry after **180s** rather than the previous 600s. No network call, new collector, broker mutation, authorization or admission rule was added; the source is a read-only presentation projection. Full source diff: [status_thermal_dashboard.patch](status_thermal_dashboard.patch).
+
+Installed M2 `pool_status.py` SHA-256 `ec1c15f8090aafd509db8b6943513ae33f5f6013b5c8dbb78f2827e50e6aceb0` → `5afda5072ec2b18869b8c1de66b3e7da0ba462a137a12ad4d5497c82169c2b05`; original backup `pool_status.py.bak-host-thermal-view-20261013`. Candidate compilation, synthetic CRITICAL/10-minute cooldown, 3/12 effective capacity, disk-floor warning, stale fail-closed view and actual live 15-host rendering passed. Live CLI readback showed all Ubuntu hosts with recent metrics (e.g., Ubuntu 0 63.2°C and 6.3% aggregate CPU; Ubuntu 2 46.1°C and 0% in that sample). These values are point-in-time, not cooling acceptance.
+
+As of the readback, Ubuntu 0's storage headroom had independently improved to about **307GiB** (above 300GiB reserve), while Ubuntu 1/2/3 remained below their respective disk floors. This is a changing host resource condition, not an effect of the thermal dashboard. No caches or active worktrees were deleted by this thermal mission.
+
+## October 13 afternoon — immutable support and Go/Intel parity
+
+**Immutable host support publication was checked, not assumed.** Ubuntu 0 and Ubuntu 2 both contain support-release `26a153efa8065e2bea8e9d010d0e09e184505775884778a3cfa4120eb4b20b05` with exact installed `lane_runtime.py` SHA-256 `af1c9ff23d5ebd5d88d4edac2f2fcd62b3c29afeb28968e5cbc232f82a83d644`. An independent C19 live-source fix (preserved in [precheckout_disk_admission.patch](precheckout_disk_admission.patch)) uses `active_dir.resolve()` before determining the true checkout filesystem: previous unresolved immutable support-release paths incorrectly rejected every worker with `host_disk_unknown`. On both real Linux hosts, a byte-identical isolated copy of that exact release code, exercised with an existing-layout **symlinked** `active_dir` under a temporary test root, refused an artificially insufficient disk reserve and accepted/released a low-reserve test allocation. No actual production worker, broker lease or physical lane marker was modified by these isolated admission tests. The installed Ubuntu `~/lanes/ext/lane_runtime.py` flat copies can be older; the actual launch reads immutable support releases, not that flat file.
+
+**Installed pre-checkout disk protection:** `hosts.json` at `b5d69d9b9a93db5ad3b99320c080b2fbdef4a9143c24d4a7332113954ad58d4a` introduced `checkout_reserve_gb=15` on Ubuntu 0/1/2/3; host picker `47d30ccd7103e38cec827fb038ac6d6cb31008addecf11939fe56870c534bab6`; `remote_sub.sh` `0d061f79a7ed53ed6f7803297efab231cbe43e301daccf922e41dc99cc85ef6e` (before later Go route patch); `lane_runtime.py` subsequently `af1c9ff2...` with symlink fix. The picker requires 315 GiB on Ubuntu0/3 and 165 GiB on Ubuntu1/2 before **new** full checkout starts. The last-mile `LaneLease` rechecks actual `statvfs` under its **existing** admission lock, refusing unknown/mismatched volumes. This is a staging buffer, not a reservation for all possible concurrent future worktree allocations.
+
+**Go/DeepSeek route parity completed on M2:** its separate `go_remote_run.py` transport previously omitted all `LANE_MIN_FREE_MEM_GB`, `LANE_MAX_CPU_TCTL_C` and `LANE_MIN_FREE_DISK_GB` when invoking the common `remote_sub_exec.py` and physical LaneLease. The exact [go_thermal_disk_admission.patch](go_thermal_disk_admission.patch) preserves original lease/capability/cleanup owners and explicitly forwards validated bounded host-policy ceilings via existing shell-quoted worker arguments. Preimage and new source SHA-256: `go_remote_run.py` `afd958a3d7bdcb6544f84da5ea643c903813b8aba476d7546b3248bfe71113bc` → `ca36b8867225d64d18606d13a56929e13aa086b8993d5e540f52d5594ad93d87`; `remote_sub.sh` `0d061f79a7ed53ed6f7803297efab231cbe43e301daccf922e41dc99cc85ef6e` → `e2ec7dfe2efa0680b4bf961ac73ce916adf5f1dc90e510f6c8ff6ed50e069deb`. Live backups: `go_remote_run.py.bak-go-resource-guard-20261013`, `remote_sub.sh.bak-go-resource-guard-20261013`. **44 independent isolated existing-plus-new Go tests passed** (tests published as [test_go_resource_guards.py](test_go_resource_guards.py)); no paid Go worker was dispatched solely to prove this route, so remote Go production START remains separately unproven.
+
+**Intel thermal protection completed on M2:** `ubuntu1` now has `require_thermal=true`, `cpu_tctl_limit_c=90.0`, and `nvme_min_crit_headroom_c=8.0` in the incumbent host registry. [intel_package_thermal_admission.patch](intel_package_thermal_admission.patch) extends the existing last-mile hwmon reader to the **hottest valid Intel `coretemp` Package id** without choosing a possibly cooler individual core and without weakening AMD `k10temp` Tctl priority. Malformed/missing package readings fail closed. Synthetic Intel/AMD/invalid sensor tests and live 15-host picker compatibility passed. The exact *same candidate source SHA* `966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937` was interpreted in-memory, read-only, on real Ubuntu1 and Ubuntu2 using their own Linux sysfs and returned valid 46°C and 45°C readings; no host setting was changed. M2 live `lane_runtime.py` SHA-256 `af1c9ff2...` → `966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937`; `hosts.json` `b5d69d9b...` → `7688ae6c7a713f48e1eaf78c7111bc176e0df718f3d52c897b4249674c5ed92b`, with backups `lane_runtime.py.bak-intel-thermal-20261013` and `hosts.json.bak-intel-thermal-20261013`. M2 picker readback now displays Ubuntu1's 90°C thermal and cooldown gates passing on live telemetry. Future host immutable code publication occurs through the incumbent launcher; new remote Intel LaneLease START has **not** yet been proven.
+
+**Four-hour thermal trend at ~19:35 UTC**: roughly 221 minute observations per host over the preceding 238 minutes. Tctl mean/max: Ubuntu0 45.6/77.9°C; Ubuntu1 57.4/78°C; Ubuntu2 52.0/83.4°C; Ubuntu3 36.5/38.5°C. No reading reached 85°C in this interval. This is observational and confounded by workload (Ubuntu3 largely idle); **not** a claim that BIOS/cooling issue is solved. The existing unauthorized Ubuntu2 power-profile change remained refused and was **not retried**.
+
+**Worktree materialization root cause confirmed:** sampled full Macro checkout on Ubuntu2/3 occupied 10,512–10,513 MiB with `core.sparseCheckout` unset; corresponding lean C19 checkout occupied 247–277 MiB with `core.sparseCheckout=true`, cone mode and an explicit sparse profile. Both sets are registered Git worktrees, but they come from different creation paths. M2's `lane2.py` already implements `worktree add --no-checkout` plus sparse before hydration; this alone does not cover worker-created `sni-*` full clones on Ubuntu Linux, where the M2 SSD-specific `worktree_storage.py` helper is not installed. Preserve task-required assets and existing uncommitted work. A governed worker-creation fix must reuse the existing worktree owner and allow justified full checkout, not introduce another cleanup/control plane or indiscriminately sparse existing active workspaces.
+
+**Fleet disk cleanup:** refer to [fleet_disk_recovery_20261013.md](fleet_disk_recovery_20261013.md) for **35** exact individually cleared Git worktrees and approximately **355 GiB** cumulative recovery. The continuing 15 GiB preflight buffer is a conservative temporary protection while the distinct worker checkout creation paths are reconciled.
+
+## Four-hour thermal peak display — bounded log-history correction
+
+The production M2 `pool_status.py --thermal` view now shows **current CPU temperature, peak temperature across the last four hours, number of ≥90°C samples, current CPU use, current heat state and cooldown, and telemetry age**. It reads bounded tails of the incumbent `state/host_pull.log` and its optional `.1` file, deduplicating same-host/same-minute records. The existing LaunchAgent had directly appended approximately **7.6 MB** to the active log while the old launch wrapper's startup rotation was not controlling it. A first candidate correctly returned unknown when the log exceeded 2 MB; the accepted revision reads only at most the last **1 MB** of each log, discarding a partial first line, so it remains usable even when the log exceeds the previous wrapper's rotation threshold. Missing or invalid telemetry still displays unknown, never an invented zero.
+
+The source delta is [thermal_trend_status.patch](thermal_trend_status.patch). Live installed `pool_status.py` SHA-256 `5afda5072ec2b18869b8c1de66b3e7da0ba462a137a12ad4d5497c82169c2b05` → `bdc1ff38110d4d3b3158e2b21092ee426c58ef0650d5a0d99df801e09297205a`; rollback copy `pool_status.py.bak-thermal-history-20261013` in the original ext directory. The observed 4-hour record set contained 222 samples per Ubuntu host with peaks Ubuntu0 77.875°C, Ubuntu1 78.0°C, Ubuntu2 83.375°C, Ubuntu3 38.25°C and no ≥90°C sample. Tests passed for duplicate logs across rotation, time-window exclusion, oversized-file bounded-tail recovery, missing-log unknown and actual four-host rendering. The historical display **does not influence placement or physical admission**, which remain owned by `host_pick.py` and `lane_runtime.LaneLease`.
+
+The oversized-log diagnosis is recorded separately from runtime code ownership: source remains one existing collector LaunchAgent, no new monitoring service, notification watcher or log authority was created. Dedicated log growth prevention via its original LaunchAgent/collector owner remains a possible maintenance improvement, but was not attempted here because unsafe FD rotation could corrupt ongoing writes.

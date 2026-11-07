@@ -215,7 +215,9 @@ def _engine_blocked(subject: str) -> bool | None:
             return None
         vetoes = syn.get("vetoes")
         authority = syn.get("size_authority")
-        if not isinstance(vetoes, list):
+        if not isinstance(vetoes, list) or any(
+            not isinstance(veto, str) or not veto.strip() for veto in vetoes
+        ):
             return None
         if authority not in {"up", "down", "hold", "blocked", "insufficient_data"}:
             return None

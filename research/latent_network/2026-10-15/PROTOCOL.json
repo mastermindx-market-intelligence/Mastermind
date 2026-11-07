@@ -1,0 +1,98 @@
+{
+  "id": "LP-NETWORK-08",
+  "frozen_at": "2026-10-15T10:31:32.685081+00:00",
+  "question": "Do historically connected industries provide incremental forward return-ranking information beyond the target industry and common market context?",
+  "commission_hypotheses": [
+    "H6 propagation among related groups",
+    "H3 cross-sectional leadership transition"
+  ],
+  "novelty": "New to this commission, not global discovery. Statistical connections are not economic ownership/supply-chain edges or capital-accounting flows.",
+  "authority": "Current Chairman continuation; research-only prototypes. No purchases, production deployment, source schemas, live ranks, alerts, sizing or trading.",
+  "root": "latent-pressure-research-20261014-chatgpt4-001",
+  "parent_carrier": "Mastermind PR1470",
+  "independent_carrier": "research/latent-network-20261015 at published16152f1819256a702817d3b298511dff4a1d1845; excludes earlier unpublished experiments",
+  "protected_pin": "78388ac29f7e54c9dfe7799a8e4769fb46d4aed6",
+  "input_manifest": [
+    {
+      "filename": "49_Industry_Portfolios_daily_CSV.zip",
+      "sha256": "8f394fe34bea54d41b9aafed410425ee8f8e252ede3c71a7c1cd20bab83040de",
+      "source_url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/49_Industry_Portfolios_daily_CSV.zip",
+      "source_vintage": "202608 CRSP reconstructed historical data; not original release-time data",
+      "public_redistribution": "inputs retained private; source hashes and experiment aggregates only"
+    },
+    {
+      "filename": "F-F_Research_Data_Factors_daily_CSV.zip",
+      "sha256": "2f29e22546069914890a712680a6f81f3680ebc3543b52864484d209ca13a7db",
+      "source_url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_Factors_daily_CSV.zip",
+      "source_vintage": "202608 CRSP reconstructed historical data; not original release-time data",
+      "public_redistribution": "inputs retained private; source hashes and experiment aggregates only"
+    }
+  ],
+  "universe": "All49 value-weighted historically formed French industry portfolios. Eligible only after756completepastobservations. Missing returns never zero; no currentconstituentselection.",
+  "history_start": "1963-07-01",
+  "origins": "Every actual Friday from1970 onwards; featuresobservedclose_t; entryclose_t+1; no Friday holiday imputation.",
+  "horizons": [
+    5,
+    21
+  ],
+  "targets": "Industry logreturn t+1 to t+h+1 minus markettotal logreturn over samewindow; label rank is within-date percentile among all eligibleindustrieswith completefuture. No future eligibility filteringexcept explicitunknownoutcome; report omissions. Regression target2*(rank-.5), rankcomputedonlyfortraininglabels/evaluation.",
+  "primary_period": "2010-2025 with completeoutcomes byDecember31,2025",
+  "development_period": "1990-2009",
+  "reserve_period": "2026available throughAugust31; descriptiveonly; previouslyexamined byothercommissiontests, not pristineindependentholdout",
+  "fit": "Separate horizon models. Annual rolling20year train; every label horizon completesstrictlybeforetestyear. Mean-loss ridge .01; interceptunpenalized; training-onlystandardizationclip+-5; closed-formsolve. No hyperparameter search, modelretuning or thresholdoptimizing afterresults.",
+  "baseline_features": [
+    "own logmomentum5,21,63,126,252",
+    "own marketrelativemomentum5,21,63,126,252",
+    "rel21change5,relvol63,vol21,vol63",
+    "distancefrompast63high/low",
+    "logtrend63,252",
+    "relativecrosssectionrank21",
+    "market21,marketvol63,SMB21,HML21",
+    "allOTHERindustriesmeanrelative5,21,63",
+    "allindustryrelative21dispersion"
+  ],
+  "factor_controls": "Each industry logreturn residual from252dailyobservations OLSwithintercept onMktRF,SMB,HML; coefficientsfitthroughyesterdayonly. Factorsatdecisiont retrospectivelyavailable, not verifiedactualpublicationlatency.",
+  "network_estimation": "Once eachcalendar year, use756previousdailyresidualinnovationsendingbeforeyearstart. Graphforhistoricaltrainingfeatures must be each historicalyear graph, nevercurrenttestgraphbackfilled.",
+  "symmetric_graph": "Positive contemporaneousresidualcorrelation; selecttop5positiveoffdiagonalneighborsperrow; normalizerowweights tosum1. Noedges yieldszerosandcoveragefield.",
+  "directed_graph": "5sessionblock residualsum; A_ij=Corr(target_i[t],leader_j[t-5])-Corr(target_i[t-5],leader_j[t]); selecttop5positiveoffdiagonalincoming edges; equal correlation/direction ties stableindustryorder. No negativeweights or lookahead. This identifies statisticallead-asymmetry not causal links.",
+  "network_features_per_graph": [
+    "weightedneighborresidualsum5 / ownresidualstd63sqrt5",
+    "equivalent21 and63",
+    "weightedneighborpositive21fraction",
+    "neighbor21minusown21 normalized",
+    "weightedneighbor21dispersion normalized",
+    "meanselectededgeweightbefore rownormalization",
+    "fraction positive availableedges outof5"
+  ],
+  "models": [
+    "constant0",
+    "own_common_baseline",
+    "baseline+symmetric_network",
+    "baseline+directed_network",
+    "baseline+fourfixedlabel-permuted-directedgraphs as separate placebo models"
+  ],
+  "placebos": "Seeds 80261015..80261018; joint row/column relabelingPAPtranspose preserves zero diagonal/topology/degrees and weight spectrum but breaks industryidentity. Four controlsfixedbeforeoutcomes; report all andstrongest control, not onlybestreal. A smallplacebosetisnot an exactrandomizationtest.",
+  "primary_metrics": [
+    "mean per-Friday SpearmanIC withfuturebenchmarkrelativereturnrank",
+    "paired loss of scaledranktarget; positivegainmeanscandidatebetter",
+    "longtopquintile minusbottomquintile forwardrelativearithmeticmean as utilitydiagnostic, notportfolioCAGR",
+    "same-count earlycatchupalerts amongRS21&RS63oppositesignfromprediction, matchedweeklybudget; forwardreturndirection and21RSconfirmationlead withcompletewindow/censoredcounts"
+  ],
+  "scoring_hierarchy": "Both realmodels must beat own/commonbaseline; directed must additionally beat strongest of4placebos at identical horizon. Improvementsincommon-factorprediction do not establisheconomicpropagation.",
+  "inference": "Within-datecrosssection preserved;1000circularmovingblocks of26Fridaydates,seed80261015; Holm4 realgraph*horizon comparisons. Program is adaptive research afterothernegativehypotheses, so this is within-experiment correctionnotglobalresearchFDR. No interval/pvalue when<104dates.",
+  "research_promising_gate": "MeanIC gain>=.01 and CIabove0; pairedranklossgain>=.0005; Holm4<.05; meanICgainpositivein>=2of3eras2010-14/2015-19/2020-25; matchedearlyprecisionnotworse; directional/lead/cost metricsreported withdenominators. Additionaldirectedvsplaceborequirement. Any pass still not productionvalidated.",
+  "cost_sensitivity": "10/30/100basispoints deductedfrom top-bottomhorizonspread, equalnotionallong/shortdiagnostic; no borrow,fundrebalancing,implementationor tradability claim. Nonoverlapmonthorigin diagnosticretained.",
+  "tests": [
+    "Graph trainendstrictlybeforeasofyear",
+    "Pastfeatures invariant under futureappend andfuturepermutation",
+    "Knownsyntheticleader direction recovered",
+    "Permutedgraph invariants",
+    "Entrydayreturn excluded; correctforwardhorizon",
+    "missingoutcomenot0",
+    "trainlabelpurge",
+    "identicalpanelacrossmodels",
+    "lossandrankdirectionarithmetic"
+  ],
+  "scope_limit": "No attempt to read blockedpriorresults, publish oldunpublishedcommits, read IEXbookPDF or oldworkerreturn; no duplicate oldshockrun. This independentexperimentusesonly sourceinputbytes already authorized.",
+  "output": "New source,aggregateproof,negative/positiveverdictand read-onlyresearchdemonstration; rawinputs/datepredictionsprivate."
+}
