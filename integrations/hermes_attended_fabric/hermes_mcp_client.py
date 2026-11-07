@@ -16,7 +16,7 @@ from .native import FabricNativeRefusal
 
 EXECUTION_SERVER = "mastermind-fabric-exec"
 FABRIC_SCHEMA = "mastermind.fabric_mcp.v1"
-NATIVE_ACTIONS = frozenset({"fabric_status", "fabric_request", "fabric_result"})
+NATIVE_ACTIONS = frozenset({"fabric_capabilities", "fabric_status", "fabric_request", "fabric_result"})
 _MAX_RETURN_CHARS = 65536
 _ERROR = "HERMES_FABRIC_MCP_UNAVAILABLE"
 
@@ -74,7 +74,8 @@ def bind_native_mcp_client(ctx: Any) -> Callable[[str, Mapping[str, Any]], Mappi
             document = reply.get("result")
         if (not isinstance(document, Mapping)
                 or document.get("schema") != FABRIC_SCHEMA
-                or document.get("action") != action):
+                or document.get("action") != (
+                    "capabilities" if action == "fabric_capabilities" else action)):
             raise FabricNativeRefusal("HERMES_FABRIC_MCP_SCHEMA_INVALID")
         # The native client's admission check precedes transport. Consent may
         # change while that call runs, so it must also govern response release.

@@ -1026,3 +1026,49 @@ test('fresh backend generations cannot redispatch an original run with orphan ev
    assert.doesNotMatch(e.calls[0].arguments.command,/'request'/);
  }
 });
+
+const nativeScope={home:'/fixture/hermes-home',source:'/fixture/hermes-source',python:'/fixture/python'};
+const nativeOrigin={schema:'mastermind.hermes_native_origin.v1',kind:'hermes_attended_session',
+ profile_id:'default',origin_session_id:'native-origin',session_id:'native-session',
+ generation:'a'.repeat(64),turn_id:'turn',tool_call_id:'call',task_key:'task',
+ tool_action:'submit',arguments_digest:'b'.repeat(64),lease_holder_digest:'c'.repeat(64),
+ enrollment_generation:'d'.repeat(64)};
+
+test('native channel cannot omit origin to regain operator request or read authority',async()=>{
+ const e=engine();
+ const f=api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative:nativeScope});
+ for(const [name,args] of [['fabric_request',packet],['fabric_status',id],['fabric_result',id]]){
+  assert.equal(unwrap(await f.call(name,args)).error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ }
+ assert.equal(e.calls.length,0);
+});
+
+test('native channel rejects operator lifecycle actions before engine access',async()=>{
+ const e=engine();
+ const f=api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative:nativeScope});
+ const out=unwrap(await f.call('fabric_wait',{...id,native_origin:nativeOrigin,timeout_seconds:1}));
+ assert.equal(out.error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ assert.equal(e.calls.length,0);
+});
+
+test('ordinary operator facade cannot treat supplied native metadata as enrollment',async()=>{
+ const e=engine();
+ const out=unwrap(await facade(e).call('fabric_request',{...packet,native_origin:nativeOrigin}));
+ assert.equal(out.error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ assert.equal(e.calls.length,0);
+});
+
+test('native channel requires a complete absolute host-selected configuration',()=>{
+ const e=engine();
+ for(const hermesNative of [{home:'/fixture/home'}, {...nativeScope,python:'python3'},
+   {...nativeScope,extra:'unrecognized'}, {...nativeScope,home:'/fixture/\0bad'}]){
+  assert.throws(()=>api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative}),TypeError);
+ }
+ assert.equal(e.calls.length,0);
+});
+
+test('ordinary capabilities explicitly report native origin disabled',async()=>{
+ const e=engine([captured('request status result accept')]);
+ const out=unwrap(await facade(e).call('fabric_capabilities',{}));
+ assert.deepEqual(out.hermes_native_origin,{schema:'mastermind.hermes_native_enrollment.v1',enabled:false});
+});

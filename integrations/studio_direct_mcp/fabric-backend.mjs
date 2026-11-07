@@ -10,6 +10,87 @@ import { homedir } from 'node:os';
 import { resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import {spawn} from 'node:child_process';
+
+// Native policy stays inside the incumbent sealed, standalone backend blob.
+// Only explicit native mode reads the separately composed Hermes package.
+const ENROLLMENT_SCHEMA='mastermind.hermes_native_enrollment.v1';
+const NATIVE_ORIGIN_SCHEMA=Object.freeze({
+  type:'object', additionalProperties:false,
+  required:['schema','kind','profile_id','origin_session_id','session_id','generation',
+    'turn_id','tool_call_id','task_key','tool_action','arguments_digest',
+    'lease_holder_digest','enrollment_generation'],
+  properties:Object.fromEntries(['schema','kind','profile_id','origin_session_id','session_id',
+    'generation','turn_id','tool_call_id','task_key','tool_action','arguments_digest',
+    'lease_holder_digest','enrollment_generation'].map(k=>[k,{type:'string',minLength:1,maxLength:256}])),
+});
+const CHECK=fileURLToPath(new URL('../hermes_attended_fabric/enrollment_check.py',import.meta.url));
+const NATIVE_HERMES_TOOLS=Object.freeze([
+  'fabric_capabilities','fabric_request','fabric_status','fabric_result']);
+const ACTIONS=new Set(NATIVE_HERMES_TOOLS.slice(1));
+
+function createHermesOriginAdmission(config=null) {
+  if(config!==null && (typeof config!=='object' || Array.isArray(config)
+      || Object.keys(config).sort().join(',')!=='home,python,source'
+      || Object.values(config).some(x=>typeof x!=='string' || !isAbsolute(x) || x.includes('\0'))))
+    throw new TypeError('invalid native Hermes enrollment configuration');
+  if(config!==null)config=Object.freeze({...config});
+  const scoped=config!==null;
+  async function check(action,args) {
+    const payload=JSON.stringify({action,arguments:args});
+    if(Buffer.byteLength(payload)>65536) return null;
+    return await new Promise(resolve=>{
+      let child,done=false,size=0;
+      const chunks=[];
+      const finish=value=>{
+        if(done)return;
+        done=true;clearTimeout(timer);resolve(value);
+      };
+      const timer=setTimeout(()=>{child?.kill('SIGKILL');finish(null);},10000);
+      try {
+        child=spawn(config.python,[CHECK,config.source,config.home],{
+          stdio:['pipe','pipe','ignore'],windowsHide:true,
+          env:{PATH:process.env.PATH??'',PYTHONNOUSERSITE:'1'},
+        });
+        child.on('error',()=>finish(null));
+        child.stdout.on('data',chunk=>{
+          size+=chunk.length;
+          if(size>8192){child.kill('SIGKILL');finish(null);}
+          else chunks.push(chunk);
+        });
+        child.on('close',code=>{
+          if(code!==0)return finish(null);
+          try {
+            const value=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            if(value?.schema!=='mastermind.hermes_origin_check.v1'
+                || value.authorized!==true || value.contract?.schema!==ENROLLMENT_SCHEMA
+                || value.contract.enabled!==true
+                || value.contract.kind!=='hermes_attended_session'
+                || !/^[0-9a-f]{64}$/.test(value.contract.generation??'')) return finish(null);
+            finish(value.contract);
+          }catch{finish(null);}
+        });
+        child.stdin.on('error',()=>finish(null));
+        child.stdin.end(payload);
+      }catch{child?.kill('SIGKILL');finish(null);}
+    });
+  }
+  return Object.freeze({
+    scoped,
+    async capabilities() {
+      return scoped
+        ? (await check('fabric_capabilities',{}))??{schema:ENROLLMENT_SCHEMA,enabled:false}
+        : {schema:ENROLLMENT_SCHEMA,enabled:false};
+    },
+    async authorize(action,args) {
+      if(!scoped)return args.native_origin===undefined;
+      if(!ACTIONS.has(action) || !args.native_origin
+          || typeof args.native_origin!=='object' || Array.isArray(args.native_origin))
+        return false;
+      return (await check(action,args))!==null;
+    },
+  });
+}
 
 const VERSION = '0.3.0';
 const ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$';
@@ -84,7 +165,7 @@ const EXPERIENTIAL_POOL = 'experiential';
 const EXPERIENTIAL_MODEL = 'glm-5.3-uncensored';
 const DEFAULT_ADAPTER = resolve(homedir(), '.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/fabric_task.py');
 const idSchema = { type: 'string', pattern: ID_PATTERN, minLength: 1, maxLength: 128 };
-const identity = { run_id: idSchema, root_id: idSchema };
+const identity = { run_id: idSchema, root_id: idSchema, native_origin:NATIVE_ORIGIN_SCHEMA };
 const maxBytes = { type: 'integer', minimum: 1024, maximum: MAX_RESPONSE_BYTES, default: 8192 };
 const pageBytes = { type:'integer', minimum:1, maximum:MAX_PAGE_BYTES, default:MAX_PAGE_BYTES };
 const pageOffset = { type:'integer', minimum:0, maximum:MAX_RETAINED_BYTES, default:0 };
@@ -422,6 +503,7 @@ export function projectFabricParentRecovery(s, expectedRoot) {
 
 export function createFabricFacade(engine, options={}) {
   const cfg={adapterPath:DEFAULT_ADAPTER,python:'python3',workerCwd:'~',quotaFallback:false,...options};
+  const nativeOrigin=createHermesOriginAdmission(cfg.hermesNative??null);
   if(!isAbsolute(cfg.adapterPath) || cfg.adapterPath.includes('\0') || typeof cfg.python!=='string' || !cfg.python || cfg.python.includes('\0') || typeof cfg.workerCwd!=='string' || !cfg.workerCwd || cfg.workerCwd.includes('\0')) throw new TypeError('invalid operator configuration');
   // This index only fences returned incumbent process handles. It has no run state,
   // admission, scheduling or retry authority and is never persisted or reconstructed.
@@ -645,9 +727,13 @@ export function createFabricFacade(engine, options={}) {
           manual_routing:{available:manualReady,default:'AUTO',exact_model_requires_pool:true,
             selection_preflight:'native_preview_no_reservation',strict_pin_required:true,cross_provider_fallback:false},
           controller_tracking:{max_unresolved:MAX_CONTROLLERS,max_generation_identities:MAX_ATTEMPT_IDENTITIES,scope:'backend_process_generation_only',restart_persistent:false},
+          hermes_native_origin:await nativeOrigin.capabilities(),
           worker_admission:'UNPROBED',worker_start:'UNPROBED',backend:'existing Desktop Commander process owner',
-          tools:FABRIC_TOOLS.map(t=>t.name),caller_identity:'trusted enrolled channel; not individual ChatGPT identity',root_metadata_is_authentication:false});
+          tools:FABRIC_TOOLS.filter(t=>!nativeOrigin.scoped || NATIVE_HERMES_TOOLS.includes(t.name)).map(t=>t.name),caller_identity:'trusted enrolled channel; not individual ChatGPT identity',root_metadata_is_authentication:false});
       }
+      // A native-scoped channel cannot omit origin metadata to become a
+      // general operator. Check existing profile/SessionDB before any effect.
+      if(!await nativeOrigin.authorize(name,args)) fail('HERMES_NATIVE_ORIGIN_REFUSED');
       if(name==='fabric_controller_output') {
         const binding=controllers.get(args.controller_pid);
         if(!binding || binding.run_id!==args.run_id || binding.root_id!==args.root_id) fail('CONTROLLER_NOT_BOUND');
@@ -735,6 +821,8 @@ export function createFabricFacade(engine, options={}) {
         if(args.max_turns!==undefined) argv.push('--max-turns',String(args.max_turns));
         if(args.escalation_reason) argv.push('--escalation-reason',args.escalation_reason);
         if(args.subject_pool) argv.push('--subject-pool',args.subject_pool);
+        // Async capacity/manual preflight may outlive native permission.
+        if(!await nativeOrigin.authorize(name,args)) fail('HERMES_NATIVE_ORIGIN_REFUSED');
         if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
         if(attempted.size>=MAX_ATTEMPT_IDENTITIES) fail('GENERATION_TRACKING_CAPACITY');
         attempted.add(requestKey);
@@ -761,7 +849,10 @@ export function createFabricFacade(engine, options={}) {
           next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
       }
       const s=await status(args);
-      if(name==='fabric_status') return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,expected_root_id:args.root_id,status:s,parent_recovery:projectFabricParentRecovery(s,args.root_id),root_verified:s.root_id===args.root_id,execution_absence_proven:false});
+      if(name==='fabric_status') {
+        if(!await nativeOrigin.authorize(name,args)) fail('HERMES_NATIVE_ORIGIN_REFUSED');
+        return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,expected_root_id:args.root_id,status:s,parent_recovery:projectFabricParentRecovery(s,args.root_id),root_verified:s.root_id===args.root_id,execution_absence_proven:false});
+      }
       if(name==='fabric_wait') {
         const seconds=args.timeout_seconds??5;
         const waited=statusJSON(await runCapturedShort(['wait',args.run_id,'--timeout',String(seconds),'--interval','2',...(cfg.quotaFallback?['--follow']:[])],Math.min(12000,(seconds+2)*1000)),args.run_id,cfg.quotaFallback);
@@ -789,8 +880,11 @@ export function createFabricFacade(engine, options={}) {
           fail('RESULT_CHANGED',{current_response_sha256:check.response_sha256});
         data={response_sha256:check.response_sha256};
       } else data=await retained(args,s);
-      if(name==='fabric_result') return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,accept_run_id:s.run_id,root_id:args.root_id,...data,accepted:s.accepted===true,
-        digest_scope:'exact complete adapter CLI response; not a cryptographic artifact attestation'});
+      if(name==='fabric_result') {
+        if(!await nativeOrigin.authorize(name,args)) fail('HERMES_NATIVE_ORIGIN_REFUSED');
+        return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,accept_run_id:s.run_id,root_id:args.root_id,...data,accepted:s.accepted===true,
+          digest_scope:'exact complete adapter CLI response; not a cryptographic artifact attestation'});
+      }
       if(data.response_sha256!==args.expected_response_sha256) fail('RESULT_CHANGED',{current_response_sha256:data.response_sha256});
       effectStarted=true;
       const accepted=await runCapturedShort(['accept',args.run_id,'--by',args.by]);
@@ -825,9 +919,13 @@ async function main() {
   if(!isAbsolute(engineEntry)) throw new Error('ENGINE_ENTRY_MUST_BE_ABSOLUTE');
   const engine=new Client({name:'mastermind-fabric-process-transport',version:VERSION},{capabilities:{}});
   await engine.connect(new StdioClientTransport({command:process.execPath,args:[engineEntry],cwd:homedir(),env:{...process.env},stderr:'inherit'}));
-  const facade=createFabricFacade(engine,{adapterPath:process.env.MMX_FABRIC_ADAPTER_PATH??DEFAULT_ADAPTER,python:process.env.MMX_FABRIC_PYTHON??'python3',workerCwd:process.env.MMX_FABRIC_WORKER_CWD??'~',quotaFallback:true});
+  const hermesFields=[process.env.MMX_FABRIC_HERMES_HOME,process.env.MMX_FABRIC_HERMES_SOURCE,process.env.MMX_FABRIC_HERMES_PYTHON];
+  const hermesNative=hermesFields.some(x=>x!==undefined)
+    ? {home:hermesFields[0],source:hermesFields[1],python:hermesFields[2]} : null;
+  const facade=createFabricFacade(engine,{adapterPath:process.env.MMX_FABRIC_ADAPTER_PATH??DEFAULT_ADAPTER,python:process.env.MMX_FABRIC_PYTHON??'python3',workerCwd:process.env.MMX_FABRIC_WORKER_CWD??'~',quotaFallback:true,hermesNative});
   const server=new Server({name:'mastermind-subagent-fabric',version:VERSION},{capabilities:{tools:{}}});
-  server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:FABRIC_TOOLS}));
+  const advertised=hermesNative ? FABRIC_TOOLS.filter(t=>NATIVE_HERMES_TOOLS.includes(t.name)) : FABRIC_TOOLS;
+  server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:advertised}));
   server.setRequestHandler(CallToolRequestSchema,async req=>facade.call(req.params.name,req.params.arguments??{}));
   await server.connect(new StdioServerTransport());
   let closing=false;
