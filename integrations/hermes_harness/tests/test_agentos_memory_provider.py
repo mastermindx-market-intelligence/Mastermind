@@ -8,6 +8,7 @@ acquisition and digest.
 """
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import importlib.util
 import json
@@ -15,14 +16,18 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 import unittest
 
 from integrations.hermes_harness.agentos_memory_provider import (
+    DEFAULT_FRESHNESS_SECONDS,
     MAX_CONTEXT_BYTES,
+    MAX_FRESHNESS_SECONDS,
     REASON_CONTEXT_EXPIRED,
     REASON_CONTEXT_PENDING,
     REASON_CONTEXT_TOO_LARGE,
     REASON_CONTEXT_UNAVAILABLE,
+    REASON_FRESHNESS_INVALID,
     REASON_OBSERVATION_MISMATCH,
     REASON_PROFILE_MISMATCH,
     REASON_REBIND_REFUSED,
@@ -190,6 +195,21 @@ def _binding(session_id="session-alpha", *, role="role-alpha", profile="profile-
 
 def _provider(ports, owner, spawn=None, **kwargs):
     return create_provider(ports=ports, reader=owner.read, spawn=spawn, **kwargs)
+
+
+def _await_settled(provider, timeout=10.0):
+    """Wait, bounded, for the real background read to settle.
+
+    The native path runs on a real thread, so the test waits for the real
+    completion instead of pretending the read was synchronous. The deadline
+    keeps a hung read from stalling the suite.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        state = provider.readiness()
+        if state["state"] != "PENDING" or time.monotonic() >= deadline:
+            return state
+        time.sleep(0.005)
 
 
 class UnboundProviderTests(unittest.TestCase):
@@ -707,6 +727,175 @@ class WriteFreedomTests(unittest.TestCase):
         self.assertEqual(len(self.owner.calls), 1)
 
 
+class FreshnessBudgetTests(unittest.TestCase):
+    """The freshness budget is a finite, positive, bounded number.
+
+    A stale organizational snapshot must never outlive the grant it was read
+    under, so the budget is validated at construction — before any binding is
+    resolved and before any context is acquired.
+    """
+
+    def setUp(self):
+        self.raw = _bundle_bytes("WS:ALPHA", sections=[{"title": "o", "body": "b"}])
+        self.owner = FakeOwner({"WS:ALPHA": (self.raw, _observation(self.raw, "WS:ALPHA"))})
+        self.resolver = StaticResolver({"session-alpha": _binding()})
+        self.ports = AgentOsHostPorts(resolver=self.resolver, guard=StaticGuard())
+        self.spawn = ManualSpawn()
+
+    def _construct(self, value):
+        return create_provider(ports=self.ports, reader=self.owner.read,
+                               spawn=self.spawn, freshness_seconds=value)
+
+    def _assert_refused(self, value):
+        with self.assertRaises(AgentOsRefusal) as caught:
+            self._construct(value)
+        self.assertEqual(caught.exception.code, REASON_FRESHNESS_INVALID)
+
+    def test_default_budget_is_120_seconds(self):
+        clock = {"now": 500.0}
+        provider = create_provider(ports=self.ports, reader=self.owner.read,
+                                   spawn=self.spawn, clock=lambda: clock["now"])
+        provider.initialize(session_id="session-alpha",
+                            hermes_home="/tmp/hermes-alpha",
+                            agent_identity="profile-alpha")
+        provider.prepare_context()
+        self.spawn.run_all()
+        self.assertNotEqual(provider.prefetch("q"), "")
+        # The snapshot expires exactly one default budget after the read.
+        clock["now"] = 500.0 + DEFAULT_FRESHNESS_SECONDS - 0.001
+        self.assertNotEqual(provider.prefetch("q"), "")
+        clock["now"] = 500.0 + DEFAULT_FRESHNESS_SECONDS
+        self.assertEqual(provider.prefetch("q"), "")
+        self.assertEqual(provider.readiness()["reason"], REASON_CONTEXT_EXPIRED)
+
+    def test_non_finite_budget_is_refused(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(value=value):
+                self._assert_refused(value)
+
+    def test_non_positive_budget_is_refused(self):
+        for value in (0, 0.0, -1, -0.5, -1e-9):
+            with self.subTest(value=value):
+                self._assert_refused(value)
+
+    def test_bool_budget_is_refused(self):
+        # bool is an int, but it is not a duration.
+        for value in (True, False):
+            with self.subTest(value=value):
+                self._assert_refused(value)
+
+    def test_string_budget_is_refused_rather_than_coerced(self):
+        for value in ("120", "inf", ""):
+            with self.subTest(value=value):
+                self._assert_refused(value)
+
+    def test_budget_above_the_ceiling_is_refused(self):
+        self._assert_refused(MAX_FRESHNESS_SECONDS + 0.001)
+        self._assert_refused(10 ** 9)
+
+    def test_the_ceiling_itself_is_accepted(self):
+        provider = self._construct(MAX_FRESHNESS_SECONDS)
+        provider.initialize(session_id="session-alpha",
+                            hermes_home="/tmp/hermes-alpha",
+                            agent_identity="profile-alpha")
+        self.assertTrue(provider.is_available())
+
+    def test_a_refused_budget_acquires_no_context(self):
+        self._assert_refused(float("nan"))
+        self.assertEqual(self.resolver.calls, [])
+        self.assertEqual(self.owner.calls, [])
+
+    def test_a_refused_budget_never_reaches_a_caller(self):
+        refusal = AgentOsRefusal(REASON_FRESHNESS_INVALID)
+        self.assertEqual(refusal.code, REASON_FRESHNESS_INVALID)
+        self.assertEqual(str(refusal), REASON_FRESHNESS_INVALID)
+
+
+class ReadinessGuardTests(unittest.TestCase):
+    """Readiness never claims READY for a snapshot the host no longer grants.
+
+    A cached snapshot is only READY while the host guard still grants the
+    exact binding. The guard is consulted locally; the provider performs no
+    I/O and no compiler read to produce a status.
+    """
+
+    def setUp(self):
+        self.raw = _bundle_bytes("WS:ALPHA", sections=[
+            {"title": "objective", "body": "ALPHA-SECRET"}])
+        self.owner = FakeOwner({"WS:ALPHA": (self.raw, _observation(self.raw, "WS:ALPHA"))})
+        self.resolver = StaticResolver({"session-alpha": _binding()})
+        self.spawn = ManualSpawn()
+
+    def _acquired(self, guard):
+        ports = AgentOsHostPorts(resolver=self.resolver, guard=guard)
+        provider = _provider(ports, self.owner, self.spawn)
+        provider.initialize(session_id="session-alpha",
+                            hermes_home="/tmp/hermes-alpha",
+                            agent_identity="profile-alpha")
+        provider.prepare_context()
+        self.spawn.run_all()
+        return provider
+
+    def test_a_live_grant_is_still_ready(self):
+        provider = self._acquired(StaticGuard())
+        state = provider.readiness()
+        self.assertEqual(state["state"], "READY")
+        self.assertIsNotNone(state["bundle_sha256"])
+
+    def test_revoked_after_acquire_is_never_reported_ready(self):
+        # The read succeeds; the grant is revoked before any prefetch.
+        provider = self._acquired(ScriptedGuard(["gen-1", "gen-1", None]))
+        state = provider.readiness()
+        self.assertNotEqual(state["state"], "READY")
+        self.assertEqual(state["reason"], "AGENTOS_SCOPE_REVOKED")
+        self.assertFalse(state["context_supplied"])
+        self.assertIsNone(state["bundle_sha256"])
+        # And nothing is delivered.
+        self.assertEqual(provider.prefetch("q"), "")
+        self.assertNotIn("ALPHA-SECRET", provider.prefetch("q"))
+
+    def test_scope_changed_after_acquire_is_never_reported_ready(self):
+        provider = self._acquired(ScriptedGuard(["gen-1", "gen-1", "gen-1-rotated"]))
+        state = provider.readiness()
+        self.assertNotEqual(state["state"], "READY")
+        self.assertEqual(state["reason"], "AGENTOS_SCOPE_CHANGED")
+        self.assertFalse(state["context_supplied"])
+        self.assertEqual(provider.prefetch("q"), "")
+
+    def test_unverifiable_guard_after_acquire_is_never_reported_ready(self):
+        class LateExplodingGuard:
+            def __init__(self):
+                self.calls = 0
+
+            def current_generation(self, binding):
+                self.calls += 1
+                if self.calls <= 2:
+                    return binding.generation
+                raise RuntimeError("guard unavailable")
+
+        provider = self._acquired(LateExplodingGuard())
+        state = provider.readiness()
+        self.assertNotEqual(state["state"], "READY")
+        self.assertEqual(state["reason"], "AGENTOS_SCOPE_UNVERIFIED")
+        self.assertFalse(state["context_supplied"])
+        self.assertEqual(provider.prefetch("q"), "")
+
+    def test_cached_prepare_context_never_reports_ready_after_a_revoke(self):
+        provider = self._acquired(ScriptedGuard(["gen-1", "gen-1", None]))
+        state = provider.prepare_context()
+        self.assertNotEqual(state["state"], "READY")
+        self.assertEqual(state["reason"], "AGENTOS_SCOPE_REVOKED")
+        self.assertFalse(state["context_supplied"])
+        # The dropped snapshot is not replaced by an automatic retry.
+        self.assertEqual(len(self.owner.calls), 1)
+
+    def test_readiness_never_triggers_a_read(self):
+        provider = self._acquired(StaticGuard())
+        for _ in range(5):
+            provider.readiness()
+        self.assertEqual(len(self.owner.calls), 1)
+
+
 class RegistrationTests(unittest.TestCase):
     def test_register_requires_the_real_upstream_base(self):
         """A native provider is never faked: without the real base it refuses."""
@@ -845,6 +1034,146 @@ class UpstreamInterfaceCompatibilityTests(unittest.TestCase):
             _time.sleep(0.01)
         self.assertEqual(observed.get("marker"), "profile-alpha-context")
         self.assertIn("MARKER", provider.prefetch("q"))
+
+    def test_native_module_storage_does_not_shadow_the_lookup_method(self):
+        """The module object is stored; the lookup stays a callable method.
+
+        When both used the name ``_upstream_module``, the class attribute
+        holding the module shadowed the inherited method and the default
+        native path raised ``TypeError: 'module' object is not callable``
+        before any read.
+        """
+        cls = build_provider_class(upstream_module=self.module)
+        self.assertIs(cls._native_memory_module, self.module)
+        self.assertTrue(callable(getattr(cls, "_upstream_module", None)))
+        provider = cls(ports=None, reader=lambda *a, **k: None)
+        self.assertIs(provider._upstream_module(), self.module)
+
+    def test_native_default_path_prepares_without_an_injected_spawn(self):
+        """The product path, with the real upstream module and no spawn override.
+
+        This is the path the parent reproduced as broken: a bound native
+        provider must arm the real upstream ``spawn_context_thread`` itself.
+        """
+        raw = _bundle_bytes("WS:ALPHA", sections=[
+            {"title": "objective", "body": "NATIVE-SECRET"}])
+        owner = FakeOwner({"WS:ALPHA": (raw, _observation(raw, "WS:ALPHA"))})
+        ports = AgentOsHostPorts(
+            resolver=StaticResolver({"session-alpha": _binding()}),
+            guard=StaticGuard())
+        provider = create_provider(
+            upstream_module=self.module, ports=ports, reader=owner.read,
+            allow_missing_base=False)
+        provider.initialize(session_id="session-alpha",
+                            hermes_home="/tmp/hermes-alpha",
+                            agent_identity="profile-alpha")
+        # No spawn override anywhere: the provider finds the native helper.
+        provider.prepare_context()
+        state = _await_settled(provider)
+        self.assertEqual(state["state"], "READY", state)
+        self.assertEqual(len(owner.calls), 1)
+        self.assertEqual(owner.calls[0]["workstream"], "WS:ALPHA")
+        self.assertEqual(owner.calls[0]["owner_root"], "/tmp/owner-alpha")
+        text = provider.prefetch("q")
+        self.assertIn("NATIVE-SECRET", text)
+        self.assertTrue(provider.readiness()["context_supplied"])
+
+    def test_native_registration_path_uses_the_real_thread_and_contextvars(self):
+        """Register through a real-shaped context, then qualify the default path.
+
+        The instance is obtained the way Hermes obtains it — through
+        ``register(ctx)`` against the real upstream base — and then prepared
+        without an injected spawn. The upstream ``spawn_context_thread`` must
+        carry the caller's ``contextvars`` into the read, the owner must be
+        read exactly once, and the context must actually be delivered.
+        """
+        from integrations.hermes_harness import agentos_memory_provider as module
+
+        marker = contextvars.ContextVar("mmx_native_default_marker", default="unset")
+        raw = _bundle_bytes("WS:ALPHA", sections=[
+            {"title": "objective", "body": "NATIVE-DEFAULT-MARKER"}])
+        owner = FakeOwner({"WS:ALPHA": (raw, _observation(raw, "WS:ALPHA"))})
+        observed = {}
+
+        def reader(workstream, budget, *, owner_root=None):
+            observed["marker"] = marker.get()
+            owner.calls.append({"workstream": workstream, "budget": budget,
+                                "owner_root": owner_root})
+            return owner.entries[workstream]
+
+        ports = AgentOsHostPorts(
+            resolver=StaticResolver({"session-alpha": _binding()}),
+            guard=StaticGuard())
+        registered = []
+
+        class Ctx:
+            """The real upstream plugin context shape.
+
+            Upstream ``plugins/memory/__init__.py`` captures the provider
+            through ``register_memory_provider`` and keeps it in ``.provider``.
+            """
+
+            provider = None
+
+            def register_memory_provider(self, provider):
+                self.provider = provider
+                registered.append(provider)
+
+        saved_module = module._UPSTREAM_MODULE
+        saved_ports = module._HOST_PORTS
+        saved_reader = module.read_context
+        try:
+            module._UPSTREAM_MODULE = self.module
+            module._HOST_PORTS = None
+            module.install_host_ports(ports)
+            module.read_context = reader
+            module.register(Ctx())
+        finally:
+            module._UPSTREAM_MODULE = saved_module
+            module._HOST_PORTS = saved_ports
+            module.read_context = saved_reader
+
+        self.assertEqual(len(registered), 1)
+        provider = registered[0]
+        self.assertIsInstance(provider, self.module.MemoryProvider)
+        provider.initialize(session_id="session-alpha",
+                            hermes_home="/tmp/hermes-alpha",
+                            agent_identity="profile-alpha")
+        marker.set("profile-alpha-context")
+        provider.prepare_context()
+        state = _await_settled(provider)
+        self.assertEqual(state["state"], "READY", state)
+        # The upstream helper carried the caller's contextvars into the read.
+        self.assertEqual(observed.get("marker"), "profile-alpha-context")
+        self.assertEqual(len(owner.calls), 1)
+        text = provider.prefetch("q")
+        self.assertIn("NATIVE-DEFAULT-MARKER", text)
+        self.assertTrue(provider.readiness()["context_supplied"])
+
+    def test_native_default_path_fails_closed_without_the_context_helper(self):
+        """A missing or non-callable helper is a closed refusal, not a TypeError."""
+        raw = _bundle_bytes("WS:ALPHA", sections=[{"title": "o", "body": "b"}])
+        owner = FakeOwner({"WS:ALPHA": (raw, _observation(raw, "WS:ALPHA"))})
+        ports = AgentOsHostPorts(
+            resolver=StaticResolver({"session-alpha": _binding()}),
+            guard=StaticGuard())
+
+        class NoHelper:
+            """The real upstream shape with the context helper removed."""
+            MemoryProvider = self.module.MemoryProvider
+
+        provider = create_provider(
+            upstream_module=NoHelper, ports=ports, reader=owner.read,
+            allow_missing_base=False)
+        provider.initialize(session_id="session-alpha",
+                            hermes_home="/tmp/hermes-alpha",
+                            agent_identity="profile-alpha")
+        provider.prepare_context()
+        state = provider.readiness()
+        self.assertNotEqual(state["state"], "READY")
+        self.assertEqual(state["reason"], "AGENTOS_CONTEXT_HELPER_UNAVAILABLE")
+        self.assertEqual(provider.prefetch("q"), "")
+        self.assertEqual(owner.calls, [])
 
 
 if __name__ == "__main__":

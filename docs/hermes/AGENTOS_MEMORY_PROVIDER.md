@@ -46,6 +46,12 @@ Read-only means read-only:
 | Upstream Hermes | `NousResearch/hermes-agent` @ `1c0cd667746d3395fe9e1b6c74f8f85952486f18` |
 | Upstream `agent/memory_provider.py` SHA-256 | `ac81dcf489c698891f0edebfe26845a75c50d2bde77ec3be8d7938a85c79f1fc` |
 
+The provider source on this branch is a bounded repair of the original leaf:
+the same three-file scope, fast-forwarded on the same branch and PR. The
+repair qualifies the native default path, the freshness ceiling and the
+readiness guard against the pinned upstream source; it adds no new capability
+and changes no owner.
+
 ## Host integration API
 
 The provider never trusts model text, a constructor string or a retrieved note
@@ -147,7 +153,7 @@ provider.readiness()         # {"state": …, "reason": …, "context_supplied":
 |---|---|
 | `UNBOUND` | No host binding. The provider is unavailable. |
 | `PENDING` | The single background read is in flight. |
-| `READY` | A current snapshot is held and inside its freshness budget. |
+| `READY` | A current snapshot is held, inside its freshness budget, and still granted by the host. |
 | `UNAVAILABLE` | No deliverable snapshot; `reason` says why. |
 | `CLOSED` | The provider was shut down. |
 
@@ -166,13 +172,58 @@ provider.prepare_context()
 bound workstream/role/profile, the bundle digest and whether context was
 actually supplied.
 
+### Readiness and the host guard
+
+`readiness()` and the cached path of `prepare_context()` consult the host
+currentness guard before reporting a cached snapshot as `READY`. A revoked
+grant, a changed scope or an unverifiable guard reports `UNAVAILABLE` with the
+closed reason instead, and `context_supplied` is `False`: nothing may claim a
+deliverable context that the host no longer grants.
+
+The guard is therefore on the host's critical path. Its implementation must be
+**cheap, local and non-blocking** — it is consulted before a read, after a
+read, immediately before a delivery and on every readiness report. The
+provider itself performs no I/O and no compiler read to produce a status, and
+`prefetch()` still never reads from the owner.
+
+Consulting the guard never starts a read and never retries one. A revoked or
+changed guard drops the cached snapshot; a later `prepare_context()` may
+re-resolve the binding, but nothing here loops on its own.
+
+## First-turn barrier
+
+The native host owns this barrier. Before the first model request that
+promises recall, the host must complete a **bounded preparation** of this
+provider:
+
+1. `initialize()` binds the instance to exactly one session.
+2. `prepare_context()` arms the single background read. It never blocks.
+3. The host waits, bounded, for `readiness()` to leave `PENDING` — that is,
+   until the read has either produced a snapshot (`READY`) or failed with a
+   closed reason (`UNAVAILABLE`).
+
+Only then may the first request that depends on organizational recall be
+issued.
+
+**Eventual warming is not cold recall.** A provider that is still `PENDING`, or
+that reports `UNAVAILABLE` with a closed reason, has *no* context to give the
+first turn. The host must not issue a first-turn request that promises recall
+on the expectation that the snapshot will arrive later, and must not describe a
+warming provider as a warm one. A first turn without context is simply a first
+turn without context.
+
+This adds no new lifecycle owner. The barrier is the existing native host's
+own startup sequence, and the provider contributes only the two seams it
+already exposes (`prepare_context()` and `readiness()`). The provider never
+blocks, never schedules and never starts a service.
+
 ## Native hook lifecycle
 
 | Hook | Behavior |
 |---|---|
 | `is_available()` | Cheap: true only with host ports installed and the provider not closed. No network, no filesystem, no read. |
 | `initialize(session_id, **kwargs)` | Resolves through the host port and binds this instance to exactly this session. A missing or mismatched session/profile raises a bounded refusal (upstream logs and swallows it) and leaves the instance unbound. |
-| `prepare_context()` | Host seam: arms the one in-flight background read. |
+| `prepare_context()` | Host seam: arms the one in-flight background read. A cached snapshot is re-served only while the host guard still grants it; otherwise it is dropped, not retried. |
 | `prefetch(query, *, session_id="")` | Returns the current snapshot or `""`. The query is never parsed for scope. A non-empty `session_id` that does not match the bound session is refused. |
 | `queue_prefetch(query, *, session_id="")` | Arms the next read after a turn. Never reads inline. |
 | `sync_turn(...)` | Deliberately inert. |
@@ -180,6 +231,7 @@ actually supplied.
 | `on_pre_compress(messages)` | Deliberately inert; returns `""`. |
 | `on_session_switch(new_session_id, ...)` | Re-resolves through the host port. Clears pending and cached material first, so a late read cannot repopulate the old session. A different role is refused with `AGENTOS_REBIND_REFUSED`. |
 | `shutdown()` | Clears every cached and pending piece of material. A late background return is discarded. |
+| `readiness()` | Host-facing status. Consults the local currentness guard; a revoked, changed or unverifiable grant is never reported as `READY`. |
 
 ### Concurrency
 
@@ -188,6 +240,15 @@ through the native context helper (`agent.memory_provider.spawn_context_thread`)
 so the profile's `contextvars` — the active `HERMES_HOME` and the per-turn
 secret scope — are preserved. There is no durable queue, no service and no
 scheduler.
+
+**The default path is the native path.** A provider built against the real
+upstream module finds `spawn_context_thread` itself; no injected spawn
+substitute is needed and none is expected in production. The upstream module
+is *stored* under `_native_memory_module` and reached through the
+`_upstream_module()` lookup, so the stored module can never shadow the lookup
+and turn the default path into a raw `TypeError`. If the helper is missing or
+is not callable, the read is refused with the closed reason
+`AGENTOS_CONTEXT_HELPER_UNAVAILABLE` — never with an untyped exception.
 
 Currentness is required three times:
 
@@ -200,8 +261,16 @@ repopulate an old session.
 
 ### Freshness
 
-A snapshot carries a bounded monotonic freshness budget (default 120 s). After
-it expires the snapshot is dropped: there is no stale-while-revalidate
+A snapshot carries a bounded monotonic freshness budget: a **finite, positive**
+number of seconds, at most **300 s**, default **120 s**. The budget is
+validated when the provider is constructed — before a binding is resolved and
+before any context is acquired — so an unusable budget never reaches a read.
+`bool`, a string, `NaN`, `±inf`, zero, a negative value and anything above the
+ceiling are all refused with the closed reason `AGENTOS_FRESHNESS_INVALID`.
+The clock is `time.monotonic` by default; a supplied clock is a test seam,
+never a freshness authority.
+
+After it expires the snapshot is dropped: there is no stale-while-revalidate
 delivery. The next `prepare_context()` or `queue_prefetch()` reads the current
 bundle from the owner again.
 
@@ -254,6 +323,7 @@ model-visible string.
 | `AGENTOS_CONTEXT_DELIVERY_TOO_LARGE` | The complete bundle exceeds 32 KiB. |
 | `AGENTOS_OBSERVATION_MISMATCH` | The observation did not match the read. |
 | `AGENTOS_CONTEXT_HELPER_UNAVAILABLE` | The upstream base or context helper is absent. |
+| `AGENTOS_FRESHNESS_INVALID` | The freshness budget was not a finite, positive value inside the 300 s ceiling. |
 | `AGENTOS_SESSION_CLOSED` | The provider was shut down. |
 | `AGENTOS_HOST_PORTS_ALREADY_INSTALLED` | A second, different host port pair was installed. |
 
@@ -263,13 +333,31 @@ passed through unchanged so the caller still learns why the owner refused.
 
 ## Rollback
 
-1. Disable the external provider in the selected role profile (set
-   `memory.provider` back to the built-in store). This is the whole runtime
-   rollback: the adapter holds no durable state of its own.
-2. Remove the `install_host_ports()` call from the native bootstrap.
-3. Preserve the canonical Agent OS records, the built-in Hermes memory and any
-   private native notes. Rolling back this adapter must never erase company
-   facts.
+Rollback restores the **exact prior state**. It never guesses a substitute.
+
+1. **Capture the previous selection before anything changes it.** Hermes
+   selects one external memory provider at a time, through the
+   `memory.provider` key of the role profile's config; the core built-in
+   store is selected by the sentinels `""`, `default`, `builtin`, `built-in`
+   or `none`. Record the selected provider name and the whole relevant
+   provider configuration for that profile before touching it.
+2. **Restore that exact selection and that exact configuration.** Put back
+   the recorded provider name and the recorded configuration values verbatim.
+   **Do not blindly switch to the built-in store.** The OMH ("Oh My Hermes")
+   bridge is the memory provider currently selected on M2, and it carries its
+   own file-backed memory and its own configuration. Replacing it with the
+   built-in store would silently drop a different provider's behavior,
+   configuration and state. Restoring the built-in store is correct only when
+   the built-in store is what was selected before.
+3. Remove the `install_host_ports()` call from the native bootstrap.
+4. Preserve the canonical Agent OS records, the built-in Hermes memory, the
+   previously selected provider's own state and any private native notes.
+   Rolling back this adapter must never erase company facts, and must never
+   erase the previously selected provider's state.
+
+This packet changes no live configuration and installs no provider decorator.
+The selection and its rollback belong to the native host owner that holds the
+role profile, at the time of the change.
 
 There is no derived index to rebuild and no service to stop.
 
@@ -294,15 +382,31 @@ library `unittest`, no new dependencies) covers:
   bundles, oversized bundles and reader errors all fail safely with closed
   codes;
 - no tool schemas, no write, no dispatch and no checkpoint claim;
+- the freshness budget is finite and positive, at most 300 s with a 120 s
+  default, and `bool`, `NaN`, `±inf`, zero, negative, over-limit and string
+  values are refused before any context is acquired;
+- readiness and the cached `prepare_context()` never report `READY` for a
+  snapshot the host guard has revoked, changed or cannot verify, and never
+  report `context_supplied` for one;
 - interface compatibility against the **actual pinned upstream
   `agent/memory_provider.py`**, including its exact commit and SHA-256, and the
-  real upstream `spawn_context_thread` preserving the profile context.
+  real upstream `spawn_context_thread` preserving the profile context;
+- the **native default path** with the real upstream module and **no injected
+  spawn**: a bound provider arms the real upstream `spawn_context_thread`
+  itself, the read happens exactly once, the caller's `contextvars` reach the
+  read and the context is delivered;
+- the same default path reached through a **real-shaped registration
+  context**, so the instance is obtained the way Hermes obtains it;
+- a missing or non-callable context helper failing closed with
+  `AGENTOS_CONTEXT_HELPER_UNAVAILABLE` instead of a raw `TypeError`.
 
 The upstream compatibility check locates the pinned checkout through
 `MMX_HERMES_PIN` or the fleet's external-SSD pin path, and skips with an
 explicit message when the pinned source is not on the host. Fixture-based
 tests and the real-native check are separate cases: the native check asserts
-the upstream file digest, so a fixture can never pass as native code.
+the upstream file digest, so a fixture can never pass as native code, and a
+host without the pinned source **skips** the native qualification instead of
+passing it.
 
 ## Remaining live enrollment and acceptance gap
 
@@ -316,8 +420,11 @@ This packet delivers source only. Still open, and owned by the parent:
   provider (`memory.provider`) is not selected or installed.
 - **Real owner read.** The qualified run against the live Agent OS compiler
   root is not performed here; the owner root in the binding is host-supplied.
-- **First-turn readiness qualification.** The host must call
-  `prepare_context()` and qualify `readiness()` before the first turn.
+- **First-turn readiness qualification.** The host must complete the bounded
+  preparation above — `prepare_context()`, then a bounded wait for
+  `readiness()` to leave `PENDING` — before the first request that promises
+  recall. The barrier is the host's to enforce; this packet only supplies the
+  two seams it needs.
 - **Acceptance fixture.** The two-role/two-project fixture with a permitted
   common fact, a private fact, a stale shared fact and a source-linked
   correction must be run against the live owner publication workflow.

@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import math
 import re
 import threading
 import time
@@ -40,7 +41,9 @@ __all__ = [
     "AgentOsHostPorts",
     "AgentOsMemoryProviderCore",
     "AgentOsRefusal",
+    "DEFAULT_FRESHNESS_SECONDS",
     "MAX_CONTEXT_BYTES",
+    "MAX_FRESHNESS_SECONDS",
     "PROVIDER_NAME",
     "build_provider_class",
     "create_provider",
@@ -57,6 +60,10 @@ SCHEMA = "mastermind.hermes_agentos_memory.v1"
 MAX_CONTEXT_BYTES = 32 * 1024
 DEFAULT_BUDGET = 4000
 DEFAULT_FRESHNESS_SECONDS = 120.0
+# A snapshot older than this is refused rather than delivered. The ceiling is
+# explicit and finite: an unbounded or non-finite freshness budget would let a
+# stale organizational snapshot outlive the grant it was read under.
+MAX_FRESHNESS_SECONDS = 300.0
 
 WORKSTREAM_RE = re.compile(r"WS:[A-Z][A-Z0-9-]{0,95}\Z")
 HEX64_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -78,6 +85,7 @@ REASON_CONTEXT_EXPIRED = "AGENTOS_CONTEXT_EXPIRED"
 REASON_CONTEXT_TOO_LARGE = "AGENTOS_CONTEXT_DELIVERY_TOO_LARGE"
 REASON_OBSERVATION_MISMATCH = "AGENTOS_OBSERVATION_MISMATCH"
 REASON_HELPER_UNAVAILABLE = "AGENTOS_CONTEXT_HELPER_UNAVAILABLE"
+REASON_FRESHNESS_INVALID = "AGENTOS_FRESHNESS_INVALID"
 REASON_CLOSED = "AGENTOS_SESSION_CLOSED"
 REASON_HOST_PORTS_INSTALLED = "AGENTOS_HOST_PORTS_ALREADY_INSTALLED"
 
@@ -96,6 +104,7 @@ PROVIDER_CODES = frozenset({
     REASON_CONTEXT_TOO_LARGE,
     REASON_OBSERVATION_MISMATCH,
     REASON_HELPER_UNAVAILABLE,
+    REASON_FRESHNESS_INVALID,
     REASON_CLOSED,
     REASON_HOST_PORTS_INSTALLED,
 })
@@ -132,6 +141,9 @@ _ENVELOPE_HEADER = (
     "does not inherit another parent's custody.\n"
     "Acquisition observation; not Runtime PREPARE or a supplied-input receipt:\n"
 )
+
+# Sentinel: the host guard has not been consulted yet for this status.
+_GUARD_UNCHECKED = object()
 
 
 def _closed_code(code: Any) -> str:
@@ -182,6 +194,10 @@ class AgentOsCurrentnessGuard(Protocol):
 
     ``None`` means the grant was revoked. A different generation means the
     scope changed and the old binding is stale.
+
+    The implementation must be cheap, local and non-blocking: it is consulted
+    before a read, after a read, immediately before a delivery and on every
+    readiness report, so a remote or slow guard would stall the host's turn.
     """
 
     def current_generation(self, binding: AgentOsBinding) -> Optional[str]:
@@ -234,6 +250,24 @@ def _plain(value: Any) -> bool:
     return not any(ord(char) < 0x20 or ord(char) == 0x7F for char in value)
 
 
+def _freshness_seconds(value: Any) -> float:
+    """A finite, positive freshness budget inside the explicit ceiling.
+
+    A constructor value is a configuration choice, never an authorization, but
+    it still has to be a real bounded number: ``bool`` is refused even though it
+    is an ``int``, a string is refused rather than coerced, and ``NaN``/``inf``
+    are refused rather than silently poisoning the expiry comparison.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise AgentOsRefusal(REASON_FRESHNESS_INVALID)
+    number = float(value)
+    if not math.isfinite(number):
+        raise AgentOsRefusal(REASON_FRESHNESS_INVALID)
+    if number <= 0.0 or number > MAX_FRESHNESS_SECONDS:
+        raise AgentOsRefusal(REASON_FRESHNESS_INVALID)
+    return number
+
+
 class AgentOsMemoryProviderCore:
     """The provider behavior. It imports no Hermes module at definition time.
 
@@ -261,7 +295,9 @@ class AgentOsMemoryProviderCore:
         self._reader = reader if reader is not None else read_context
         self._spawn = spawn
         self._budget = budget
-        self._freshness = freshness_seconds
+        # Validated before any context can be acquired: an unbounded freshness
+        # budget is refused at construction, not at first delivery.
+        self._freshness = _freshness_seconds(freshness_seconds)
         self._clock = clock if clock is not None else time.monotonic
         self._lock = threading.RLock()
         self._binding: Optional[AgentOsBinding] = None
@@ -453,7 +489,16 @@ class AgentOsMemoryProviderCore:
             reservation = None
             if not rebind:
                 if self._snapshot is not None and self._clock() < self._snapshot.expires_at:
-                    self._want_read = False
+                    # A cached snapshot is only READY while the host still
+                    # grants this exact binding. A revoked, changed or
+                    # unverifiable guard drops it instead of re-serving it,
+                    # and no replacement read is armed here: this is not a
+                    # retry loop.
+                    guard_reason = self._guard_reason(self._binding, self._epoch)
+                    if guard_reason is None:
+                        self._want_read = False
+                        return self._status_locked(guard_reason)
+                    self._drop(guard_reason)
                     return self._status_locked()
                 if self._pending or self._revoked:
                     self._want_read = True
@@ -475,17 +520,42 @@ class AgentOsMemoryProviderCore:
         return self.readiness()
 
     def readiness(self) -> dict:
-        """The bounded, host-visible state of this provider instance."""
+        """The bounded, host-visible state of this provider instance.
+
+        A cached snapshot is reported as ``READY`` only while the host guard
+        still grants this exact binding. A revoked, changed or unverifiable
+        guard reports ``UNAVAILABLE`` with the closed reason instead.
+        """
         with self._lock:
             return self._status_locked()
 
-    def _status_locked(self) -> dict:
+    def _status_locked(self, guard_reason: Any = _GUARD_UNCHECKED) -> dict:
+        """The bounded state of this instance. The caller holds the lock.
+
+        ``guard_reason`` carries an already-computed host-guard verdict so a
+        caller that had to ask the guard anyway does not ask it twice.
+        """
+        reason = self._reason
+        supplied = self._last_supplied
+        bundle_sha256 = self._snapshot.bundle_sha256 if self._snapshot else None
         if self._closed:
             state = "CLOSED"
         elif self._binding is None:
             state = "UNBOUND"
         elif self._snapshot is not None and self._clock() < self._snapshot.expires_at:
-            state = "READY"
+            # A cached snapshot is READY only while the host still grants this
+            # exact binding. A revoke, a scope change or an unverifiable guard
+            # means there is no deliverable context, so nothing may claim to
+            # be READY and no context may be claimed as supplied.
+            if guard_reason is _GUARD_UNCHECKED:
+                guard_reason = self._guard_reason(self._binding, self._epoch)
+            if guard_reason is None:
+                state = "READY"
+            else:
+                state = "UNAVAILABLE"
+                reason = guard_reason
+                supplied = False
+                bundle_sha256 = None
         elif self._pending:
             state = "PENDING"
         else:
@@ -494,13 +564,13 @@ class AgentOsMemoryProviderCore:
             "schema": SCHEMA,
             "provider": PROVIDER_NAME,
             "state": state,
-            "reason": self._reason,
+            "reason": reason,
             "workstream": self._binding.workstream if self._binding else None,
             "role": self._binding.role if self._binding else None,
             "profile": self._binding.profile if self._binding else None,
-            "bundle_sha256": self._snapshot.bundle_sha256 if self._snapshot else None,
+            "bundle_sha256": bundle_sha256,
             # True only after the context was actually handed to a turn.
-            "context_supplied": self._last_supplied,
+            "context_supplied": supplied,
         }
 
     # -- Binding resolution ---------------------------------------------------
@@ -612,15 +682,19 @@ class AgentOsMemoryProviderCore:
     def _spawn_read(self, binding: AgentOsBinding, epoch: int) -> None:
         spawn = self._spawn
         if spawn is None:
-            module = self._upstream_module()
-            spawn = getattr(module, "spawn_context_thread", None) if module else None
+            spawn = self._native_spawn_helper()
         if spawn is None:
+            # The native context helper is missing or is not callable. This is
+            # a closed availability refusal, never a raw TypeError.
             self._release_read()
             return
         try:
             thread = spawn(self._acquire, name="agentos-memory-read",
                            args=(binding, epoch))
         except Exception:
+            self._release_read()
+            return
+        if thread is None or not callable(getattr(thread, "start", None)):
             self._release_read()
             return
         try:
@@ -760,11 +834,35 @@ class AgentOsMemoryProviderCore:
             self._spawn_read(*restart)
 
     def _upstream_module(self):
-        """The real upstream module, when Hermes is present."""
-        module = getattr(type(self), "_upstream_module", None)
+        """The real upstream module, when Hermes is present.
+
+        Storage and lookup are deliberately separate names. The native module
+        is held in ``_native_memory_module``; this method is the only way to
+        reach it. When both used one name, the class attribute holding the
+        module object shadowed this method and the default native path raised
+        ``TypeError: 'module' object is not callable`` before any read.
+        """
+        module = getattr(type(self), "_native_memory_module", None)
         if module is not None:
             return module
         return _load_upstream_module()
+
+    def _native_spawn_helper(self):
+        """The real upstream ``spawn_context_thread``, when Hermes is present.
+
+        Returns ``None`` — never a partially usable object — when the helper is
+        absent or is not callable, so the caller fails closed.
+        """
+        try:
+            module = self._upstream_module()
+        except Exception:
+            return None
+        if module is None:
+            return None
+        helper = getattr(module, "spawn_context_thread", None)
+        if not callable(helper):
+            return None
+        return helper
 
 
 # -- Late, dependency-injected factory around the real upstream base ---------
@@ -817,7 +915,9 @@ def build_provider_class(base=None, *, upstream_module=None, allow_missing_base=
         {
             "__module__": __name__,
             "__doc__": AgentOsMemoryProviderCore.__doc__,
-            "_upstream_module": module,
+            # Storage only. The lookup is the inherited ``_upstream_module()``
+            # method, which this attribute must never shadow.
+            "_native_memory_module": module,
             "_hermes_native_base": True,
         },
     )
