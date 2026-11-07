@@ -57,6 +57,13 @@
     "run_id": "fabric-app-j-preserving-migration-20261107-02",
     "state": "TERMINAL"
   },
+  "prior_accepted_http_proof": {
+    "at": "2026-11-07T07:36:10Z",
+    "log_sha256": "b0a0e080b435ec66d39734c528019479648c5fdf9ecf16437371345754317790",
+    "relationship": "prior S3 proof discovered after independent root run; root receipt is corroborating, not first gap closure",
+    "source": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6703989157",
+    "tests": 22
+  },
   "retained_candidate": {
     "base": "3ec62ffe02f277e3bab530e3ba069f2f86dcd18d",
     "compressed_sha256": "4e6c61cdc049aa7f0f24f7b55d1de48158e0fe8eb1ebc175d67c87e9a62c460c",
