@@ -1,0 +1,266 @@
+{
+  "schema": "mastermind.hermes_primary_provider_h2_original_union/v1",
+  "merge_base": "bf46d822dbce3ac2226df69da7f94e37101df986",
+  "parents": [
+    "4b2eb8ac8ebf125ce67c728b95cb70ee2a2c6bd2",
+    "d0c543124b47372becd8ee632a1c29b32ffc3ef0"
+  ],
+  "incumbent_only_paths": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "mode": "100644",
+      "git_blob": "dd4000d3788f70df3726f83138438e9274ff46c4"
+    },
+    {
+      "path": ".github/workflows/hermes-application-enrollment.yml",
+      "mode": "100644",
+      "git_blob": "96707375e746f1badc53b5aea335c25ba76efe2c"
+    },
+    {
+      "path": "integrations/hermes_attended_fabric/NATIVE_ENROLLMENT.md",
+      "mode": "100644",
+      "git_blob": "cb78fe8e1f6b52c621e498b34070a86b7f6d08d2"
+    },
+    {
+      "path": "integrations/hermes_attended_fabric/enrollment_check.py",
+      "mode": "100644",
+      "git_blob": "ba87fce83424ceb2c43c2f90cffb6219e0b29fba"
+    },
+    {
+      "path": "integrations/hermes_attended_fabric/facade_port.py",
+      "mode": "100644",
+      "git_blob": "7151eb67685239f2bccf36a64055e3e5ce8a8ca7"
+    },
+    {
+      "path": "integrations/hermes_attended_fabric/native.py",
+      "mode": "100644",
+      "git_blob": "d0143c5c561057f0bec7628d3aa084cd54920e6a"
+    },
+    {
+      "path": "integrations/hermes_attended_fabric/native_evidence.py",
+      "mode": "100644",
+      "git_blob": "9e0d51f4568c0edf9b80f979ffe9e0b651359cd3"
+    },
+    {
+      "path": "integrations/hermes_attended_fabric/tests/native_owner_qualification.py",
+      "mode": "100644",
+      "git_blob": "5eeb14b4625e3be865bb5c9eec8a68d2f243a236"
+    },
+    {
+      "path": "integrations/hermes_attended_fabric/tests/test_facade_port.py",
+      "mode": "100644",
+      "git_blob": "67dd2a0b8eb2259a27487f741d090bc00df8981c"
+    },
+    {
+      "path": "integrations/hermes_attended_fabric/tests/test_facade_wire_integration.py",
+      "mode": "100644",
+      "git_blob": "6167b643a34c07d2bdd4f4ef751647e90d1598cb"
+    },
+    {
+      "path": "integrations/hermes_attended_fabric/tests/test_return_currentness.py",
+      "mode": "100644",
+      "git_blob": "426258dbf0ce33ebf13b0bcb162c706d46d43b31"
+    },
+    {
+      "path": "integrations/studio_direct_mcp/fabric-backend.mjs",
+      "mode": "100644",
+      "git_blob": "38ed38db7aa0fb1e10991291ccac20316678c041"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+      "mode": "100644",
+      "git_blob": "e5776548a1b75a128f4bbb4f29b478f1bed52280"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/native_install.py",
+      "mode": "100644",
+      "git_blob": "2de79611ce82e14b6a255bd1a4956fb5abbf7502"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py",
+      "mode": "100644",
+      "git_blob": "2a53b4c5c896ce85678ec94d41c0b843bbc104fb"
+    },
+    {
+      "path": "tests/test_executive_fabric_release_identity_review.py",
+      "mode": "100644",
+      "git_blob": "9f1bbdedbf26450f5707eba05f6c19f02caefa2b"
+    },
+    {
+      "path": "tests/test_fabric_grok47_qwen_release_composition_20261022.py",
+      "mode": "100644",
+      "git_blob": "59009f7c8e00a1ae2db51c293f36ee58ad2564bc"
+    },
+    {
+      "path": "tests/test_hermes_fabric_native_identity_review.py",
+      "mode": "100644",
+      "git_blob": "7d1e9bf4b58d3672243ac16b9719724c1a5d04ba"
+    },
+    {
+      "path": "tests/test_native_pool_policy_publication.py",
+      "mode": "100644",
+      "git_blob": "89ef60323a9252e10de7ee84d736f8179eac01a9"
+    },
+    {
+      "path": "integrations/hermes_attended_fabric/tests/observational_native_qualification.py",
+      "mode": "100644",
+      "git_blob": "ae1ed92b2615bcbd2e9a83e6f6f14522629fff03"
+    },
+    {
+      "path": "integrations/hermes_attended_fabric/tests/prepare_native_qualification.py",
+      "mode": "100644",
+      "git_blob": "a8e37f897dd46daab632c39c942a57db4b154624"
+    },
+    {
+      "path": "integrations/hermes_attended_fabric/tests/run_native_owner_qualification.py",
+      "mode": "100644",
+      "git_blob": "f257e5e5197cfd92578827f4b05245f933b30701"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/provider_application/README.md",
+      "mode": "100644",
+      "git_blob": "e0ffeaf9242b888be7a3a7688d4b9fb571083344"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/provider_application/composition.json",
+      "mode": "100644",
+      "git_blob": "ce02d342778c060ab729839fd99689816bd77f74"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/provider_application/fabric_task.py.patch",
+      "mode": "100644",
+      "git_blob": "4590f63124efd09d8b6b203a2f12a9db305f4fb3"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/provider_application/lease_broker.py.patch",
+      "mode": "100644",
+      "git_blob": "d3d0289d168aaffd8481687dc64e426c8d2f7b41"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/provider_application/pick.py.patch",
+      "mode": "100644",
+      "git_blob": "75247c81064a5e6d6c53f210d45a666d00c46948"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/provider_application/remote_sub.sh.patch",
+      "mode": "100644",
+      "git_blob": "6752b46a1adca8f9193ec3619ab0ad2e66378c3f"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/provider_application/slot.py.patch",
+      "mode": "100644",
+      "git_blob": "509b209cc7148c183b21c95922cd00cc398f4edd"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/provider_application/sub.sh.patch",
+      "mode": "100644",
+      "git_blob": "ef85dfa2c65e79dc39fe6860b0215795a6d1a50f"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py",
+      "mode": "100644",
+      "git_blob": "fbf2f43bd3f888a23c33e2a4206de2b71706e310"
+    },
+    {
+      "path": "review_evidence/fabric_application/hermes-transport-host-join-20261107.json",
+      "mode": "100644",
+      "git_blob": "c87ddab0aa39f96414fe2d25571ab9703aa2db6a"
+    },
+    {
+      "path": "review_evidence/fabric_application/provider-application-transition-20261107.json",
+      "mode": "100644",
+      "git_blob": "c4148e5ebc19bf6eefed9b13ac489e63bb403b94"
+    },
+    {
+      "path": "review_evidence/fabric_application/provider-macro-projection-source-join-20261107.json",
+      "mode": "100644",
+      "git_blob": "da0870b0b8d54c0a6735932dc44ef134cc761ae8"
+    },
+    {
+      "path": "review_evidence/fabric_application/provider-quota-joined-composition-20261107.json",
+      "mode": "100644",
+      "git_blob": "c8f7c592179807810b6526dac0ded2c8cd111d39"
+    },
+    {
+      "path": "review_evidence/hermes_primary/attended-auto-native-qualification-20261107.json",
+      "mode": "100644",
+      "git_blob": "4ef46f893fccb3db04b2e52a1052b902846bacdf"
+    },
+    {
+      "path": "review_evidence/hermes_primary/historical-shadow-fixture-repair-20261107.json",
+      "mode": "100644",
+      "git_blob": "22f6054bcf3c00194dd67d338a0e5f7b36600095"
+    }
+  ],
+  "ours_only_paths_preserved": 36,
+  "both_changed_identical_paths": 53,
+  "sole_differing_overlap": "tests/executive_fabric_release_identity_review.py",
+  "registry_resolution": "intact d0 plus three absent exact Hermes records; newer worker and shared-relay records preserved",
+  "new_disjoint_latency_package": "integrations/hermes_application_fabric/qualification/provider_h2_latency",
+  "new_qualification": {
+    "cases": 266,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "qualifier_sha256": "40ab160026be8407b680637563a14698e6903f30ca37e1a48d9e9ab4bfd81251",
+    "log_sha256": "60825e25048b1e3cd0625cea9fad914c11a52523d692a0e3c9e4c81a5a3e170c"
+  },
+  "native_acceptance_sdk_dependencies_unchanged": true,
+  "existing_29_case_acceptance_proof_reused_unchanged": true,
+  "fixture_repair_custody": "completed H4 seven-file repair adopted intact; root five-file proof remains historical at4b; original commissioned consumption is not duplicated",
+  "shared_ci_and_protected_worker_adoption": "intact original-owner published blobs; no root edits",
+  "held_source_bodies_read": false,
+  "held_builder_changed": false,
+  "live_runtime_selection": false,
+  "provider_request": false,
+  "live_acceptance": false,
+  "superseded_ours_only_fixtures": [
+    "tests/test_ceo_submit_armed_composition.py",
+    "tests/test_executive_launchd_config.py",
+    "tests/test_executive_release_publication.py"
+  ],
+  "completed_h4_fixture_intake": {
+    "source": "d9d1afd23332f58a1cf5649fc37d51c1138ea512",
+    "paths": [
+      {
+        "path": "tests/test_ceo_submit_armed_composition.py",
+        "git_blob": "f1447e9809f9d4eafca3e8755a376a72c0008366"
+      },
+      {
+        "path": "tests/test_executive_launchd_config.py",
+        "git_blob": "1d9c5d73afc9dc9fb73059cabb0041c9bd11cf2f"
+      },
+      {
+        "path": "tests/test_executive_privileged_control_composition.py",
+        "git_blob": "95fde923c155e26c140db56a0e3fe9f032b91c9c"
+      },
+      {
+        "path": "tests/test_executive_python_runtime_provisioner.py",
+        "git_blob": "3af9b134fea3b24f69b74d860588e3f0b7d859ca"
+      },
+      {
+        "path": "tests/test_executive_release_publication.py",
+        "git_blob": "e2374a55ad753be4fe2289f5ee7b1e71d9abbd49"
+      },
+      {
+        "path": "tests/test_executive_release_stage_only.py",
+        "git_blob": "0e1bf275b22fa9e41ca740aa73da5f667384e5b7"
+      },
+      {
+        "path": "tests/test_os_release_assets.py",
+        "git_blob": "5840d597e509c6cce226f4a18e12ac88a6bf5e2b"
+      },
+      {
+        "path": "review_evidence/hermes_primary/attended-installer-ci-fixtures-20261107.json",
+        "git_blob": "c1a107f9849563a74f3e58b1a19677b121d6abf5"
+      },
+      {
+        "path": "review_evidence/hermes_primary/attended-installation-frontier-20261107.md",
+        "git_blob": "92a1020c2f592f5c7f74d2939afb21bacab39295"
+      }
+    ],
+    "original_tests_passed": 70,
+    "root_rerun": false,
+    "production_source_unchanged": true
+  }
+}

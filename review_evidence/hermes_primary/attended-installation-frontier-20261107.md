@@ -8,7 +8,25 @@ Fully connect Hermes primary inference, native workers, Capacity Fabric routing/
 
 Compatible protected law pin: de6966ce1524c01ab6ac06af5461370aa79f3994. Operation: hermes-native-worker-binding-20261107-c2. Branch: sol/web-hermes-native-worker-binding-20261107-c2. Root direct implementation remains under the earlier recorded paid-Fabric refusal; the native child supplied principal judgment only.
 
-## Current composition
+## Current completed-input composition
+
+The current candidate joins protected-source commit73fc80c1b736b4032ae6e969d5240e059a8113a8 and completed provider/quota owner0a6d33bfa3280e397c1c3d32a8a6bbcae014c17c as real parents. The merge has no conflicts. The entire native quota-continuity tree is exactly the qualified owner tree e231e8ab2b171861620c49553e658a820fdb9d7d; its original builder, both installation paths, provider capabilities and quota-recovery cohort remain exact. Hermes package/runtime/projection and both protected automatic merges remain byte-identical to73fc.
+
+All13 targeted current/historical controls passed with that native source. The published a3d4 Hermes input has passed all nine focused hosted jobs, including paired text/AUTO/tools and the original native conversation handler/Broker. Those parent results retain their exact source scope. Receipt: attended-provider-quota-join-20261107.json.
+
+Next: commit the joined source, run its actual committed D8, publish one current #2225 head and return it to the original #2175 release owner. Do not refresh unrelated protected changes or repeat accepted native/provider qualification. Required final-head CI and installed selection remain distinct. Latency-aware AUTO is explicitly still open with the incumbent source owner; retain multi-option AUTO, physical capacity, newly admitted model switching and worker-result consumption as real acceptance rows.
+
+## Protected source join
+
+The current candidate extends published a3d4da4d79a5a0e7fe4a51d938a132f74f07c574 with protected ad2484d2330a865f604c3c98abd20d20189cba29 as real merge parents. Nineteen protected paths are preserved. The only conflict is an appended finite review record; both exact records remain. All governing scopes are unchanged at the compatible pin.
+
+The two automatic merges have disjoint changed functions: the Fabric tool wrappers and attended configuration parser remain exact to their owner; protected evidence readers and guarded web-observation service construction remain exact to protected source. All Hermes package, source projection, worker/backend and native patch bytes remain identical to a3d4.
+
+Receipt: attended-protected-source-join-20261107.json. The optional local observation suite did not reach any tests because the two available interpreters lack parts of its dependency closure. Environment reconstruction stopped; configured repository CI owns that ordinary regression. No passing result is claimed from those attempts.
+
+Next: commit this exact union, run actual committed D8, publish/read back and return the successor through the existing source thread. Required hosted CI, source absorption, active provider-preserving/latency followthrough and live acceptance remain open.
+
+## Qualified Hermes and Macro composition
 
 - Actual merge parents to retain: owned 5f05b4ea24ff62e49114ca6623853e0c56e7ce6e and original 7e61fb8c8e8e43d08e2272e502b3f8e4386ee95f.
 - The two historical test conflicts are equivalent fixes. Retain the exact owned postimages, which also enforce the whole manifest, exact three-file inverse, input immutability and current/historical guard separation. All 13 targeted controls passed on the composed native source.
@@ -40,3 +58,13 @@ Compatible protected law pin: de6966ce1524c01ab6ac06af5461370aa79f3994. Operatio
 Commit the composed source with both real parents, run actual committed D8, publish the owned branch and read back GitHub. Return the receipt and archive identity through #2175, #2232 and existing Secretary thread1794058108.831279. Then consume genuine required-CI/release-owner returns and repair any concrete new failure.
 
 Final acceptance requires original carrier absorption, current-head binding CI, protected release and installed selection, actual scoped grants, and real primary -> tool -> continuation plus worker-result/usage settlement evidence. Source support, local tests, messages, merge and deployment remain distinct. Do not report this mission complete or a background runner from this checkpoint.
+
+## Installer CI fixture completion — 2026-11-07
+
+Source parent: 024bc08b63072a03ca3af296cf3e52d9ab3388ad. Current hosted CI exposed31 distinct failures across seven existing test modules. The completed repair supplies the installer's existing optional attended defaults and digest argument, preserves omission of installed-only evidence from the static template, and refreshes only D7's whole-script fingerprint. Production code, native quota tree, Hermes runtime/core patch and Macro25ba projection are unchanged.
+
+Seventy targeted original controls passed:25 focused installer/D7 cases (including all ten source-mutation refusals) and45 complete release publication/staging cases with real archived native closure. Repository conftest and offline safeguards were retained; no dependency environment was changed. Full receipt: review_evidence/hermes_primary/attended-installer-ci-fixtures-20261107.json. The final committed D8 and publication result belong in the existing source-linked #2175 return6712329564 after this commit is created.
+
+The source integration already supports fresh selection on a new admitted APPLICATION turn; its tool continuations retain that turn's original selection/lease. Recovery never repicks an uncertain turn. The latency field belongs to the original enrolled ApplicationSelectionPurpose, not the Hermes/Macro request or capsule scope; the existing exporter delegates validation to that owner and commits the renewed enrollment observation.
+
+The Secretary's stale absent-non-Go-issuer claim was corrected against the current original routed-v9 installer and exporter/capsule proof in #2175 comment6712838542. No additional issuer or fleet-wide v10 prerequisite is introduced. The next runtime work still requires actual original source/release/C3 and consumer/account evidence. H4's native acceptance command/latency lane and original J/Go401/H4/H6 custody remain active. The owned source work is ready for its normal commit, final committed guard and fenced push, then current-head CI and original-owner source absorption.

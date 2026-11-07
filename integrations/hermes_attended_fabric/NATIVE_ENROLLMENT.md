@@ -1,5 +1,42 @@
 # Native attended-worker enrollment
 
+## Current native configuration contract
+
+The native host patch now contains **20 files**, with patch SHA256
+`631d202a736dc511b359b518dc74ab9b9b84566b05d74bafb2bab7763ed94541`.
+Its previous 15 postimages are unchanged. Worker runtime SHA256 is
+`c3ce3f07017224947ea9ce28ac6744172c1fa08e767210bfbab23277d39205ee`.
+
+The worker requires native `load_config_observational()`; an older native tree
+without that API refuses enrollment. This reads current local configuration,
+applies the existing user normalization and managed policy, and detects file,
+symlink and deployment-selection changes. It does not initialize the home, make
+backups, use a cached/worker snapshot or last-known-good fallback, boot a remote
+backend, load external secrets, or repair dependencies.
+
+The backend preserves only the existing process selectors `HERMES_HOME`,
+`HERMES_CONFIG_BACKEND` and `HERMES_MANAGED_DIR` when starting its isolated
+checker. The process deployment selects the backend and managed scope; the bound
+served home selects the current document and the native PM dependency owner.
+Arbitrary parent variables and credentials are not forwarded.
+
+Enrollment permission lists must be actual lists of nonempty strings with
+resolved values. An unresolved reference in enabled, disabled or MCP allowlist
+policy refuses enrollment; unrelated credential placeholders are unaffected.
+Malformed current YAML, malformed managed policy, unreadable inputs, dangling
+policy links and current remote-backend selection all refuse without exiting
+the Hermes agent.
+
+Focused qualification: **16 native current-configuration checks, 17 fresh
+process cases and all 25 real native worker-owner cases passed**, including
+the actual Node backend, native MCP formatter and request-to-retained-result path.
+The private dependency selection was produced by the real native PM with its
+MCP feature; 74 offline worker, 78 Node backend and 7 preimage-safety checks also
+passed. The cold checker
+effect audit permits reads and rejects filesystem mutation, subprocess launch
+and network contact. Worker install metadata and the final command engine remain
+explicit fixtures; this is source qualification, not live activation.
+
 ## Source and custody
 
 This contribution is developed in operation
@@ -54,8 +91,22 @@ The closed runtime file projection consists of `__init__.py`, `plugin.yaml`,
 order. This is a projection of the selected release; no additional installation
 record or publication owner is created.
 
-Publish through the existing protected source and release workflow. The native
-installation owner accepts the source
+Publish through the existing protected source and release workflow. Before
+worker enrollment, select the native **MCP feature** in the same installation and
+qualified profile through its existing PM:
+
+```sh
+HERMES_HOME="$HERMES_PROFILE_HOME" "$HERMES_NATIVE_LAUNCHER" pm install --extra mcp
+```
+
+Read back that owner's committed environment and recorded `mcp` extra, then let
+the existing H4 activation/reload lifecycle use that generation. Minimal native
+core environments do not contain the MCP SDK. Plugin publication by itself does
+not select this optional native feature. Preserve any frozen feature policy and
+previous explicit feature decisions; do not install packages during an agent
+call or add a second dependency owner.
+
+The native installation owner accepts the source
 `mastermindx-market-intelligence/Mastermind#integrations/hermes_attended_fabric`
 with `--ref <full-40-character-selected-release-SHA>` under `hermes plugins install`.
 Use that existing installer in the qualified profile and H4 activation window.
@@ -185,32 +236,34 @@ python3 -m unittest discover -s integrations/hermes_attended_fabric/tests -p 'te
 node --test integrations/studio_direct_mcp/fabric-backend.test.mjs integrations/studio_direct_mcp/fabric-backend-capacity.test.mjs integrations/studio_direct_mcp/fabric-diagnostics.test.mjs
 ```
 
-On the observed M2, use the installed native Python with its already committed
-dependency environment to run the explicit native owner suite:
+Use a private source fixture made from the exact pinned native base and current
+20-file patch. Prepare a **new, empty qualification home** through the original
+native PM, selecting its declared MCP feature:
 
-```python
-import runpy
-import site
-import sys
-from pathlib import Path
-
-native = Path("/Users/chriswong/.hermes/hermes-agent")
-sys.path.insert(0, str(native))
-from pm.environments import committed_venv, site_packages
-
-site.addsitedir(str(site_packages(committed_venv(native))))
-sys.path.insert(0, str(Path.cwd()))
-runpy.run_path(
-    "integrations/hermes_attended_fabric/tests/native_owner_qualification.py",
-    run_name="__main__",
-)
+```sh
+python3 -I -B integrations/hermes_attended_fabric/tests/prepare_native_qualification.py --native-source "$HERMES_NATIVE_FIXTURE" --fixture-home "$HERMES_QUALIFICATION_HOME" --runtime-dir "$HERMES_PM_TOOL_STORE"
 ```
 
-The native suite uses temporary profiles and the actual installed SessionDB,
-turn lease, PluginContext, middleware and tool registry. It does not alter the
-live profile, install the package, contact a provider, or run a paid worker.
-The server wire cases invoke the actual Node facade and read-only native checker;
-the final Fabric command engine remains a fixture.
+The helper refuses an existing home and records a fixture marker only after the
+native PM commits its real dependency selection. Reconcile a failed preparation
+before another attempt. Use the interpreter under the returned
+`dependency_environment` as `HERMES_QUALIFIED_PYTHON`:
+
+```sh
+"$HERMES_QUALIFIED_PYTHON" -I -B integrations/hermes_attended_fabric/tests/run_native_owner_qualification.py --native-source "$HERMES_NATIVE_FIXTURE" --fixture-home "$HERMES_QUALIFICATION_HOME"
+"$HERMES_QUALIFIED_PYTHON" -I -B integrations/hermes_attended_fabric/tests/observational_native_qualification.py --native-source "$HERMES_NATIVE_FIXTURE" --fixture-home "$HERMES_QUALIFICATION_HOME" --node "$HERMES_QUALIFIED_NODE"
+```
+
+The wrapper establishes the fixture home before the first native import and
+explicitly fences startup recovery, launcher preparation and dependency
+activation in the test process. Actual SessionDB, turn leases, PluginContext,
+middleware, registry, native source, committed dependencies, Node facade and
+cold checker execute. The worker installation record and final Fabric command
+engine are fixtures. The cold checker does not inherit parent monkeypatches.
+
+Do not run the test module directly against a live checkout. Adding a dependency
+site directory before importing `run_agent` does not prevent native bootstrap
+from replacing the interpreter or publishing startup state.
 
 Record the exact source head, native head, suite totals and exit codes in the
 existing release proof. The ordinary protected CI remains required on the
@@ -306,3 +359,21 @@ Running it alone on the older protected parent reports missing
 `ORIGINAL_COLLECTION_LEGACY_SCHEMA`, so it must be qualified on the actual
 composed target. The production guard and original assertions are preserved;
 no new parallel fixture repair, skip, or runtime relaxation is introduced.
+
+### Current verified successor projection
+
+The successor-identity extension preserves the original logical run and projects
+`effective_run_id` only from a qualified incumbent status/result. Nested status
+and continuation identities must agree; an absent successor never authorizes a
+replacement submit of the original task. Result currentness is checked again
+after retrieval, including the effective leaf.
+
+The current eight-file runtime projection is
+`e010d6366c8142e977ffab2f591656e6ea17fe6725d262c937abf065365a51b9`.
+The earlier `c099a74d` projection above belongs to the previous milestone.
+The updated source passes74 worker contract cases and22 actual native owner
+cases with zero failures/errors/skips. The native MCP status double now carries
+the same original/effective IDs as the existing wire contract; the production
+absence/currentness checks were retained. The package/identity gate also passes.
+This remains source qualification; the actual native install and paid worker
+START/result-consumption path still require their own receipts.

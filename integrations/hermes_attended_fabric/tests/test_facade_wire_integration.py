@@ -131,6 +131,17 @@ class TestFacadeWireIntegration(unittest.TestCase):
         self.assertEqual([n for n, _ in owner.calls][-3:],
                          ["fabric_status", "fabric_result", "fabric_status"])
 
+    def test_successor_status_and_existing_submit_keep_the_observed_leaf(self):
+        owner = WireOwner()
+        owner.state = "TERMINAL"
+        owner.follow = True
+        for action in ("status", "submit"):
+            got = owner.ask(action)
+            self.assertEqual(got["state"], "TERMINAL")
+            self.assertEqual(got["run_id"], owner.run_id)
+            self.assertEqual(got["effective_run_id"], owner.run_id + ".q1.fixture")
+        self.assertEqual([name for name, _ in owner.calls].count("fabric_request"), 0)
+
     def test_incumbent_successor_result_preserves_origin_and_parent(self):
         owner = WireOwner()
         owner.state = "TERMINAL"
@@ -139,6 +150,7 @@ class TestFacadeWireIntegration(unittest.TestCase):
         self.assertEqual(got["state"], "TERMINAL")
         self.assertEqual(got["run_id"], owner.run_id)
         self.assertEqual(got["parent_id"], owner.parent)
+        self.assertEqual(got["effective_run_id"], owner.run_id + ".q1.fixture")
         self.assertEqual(got["result_text"], owner.text)
         result_wire = owner.calls[1][1]["reply"]["structuredContent"]
         self.assertEqual(result_wire["effective_run_id"], owner.run_id + ".q1.fixture")

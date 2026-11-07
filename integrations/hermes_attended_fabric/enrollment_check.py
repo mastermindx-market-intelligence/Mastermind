@@ -41,31 +41,31 @@ def main() -> int:
                 or installed.is_symlink() or installed.parent.is_symlink()
                 or Path(__file__).resolve().parent != installed):
             raise ValueError()
-        # Read the already committed dependency selection; do not invoke
-        # native bootstrap, recovery, install, reload or provider resolution.
+        # Bind the explicit served home before resolving its existing PM
+        # selection. Process deployment selectors remain the caller's own.
+        # No native bootstrap, recovery, install, reload or provider resolution.
         sys.path.insert(0, str(source))
-        from pm.environments import committed_venv, site_packages
-        environment = committed_venv(source)
-        if environment is None:
-            raise ValueError()
-        site.addsitedir(str(site_packages(environment)))
         from hermes_constants import set_hermes_home_override, reset_hermes_home_override
-        # Native subdirectory installs do not contain a repository-level
-        # integrations package. Load only this fixed installed package, without
-        # invoking its register() entry point or ambient package discovery.
-        name = "_mmx_attended_fabric_evidence"
-        _source_module(name, installed / "__init__.py", package=True)
-        _source_module(name + ".native", installed / "native.py")
-        evidence = _source_module(
-            name + ".native_evidence", installed / "native_evidence.py")
-        raw = sys.stdin.buffer.read(65537)
-        if len(raw) > 65536:
-            raise ValueError()
-        request = json.loads(raw)
-        if type(request) is not dict or set(request) != {"action", "arguments"}:
-            raise ValueError()
         token = set_hermes_home_override(str(home))
         try:
+            from pm.environments import committed_venv, site_packages
+            environment = committed_venv(source)
+            if environment is None:
+                raise ValueError()
+            site.addsitedir(str(site_packages(environment)))
+            # Load only this fixed installed package without register() or
+            # ambient package discovery.
+            name = "_mmx_attended_fabric_evidence"
+            _source_module(name, installed / "__init__.py", package=True)
+            _source_module(name + ".native", installed / "native.py")
+            evidence = _source_module(
+                name + ".native_evidence", installed / "native_evidence.py")
+            raw = sys.stdin.buffer.read(65537)
+            if len(raw) > 65536:
+                raise ValueError()
+            request = json.loads(raw)
+            if type(request) is not dict or set(request) != {"action", "arguments"}:
+                raise ValueError()
             contract = evidence.read_enrollment(home)
             if (contract["source_revision"] != revision
                     or contract["package_sha256"] != package_sha256):

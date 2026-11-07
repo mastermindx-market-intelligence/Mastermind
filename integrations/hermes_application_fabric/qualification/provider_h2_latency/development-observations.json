@@ -1,0 +1,43 @@
+{
+  "schema": "mastermind.hermes_provider_h2_latency_development_observations/v1",
+  "runtime_source_changes_for_harness_failures": 0,
+  "initial_materialization_checks": {
+    "assumed_function_names_corrected_to_actual_emitted_names": true,
+    "critical_functions_ast_unchanged": true
+  },
+  "initial_boundary": {
+    "library_import_before_fixture_boundary": "installed PyYAML preloaded",
+    "relative_cleanup_context": "qualification cwd fixed to isolated workspace",
+    "source_failures": 0,
+    "cleanup_errors": 21,
+    "corrected_latency_cases": 28
+  },
+  "initial_expanded_run": {
+    "tests": 238,
+    "passed": 180,
+    "errors": 58,
+    "failures": 0,
+    "log_sha256": "4999556f12f53fa9e4c1adc842127610fb7fe30fcfe20f79915eac13e28816fe",
+    "causes": {
+      "missing_public_shared_realm_protocol_fixture_dependencies": 42,
+      "missing_public_lane_runtime_fixture_dependency": 16
+    }
+  },
+  "targeted_dependency_completion": {
+    "cases": 58,
+    "failures": 0,
+    "errors": 0,
+    "log_sha256": "ef87604b4a18d952b289ab02980c752808118ddbd49c7e6872aa408b18c493a6"
+  },
+  "final_complete_qualifier": {
+    "cases": 266,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "log_sha256": "60825e25048b1e3cd0625cea9fad914c11a52523d692a0e3c9e4c81a5a3e170c",
+    "qualifier_sha256": "40ab160026be8407b680637563a14698e6903f30ca37e1a48d9e9ab4bfd81251"
+  },
+  "effect_unknown_created": false,
+  "provider_request": false,
+  "live_acceptance": false
+}

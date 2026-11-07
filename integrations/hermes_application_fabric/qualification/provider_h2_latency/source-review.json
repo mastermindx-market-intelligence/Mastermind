@@ -1,0 +1,67 @@
+{
+  "schema": "mastermind.hermes_provider_h2_latency_bounded_source_review/v1",
+  "qualified_runtime_parent": "0a6d33bfa3280e397c1c3d32a8a6bbcae014c17c",
+  "original_adopted_parent": "d0c543124b47372becd8ee632a1c29b32ffc3ef0",
+  "contribution_parent": "4b2eb8ac8ebf125ce67c728b95cb70ee2a2c6bd2",
+  "helper_git_blobs": {
+    "tests/test_ceo_submit_armed_composition.py": "f1447e9809f9d4eafca3e8755a376a72c0008366",
+    "tests/executive_identity_review.py": "33e5a6c60b7a352a53b1f6a8ed425f174182b6cd",
+    "tests/executive_incident_identity_review.py": "eba94de862039868812239414d6861201647695b",
+    "tests/test_hermes_workspace_oauth_identity_review.py": "b8d647383b496b345c53feb21ec3071c65af474e"
+  },
+  "registry_base_git_blob": "68e2b6cdf944775bd31e3b0cee0a5bf8000aef5c",
+  "registry_sha256": "060f11914fdd244788415a3b432f2cc1b56e1b4baa8c73c55f8dd210476bd07b",
+  "incumbent_registry_bytes_and_effective_records_preserved": true,
+  "three_existing_hermes_records_rejoined": true,
+  "new_identity_exemptions": 0,
+  "full_frozen_source_findings": {},
+  "new_files": {
+    "integrations/hermes_application_fabric/qualification/provider_h2_latency/README.md": {
+      "sha256": "8074bc328affe09c8e534c3ed928a3311b793cc57bc33ae6ec325acd57a1c1e9",
+      "git_blob": "07b7c14ae43893a8ae07410b082d6b2519d8054b",
+      "bytes": 8391
+    },
+    "integrations/hermes_application_fabric/qualification/provider_h2_latency/qualify.py": {
+      "sha256": "40ab160026be8407b680637563a14698e6903f30ca37e1a48d9e9ab4bfd81251",
+      "git_blob": "dcaeeecab79e17be8c728e8dd3ad7e2d530eab6f",
+      "bytes": 14442
+    },
+    "integrations/hermes_application_fabric/qualification/provider_h2_latency/source-contract.json": {
+      "sha256": "5a89609e636827a85352d2e26a0bfea93c969ba5acff7455d1c9b44e765ab44d",
+      "git_blob": "9601465ed0d108d04cb3730aa8433d1857b7f24e",
+      "bytes": 7851
+    },
+    "integrations/hermes_application_fabric/qualification/provider_h2_latency/application-h2-latency.patch": {
+      "sha256": "dd4f53955a43db64ca19c077e1a8e2d7692d3b1ae4e1b0aa6d1f879d7cbc4463",
+      "git_blob": "ccc3a8f7952f9b70b56668d852a7a1d6bd19068c",
+      "bytes": 40596
+    },
+    "integrations/hermes_application_fabric/qualification/provider_h2_latency/latency_physical_account.py.source": {
+      "sha256": "8e5d4fc50c9e2f6fe134b1c2221617acfc33c2992dca8e126fa42b86ee967e4b",
+      "git_blob": "37888a99f42673e9e22cfdb05d6f488153a02284",
+      "bytes": 2827
+    },
+    "integrations/hermes_application_fabric/qualification/provider_h2_latency/qualification.json": {
+      "sha256": "0183a1804fd970c675ddabae34686616043386657ee2b85d06c7b7e27d5969e5",
+      "git_blob": "51266fc1c7ffae5b33fc4b186b6d945076ad3983",
+      "bytes": 2270
+    },
+    "integrations/hermes_application_fabric/qualification/provider_h2_latency/tests.log": {
+      "sha256": "60825e25048b1e3cd0625cea9fad914c11a52523d692a0e3c9e4c81a5a3e170c",
+      "git_blob": "badf170c685096c6cc841e3091337f8860207d1e",
+      "bytes": 53353
+    },
+    "integrations/hermes_application_fabric/qualification/provider_h2_latency/development-observations.json": {
+      "sha256": "af3913789d1a27ded5e6d9cd83797aecda9f141a6967f03d4b11e99add702bb9",
+      "git_blob": "b927edd802fc3da0ef997e46463e57284d42b27f",
+      "bytes": 1470
+    }
+  },
+  "full_committed_d8_gate": false,
+  "natural_resulting_head_ci": "not_yet_run",
+  "source_qualification_cases": 266,
+  "provider_request": false,
+  "host_enrollment": false,
+  "live_acceptance": false,
+  "completed_h4_fixture_source": "d9d1afd23332f58a1cf5649fc37d51c1138ea512"
+}

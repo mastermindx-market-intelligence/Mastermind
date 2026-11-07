@@ -420,37 +420,52 @@ def test_lost_lock_close_ack_after_replace_keeps_unknown_and_original_target(ins
 def _publisher_source_manifest():
     from ops.native_fabric.quota_continuity.rollout import build_review_stage as builder
     native = Path(builder.__file__).resolve().parent.parent
-    manifest = json.loads((native / "rollout/native-manifest.json").read_bytes())
+    raw_manifest = (native / "rollout/native-manifest.json").read_bytes()
+    assert digest(raw_manifest) == "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a"
+    manifest = json.loads(raw_manifest)
     current = (native / "candidate/support_bundle.py").read_bytes()
     assert digest(current) == builder.APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]
     assert manifest["ext/support_bundle.py"] == digest(current)
     return builder, manifest
 
 
+def _publisher_host_predecessor(builder, manifest):
+    # Traverse only the qualified host successor. The original collector stays
+    # current because this fixture exercises the collector-successor lineage.
+    before = copy.deepcopy(manifest)
+    predecessor = builder.before_host_pull_integrity(manifest)
+    assert predecessor is not manifest and manifest == before
+    assert set(predecessor) == set(manifest)
+    assert {name for name in manifest if manifest[name] != predecessor[name]} == {
+        "ext/host_pull.sh", "ext/host_pull_backend.py", "ext/host_pull_daemon.sh",
+    }
+    assert digest((json.dumps(predecessor, sort_keys=True, indent=2) + "\n").encode()) == (
+        "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e")
+    return predecessor
+
+
 def test_publisher_successor_preserves_actual_manifest_and_prior_go_validator():
     builder, manifest = _publisher_source_manifest()
     before = copy.deepcopy(manifest)
-    publisher_parent = builder.before_host_pull_integrity(manifest)
-    assert publisher_parent is not manifest and manifest == before
-    assert set(publisher_parent) == set(manifest)
-    assert digest((json.dumps(publisher_parent, sort_keys=True, indent=2) + "\n").encode()) == "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
-    previous = builder.before_application_pool_composition(publisher_parent)
-    assert previous is not manifest and manifest == before
-    assert {name for name in publisher_parent if publisher_parent[name] != previous[name]} == set(builder.APPLICATION_POOL_COMPOSITION_DIGESTS)
+    host_parent = _publisher_host_predecessor(builder, manifest)
+    host_before = copy.deepcopy(host_parent)
+    previous = builder.before_application_pool_composition(host_parent)
+    assert previous is not host_parent and host_parent == host_before
+    assert {name for name in host_parent if host_parent[name] != previous[name]} == set(builder.APPLICATION_POOL_COMPOSITION_DIGESTS)
     assert digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == builder.APPLICATION_POOL_COMPOSITION_SPARSE_SUCCESSOR_PARENT_SHA256
     before_sparse = builder.before_sparse_commit_preflight(previous)
     assert digest((json.dumps(before_sparse, sort_keys=True, indent=2) + "\n").encode()) == builder.APPLICATION_POOL_COMPOSITION_SUCCESSOR_PARENT_SHA256
-    dependencies = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-    builder.validate_go_base_manifest(manifest, dependencies)
-    builder.validate_go_base_manifest(previous, {name: previous["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES})
-    assert manifest == before
+    for qualified in (manifest, host_parent, previous):
+        dependencies = {name: qualified["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
+        builder.validate_go_base_manifest(qualified, dependencies)
+    assert manifest == before and host_parent == host_before
     assert builder.before_application_pool_composition(previous) == previous
 
 
 @pytest.mark.parametrize("mutation", ["other_member", "missing_member", "renamed_member", "added_member"])
 def test_publisher_forward_transform_refuses_partial_or_mixed_closures(mutation):
-    builder, manifest = _publisher_source_manifest()
-    manifest = builder.before_host_pull_integrity(manifest)
+    builder, current = _publisher_source_manifest()
+    manifest = _publisher_host_predecessor(builder, current)
     if mutation == "other_member":
         manifest["ext/pick.py"] = "f" * 64
     elif mutation == "missing_member":
@@ -459,24 +474,25 @@ def test_publisher_forward_transform_refuses_partial_or_mixed_closures(mutation)
         manifest["ext/unqualified.py"] = manifest.pop("ext/pick.py")
     else:
         manifest["ext/unqualified.py"] = "e" * 64
+    before = copy.deepcopy(manifest)
     with pytest.raises(ValueError, match="application pool composition parent closure"):
         builder.before_application_pool_composition(manifest)
+    assert manifest == before
 
 
-def test_unknown_publisher_never_receives_forward_compatibility():
-    builder, manifest = _publisher_source_manifest()
-    current = copy.deepcopy(manifest)
-    manifest = builder.before_host_pull_integrity(manifest)
+@pytest.mark.parametrize("lineage,expected_guard", [
+    ("current", "native host-pull integrity parent closure differs"),
+    ("host-predecessor", "native scoped-model parent closure"),
+])
+def test_unknown_publisher_never_receives_forward_compatibility(lineage, expected_guard):
+    builder, current = _publisher_source_manifest()
+    manifest = (copy.deepcopy(current) if lineage == "current" else
+                _publisher_host_predecessor(builder, current))
     manifest["ext/support_bundle.py"] = "f" * 64
+    before = copy.deepcopy(manifest)
     dependencies = {name: manifest["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     with pytest.raises(ValueError, match="application pool composition cohort"):
         builder.before_application_pool_composition(manifest)
-    with pytest.raises(ValueError, match="native scoped-model parent closure"):
+    with pytest.raises(ValueError, match=expected_guard):
         builder.validate_go_base_manifest(manifest, dependencies)
-
-    # The actual current cohort rejects the same unknown publisher at its
-    # outer host-pull boundary, separately from the historical scoped guard.
-    current["ext/support_bundle.py"] = "f" * 64
-    current_dependencies = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
-    with pytest.raises(ValueError, match="native host-pull integrity parent closure"):
-        builder.validate_go_base_manifest(current, current_dependencies)
+    assert manifest == before

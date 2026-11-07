@@ -1,13 +1,15 @@
 """Explicit qualification against the real, pinned Hermes native owner.
 
-Run with the existing Hermes Python and its source on sys.path. The real
-PluginContext, registry, middleware, AIAgent identity and SessionDB execute.
+Run through run_native_owner_qualification.py with its marked private native
+PM home. The real PluginContext, registry, middleware, AIAgent identity and
+SessionDB execute.
 Only the remote MCP service response is a fixture; no provider is contacted.
 This file is intentionally outside automatic offline test discovery.
 """
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -37,7 +39,10 @@ from integrations.hermes_attended_fabric.native_session import (
 
 class NativeOwnerQualification(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        owner = os.environ.get("MMX_HERMES_QUALIFICATION_HOME")
+        if not owner:
+            raise RuntimeError("run through run_native_owner_qualification.py with a prepared fixture home")
+        self.temp = tempfile.TemporaryDirectory(prefix="native-worker-", dir=Path(owner) / "profiles")
         self.home = Path(self.temp.name)
         self.token = set_hermes_home_override(str(self.home))
         self._config(True)
@@ -124,8 +129,8 @@ class NativeOwnerQualification(unittest.TestCase):
         if action == "fabric_status":
             if self.on_status:
                 self.on_status()
-            result.update(root_verified=False, status={
-                "schema": "mastermind.fabric_task_status.v1",
+            result.update(root_verified=False, effective_run_id=args["run_id"], status={
+                "schema": "mastermind.fabric_task_status.v1", "run_id": args["run_id"],
                 "state": "NOT_FOUND", "result_available": False,
             })
         elif action == "fabric_request":

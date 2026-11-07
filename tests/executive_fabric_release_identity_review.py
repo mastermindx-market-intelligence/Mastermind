@@ -779,10 +779,7 @@ REVIEWED_FILES["control_plane/remote_worker_transport.py"] = {
 # The installer exclusively creates the gateway audit parent with this private
 # initial mode, under its held trusted root, before qualified final0755 mode.
 # Only this new token is reviewed; existing source identities remain visible.
-REVIEWED_FILES['ops/executive_os/install.sh'] = {
-    'sha256': '91736e2ca23c4fa9457cb9470971c48130a83758b8ff18814a05e67e8b43942d',
-    'sites': ((1668, 26, 31, 'int', '0o700'),),
-}
+REVIEWED_FILES['ops/executive_os/install.sh'] = {'sha256': '6f19581f58b1f7009093150d0446823c0f1f19f1eab6ec3a5923d736b77836e2', 'sites': ((1717, 26, 31, 'int', '0o700'),)}
 
 
 # Fixed MCP audit leaf ownership and modes in the existing gateway transaction.
@@ -794,8 +791,8 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
-    "sha256": "8217cc69b66849e96d06058ae9b2d942b15e85ff6a27630083ca63b7e997af67",
-    "sites": ((48, 65, 68, "int", "500"), (260, 60, 63, "int", "500")),
+    "sha256": "9b26d8e1aa4d95db804f3e821e82d6c45b5bcdf3482d7823b6d578a9daa8e976",
+    "sites": ((48, 65, 68, "int", "500"), (271, 60, 63, "int", "500")),
 }
 
 # Hermes primary APPLICATION codec: fixed input-byte and conversation-count
@@ -836,7 +833,7 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 # Full-source or token-site drift restores the ordinary identity guard.
 REVIEWED_FILES[
     "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
-] = {'sha256': 'e2039148bca4e1a7a0782a7ebc6e18d180a1f4333e581938bc8b0eb557cd86da', 'sites': ((354, 37, 40, 'int', '409'),)}
+] = {'sha256': '192ff0bf4321f0006cb34ba68dd4d648da3a3825dccc8cd731f220f61e793f32', 'sites': ((367, 37, 40, 'int', '409'),)}
 
 # Original H4 f008 receipts record the existing Darwin host's ownership.
 # These are observed identities, not runtime defaults, service enrollment or
@@ -958,13 +955,44 @@ REVIEWED_FILES['review_evidence/fabric_application/shared-relay-source-qualifica
     "sites": ((296, 26, 29, "int", "501"),),
 }
 
-# Retained protected readiness qualification records the actual proof-host UID.
-# This is evidence, not a runtime default or grant. The one complete UTF-8 token
-# requires this exact full postimage; any byte/path drift restores the guard.
+# Retained source qualification records the observed proof parent UID only.
+# It grants no runtime identity or enrollment. Exact bytes and the sole complete
+# UTF-8 integer token are required; drift restores the ordinary identity guard.
+REVIEWED_FILES["review_evidence/fabric_application/shared-relay-source-qualification-20261107.json"] = {
+    "sha256": "3629a7a963e9621aa1b190c1b946c6a3d8a1277caaa3ffac6dd129a4c984b5b3",
+    "sites": (),
+    "utf8_sites": ((296, 26, 29, "int", "501"),),
+}
+
+# The sealed verifier ModuleType label is a Python module identity, never an OS
+# account, principal or service. This exact source/string site alone is reviewed;
+# any full-source or token drift restores the ordinary identity guard.
+REVIEWED_FILES["integrations/hermes_application_fabric/source_context.py"] = {'sha256': '887799a569cc04d5e0327e2c2732ee389064929e241c060328dcbecedcab3597', 'sites': ((425, 36, 73, 'str', '"_mastermind_attended_native_sources"'), (444, 42, 78, 'str', '"_mastermind_attended_configuration"'))}
+
+# Exact retained readiness qualification records the observed proof parent UID.
+# This grants no runtime identity. Any source, path or token drift exposes it
+# to the incumbent guard again; the original receipt is preserved unchanged.
 REVIEWED_FILES['review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json'] = {
-    'sha256': 'ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33',
-    'sites': (),
-    'utf8_sites': ((61, 13, 16, 'int', '501'),),
+    "sha256": 'ca3bfdc6cd8a670f1eb54a578bd795a19060ee05b299fa37c30b6fe479838d33',
+    "sites": (),
+    "utf8_sites": ((61, 13, 16, "int", "501"),),
+}
+
+# Installed-consumer qualification maps disposable Control metadata to the
+# incumbent Control UID. These two exact fixture operands register no account,
+# grant or service; source/token drift restores the ordinary identity guard.
+REVIEWED_FILES["integrations/hermes_application_fabric/qualification/qualify_attended_configuration.py"] = {
+    "sha256": "96dbbd9572b9323e2f1da20882b2170b21932e119d4768925ca030d50399bf92",
+    "sites": ((105, 39, 42, "int", "450"), (132, 27, 30, "int", "450")),
+}
+
+# Exact observed native preimage metadata records the proof-host UID only.
+# These immutable evidence tokens create no account, runtime default or grant.
+# Full-source or token drift restores the ordinary guard.
+REVIEWED_FILES['review_evidence/hermes_primary/attended-native-preimages-20-files-20261107.json'] = {
+    "sha256": '7b5af848fa6bdc47b178b73fc027a46c34f897e2a9bade655b9dec09af6d1a12',
+    "sites": (),
+    "utf8_sites": ((39, 18, 21, 'int', '501'), (52, 18, 21, 'int', '501'), (65, 18, 21, 'int', '501'), (78, 18, 21, 'int', '501'), (91, 18, 21, 'int', '501'), (104, 18, 21, 'int', '501'), (121, 18, 21, 'int', '501'), (134, 18, 21, 'int', '501'), (147, 18, 21, 'int', '501'), (160, 18, 21, 'int', '501'), (173, 18, 21, 'int', '501'), (186, 18, 21, 'int', '501'), (199, 18, 21, 'int', '501'), (212, 18, 21, 'int', '501'), (229, 18, 21, 'int', '501'), (242, 18, 21, 'int', '501'), (263, 18, 21, 'int', '501'), (276, 18, 21, 'int', '501'), (289, 18, 21, 'int', '501'), (302, 18, 21, 'int', '501'), (319, 18, 21, 'int', '501')),
 }
 REVIEWED_FILES["integrations/session_bridge/installed_web_observation.py"] = {
     "sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
@@ -972,211 +1000,7 @@ REVIEWED_FILES["integrations/session_bridge/installed_web_observation.py"] = {
 }
 
 
-# Preserve the exact qualified Hermes primary postimages while composing bf46.
-# All incumbent records and imports above remain byte-for-byte unchanged.
-REVIEWED_FILES.update({'ops/executive_os/install.sh': {'sha256': '6f19581f58b1f7009093150d0446823c0f1f19f1eab6ec3a5923d736b77836e2',
-                                 'sites': ((1717, 26, 31, 'int', '0o700'),)},
- 'integrations/hermes_application_fabric/qualification/qualify_application_owner.py': {'sha256': '192ff0bf4321f0006cb34ba68dd4d648da3a3825dccc8cd731f220f61e793f32',
-                                                                                       'sites': ((367,
-                                                                                                  37,
-                                                                                                  40,
-                                                                                                  'int',
-                                                                                                  '409'),)},
- 'integrations/hermes_application_fabric/qualification/application_latency/application-owner-latency.patch': {'sha256': 'bccdbeaafd5535f399b3c1c60ed6dee897ce31924f648d883009de3b61e16010',
-                                                                                                              'sites': ((174,
-                                                                                                                         81,
-                                                                                                                         84,
-                                                                                                                         'int',
-                                                                                                                         '512'),
-                                                                                                                        (598,
-                                                                                                                         80,
-                                                                                                                         83,
-                                                                                                                         'int',
-                                                                                                                         '500'),
-                                                                                                                        (723,
-                                                                                                                         48,
-                                                                                                                         51,
-                                                                                                                         'int',
-                                                                                                                         '500'),
-                                                                                                                        (856,
-                                                                                                                         56,
-                                                                                                                         59,
-                                                                                                                         'int',
-                                                                                                                         '401'),
-                                                                                                                        (945,
-                                                                                                                         85,
-                                                                                                                         88,
-                                                                                                                         'int',
-                                                                                                                         '400'),
-                                                                                                                        (953,
-                                                                                                                         68,
-                                                                                                                         71,
-                                                                                                                         'int',
-                                                                                                                         '409'),
-                                                                                                                        (963,
-                                                                                                                         49,
-                                                                                                                         52,
-                                                                                                                         'int',
-                                                                                                                         '409'),
-                                                                                                                        (1026,
-                                                                                                                         49,
-                                                                                                                         52,
-                                                                                                                         'int',
-                                                                                                                         '503'),
-                                                                                                                        (1031,
-                                                                                                                         45,
-                                                                                                                         48,
-                                                                                                                         'int',
-                                                                                                                         '409'),
-                                                                                                                        (1048,
-                                                                                                                         34,
-                                                                                                                         37,
-                                                                                                                         'int',
-                                                                                                                         '409'))},
- 'integrations/hermes_application_fabric/qualification/provider_preserving_application/application-provider-latency.patch': {'sha256': '02dd1fd3174a7c76c3441993f781e8307b16c5f6c854cbf6c3cd54224ecd9919',
-                                                                                                                             'sites': ((918,
-                                                                                                                                        48,
-                                                                                                                                        51,
-                                                                                                                                        'int',
-                                                                                                                                        '500'),
-                                                                                                                                       (1051,
-                                                                                                                                        56,
-                                                                                                                                        59,
-                                                                                                                                        'int',
-                                                                                                                                        '401'))},
- 'integrations/hermes_application_fabric/qualification/qualify_attended_configuration.py': {'sha256': '96dbbd9572b9323e2f1da20882b2170b21932e119d4768925ca030d50399bf92',
-                                                                                            'sites': ((105,
-                                                                                                       39,
-                                                                                                       42,
-                                                                                                       'int',
-                                                                                                       '450'),
-                                                                                                      (132,
-                                                                                                       27,
-                                                                                                       30,
-                                                                                                       'int',
-                                                                                                       '450'))},
- 'integrations/hermes_application_fabric/source_context.py': {'sha256': '887799a569cc04d5e0327e2c2732ee389064929e241c060328dcbecedcab3597',
-                                                              'sites': ((425,
-                                                                         36,
-                                                                         73,
-                                                                         'str',
-                                                                         '"_mastermind_attended_native_sources"'),
-                                                                        (444,
-                                                                         42,
-                                                                         78,
-                                                                         'str',
-                                                                         '"_mastermind_attended_configuration"'))},
- 'review_evidence/hermes_primary/attended-native-preimages-20-files-20261107.json': {'sha256': '7b5af848fa6bdc47b178b73fc027a46c34f897e2a9bade655b9dec09af6d1a12',
-                                                                                     'sites': (),
-                                                                                     'utf8_sites': ((39,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (52,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (65,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (78,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (91,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (104,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (121,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (134,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (147,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (160,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (173,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (186,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (199,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (212,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (229,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (242,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (263,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (276,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (289,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (302,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'),
-                                                                                                    (319,
-                                                                                                     18,
-                                                                                                     21,
-                                                                                                     'int',
-                                                                                                     '501'))},
- 'integrations/hermes_application_fabric/qualification/native_acceptance_source_proof.json': {'sha256': '761af79c686dd9f7a53c46ae4ab3819e4f1da0a4a060ab4b71472d2113ea5d36',
-                                                                                              'sites': (),
-                                                                                              'utf8_sites': ((108,
-                                                                                                              9,
-                                                                                                              12,
-                                                                                                              'int',
-                                                                                                              '501'),)}})
+# Retain the three exact Hermes proposal/acceptance records absent from d0.
+REVIEWED_FILES['integrations/hermes_application_fabric/qualification/application_latency/application-owner-latency.patch'] = {'sha256': 'bccdbeaafd5535f399b3c1c60ed6dee897ce31924f648d883009de3b61e16010', 'sites': ((174, 81, 84, 'int', '512'), (598, 80, 83, 'int', '500'), (723, 48, 51, 'int', '500'), (856, 56, 59, 'int', '401'), (945, 85, 88, 'int', '400'), (953, 68, 71, 'int', '409'), (963, 49, 52, 'int', '409'), (1026, 49, 52, 'int', '503'), (1031, 45, 48, 'int', '409'), (1048, 34, 37, 'int', '409'))}
+REVIEWED_FILES['integrations/hermes_application_fabric/qualification/provider_preserving_application/application-provider-latency.patch'] = {'sha256': '02dd1fd3174a7c76c3441993f781e8307b16c5f6c854cbf6c3cd54224ecd9919', 'sites': ((918, 48, 51, 'int', '500'), (1051, 56, 59, 'int', '401'))}
+REVIEWED_FILES['integrations/hermes_application_fabric/qualification/native_acceptance_source_proof.json'] = {'sha256': '761af79c686dd9f7a53c46ae4ab3819e4f1da0a4a060ab4b71472d2113ea5d36', 'sites': (), 'utf8_sites': ((108, 9, 12, 'int', '501'),)}
