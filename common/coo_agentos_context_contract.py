@@ -1,0 +1,142 @@
+"""Closed encoding for an adopted Agent OS read on the incumbent COO transport.
+
+This module selects no source, grants no authority and executes no compiler.
+The installed owner rederives the principal/mission/profile before and after I/O.
+"""
+from __future__ import annotations
+
+import base64
+import dataclasses
+import json
+import re
+
+from common.workspace_project_plan_contract import validate_selection
+from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+
+FRAME_SCHEMA = "mastermind.ceo_ingress.coo_agentos_context.v1"
+RESULT_SCHEMA = "mastermind.coo_agentos_context_result.v1"
+CATALOGUE = "coo.agentos_context.v1"
+LEGACY_CATALOGUE = "coo.v1"
+ACTION = "read_adopted_agentos_context"
+TOOL = "executive_agentos_context"
+MAX_REQUEST_BYTES = 8192
+MAX_RESPONSE_BYTES = 224 * 1024
+MAX_BUNDLE_BYTES = 128 * 1024
+MAX_BASE64_CHARS = 4 * ((MAX_BUNDLE_BYTES + 2) // 3)
+_CONTEXT_KEYS = {field.name for field in dataclasses.fields(PrincipalAdmissionContext)}
+_FRAME_KEYS = {"schema", "principal", "principal_context", "capability_profile_digest"}
+_RESULT_KEYS = {"schema", "catalogue", "principal_context", "capability_profile_digest",
+                "bundle_encoding", "bundle_base64", "receipt"}
+
+
+def _refuse():
+    raise ValueError("AGENTOS_CONTEXT_UNAVAILABLE")
+
+
+def _shape(value, keys):
+    if type(value) is not dict or len(value) != len(keys) or any(type(key) is not str or key not in keys for key in value):
+        _refuse()
+
+
+def _digest(value):
+    if type(value) is not str or re.fullmatch("[0-9a-f]{64}", value) is None:
+        _refuse()
+    return value
+
+
+def context(value):
+    _shape(value, _CONTEXT_KEYS)
+    if any(type(item) is not str or len(item) > 256 for item in value.values()):
+        _refuse()
+    try:
+        result = PrincipalAdmissionContext(**value)
+        validate_selection({"work_ref": result.work_ref})
+    except (ValueError, TypeError):
+        _refuse()
+    return result
+
+
+def encode(value, *, limit=MAX_RESPONSE_BYTES):
+    try:
+        raw = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False,
+                         separators=(",", ":")).encode("utf-8", "strict")
+    except (TypeError, ValueError, UnicodeError, RecursionError):
+        _refuse()
+    if len(raw) > limit:
+        _refuse()
+    return raw
+
+
+def decode(raw, *, limit=MAX_RESPONSE_BYTES):
+    if type(raw) is not bytes or not 0 < len(raw) <= limit:
+        _refuse()
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value: _refuse()
+            value[key] = item
+        return value
+    def nonfinite(value):
+        _refuse()
+    try:
+        return json.loads(raw.decode("utf-8", "strict"), object_pairs_hook=unique, parse_constant=nonfinite)
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        _refuse()
+
+
+def validate_frame(frame):
+    _shape(frame, _FRAME_KEYS)
+    if type(frame["schema"]) is not str or frame["schema"] != FRAME_SCHEMA:
+        _refuse()
+    selected = context(frame["principal_context"])
+    _digest(frame["capability_profile_digest"])
+    # Reuse the incumbent six-field authenticated-principal frame validator.
+    # This validates shape only; Control independently selects the installed row.
+    from control_plane.coo_principal_host import FACT_SCHEMA, validate_facts_frame
+    validate_facts_frame({"schema": FACT_SCHEMA, "operation": "authority",
+        "work_ref": selected.work_ref, "principal": frame["principal"]})
+    encode(frame, limit=MAX_REQUEST_BYTES)
+    return frame
+
+
+def validate_result(value, *, expected_context, capability_profile_digest):
+    """Bind the original bytes, owner receipt and this request's authority echo."""
+    from control_plane.agentos_context_bundle import validate_context_read, TOKEN_BUDGET
+    from ops.fabric_launch.agentos import validate_bundle
+    _shape(value, _RESULT_KEYS)
+    expected = context(expected_context)
+    observed = context(value["principal_context"])
+    if (type(value["schema"]) is not str or value["schema"] != RESULT_SCHEMA
+            or type(value["catalogue"]) is not str or value["catalogue"] != CATALOGUE
+            or observed != expected or _digest(value["capability_profile_digest"]) != _digest(capability_profile_digest)
+            or type(value["bundle_encoding"]) is not str or value["bundle_encoding"] != "base64"):
+        _refuse()
+    encoded = value["bundle_base64"]
+    if type(encoded) is not str or not 0 < len(encoded) <= MAX_BASE64_CHARS:
+        _refuse()
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError):
+        _refuse()
+    if base64.b64encode(raw).decode("ascii") != encoded:
+        _refuse()
+    raw, receipt = validate_context_read(raw, value["receipt"], work_ref=expected.work_ref)
+    bundle = validate_bundle(raw, expected.work_ref)
+    if (bundle.get("repo_sha") != receipt["repo_sha"]
+            or type(bundle.get("token_budget")) is not int or bundle["token_budget"] != TOKEN_BUDGET
+            or bundle.get("generated_at") != receipt["generated_at"]
+            or len(bundle["degraded"]) != receipt["degraded_count"]
+            or len(bundle["omitted_due_to_budget"]) != receipt["omitted_count"]):
+        _refuse()
+    encode(value, limit=MAX_RESPONSE_BYTES - 128)
+    return raw, receipt
+
+
+def result(raw, receipt, *, principal_context, capability_profile_digest):
+    if type(raw) is not bytes or not 0 < len(raw) <= MAX_BUNDLE_BYTES:
+        _refuse()
+    value = {"schema": RESULT_SCHEMA, "catalogue": CATALOGUE,
+        "principal_context": dict(principal_context), "capability_profile_digest": capability_profile_digest,
+        "bundle_encoding": "base64", "bundle_base64": base64.b64encode(raw).decode("ascii"), "receipt": receipt}
+    validate_result(value, expected_context=principal_context, capability_profile_digest=capability_profile_digest)
+    return decode(encode(value))  # Detach the already bounded owner result.
