@@ -1618,4 +1618,3 @@ def latest(*, strict: bool = False) -> dict:
         if strict:
             raise
         return {}
-
