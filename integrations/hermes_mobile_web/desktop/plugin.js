@@ -82,7 +82,9 @@ export function createLauncher(api = host, epoch = gatewayActivationEpoch) {
       if (!snapshot.selected || snapshot.loadingChats || snapshot.opening || !row) return
       put({ opening: true, historyError: '' })
       try {
-        await api.openSession(id, { route: snapshot.selected, profile: snapshot.selected.targetProfile, intent: 'tab', expectHistory: row.expectHistory, awaitHydration: true, forceResume: true })
+        // A normal tap must leave this full-page route. Native 'tab' intentionally
+        // preserves main and can leave /mastermind being interpreted as a session.
+        await api.openSession(id, { route: snapshot.selected, profile: snapshot.selected.targetProfile, intent: 'in-place', expectHistory: row.expectHistory, awaitHydration: true, forceResume: true })
       } catch {
         put({ historyError: 'Hermes could not open that conversation. Return to the native history list; do not resend an uncertain message.' })
       } finally { put({ opening: false }) }
@@ -104,7 +106,7 @@ export function createLauncher(api = host, epoch = gatewayActivationEpoch) {
           return
         }
         const row = matches[0], id = text(row.resolved_id) ? row.resolved_id : row.id
-        await api.openSession(id, { route, profile: route.targetProfile, intent: 'tab', expectHistory: expectsHistory(row), awaitHydration: true, forceResume: true, keepAllProfilesScope: true, workspaceMode: 'bots', workspaceOwnerKey: botWorkspaceKey(route), tabTitle: 'Bot Chat' })
+        await api.openSession(id, { route, profile: route.targetProfile, intent: 'in-place', expectHistory: expectsHistory(row), awaitHydration: true, forceResume: true, keepAllProfilesScope: true, workspaceMode: 'bots', workspaceOwnerKey: botWorkspaceKey(route), tabTitle: 'Bot Chat' })
       } catch {
         put({ historyError: 'The existing Bot Chat could not be opened. No new chat or message was created.' })
       } finally { put({ opening: false }) }
