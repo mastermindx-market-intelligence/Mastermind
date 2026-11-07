@@ -444,3 +444,31 @@ actual selected closure, exact registry/target/key policy and producer identity,
 then consume only that original invocation's detached result. Lost or ambiguous
 response is not permission to replay. No normal refresh or hook execution is
 implied by this capability.
+
+
+### Admission repair on the active APPLICATION carrier — 2026-11-07
+
+This isolated dependent contribution targets the existing #2175 branch at 312be66141bf58c564a11818d63ddd3f958ca0c0. It consumes the exact repair source of #2187 at 3b2338d3946209b6f6ce6a0b694cf609015fb07f, without importing unrelated protected changes into the active branch. #2175 remains the sole final APPLICATION composition carrier. Its live workspace and branch were not changed.
+
+The installed APPLICATION parent has 107-member manifest 3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9. The current repaired source differs in exactly ext/fabric_task.py and ext/lane_runtime.py. All 105 other entries, including the eight additional APPLICATION component successors absent from the independent WORKER baseline, remain identical.
+
+The existing builder first qualifies and inverses the exact repaired pair against one of two explicit whole parents: the original WORKER 815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347 or the complete APPLICATION 3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9 with its exact five-member carrier cohort. Its existing APPLICATION inverse then requires e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4, followed by the existing Go historical and dependency checks. Neither the captured dependency map nor the three APPLICATION dependency members are normalized. Both main and Go validation use this same ordering; published manifests and inventories retain actual repaired bytes.
+
+Actual builder receipts:
+
+| Variant | Members | Manifest SHA-256 |
+| --- | ---: | --- |
+| Native base | 107 | b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4 |
+| Go APPLICATION | 109 | a6de024d6b6d5a560fb670c2a53ff60401e94e843b15a8a112f3a4c469ce8a67 |
+| APPLICATION HTTP | 112 | 2fd27a08a973ac153f3f896a2d3213452feeeea46609ddec80c8e3a6eb073bd7 |
+
+Qualification:
+
+- Before composition, the original APPLICATION normalizer rejected the actual two-member repair as a mixed native base. The implemented composition accepts only the exact qualified parents.
+- The first 132-case release/packaging suite passed, including distinct WORKER/APPLICATION lineages, partial/foreign/backdated closures, alterations to each preserved APPLICATION member, unchanged caller inputs, and rejection of 109/112 namespaces at the 107-member base boundary.
+- After narrowing to the dependent contribution, 376 focused Python cases passed with zero errors, failures or skips (process 49731; 107.725 seconds), covering original-run continuity, real lock contention in both runtime copies, Go closure and extension builds, historical launcher composition, packaging and exact identity review.
+- The actual Studio Fabric facade suite passed all 70 cases, including fresh backend generations refusing to redispatch a run with retained orphan evidence; the same process completed with terminal exit 0.
+- The active parent already contained a four-line Go shim recovery change but retained its older whole-file identity review. This contribution preserves that code, maps every unchanged reviewed literal to its new source position, and records the one new HTTP conflict status literal at line 2804. The exact current source is c01fffa59c0095355cddda7f31aa76a218f0ee87a30769998d9627ec2ee37cef; the existing identity review now qualifies all 53 sites.
+- The broader local native-security module reported 35 passes and 32 failures at the existing FABRIC_SPARSE_GIT_OBSERVATION_UNQUALIFIED boundary. That is not a green security receipt. Hosted Linux qualification remains required; no guard, assertion, Git binary, environment contract or CI gate was weakened.
+
+No live generation was published or selected, no provider task was dispatched, and no APPLICATION profile or service was activated. Final acceptance requires incorporation into #2175 at its then-current head, the original #2187 protected-source integration, exact-head hosted checks, the final protected merge, fresh installed predecessor verification, the existing immutable publisher/selector, and authenticated consumer proof. The installed M2/C26, #398 and original APPLICATION operation holds remain distinct.

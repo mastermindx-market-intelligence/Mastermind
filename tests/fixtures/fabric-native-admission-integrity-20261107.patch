@@ -1,0 +1,42 @@
+--- a/fabric_task.py
++++ b/fabric_task.py
+@@ -735 +735,8 @@
+-        if retained.exists() or retained.is_symlink():
++        retained_present, artifact_unverified = True, False
++        try:
++            retained.lstat()
++        except FileNotFoundError:
++            retained_present = False
++        except OSError:
++            retained_present, artifact_unverified = False, True
++        if retained_present:
+@@ -770,0 +778,15 @@
++        # The packet is fsynced before its descriptor. A crash in that window
++        # still occupies the original run, as does an orphan result. Check only
++        # the fixed artifacts guarded by request(); their presence or unreadable
++        # metadata proves neither execution absence nor root identity. Never read
++        # their contents or turn a missing log into permission to redispatch.
++        if not artifact_unverified:
++            for artifact in (retained.with_name(f"{rid}.request.packet"), result_path):
++                try:
++                    artifact.lstat()
++                except FileNotFoundError:
++                    continue
++                except OSError:
++                    pass
++                artifact_unverified = True
++                break
+@@ -774,2 +796,2 @@
+-            "state": "NOT_FOUND",
+-            **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"),
++            "state": "STATUS_UNREADABLE" if artifact_unverified else "NOT_FOUND",
++            **_acceptance_unknown("ARTIFACT_UNVERIFIED" if artifact_unverified else "EXECUTION_NOT_ELIGIBLE"),
+--- a/lane_runtime.py
++++ b/lane_runtime.py
+@@ -1785 +1784,0 @@
+-        observed_load = float(os.getloadavg()[0] if load1 is None else load1)
+@@ -1799,0 +1799,4 @@
++            # Waiting for admission can outlive the picker's load observation.
++            # Sample live load under the same physical lock as slot admission;
++            # the explicit load1 value remains a deterministic fixture seam.
++            observed_load = float(os.getloadavg()[0] if load1 is None else load1)

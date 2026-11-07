@@ -217,6 +217,43 @@ GO_REMOTE_CWD_TASK_DIGEST = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6
 # Older namespaces and the frozen Ubuntu4/poll generations retain their bytes.
 GO_REQUEST_REFUSAL_TASK_DIGEST = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
 
+# The same two-member repair has two separately qualified 107-member parents:
+# the protected WORKER closure and the installed APPLICATION carrier closure.
+# Temporary inverse views never replace the actual emitted repaired bytes;
+# unrelated or mixed complete parents remain ineligible.
+ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256 = "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
+ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256 = "3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9"
+ADMISSION_INTEGRITY_PREIMAGES = {
+    "ext/fabric_task.py": GO_REQUEST_REFUSAL_TASK_DIGEST,
+    "ext/lane_runtime.py": GO_CENSUS_EXIT_RUNTIME_DIGEST,
+}
+ADMISSION_INTEGRITY_DIGESTS = {
+    "ext/fabric_task.py": "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68",
+    "ext/lane_runtime.py": "b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b",
+}
+
+
+def before_admission_integrity(manifest):
+    """Validate one exact forward cohort without mutating caller identity."""
+    if type(manifest) is not dict:
+        raise ValueError("native admission integrity manifest invalid")
+    if not any(manifest.get(name) == digest
+               for name, digest in ADMISSION_INTEGRITY_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in ADMISSION_INTEGRITY_DIGESTS.items()):
+        raise ValueError("native admission integrity cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(ADMISSION_INTEGRITY_PREIMAGES)
+    parent_identity = sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode())
+    if parent_identity == ADMISSION_INTEGRITY_PARENT_MANIFEST_SHA256:
+        return previous
+    if (parent_identity == ADMISSION_INTEGRITY_APPLICATION_PARENT_MANIFEST_SHA256
+            and all(previous.get("ext/" + name) == digest
+                    for name, digest in APPLICATION_CARRIER_DIGESTS.items())):
+        return previous
+    raise ValueError("native admission integrity parent closure differs")
+
 
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/previous106/current107 compositions.
@@ -536,6 +573,9 @@ def normalize_application_carrier_base_manifest(manifest):
     """
     if type(manifest) is not dict:
         return manifest
+    # Qualify the exact repaired parent before the existing APPLICATION inverse.
+    # main() and Go validation share this ordering and retain actual output hashes.
+    manifest = before_admission_integrity(manifest)
     present = {name for name, expected in APPLICATION_CARRIER_DIGESTS.items()
                if manifest.get("ext/" + name) == expected}
     if not present:
