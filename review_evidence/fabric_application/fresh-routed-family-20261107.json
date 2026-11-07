@@ -1,0 +1,217 @@
+{
+  "authority": "Chairman Fabric APPLICATION integration mission; original eight consumer roles, same enrollment owner and native closure.",
+  "candidate_native_builds": [
+    {
+      "cohort": "107",
+      "native-manifest.json": {
+        "bytes": 10669,
+        "sha256": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
+      },
+      "native-source-inventory.json": {
+        "bytes": 35834,
+        "sha256": "f98a03d15d2f656e331d0b9d943321b8c1bd4384a114f619ff818dca0e647f40"
+      },
+      "returncode": 0,
+      "seconds": 0.093,
+      "stdout_tail": "{\"native_files\": 107, \"total_bytes\": 3233889, \"manifest_sha256\": \"bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e\", \"source_inventory_sha256\": \"f98a03d15d2f656e331d0b9d943321b8c1bd4384a114f619ff818dca0e647f40\"}\n"
+    },
+    {
+      "cohort": "109",
+      "native-manifest.json": {
+        "bytes": 10868,
+        "sha256": "acf6fdcc2df38eb2865c83f114e4bfec5c05f7ebfb66c4677ad6cfe87f5aa8c8"
+      },
+      "native-source-inventory.json": {
+        "bytes": 36359,
+        "sha256": "d4d7f2bce8158e9cd5b65fcec80e8e01cd50b72123af0f7f53b513caaa102eba"
+      },
+      "returncode": 0,
+      "seconds": 0.072,
+      "stdout_tail": "{\"native_files\": 109, \"total_bytes\": 3477088, \"manifest_sha256\": \"acf6fdcc2df38eb2865c83f114e4bfec5c05f7ebfb66c4677ad6cfe87f5aa8c8\", \"source_inventory_sha256\": \"d4d7f2bce8158e9cd5b65fcec80e8e01cd50b72123af0f7f53b513caaa102eba\"}\n"
+    },
+    {
+      "cohort": "112",
+      "native-manifest.json": {
+        "bytes": 11199,
+        "sha256": "7d814132900a7f4bb11ef10c566a4b5d18bb85a3a0b19c2be260cac3270efd61"
+      },
+      "native-source-inventory.json": {
+        "bytes": 37275,
+        "sha256": "d938a2bb15ec7daa7b1a56b1b6a82f0b10c11d4b8e8cc2c1c6e3cf0d68962977"
+      },
+      "returncode": 0,
+      "seconds": 0.096,
+      "stdout_tail": "{\"native_files\": 112, \"total_bytes\": 3560263, \"manifest_sha256\": \"7d814132900a7f4bb11ef10c566a4b5d18bb85a3a0b19c2be260cac3270efd61\", \"source_inventory_sha256\": \"d938a2bb15ec7daa7b1a56b1b6a82f0b10c11d4b8e8cc2c1c6e3cf0d68962977\"}\n"
+    }
+  ],
+  "files": {
+    ".github/workflows/hermes-application-enrollment.yml": {
+      "git_blob": "9c4d3fccf8db8b40804174d87561d1252ee85db6",
+      "sha256": "56a67062765d62cef10b45a8718f46c0a4913856371bf6a1cbc66999f48ef2da"
+    },
+    "ops/native_fabric/quota_continuity/candidate/native_go_entry.py": {
+      "git_blob": "35596b34ce2f3b58a610421902c425e393517830",
+      "sha256": "ada5c451254f6186acdee100725e1f5517b9e446e863b6f125308485d203e055"
+    },
+    "ops/native_fabric/quota_continuity/rollout/native_install.py": {
+      "git_blob": "8decd5031b7262b248553346530b2b6d2b78e79c",
+      "sha256": "fa6286a2b742dda1d1d79e4f57b32ab7c8c1063a2243f01e0593407f5ae90283"
+    },
+    "ops/native_fabric/quota_continuity/tests/test_go_service_fresh_family_composition.py": {
+      "git_blob": "fa924e42fc1edea8034dc8777ed26f47d2fd2e21",
+      "sha256": "cf3b9b06ce360a2377283ee9363e3a9f17717a380e82d9be53d6c917e4167a19"
+    },
+    "tests/executive_fabric_release_identity_review.py": {
+      "git_blob": "da94c95459b6f96c1c8de568dee2545449a7f7d5",
+      "sha256": "b4eac72e9628216c6203de2476f781306c3a1a1dbf05fddade7ca1a8a7cab8fd"
+    }
+  },
+  "implementation": {
+    "grant_semantics": "Explicit append-only additions, at most 128 per operation. Empty additions preserve exact current account bytes and grant no new inference authority. Every present grant list and every addition uses the complete A parser.",
+    "interrupted_peer_fix": "Before a first v9 intent, repeat current completed-peer/partial-record validation under the incumbent locks. Original-intent recovery is unchanged.",
+    "owner": "existing family binding, intent, credential custody and completion receipt",
+    "predecessor_retained_counts": {
+      "none": 0,
+      "v1": 1,
+      "v10": 8,
+      "v3": 1,
+      "v4": 1,
+      "v5": 2,
+      "v6": 5,
+      "v7": 5,
+      "v8": 8
+    },
+    "retention": "Preserve exact token prefixes and existing scope values, including existing route/purpose. Add only missing explicit route/purpose. Do not recreate, renew, enable or broaden old grants.",
+    "roles": [
+      "admin",
+      "text",
+      "chat",
+      "brain",
+      "ask",
+      "batch",
+      "analysis",
+      "portfolio"
+    ],
+    "schema": "native-go-service-enrollment-specification.v10"
+  },
+  "proof": {
+    "actual_startup": "Real entry/B listener accepts all eight enrolled identities and refuses absent native execution through the selection owner. Both populated and empty Go account profiles make zero Go upstream attempts. This is enrollment/startup proof, not positive native execution.",
+    "final_identity_log_sha256": "36a690b7c76f9392ea52dfa0b4cdb73f58d82c341a9af6b59f75d2a1fcf5a0c5",
+    "identity_qualification": {
+      "authored_patch_hunks": [
+        {
+          "new_count": 3,
+          "new_start": 277,
+          "old_count": 0,
+          "old_start": 276
+        },
+        {
+          "new_count": 1,
+          "new_start": 545,
+          "old_count": 1,
+          "old_start": 542
+        },
+        {
+          "new_count": 2,
+          "new_start": 548,
+          "old_count": 2,
+          "old_start": 545
+        },
+        {
+          "new_count": 4,
+          "new_start": 559,
+          "old_count": 1,
+          "old_start": 556
+        },
+        {
+          "new_count": 2,
+          "new_start": 575,
+          "old_count": 0,
+          "old_start": 568
+        },
+        {
+          "new_count": 1,
+          "new_start": 656,
+          "old_count": 0,
+          "old_start": 647
+        },
+        {
+          "new_count": 2,
+          "new_start": 659,
+          "old_count": 2,
+          "old_start": 650
+        },
+        {
+          "new_count": 1,
+          "new_start": 671,
+          "old_count": 1,
+          "old_start": 662
+        },
+        {
+          "new_count": 1,
+          "new_start": 674,
+          "old_count": 1,
+          "old_start": 665
+        }
+      ],
+      "new_reviewed_site": [
+        831,
+        60,
+        65,
+        "int",
+        "0o700"
+      ],
+      "old_reviewed_site": [
+        822,
+        60,
+        65,
+        "int",
+        "0o700"
+      ],
+      "registry_after_git_blob": "da94c95459b6f96c1c8de568dee2545449a7f7d5",
+      "registry_before_git_blob": "a1121cd93c34e65d4ea85228b970d819290e7d5e",
+      "scope": "Guarded mutation of the previously disclosed exact qualification row; no new exemption, spelling, site, or file.",
+      "source": "ops/native_fabric/quota_continuity/candidate/native_go_entry.py",
+      "source_after_sha256": "ada5c451254f6186acdee100725e1f5517b9e446e863b6f125308485d203e055",
+      "source_before_sha256": "eed37568f732d270ec420109601cd166fe23a8c07f714ac4f2a228504d3af320"
+    },
+    "new_tests_log_sha256": "ab98df93dea0321870f27e822c24c9dbc9b2cf86ffdc0f5b5d4ed8b3b67ca0a7",
+    "original_regression_log_sha256": "e529175932982a28f166098cf262a092fbe59b6c8ed41fa7b330abfd73264e7b",
+    "resolved_unique_cases": 677,
+    "runs": [
+      {
+        "label": "existing_family_and_identity",
+        "totals": {
+          "errors": 0,
+          "failures": 3,
+          "skipped": 0,
+          "tests": 639
+        },
+        "xml_sha256": "c90b846c9d494252662f210ac895d02538bef1da5f9cc475ca335fd69d242c8c"
+      },
+      {
+        "label": "fresh_v10",
+        "totals": {
+          "errors": 0,
+          "failures": 0,
+          "skipped": 0,
+          "tests": 38
+        },
+        "xml_sha256": "d8c1df04de7ef415621a72346e9814521396f376e50b5d12088dd36f688d5fc7"
+      },
+      {
+        "label": "final_identity",
+        "totals": {
+          "errors": 0,
+          "failures": 0,
+          "skipped": 0,
+          "tests": 337
+        },
+        "xml_sha256": "69c3bdff9afe56985795a2aadfced810b7ab0e1318eb5d169196205434c1e8c6"
+      }
+    ]
+  },
+  "remaining_runtime": "Protected merged rebuild/publication/selection, original C3/J reconciliation, authentic grants and source-owned native binding, VPS deployment and live consumer/browser acceptance.",
+  "schema": "mastermind.fabric_application.fresh_routed_family.v1",
+  "source_parent": "552375cd288ebe3c417d10afa17f47114c6319db"
+}

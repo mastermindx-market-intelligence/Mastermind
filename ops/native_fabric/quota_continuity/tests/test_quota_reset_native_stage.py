@@ -113,8 +113,13 @@ def test_complete_cohort_cannot_relabel_a_different_parent(stages):
 
 
 
-def _historical_quota_reset_parent():
-    previous = json.loads((ROLLOUT / "native-manifest.json").read_bytes())
+def _historical_quota_reset_parent(legacy_sparse=True):
+    current = json.loads((ROLLOUT / "native-manifest.json").read_bytes())
+    previous = builder.before_host_pull_integrity(current)
+    assert builder.sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == \
+        "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
+    if not legacy_sparse:
+        return previous
     previous["ext/remote_sub_exec.py"] = \
         "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea"
     assert builder.sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == \
@@ -122,8 +127,9 @@ def _historical_quota_reset_parent():
     return previous
 
 
-def test_historical_complete_h2_parent_retains_its_exact_inverse():
-    previous = _historical_quota_reset_parent()
+@pytest.mark.parametrize("legacy_sparse", [False, True])
+def test_historical_complete_h2_parent_retains_its_exact_inverse(legacy_sparse):
+    previous = _historical_quota_reset_parent(legacy_sparse)
     historical = dict(previous)
     historical.update({"ext/" + name: digest for name, digest in builder.QUOTA_RESET_DIGESTS.items()})
     before = dict(historical)
@@ -131,8 +137,9 @@ def test_historical_complete_h2_parent_retains_its_exact_inverse():
     assert historical == before
 
 
-def test_current_builder_refuses_historical_parent_before_new_emission(tmp_path):
-    previous = _historical_quota_reset_parent()
+@pytest.mark.parametrize("legacy_sparse", [False, True])
+def test_current_builder_refuses_historical_parent_before_new_emission(tmp_path, legacy_sparse):
+    previous = _historical_quota_reset_parent(legacy_sparse)
     output = tmp_path / "must-not-be-created"
     with pytest.raises(ValueError, match="requires exact complete APPLICATION parent"):
         builder.compose_quota_reset_stage(ROOT, output, previous, {})
@@ -218,3 +225,14 @@ class TestEmittedGlmResetBrokerJourney(component.GlmResetBrokerJourney):
         for name, path in sources.items():
             self.assertEqual(builder.sha(path.read_bytes()), self.stage_manifest["ext/" + name])
         return sources
+
+@pytest.mark.parametrize("member", sorted(builder.HOST_PULL_INTEGRITY_DIGESTS))
+@pytest.mark.parametrize("replacement", ["preimage", "foreign"])
+def test_h2_cannot_relabel_an_incomplete_host_pull_parent(stages, member, replacement):
+    actual = base_manifest(stages.base)
+    actual[member] = (builder.HOST_PULL_INTEGRITY_PREIMAGES[member]
+                      if replacement == "preimage" else "0" * 64)
+    before = dict(actual)
+    with pytest.raises(ValueError, match="quota reset parent closure"):
+        builder.normalize_application_carrier_base_manifest(actual)
+    assert actual == before

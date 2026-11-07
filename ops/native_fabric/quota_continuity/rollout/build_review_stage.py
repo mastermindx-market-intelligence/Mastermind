@@ -267,6 +267,39 @@ def before_admission_integrity(manifest):
     raise ValueError("native admission integrity parent closure differs")
 
 
+# The complete host-pull repair composes only on the current protected107
+# admission-integrity closure. This inverse is a validation view; emitted
+# manifests and staged payloads keep the repaired source identities.
+HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256 = "8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6"
+HOST_PULL_INTEGRITY_PREIMAGES = {
+    "ext/host_pull.sh": "b58b4cf4932b801df45d4a70fdd99aaaee800e7e57cc06501aa5c21b20ea8a1c",
+    "ext/host_pull_backend.py": "d00ff264dcb1a51b73d1e1f772da22a2130873f517299e8c430f060a8191f248",
+    "ext/host_pull_daemon.sh": "826aed96db81ecbfee1b647a1d5e4842414d43961b6daaea5a77606e9e679345",
+}
+HOST_PULL_INTEGRITY_DIGESTS = {
+    "ext/host_pull.sh": "464d9a5522a61311d5e8c2b7495a6297c86300d611903ad56524d4aa2e574e72",
+    "ext/host_pull_backend.py": "822226666c479137afe8f357d43032a805066a71a5b90d38f2051b40230c2ae9",
+    "ext/host_pull_daemon.sh": "842c12036b7bcd1a7101747a522efa272a893474342d57817fb06ecee3e73f0b",
+}
+
+
+def before_host_pull_integrity(manifest):
+    """Validate the complete host-pull successor without changing its identity."""
+    if type(manifest) is not dict:
+        raise ValueError("native host-pull integrity manifest invalid")
+    if not any(manifest.get(name) == digest
+               for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get(name) != digest
+           for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
+        raise ValueError("native host-pull integrity cohort is incomplete or foreign")
+    previous = dict(manifest)
+    previous.update(HOST_PULL_INTEGRITY_PREIMAGES)
+    if sha((json.dumps(previous, sort_keys=True, indent=2) + '\n').encode()) not in {HOST_PULL_INTEGRITY_PARENT_MANIFEST_SHA256, 'bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e'}:
+        raise ValueError("native host-pull integrity parent closure differs")
+    return previous
+
+
 def validate_go_base_manifest(manifest, dependency_hashes):
     """Accept exact historical102/prior104/previous106/current107 compositions.
 
@@ -462,10 +495,11 @@ def compose_application_http_stage(root, output, manifest, files):
 
 # Optional H2 successor: one closed four-member cohort over the complete
 # APPLICATION parent. Historical/default generations retain their exact bytes.
-QUOTA_RESET_PARENT_SHA256 = "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
+QUOTA_RESET_PARENT_SHA256 = "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a"
 # The former whole parent remains a historical inverse, never a new build base.
 QUOTA_RESET_REVIEWED_PARENT_SHA256S = frozenset({
     "c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459",
+    "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
     QUOTA_RESET_PARENT_SHA256,
 })
 QUOTA_RESET_PREIMAGES = {
@@ -898,6 +932,7 @@ def normalize_application_carrier_base_manifest(manifest):
     # Qualify the exact repaired parent before the existing APPLICATION inverse.
     # main() and Go validation share this ordering and retain actual output hashes.
     manifest = before_quota_reset_recovery(manifest)
+    manifest = before_host_pull_integrity(manifest)
     if manifest.get("ext/support_bundle.py") == APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]:
         manifest = before_application_pool_composition(manifest)
     else:

@@ -274,6 +274,9 @@ SERVICE_WORKLOAD_ROLES = SERVICE_FAMILY_ROLES + (
 SERVICE_ROLE_SCHEMA = "mastermind.native_go_application_service.v9"
 SERVICE_ROLE_ENROLLMENT_SCHEMA = "native-go-service-enrollment.v9"
 SERVICE_ROLE_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v9"
+SERVICE_FRESH_FAMILY_SCHEMA = "mastermind.native_go_application_service.v10"
+SERVICE_FRESH_FAMILY_ENROLLMENT_SCHEMA = "native-go-service-enrollment.v10"
+SERVICE_FRESH_FAMILY_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v10"
 # Closed service projections owned by the existing APPLICATION installer. A
 # role's interactive session or another consumer's bearer is not this grant.
 SERVICE_ROLE_PROFILES = {
@@ -539,11 +542,11 @@ def _service_workload_scope_binding(startup, scope, credential, role):
         route_scope=startup.handler.ApplicationRouteScope(scope["route_scope"]))
 
 
-def _validate_service_family(startup, document, *, routed=False, workloads=False):
+def _validate_service_family(startup, document, *, routed=False, workloads=False, fresh_family=False):
     fields = {"schema", "operation_id", "plan_digest", "source_generation", "ingress_digest",
               "scopes", "owners", "credentials"}
-    roles = SERVICE_WORKLOAD_ROLES if workloads else SERVICE_FAMILY_ROLES
-    if (set(document) != fields or document["schema"] != (SERVICE_WORKLOAD_SCHEMA if workloads else SERVICE_ROUTED_SCHEMA if routed else SERVICE_FAMILY_SCHEMA)
+    roles = SERVICE_WORKLOAD_ROLES if workloads or fresh_family else SERVICE_FAMILY_ROLES
+    if (set(document) != fields or document["schema"] != (SERVICE_FRESH_FAMILY_SCHEMA if fresh_family else SERVICE_WORKLOAD_SCHEMA if workloads else SERVICE_ROUTED_SCHEMA if routed else SERVICE_FAMILY_SCHEMA)
             or document["owners"] != application_service_owners(startup)
             or type(document["scopes"]) is not list or len(document["scopes"]) != len(roles)
             or type(document["credentials"]) is not list or len(document["credentials"]) != len(roles)):
@@ -553,7 +556,10 @@ def _validate_service_family(startup, document, *, routed=False, workloads=False
             raise ValueError("native application service commitment refused")
     if type(document["operation_id"]) is not str or IDENTITY.fullmatch(document["operation_id"]) is None:
         raise ValueError("native application service operation refused")
-    scope_binding = _service_workload_scope_binding if workloads else _service_routed_scope_binding if routed else _service_family_scope_binding
+    scope_binding = _service_workload_scope_binding if workloads or fresh_family else _service_routed_scope_binding if routed else _service_family_scope_binding
+    if fresh_family and any(type(scope) is not dict or "selection_purpose" not in scope
+                            for scope in document["scopes"]):
+        raise ValueError("fresh application family requires explicit selection purposes")
     bindings = tuple(scope_binding(startup, scope, credential, role[0])
         for role, scope, credential in zip(roles, document["scopes"], document["credentials"]))
     first = document["scopes"][0]
@@ -566,6 +572,8 @@ def _validate_service_family(startup, document, *, routed=False, workloads=False
 
 
 def validate_application_service_document(startup, document):
+    if type(document) is dict and document.get("schema") == SERVICE_FRESH_FAMILY_SCHEMA:
+        return _validate_service_family(startup, document, fresh_family=True)
     if type(document) is dict and document.get("schema") == SERVICE_WORKLOAD_SCHEMA:
         return _validate_service_family(startup, document, workloads=True)
     if type(document) is dict and document.get("schema") == SERVICE_ROUTED_SCHEMA:
@@ -645,10 +653,11 @@ def validate_completed_application_records(startup, raw, binding_identity, inten
     """Validate the same completed enrollment chain from retained private bytes."""
     document, intent, receipt = map(_service_json, (raw, intent_raw, receipt_raw))
     result = validate_application_service_document(startup, document)
+    fresh_family = document["schema"] == SERVICE_FRESH_FAMILY_SCHEMA
     workloads = document["schema"] == SERVICE_WORKLOAD_SCHEMA
     routed = document["schema"] == SERVICE_ROUTED_SCHEMA
-    family = document["schema"] in (SERVICE_FAMILY_SCHEMA, SERVICE_ROUTED_SCHEMA, SERVICE_WORKLOAD_SCHEMA)
-    service_set = document["schema"] in (SERVICE_SET_SCHEMA, SERVICE_FAMILY_SCHEMA, SERVICE_ROUTED_SCHEMA, SERVICE_WORKLOAD_SCHEMA)
+    family = document["schema"] in (SERVICE_FAMILY_SCHEMA, SERVICE_ROUTED_SCHEMA, SERVICE_WORKLOAD_SCHEMA, SERVICE_FRESH_FAMILY_SCHEMA)
+    service_set = document["schema"] in (SERVICE_SET_SCHEMA, SERVICE_FAMILY_SCHEMA, SERVICE_ROUTED_SCHEMA, SERVICE_WORKLOAD_SCHEMA, SERVICE_FRESH_FAMILY_SCHEMA)
     http = document["schema"] == SERVICE_HTTP_SCHEMA
     admin = document["schema"] == SERVICE_ADMIN_SCHEMA
     role = document["schema"] == SERVICE_ROLE_SCHEMA
@@ -659,10 +668,10 @@ def validate_completed_application_records(startup, raw, binding_identity, inten
                       scope_field, "binding_sha256", "binding_identity", "accounts_sha256", "accounts_identity"}
     if http:
         receipt_fields |= {"application_recipe_digest", "source_projection_sha256", "provider_profile_identity"}
-    if (set(intent) != intent_fields or intent["schema"] != (SERVICE_ROLE_ENROLLMENT_SCHEMA if role else SERVICE_WORKLOAD_ENROLLMENT_SCHEMA if workloads else SERVICE_ROUTED_ENROLLMENT_SCHEMA if routed else SERVICE_FAMILY_ENROLLMENT_SCHEMA if family else SERVICE_SET_ENROLLMENT_SCHEMA if service_set else SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
+    if (set(intent) != intent_fields or intent["schema"] != (SERVICE_FRESH_FAMILY_ENROLLMENT_SCHEMA if fresh_family else SERVICE_ROLE_ENROLLMENT_SCHEMA if role else SERVICE_WORKLOAD_ENROLLMENT_SCHEMA if workloads else SERVICE_ROUTED_ENROLLMENT_SCHEMA if routed else SERVICE_FAMILY_ENROLLMENT_SCHEMA if family else SERVICE_SET_ENROLLMENT_SCHEMA if service_set else SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
             SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
             SERVICE_SELECTED_ENROLLMENT_SCHEMA if selected else SERVICE_ENROLLMENT_SCHEMA)
-            or set(receipt) != receipt_fields or receipt["schema"] != (SERVICE_ROLE_RECEIPT_SCHEMA if role else SERVICE_WORKLOAD_RECEIPT_SCHEMA if workloads else SERVICE_ROUTED_RECEIPT_SCHEMA if routed else SERVICE_FAMILY_RECEIPT_SCHEMA if family else SERVICE_SET_RECEIPT_SCHEMA if service_set else SERVICE_HTTP_RECEIPT_SCHEMA if http else
+            or set(receipt) != receipt_fields or receipt["schema"] != (SERVICE_FRESH_FAMILY_RECEIPT_SCHEMA if fresh_family else SERVICE_ROLE_RECEIPT_SCHEMA if role else SERVICE_WORKLOAD_RECEIPT_SCHEMA if workloads else SERVICE_ROUTED_RECEIPT_SCHEMA if routed else SERVICE_FAMILY_RECEIPT_SCHEMA if family else SERVICE_SET_RECEIPT_SCHEMA if service_set else SERVICE_HTTP_RECEIPT_SCHEMA if http else
                 SERVICE_ADMIN_RECEIPT_SCHEMA if admin else
                 SERVICE_SELECTED_RECEIPT_SCHEMA if selected else SERVICE_RECEIPT_SCHEMA)
             or any(intent[key] != document[key] or receipt[key] != document[key]

@@ -1,0 +1,34 @@
+{
+  "evidence_representation_facts_equal": true,
+  "h2_parent": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+  "head": "59f9cfce43cba2f91ec49b37062f974648a48bc0",
+  "historical_h2_parents": [
+    "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+    "c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459"
+  ],
+  "incoming": "bd119dfd25db6e9b5b48ab461407faf29cb0725d",
+  "incoming_test_eof_whitespace_repaired": [
+    "tests/test_executive_installed_snapshot_hardening.py",
+    "tests/test_host_pull_stage_diagnostics.py"
+  ],
+  "installed": false,
+  "native_entry_semantics": "exact bd119 v10 bytes plus prior H2 authenticated preloads only",
+  "native_entry_sha256": "41dc619494380cc144e84ccce95b861f3eaac9a092c4fcdbf6f154a6d09bb1fc",
+  "normalization_order": [
+    "H2",
+    "host-pull",
+    "APPLICATION or exact models",
+    "sparse",
+    "admission",
+    "carrier"
+  ],
+  "resolved": [
+    "ops/native_fabric/quota_continuity/rollout/ROLLOUT_REVIEW.md",
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+    "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py",
+    "review_evidence/fabric_application/hermes-macro-current-pair-qualification-20261107.json",
+    "tests/executive_fabric_release_identity_review.py"
+  ],
+  "schema": "mastermind.h6.protected_host_v10_join_preparation.v1",
+  "tested": false
+}

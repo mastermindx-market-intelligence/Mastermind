@@ -978,3 +978,48 @@ cache ownership on repeated inspection. Source qualification and regenerated
 artifact identities are recorded under review_evidence/fabric_application/
 h6-recovery-20261107-c2. No live installation, selection or account admission is
 implied by this optional artifact. H3 optimization remains excluded.
+
+### Combined host-pull source image — 2026-11-07 (#1836)
+
+The host-pull composition advances the ordinary current source image from
+`8af7302990d7e77112457090767265d7eb43a4f544ec533bf9b517c5eb6c35c6`
+to
+`a42259df6aa9dc910abd3e6eacb75f30b9089663d569c88f946f965bc8ceedd3`.
+The existing builder emitted 107 members, 75 baseline files and 3,089,380
+payload bytes. Its source-inventory SHA256 is
+`553b24be3cbb9523d618ebdbfd95421b39dc9ef5783cff0946404dba5787c298`.
+
+Only `ext/host_pull.sh`, `ext/host_pull_backend.py` and
+`ext/host_pull_daemon.sh` change in that manifest and inventory. All other
+member hashes, metadata and installed-preimage identities remain intact.
+The builder validates one exact three-member inverse against the complete
+8af730 parent, then uses the unchanged 815ec admission-parent guard; emitted
+metadata continues to identify the actual repaired bytes. The historical
+95-member upgrade and 6ac208 manifest are unchanged.
+
+The earlier variant table and dated CI records above describe their original
+source epochs. Their 8af730 identity remains historical predecessor authority;
+it must not be globally replaced with the new current identity. Current
+qualification consumers bind the generated a42259 manifest. The catalog and
+paid-initializer expectations each require only that current-pin correction:
+the initializer's historical comparison still has 95 original members,
+12 additions, 36 changed common members and 59 unchanged original members.
+
+The three historical host-pull payloads are retained as authenticated fixture
+data for the old 102-member stage. Current Go tests first normalize the
+validated host epoch before exercising the older admission inverse. Hosted
+native preflight job 128415654001 in workflow 42376687583 passed these consumers;
+that run's ordinary shard 5 subsequently identified the two stale current-pin
+assertions above. This records the distinct results and does not claim the
+full workflow passed.
+
+The combined-image technical source review covers the unchanged production
+composition. Source qualification and a protected merge do not authorize an
+installed generation, CURRENT change, launchctl action, H1 admission, provider
+or worker start. Existing APPLICATION #2175 composition and enrollment
+constraints remain separate; no installed generation was replaced or selected.
+
+
+### H2 over the completed host-pull/v10 composition — 2026-11-07
+
+The current optional H2 build parent is the complete107-member59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a host-pull/APPLICATION image. The priorbcfb8c andc7f5d2 parents remain exact historical inverses, not new build inputs. Historical validation reverses H2 first, then the complete host-pull trio, then the existing APPLICATION/exact, sparse, admission and carrier cohorts. Actual emitted source hashes and dependencies remain unchanged by those temporary historical views. The entry combines v10 enrollment with authenticated H2 quota/glm module preloads; its resulting bytes require their own exact qualification. H3 experiments remain outside the builder.
