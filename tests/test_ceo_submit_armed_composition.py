@@ -1602,11 +1602,13 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # The adopted-context read composition changes this full-file pin. The
     # exact installed entry AST and all ten mutation refusals remain unchanged;
     # no additional event loop or execution call is admitted.
+    # The optional sealed observation owner composes with those protected reads;
+    # only this final full-file fingerprint changes, never the wrapper AST.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '8208bae9f1af55cc313f176f73740182db89ecd4578572c11f79d131055f7803'):
+            '54dcc405c66afbbf5ca980f64dead4c0d6709ff1920bd02d1a27e9a3db38e5b6'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -3394,3 +3396,137 @@ def test_d8_nonrecursive_publisher_mkdir_modes_keep_identity_operands_guarded():
     )
     for line in guarded:
         assert _scan_identity_source_lines([line], path_identity=True), line
+
+
+
+_WEB_OBSERVATION_PATH = "integrations/session_bridge/installed_web_observation.py"
+
+
+def _d8_web_observation_scan(source, *, path=_WEB_OBSERVATION_PATH, postimage=True):
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source),
+        source_postimages={path: source} if postimage else None,
+    )
+
+
+def test_d8_web_observation_exact_file_bound_masks_only_one_operand():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    # Exercise the real scanner before inspecting the finite review record.
+    assert _d8_web_observation_scan(source) == []
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22"
+    )
+    assert reviewed_literal_spans(_WEB_OBSERVATION_PATH, source) == (
+        (252, 46, 49, "int"),
+    )
+    lines = source.splitlines(keepends=True)
+    assert lines[251][46:49] == "512"
+    tokens = [token for token in tokenize.generate_tokens(io.StringIO(source).readline)
+              if token.start == (252, 46) and token.end == (252, 49)]
+    assert len(tokens) == 1
+    assert tokens[0].type == tokenize.NUMBER and tokens[0].string == "512"
+    expected = list(lines)
+    expected[251] = lines[251][:46] + "0  " + lines[251][49:]
+    assert mask_reviewed_identity_literals(_WEB_OBSERVATION_PATH, source) == "".join(expected)
+
+    owner = next(
+        node for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef) and node.name == "_path_custody"
+    )
+    bounds = [
+        node for node in ast.walk(owner)
+        if isinstance(node, ast.Compare)
+        and isinstance(node.left, ast.Attribute)
+        and isinstance(node.left.value, ast.Name)
+        and node.left.value.id == "info" and node.left.attr == "st_size"
+    ]
+    assert len(bounds) == 1
+    assert ast.dump(bounds[0], include_attributes=False) == ast.dump(
+        ast.parse("info.st_size > 512 * 1024", mode="eval").body,
+        include_attributes=False,
+    )
+
+
+@pytest.mark.parametrize("postimage,path", [
+    (False, _WEB_OBSERVATION_PATH),
+    (True, "integrations/session_bridge/other_web_observation.py"),
+    (True, "control_plane/unreviewed_observation.py"),
+])
+def test_d8_web_observation_requires_exact_path_and_postimage(postimage, path):
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    assert _d8_web_observation_scan(source, path=path, postimage=postimage) == ["512"]
+
+
+def test_d8_web_observation_registry_removal_exposes_bound(monkeypatch):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    monkeypatch.delitem(REVIEWED_FILES, _WEB_OBSERVATION_PATH)
+    assert reviewed_literal_spans(_WEB_OBSERVATION_PATH, source) == ()
+    assert mask_reviewed_identity_literals(_WEB_OBSERVATION_PATH, source) == source
+    assert _d8_web_observation_scan(source) == ["512"]
+
+
+@pytest.mark.parametrize("old,new,expected", [
+    ("512 * 1024", "513 * 1024", "513"),
+    ("512 * 1024", "512 * 2048", "512"),
+    ("info.st_size > 512 * 1024", "info.st_uid > 512 * 1024", "512"),
+    ("info.st_size > 512 * 1024", "info.st_gid > 512 * 1024", "512"),
+    ("or (not socket and info.st_size > 512 * 1024)):",
+     "or (not socket and info.st_size > 512 * 1024) or uid == 777):", "777"),
+])
+def test_d8_web_observation_operand_and_identity_context_drift_is_guarded(old, new, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    changed = source.replace(old, new)
+    ast.parse(changed)
+    assert reviewed_literal_spans(_WEB_OBSERVATION_PATH, changed) == ()
+    assert mask_reviewed_identity_literals(_WEB_OBSERVATION_PATH, changed) == changed
+    findings = _d8_web_observation_scan(changed)
+    assert expected in findings
+    if expected == "777":
+        assert "512" in findings
+
+
+@pytest.mark.parametrize("suffix,expected", [
+    ("\n# unrelated source byte drift\n", "512"),
+    ("\npeer_uid = 777\n", "777"),
+    ("\npeer_gid = 777\n", "777"),
+    ("\npeer_port = 777\n", "777"),
+    ('\naccount = "_mastermind_unreviewed"\n', "_mastermind_unreviewed"),
+])
+def test_d8_web_observation_pin_cannot_hide_added_identity_or_source_drift(suffix, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8") + suffix
+    assert reviewed_literal_spans(_WEB_OBSERVATION_PATH, source) == ()
+    findings = _d8_web_observation_scan(source)
+    assert "512" in findings
+    assert expected in findings
+
+
+@pytest.mark.parametrize("changed_diff", [False, True])
+def test_d8_web_observation_false_postimage_is_rejected(changed_diff):
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    changed = source.replace("512 * 1024", "513 * 1024")
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(_WEB_OBSERVATION_PATH, changed if changed_diff else source),
+            source_postimages={
+                _WEB_OBSERVATION_PATH: source if changed_diff else changed,
+            },
+        )
+
+
+@pytest.mark.parametrize("identity", [False, True])
+def test_d8_web_observation_real_committed_git_collector(tmp_path, monkeypatch, identity):
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    if identity:
+        source += "\npeer_uid = 777\n"
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, _WEB_OBSERVATION_PATH, source, identity,
+    )

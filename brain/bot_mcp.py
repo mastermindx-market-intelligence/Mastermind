@@ -196,6 +196,65 @@ _FRESHNESS_BASIS = "vendored_macro_file"
 _FRESHNESS_KEYS = ("freshness", "alt_freshness")
 
 
+def _ticker_record_checked(mapping, ticker):
+    """Return one ticker record plus whether the mapping shape was invalid."""
+    if mapping is None:
+        return None, False
+    tickers = mapping.get("tickers")
+    if tickers is None:
+        return None, False
+    if not isinstance(tickers, dict):
+        return None, True
+    if ticker not in tickers:
+        return None, False
+    record = tickers[ticker]
+    if not isinstance(record, dict):
+        return None, True
+    return record, False
+
+def _list_field_checked(mapping, key):
+    """Return one optional list field plus whether its persisted shape was invalid."""
+    if mapping is None:
+        return [], False
+    value = mapping.get(key)
+    if value is None:
+        return [], False
+    if not isinstance(value, list):
+        return [], True
+    return value, False
+
+def _read_ticker_feed_checked(ticker, relative_paths):
+    """Select a usable feed and its actual path without hiding earlier read failures."""
+    had_failure = False
+    empty = None
+    for rel in relative_paths:
+        mapping, read_failed = _read_first_nonempty_mapping_checked(
+            (_V / rel,), allow_empty=True,
+        )
+        had_failure = had_failure or read_failed
+        if mapping is None:
+            continue
+        if not mapping:
+            if empty is None:
+                empty = (mapping, rel)
+            continue
+        record, shape_failed = _ticker_record_checked(mapping, ticker)
+        had_failure = had_failure or shape_failed
+        if shape_failed:
+            continue
+        return mapping, record, had_failure, rel
+    if empty is not None:
+        mapping, rel = empty
+        return mapping, None, had_failure, rel
+    return None, None, had_failure, None
+
+
+def _feed_ticker_checked(value):
+    """Return one nonblank feed identifier without changing its normalization."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.upper()
+
 def _first_vendored(*rels: str):
     """(rel, payload) of the first vendored file with a non-empty payload — the same precedence
     as the `_read_json(site) or _read_json(data)` reads — else (None, {})."""
@@ -259,9 +318,34 @@ def _stock_price(t: str):
 # ---------------- READ tools ----------------
 @tool("get_regime", "Current US macro regime read (quad, growth/inflation scores, liquidity).", {})
 async def get_regime(args):
-    d = _read_json(_V / "data" / "regime" / "latest.json") or {}
     keys = ["date", "quad", "quad_name", "growth_score", "inflation_score", "liquidity_overlay", "cycle_tag"]
-    out = {k: d.get(k) for k in keys} | {"sector_rs_top": (d.get("sector_rs") or [])[:6]}
+    d, core_failed = _read_first_nonempty_mapping_checked((
+        _V / "data" / "regime" / "latest.json",
+    ))
+    if d is None:
+        out = {k: None for k in keys} | {
+            "sector_rs_top": None,
+            "read_status": "unavailable",
+            "regime_status": "unavailable" if core_failed else "absent",
+            "error": "regime_core_unavailable" if core_failed else "regime_core_absent",
+        }
+        if core_failed:
+            out["failed_sources"] = ["regime"]
+        return _json(out)
+
+    sector_rs = d.get("sector_rs")
+    if sector_rs is not None and not isinstance(sector_rs, list):
+        return _json({
+            **{k: None for k in keys},
+            "sector_rs_top": None,
+            "read_status": "unavailable",
+            "regime_status": "unavailable",
+            "error": "regime_core_unavailable",
+            "failed_sources": ["regime"],
+        })
+
+    out = {k: d.get(k) for k in keys} | {"sector_rs_top": (sector_rs or [])[:6]}
+    failed_sources = []
     # E1.1 — append the market_view brief + label_vs_planes line (ADDITIVE; absent view → keys absent).
     # This replaces the ad-hoc 7-key slice so the autonomous Brain reads the same perception layer as
     # the judgment seats — the incident's root cause was the Brain seeing ONLY the label.
@@ -269,35 +353,52 @@ async def get_regime(args):
         from brain.pm_conviction import _read_market_view, _market_view_enrichment
         mv = _read_market_view()
         enrichment = _market_view_enrichment(mv)
+        if enrichment is not None and not isinstance(enrichment, dict):
+            raise TypeError("market-view enrichment is not a mapping")
         if enrichment:
-            compact_mv = dict(enrichment)
-            compact_mv["plane_summaries"] = [
-                {
+            planes = enrichment.get("plane_summaries")
+            if planes is None:
+                planes = []
+            if not isinstance(planes, list):
+                raise TypeError("market-view planes are not a list")
+            compact_planes = []
+            for row in planes:
+                if not isinstance(row, dict):
+                    raise TypeError("market-view plane is not a mapping")
+                freshness, freshness_failed = _mapping_field_checked(row, "freshness")
+                if freshness_failed:
+                    raise TypeError("market-view plane freshness is not a mapping")
+                compact_planes.append({
                     "name": row.get("name"),
                     "direction": row.get("direction"),
                     "status": row.get("status"),
-                    "asof": (row.get("freshness") or {}).get("asof"),
-                    "stale": (row.get("freshness") or {}).get("stale"),
-                    "age_sessions": (row.get("freshness") or {}).get("age_sessions"),
-                }
-                for row in (enrichment.get("plane_summaries") or [])
-            ]
+                    "asof": freshness.get("asof"),
+                    "stale": freshness.get("stale"),
+                    "age_sessions": freshness.get("age_sessions"),
+                })
+            compact_mv = dict(enrichment)
+            compact_mv["plane_summaries"] = compact_planes
+            json.dumps(compact_mv, default=str, ensure_ascii=False)
             out["market_view"] = compact_mv
-    except Exception:  # noqa: BLE001 — additive; never break the tool
-        pass
+    except Exception:  # noqa: BLE001 - preserve the healthy core and other context
+        failed_sources.append("market_view")
     try:
         from brain import decision_context as _dc
 
         dc = _dc.prompt_summary(
             expected_publication=(out.get("market_view") or {}).get("publication")
         )
+        if dc is not None and not isinstance(dc, dict):
+            raise TypeError("decision context is not a mapping")
         if dc:
-            liquidity = dc.get("liquidity") or {}
-            quality = liquidity.get("quality") or {}
-            driver = dc.get("market_driver") or {}
+            liquidity, liquidity_failed = _mapping_field_checked(dc, "liquidity")
+            quality, quality_failed = _mapping_field_checked(liquidity, "quality")
+            driver, driver_failed = _mapping_field_checked(dc, "market_driver")
+            if liquidity_failed or quality_failed or driver_failed:
+                raise TypeError("decision context contains an invalid mapping field")
             # Keep this tool's JSON safely below its transport cap. Rich fresh-lobe context remains
             # available to the strategist/PM; get_regime carries the precise regime core.
-            out["decision_context"] = {
+            compact_dc = {
                 "schema_version": dc.get("schema_version"),
                 "market_asof": dc.get("market_asof"),
                 "hard_label": dc.get("hard_label"),
@@ -324,8 +425,14 @@ async def get_regime(args):
                 "publication": dc.get("publication"),
                 "serving_freshness": dc.get("serving_freshness"),
             }
-    except Exception:  # noqa: BLE001
-        pass
+            json.dumps(compact_dc, default=str, ensure_ascii=False)
+            out["decision_context"] = compact_dc
+    except Exception:  # noqa: BLE001 - preserve the healthy core and other context
+        failed_sources.append("decision_context")
+    if failed_sources:
+        out["read_status"] = "partial"
+        out["failed_sources"] = failed_sources
+        out["note"] = "Regime core is available; named context sources did not complete."
     return _json(out)
 
 
@@ -577,24 +684,109 @@ async def get_divergences(args):
 @tool("get_altdata", "Alternative-data flow + Trump-family/administration linkage for a NAME — cross-signal convergence across congress/insider/government-contract/lobbying/Trump-trade channels, plus whether the name sits in the latent-stake entity graph (e.g. American Bitcoin -> Hut 8, branded crypto but the value accrues to an AI-power-infra parent). A QUALITATIVE research signal: politically-linked smart-money flow. Public-record + CONTEXT-ONLY (never a scored axis) — informs narrative/conviction, never sizes alone.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_altdata(args):
-    t = (args.get("ticker") or "").upper()
-    bt = (_read_json(_V / "site" / "altdata" / "by_ticker.json")
-          or _read_json(_V / "data" / "altdata" / "by_ticker.json") or {})
-    rec = (bt.get("tickers") or {}).get(t)
-    latent = _read_json(_V / "site" / "altdata" / "latent.json") or {}
-    graph = None
-    for w in (latent.get("watch") or []):
-        if (w.get("ticker") or "").upper() == t:
-            graph = {"in_graph": True, "themes": [th.get("en") for th in (w.get("themes") or [])],
-                     "trump_people": w.get("trump_people"), "top_holder": (w.get("top_holder") or {}).get("owner"),
-                     "alt_corroborated": w.get("alt_corroborated"), "note": w.get("note")}
+    t = None
+    try:
+        t = _feed_ticker_checked(args.get("ticker"))
+        if t is None:
+            raise ValueError("alt-data ticker is unavailable")
+        flow_store, rec, flow_failed, _flow_rel = _read_ticker_feed_checked(t, (
+            "site/altdata/by_ticker.json", "data/altdata/by_ticker.json",
+        ))
+        flow_available = flow_store is not None
+
+        latent, graph_read_failed = _read_first_nonempty_mapping_checked(
+            (_V / "site" / "altdata" / "latent.json",), allow_empty=True,
+        )
+        watch, watch_shape_failed = _list_field_checked(latent, "watch")
+        mismatches, mismatch_shape_failed = _list_field_checked(latent, "mismatches")
+        graph_failed = graph_read_failed or watch_shape_failed or mismatch_shape_failed
+        graph_available = latent is not None and not (watch_shape_failed or mismatch_shape_failed)
+
+        graph = None
+        for row in watch:
+            row_ticker = _feed_ticker_checked(row.get("ticker")) if isinstance(row, dict) else None
+            if row_ticker is None:
+                graph_failed = True
+                continue
+            if row_ticker != t:
+                continue
+            themes = row.get("themes")
+            if themes is None:
+                themes = []
+            if not isinstance(themes, list):
+                graph_failed = True
+                themes = []
+            elif any(not isinstance(theme, dict) for theme in themes):
+                graph_failed = True
+                themes = [theme for theme in themes if isinstance(theme, dict)]
+            top_holder = row.get("top_holder")
+            if top_holder is None:
+                top_holder = {}
+            if not isinstance(top_holder, dict):
+                graph_failed = True
+                top_holder = {}
+            graph = {
+                "in_graph": True,
+                "themes": [theme.get("en") for theme in themes],
+                "trump_people": row.get("trump_people"),
+                "top_holder": top_holder.get("owner"),
+                "alt_corroborated": row.get("alt_corroborated"),
+                "note": row.get("note"),
+            }
             break
-    mismatch = next((m for m in (latent.get("mismatches") or [])
-                     if t in {(m.get("repointed_ticker") or "").upper(), (m.get("entity_ticker") or "").upper()}), None)
-    if rec is None and graph is None and mismatch is None:
-        return _ok(f"no alt-data signal for {t} — not flagged by any political/insider/contract channel.")
-    return _json({"ticker": t, "flow": rec, "latent_graph": graph, "label_mismatch": mismatch,
-                  "note": "Public-record alt-data (congress/insider/govt-contract/SEC EDGAR — macro engine Signal Intelligence Desk). Context-only — informs narrative, never sizes alone."})
+
+        mismatch = None
+        for row in mismatches:
+            if not isinstance(row, dict):
+                graph_failed = True
+                continue
+            tickers = set()
+            for key in ("repointed_ticker", "entity_ticker"):
+                value = row.get(key)
+                if value is None or value == "":
+                    continue
+                row_ticker = _feed_ticker_checked(value)
+                if row_ticker is None:
+                    graph_failed = True
+                else:
+                    tickers.add(row_ticker)
+            if not tickers:
+                graph_failed = True
+            if t in tickers:
+                mismatch = row
+                break
+
+        failed_sources = []
+        if flow_failed:
+            failed_sources.append("altdata_flow")
+        if graph_failed:
+            failed_sources.append("altdata_graph")
+        payload = {
+            "ticker": t,
+            "flow": rec,
+            "latent_graph": graph,
+            "label_mismatch": mismatch,
+            "note": "Public-record alt-data (congress/insider/govt-contract/SEC EDGAR — macro engine Signal Intelligence Desk). Context-only — informs narrative, never sizes alone.",
+        }
+        if failed_sources:
+            payload["read_status"] = (
+                "unavailable"
+                if flow_failed and graph_failed and not flow_available and not graph_available
+                else "partial"
+            )
+            payload["failed_sources"] = failed_sources
+            if payload["read_status"] == "unavailable":
+                payload["error"] = "ticker_altdata_unavailable"
+            return _json(payload)
+        if rec is None and graph is None and mismatch is None:
+            return _ok(f"no alt-data signal for {t} — not flagged by any political/insider/contract channel.")
+        return _json(payload)
+    except Exception:  # noqa: BLE001 - malformed input or projection remains unavailable
+        return _json({
+            "ticker": t, "flow": None, "latent_graph": None, "label_mismatch": None,
+            "read_status": "unavailable", "error": "ticker_altdata_unavailable",
+            "failed_sources": ["altdata_flow", "altdata_graph"],
+        })
 
 
 @tool("get_news",
@@ -604,14 +796,39 @@ async def get_altdata(args):
       "about this name. CONTEXT-ONLY (never a scored axis) — informs narrative/conviction, never sizes alone.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_news(args):
-    t = (args.get("ticker") or "").upper()
-    rel, bt = _first_vendored("site/news/by_ticker.json", "data/news/by_ticker.json")
-    rec = (bt.get("tickers") or {}).get(t)
-    if rec is None:
-        return _ok(f"no news-flow signal for {t} — not covered by the macro news surface.")
-    return _json({"ticker": t, "news": rec,
-                  "note": "Public-record financial news flow. Context-only — informs narrative, never sizes alone.",
-                  "freshness": _freshness(bt, rel), "evidence_grade": "vendored_snapshot"})
+    t = None
+    try:
+        t = _feed_ticker_checked(args.get("ticker"))
+        if t is None:
+            raise ValueError("news ticker is unavailable")
+        store, rec, failed, rel = _read_ticker_feed_checked(t, (
+            "site/news/by_ticker.json", "data/news/by_ticker.json",
+        ))
+        labels = {"freshness": _freshness(store, rel), "evidence_grade": "vendored_snapshot"}
+        if failed:
+            payload = {
+                "ticker": t,
+                "news": rec,
+                "read_status": "partial" if store is not None else "unavailable",
+                "failed_sources": ["news"],
+                "note": "News evidence did not fully load; missing fields are unknown, not negative evidence. Context-only; never sizes alone.",
+                **labels,
+            }
+            if payload["read_status"] == "unavailable":
+                payload["error"] = "ticker_news_unavailable"
+            return _json(payload)
+        if rec is None:
+            return _ok(f"no news-flow signal for {t} — not covered by the macro news surface.")
+        return _json({
+            "ticker": t, "news": rec,
+            "note": "Public-record financial news flow. Context-only — informs narrative, never sizes alone.",
+            **labels,
+        })
+    except Exception:  # noqa: BLE001 - no input/read/projection failure escapes the tool
+        return _json({
+            "ticker": t, "news": None, "read_status": "unavailable",
+            "error": "ticker_news_unavailable", "failed_sources": ["news"],
+        })
 
 
 @tool("get_intelligence",
@@ -623,33 +840,94 @@ async def get_news(args):
       "QUIET tape; crowded/late = flow into a LOUD tape). CONTEXT-ONLY — informs conviction, never sizes alone.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_intelligence(args):
-    t = (args.get("ticker") or "").upper()
-    urel, uni = _first_vendored("site/intelligence/by_ticker.json", "data/intelligence/by_ticker.json")
-    rec = (uni.get("tickers") or {}).get(t)
-    if rec is not None:
-        labels = {"freshness": _freshness(uni, urel), "evidence_grade": "vendored_snapshot"}
-    else:
-        # the unified bundle isn't published yet — compose from the standalone feeds
-        nrel = "site/news/by_ticker.json"
-        ndoc = _read_json(_V / nrel) or {}
-        news = (ndoc.get("tickers") or {}).get(t)
+    t = None
+    try:
+        t = _feed_ticker_checked(args.get("ticker"))
+        if t is None:
+            raise ValueError("intelligence ticker is unavailable")
+        unified_store, rec, unified_failed, urel = _read_ticker_feed_checked(t, (
+            "site/intelligence/by_ticker.json", "data/intelligence/by_ticker.json",
+        ))
+        unified_available = unified_store is not None
+        if rec is not None:
+            payload = {
+                "ticker": t, **rec,
+                "note": "News flow (what the tape says) + alt-data signal (what smart money does), side by side. Context-only — the divergence between them is the read; never sizes alone.",
+                "freshness": _freshness(unified_store, urel), "evidence_grade": "vendored_snapshot",
+            }
+            if unified_failed:
+                payload["read_status"] = "partial"
+                payload["failed_sources"] = ["unified_intelligence"]
+            return _json(payload)
+
+        news_store, news, news_failed, nrel = _read_ticker_feed_checked(t, (
+            "site/news/by_ticker.json", "data/news/by_ticker.json",
+        ))
+        news_available = news_store is not None
         arel = "site/altdata/mastermind.json"
-        adoc = _read_json(_V / arel) or {}
-        mm = adoc.get("signals") or []
-        alt = next((s for s in mm if (s.get("ticker") or "").upper() == t), None)
+        alt_store, alt_read_failed = _read_first_nonempty_mapping_checked(
+            (_V / arel,), allow_empty=True,
+        )
+        signals, signals_shape_failed = _list_field_checked(alt_store, "signals")
+        alt_failed = alt_read_failed or signals_shape_failed
+        alt_available = alt_store is not None and not signals_shape_failed
+        alt = None
+        for row in signals:
+            row_ticker = _feed_ticker_checked(row.get("ticker")) if isinstance(row, dict) else None
+            if row_ticker is None:
+                alt_failed = True
+                continue
+            if row_ticker == t:
+                alt = row
+                break
+
+        failed_sources = []
+        if unified_failed:
+            failed_sources.append("unified_intelligence")
+        if news_failed:
+            failed_sources.append("news")
+        if alt_failed:
+            failed_sources.append("altdata")
+        labels = {
+            "missing_reason": (
+                "unified_intelligence_incomplete" if unified_failed
+                else "ticker_absent_in_vendored_file" if unified_available
+                else "unified_artifact_absent"
+            ),
+            "fallback": "standalone_news_and_altdata_feeds",
+            "evidence_grade": "legacy_fallback",
+            "freshness": _freshness(news_store, nrel),
+        }
+        if alt is not None:
+            labels["alt_freshness"] = _freshness(alt_store, arel)
+        composed = {"ticker": t, "news": news, "alt": alt, "has_news": bool(news), "has_alt": bool(alt)}
+        if failed_sources:
+            payload = {
+                **composed, **labels,
+                "read_status": (
+                    "unavailable"
+                    if unified_failed and news_failed and alt_failed
+                    and not unified_available and not news_available and not alt_available
+                    else "partial"
+                ),
+                "failed_sources": failed_sources,
+                "note": "Intelligence evidence did not fully load; missing fields are unknown, not negative evidence. Context-only; never sizes alone.",
+            }
+            if payload["read_status"] == "unavailable":
+                payload["error"] = "ticker_intelligence_unavailable"
+            return _json(payload)
         if news is None and alt is None:
             return _ok(f"no news or alt-data intelligence for {t}.")
-        rec = {"ticker": t, "news": news, "alt": alt, "has_news": bool(news), "has_alt": bool(alt)}
-        labels = {"missing_reason": "ticker_absent_in_vendored_file",
-                  "fallback": "standalone_news_and_altdata_feeds",
-                  "evidence_grade": "legacy_fallback",
-                  "freshness": _freshness(ndoc, nrel if ndoc else None)}
-        if alt is not None:
-            labels["alt_freshness"] = _freshness(adoc, arel)
-    return _json({"ticker": t, **rec,
-                  "note": "News flow (what the tape says) + alt-data signal (what smart money does), side "
-                          "by side. Context-only — the divergence between them is the read; never sizes alone.",
-                  **labels})
+        return _json({
+            **composed, **labels,
+            "note": "News flow (what the tape says) + alt-data signal (what smart money does), side by side. Context-only — the divergence between them is the read; never sizes alone.",
+        })
+    except Exception:  # noqa: BLE001 - keep setup and final transport inside the boundary
+        return _json({
+            "ticker": t, "news": None, "alt": None,
+            "read_status": "unavailable", "error": "ticker_intelligence_unavailable",
+            "failed_sources": ["unified_intelligence", "news", "altdata"],
+        })
 
 
 @tool("get_quote",
@@ -906,28 +1184,138 @@ async def get_intake_candidates(args):
       "Context-only — informs conviction, never sizes alone.",
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_ticker_package(args):
-    t = (args.get("ticker") or "").upper()
-    uni = (_read_json(_V / "site" / "intelligence" / "by_ticker.json")
-           or _read_json(_V / "data" / "intelligence" / "by_ticker.json") or {})
-    intel = (uni.get("tickers") or {}).get(t)
-    pkg = {"ticker": t, "intelligence": intel}
     try:
+        t = _single_name_ticker(args)
+    except Exception:  # noqa: BLE001 - reject invalid arguments before any source access
+        t = None
+    if t is None:
+        return _json({
+            "ticker": None,
+            "read_status": "unavailable",
+            "error": "ticker_package_unavailable",
+        })
+
+    pkg = {"ticker": t, "intelligence": None, "intake": None}
+    failed_sources = []
+    degraded_sources = []
+    intelligence_available = False
+    try:
+        uni, intel, intelligence_failed, _ = _read_ticker_feed_checked(t, (
+            "site/intelligence/by_ticker.json",
+            "data/intelligence/by_ticker.json",
+        ))
+        pkg["intelligence"] = intel
+        intelligence_available = uni is not None
+    except Exception:  # noqa: BLE001 - retain independent sources
+        intelligence_failed = True
+    if intelligence_failed:
+        failed_sources.append("intelligence")
+
+    lenses_available = False
+    meaningful_lenses = False
+    try:
+        import math
         from portfolio import lenses
-        s = lenses.synthesize(lenses.decision_matrix(t, "name"))
-        pkg["lenses"] = {"divergences": s.get("divergences"), "confluence": s.get("confluence"),
-                         "vetoes": s.get("vetoes")}
-    except Exception as e:  # noqa: BLE001
-        pkg["lenses"] = {"error": f"decision matrix unavailable ({e})"}
+
+        synthesis = lenses.synthesize(lenses.decision_matrix(t, "name"))
+        if not isinstance(synthesis, dict):
+            raise TypeError("lens synthesis is not a mapping")
+        confluence = synthesis.get("confluence")
+        if (isinstance(confluence, bool) or not isinstance(confluence, (int, float))
+                or not math.isfinite(confluence)):
+            raise TypeError("lens confluence is not finite numeric evidence")
+        if not isinstance(synthesis.get("divergences"), list) or not isinstance(synthesis.get("vetoes"), list):
+            raise TypeError("lens evidence rows are not lists")
+        qualification_keys = ("data_degraded", "stockdata_present", "n_scored", "thin_evidence", "size_authority")
+        for key in ("data_degraded", "stockdata_present", "thin_evidence"):
+            if key in synthesis and not isinstance(synthesis[key], bool):
+                raise TypeError("lens qualification is not boolean")
+        if "n_scored" in synthesis and (
+            isinstance(synthesis["n_scored"], bool)
+            or not isinstance(synthesis["n_scored"], int)
+            or synthesis["n_scored"] < 0
+        ):
+            raise TypeError("lens vote count is invalid")
+        if "size_authority" in synthesis and (
+            not isinstance(synthesis["size_authority"], str)
+            or not synthesis["size_authority"].strip()
+        ):
+            raise TypeError("lens authority is not a label")
+        projected = {
+            "divergences": synthesis["divergences"],
+            "confluence": confluence,
+            "vetoes": synthesis["vetoes"],
+        }
+        projected.update({key: synthesis[key] for key in qualification_keys if key in synthesis})
+        json.dumps(projected, default=str, ensure_ascii=False)
+        pkg["lenses"] = projected
+        lenses_available = True
+        meaningful_lenses = bool(
+            confluence or projected["divergences"] or projected["vetoes"]
+            or any(key in projected for key in qualification_keys)
+        )
+        if synthesis.get("data_degraded") is True:
+            degraded_sources.append("lenses")
+    except Exception:  # noqa: BLE001 - no exception text reaches the model
+        failed_sources.append("lenses")
+        pkg["lenses"] = {
+            "read_status": "unavailable",
+            "error": "ticker_package_lenses_unavailable",
+        }
+
+    intake_available = False
+    intake_failed = False
     try:
         from brain import intake
-        prov = next((c for c in intake.queue(60) if c["ticker"] == t), None)
-        pkg["intake"] = prov
-    except Exception:  # noqa: BLE001
-        pkg["intake"] = None
-    if intel is None and pkg.get("intake") is None:
-        return _ok(f"no per-ticker intelligence for {t} — not flagged by any dashboard engine.")
-    pkg["note"] = ("Full per-name picture: intelligence facets + lens divergences + intake provenance. "
-                   "The divergence between demand-tape and supply-smart-money is the read; never sizes alone.")
+
+        rows = intake.queue(60)
+        if not isinstance(rows, list):
+            raise TypeError("intake queue is not a list")
+        matching = None
+        valid_rows = 0
+        for row in rows:
+            if not isinstance(row, dict):
+                intake_failed = True
+                continue
+            row_ticker = _feed_ticker_checked(row.get("ticker"))
+            if row_ticker is None:
+                intake_failed = True
+                continue
+            valid_rows += 1
+            if matching is None and row_ticker == t:
+                matching = row
+        json.dumps(matching, default=str, ensure_ascii=False)
+        pkg["intake"] = matching
+        intake_available = not intake_failed or valid_rows > 0
+    except Exception:  # noqa: BLE001 - preserve selected intelligence and lenses
+        intake_failed = True
+    if intake_failed:
+        failed_sources.append("intake")
+
+    if failed_sources or degraded_sources:
+        if failed_sources:
+            pkg["failed_sources"] = failed_sources
+        if degraded_sources:
+            pkg["degraded_sources"] = degraded_sources
+        pkg["read_status"] = (
+            "partial" if intelligence_available or lenses_available or intake_available else "unavailable"
+        )
+        if pkg["read_status"] == "unavailable":
+            pkg["error"] = "ticker_package_unavailable"
+        pkg["note"] = (
+            "Ticker-package evidence is incomplete; missing fields are unknown, not negative evidence."
+        )
+        return _json(pkg)
+
+    if pkg["intelligence"] is None and pkg["intake"] is None and not meaningful_lenses:
+        return _ok(
+            f"no per-ticker intelligence for {t} in the inspected artifacts or first 60 intake candidates."
+        )
+    pkg["note"] = (
+        "Per-name picture: selected intelligence facets, available lens synthesis and intake provenance. "
+        "The intake search covers its first 60 candidates and does not establish complete upstream coverage; "
+        "this package never sizes alone."
+    )
     return _json(pkg)
 
 
