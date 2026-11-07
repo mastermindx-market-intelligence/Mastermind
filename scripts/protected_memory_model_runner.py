@@ -21,9 +21,13 @@ from common.protected_memory_model_input import decode_memory_model_input
 from control_plane import protected_memory_profile as profile
 
 
-def _credential(expected):
+def _credential(expected, *, evaluation_profile=None):
     from control_plane.codex_provider_realm import _native_open
-    with _native_open(profile.CREDENTIAL) as (fd,info):
+    path=profile.CREDENTIAL
+    if evaluation_profile is not None:
+        from control_plane import protected_memory_evaluation_source as evaluation
+        path=evaluation.SLOTS[expected['credential_slot']]
+    with _native_open(path) as (fd,info):
         import stat
         if (info.st_uid!=0 or info.st_gid!=450 or not stat.S_ISREG(info.st_mode)
                 or stat.S_IMODE(info.st_mode)!=0o440 or info.st_nlink!=1 or not 1<=info.st_size<=8192):raise ValueError
@@ -31,6 +35,7 @@ def _credential(expected):
         identity=lambda s:(s.st_dev,s.st_ino,s.st_uid,s.st_gid,s.st_mode,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
         if len(raw)!=info.st_size or identity(info)!=identity(os.fstat(fd)):raise ValueError
     value=profile._json(raw)
+    if evaluation_profile is not None and hashlib.sha256(raw).hexdigest()!=evaluation_profile['credential_document_sha256']:raise ValueError
     wire.exact(value,'schema account_ref api_key')
     if (value['schema']!='mastermind.protected_memory_model_credential.v1'
             or value['account_ref']!=expected['account_ref'] or type(value['api_key']) is not str
@@ -88,18 +93,27 @@ def main():
         chunks.extend(part)
     if len(chunks)<5 or int.from_bytes(chunks[:4],'big')!=len(chunks)-4:return 75
     value=wire.parse(bytes(chunks[4:]),400000)
-    wire.exact(value,'schema profile_sha256 input_sha256 input_base64 body_base64')
-    if value['schema']!='mastermind.protected_memory_model_request.v1':return 75
+    evaluation_profile=None
+    if value.get('schema')=='mastermind.protected_memory_evaluation_model_request.v1':
+        wire.exact(value,'schema profile_id profile_sha256 input_sha256 input_base64 body_base64')
+    else:
+        wire.exact(value,'schema profile_sha256 input_sha256 input_base64 body_base64')
+        if value['schema']!='mastermind.protected_memory_model_request.v1':return 75
     import base64
     packet=base64.b64decode(value['input_base64'],validate=True)
     body=base64.b64decode(value['body_base64'],validate=True)
     if hashlib.sha256(packet).hexdigest()!=value['input_sha256']:return 75
     config=profile._json(profile._read_config());selected=config.get('protected_memory_execution')
+    if value['schema']=='mastermind.protected_memory_evaluation_model_request.v1':
+        from control_plane import protected_memory_evaluation_source as evaluation
+        rows=[r for r in evaluation.configured(config)['profiles'] if r['id']==value['profile_id']]
+        if len(rows)!=1:return 75
+        evaluation_profile=rows[0];selected=evaluation.profile_document(evaluation_profile['profile'])
     if type(selected) is not dict or hashlib.sha256(profile.canonical(selected)).hexdigest()!=value['profile_sha256']:return 75
     decode_memory_model_input(body,expected_packet=packet,expected_model=selected['model'])
     require_installed_service_peer(parent,binding)
     # No provider call can precede exact profile/body checks and parent release.
-    result=_post(selected,body,_credential(selected))
+    result=_post(selected,body,_credential(selected,evaluation_profile=evaluation_profile))
     sys.stdout.buffer.write(result);sys.stdout.buffer.flush()
     return 0
 

@@ -926,6 +926,14 @@ def _normalise_constraints(
             result["native_memory"] = normalize_memory_runtime_intent(raw["native_memory"])
         except (ValueError, TypeError, UnicodeError, RecursionError):
             raise StateConflict("native Memory intent constraint is invalid") from None
+    if "native_memory_evaluation" in raw:
+        from common.memory_evaluation_contract import evaluation_intent
+        try:
+            if "native_memory" not in result:
+                raise ValueError()
+            result["native_memory_evaluation"] = evaluation_intent(raw["native_memory_evaluation"])
+        except (ValueError, TypeError):
+            raise StateConflict("native Memory evaluation constraint is invalid") from None
 
     aliases_raw = raw.get("preferred_model_aliases") or []
     if isinstance(aliases_raw, str):

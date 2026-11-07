@@ -173,6 +173,17 @@ def handle_memory_exchange(raw, connection):
         if raw.get('operation') == 'describe':
             wire.exact(raw, 'schema operation')
             return {'schema':SCHEMA,'state':'OWNER_CURRENT','owner':observed}
+        if raw.get('operation') == 'evaluation_source':
+            wire.exact(raw, 'schema operation request')
+            from control_plane.protected_memory_evaluation_source import root_exchange
+            return {'schema':SCHEMA, 'state':'EVALUATION_SOURCE_CURRENT',
+                'response':root_exchange(raw['request'], connection)}
+        if raw.get('operation') == 'evaluation_economic':
+            wire.exact(raw, 'schema operation projection request evaluation_context')
+            admitted = peer.accept_protected_memory_intent(raw['projection'], connection)
+            from control_plane import protected_memory_economic_owner as economic
+            receipt = economic.execute(admitted, raw['request'], evaluation_context=raw['evaluation_context'])
+            return {'schema':SCHEMA, 'state':'ECONOMIC_OBSERVED', 'receipt':receipt}
         if raw.get('operation') == 'qualify_transport':
             wire.exact(raw, 'schema operation projection')
             admitted = peer.accept_protected_memory_intent(raw['projection'], connection)

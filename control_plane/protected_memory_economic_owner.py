@@ -82,12 +82,18 @@ def _call_helper(payload):
         parent.close(); child.close()
 
 
-def _material(projection, observed):
+def _material(projection, observed, *, evaluation_profile_id=None):
     from control_plane import executive_memory_issuer as issuer
     from control_plane import protected_memory_profile as profile
     raw = issuer._read(issuer.CONFIG, 4194304)
     if hashlib.sha256(raw).hexdigest() != observed['configuration_sha256']: fail()
-    value = profile._json(raw).get('protected_memory_execution')
+    document = profile._json(raw)
+    value = document.get('protected_memory_execution')
+    if evaluation_profile_id is not None:
+        from control_plane.protected_memory_evaluation_source import configured, profile_document
+        rows = [row for row in configured(document)['profiles'] if row['id'] == evaluation_profile_id]
+        if len(rows) != 1: fail()
+        value = profile_document(rows[0]['profile'])
     wire.exact(value, 'schema profile_id policy_sha256 worker_id quota_class provider model account_ref api_origin credential_slot')
     if (value['schema'] != profile.SCHEMA or value['profile_id'] != profile.PROFILE
             or value['provider'] != 'glm' or value['model'] not in ('glm-5.3','glm-5.3-flash')
@@ -101,14 +107,19 @@ def _material(projection, observed):
     return raw, selector, route
 
 
-def execute(admitted, request):
+def execute(admitted, request, *, evaluation_context=None):
     """Called only with a nominal current root-issued Control intent."""
     from control_plane import executive_memory_issuer as issuer
     peer.require_protected_memory_intent(admitted)
     state = peer._ISSUED[admitted]
     projection = json.loads(state.original)
     observed = peer.observe_control_owner(state.connection)
-    before, selector, route = _material(projection, observed)
+    if evaluation_context is not None:
+        from control_plane import protected_memory_evaluation_source as evaluation_source
+        wire.exact(evaluation_context, 'profile_id source_request')
+        evaluation_source.root_exchange(evaluation_context['source_request'], state.connection)
+    profile_id = None if evaluation_context is None else evaluation_context['profile_id']
+    before, selector, route = _material(projection, observed, evaluation_profile_id=profile_id)
     wire.exact(request, 'action arguments')
     if type(request['action']) is not str or request['action'] not in ACTIONS: fail()
     action = request['action']; arguments = request['arguments']
@@ -119,7 +130,8 @@ def execute(admitted, request):
         delegation=arguments['delegation'];wire.exact(delegation,'token task_class task_complexity model')
         # Do not call the helper/reserve a row/count/lease before genuine
         # current Linux service/recipient/source-purpose qualification.
-        issuer.qualify_before_economic(admitted)
+        if evaluation_context is None:
+            issuer.qualify_before_economic(admitted)
     if action == 'bind_input': wire.exact(arguments, 'input_sha256 input_bytes body_sha256')
     if action == 'consume':
         wire.exact(arguments, 'attempt_id process_ref_sha256')
@@ -131,7 +143,9 @@ def execute(admitted, request):
         'route':route, 'arguments':{} if action=='acquire' else arguments,
         'controller_pid':actual_peer.pid,'delegation':delegation})
     peer.require_protected_memory_intent(admitted)
-    if peer.observe_control_owner(state.connection) != observed or _material(projection, observed)[0] != before: fail()
+    if peer.observe_control_owner(state.connection) != observed or _material(projection, observed, evaluation_profile_id=profile_id)[0] != before: fail()
+    if evaluation_context is not None:
+        evaluation_source.root_exchange(evaluation_context['source_request'], state.connection)
     wire.exact(result, 'schema root parent run_id pre_input_sha256 profile_sha256 lease_id phase retry_authorized')
     if (result['schema'] != 'mastermind.protected_memory_economic_receipt.v1'
             or any(result[k] != v for k,v in selector.items()) or result['retry_authorized'] is not False

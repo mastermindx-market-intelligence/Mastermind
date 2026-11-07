@@ -6107,6 +6107,27 @@ class ExecutiveControlService:
                     )
                 return
             from control_plane.coo_principal_host import FACT_SCHEMA, CooHostProvider
+            from control_plane import protected_memory_evaluation_assignment as evaluation
+            if isinstance(parsed, dict) and parsed.get('schema') == evaluation.INGRESS:
+                if (not app_peer or not app_binding.principal_admission_armed
+                        or not callable(app_binding.principal_facts_factory)):
+                    await self._send_ceo_ingress_error(writer, 'peer_denied', 'evaluation ingress unavailable')
+                    return
+                try:
+                    if self._closing or self._service_state not in {'READY', 'AWAITING_CANARY'}:
+                        raise ValueError('evaluation unavailable')
+                    provider = app_binding.principal_facts_factory(self._require_runtime())
+                    cap = evaluation.capture_authenticated_assessment(connection, parsed, provider, self._require_supervisor())
+                    from control_plane.workspace_owned_task import await_owned
+                    result = await await_owned(asyncio.create_task(asyncio.to_thread(evaluation.admit_registered_evaluator, cap)))
+                    if self._closing or self._ceo_ingress_app_binding is not app_binding:
+                        raise ValueError('evaluation unavailable')
+                    await self._send_ceo_ingress_response(writer, {'ok':True, 'result':result})
+                except evaluation.AssessmentCommitUnknown:
+                    await self._send_ceo_ingress_error(writer, 'effect_unknown', 'reconcile original assessment command')
+                except Exception:
+                    await self._send_ceo_ingress_error(writer, 'source_unavailable', 'evaluation unavailable')
+                return
             if isinstance(parsed, dict) and parsed.get("schema") == FACT_SCHEMA:
                 if not app_peer or not callable(app_binding.principal_facts_factory):
                     await self._send_ceo_ingress_error(writer, "peer_denied", "COO facts require the installed App peer")

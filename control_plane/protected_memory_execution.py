@@ -341,6 +341,10 @@ async def run_protected_memory_case(supervisor, lease):
     The existing Control command owner selects it only for its current admitted
     native_memory Job. Public request fields alone cannot enter this function.
     """
+    job=supervisor.runtime.jobs.get_job(lease.attempt.job_id)
+    if job is not None and 'native_memory_evaluation' in job.constraints:
+        from control_plane.protected_memory_evaluation_execution import run_registered_evaluation
+        return await run_registered_evaluation(supervisor,lease)
     import asyncio
     from control_plane.executive_supervisor import ExecutiveSupervisor
     from control_plane.executive_runtime import AttemptLease,JobPayload

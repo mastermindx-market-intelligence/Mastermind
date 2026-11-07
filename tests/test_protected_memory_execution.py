@@ -38,7 +38,9 @@ from tests.test_protected_memory_economic import economy
 @pytest.fixture
 def joined(configured,installed,monkeypatch,economy,request):
     runtime,job,_,config=configured
-    attempt=runtime.attempts.list_attempts()[0]
+    # A composed fixture may also contain its still-active study root. Select
+    # the actual configured opaque claim, never the first unrelated Attempt.
+    attempt=runtime.attempts.get_attempt(__import__('control_plane.native_memory_admission',fromlist=['_ISSUED'])._ISSUED[configured[2]].lease.attempt.attempt_id)
     # The genuine opaque token remains in the source fixture claim, never
     # reconstructed from public Attempt fields or source labels.
     from control_plane import native_memory_admission as admission
