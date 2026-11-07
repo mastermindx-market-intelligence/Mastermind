@@ -24,7 +24,6 @@ db.close()
 }
 
 export async function verifyNativeContinuity({ page, context, origin, provider, gate, within, report, output, database }) {
-  // Exercise the manifest/shortcut's actual cold entry, not only in-app navigation.
   await page.goto(origin + '/?mastermind-agent=secretary#/mastermind')
   const openBot = page.getByRole('button', { name: 'Open Bot Chat', exact: true })
   await openBot.waitFor({ timeout: 45000 })
@@ -37,20 +36,24 @@ export async function verifyNativeContinuity({ page, context, origin, provider, 
   const held = gate()
   provider.script(marker, [{ text: ['CANONICAL_STREAM_RUNNING\n\n', 'MUST_NOT_FINISH_AFTER_STOP'], holdAfterFirstChunk: held }])
   try {
-    await composer.fill(`${marker} This isolated turn tests reconnect and Stop.`)
+    const prompt = `${marker} This isolated turn tests reconnect and Stop.`
+    await composer.fill(prompt)
     await composer.press('Enter')
     await within(provider.streamStarted(marker), 45000, 'canonical stream')
     await page.getByText('CANONICAL_STREAM_RUNNING', { exact: true }).last().waitFor({ timeout: 30000 })
     const interruptedUrl = page.url()
     await context.setOffline(true)
-    // An offline reload deliberately drops the browser stream. The server turn remains its owner.
     await page.reload({ timeout: 10000 }).catch(() => {})
     await context.setOffline(false)
     await page.goto(interruptedUrl)
-    await page.getByText('CANONICAL_STREAM_RUNNING', { exact: true }).last().waitFor({ timeout: 45000 })
-    assert.equal(provider.completions.filter(row => row.marker === marker).length, 1, 'reconnection must not resubmit the turn')
+    await page.getByText(prompt, { exact: true }).last().waitFor({ timeout: 45000 })
     const stop = page.locator('[data-slot="composer-root"] button[aria-label="Stop"]').filter({ visible: true }).first()
     await stop.waitFor({ timeout: 45000 })
+    // The native runtime can retain the turn while its already-emitted prefix
+    // awaits another event. Observe that separately; do not claim prefix recovery
+    // merely because the original running turn and Stop control were recovered.
+    report.partialPrefixRehydratedBeforeNextDelta = await page.getByText('CANONICAL_STREAM_RUNNING', { exact: true }).last().isVisible().catch(() => false)
+    assert.equal(provider.completions.filter(row => row.marker === marker).length, 1, 'reconnection must not resubmit the turn')
     await stop.click()
     await stop.waitFor({ state: 'hidden', timeout: 45000 })
     const end = Date.now() + 15000
@@ -76,4 +79,28 @@ export async function verifyNativeContinuity({ page, context, origin, provider, 
     held.open()
     await context.setOffline(false).catch(() => {})
   }
+
+  const toolMarker = 'U3-mastermindmobileproof'
+  provider.script(toolMarker, [
+    { text: ['Checking the native tool display.'], toolCalls: [{ name: 'terminal', args: { command: 'printf MOBILE_TOOL_OK' } }] },
+    { text: ['Tool display confirmed: MOBILE_TOOL_OK.'] }
+  ])
+  await composer.fill(`${toolMarker} Run the harmless fixture printf and confirm its result.`)
+  await composer.press('Enter')
+  const approval = page.locator('[data-approval-run]').filter({ visible: true }).first()
+  const final = page.getByText('Tool display confirmed: MOBILE_TOOL_OK.', { exact: true }).last()
+  const outcome = await Promise.race([
+    final.waitFor({ timeout: 45000 }).then(() => 'finished'),
+    approval.waitFor({ timeout: 45000 }).then(() => 'approval')
+  ])
+  if (outcome === 'approval') await approval.click()
+  await final.waitFor({ timeout: 45000 })
+  await page.getByText(/printf MOBILE_TOOL_OK/).first().waitFor({ timeout: 30000 })
+  const calls = provider.completions.filter(row => row.marker === toolMarker)
+  assert.equal(calls.length, 2, 'one tool request and one result continuation')
+  assert.deepEqual(calls.flatMap(row => row.toolCalls), ['terminal'])
+  assert.equal(decodeURIComponent(new URL(page.url()).hash.slice(2)), CANONICAL)
+  report.nativeTool = { name: 'terminal', command: 'printf MOBILE_TOOL_OK', toolRequests: 1, providerCompletions: 2, approvalUsed: outcome === 'approval' }
+  report.steps.push('the same canonical chat completes a native harmless terminal tool and renders its command/result after reconnect and Stop')
+  await page.screenshot({ path: join(output, 'native-canonical-tool.png'), fullPage: true })
 }
