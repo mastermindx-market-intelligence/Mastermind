@@ -331,8 +331,7 @@ def w3c_plist_configured(*, release_sha: str) -> bool:
             return False
         bot_user_id = arguments[arguments.index("--bot-user-id") + 1]
         return raw == render_plist(
-            bot_user_id=bot_user_id, release_sha=release_sha, w3c_enabled=True,
-            dot_canary_enabled="--enable-dot-canary" in arguments,
+            bot_user_id=bot_user_id, release_sha=release_sha, w3c_enabled=True
         )
     except Exception:
         return False
