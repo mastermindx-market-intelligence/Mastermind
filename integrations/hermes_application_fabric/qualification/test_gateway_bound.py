@@ -163,6 +163,10 @@ class GatewayBoundTests(unittest.TestCase):
                 self.assertTrue(original.qualified and original.application_allowed)
                 qualified = replace(original,
                     base_url=f"http://127.0.0.1:{self.server.server_port}/v1")
+                # This public enrollment identity names the environment slot;
+                # the disposable credential value remains in patch.dict below.
+                reference_name = "HERMES_ATTENDED_FABRIC_APPLICATION_TOKEN"
+                self.assertEqual(qualified.secret_ref, reference_name)
                 stack.enter_context(patch.dict(owner._APPLICATION_FABRIC_TRANSPORTS,
                                                {transport_id: qualified}))
                 row = {key: getattr(qualified, key) for key in owner._APPLICATION_IDENTITY_FIELDS}
@@ -176,9 +180,11 @@ class GatewayBoundTests(unittest.TestCase):
                 rendered = json.dumps(document)
                 self.assertNotIn("t" * 40, rendered)
                 (config / "provider_production_modes.v1.json").write_text(rendered)
-                (config / "capability_manifest.yml").write_text(json.dumps({"capabilities": [{
-                    "capability_id": qualified.capability_id, "secret_ref": qualified.secret_ref,
-                    "kill_state": "active", "allowed_lanes": ["hermes-attended"]}]}))
+                capability_document = json.dumps({"capabilities": [{
+                    "capability_id": qualified.capability_id, "secret_ref": reference_name,
+                    "kill_state": "active", "allowed_lanes": ["hermes-attended"]}]})
+                self.assertNotIn("t" * 40, capability_document)
+                (config / "capability_manifest.yml").write_text(capability_document)
                 stack.enter_context(patch.dict(os.environ,
                     {qualified.secret_ref: "t" * 40, "MM_PROVIDER_WORKLOAD_PROFILE": "hermes_attended"}))
                 factory = owner.make_application_fabric_factory(mode_id="shared_fabric",
