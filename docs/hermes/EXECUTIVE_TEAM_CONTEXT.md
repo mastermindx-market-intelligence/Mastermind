@@ -10,7 +10,7 @@ Parent: Mastermind #2159, design comment6699721779; execution comment6700014545.
 
 The installed host retains one logical Secretary and can resolve several separately authorized native session contexts. A native call cannot supply a different role, project, provider, account, endpoint or credential. No conversation transcript or company-state cache is created.
 
-`LeadershipReader` performs exactly one `SecretaryAccessClient.read_mission()` through its fixed authenticated Workspace client. The existing producer and summary validator own the source contract. The reader preserves source identity, coverage, child/result references, execution and acceptance as distinct facts. It requests full details on every read, including repeated unchanged reads, without asking a reasoning model to poll.
+By default, `LeadershipReader` performs exactly one `SecretaryAccessClient.read_mission()` through its fixed authenticated Workspace client. The existing producer and summary validator own the source contract. The reader preserves source identity, coverage, child/result references, execution and acceptance as distinct facts. It requests full details on every read, including repeated unchanged reads, without asking a reasoning model to poll.
 
 A wrong native session, denied access, changed host binding, revoked grant, stale/future source, invalid clock, malformed source or excessive output yields an explicit refusal/unavailability with no remembered mission attached. A grant revoked while the read is in flight discards its result. Cancellation propagates. Error messages are value-free.
 
@@ -31,6 +31,7 @@ reader = LeadershipReader(
     session_id=actual_native_session_id,
     access=existing_authenticated_secretary_access_client,
     currentness_guard=existing_session_role_grant_current,
+    include_project_continuity=False,  # Host may explicitly opt into the same Workspace plan route.
 )
 # The host retains reader in its EXISTING native-session context. It does not
 # create another session dictionary or credential owner for this feature.
@@ -57,11 +58,51 @@ Native registration uses the current PluginContext, scoped registry, replacement
 
 ## What continuity is and is not supplied
 
-The existing Mission v3 summary does not supply an authoritative original objective, DONE_WHEN, next plan action or unresolved-effect list. The briefing explicitly reports those four missing fields and recommends consulting the canonical plan. It never invents a complete recovery packet from a mission title.
+The existing Mission v3 summary does not supply an authoritative original objective, DONE_WHEN, next plan action or unresolved-effect list. The default Mission-only briefing explicitly reports those four missing fields and recommends consulting the canonical plan. It never invents a complete recovery packet from a mission title.
 
 The existing Agent OS/native memory/continuation lane must provide those facts through its current source-bound contract. The reader does not duplicate that lane or claim that read-only context has implemented dispatch, result consumption, wake, project continuation or product acceptance. A result reference is not proof that a parent consumed it.
 
 This first consumer therefore makes specialist context useful and safely callable while leaving exact missing integration visible. No existing native/OMH memory provider is replaced. No active #2134/H24/OMH/Capacity source is changed.
+
+### Optional authored-plan continuity on the same reader
+
+The host may set `include_project_continuity=True`. This adds exactly one
+`SecretaryAccessClient.read_project_plan()` after a successful, current Mission
+read, through the same already-authenticated Workspace client. The fixed GET
+`/workspace/project-plan/current` receives only the host-selected `work_ref`.
+The native tool still accepts empty arguments; the model cannot toggle the option
+or choose another project. No second tool, credential, scope registry or cache is
+introduced. Default-off behavior and one-Mission-read callers are unchanged.
+
+The existing canonical v1/v2 validator qualifies the response. The brief includes
+bounded authored objective/next action, title/status/owner, canonical source
+commit/path/hash, adoption summary and explicit field coverage. An oversized field
+is **omitted**, never silently truncated. Raw adoption bodies, proposals,
+rationales, comparisons, wave text and version history are not exported. Wave
+omission counts remain explicit. `done_when` and `unresolved_effects` remain
+missing; no text is interpreted into either field. The original
+`CONSULT_CANONICAL_PLAN` recommendation and all no-authority boundaries survive.
+
+`AUTHORED_WORKSTREAM_RECORD` is not necessarily the adopted plan:
+`matches_authored_record=false` stays visible when supplied by the v2 owner.
+The workstream record is not a proven root-job binding. Mission and plan are
+`SEPARATE_READS_NOT_ATOMIC`; the plan contract has no source freshness timestamp.
+`read_completed_at` is only the local observation time, and source freshness is
+explicitly `NOT_REPORTED_BY_OWNER`.
+
+The guard is checked immediately before and after the extra await. Original
+Mission freshness is checked again after the plan and optional adviser meter.
+An authorization refusal (including an empty, malformed, oversized or interrupted
+401/403 body) discards **all** earlier Mission/organization facts. Other plan
+failures retain only a still-current Mission with explicit plan unavailability.
+The 128 KiB plan wire cap and 24 KiB whole-brief cap are distinct; optional content
+can be omitted if necessary to preserve the existing bounded Mission brief.
+
+Focused regression and real signed-HTTP/native-handler path:
+`tests/test_hermes_project_continuity.py`. The HTTP and native handlers are real;
+owner records and credentials are synthetic. No installed role or browser read
+is implied. Source master plan:
+`docs/superpowers/plans/2026-11-06-chatgpt-session-observability.md`, O5A–O5D.
 
 ## Company organization and goal lineage (Paperclip-inspired)
 

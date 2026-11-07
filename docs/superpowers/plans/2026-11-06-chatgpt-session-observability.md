@@ -1,13 +1,13 @@
 # ChatGPT Web session visibility and continuity — implementation master plan
 
-Version: 1.1 • 2026-11-06 (America/Vancouver)
+Version: 1.2 • 2026-11-06 (America/Vancouver)
 Operation: `chatgpt-session-observability-20261106-c2`
 Workstream: `WS:CHAIRMAN-CONTROL-ROOM`; existing SC1 / active-dialogue program.
 Source/law base: `af18454f0cd2086c7976e55e16fee1d8dd70f405`.
 Agent OS source inspected: Macro `d83f26a8bfa09f2c5b2eaa932b58cd303ef6c301`,
 `agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md`.
 Carrier: `sol/web-chatgpt-session-observability-20261106-c2`.
-Status: O1–O3 SOURCE TESTED; publication/hosted CI pending; installation and live acceptance unproven.
+Status: O1–O3 SOURCE MERGED (#2174); O5 consumer extension source tested; installation and live acceptance unproven.
 
 ## Outcome and feasibility
 
@@ -198,3 +198,96 @@ The current Hermes donor MCP configuration is disabled by source and retains its
 receiving-owner authenticated-release requirement. No static all-access scope,
 borrowed token, new browser reader or held-PR replacement may fill that gap.
 Do not call this product complete without O4–O7 evidence.
+
+
+## O5 consumer extension — original Workspace owner, not another memory plane
+
+Operation: `chatgpt-session-continuity-consumer-20261106-c2`.
+Source base: `9d1558e99615e30a0b4e47404e4b2b2e7c440083`.
+Carrier: `sol/web-chatgpt-session-continuity-consumer-20261106-c2`.
+
+O1–O3 landed through the protected queue in PR #2174, squash merge
+`2986a584a96bd98e8ac4ee27c61ab84169667784`. Candidate
+`50adff1969d1b0d2b43d6d99bfff62ccb148faa4` passed required CI
+42331708315, Hermes harness 42331708309 and CodeQL 42331704806. Required CI
+used its legitimate source-proximate classification; this is not a full pytest
+suite claim. The preceding publication-pending frontier above is historical.
+
+Neighboring native source #2134 and leadership organization source #2173 have
+merged. That resolves source overlap, not native installation, role enrollment
+or the original browser permission holds. Macro PR #10817 records this mission
+in the existing SC1 workstream and Agent OS handoff, not a new task registry.
+
+The next useful source slice connects the existing authenticated Workspace
+project-plan route to the already existing Hermes leadership brief. The current
+Executive resource allowlist does not itself supply per-caller profile/workstream
+ACLs for O4. Do not invent an all-access adapter or use a direct filesystem
+collector to fill that installed authorization gap.
+
+| Leaf | Retained owner-seam work | Done when |
+|---|---|---|
+| O5A | Add `SecretaryAccessClient.read_project_plan()` on its current authenticated Workspace client | One fixed GET, host-selected work_ref only, incumbent v1/v2 validation, wire-size bound, no retry/control/auth changes |
+| O5B | Optional `LeadershipReader(include_project_continuity=True)` composition | Default remains exactly one Mission read; enabled adds exactly one plan read; native tool arguments remain empty |
+| O5C | Bounded authored-plan projection and authorization regression proof | Exact source/adoption/missingness, no raw adoption/proposal bodies; 401/403 survive malformed responses; revocation discards all earlier facts |
+| O5D | Source publication and real installed-role acceptance frontier | Focused tests and required CI; host enrollment/actual role reads still separately proven, never inferred from source |
+
+The projection is evidence from an authored workstream record, not an adopted
+operating instruction or root-job binding. Keep the owner adoption state and
+`matches_authored_record` distinction. Keep original DONE_WHEN and unresolved
+effects missing: the plan route does not supply those contracts. Mission and
+plan are separate reads, not an atomic snapshot. A local read-completion timestamp
+is not a source freshness timestamp.
+
+Each optional field has an explicit UTF-8 JSON budget. Oversized text is omitted
+with coverage metadata, never silently truncated into an apparently complete
+instruction. The existing whole-brief 24 KiB bound remains; optional plan content
+may become explicitly unavailable rather than destroy an otherwise valid Mission.
+No plan cache, raw transcript, new tool, new role, new credential, extra principal
+scope, writer, queue, service or dispatch is introduced.
+
+The currentness guard covers the actual host session/role/workstream grant and
+authenticated client generation. Recheck before/after the additional await and
+re-evaluate original Mission freshness after the plan and adviser-budget reads.
+Any plan authorization refusal discards the entire earlier Mission/organization
+brief, including malformed/empty/oversized/interrupted 401/403 bodies. Timeout or
+5xx may leave a still-current Mission with explicitly missing plan content.
+Cancellation propagates. Source text never grants admission or replay.
+
+Validation will exercise the incumbent canonical producer, actual fixed Workspace
+HTTP route and existing native handler with synthetic credentials and fixture
+owners. This is source-path proof, not live Hermes or ChatGPT Web enrollment.
+
+
+### O5 source verification
+
+The new 49-case consumer suite and 186 incumbent regressions passed together:
+**235 passed, zero skipped**, Python 3.12, 57.24 seconds (process 59.04 seconds).
+The focused red-first baseline was two missing-feature failures and one preserved
+default-path pass. The first full new-suite run was 42 passed / 1 failed: the
+remaining failure was a test asserting a nonexistent `principal.subject` field.
+It was corrected to the actual closed principal's `subject_digest`; no
+production authorization contract was relaxed.
+
+The final pack uses the existing signed Workspace HTTP routes, canonical Mission
+producer, canonical v1/v2 plan validator and actual native brief handler with
+synthetic owner records/credentials. It does not install Hermes or qualify a
+production native profile. A read-only architectural critique identified the
+malformed-401/403 and wire/brief-budget edges before release; the implemented
+regression suite covers them. Main session self-checked the owned diff.
+
+```sh
+python -m pytest -o addopts='' -q \
+  tests/test_hermes_project_continuity.py \
+  tests/test_hermes_leadership.py tests/test_hermes_leadership_organization.py \
+  tests/test_hermes_leadership_budget.py tests/test_hermes_leadership_cli.py \
+  tests/test_secretary_team_access.py tests/test_secretary_team_access_http.py \
+  tests/test_secretary_team_mission.py tests/test_workspace_project_plan_read.py \
+  tests/test_project_plan_continuity_wire.py --tb=short
+```
+
+The native source test run reused isolated temporary test-only dependencies from
+O1–O3, not an installed service environment. Next: publish this exact source,
+consume required CI, release through protected repository controls, then obtain
+the incumbent role/profile/Workspace bindings for a separately authorized live
+canary. O4 and O6–O7 remain unproven; no all-account transcript/control capability
+or product completion is claimed.
