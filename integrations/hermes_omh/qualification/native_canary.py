@@ -22,11 +22,24 @@ def main():
     p.add_argument('--omh-python',required=True)
     p.add_argument('--omh-home',required=True)
     p.add_argument('--release-commit',required=True)
+    p.add_argument('--capacity-config',help='Existing operator profile config; reuse only its read-only capacity MCP entry')
     a=p.parse_args()
     root=Path(a.source_root).resolve()
     source=root/'integrations/hermes_omh/plugin'
     spec=importlib.util.spec_from_file_location('_mmx_omh_canary_source',source/'__init__.py')
     module=importlib.util.module_from_spec(spec);sys.modules[spec.name]=module;spec.loader.exec_module(module)
+    capacity=None
+    if a.capacity_config:
+        import yaml
+        original=yaml.safe_load(Path(a.capacity_config).read_text())
+        capacity=original.get('mcp_servers',{}).get('mastermind-fabric-capacity')
+        if type(capacity) is not dict or capacity.get('enabled') is not True:
+            raise AssertionError('Existing read-only capacity server is not enabled')
+        if set(capacity)-{'command','args','enabled'}:
+            raise AssertionError('Canary does not copy credential, trust or unknown server configuration')
+        if (capacity.get('command')!='/opt/homebrew/bin/python3'
+                or capacity.get('args')!=['/Users/chriswong/.hermes/bridges/fabric_capacity_mcp.py']):
+            raise AssertionError('Canary supports only the observed existing M2 read-only bridge')
     blocked=[]
     original_connect=socket.socket.connect
     def deny_connect(sock,address):
@@ -45,6 +58,11 @@ def main():
                             source_files={r:hashlib.sha256((root/r).read_bytes()).hexdigest() for r in module.SOURCE_FILES})
             (dest/'_runtime.json').write_text(json.dumps(descriptor));(dest/'_runtime.json').chmod(0o600)
             config='plugins:\n  enabled: [mastermind-omh]\n  auto_apply: false\n'
+            if capacity is not None:
+                config=yaml.safe_dump(dict(
+                    plugins=dict(enabled=['mastermind-omh'],auto_apply=False,
+                                 entries={'mastermind-omh':dict(mcp_allowlist=['mastermind-fabric-capacity'])}),
+                    mcp_servers={'mastermind-fabric-capacity':capacity}))
             (home/'config.yaml').write_text(config)
             manager=PluginManager(scope_key=str(home))
             manager.discover_and_load()
@@ -66,6 +84,24 @@ def main():
             assert results['plan']['state']=='PREPARED_NOT_ADMITTED'
             assert results['recommend']['state']=='RECOMMENDED_NOT_ADMITTED'
             assert results['recommend']['omh_version']=='4.0.6'
+            route=None
+            if capacity is not None:
+                from tools.mcp_tool_discovery import discover_mcp_tools
+                discover_mcp_tools(allowed_mcp_names=['mastermind-fabric-capacity'])
+                request=dict(action='route',message='Inspect the existing capacity routing contracts',
+                             category='quick',task_class='census',complexity='C1_ROUTINE_BOUNDED')
+                route=json.loads(registry.dispatch('mmx_omh',request,scope=str(home),
+                    session_id='mmx-omh-route-canary',task_id='mmx-omh-route-task'))
+                if route.get('state')!='ROUTE_PREVIEW_NOT_ADMITTED':
+                    raise AssertionError(f'Native route refused: {route.get("reason")}')
+                assert route['routing_requirements']==dict(task_class='census',complexity='C1_ROUTINE_BOUNDED')
+                assert route['capacity_preview']['reserved'] is False
+                assert route['capacity_preview']['selection_rechecked_at_request'] is True
+                assert route['recommendation']['selected_model'] is None
+                invalid=dict(request,pool='unqualified-omh-pool')
+                invalid_out=json.loads(registry.dispatch('mmx_omh',invalid,scope=str(home),
+                    session_id='mmx-omh-route-canary',task_id='mmx-omh-route-task'))
+                assert invalid_out['state']=='REFUSED' and invalid_out['reason']=='NATIVE_REQUEST_INVALID'
             from hermes_cli.plugin_command_dispatch import invoke_plugin_command
             command=manager._plugin_commands['mmx-omh']['handler']
             command_status=json.loads(invoke_plugin_command(command,'status',session_id='mmx-omh-canary-session',platform='cli'))
@@ -83,13 +119,20 @@ def main():
             assert (home/'config.yaml').read_text()==config
             assert not blocked
             print(json.dumps({'schema':'mastermind.hermes_omh.native_canary/v1',
-                'source_commit':a.release_commit,'source_files_sha256':hashlib.sha256(json.dumps(descriptor['source_files'],sort_keys=True).encode()).hexdigest(),
+                'source_commit':a.release_commit,'plugin_sha256':hashlib.sha256((source/'__init__.py').read_bytes()).hexdigest(),
+                'source_files_sha256':hashlib.sha256(json.dumps(descriptor['source_files'],sort_keys=True).encode()).hexdigest(),
                 'native_loader':'PluginManager.discover_and_load','native_dispatch':'ToolRegistry.dispatch','native_command_dispatch':'invoke_plugin_command',
                 'live_command':'mmx-omh','live_command_status':command_status['state'],
                 'live_command_advice':command_advice['state'],'tool_activation':'next_session_by_native_contract',
                 'status':results['status']['state'],'plan':results['plan']['state'],
                 'plan_sha256':results['plan']['plan_sha256'],'recommendation':results['recommend']['state'],
                 'model_candidates':results['recommend']['model_candidates'],'skills':results['recommend']['skills'],
+                'capacity_client':'PluginContext.call_mcp' if route else None,
+                'capacity_server':'mastermind-fabric-capacity' if route else None,
+                'capacity_preview':route['capacity_preview'] if route else None,
+                'routing_requirements':route['routing_requirements'] if route else None,
+                'routing_state':route['state'] if route else None,
+                'forced_pool':'REFUSED' if route else None,
                 'cross_profile':'REFUSED','profile_config_unchanged':True,'blocked_network_attempts':len(blocked),
                 'production_profile_changed':False,'provider_called':False,'admitted':False,'dispatched':False},sort_keys=True))
     finally:socket.socket.connect=original_connect
