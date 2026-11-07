@@ -48,6 +48,7 @@ test('redaction strips binary payloads and arbitrary metadata, never evicts old 
   const redaction = new PrivateRedaction();
   redaction.add('initial-canary', 'fixture@example.test');
   for (let i = 1; i < 8; i++) redaction.add(`different-canary-${i}`, 'fixture@example.test');
+  redaction.add('initial-canary', 'fixture@example.test');
   assert.throws(() => redaction.add('ninth-canary', 'fixture@example.test'));
   assert.equal(redaction.text('initial-canary'), '[REDACTED]');
   assert.throws(() => redaction.output({ content: [{ type: 'image', data: 'opaque' }] }));

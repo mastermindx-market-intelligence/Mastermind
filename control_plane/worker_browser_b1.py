@@ -4816,7 +4816,7 @@ def load_runtime_install_attestation(
 # exact lib directory, installer manifest, loader checks and launch stay exact.
 # These reviewed postimages are never learned from a live installation.
 _WORKBENCH_CREDENTIAL_SOURCE_PINS = {
-    "node_modules/@mastermind/workbench-vault/child.cjs": "fe6e8285c70e37e48ca695d21bafe7d22576cf14e2c9358b7064f85c02a4a3dc",
+    "node_modules/@mastermind/workbench-vault/child.cjs": "339c6bc883ec3ed4fa38a93cd9f7d87ff40add91879b4f8f13a90486f7c9ce43",
     "node_modules/fernet/fernet.js": "d979ce3486be3041d4aebe1604daf002303707a9fd3a201dd6211363eecea70a",
     "node_modules/fernet/lib/token.js": "b43433e48fe91cd23e5571c26698d6cb3849dcaf25f3e1252417ca2e558c0c09",
     "node_modules/fernet/lib/secret.js": "c905d56288b63da3f673052556965c53ea21036fce14938383119fc8db05a8ea",

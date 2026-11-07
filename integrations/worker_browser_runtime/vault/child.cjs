@@ -102,8 +102,9 @@ class PrivateRedaction {
     this.bytes = 0;
   }
   add(password, identifier) {
-    const fingerprint = crypto.createHash('sha256').update(password).digest('hex');
-    if (!this.credentials.has(fingerprint) && this.credentials.size >= 8) refuse();
+    // These same values already live in the private redaction map. Keep only
+    // their bounded membership here; no password-derived verifier is needed.
+    if (!this.credentials.has(password) && this.credentials.size >= 8) refuse();
     const additions = [...new Set([...secretRepresentations(password), ...secretRepresentations(identifier)])]
       .filter(v => !this.values.has(v));
     const addedBytes = additions.reduce((n, v) => n + Buffer.byteLength(v), 0);
@@ -114,7 +115,7 @@ class PrivateRedaction {
       this.map['MMX_PRIVATE_' + crypto.randomBytes(16).toString('hex')] = value;
       this.values.add(value);
     }
-    this.credentials.add(fingerprint);
+    this.credentials.add(password);
     this.bytes += addedBytes;
     // The logical set is monotonic. Reorder the SAME object synchronously so
     // the donor's insertion-order redactor always matches the longest value

@@ -11,6 +11,7 @@ import dataclasses
 import hashlib
 import json
 import re
+from http.client import HTTPS_PORT
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
@@ -76,7 +77,7 @@ def exact_https_origin(value: object) -> str:
         raise CredentialUseRefused()
     # URL.origin canonicalization: default port is omitted, host is lowercase.
     host = "[" + hostname + "]" if ":" in hostname else hostname
-    canonical = "https://" + host + (":" + str(port) if port not in (None, 443) else "")
+    canonical = "https://" + host + (":" + str(port) if port not in (None, HTTPS_PORT) else "")
     if value != canonical:
         raise CredentialUseRefused()
     return value

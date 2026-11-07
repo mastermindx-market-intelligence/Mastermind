@@ -56,7 +56,7 @@ def capture_existing_vault(grant: dict) -> dict[str, str]:
                 os.close(descriptor)
         after = os.stat(selected.vault_directory, follow_symlinks=False)
         if ((after.st_dev, after.st_ino, after.st_uid, stat.S_IMODE(after.st_mode))
-                != (before.st_dev, before.st_ino, before.st_uid, 0o700)):
+                != (before.st_dev, before.st_ino, before.st_uid, stat.S_IMODE(before.st_mode))):
             raise CredentialUseRefused()
         key = captured["vault.key"].removesuffix("\n")
         ciphertext = captured["vault.json.enc"]
