@@ -1,0 +1,61 @@
+{
+  "base_commit": "a54eccfc3bb9700d067fd2785a5c11c9c8b55895",
+  "files": [
+    {
+      "artifact": "source_overlay/ops/native_fabric/quota_continuity/rollout/common_admission_cohort/composition.json",
+      "bytes": 4071,
+      "path": "ops/native_fabric/quota_continuity/rollout/common_admission_cohort/composition.json",
+      "sha256": "eab9512c4c456827f53a3b07317bbd19f8cb671f2f2d30d116e138c71c36a9e8"
+    },
+    {
+      "artifact": "source_overlay/ops/native_fabric/quota_continuity/rollout/common_admission_cohort/lease_broker.py.patch",
+      "bytes": 45288,
+      "path": "ops/native_fabric/quota_continuity/rollout/common_admission_cohort/lease_broker.py.patch",
+      "sha256": "1b214f03f5bcc8cfc2445ae56c3c2818f40f94854d083845d2ffe60bfa0fd564"
+    },
+    {
+      "artifact": "source_overlay/ops/native_fabric/quota_continuity/rollout/common_admission_cohort/native_go_entry.py.patch",
+      "bytes": 675,
+      "path": "ops/native_fabric/quota_continuity/rollout/common_admission_cohort/native_go_entry.py.patch",
+      "sha256": "f73f0667c102860ac72238e58385938004c65f9cfcc3aebbd582bdb863b7518f"
+    },
+    {
+      "artifact": "source_overlay/ops/native_fabric/quota_continuity/rollout/common_admission_cohort/native_runtime_bindings.py.patch",
+      "bytes": 3718,
+      "path": "ops/native_fabric/quota_continuity/rollout/common_admission_cohort/native_runtime_bindings.py.patch",
+      "sha256": "2978e58c16797af600e1672910db8037f5225a3f5d0274db9a817ee1abc3d1f3"
+    },
+    {
+      "artifact": "source_overlay/ops/native_fabric/quota_continuity/rollout/common_admission_cohort/paid_model_owner.py.patch",
+      "bytes": 5604,
+      "path": "ops/native_fabric/quota_continuity/rollout/common_admission_cohort/paid_model_owner.py.patch",
+      "sha256": "3db99f04f01e9e3084111e218c60785bee030733995b6ae9683d15da94be184c"
+    },
+    {
+      "artifact": "source_overlay/ops/native_fabric/quota_continuity/rollout/common_admission_cohort/paid_provider_entry.py.patch",
+      "bytes": 1982,
+      "path": "ops/native_fabric/quota_continuity/rollout/common_admission_cohort/paid_provider_entry.py.patch",
+      "sha256": "abff035587725a51e6d9bf65398c697c27374315db33ff8fdc2ec58811f4bed7"
+    },
+    {
+      "artifact": "source_overlay/ops/native_fabric/quota_continuity/rollout/common_admission_cohort/quota_remote.py.patch",
+      "bytes": 12319,
+      "path": "ops/native_fabric/quota_continuity/rollout/common_admission_cohort/quota_remote.py.patch",
+      "sha256": "149b8a63f0c77154bc5c1a88edd90ec1a9838d35bad6dcca4501646964ef64ac"
+    },
+    {
+      "artifact": "source_overlay/ops/native_fabric/quota_continuity/rollout/common_admission_cohort/remote_sub.sh.patch",
+      "bytes": 3709,
+      "path": "ops/native_fabric/quota_continuity/rollout/common_admission_cohort/remote_sub.sh.patch",
+      "sha256": "a5649409798298e0cdd24f6db2ce1173318bc2ee915ed61519e110f61c3a5313"
+    },
+    {
+      "artifact": "source_overlay/ops/native_fabric/quota_continuity/rollout/common_admission_cohort/support_bundle.py.patch",
+      "bytes": 10396,
+      "path": "ops/native_fabric/quota_continuity/rollout/common_admission_cohort/support_bundle.py.patch",
+      "sha256": "b9dea3eff283bd3ceb4c81a5e15f4cc1c1d80f44b45dc4a944d96b0715cc03eb"
+    }
+  ],
+  "no_runtime_installation": true,
+  "schema": "h6.exact-source-overlay.v1"
+}

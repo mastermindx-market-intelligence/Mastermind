@@ -1,0 +1,209 @@
+--- a/ext/support_bundle.py
++++ b/ext/support_bundle.py
+@@ -1,10 +1,13 @@
+ #!/usr/bin/env python3
+ """support_bundle: pure file publication helper, Python3 stdlib only."""
+ 
+ import os, sys, json, hashlib, tempfile, shutil, fcntl,errno,stat,time
+ from pathlib import Path
++from contextlib import contextmanager
++
++COMMON_ADMISSION_PROTOCOL = "physical-admission.v1"
+ 
+ # Fixed public source closure (no credentials or controller-only helpers)
+ SOURCE_FILES = frozenset({
+     "remote_sub_exec.py",
+     "artifact_production.py",
+@@ -68,10 +71,25 @@
+ # Historical and paid worker memberships keep their exact admitted sets.
+ APPLICATION_SOURCE_FILES = SOURCE_FILES | {"application_native_owner.py"}
+ APPLICATION_PHYSICAL_ROOT_SOURCE_FILES = PHYSICAL_ROOT_SOURCE_FILES | {"application_native_owner.py"}
+ SOURCE_GENERATIONS = (APPLICATION_PHYSICAL_ROOT_SOURCE_FILES, APPLICATION_SOURCE_FILES, PAID_INITIALIZED_PHYSICAL_ROOT_SOURCE_FILES, PAID_INITIALIZED_SOURCE_FILES, PRE_HELD_YAML_PAID_INITIALIZED_PHYSICAL_ROOT_SOURCE_FILES, PRE_HELD_YAML_PAID_INITIALIZED_SOURCE_FILES, PAID_MODEL_PHYSICAL_ROOT_SOURCE_FILES, PAID_MODEL_SOURCE_FILES, PHYSICAL_ROOT_SOURCE_FILES, SOURCE_FILES, PRE_COMMISSION_DEADLINE_SOURCE_FILES, PRE_NATIVE_BINDING_SOURCE_FILES, PRE_QUOTA_CONTINUITY_SOURCE_FILES, PRE_CPU_SCOPE_SOURCE_FILES, PRE_CPU_STRESS_SOURCE_FILES, POLICY_SOURCE_FILES, OPERATOR_SOURCE_FILES, PRE_OPERATOR_SOURCE_FILES, PREVIOUS_SOURCE_FILES, LEGACY_SOURCE_FILES)
+ 
++
++# Six explicit successors join the existing helper and cache reader. Every old
++# source set and its original alias membership remain byte-for-byte distinct.
++COMMON_DEPENDENCIES = frozenset({"go_lease_capability.py", "quota_remote.py", "support_bundle.py"})
++COMMON_SOURCE_FILES = SOURCE_FILES | COMMON_DEPENDENCIES | {"paid_model_owner.py"}
++COMMON_PHYSICAL_ROOT_SOURCE_FILES = COMMON_SOURCE_FILES | {"artifact_delivery.py"}
++COMMON_PAID_SOURCE_FILES = PAID_INITIALIZED_SOURCE_FILES | COMMON_DEPENDENCIES
++COMMON_PAID_PHYSICAL_ROOT_SOURCE_FILES = COMMON_PAID_SOURCE_FILES | {"artifact_delivery.py"}
++COMMON_APPLICATION_SOURCE_FILES = COMMON_SOURCE_FILES | {"application_native_owner.py"}
++COMMON_APPLICATION_PHYSICAL_ROOT_SOURCE_FILES = COMMON_APPLICATION_SOURCE_FILES | {"artifact_delivery.py"}
++COMMON_SOURCE_GENERATIONS = (COMMON_SOURCE_FILES, COMMON_PHYSICAL_ROOT_SOURCE_FILES,
++    COMMON_PAID_SOURCE_FILES, COMMON_PAID_PHYSICAL_ROOT_SOURCE_FILES,
++    COMMON_APPLICATION_SOURCE_FILES, COMMON_APPLICATION_PHYSICAL_ROOT_SOURCE_FILES)
++SOURCE_GENERATIONS = COMMON_SOURCE_GENERATIONS + SOURCE_GENERATIONS
++
+ # Fixed symlinks inside ext -> stable_ext/<name>
+ _EXT_SYMLINKS = frozenset({
+     "active","lanes","slots","state","broker","lane_bin",
+     "hosts.json","bailian_policy.json","bailian_usage.json",
+     "GROK_EXHAUSTED","glm_window_state.json","glm_shim","go_shim",
+@@ -166,12 +184,19 @@
+         raise ValueError(f"unexpected file kind: {path}")
+     if mode is not None and stat.S_IMODE(observed.st_mode) != mode:
+         raise ValueError(f"unexpected mode: {path}")
+ 
+ 
++
++def _release_ext_names(manifest):
++    names = frozenset(manifest)
++    if names not in SOURCE_GENERATIONS:
++        raise ValueError("manifest must name exactly the fixed source files")
++    return _EXT_SYMLINKS | {"quota_cache.json"} if names in COMMON_SOURCE_GENERATIONS else _EXT_SYMLINKS
++
+ def _release_metadata(manifest, digest, stable_ext):
+-    links = {"ext/" + n: str(stable_ext / n) for n in _EXT_SYMLINKS}
++    links = {"ext/" + n: str(stable_ext / n) for n in _release_ext_names(manifest)}
+     links.update({n: str(stable_ext.parent / n) for n in _ROOT_SYMLINKS})
+     return {"schema": _SCHEMA, "files": manifest, "digest": digest, "links": links}
+ 
+ 
+ def _verify_release(root, expected):
+@@ -183,11 +208,11 @@
+     if _load_manifest(meta) != expected:
+         raise ValueError("release metadata mismatch")
+     if {p.name for p in root.iterdir()} != {"ext", "RELEASE.json", *_ROOT_SYMLINKS}:
+         raise ValueError("unexpected release contents")
+     if (frozenset(expected["files"]) not in SOURCE_GENERATIONS
+-            or {p.name for p in ext.iterdir()} != set(expected["files"]) | _EXT_SYMLINKS):
++            or {p.name for p in ext.iterdir()} != set(expected["files"]) | _release_ext_names(expected["files"])):
+         raise ValueError("unexpected ext contents")
+     for name, wanted in expected["files"].items():
+         path = ext / name
+         _require_kind(path, stat.S_ISREG, 0o555)
+         if _hex64(path.read_bytes()) != wanted:
+@@ -292,21 +317,28 @@
+ 
+ 
+ _POLICY_LOCK_WAIT_SECONDS = 2.0
+ 
+ 
+-def _acquire_policy_lock(fd):
++def _acquire_policy_lock(fd, *, deadline_ns=None):
+     # Wait for a short metadata critical section, never for a host slot or worker.
++    if deadline_ns is not None and (type(deadline_ns) is not int or deadline_ns <= 0):
++        raise ValueError("ADMISSION_DEADLINE_INVALID")
+     deadline = time.monotonic() + _POLICY_LOCK_WAIT_SECONDS
+     while True:
++        if deadline_ns is not None and time.monotonic_ns() >= deadline_ns:
++            raise TimeoutError("ADMISSION_DEADLINE_EXPIRED")
+         try:
+             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+             return
+         except BlockingIOError:
+             remaining = deadline - time.monotonic()
+             if remaining <= 0:
+                 raise BlockingIOError(errno.EAGAIN, "SUPPORT_ADMISSION_LOCK_BUSY")
++            if deadline_ns is not None:
++                remaining = min(remaining, max(0.0,
++                    (deadline_ns - time.monotonic_ns()) / 1_000_000_000))
+             time.sleep(min(0.02, remaining))
+ 
+ 
+ def _is_retained_settlement_metadata(path):
+     """Classify retained metadata; never settle a run or remove a lane marker.
+@@ -499,11 +531,11 @@
+             or _policy_file_identity(os.stat(".admission.lock", dir_fd=handles[1][1],
+                                             follow_symlinks=False)) != lock_identity):
+         raise PolicyPublicationRefused("POLICY_ADMISSION_LOCK_CHANGED")
+ 
+ 
+-def _policy_open_scope(stable_ext):
++def _policy_open_scope(stable_ext, *, deadline_ns=None):
+     """Open and lock the existing owner only; never create a missing installation."""
+     descriptors, handles, lock_fd = [], [], None
+     try:
+         stable = _policy_canonical_path(stable_ext)
+         if stable.name != "ext":
+@@ -522,11 +554,11 @@
+         descriptors.append(lock_fd)
+         info = os.fstat(lock_fd)
+         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                 or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1 or info.st_size != 0):
+             raise PolicyPublicationRefused("POLICY_ADMISSION_LOCK_INVALID")
+-        _acquire_policy_lock(lock_fd)
++        _acquire_policy_lock(lock_fd, deadline_ns=deadline_ns)
+         lock_identity = _policy_file_identity(info)
+         _policy_handles_current(handles, lock_fd, lock_identity)
+         return handles, lock_fd, lock_identity
+     except BaseException:
+         for descriptor in reversed(descriptors):
+@@ -545,10 +577,76 @@
+             # release the other original handles before reporting uncertainty.
+             if failure is None:
+                 failure = exc
+     if failure is not None:
+         raise failure
++
++
++def _source_state_owner(code_here):
++    """Delegate immutable source custody to its incumbent identity owner."""
++    here = Path(code_here)
++    if (not here.is_absolute() or here != Path(__file__).absolute().parent
++            or here.name != "ext"):
++        raise ValueError("ADMISSION_SOURCE_CONTEXT_REFUSED")
++    if here.parent.parent.name == "native-code-releases":
++        from native_runtime_bindings import owner_path
++        return owner_path(here / "active", here).parent
++    if here.parent.parent.name == "support-releases":
++        from paid_model_owner import canonical_state_ext
++        return canonical_state_ext(here, os.environ)
++    raise ValueError("ADMISSION_SOURCE_OWNER_UNQUALIFIED")
++
++
++@contextmanager
++def source_admission_scope(code_here, *, deadline_ns=None):
++    """Hold the existing physical owner for this exact delivered code cohort.
++
++    This does not establish a grant or substitute a remote support digest for a
++    native selection. Flat/legacy sources have no implicit fenced eligibility.
++    """
++    stable = _source_state_owner(code_here)
++    with admission_scope(stable, deadline_ns=deadline_ns) as check:
++        def require_current_owner():
++            if _source_state_owner(code_here) != stable:
++                raise ValueError("ADMISSION_SOURCE_OWNER_CHANGED")
++            check()
++        require_current_owner()
++        yield stable, require_current_owner
++
++
++def require_current_admission_source(code_here):
++    """For new work only; original recovery deliberately does not call this."""
++    stable = _source_state_owner(code_here)
++    here = Path(code_here)
++    if here.parent.parent.name == "native-code-releases":
++        from native_runtime_bindings import require_current_selection
++        require_current_selection(here)
++    # Remote eligibility retains the actual committed support source and lane
++    # owner. Its digest is never interpreted as a native CURRENT generation.
++    return stable
++
++
++@contextmanager
++def admission_scope(stable_ext, *, deadline_ns=None):
++    """Hold the incumbent physical owner without creating installation state.
++
++    Callers which also publish take publication before this scope; Broker and
++    SQLite ownership are inside it. The yielded check must run before the
++    caller commits its effect. This helper owns no claim, selection or grant.
++    It is deliberately not reentrant: an already-held caller passes its scope
++    through existing owner operations instead of opening a second flock.
++    """
++    handles, lock_fd, identity = _policy_open_scope(
++        stable_ext, deadline_ns=deadline_ns)
++    try:
++        def require_current():
++            _policy_handles_current(handles, lock_fd, identity)
++            if deadline_ns is not None and time.monotonic_ns() >= deadline_ns:
++                raise TimeoutError("ADMISSION_DEADLINE_EXPIRED")
++        yield require_current
++    finally:
++        _policy_close_scope(handles, lock_fd)
+ 
+ 
+ def _policy_public_document(raw, policy_owner):
+     """A bounded public-data envelope, not another routing/admission policy."""
+     import re

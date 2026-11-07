@@ -1,0 +1,243 @@
+--- a/ext/quota_remote.py
++++ b/ext/quota_remote.py
+@@ -10,10 +10,11 @@
+ import shutil
+ import signal
+ import subprocess
+ import json
+ import os
++from pathlib import Path
+ import sys
+ import tempfile
+ import time
+ import urllib.error
+ import urllib.request
+@@ -895,10 +896,25 @@
+     Atomic rename alone loses concurrent account changes. This advisory lock is
+     shared by every writer in this successor. A bounded wait acquires this same
+     short lock; it never repeats a provider request or a failed publication.
+     """
+     try:
++        from support_bundle import source_admission_scope
++        with source_admission_scope(Path(HERE)) as scope:
++            stable, held = scope
++            if Path(path) != stable / "quota_cache.json":
++                raise QuotaCacheWriteError("quota cache owner differs from delivered source")
++            return _update_cache_locked(path, update, held)
++    except QuotaCacheWriteError:
++        raise
++    except OSError:
++        raise QuotaCacheWriteError("quota cache physical owner unavailable; reconcile original owner") from None
++
++
++def _update_cache_locked(path: str, update: Callable, admission_check) -> Any:
++    """Inner cache owner; caller holds physical admission through publication."""
++    try:
+         with open(path + ".lock", "a", encoding="utf-8") as lock:
+             deadline = time.monotonic() + CACHE_LOCK_WAIT_S
+             while True:
+                 try:
+                     fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+@@ -909,10 +925,11 @@
+                         raise
+                     time.sleep(min(.02, remaining))
+             try:
+                 cache = _load_cache(path)
+                 changed, result = update(cache)
++                admission_check()
+                 if changed:
+                     _atomic_write(path, cache)
+                 return result
+             finally:
+                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+@@ -957,18 +974,31 @@
+     def update(cache):
+         container, key = _cache_target(cache, provider, account)
+         current = container.get(key)
+         pending = current.get("refresh_pending") if isinstance(current, dict) else None
+         matched = _pending_matches(pending, attempt_id, provider, account, binding, started_at)
++        if attempt_id is not None and not matched:
++            # Superseded or removed original completion cannot recreate a row.
++            return False, current
+         if (isinstance(current, dict) and current.get("terminal_refusal")
+                 or _has_pending(current) and not matched
+                 or _attempt_at(current) > started_at
+                 or isinstance(current, dict) and current.get("refresh_error")
+                 and _attempt_at(current) == started_at and not matched):
+             return False, current
++        # Recheck the incumbent local configuration owner at publication.
++        # This is a source-origin fence, not proof that every writer shares it.
++        if (attempt_id is not None and provider in ("glm", "minimax")
++                and _config_binding(provider) != binding):
++            return False, current
+         row = {"refreshed_at": started_at, "refresh_started_at": started_at,
+                "binding": binding, "states": [asdict(state) for state in states]}
++        # Keep the existing successful refresh identity; never mint a second one.
++        # Legacy unbound publication may still support a percentage read view,
++        # but cannot supply a strict integer-capacity origin.
++        if matched:
++            row["observation_id"] = attempt_id
+         if provider == "glm" and account is not None:
+             previous = dict(current, refresh_error=pending.get("previous_error")) if matched else current
+             row["quota_change"] = _glm_quota_change(previous, row, account)
+         container[key] = row
+         return True, row
+@@ -1144,10 +1174,158 @@
+                             failure_config_generation=(binding or {}).get("config_generation"))
+                     for state in stale if state is not None]
+         return []
+ 
+ 
++
++def read_account_admission_cache():
++    """One bounded, read-only H2 observation from the incumbent cache owner.
++
++    This function never refreshes, resolves credentials or accepts a caller path.
++    The caller holds the existing physical admission scope. Reuse its source
++    owner read-only; never retain an import-time resolved cache target.
++    A digest binds the retained bytes; it is not a grant or provider attestation.
++    """
++    import hashlib
++    import math
++    import stat
++
++    def object_pairs(pairs):
++        out = {}
++        for key, value in pairs:
++            if key in out:
++                raise ValueError("duplicate_capacity_key")
++            out[key] = value
++        return out
++
++    def invalid_constant(value):
++        raise ValueError("invalid_capacity_number")
++
++    import support_bundle
++    cache_path = support_bundle._source_state_owner(Path(HERE)) / "quota_cache.json"
++    fd = os.open(cache_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
++    with os.fdopen(fd, "rb") as source:
++        before = os.fstat(source.fileno())
++        if not stat.S_ISREG(before.st_mode) or before.st_size > 4 * 1024 * 1024:
++            raise ValueError("capacity_source_unavailable")
++        raw = source.read(4 * 1024 * 1024 + 1)
++        after = os.fstat(source.fileno())
++    if (len(raw) > 4 * 1024 * 1024 or
++            (before.st_ino, before.st_size, before.st_mtime_ns) !=
++            (after.st_ino, after.st_size, after.st_mtime_ns)):
++        raise ValueError("capacity_source_changed")
++    document = json.loads(raw.decode("utf-8"), object_pairs_hook=object_pairs,
++                          parse_constant=invalid_constant)
++    if type(document) is not dict:
++        raise ValueError("capacity_source_invalid")
++    return document, hashlib.sha256(raw).hexdigest()
++
++
++def account_admission_observation(cache, *, provider, account, generation,
++                                  quota_scope, required_windows, now_ts):
++    """Validate the qualified H2 envelope; legacy percentages cannot invent it.
++
++    H2's existing producer owns capacity_generation and exact coverage of settled
++    leases. Each window has its own native unit, epoch and remaining balance.
++    Null reset clocks may support headroom; they never establish expiry urgency.
++    """
++    import math
++    import re
++
++    def ident(value):
++        if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value):
++            raise ValueError("capacity_identity_invalid")
++        return value
++
++    def number(value, *, positive=False, integral=False):
++        if type(value) not in (int, float) or not math.isfinite(value) or value < 0 or (positive and value == 0):
++            raise ValueError("capacity_number_invalid")
++        if integral and (type(value) is not int or value > 2**63-1):
++            raise ValueError("capacity_meter_must_use_exact_integer_units")
++        return value
++
++    def stamp(value):
++        if not isinstance(value, str):
++            raise ValueError("capacity_time_invalid")
++        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
++        if parsed.tzinfo is None:
++            raise ValueError("capacity_time_invalid")
++        return parsed.timestamp()
++
++    number(now_ts, positive=True)
++    ident(generation)
++    # MiniMax is canonically a provider row; never admit an accounts copy.
++    entry = cache[provider] if provider == "minimax" else cache[provider]["accounts"][account]
++    if (type(entry) is not dict or entry.get("terminal_refusal")
++            or entry.get("refresh_error") or _has_pending(entry)):
++        raise ValueError("capacity_refresh_unreconciled")
++    envelope = entry["admission"]
++    fields = {"schema", "provider", "account", "capacity_generation", "quota_scope",
++              "source", "observed_at", "windows", "origin"}
++    if (type(envelope) is not dict or set(envelope) != fields
++            or envelope["schema"] != "mastermind.account_capacity_observation.v2"
++            or envelope["provider"] != provider or envelope["account"] != account
++            or envelope["capacity_generation"] != generation
++            or envelope["quota_scope"] != quota_scope
++            or envelope["source"] != "PROVIDER_AUTHORITATIVE"):
++        raise ValueError("capacity_binding_unqualified")
++    # Current origin comes from the incumbent configuration owner, not the
++    # row being admitted. Unsupported owners (including the unjoined Go owner)
++    # remain unqualified; a cache field cannot create that capability.
++    binding = _config_binding(provider)
++    origin = envelope["origin"]
++    if (type(binding) is not dict or set(binding) != {"config_generation", "endpoint"}
++            or not isinstance(binding["config_generation"], str)
++            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", binding["config_generation"])
++            or not isinstance(binding["endpoint"], str)
++            or _public_endpoint(binding["endpoint"]) != binding["endpoint"]
++            or type(origin) is not dict or set(origin) != {"binding", "observation_id"}
++            or origin["binding"] != binding or entry.get("binding") != binding
++            or not isinstance(origin["observation_id"], str)
++            or not re.fullmatch(r"[0-9a-f]{32}", origin["observation_id"])
++            or origin["observation_id"] != entry.get("observation_id")):
++        raise ValueError("capacity_origin_unqualified")
++    observed = stamp(envelope["observed_at"])
++    # v2 observed_at is the incumbent original refresh-start clock, expressed
++    # as an aware ISO timestamp and compared as normalized epoch seconds. A
++    # distinct provider snapshot time must not be substituted into this field.
++    if number(entry.get("refreshed_at"), positive=True) != observed:
++        raise ValueError("capacity_origin_clock_changed")
++    if not 0 <= now_ts - observed < FRESH_S:
++        raise ValueError("capacity_observation_stale")
++    rows = envelope["windows"]
++    if type(rows) is not list or not 1 <= len(rows) <= 8:
++        raise ValueError("capacity_windows_invalid")
++    windows = {}
++    for row in rows:
++        expected = {"kind", "epoch", "unit", "limit", "remaining", "starts_at", "reset_at", "accounted_lease_ids"}
++        if type(row) is not dict or set(row) != expected:
++            raise ValueError("capacity_window_invalid")
++        kind = ident(row["kind"])
++        if kind in windows:
++            raise ValueError("capacity_window_duplicate")
++        ident(row["epoch"])
++        ident(row["unit"])
++        limit = number(row["limit"], positive=True, integral=True)
++        remaining = number(row["remaining"], integral=True)
++        start = stamp(row["starts_at"])
++        reset = None if row["reset_at"] is None else stamp(row["reset_at"])
++        if remaining > limit or start > observed or (reset is not None and reset <= now_ts):
++            raise ValueError("capacity_window_invalid")
++        covered = row["accounted_lease_ids"]
++        if (type(covered) is not list or len(covered) > 256
++                or any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{12}", value) for value in covered)
++                or len(set(covered)) != len(covered)):
++            raise ValueError("capacity_coverage_invalid")
++        windows[kind] = dict(row, starts_at_epoch=start, reset_at_epoch=reset)
++    if set(windows) != set(required_windows):
++        raise ValueError("capacity_windows_incomplete")
++    return {"schema": envelope["schema"], "provider": provider, "account": account,
++            "capacity_generation": generation, "quota_scope": quota_scope,
++            "source": envelope["source"], "observed_at": observed, "windows": windows,
++            "origin": {"binding": dict(binding), "observation_id": origin["observation_id"]}}
++
+ def cached_glm_account_parked(account: str, *, now_ts: Optional[float] = None,
+                               cache_path: Optional[str] = None,
+                               config_generation: Optional[str] = None) -> bool:
+     """Narrow existing admission from a fresh authoritative account observation.
+ 

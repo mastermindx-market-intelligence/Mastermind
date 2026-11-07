@@ -1,0 +1,51 @@
+--- a/ext/remote_sub.sh
++++ b/ext/remote_sub.sh
+@@ -1469,20 +1469,21 @@
+     exit "$RC"
+   fi
+ }
+ 
+ SUPPORT_FILES=(
++  support_bundle.py paid_model_owner.py go_lease_capability.py quota_remote.py
+   provider_outcome.py quota_circuit.py recovery_artifacts.py capacity_preflight.py native_runtime_bindings.py commission_deadline.py
+   pools.yaml fabric_policy_snapshot.py remote_sub_exec.py fabric_cpu_scope.py native_remote.py fabric_operator_client.py fabric_operator_stop.py fabric_operator_diagnostics.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py yes
+   codex_usage.py go_remote_codex.py go_remote_capsule.py
+   mm_codex_exec.sh glm_codex_exec.sh go_codex_exec.sh qwen_exec.sh
+   fabric_client_projection.py studio_mcp_projection.sh
+   mm_feeder_lib.py pool_ledger.py lease_broker.py glm_keys.py bailian_keys.py
+ )
+ # The v2 executor imports this explicit sealed dependency only for bound roots.
+ [ "$REMOTE_PHYSICAL_ROOT" = "-" ] || SUPPORT_FILES+=(artifact_delivery.py)
+-[ "$CANONICAL_PAID_ACTIVE" -eq 0 ] || SUPPORT_FILES+=(paid_glm_model_client.py paid_model_owner.py linux_process_identity.py paid_provider_entry.py paid_initializer.py paid_initializer_token_data.py paid_initializer_nested_data.py)
++[ "$CANONICAL_PAID_ACTIVE" -eq 0 ] || SUPPORT_FILES+=(paid_glm_model_client.py linux_process_identity.py paid_provider_entry.py paid_initializer.py paid_initializer_token_data.py paid_initializer_nested_data.py paid_yaml_runtime.py paid_pyyaml_6_0_3.zip paid_pyyaml_provenance.json)
+ # APPLICATION has one explicit closure; ordinary worker membership is unchanged.
+ if [ "$APPLICATION_ACTIVE" -eq 1 ]; then
+   [ -f "$HERE/application_native_owner.py" ] || {
+     RC=78; log "APPLICATION_OWNER_ABSENT before_launch=1"; exit "$RC";
+   }
+@@ -1509,11 +1510,11 @@
+ fi
+ 
+ run_scp() {
+   if [ "$DRY_RUN" -eq 1 ]; then
+     show_args "$SCP_CMD" -q "$PACKET_BASE" "$SSH_ALIAS:$REMOTE_PACKET"
+-    show_args "$SCP_CMD" -q "${SUPPORT_FILES[@]}" support_bundle.py pools.yaml "$(basename "$SUPPORT_MANIFEST")" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/"
++    show_args "$SCP_CMD" -q "${SUPPORT_FILES[@]}" "$(basename "$SUPPORT_MANIFEST")" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/"
+     show_args "<support-publication>" "same shared ext/active and ext/orch state; code=$SUPPORT_DIGEST; immutable advisory snapshot; shared admission recheck"
+     return 0
+   fi
+   check_bound_lane_layout || { log "REMOTE_LANE_ROOT_REFUSED before_upload=1"; return 78; }
+   if [ "$REMOTE_PHYSICAL_ROOT" != "-" ]; then
+@@ -1527,11 +1528,11 @@
+   # Per-run upload directory is new; existing published code is never overwritten.
+   commission_run support-mkdir "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+     "mkdir -p $REMOTE_LANES_Q/support-releases && mkdir $REMOTE_LANES_Q/tmp/${ID}.support-src" || return $?
+   _src=()
+   for _f in "${SUPPORT_FILES[@]}"; do [ "$_f" = pools.yaml ] || _src+=("$HERE/$_f"); done
+-  commission_run support-upload "$SCP_CMD" -q "${_src[@]}" "$HERE/support_bundle.py" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/" || return $?
++  commission_run support-upload "$SCP_CMD" -q "${_src[@]}" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/" || return $?
+   commission_run manifest-upload "$SCP_CMD" -q "$SUPPORT_MANIFEST" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/manifest.json" || return $?
+   commission_run policy-upload "$SCP_CMD" -q "$POLICY_SOURCE" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/pools.yaml" || return $?
+   # New generation carries hash-bound advisory policy. Publication checks
+   # exact semantic compatibility without replacing policy under active workers.
+   # Physical admission rechecks under the original lock before marker creation.

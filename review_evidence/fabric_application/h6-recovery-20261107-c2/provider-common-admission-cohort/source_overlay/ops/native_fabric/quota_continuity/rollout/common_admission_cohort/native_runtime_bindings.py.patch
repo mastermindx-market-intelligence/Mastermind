@@ -1,0 +1,80 @@
+--- a/ext/native_runtime_bindings.py
++++ b/ext/native_runtime_bindings.py
+@@ -12,10 +12,11 @@
+ from pathlib import Path
+ import re
+ import stat
+ 
+ SCHEMA = "native-code-generation.v1"
++SELECTION_SCHEMA = "native-code-selection.v1"
+ STORE_NAME = "native-code-releases"
+ HEX = re.compile(r"[0-9a-f]{64}\Z")
+ EXT_NAMES = frozenset({
+     "active", "lanes", "slots", "state", "broker", "lane_bin",
+     "hosts.json", "bailian_policy.json", "bailian_usage.json",
+@@ -35,19 +36,21 @@
+             or (mode is not None and stat.S_IMODE(info.st_mode) != mode)):
+         raise ValueError("native state binding custody mismatch")
+     return info
+ 
+ 
+-def _json(path):
++def _json(path, *, expected_mode=0o444, maximum=128 * 1024, single_link=False):
+     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+     try:
+         before = os.fstat(fd)
+         if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
+-                or stat.S_IMODE(before.st_mode) != 0o444 or before.st_size > 128 * 1024):
++                or stat.S_IMODE(before.st_mode) != expected_mode
++                or not 0 <= before.st_size <= maximum
++                or single_link and before.st_nlink != 1):
+             raise ValueError("native state binding metadata custody")
+         with os.fdopen(os.dup(fd), "rb") as handle:
+-            data = handle.read(128 * 1024 + 1)
++            data = handle.read(maximum + 1)
+         def identity(value):
+             return (value.st_dev, value.st_ino, value.st_uid, value.st_mode,
+                     value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+         if (len(data) != before.st_size or identity(before) != identity(os.fstat(fd))
+                 or identity(before) != identity(path.lstat())):
+@@ -119,5 +122,40 @@
+             tail = path.relative_to(prefix)
+         except ValueError:
+             continue
+         return Path(target) / tail
+     return path
++
++
++def require_current_selection(code_here):
++    """Return the incumbent selection for this executing native generation.
++
++    A NEW claim's caller must hold the existing physical admission fence until
++    its commit. This pure read does not acquire a lock, publish a selection, or
++    grant admission. Original recovery continues to use owner_path(), which is
++    deliberately independent of CURRENT.
++    """
++    here = Path(code_here)
++    if (not here.is_absolute() or here.name != "ext"
++            or here.parent.parent.name != STORE_NAME
++            or not HEX.fullmatch(here.parent.name)):
++        raise ValueError("native claim source context unavailable")
++    # Reuse the original immutable metadata and fixed-alias custody verifier.
++    owner_path(here / "active", here)
++    try:
++        selected = _json(here.parent.parent / "CURRENT.json", expected_mode=0o600,
++                         maximum=4096, single_link=True)
++    except OSError:
++        raise ValueError("native claim selection unavailable") from None
++    if (type(selected) is not dict or set(selected) != {
++            "schema", "generation", "previous", "sequence"}
++            or selected["schema"] != SELECTION_SCHEMA
++            or type(selected["sequence"]) is not int or selected["sequence"] < 1
++            or type(selected["generation"]) is not str
++            or not HEX.fullmatch(selected["generation"])
++            or selected["previous"] is not None and (
++                type(selected["previous"]) is not str
++                or not HEX.fullmatch(selected["previous"]))):
++        raise ValueError("native claim selection malformed")
++    if selected["generation"] != here.parent.name:
++        raise ValueError("native claim source is no longer selected")
++    return dict(selected)

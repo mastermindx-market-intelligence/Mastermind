@@ -9,15 +9,14 @@ account eligibility, service entitlement, provider budget or release authority.
 
 The patch applies to H6 commit a54eccfc3bb9700d067fd2785a5c11c9c8b55895.
 The three existing rollout source preimages are the completed 0a6d33bf donor
-bytes. The nine additions are one composition record and eight exact source
-patches. The seven base replacements and entry patch include the preserving H3
+bytes. The nine source_overlay additions are one composition record and eight
+exact source patches. The seven base replacements and entry patch include the preserving H3
 and common-fence changes; do not stack the earlier H3/common patches again.
 
 common-admission-cohort-proposal.patch SHA256:
-00618560eca9ba2b7a8762ea113f30c842a17291263ca5228998123a40a68f19
+64142500cd2651083c538c2cfc6e399edf2a739dde2c0c66c865204a8e39b68b
 
-The patch is 173725 bytes across 12 source files. Forward check, actual application
-to a fresh exact source export, postimage verification and reverse check passed.
+The patch is 81259 bytes for the three existing rollout owners; nine new\ncohort files are in source_overlay with exact source_overlay_inventory.json hashes.\nAll 12 resulting source files match the qualified source. Forward check, actual application\nto a fresh exact source export, postimage verification and reverse check passed.
 See patch-application-proof.json.
 
 ## Closed source relation
@@ -101,8 +100,7 @@ Final enrollment JUnit SHA256:
 ## Reproduction through existing owners
 
 Materialize an owned disposable repository-shaped source at the exact base,
-then apply the proposal patch after checking its three existing preimages.
-Retain the source checkout as source beneath a private H6 cohort directory.
+then apply the proposal patch after checking its three existing preimages. Copy\nthe nine exact source_overlay files to their recorded repository-relative paths\nonly when those destinations are absent; verify their recorded hashes.\nRetain the source checkout as source beneath a private H6 cohort directory.
 The normal builder flags continue to emit the existing artifacts unchanged.
 
 The new source is emitted only with:
@@ -144,3 +142,7 @@ This proposal and its test receipts are a completed H6 source contribution.
 They do not establish release, selection, installation, live account enrollment,
 provider inference, monetary acceptance, original J collection, or final A-D
 product acceptance.
+
+## Protected-source packaging correction
+
+The first committed-head guard on1390 rejected nested-patch hunk line numbers895/896.\nThe source is now delivered as ordinary existing-owner diffs plus directly visible\noverlay members. The same guard and review registry remain unchanged. All12\nqualified source postimages, manifests and executed source/enrollment evidence\nare unchanged. The failed receipt and exact packaging change are retained.\n

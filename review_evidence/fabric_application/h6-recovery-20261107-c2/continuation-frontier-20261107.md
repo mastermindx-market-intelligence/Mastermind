@@ -29,8 +29,7 @@ operation was performed by this return. Do not duplicate existing operations.
   frozen preserving source. Thirty source-relation cases passed; six actual
   single/set enrollment cases then passed with the new G/I/entry/helper.
   No verified_admission_scope injection. See provider-common-admission-cohort.
-- Proposal source patch00618560… has12 changed paths; forward apply, exact
-  postimages and reverse check passed. It remains unselectable and unapplied
+- Proposal source patch64142500cd26… plus nine explicit source-overlay files\n  preserves all12 qualified postimages; forward apply and reverse check passed.\n  The1390 guard caught nested patch line coordinates895/896; packaging changed,\n  with no guard, registry, template or qualified source-postimage change. It remains unselectable and unapplied
   to this checkout's production source.
 
 ## DO_NOT_REDO and active inputs

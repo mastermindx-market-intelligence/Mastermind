@@ -1,0 +1,826 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -21,10 +21,11 @@
+ import fcntl
+ import hashlib
+ import json
+ import math
+ import os
++from pathlib import Path
+ import re
+ import socket
+ import sqlite3
+ import sys
+ import time
+@@ -798,11 +799,11 @@
+ _APPLICATION_NATIVE_GRANT_FIELDS = _APPLICATION_GRANT_FIELDS | {
+     "transport_kind", "recipe_digest", "output_limit_mode", "usage_policy",
+ }
+ 
+ 
+-def _read_application_accounts(path):
++def _read_accounts_document(path):
+     """Fresh owner document; no mtime fallback, duplicate keys or secret lookup."""
+     try:
+         import yaml
+ 
+         class ClosedLoader(yaml.SafeLoader):
+@@ -821,10 +822,24 @@
+         with open(path, "rb") as source:
+             raw = source.read(2 * 1024 * 1024 + 1)
+         if len(raw) > 2 * 1024 * 1024:
+             raise ApplicationAdmissionError("invalid_accounts_document")
+         document = yaml.load(raw.decode("utf-8"), Loader=ClosedLoader)
++        if type(document) is not dict or type(document.get("providers")) is not dict:
++            raise ApplicationAdmissionError("invalid_accounts_document")
++        _application_json(document)
++        return document
++    except ApplicationAdmissionError:
++        raise
++    except Exception:
++        raise ApplicationAdmissionError("accounts_unavailable") from None
++
++
++def _read_application_accounts(path):
++    """Validate the existing application grant on a fresh owner document."""
++    try:
++        document = _read_accounts_document(path)
+         if (not isinstance(document, dict)
+                 or document.get("schema") != "mastermind.provider_accounts.v1"
+                 or not isinstance(document.get("providers"), dict)
+                 or not isinstance(document.get("application_grants"), list)):
+             raise ApplicationAdmissionError("invalid_accounts_document")
+@@ -1186,10 +1201,11 @@
+     state: str = ""
+     reason: str = ""
+     orchestrator_id: str = ""
+     pool: str = ""
+     quota_blockade: Optional[Dict[str, Any]] = None
++    account_admission: Optional[Dict[str, Any]] = None
+ 
+     def line(self) -> str:
+         if self.ok:
+             return f"LEASE={self.lease_id} ACCOUNT={self.account}"
+         return f"WAIT reason={self.reason or 'unavailable'}"
+@@ -1339,10 +1355,24 @@
+             conn.execute(
+                 "ALTER TABLE leases ADD COLUMN model TEXT NOT NULL DEFAULT ''"
+             )
+         if "purpose" not in lcols:
+             conn.execute("ALTER TABLE leases ADD COLUMN purpose TEXT NOT NULL DEFAULT 'WORKER'")
++        for field in ("account_admission_json", "account_admission_digest"):
++            if field not in lcols:
++                conn.execute("ALTER TABLE leases ADD COLUMN " + field + " TEXT")
++        conn.execute("""CREATE TRIGGER IF NOT EXISTS account_admission_binding_v1
++            BEFORE UPDATE ON leases WHEN OLD.account_admission_json IS NOT NULL AND (
++                NEW.id IS NOT OLD.id OR NEW.granted_at IS NOT OLD.granted_at
++                OR NEW.task_class IS NOT OLD.task_class
++                OR NEW.account_admission_json IS NOT OLD.account_admission_json
++                OR NEW.account_admission_digest IS NOT OLD.account_admission_digest
++                OR NEW.account IS NOT OLD.account OR NEW.pool IS NOT OLD.pool
++                OR NEW.model IS NOT OLD.model OR NEW.quota_scope IS NOT OLD.quota_scope
++                OR NEW.orchestrator_id IS NOT OLD.orchestrator_id OR NEW.host IS NOT OLD.host
++                OR NEW.purpose IS NOT OLD.purpose)
++            BEGIN SELECT RAISE(ABORT, 'account_admission_binding_immutable'); END""")
+         conn.execute("""CREATE TABLE IF NOT EXISTS application_turns (
+             principal_id TEXT NOT NULL, turn_id TEXT NOT NULL,
+             grant_id TEXT NOT NULL, grant_digest TEXT NOT NULL,
+             caller_host TEXT NOT NULL, workload TEXT NOT NULL,
+             admission_root TEXT NOT NULL, pool TEXT NOT NULL, account TEXT NOT NULL,
+@@ -1950,10 +1980,43 @@
+                     orchestrator_id=orchestrator_id, pool=self.provider_name(pool))
+             raise
+         finally:
+             _ACQUIRE_DEADLINE_NS.reset(token)
+ 
++    @contextmanager
++    def _physical_admission_scope(self, *, deadline_ns=None):
++        from support_bundle import source_admission_scope
++        try:
++            with source_admission_scope(Path(HERE), deadline_ns=deadline_ns) as scope:
++                stable, held = scope
++                # Only the authenticated fixed alias or its original owner is
++                # accepted. Do not resolve arbitrary state-internal symlinks.
++                here = Path(HERE)
++                owners = {
++                    "db_path": (stable / "broker/leases.sqlite", here / "broker/leases.sqlite"),
++                    "lock_path": (stable / "broker/leases.lock", here / "broker/leases.lock"),
++                    "accounts_path": (stable.parent / "orch/fabric/accounts.yaml", here.parent / "orch/fabric/accounts.yaml"),
++                    "status_json": (stable.parent / "orch/fabric/status.json", here.parent / "orch/fabric/status.json"),
++                    "hosts_path": (stable / "hosts.json", here / "hosts.json"),
++                    "grok_marker": (stable / "GROK_EXHAUSTED", here / "GROK_EXHAUSTED"),
++                }
++                if any(Path(getattr(self, name)) not in allowed for name, allowed in owners.items()):
++                    raise ApplicationAdmissionError("physical_owner_mismatch")
++                yield held
++        except TimeoutError:
++            if deadline_ns is not None:
++                require_remaining(deadline_ns)
++            raise
++
++    @staticmethod
++    def _require_current_admission_source():
++        from support_bundle import require_current_admission_source
++        try:
++            require_current_admission_source(Path(HERE))
++        except (OSError, ValueError, KeyError):
++            raise ApplicationAdmissionError("source_no_longer_eligible") from None
++
+     def _acquire(self, orchestrator_id, pool, account, task_class, host,
+                  pid, ttl, wait, poll, model, operator_child_id, capacity_handoff, not_before=None):
+         pool = self.provider_name(pool)
+         model = str(model or "").strip()
+         host = host or self.this_host
+@@ -1970,34 +2033,37 @@
+         # Successful acquire deletes the waiter row inside _try_acquire.
+         while True:
+             if not_before is not None:
+                 from commission_deadline import require_not_before
+                 require_not_before(not_before)
+-            lock = self._lock()
+-            try:
+-                if not_before is not None:
+-                    require_not_before(not_before)
+-                self._gc_locked()
+-                result, waiter_id, last_reason = self._try_acquire(
+-                    orchestrator_id,
+-                    pool,
+-                    account,
+-                    task_class,
+-                    host,
+-                    pid,
+-                    ttl,
+-                    waiter_id,
+-                    model,
+-                    operator_child_id,
+-                    capacity_handoff,
+-                    not_before,
+-                )
+-                if result.ok or last_reason in ("operator_authorization_refused", "host_account_unavailable", "quota_cooldown"):
+-                    return result
+-            finally:
+-                fcntl.flock(lock, fcntl.LOCK_UN)
+-                lock.close()
++            with self._physical_admission_scope(deadline_ns=_ACQUIRE_DEADLINE_NS.get()) as held:
++                self._require_current_admission_source()
++                lock = self._lock()
++                try:
++                    if not_before is not None:
++                        require_not_before(not_before)
++                    self._gc_locked()
++                    result, waiter_id, last_reason = self._try_acquire(
++                        orchestrator_id,
++                        pool,
++                        account,
++                        task_class,
++                        host,
++                        pid,
++                        ttl,
++                        waiter_id,
++                        model,
++                        operator_child_id,
++                        capacity_handoff,
++                        not_before,
++                        admission_check=held,
++                    )
++                    if result.ok or last_reason in ("operator_authorization_refused", "host_account_unavailable", "quota_cooldown"):
++                        return result
++                finally:
++                    fcntl.flock(lock, fcntl.LOCK_UN)
++                    lock.close()
+             if self.now() >= deadline:
+                 break
+             pause = min(max(0.05, float(poll)), max(0.0, deadline - self.now()))
+             original = _ACQUIRE_DEADLINE_NS.get()
+             if original is not None:
+@@ -2127,10 +2193,217 @@
+             if int(w["priority"]) == my_p:
+                 # oldest at this class: if it's us, ok; if someone else, wait
+                 return w["orchestrator_id"] == orch
+         return True
+ 
++    def _expiry_policy(self, spec, model, task_class):
++        """The account owner supplies a qualified hard claim ceiling, not an estimate."""
++        policy = spec.get("expiry_admission")
++        if policy is None:
++            return None
++        fields = {"schema", "required_windows", "reserve_units", "reserved_slots", "urgent_classes", "claims"}
++        if (type(policy) is not dict or set(policy) != fields
++                or policy["schema"] != "mastermind.expiry_account_admission.v1"):
++            raise ValueError("account_policy_invalid")
++        required = policy["required_windows"]
++        if (type(required) is not list or not 1 <= len(required) <= 8
++                or any(not isinstance(k, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", k) for k in required)
++                or len(set(required)) != len(required)):
++            raise ValueError("account_policy_invalid")
++        reserve = policy["reserve_units"]
++        if (type(reserve) is not dict or set(reserve) != set(required)
++                or any(type(v) is not int or not 0 <= v <= 2**63-1 for v in reserve.values())
++                or type(policy["reserved_slots"]) is not int or not 0 <= policy["reserved_slots"] <= 4096):
++            raise ValueError("account_policy_invalid")
++        urgent = policy["urgent_classes"]
++        if (type(urgent) is not list or len(urgent) > 16 or len(set(urgent)) != len(urgent)
++                or any(not isinstance(k, str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", k) for k in urgent)):
++            raise ValueError("account_policy_invalid")
++        claim = policy["claims"][model][task_class]
++        if (type(claim) is not dict or set(claim) != {"budget_ref", "units"}
++                or not isinstance(claim["budget_ref"], str) or not 1 <= len(claim["budget_ref"]) <= 256
++                or any(ord(c) < 33 or ord(c) > 126 for c in claim["budget_ref"])
++                or type(claim["units"]) is not dict or set(claim["units"]) != set(required)):
++            raise ValueError("account_claim_budget_unqualified")
++        for value in claim["units"].values():
++            if (type(value) is not dict or set(value) != {"unit", "maximum"}
++                    or not isinstance(value["unit"], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value["unit"])
++                    or type(value["maximum"]) is not int or not 0 < value["maximum"] <= 2**63-1):
++                raise ValueError("account_claim_budget_unqualified")
++        return policy, claim
++
++    def _expiry_source_policy(self):
++        # Reuse the qualified existing pool-policy reader and its R31 thresholds.
++        # This read does not call any provider or change pool suitability.
++        import pick
++        snapshot = pick.read_application_policy()
++        document = snapshot.document
++        raw = document.get("routing", {}).get("burn_down", {})
++        if (type(raw) is not dict or ("promote" in raw and type(raw["promote"]) is not bool)
++                or any(k in raw and (type(raw[k]) not in (int, float) or not math.isfinite(raw[k]))
++                       for k in ("hours_before_reset", "min_remaining_pct"))):
++            raise ValueError("account_expiry_policy_invalid")
++        config = pick._burn_down_cfg(document)
++        if (type(config["promote"]) is not bool
++                or not math.isfinite(config["hours_before_reset"]) or config["hours_before_reset"] <= 0
++                or not math.isfinite(config["min_remaining_pct"]) or not 0 <= config["min_remaining_pct"] <= 100):
++            raise ValueError("account_expiry_policy_invalid")
++        return config, snapshot.bytes_sha256
++
++    def _expiry_account_candidates(self, conn, pool, model, task_class, candidates):
++        """Filter and rank under the existing transaction; retain one observation."""
++        import quota_circuit
++        import quota_remote
++        document = self.load_accounts_doc()
++        inventory = []
++        for provider, spec in document["providers"].items():
++            if type(spec) is not dict or type(spec.get("accounts", [])) is not list:
++                raise ValueError("account_inventory_invalid")
++            names = [a.get("name") for a in spec.get("accounts", []) if type(a) is dict]
++            if len(names) != len(spec.get("accounts", [])) or len(names) != len(set(names)):
++                raise ValueError("account_inventory_invalid")
++            for account in spec.get("accounts", []):
++                scope = quota_circuit.scope_for(self, provider, account["name"])
++                inventory.append((provider, spec, account, scope))
++        affected = {scope for _, spec, _, scope in inventory if "expiry_admission" in spec}
++        # Removing a policy or renaming a scope cannot erase the meaning of
++        # reservations already committed by this owner. Source rollback must
++        # preserve this reader until the original liabilities are reconciled.
++        for prior in conn.execute("SELECT DISTINCT pool, account, quota_scope FROM leases "
++                                  "WHERE account_admission_json IS NOT NULL"):
++            affected.add(prior["quota_scope"])
++            affected.add(quota_circuit.scope_for(self, prior["pool"], prior["account"]))
++        if not any(quota_circuit.scope_for(self, pool, a["name"]) in affected for a in candidates):
++            return candidates, {}, None
++        cache, source_digest = quota_remote.read_account_admission_cache()
++        config, policy_digest = self._expiry_source_policy()
++        config_digest = hashlib.sha256(_application_json(document).encode()).hexdigest()
++        out, evidence = [], {}
++        now = self.now()
++        for account in candidates:
++            name = account["name"]
++            scope = quota_circuit.scope_for(self, pool, name)
++            if scope not in affected:
++                out.append(account)
++                continue
++            try:
++                if account.get("enabled", True) is not True:
++                    continue
++                policy, claim = self._expiry_policy(self.provider(pool), model, task_class)
++                obs = quota_remote.account_admission_observation(cache, provider=self.provider_name(pool),
++                    account=name, generation=account["capacity_generation"], quota_scope=scope,
++                    required_windows=policy["required_windows"], now_ts=now)
++                members = [(p, s, a) for p, s, a, q in inventory if q == scope and s.get("enabled", True) is True
++                           and a.get("enabled", True) is True]
++                caps = []
++                for p, spec, member in members:
++                    other = spec.get("expiry_admission")
++                    if (type(other) is not dict or any(other.get(k) != policy[k] for k in
++                            ("schema", "required_windows", "reserve_units", "reserved_slots", "urgent_classes"))):
++                        raise ValueError("shared_scope_policy_unqualified")
++                    paired = quota_remote.account_admission_observation(cache, provider=p,
++                        account=member["name"], generation=member["capacity_generation"], quota_scope=scope,
++                        required_windows=policy["required_windows"], now_ts=now)
++                    if paired["windows"] != obs["windows"] or paired["observed_at"] != obs["observed_at"]:
++                        raise ValueError("shared_scope_observation_disagrees")
++                    cap = self.account_cap(p, member, conn=conn)
++                    if cap is None:
++                        raise ValueError("shared_scope_unavailable")
++                    caps.append(cap)
++                providers = sorted({p for p, _, _ in members})
++                placeholders = ",".join("?" for _ in providers)
++                rows = [dict(r) for r in conn.execute(
++                    "SELECT * FROM leases WHERE (quota_scope=? OR (quota_scope IS NULL AND pool IN (" + placeholders + "))) "
++                    "LIMIT 4097", (scope, *providers))]
++                if len(rows) > 4096:
++                    raise ValueError("shared_scope_history_unqualified")
++                rows = [r for r in rows if (r["quota_scope"] or quota_circuit.scope_for(self, r["pool"], r["account"])) == scope]
++                # A config rename/scope change is not a drain or liability transfer.
++                # The existing publication owner must reconcile these originals.
++                for p, _, member in members:
++                    changed = conn.execute("SELECT 1 FROM leases WHERE pool=? AND account=? "
++                        "AND quota_scope IS NOT NULL AND quota_scope!=? "
++                        "AND (account_admission_json IS NOT NULL OR state IN ('held','rented')) LIMIT 1",
++                        (p, member["name"], scope)).fetchone()
++                    if changed:
++                        raise ValueError("account_scope_change_unreconciled")
++                priors = {}
++                for row in rows:
++                    raw = row["account_admission_json"]
++                    if raw is None:
++                        continue
++                    if hashlib.sha256(raw.encode()).hexdigest() != row["account_admission_digest"]:
++                        raise ValueError("shared_scope_lease_unqualified")
++                    prior = json.loads(raw)
++                    if (prior.get("quota_scope") != scope or prior.get("account") != row["account"]
++                            or prior.get("pool") != row["pool"] or prior.get("model") != row["model"]):
++                        raise ValueError("shared_scope_lease_unqualified")
++                    observed = prior["observation"]
++                    if (obs["observed_at"] < observed["observed_at"]
++                            or (obs["observed_at"] == observed["observed_at"]
++                                and obs["windows"] != observed["windows"])):
++                        raise ValueError("account_observation_regressed")
++                    priors[row["id"]] = prior
++                urgent = task_class in policy["urgent_classes"]
++                slots = 0 if urgent else policy["reserved_slots"]
++                if sum(r["state"] in ("held", "rented") for r in rows) + slots >= min(caps):
++                    continue
++                retained = []
++                deadline = None
++                for kind, window in obs["windows"].items():
++                    bound = claim["units"][kind]
++                    if bound["unit"] != window["unit"]:
++                        raise ValueError("account_budget_unit_mismatch")
++                    committed = 0
++                    for row in rows:
++                        active = row["state"] in ("held", "rented")
++                        if not active and row["id"] in window["accounted_lease_ids"]:
++                            continue
++                        prior = priors.get(row["id"])
++                        if prior is None:
++                            raise ValueError("shared_scope_lease_unqualified")
++                        matching = [w for w in prior["windows"] if w["kind"] == kind]
++                        if len(matching) != 1 or matching[0]["unit"] != window["unit"]:
++                            raise ValueError("shared_scope_lease_unqualified")
++                        previous = matching[0]
++                        if previous["epoch"] != window["epoch"]:
++                            # Terminal does not prove that delayed/cross-reset
++                            # consumption was included. Only H2's exact coverage
++                            # can discharge this original per-window liability.
++                            raise ValueError("shared_scope_window_crossing")
++                        amount = previous["reserved_units"]
++                        if type(amount) is not int or not 0 < amount <= 2**63-1:
++                            raise ValueError("shared_scope_lease_unqualified")
++                        committed += amount
++                    reserve = 0 if urgent else policy["reserve_units"][kind]
++                    available = window["remaining"] - committed - reserve
++                    if available < bound["maximum"]:
++                        raise ValueError("account_window_exhausted")
++                    reset = window["reset_at_epoch"]
++                    if (config["promote"] and reset is not None
++                            and 0 < reset - now <= config["hours_before_reset"] * 3600
++                            and 100 * available / window["limit"] >= config["min_remaining_pct"]):
++                        deadline = min(deadline, reset) if deadline is not None else reset
++                    retained.append({"kind": kind, "epoch": window["epoch"], "unit": window["unit"],
++                        "reserved_units": bound["maximum"], "remaining": window["remaining"],
++                        "committed_units": committed, "reserve_units": reserve,
++                        "starts_at": window["starts_at"], "reset_at": window["reset_at"], "limit": window["limit"]})
++                record = {"schema": "mastermind.account_admission.v1", "pool": self.provider_name(pool),
++                    "account": name, "model": model, "quota_scope": scope,
++                    "capacity_generation": account["capacity_generation"], "observed_at": obs["observed_at"],
++                    "admitted_at": now, "source_digest": source_digest, "config_digest": config_digest,
++                    "policy_digest": policy_digest, "budget_ref": claim["budget_ref"],
++                    "urgent_reserve_used": urgent, "windows": retained, "observation": obs,
++                    "reason": "expiring_allowance" if deadline is not None else "eligible_headroom"}
++                if len(_application_json(record).encode()) > 32768:
++                    raise ValueError("account_evidence_too_large")
++                out.append(dict(account, _expiry_rank=(0, deadline) if deadline is not None else (1, 0)))
++                evidence[name] = record
++            except (KeyError, TypeError, ValueError, OverflowError):
++                continue
++        return out, evidence, (source_digest, config_digest, policy_digest)
++
+     def _pick_account(
+         self,
+         conn: sqlite3.Connection,
+         pool: str,
+         preferred: Optional[str],
+@@ -2167,10 +2440,11 @@
+                         and has_model_room(a, preferred)
+                     ):
+                         return preferred
+                     return None
+             return None  # stickiness: requested account not grantable
++        expiry = {a["name"]: a.get("_expiry_rank", (1, 0)) for a in grantable}
+         scored: List[Tuple[int, int, str]] = []
+         for a in grantable:
+             name = str(a["name"])
+             held = self._account_held(conn, pool, name)
+             cap = int(a["_eff_cap"])
+@@ -2235,15 +2509,15 @@
+                 if type(observed) is not int or observed not in (0, 1, 2):
+                     observed = 1
+                 return max(local_rank, observed)
+ 
+             scored.sort(key=lambda t: (
+-                cooldown_priority(t[2]),
++                cooldown_priority(t[2]), expiry[t[2]],
+                 t[0], -t[1], recent.get(t[2], float("-inf")), t[2]
+             ))
+         else:
+-            scored.sort(key=lambda t: (t[0], -t[1], t[2]))
++            scored.sort(key=lambda t: (expiry[t[2]], t[0], -t[1], t[2]))
+         return scored[0][2]
+ 
+     def _try_acquire(
+         self,
+         orch: str,
+@@ -2256,25 +2530,47 @@
+         waiter_id: Optional[str],
+         model: str = "",
+         operator_child_id: Optional[str] = None,
+         capacity_handoff: bool = False,
+         not_before: Optional[str] = None,
++        *, admission_check,
+     ) -> Tuple[AcquireResult, Optional[str], str]:
+         conn = self._conn()
+         try:
+             conn.execute("BEGIN IMMEDIATE")
+             result = self._try_acquire_in_transaction(conn, orch, pool, account, task_class,
+                 host, pid, ttl, waiter_id, model, operator_child_id, capacity_handoff, not_before)
++            admission_check()
+             conn.commit()
+             return result
+         except BaseException:
+             conn.rollback()
+             raise
+         finally:
+             conn.close()
+ 
+-    def _try_acquire_in_transaction(
++    def _try_acquire_in_transaction(self, conn, orch, pool, account, task_class, host,
++                                    pid, ttl, waiter_id, model="", operator_child_id=None,
++                                    capacity_handoff=False, not_before=None, *, allowed_accounts=None,
++                                    purpose="WORKER"):
++        try:
++            document = _read_accounts_document(self.accounts_path)
++            current = _APPLICATION_ACCOUNTS.get()
++            if current is not None and current != document:
++                raise ValueError("account_configuration_changed")
++        except (ApplicationAdmissionError, ValueError):
++            return (AcquireResult(ok=False, reason="account_configuration_unavailable", pool=pool,
++                                  orchestrator_id=orch), waiter_id, "account_configuration_unavailable")
++        token = _APPLICATION_ACCOUNTS.set(document)
++        try:
++            return self._try_acquire_on_accounts(conn, orch, pool, account, task_class, host,
++                pid, ttl, waiter_id, model, operator_child_id, capacity_handoff, not_before,
++                allowed_accounts=allowed_accounts, purpose=purpose)
++        finally:
++            _APPLICATION_ACCOUNTS.reset(token)
++
++    def _try_acquire_on_accounts(
+         self,
+         conn: sqlite3.Connection,
+         orch: str,
+         pool: str,
+         account: Optional[str],
+@@ -2378,12 +2674,19 @@
+                 AcquireResult(ok=False, reason="priority_wait", pool=pool, orchestrator_id=orch),
+                 waiter_id,
+                 "priority_wait",
+             )
+ 
++        candidates = self.grantable_accounts(pool, conn=conn) if compatible_accounts is None else compatible_accounts
++        try:
++            candidates, account_evidence, source_fence = self._expiry_account_candidates(
++                conn, pool, model, task_class, candidates)
++        except (OSError, KeyError, ValueError, TypeError, ImportError, ApplicationAdmissionError):
++            return (AcquireResult(ok=False, reason="account_capacity_unqualified", pool=pool,
++                                  orchestrator_id=orch), waiter_id, "account_capacity_unqualified")
+         picked = self._pick_account(conn, pool, account, model=model,
+-                                    grantable_override=compatible_accounts)
++                                    grantable_override=candidates)
+         if not picked:
+             reason = "account_unavailable" if account else "accounts_at_cap"
+             if account and any(self._parked(a, self.now()) for a in (spec.get("accounts") or []) if a.get("name") == account):
+                 reason = "account_parked"
+             grantable_names = {a.get("name") for a in self.grantable_accounts(pool)}
+@@ -2427,19 +2730,41 @@
+                                       pool=pool, orchestrator_id=orch),
+                         waiter_id, "operator_authorization_refused")
+         if not_before is not None:
+             from commission_deadline import require_not_before
+             require_not_before(not_before)
++        admission = account_evidence.get(picked)
++        if admission is not None:
++            admission = dict(admission, lease_id=lid, orchestrator_id=orch,
++                task_class=task_class, purpose=purpose, admitted_at=now)
++        admission_json = _application_json(admission) if admission is not None else None
++        admission_digest = hashlib.sha256(admission_json.encode()).hexdigest() if admission_json is not None else None
++        if source_fence is not None:
++            try:
++                import quota_remote
++                _, fresh_source = quota_remote.read_account_admission_cache()
++                fresh_config = hashlib.sha256(_application_json(_read_accounts_document(self.accounts_path)).encode()).hexdigest()
++                _, fresh_policy = self._expiry_source_policy()
++                if source_fence != (fresh_source, fresh_config, fresh_policy):
++                    raise ValueError("account_capacity_changed")
++                if admission is not None and not 0 <= self.now() - admission["observed_at"] < quota_remote.FRESH_S:
++                    raise ValueError("account_capacity_stale")
++                if admission is not None and any(w["reset_at_epoch"] is not None and w["reset_at_epoch"] <= self.now()
++                        for w in admission["observation"]["windows"].values()):
++                    raise ValueError("account_capacity_window_changed")
++            except (OSError, KeyError, TypeError, ValueError, ImportError, ApplicationAdmissionError):
++                return (AcquireResult(ok=False, reason="account_capacity_changed", pool=pool,
++                                      orchestrator_id=orch), waiter_id, "account_capacity_changed")
+         conn.execute(
+             "INSERT INTO leases "
+             "(id, orchestrator_id, pool, account, task_class, model, host, pid, "
+             "granted_at, ttl, last_heartbeat, state, renewable, quota_scope, purpose, "
+-            "quota_config_generation, quota_recovery_json) "
+-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
++            "quota_config_generation, quota_recovery_json, account_admission_json, account_admission_digest) "
++            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+             (lid, orch, pool, picked, task_class, model, host, pid, now, use_ttl, now, state, 1,
+              __import__("quota_circuit").scope_for(self, pool, picked), purpose,
+-             quota_generation, quota_recovery),
++             quota_generation, quota_recovery, admission_json, admission_digest),
+         )
+         if operator_child_id is not None:
+             conn.execute("UPDATE operator_child_authorizations SET admitted_lease_id=? WHERE run_id=? AND root=? AND admitted_lease_id IS NULL",
+                          (lid, operator_child_id, orch))
+         conn.execute(
+@@ -2450,10 +2775,11 @@
+         return (
+             AcquireResult(
+                 ok=True,
+                 lease_id=lid,
+                 account=picked,
++                account_admission=admission,
+                 state=state,
+                 orchestrator_id=orch,
+                 pool=pool,
+             ),
+             None,
+@@ -2541,27 +2867,31 @@
+     def _application_transaction(self, *, deadline_ns=None, collect=False):
+         deadline = validate_deadline_ns(deadline_ns) if deadline_ns is not None else None
+         token = _ACQUIRE_DEADLINE_NS.set(deadline)
+         lock = conn = None
+         try:
+-            lock = self._lock()
+-            if collect:
+-                self._gc_locked()
+-            conn = self._conn()
+-            conn.execute("BEGIN IMMEDIATE")
+-            yield conn
+-            conn.commit()
+-        except BaseException:
+-            if conn is not None:
+-                conn.rollback()
+-            raise
++            with self._physical_admission_scope(deadline_ns=deadline) as held:
++                try:
++                    lock = self._lock()
++                    if collect:
++                        self._gc_locked()
++                    conn = self._conn()
++                    conn.execute("BEGIN IMMEDIATE")
++                    yield conn
++                    held()
++                    conn.commit()
++                except BaseException:
++                    if conn is not None:
++                        conn.rollback()
++                    raise
++                finally:
++                    if conn is not None:
++                        conn.close()
++                    if lock is not None:
++                        fcntl.flock(lock, fcntl.LOCK_UN)
++                        lock.close()
+         finally:
+-            if conn is not None:
+-                conn.close()
+-            if lock is not None:
+-                fcntl.flock(lock, fcntl.LOCK_UN)
+-                lock.close()
+             _ACQUIRE_DEADLINE_NS.reset(token)
+ 
+     def _application_grant(self, principal_id, caller_host, workload, pool, model,
+                            expected_credential_ref=None, expected_recipe_digest=None):
+         document = _read_application_accounts(self.accounts_path)
+@@ -2856,12 +3186,82 @@
+                     disposition = "effect_unknown"
+                     result["disposition"] = disposition
+             result.update(recipe_digest=turn["recipe_digest"], recipe_json=turn["recipe_json"])
+         if turn["transport_kind"] is not None:
+             result["transport_kind"] = turn["transport_kind"]
++        admission = conn.execute("SELECT account_admission_json, account_admission_digest FROM leases WHERE id=?",
++                                 (turn["lease_id"],)).fetchone()
++        if admission is not None and admission["account_admission_json"] is not None:
++            raw = admission["account_admission_json"]
++            if hashlib.sha256(raw.encode()).hexdigest() != admission["account_admission_digest"]:
++                raise ApplicationAdmissionError("stored_account_admission_invalid")
++            result.update(account_admission_json=raw, account_admission_digest=admission["account_admission_digest"])
+         result.update(selection_json=turn["selection_json"], selection_digest=turn["selection_digest"])
+         return result
++
++    def _application_account_origin(self, turn, lease, document, now):
++        """Refuse new strict dispatch after rebind without changing original recovery."""
++        raw = lease["account_admission_json"]
++        if raw is None:
++            return None
++        try:
++            import quota_circuit
++            import quota_remote
++            if hashlib.sha256(raw.encode()).hexdigest() != lease["account_admission_digest"]:
++                raise ValueError("retained account evidence changed")
++            prior = json.loads(raw)
++            provider = self.provider_name(turn["pool"])
++            if (prior.get("schema") != "mastermind.account_admission.v1"
++                    or any(prior.get(key) != turn[key] for key in ("account", "model"))
++                    or prior.get("pool") != provider):
++                raise ValueError("retained account identity changed")
++            # Pin the admitted owner document, including shared-scope membership
++            # and policy. A new observation cannot silently revise that contract.
++            if hashlib.sha256(_application_json(document).encode()).hexdigest() != prior["config_digest"]:
++                raise ValueError("account configuration changed")
++            spec = document["providers"][provider]
++            members = [a for a in spec["accounts"] if a["name"] == turn["account"]]
++            if len(members) != 1 or spec.get("enabled", True) is not True:
++                raise ValueError("account unavailable")
++            account = members[0]
++            if (account.get("enabled", True) is not True
++                    or account["capacity_generation"] != prior["capacity_generation"]):
++                raise ValueError("capacity generation changed")
++            token = _APPLICATION_ACCOUNTS.set(document)
++            try:
++                scope = quota_circuit.scope_for(self, provider, turn["account"])
++            finally:
++                _APPLICATION_ACCOUNTS.reset(token)
++            if scope != prior["quota_scope"]:
++                raise ValueError("account scope changed")
++            retained = prior["windows"]
++            required = [row["kind"] for row in retained]
++            if not required or len(required) != len(set(required)):
++                raise ValueError("retained windows invalid")
++            cache, _ = quota_remote.read_account_admission_cache()
++            current = quota_remote.account_admission_observation(
++                cache, provider=provider, account=turn["account"],
++                generation=account["capacity_generation"], quota_scope=scope,
++                required_windows=required, now_ts=now)
++            previous = prior["observation"]
++            if (previous["schema"] != "mastermind.account_capacity_observation.v2"
++                    or current["origin"]["binding"] != previous["origin"]["binding"]
++                    or current["observed_at"] < previous["observed_at"]
++                    or (current["origin"]["observation_id"] == previous["origin"]["observation_id"]
++                        and current != previous)
++                    or (current["observed_at"] == previous["observed_at"]
++                        and current["windows"] != previous["windows"])
++                    or set(previous["windows"]) != set(required)
++                    or any(any(current["windows"][kind][key] != previous["windows"][kind][key]
++                               for key in ("epoch", "unit", "limit", "starts_at_epoch", "reset_at_epoch"))
++                           for kind in required)):
++                raise ValueError("admitted account origin changed")
++            # A newer coherent observation of the same binding does not erase
++            # this lease's reservation or give it a new upstream window.
++            return prior
++        except (OSError, KeyError, TypeError, ValueError, OverflowError):
++            raise ApplicationAdmissionError("account_origin_unqualified") from None
+ 
+     def begin_application_turn(self, *, principal_id, caller_host, workload, turn_id,
+                                pool, model, deadline_ns=None, transport_accounts=None,
+                                expected_credential_ref=None, application_recipe=None,
+                                expected_recipe_digest=None, expected_selection=None,
+@@ -2941,10 +3341,11 @@
+                         or prior["transport_kind"] != transport_kind):
+                     raise ApplicationAdmissionError("recipe_changed")
+                 if transport_accounts is not None and prior["account"] not in transport_accounts:
+                     raise ApplicationAdmissionError("account_unavailable")
+                 return self._application_binding(conn, prior)
++            self._require_current_admission_source()
+             admitted_accounts = frozenset(grant["accounts"])
+             if transport_accounts is not None:
+                 admitted_accounts &= transport_accounts
+             accounts_token = _APPLICATION_ACCOUNTS.set(document)
+             try:
+@@ -3126,10 +3527,11 @@
+                     or lease["state"] not in HELD_STATES
+                     or now >= min(turn["expires_at"], lease["granted_at"] + lease["ttl"])):
+                 raise ApplicationAdmissionError("turn_closed")
+             if self._application_unsettled(conn, turn):
+                 return {"ok": False, "dispatch_permitted": False, "disposition": "effect_unknown"}
++            self._require_current_admission_source()
+             count = conn.execute("SELECT COUNT(*) FROM application_requests WHERE principal_id=? AND turn_id=?",
+                                  (principal_id, turn_id)).fetchone()[0]
+             if count >= turn["max_steps"]:
+                 raise ApplicationAdmissionError("step_limit")
+             accounts_token = _APPLICATION_ACCOUNTS.set(document)
+@@ -3139,10 +3541,17 @@
+                     raise ApplicationAdmissionError("account_unavailable")
+             finally:
+                 _APPLICATION_ACCOUNTS.reset(accounts_token)
+             if any(lease[key] != turn[key] for key in ("account", "model", "pool")):
+                 raise ApplicationAdmissionError("lease_changed")
++            account_admission = self._application_account_origin(turn, lease, document, now)
++            if account_admission is not None:
++                # This source has no qualified execution-owner bound in every
++                # upstream billable meter. Neither max_steps nor one POST proves
++                # that vector. Preserve original recovery above; refuse only a
++                # new strict dispatch without minting a second meter authority.
++                raise ApplicationAdmissionError("account_dispatch_meter_unqualified")
+             now = _application_time(self.now())
+             expires = min(grant["expires_at"], turn["expires_at"], lease["granted_at"] + lease["ttl"])
+             if now >= expires:
+                 raise ApplicationAdmissionError("turn_closed")
+             dispatch_id = uuid.uuid4().hex
+@@ -3386,16 +3795,42 @@
+         lock = self._lock()
+         try:
+             self._gc_locked()
+             conn = self._conn()
+             try:
+-                return self._snapshot_locked(conn)
++                snapshot = self._snapshot_locked(conn)
+             finally:
+                 conn.close()
+         finally:
+             fcntl.flock(lock, fcntl.LOCK_UN)
+             lock.close()
++        # Advisory provider refresh may publish quota and take admission. It
++        # runs only after releasing the Broker lock and SQLite connection.
++        return self._enrich_snapshot(snapshot)
++
++    def _enrich_snapshot(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
++        """Add advisory observations after every admission/Broker scope."""
++        pools = snapshot["pools"]
++        extra: Dict[str, Any] = {}
++        try:
++            if HERE not in sys.path:
++                sys.path.insert(0, HERE)
++            import pool_status
++
++            extra = pool_status.build_status()
++        except Exception:
++            extra = {}
++        # Merge local observations (offpeak, last 402, bailian key cooldown)
++        # under pools without overwriting broker cap/active.
++        for pname, local in (extra.get("pools") or {}).items():
++            if pname not in pools:
++                continue
++            for k in ("last_402_429", "offpeak", "offpeak_window", "per_key_cap", "keys"):
++                if k in local:
++                    pools[pname][k] = local[k]
++        snapshot["offpeak"] = extra.get("offpeak")
++        return snapshot
+ 
+     def _snapshot_locked(self, conn: sqlite3.Connection) -> Dict[str, Any]:
+         doc = self.load_accounts_doc()
+         pools: Dict[str, Any] = {}
+         leases_out: List[Dict[str, Any]] = []
+@@ -3466,37 +3901,20 @@
+                     "priority": row["priority"],
+                     "enqueued_at": row["enqueued_at"],
+                     "wait_s": int(now - float(row["enqueued_at"])),
+                 }
+             )
+-        extra: Dict[str, Any] = {}
+-        try:
+-            if HERE not in sys.path:
+-                sys.path.insert(0, HERE)
+-            import pool_status
+-
+-            extra = pool_status.build_status()
+-        except Exception:
+-            extra = {}
+-        # Merge local observations (offpeak, last 402, bailian key cooldown)
+-        # under pools without overwriting broker cap/active.
+-        for pname, local in (extra.get("pools") or {}).items():
+-            if pname not in pools:
+-                continue
+-            for k in ("last_402_429", "offpeak", "offpeak_window", "per_key_cap", "keys"):
+-                if k in local:
+-                    pools[pname][k] = local[k]
+         return {
+             "schema": "mastermind.provider_capacity.v1",
+             "generated_at": int(now),
+             "generated_at_human": _now_iso(now),
+             "this_host": self.this_host,
+             "orchestrators_active": len({r["orchestrator_id"] for r in leases_out}),
+             "pools": pools,
+             "leases": leases_out,
+             "waiters": waiters_out,
+-            "offpeak": extra.get("offpeak"),
++            "offpeak": None,
+             "provenance": {
+                 "db_path": self.db_path,
+                 "broker_host": self.this_host,
+                 "coverage": "configured lease ledger only",
+                 "note": "counts reflect this configured lease ledger; execution host may differ",

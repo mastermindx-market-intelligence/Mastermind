@@ -1,0 +1,50 @@
+{
+  "cause": "Nested patch hunk coordinates were interpreted as added identity literals. They are line numbers, not identity values.",
+  "correction": "Keep the three existing-owner diffs in the ordinary patch; deliver the nine cohort additions as directly visible source_overlay members. Every new .patch is still inspected as source by the unchanged public guard.",
+  "failed_guard": {
+    "argv": [
+      "/private/tmp/h6-ci-qualification-runtime-ib96be_v/venv/bin/python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults",
+      "--basetemp",
+      "/private/tmp/h6-1390-workspace-guard-mye3ack7/fixtures",
+      "--junitxml",
+      "/private/tmp/h6-1390-workspace-guard-mye3ack7/result.xml"
+    ],
+    "cases": [
+      {
+        "classname": "tests.test_ceo_submit_armed_composition",
+        "error": false,
+        "failure": true,
+        "message": "AssertionError: assert ['895', '896'] == []\n  \n  Left contains 2 more items, first extra item: '895'\n  Use -v to get more diff",
+        "name": "test_d8_template_topology_and_protected_defaults",
+        "skipped": false
+      }
+    ],
+    "errors": 0,
+    "failures": 1,
+    "files": {
+      "result.log": "6352dfb495c22115cfca6aa3951b1475702ba836d6c986d8efb9f0c2b0e99f13",
+      "result.xml": "9433672e9664de16ec1e433d005cbd741b06d9c15afe0c749e4e517b831fb36c"
+    },
+    "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+    "rc": 1,
+    "root": "/private/tmp/h6-1390-workspace-guard-mye3ack7",
+    "seconds": 63.457,
+    "skips": 0,
+    "testcases": 1
+  },
+  "findings": [
+    "895",
+    "896"
+  ],
+  "head": "1390b8d02de3875dcf0986c94cf4ef1296ecf13d",
+  "new_patch_sha256": "64142500cd2651083c538c2cfc6e399edf2a739dde2c0c66c865204a8e39b68b",
+  "source_guard_registry_or_template_modified": false,
+  "source_line": "+@@ -895,10 +896,25 @@",
+  "source_postimages_changed": false,
+  "superseded_nested_patch_sha256": "00618560eca9ba2b7a8762ea113f30c842a17291263ca5228998123a40a68f19"
+}

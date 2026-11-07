@@ -82,8 +82,10 @@
     "source_inventory": "Current patch fields with complete prior inventory nested; runtime native bytes unchanged.",
     "source_parent": "Authenticate all staged parent files before replacements."
   },
+  "packaging_correction": "guard-packaging-correction.json; all12 qualified source postimages unchanged",
   "production_adoption": false,
-  "proposal_patch_sha256": "00618560eca9ba2b7a8762ea113f30c842a17291263ca5228998123a40a68f19",
+  "proposal_patch_sha256": "64142500cd2651083c538c2cfc6e399edf2a739dde2c0c66c865204a8e39b68b",
+  "proposal_source_overlay": "source_overlay_inventory.json",
   "proposal_source_sha256": {
     "build_review_stage.py": "6712da261b70388478fd914adb2c6af035ab416b20a3edf2775754bd4022e38b",
     "native_generation.py": "a570210825da7eb58be83381860c5ffa013ed5889486e4a3b822f96d0dab09db",
