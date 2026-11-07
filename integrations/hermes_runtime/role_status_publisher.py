@@ -92,8 +92,8 @@ class RoleStatusPublisher:
         _notification_address(self.notify_socket)
         if self.custody_observer is not None and not callable(self.custody_observer):
             raise _context_refusal()
-        if self.listener_observer is not None and (self.role != "mmsecretary"
-                or self.custody_observer is None or not callable(self.listener_observer)):
+        if self.listener_observer is not None and (
+                self.custody_observer is None or not callable(self.listener_observer)):
             raise _context_refusal()
 
     def _custody_status_text(self, wall_ms: int, monotonic_ms: int) -> str:
@@ -115,10 +115,10 @@ class RoleStatusPublisher:
         if first["pid"] != self.process_pid:
             raise RoleStatusError()
         listener = (None if self.listener_observer is None
-                    else validate_gateway_listener(self.listener_observer()))
+                    else validate_gateway_listener(self.listener_observer(), role=self.role))
         metadata = role_metadata(self.state_dir, self.role)
         if (self.listener_observer is not None
-                and listener != validate_gateway_listener(self.listener_observer())):
+                and listener != validate_gateway_listener(self.listener_observer(), role=self.role)):
             raise RoleStatusError()
         second = validate_custody(observer())
         if first != second or second["pid"] != self.process_pid:

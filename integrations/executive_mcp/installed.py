@@ -624,6 +624,7 @@ _MACRO_RECORD_DIRS = (
     "agentos/discoveries/",
     "agentos/handoffs/",
 )
+_AGENTOS_CONTEXT_CONFIG = frozenset({"config/compiled_kill_registry.yml", "config/context_index.yml"})
 
 
 def _macro_brief_content_paths(paths: set[str]) -> set[str]:
@@ -1327,6 +1328,7 @@ def _build_macro_materialization_plan(
     source: Path, *, runner: PacketRunner, env: Mapping[str, str],
     deadline: float | None,
     verified_snapshot: _VerifiedRepositorySnapshot | None = None,
+    agentos_context: bool = False,
 ) -> _MacroMaterializationPlan:
     label = "Macro source"
     try:
@@ -1341,6 +1343,11 @@ def _build_macro_materialization_plan(
             expected = dict(verified_snapshot.expected)
         tracked_paths = set(expected)
         files = _macro_brief_content_paths(tracked_paths)
+        if agentos_context:
+            from control_plane.agentos_context_bundle import REQUIRED_COMPILER_PATHS
+            files.update(tracked_paths & _AGENTOS_CONTEXT_CONFIG)
+            if not REQUIRED_COMPILER_PATHS <= files:
+                raise ValueError("required context compiler source is unavailable")
         tree_directories = _tree_directory_paths(tracked_paths)
         probe_directories: set[str] = set()
         for rel in sorted(
@@ -1386,6 +1393,70 @@ def _build_macro_materialization_plan(
         raise GatewayError(
             "backend_unavailable", "installed Macro path-list frontmatter is unsupported"
         ) from exc
+
+
+def _agentos_context_runtime(python: Path, *, runner, remaining):
+    """Reuse CF2 qualification, sharing this read's result-acceptance deadline.
+
+The incumbent attestor's filesystem checks are synchronous. They are checked
+before/after, not falsely described as cancellable hard wall-clock work.
+"""
+    try:
+        remaining()
+        contract = ceo_boot_packet._capacity_runtime_contract()
+        def probe(argv, **limits):
+            limits["timeout"] = min(limits["timeout"], remaining())
+            return runner(argv, **limits)
+        site = ceo_boot_packet.attest_capacity_boot_runtime(python, runner=probe)
+        remaining()
+        if Path(site) != Path(contract.site_packages) or Path(python) != Path(contract.python_binary):
+            raise ValueError("runtime selection differs")
+        commitment = {
+            "owner": "cf2_capacity_runtime", "python_version": contract.python_version,
+            "python_binary_sha256": contract.python_binary_sha256, "pyyaml_version": contract.pyyaml_version,
+            "pyyaml_record_sha256": contract.pyyaml_record_sha256, "runtime_tree_sha256": contract.runtime_tree_sha256,
+        }
+        return Path(site), commitment
+    except GatewayError:
+        raise
+    except Exception:
+        raise GatewayError("backend_unavailable", "installed context runtime unavailable") from None
+
+
+def _agentos_context_sources(root: Path, plan: _MacroMaterializationPlan, *, remaining):
+    """Observe the two permitted Macro executable files inside the verified plan."""
+    from control_plane.agentos_context_bundle import REQUIRED_COMPILER_PATHS, MAX_COMPILER_SOURCE_BYTES, canonical_digest
+    try:
+        sources = []
+        for relative in sorted(REQUIRED_COMPILER_PATHS):
+            remaining()
+            mode, oid = plan.file_objects[relative]
+            if mode not in {"100644", "100755"}:
+                raise ValueError("invalid compiler mode")
+            descriptor = os.open(root / relative, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+            with os.fdopen(descriptor, "rb") as stream:
+                before = os.fstat(stream.fileno())
+                if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_COMPILER_SOURCE_BYTES:
+                    raise ValueError("compiler source is unavailable")
+                raw = stream.read(MAX_COMPILER_SOURCE_BYTES + 1)
+                after = os.fstat(stream.fileno())
+            if (len(raw) != before.st_size or len(raw) > MAX_COMPILER_SOURCE_BYTES
+                    or (before.st_dev, before.st_ino, before.st_mode, before.st_mtime_ns, before.st_ctime_ns)
+                    != (after.st_dev, after.st_ino, after.st_mode, after.st_mtime_ns, after.st_ctime_ns)
+                    or _git_blob_oid(raw) != oid):
+                raise ValueError("compiler source changed")
+            sources.append({"path": relative, "mode": mode, "git_blob": oid,
+                            "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)})
+        inventory = {"head": plan.head,
+            "files": [[path, *plan.file_objects[path]] for path in sorted(plan.files)],
+            "directories": sorted(plan.directories)}
+        digest = canonical_digest(inventory)
+        remaining()
+        return sources, digest
+    except GatewayError:
+        raise
+    except (OSError, KeyError, TypeError, ValueError):
+        raise GatewayError("backend_unavailable", "installed context compiler source unavailable") from None
 
 
 def _clone_git_read_database(source: Path, destination: Path, *, deadline: float) -> None:
@@ -2481,6 +2552,32 @@ class InstalledBootPacketCollector:
         return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
             project_instructions_request=work_ref)
 
+    def agentos_context_reader(self, *, macro_root: Path):
+        """Issue one adopted-snapshot content reader; grant no public capability."""
+        from control_plane.agentos_context_bundle import AgentOsContextBundleReader, _SOURCE_ROOT
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != _SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("SOURCE_UNAVAILABLE")
+        reader = AgentOsContextBundleReader(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        reader._installed_reader_binding = _issue_installed_project_read(reader, owner=self, kind="agentos_context",
+            qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector)
+        return reader
+
+    def read_agentos_context(self, *, work_ref: str, timeout: float = 25.0):
+        from common.workspace_project_plan_contract import validate_selection
+        import math
+        validate_selection({"work_ref": work_ref})
+        if (type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 25
+                or self._expected_source_sha is None or self._allow_synthetic_fixture
+                or _CANONICAL_PROJECT_DATA.get() is not None or _CANONICAL_PROJECT_COMPILATION.get() is not None):
+            raise ValueError("SOURCE_UNAVAILABLE")
+        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout), agentos_context_request=work_ref)
+
     def project_plan_reader(self, *, macro_root: Path):
         """Issue a read facade bound to this exact installed source owner."""
         from control_plane.agentos_project_plan import AgentOsProjectPlanReader, _SOURCE_ROOT
@@ -2752,6 +2849,7 @@ class InstalledBootPacketCollector:
 
     def _collect_packet(self, *, repo: Path, now: str | None,
                         timeout: float, acceptance_request: tuple | None = None,
+                        agentos_context_request: str | None = None,
                         project_plan_request: str | None = None,
                         project_journal_request: str | None = None,
                         project_creation_request: tuple | None = None,
@@ -2761,9 +2859,15 @@ class InstalledBootPacketCollector:
                         project_knowledge_request: tuple | None = None,
                         project_instructions_request: str | None = None,
                         project_discovery_request: tuple | None = None) -> Any:
-        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request, project_archive_request, project_knowledge_recipe_request, project_knowledge_request, project_instructions_request, project_discovery_request)) > 1:
+        if sum(x is not None for x in (acceptance_request, agentos_context_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request, project_archive_request, project_knowledge_recipe_request, project_knowledge_request, project_instructions_request, project_discovery_request)) > 1:
             raise ValueError("ambiguous installed source read")
         bound_data = _CANONICAL_PROJECT_DATA.get()
+        if agentos_context_request is not None:
+            from common.workspace_project_plan_contract import validate_selection
+            validate_selection({"work_ref": agentos_context_request})
+            if (self._allow_synthetic_fixture or bound_data is not None
+                    or _CANONICAL_PROJECT_COMPILATION.get() is not None):
+                raise ValueError("SOURCE_UNAVAILABLE")
         data_view = None
         if project_discovery_request is not None and bound_data is None:
             raise ValueError('CANONICAL_DATA_UNAVAILABLE')
@@ -2831,6 +2935,7 @@ class InstalledBootPacketCollector:
             materialization_plan = _build_macro_materialization_plan(
                 self._macro_root, runner=self._runner, env=live_env, deadline=deadline,
                 verified_snapshot=macro_snapshots[0],
+                **({"agentos_context": True} if agentos_context_request is not None else {}),
             )
             if materialization_plan.head != pre_macro_sha:
                 raise GatewayError(
@@ -2888,6 +2993,15 @@ class InstalledBootPacketCollector:
                     os.fspath(self._code_root / "scripts" / "agentos_project_instructions_entry.py"),
                     "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", pre_macro_sha,
                     "--work-ref", project_instructions_request, "--timeout", f"{inner_timeout:g}"]
+            if agentos_context_request is not None:
+                if materialized_observation is None or packet_plan is None:
+                    raise GatewayError("backend_unavailable", "installed context materialization unavailable")
+                context_sources, context_inventory = _agentos_context_sources(packet_macro_root, packet_plan, remaining=remaining)
+                context_site, context_runtime = _agentos_context_runtime(self._python, runner=self._runner, remaining=remaining)
+                argv = [os.fspath(self._python), "-I", "-S", "-B",
+                    os.fspath(self._code_root / "scripts/agentos_context_bundle_entry.py"),
+                    "--macro-root", os.fspath(packet_macro_root), "--work-ref", agentos_context_request,
+                    "--site-packages", os.fspath(context_site)]
             if project_plan_request is not None:
                 argv = [os.fspath(self._python), "-I", "-B",
                         os.fspath(self._code_root / "scripts" / "agentos_project_plan_entry.py"),
@@ -2953,6 +3067,9 @@ class InstalledBootPacketCollector:
                             else ceo_boot_packet.DEFAULT_MAX_OUTPUT_BYTES)
             if project_instructions_request is not None:
                 output_limit = 32768
+            if agentos_context_request is not None:
+                from control_plane.agentos_context_bundle import MAX_BUNDLE_BYTES
+                output_limit = MAX_BUNDLE_BYTES
             if project_creation_request is not None:
                 output_limit = 4096
             if project_knowledge_request is not None:
@@ -2974,7 +3091,38 @@ class InstalledBootPacketCollector:
             stdout = result.get("stdout")
             if type(stdout) is not str:
                 raise GatewayError("backend_unavailable", "installed boot-packet collector failed")
-            if project_knowledge_recipe_request is not None:
+            if agentos_context_request is not None:
+                from control_plane import agentos_context_bundle as context_contract
+                from ops.fabric_launch.agentos import validate_bundle
+                try:
+                    if (type(result.get("code")) is not int or type(result.get("stderr")) is not str
+                            or any(type(result.get(flag)) is not bool for flag in ("timed_out", "limit_exceeded", "invalid_utf8"))):
+                        raise ValueError("invalid context result")
+                    raw = stdout.encode("utf-8", "strict")
+                    bundle = validate_bundle(raw, agentos_context_request)
+                    if (bundle.get("repo_sha") != pre_macro_sha or type(bundle.get("token_budget")) is not int
+                            or bundle["token_budget"] != context_contract.TOKEN_BUDGET):
+                        raise ValueError("context identity differs")
+                    receipt = {"schema": context_contract.RECEIPT_SCHEMA, "owner": "agent_os",
+                        "source_mode": context_contract.SOURCE_MODE, "workstream": agentos_context_request,
+                        "token_budget": context_contract.TOKEN_BUDGET, "bundle_sha256": hashlib.sha256(raw).hexdigest(),
+                        "source_script_sha256": next(item["sha256"] for item in context_sources if item["path"] == "scripts/agentos.py"),
+                        "compiler_sources": context_sources, "compiler_sources_scope": "fixed_macro_entry_and_helper",
+                        "source_inventory_sha256": context_inventory, "source_inventory_files": len(packet_plan.files),
+                        "compiler_closure_sha256": context_contract.compiler_closure_digest(context_sources, context_runtime, context_inventory),
+                        "mastermind_source_sha": pre_source_sha, "compiler_code_commit": pre_macro_sha,
+                        "data_commit": pre_macro_sha, "repo_sha": pre_macro_sha, "runtime_commitment": context_runtime,
+                        "import_policy": context_contract.IMPORT_POLICY, "deadline_semantics": context_contract.DEADLINE_SEMANTICS,
+                        "source_observation": {"mastermind_generation": pre_source_seal, "macro_generation": pre_macro_seal,
+                                               "materialized_generation": materialized_observation[1]},
+                        "generated_at": bundle.get("generated_at"), "degraded_count": len(bundle["degraded"]),
+                        "omitted_count": len(bundle["omitted_due_to_budget"]), "execution_authority": False}
+                    packet = context_contract.validate_context_read(raw, receipt, work_ref=agentos_context_request)
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed context bundle unavailable") from None
+                if _agentos_context_runtime(self._python, runner=self._runner, remaining=remaining) != (context_site, context_runtime):
+                    raise GatewayError("backend_unavailable", "installed context runtime changed")
+            elif project_knowledge_recipe_request is not None:
                 try:
                     def unique_recipe_object(pairs):
                         value = {}
@@ -3254,7 +3402,7 @@ class InstalledBootPacketCollector:
                 or post_macro_seal != pre_macro_seal
             ):
                 raise GatewayError("backend_unavailable", "installed source changed during boot-packet read")
-            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None and project_archive_request is None and project_knowledge_recipe_request is None and project_knowledge_request is None and project_instructions_request is None and project_discovery_request is None:
+            if acceptance_request is None and agentos_context_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None and project_archive_request is None and project_knowledge_recipe_request is None and project_knowledge_request is None and project_instructions_request is None and project_discovery_request is None:
                 packet = _project_macro_identity(
                     packet, materialized_root=packet_macro_root, canonical_root=self._macro_root,
                 )

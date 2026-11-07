@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import signal
 import tempfile
 import unittest
 from unittest import mock
@@ -135,6 +137,248 @@ class ExecutivePaperMcpTests(unittest.TestCase):
                 return_value="mcp_servers: {}\nmcp_servers: {}\n",
             ), self.assertRaises(RuntimeRefusal):
                 plugin.render_disarmed_native_exec_paper(profile)
+
+
+class ExecutivePaperInstalledContractTests(unittest.TestCase):
+    """Original supervisor/installer, real private files, synthetic credentials.
+
+    The subprocess tests use the existing loopback-only Hermes stand-in.
+    They cannot establish a real MCP enrollment or provider authentication.
+    """
+    def setUp(self):
+        import shutil
+        from dataclasses import replace
+        from integrations.hermes_runtime.tests._support import STUB
+        self.tmp = tempfile.TemporaryDirectory(prefix="hermes-exec-paper-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.profile = replace(compose_profile(
+            "mmsecretary", state_dir=self.root / "state",
+            secrets_file=self.root / "secrets.env", hermes_home=self.root / "home",
+            gateway_port=0, backend_port=0),
+            tool_allowlist=frozenset({"clarify"}), restart_sec=0.01,
+            memory_sample_interval_sec=0.02)
+        self.stub = self.root / "hermes-stub"
+        shutil.copyfile(STUB, self.stub)
+        self.stub.chmod(0o700)
+        self.native = self.profile.hermes_home / "profiles" / self.profile.role / "config.yaml"
+        self.native.parent.mkdir(parents=True)
+        self._write_config(plugin.render_disarmed_native_exec_paper(self.profile))
+
+    def _write_config(self, text):
+        self.native.write_text(text, encoding="utf-8")
+        self.native.chmod(0o600)
+
+    def _runtime(self, *, missing_key=False, key_file=None):
+        from integrations.hermes_runtime.secrets import Secrets
+        from integrations.hermes_runtime.constants import PINNED_UPSTREAM_SHA
+        from integrations.hermes_runtime.supervisor import ServiceRuntime
+        from integrations.hermes_runtime.tests._support import CENSUS
+        values = {
+            "HERMES_NATIVE_EGRESS_ROLE": self.profile.role,
+            "HERMES_NATIVE_HTTPS_PROXY": "http://127.0.0.2:18651",
+            "ZAI_API_KEY": "synthetic-sibling-provider-key-123456",
+            "HERMES_SLACK_BOT_TOKEN": "synthetic-slack-token-123456",
+            "MASTERMIND_EXECUTIVE_MCP_ACCESS_TOKEN": "synthetic-not-enrolled-exec-token",
+            "MASTERMIND_PAPER_MCP_PYTHON": "/not-an-enrolled-python",
+        }
+        if not missing_key:
+            values["BYTEPLUS_MODELARK_API_KEY"] = "synthetic-primary-provider-key-123456"
+        if key_file is not None:
+            from integrations.hermes_models.contract import native_provider
+            values[native_provider(self.profile.role, self.profile.native_provider_id).credential_file_env] = str(key_file)
+        secrets = Secrets("synthetic-gateway-token-123456", "hermes",
+                          "synthetic-dashboard-password-123456", values)
+        census = self.root / "census.txt"
+        catalog = plugin.exact_disarmed_catalog(self.profile, self.native.read_bytes())
+        self.assertIsNotNone(catalog)
+        census.write_text(CENSUS.read_text().rstrip() + "\n\nMCP servers:\n" + "".join(
+            "  " + name + "  [include only: " + ", ".join(names) + "]\n"
+            for name, names in catalog.items()), encoding="utf-8")
+        return ServiceRuntime(self.profile, secrets, self.stub,
+                              extra_child_env={"HERMES_STUB_TOOLS": str(census),
+                                               "HERMES_STUB_COMMIT": PINNED_UPSTREAM_SHA})
+
+    def test_current_install_owner_and_supervisor_agree_for_both_roles(self):
+        from dataclasses import replace
+        from integrations.hermes_harness.native_byok import expected_native_config
+        from integrations.hermes_runtime.supervisor import expected_disabled_mcp
+        for role in ("mmsecretary", "mmmeta"):
+            profile = replace(self.profile, role=role)
+            path = profile.hermes_home / "profiles" / role / "config.yaml"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(expected_native_config(profile), encoding="utf-8")
+            path.chmod(0o600)
+            self.assertEqual(expected_disabled_mcp(profile),
+                             plugin.exact_disarmed_catalog(profile, path.read_bytes()))
+
+    def test_disabled_catalog_preserves_only_original_primary_key_and_proxy(self):
+        runtime = self._runtime()
+        ambient = {"MASTERMIND_EXECUTIVE_MCP_ACCESS_TOKEN": "ambient-not-a-grant",
+                   "MASTERMIND_PAPER_MCP_SERVER": "/ambient/not-authorized.py"}
+        with mock.patch.dict(os.environ, ambient):
+            env = runtime._model_child_env()
+            registry_env = runtime._registry_env()
+        self.assertEqual(env["BYTEPLUS_MODELARK_API_KEY"], "synthetic-primary-provider-key-123456")
+        self.assertEqual(env["HTTPS_PROXY"], "http://127.0.0.2:18651")
+        for name in ("ZAI_API_KEY", "HERMES_GATEWAY_TOKEN", "HERMES_SLACK_BOT_TOKEN",
+                     "MASTERMIND_EXECUTIVE_MCP_ACCESS_TOKEN", "MASTERMIND_PAPER_MCP_SERVER",
+                     "MASTERMIND_PAPER_MCP_PYTHON"):
+            self.assertNotIn(name, env)
+            self.assertNotIn(name, registry_env)
+        self.assertNotIn("BYTEPLUS_MODELARK_API_KEY", registry_env)
+        runtime._check_registry()
+
+    def test_missing_key_refuses_before_any_child_or_registry_process(self):
+        runtime = self._runtime(missing_key=True)
+        with mock.patch("subprocess.run") as run, mock.patch("subprocess.Popen") as spawn:
+            with self.assertRaisesRegex(RuntimeRefusal, "NATIVE_MODEL_CREDENTIAL_UNAVAILABLE"):
+                runtime.start()
+        run.assert_not_called()
+        spawn.assert_not_called()
+        self.assertIsNone(runtime.gateway)
+
+    def test_config_drift_during_key_resolution_withholds_environment(self):
+        from integrations.hermes_harness import native_model_credential
+        runtime = self._runtime()
+        resolve = native_model_credential.primary_model_env
+        def drift(*args, **kwargs):
+            result = resolve(*args, **kwargs)
+            self.native.write_bytes(self.native.read_bytes() + b"# drift\n")
+            return result
+        with mock.patch.object(native_model_credential, "primary_model_env", side_effect=drift):
+            with self.assertRaisesRegex(RuntimeRefusal, "RUNTIME_NATIVE_CONFIG_DRIFT"):
+                runtime._model_child_env()
+
+    def test_config_permission_revocation_during_key_resolution_withholds_environment(self):
+        from integrations.hermes_harness import native_model_credential
+        runtime = self._runtime()
+        resolve = native_model_credential.primary_model_env
+        def revoke(*args, **kwargs):
+            result = resolve(*args, **kwargs)
+            self.native.chmod(0o644)
+            return result
+        with mock.patch.object(native_model_credential, "primary_model_env", side_effect=revoke):
+            with self.assertRaisesRegex(RuntimeRefusal, "RUNTIME_NATIVE_CONFIG_UNSAFE"):
+                runtime._model_child_env()
+
+    def test_consumer_mutation_during_key_resolution_withholds_environment(self):
+        from integrations.hermes_harness import native_model_credential
+        from integrations.hermes_harness.native_byok import expected_native_config
+        from integrations.hermes_harness.tests.test_native_executive_consumer import publication_document
+        runtime = self._runtime()
+        document = publication_document()
+        self._write_config(expected_native_config(self.profile, document))
+        resolve = native_model_credential.primary_model_env
+        def revoke(*args, **kwargs):
+            result = resolve(*args, **kwargs)
+            document["principal"]["subject_digest"] = "f" * 64
+            return result
+        with mock.patch.object(runtime, "_consumer_publication", return_value=document):
+            with mock.patch.object(native_model_credential, "primary_model_env", side_effect=revoke):
+                with self.assertRaisesRegex(RuntimeRefusal, "RUNTIME_NATIVE_CONFIG_DRIFT"):
+                    runtime._model_child_env()
+
+    def test_hardlink_symlink_and_enabled_catalog_refuse(self):
+        from integrations.hermes_runtime.supervisor import expected_disabled_mcp
+        original = self.native.read_bytes()
+        alias = self.root / "config-alias"
+        os.link(self.native, alias)
+        with self.assertRaisesRegex(RuntimeRefusal, "RUNTIME_NATIVE_CONFIG_UNSAFE"):
+            expected_disabled_mcp(self.profile)
+        alias.unlink()
+        self.native.rename(alias)
+        self.native.symlink_to(alias)
+        with self.assertRaisesRegex(RuntimeRefusal, "RUNTIME_NATIVE_CONFIG_SYMLINK"):
+            expected_disabled_mcp(self.profile)
+        self.native.unlink()
+        self._write_config(original.decode().replace("enabled: false", "enabled: true", 1))
+        with self.assertRaisesRegex(RuntimeRefusal, "RUNTIME_NATIVE_CONFIG_DRIFT"):
+            expected_disabled_mcp(self.profile)
+
+    def _wait(self, predicate, timeout=5):
+        import time
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(0.02)
+        self.fail("original local child did not reach expected state")
+
+    def test_start_and_restart_use_same_disabled_catalog_and_never_claim_mcp_connection(self):
+        runtime = self._runtime()
+        runtime.start()
+        self.addCleanup(runtime.stop)
+        self._wait(lambda: runtime.child_pid is not None and runtime.health_snapshot()[0] == 200)
+        first_pid = runtime.child_pid
+        self.assertEqual(set(runtime._expected_disabled_mcp()), {
+            "mastermind_steward", "mastermind_executive_v3", "mastermind_paper"})
+        os.kill(runtime.child_pid, signal.SIGKILL)
+        self._wait(lambda: runtime.child_pid not in (None, first_pid) and runtime.health_snapshot()[0] == 200)
+        self.assertGreaterEqual(runtime.restart_count, 1)
+        self.assertFalse(runtime.health_snapshot()[1]["provider_authenticated"])
+        self.assertFalse(runtime.health_snapshot()[1]["native_model_turn_verified"])
+
+    def test_restart_after_config_tamper_starts_no_replacement(self):
+        runtime = self._runtime()
+        runtime.start()
+        self.addCleanup(runtime.stop)
+        self._wait(lambda: runtime.child_pid is not None and runtime.health_snapshot()[0] == 200)
+        self._write_config(self.native.read_text().replace("paper_read", "paper_edit", 1))
+        os.kill(runtime.child_pid, signal.SIGKILL)
+        self._wait(lambda: runtime.failed)
+        self.assertEqual(runtime.child_starts, 1)
+        self.assertEqual(runtime.refusal_code, "RUNTIME_NATIVE_CONFIG_DRIFT")
+
+    def test_restart_after_primary_key_revocation_starts_no_replacement(self):
+        key_file = self.root / "primary-key"
+        key_file.write_text("synthetic-file-provider-key-123456", encoding="utf-8")
+        key_file.chmod(0o600)
+        runtime = self._runtime(key_file=key_file)
+        served = self.root / "served-count"
+        runtime.extra_child_env["HERMES_STUB_COUNT"] = str(served)
+        runtime.start()
+        self.addCleanup(runtime.stop)
+        self._wait(lambda: runtime.child_pid is not None and runtime.health_snapshot()[0] == 200)
+        key_file.unlink()
+        os.kill(runtime.child_pid, signal.SIGKILL)
+        self._wait(lambda: runtime.failed)
+        # child_starts counts attempts before environment qualification. The
+        # existing subprocess fixture records actual serve executions.
+        self.assertEqual(served.read_text(), "1")
+        self.assertIsNone(runtime.child_pid)
+        self.assertEqual(runtime.refusal_code, "NATIVE_MODEL_CREDENTIAL_UNAVAILABLE")
+
+    def test_legacy_exact_byok_keeps_original_key_without_catalog_upgrade(self):
+        from integrations.hermes_harness.native_byok import render_disarmed_native_byok
+        runtime = self._runtime()
+        self._write_config(render_disarmed_native_byok(self.profile))
+        self.assertEqual(set(runtime._expected_disabled_mcp()), {"mastermind_steward"})
+        self.assertIn("BYTEPLUS_MODELARK_API_KEY", runtime._model_child_env())
+
+    def test_selected_child_grant_is_preserved_and_cannot_fall_back(self):
+        from dataclasses import replace
+        from integrations.hermes_harness.native_byok import expected_native_config
+        from integrations.hermes_harness.tests.test_native_executive_consumer import publication_document
+        from integrations.hermes_runtime.supervisor import expected_disabled_mcp
+        document = publication_document()
+        with self.assertRaisesRegex(RuntimeRefusal, "NATIVE_CONSUMER_ROLE_MISMATCH"):
+            expected_native_config(replace(self.profile, role="mmmeta"), document)
+        config = expected_native_config(self.profile, document)
+        self._write_config(config)
+        parsed = _load_unique_yaml(config.encode())
+        self.assertEqual(parsed["plugins"]["entries"]["native_selected_child_plugin"]["mcp_allowlist"],
+                         ["mastermind_coo"])
+        self.assertIs(parsed["mcp_servers"]["mastermind_coo"]["enabled"], True)
+        self.assertEqual(parsed["mcp_servers"]["mastermind_coo"]["tools"]["include"], [])
+        for name in plugin.SERVER_NAMES:
+            self.assertIs(parsed["mcp_servers"][name]["enabled"], False)
+        self.assertEqual(expected_disabled_mcp(self.profile, document)["mastermind_coo"], ("(none)",))
+        with self.assertRaisesRegex(RuntimeRefusal, "RUNTIME_NATIVE_CONFIG_DRIFT"):
+            expected_disabled_mcp(self.profile, None)
+        self._write_config(expected_native_config(self.profile))
+        with self.assertRaisesRegex(RuntimeRefusal, "RUNTIME_NATIVE_CONFIG_DRIFT"):
+            expected_disabled_mcp(self.profile, document)
 
 
 if __name__ == "__main__":

@@ -107,3 +107,14 @@ describe("exact Executive native-session to Office context", () => {
     expect(qualifyExecutiveOfficeSession(true, selection, binding(forged)).sessionRef).toBeNull();
   });
 });
+
+it.each(["hermes_secretary", "hermes_meta"])("binds only the exact observed %s family to Office", kind => {
+  const ref = kind + ":" + "a".repeat(64);
+  const selected = {...selection, targetKind: kind};
+  const qualified = binding({currentTarget: ref, observation: {selection: selected, targetRef: ref}});
+  expect(qualifyExecutiveOfficeSession(true, selection, qualified).sessionRef).toBe(ref);
+  const other = kind === "hermes_meta" ? "hermes_secretary" : "hermes_meta";
+  expect(qualifyExecutiveOfficeSession(true, selection, binding({
+    currentTarget: ref, observation: {selection: {...selection, targetKind: other}, targetRef: ref},
+  })).sessionRef).toBeNull();
+});
