@@ -63,7 +63,7 @@ def main():
             "tests_run": result.testsRun, "failures": len(result.failures),
             "errors": len(result.errors), "skips": len(result.skipped),
             "blocked_external_connections": len(blocked), "live_provider_acceptance": False}, sort_keys=True))
-        return 0 if result.wasSuccessful() and result.testsRun == 54 and not result.skipped and not blocked else 1
+        return 0 if result.wasSuccessful() and result.testsRun == 66 and not result.skipped and not blocked else 1
 
 
 if __name__ == "__main__":

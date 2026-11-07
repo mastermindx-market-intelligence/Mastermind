@@ -279,6 +279,7 @@ SERVICE_ROLE_RECEIPT_SCHEMA = "native-go-service-enrollment-completed.v9"
 SERVICE_ROLE_PROFILES = {
     "hermes-secretary": ("hermes-secretary", "HERMES_SECRETARY_FABRIC_APPLICATION_TOKEN"),
     "hermes-meta-ceo": ("hermes-meta-ceo", "HERMES_META_FABRIC_APPLICATION_TOKEN"),
+    "hermes-attended": ("hermes-attended", "HERMES_ATTENDED_FABRIC_APPLICATION_TOKEN"),
 }
 SERVICE_SCOPE_FIELDS = frozenset({"principal_id", "caller_host", "native_host", "workload",
     "credential_ref", "capability_lane", "workload_profile", "account_profile"})
@@ -306,10 +307,13 @@ def validate_application_role_scope(scope):
     if type(profile) is not str or profile not in SERVICE_ROLE_PROFILES:
         raise ValueError("native application service profile refused")
     lane, credential_ref = SERVICE_ROLE_PROFILES[profile]
+    # Ordinary native conversations have their own inference-only workload.
+    # Preserve the historical secretary/meta-CEO mapping and original owners.
+    workload = "hermes_attended" if profile == "hermes-attended" else "site_interactive"
     if (scope.get("capability_lane") != lane or scope.get("principal_id") != lane
             or scope.get("credential_ref") != credential_ref
-            or scope.get("workload") != "site_interactive"
-            or scope.get("workload_profile") != "site_interactive"
+            or scope.get("workload") != workload
+            or scope.get("workload_profile") != workload
             or "admin_pool_view" in scope):
         raise ValueError("native application role mapping refused")
     return profile

@@ -1,0 +1,5 @@
+manifest_version: 1
+name: mastermind-fabric-gateway
+version: 0.1.0
+description: Bind original admitted Hermes gateway turns to the existing Capacity Fabric owner.
+author: MastermindX

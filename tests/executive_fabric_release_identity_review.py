@@ -83,9 +83,9 @@ REVIEWED_FILES = {
     },
     'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {
         # v9 keeps the original private account directory permission check.
-        "sha256": '88b335bcd6a6ebc33650b36387f4afab9c05a4c632dfff388c1a708be253d52c',
+        "sha256": 'eed37568f732d270ec420109601cd166fe23a8c07f714ac4f2a228504d3af320',
         "sites": (
-            (818, 60, 65, 'int', '0o700'),
+            (822, 60, 65, 'int', '0o700'),
         ),
     },
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
@@ -824,3 +824,21 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
            (183, 19, 22, 'int', '460'),
            (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
            (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}
+
+# Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
+# Full-source or token-site drift restores the ordinary identity guard.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py"
+] = {
+    "sha256": "8ff823832a3d429b619e596b9e031e300dd1689992ba72e5465e3f55088aa66b",
+    "sites": ((346, 37, 40, 'int', '409'),),
+}
+
+# Exact HTTPS port excluded by the disposable Chisel fixture.
+# This is not a general port exemption or permission to use a live listener.
+REVIEWED_FILES[
+    "integrations/hermes_application_fabric/qualification/qualify_chisel_protocol.py"
+] = {
+    "sha256": "66af1f5e2569d6f54d7313787e613cf933a301a36d12ebc2a34b48319a38961f",
+    "sites": ((27, 26, 29, "int", "443"),),
+}

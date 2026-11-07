@@ -1,0 +1,289 @@
+{
+  "before": "f61517ba40ff5cd8d7b597c29f6e188b6cf71641",
+  "decisions": [
+    "Preserve current adapter/native-owner source qualification and four exact historical carrier cohorts.",
+    "Port attended conversation parameterization; hosted current-owner12-case proof remains owed.",
+    "Retain the10-file Hermes2bd patch and its pre/postimage contract as unapplied source only.",
+    "Extend existing enrollment fixture with attended startup and three internally consistent foreign-role refusals; preserve historical PROFILES.",
+    "Remove duplicate broad AUTO execution, retain closed42-base JUnit inventory and separate227-case Metabolism gate.",
+    "Both paired checkouts include scripts and ops/launchd.",
+    "C3 source judgments found no admission, credential, retry, fixture identity or CI wiring bypass; these are not formal GitHub approval."
+  ],
+  "generated_manifests": {
+    "application": {
+      "files": 109,
+      "native_entry": "eed37568f732d270ec420109601cd166fe23a8c07f714ac4f2a228504d3af320",
+      "sha256": "70acd19f364cbf6056e2f35ba5e334e9135eb4e1f8d171e19b862bcee9a38c0c"
+    },
+    "default": {
+      "files": 107,
+      "native_entry": null,
+      "sha256": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
+    },
+    "http": {
+      "files": 112,
+      "native_entry": "eed37568f732d270ec420109601cd166fe23a8c07f714ac4f2a228504d3af320",
+      "sha256": "9cd9663bec9f14727dfea63cc928a446935e4b485f6847201f9c5bd5c401da4f"
+    }
+  },
+  "hermes_source_parent": "a4ab80d4aba948dce1b604356f7668594bbb3b12",
+  "installed": false,
+  "live_provider_acceptance": false,
+  "macro_owner": "d7b6ac402e359f68bee6c670ae975fc86e6ec868",
+  "measured_uptime_acceptance": false,
+  "monetary_acceptance": false,
+  "proofs": {
+    "attended_exact": {
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "--noconftest",
+        "-c",
+        "/dev/null",
+        "--rootdir",
+        "/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001",
+        "--basetemp",
+        "/private/tmp/mmx-hermes-attended-exact-kg0jrw9e/pytest",
+        "--junitxml",
+        "/private/tmp/mmx-hermes-attended-exact-kg0jrw9e/tests.xml",
+        "tests/test_hermes_primary_application_enrollment.py::test_role_uses_original_enrollment_once_and_actual_startup[hermes-attended]",
+        "tests/test_hermes_primary_application_enrollment.py::test_attended_scope_refuses_borrowed_role_before_original_intent"
+      ],
+      "installed": false,
+      "junit_sha256": "a4eda923d6142f059be83d528f7c2b09d6800168f450e4edff26d09b7b38ad7e",
+      "live_provider_acceptance": false,
+      "log": "/private/tmp/mmx-hermes-attended-exact-kg0jrw9e/tests.log",
+      "log_sha256": "b15fb44eb38c86ea88922bc03fa5e2b93070f12e478c3399296681e5ac2ff881",
+      "rc": 0,
+      "seconds": 24.3,
+      "source": {
+        "ops/native_fabric/quota_continuity/candidate/native_go_entry.py": "eed37568f732d270ec420109601cd166fe23a8c07f714ac4f2a228504d3af320",
+        "tests/test_hermes_primary_application_enrollment.py": "ec0ca7dd96e670c3ac2b6d454d15edca80ad18efe4469a1e22f85f9fe2e12525"
+      },
+      "source_unchanged": true,
+      "totals": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 4
+      }
+    },
+    "offline": {
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-B",
+        "integrations/hermes_application_fabric/qualification/qualify_offline.py",
+        "--owner-root",
+        "/Volumes/Mastermind/agent-workspaces/macro/web/metabolism-original-recovery-20261107-sol-001"
+      ],
+      "log": "/private/tmp/mmx-hermes-offline-join-01d39dm6/tests.log",
+      "log_sha256": "2fef0b144997c79561e16c05ab9355aa3b01c0b4d0210931349796d9a48fb5f2",
+      "rc": 0,
+      "result": {
+        "blocked_external_connections": 0,
+        "errors": 0,
+        "failures": 0,
+        "jsonschema": "4.26.0",
+        "live_provider_acceptance": false,
+        "mode": "offline-original-client-loopback-fixture",
+        "owner": "d7b6ac402e359f68bee6c670ae975fc86e6ec868",
+        "owner_client_sha256": "0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e",
+        "python": "3.14.7",
+        "skips": 0,
+        "tests_run": 66
+      },
+      "seconds": 1.04
+    },
+    "resolution": {
+      "files": {
+        ".github/workflows/hermes-application-inference.yml": {
+          "resolved_sha256": "4e16a0a9d0a444ac6aafbcac0f2531bfb6ffa0ee41f29a4b7e24d2a97d3ccd40"
+        },
+        "integrations/hermes_application_fabric/qualification/qualify_application_owner.py": {
+          "resolved_sha256": "8ff823832a3d429b619e596b9e031e300dd1689992ba72e5465e3f55088aa66b",
+          "reviewed_token": [
+            346,
+            37,
+            40,
+            "int",
+            "409"
+          ],
+          "sha256": "8ff823832a3d429b619e596b9e031e300dd1689992ba72e5465e3f55088aa66b"
+        },
+        "integrations/hermes_application_fabric/qualification/qualify_installed.py": {
+          "resolved_sha256": "74d997880905ec6ae1efe2e0ae1965c273deed8fa29cf8b920151b1e29365083"
+        },
+        "integrations/hermes_application_fabric/qualification/qualify_offline.py": {
+          "resolved_sha256": "460c066f0e6c80c108f9242589e417dcd69c322f32a47fd6dbf961b8b31ec0b1"
+        },
+        "ops/native_fabric/quota_continuity/candidate/native_go_entry.py": {
+          "reviewed_token": [
+            822,
+            60,
+            65,
+            "int",
+            "0o700"
+          ],
+          "sha256": "eed37568f732d270ec420109601cd166fe23a8c07f714ac4f2a228504d3af320"
+        },
+        "tests/executive_fabric_release_identity_review.py": {
+          "resolved_sha256": "2a026d117fa7c704515cd04c051dbd5f60467e55129296d3915a8397fcbc98ed"
+        }
+      },
+      "head": "f61517ba40ff5cd8d7b597c29f6e188b6cf71641",
+      "macro": "d7b6ac402e359f68bee6c670ae975fc86e6ec868",
+      "merge_head": "a4ab80d4aba948dce1b604356f7668594bbb3b12",
+      "partial_resolution_reconciled": true
+    },
+    "source_suites": {
+      "installed": false,
+      "live_provider_acceptance": false,
+      "runs": [
+        {
+          "command": [
+            "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+            "-B",
+            "-m",
+            "pytest",
+            "-q",
+            "--noconftest",
+            "-c",
+            "/dev/null",
+            "--rootdir",
+            "/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001",
+            "--basetemp",
+            "/private/tmp/mmx-hermes-joined-source-2nk06g4u/native-guard-tmp",
+            "--junitxml",
+            "/private/tmp/mmx-hermes-joined-source-2nk06g4u/native-guard.xml",
+            "tests/test_fabric_grok47_qwen_release_composition_20261022.py",
+            "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py"
+          ],
+          "junit_sha256": "18baf25b9da9e63fb1a952575f8b7acbac2d18d29d33cf55e633a2334a9c1a0b",
+          "log": "/private/tmp/mmx-hermes-joined-source-2nk06g4u/native-guard.log",
+          "log_sha256": "1d185aa4a9e3f836253b887c911fab892d073532415bd168e90339c59e481ec2",
+          "name": "native-guard",
+          "rc": 0,
+          "seconds": 9.81,
+          "totals": {
+            "errors": 0,
+            "failures": 0,
+            "skipped": 0,
+            "tests": 210
+          }
+        },
+        {
+          "command": [
+            "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+            "-B",
+            "-m",
+            "pytest",
+            "-q",
+            "--noconftest",
+            "-c",
+            "/dev/null",
+            "--rootdir",
+            "/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001",
+            "--basetemp",
+            "/private/tmp/mmx-hermes-joined-source-2nk06g4u/attended-enrollment-tmp",
+            "--junitxml",
+            "/private/tmp/mmx-hermes-joined-source-2nk06g4u/attended-enrollment.xml",
+            "tests/test_hermes_primary_application_enrollment.py::test_role_uses_original_enrollment_once_and_actual_startup",
+            "tests/test_hermes_primary_application_enrollment.py::test_attended_scope_refuses_borrowed_role_before_original_intent"
+          ],
+          "junit_sha256": "c790a5c66344d6cfdf1ed650e95ce516284b19b09a395526c6ec8b0d25b0bef9",
+          "log": "/private/tmp/mmx-hermes-joined-source-2nk06g4u/attended-enrollment.log",
+          "log_sha256": "2b4e57d08d9a6e1e79efbfab54ca28f61c54083724ff13c8b9bad32b86c05855",
+          "name": "attended-enrollment",
+          "rc": 0,
+          "seconds": 47.5,
+          "totals": {
+            "errors": 0,
+            "failures": 0,
+            "skipped": 0,
+            "tests": 6
+          }
+        },
+        {
+          "command": [
+            "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+            "-B",
+            "-m",
+            "pytest",
+            "-q",
+            "--noconftest",
+            "-c",
+            "/dev/null",
+            "--rootdir",
+            "/Volumes/Mastermind/agent-workspaces/web/fabric-app-admission-compose-20261107-sol-001",
+            "--basetemp",
+            "/private/tmp/mmx-hermes-joined-source-2nk06g4u/exact-source-identity-tmp",
+            "--junitxml",
+            "/private/tmp/mmx-hermes-joined-source-2nk06g4u/exact-source-identity.xml",
+            "tests/test_executive_fabric_release_identity_review.py",
+            "-k",
+            "only_exact_reviewed_file_and_spelling_qualifies or changed_or_extended_file_cannot_reuse_review"
+          ],
+          "junit_sha256": "d119e00c569ef64e75a856b393ab125b03e756210ddbe0f0b9fb13de9f33fe56",
+          "log": "/private/tmp/mmx-hermes-joined-source-2nk06g4u/exact-source-identity.log",
+          "log_sha256": "c979601cdb3d9430d6db4bbc34d6ce8e2fb8d932a89ff628e493be70344fda30",
+          "name": "exact-source-identity",
+          "rc": 0,
+          "seconds": 23.18,
+          "totals": {
+            "errors": 0,
+            "failures": 0,
+            "skipped": 0,
+            "tests": 170
+          }
+        }
+      ],
+      "source": {
+        ".github/workflows/ci.yml": "2413aa2f746c9a1dd160bfbd8aa34e4d2d569c8c87bbed18ea8323527eda5b2a",
+        ".github/workflows/hermes-application-inference.yml": "4e16a0a9d0a444ac6aafbcac0f2531bfb6ffa0ee41f29a4b7e24d2a97d3ccd40",
+        "ops/native_fabric/quota_continuity/candidate/native_go_entry.py": "eed37568f732d270ec420109601cd166fe23a8c07f714ac4f2a228504d3af320",
+        "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "3b804a82cce51a1c222dfd0c89154805a5065f48515bb6cf49c209ffda9301c2",
+        "tests/executive_fabric_release_identity_review.py": "2a026d117fa7c704515cd04c051dbd5f60467e55129296d3915a8397fcbc98ed",
+        "tests/test_hermes_primary_application_enrollment.py": "7852bfa42028f22ce61a96f0360fa087f49e4c9793cf50e175314631a7e0de83"
+      },
+      "source_unchanged": true
+    }
+  },
+  "qualification_notes": [
+    "Initial6 enrollment cases passed, then the4 new attended cases were strengthened with exact published-entry identity and independent refusal premises and passed again.",
+    "170 exact-source identity cases and210 native guard/stage cases passed on the current changed native entry.",
+    "Offline66 cases passed with jsonschema4.26.0 and Macro d7b client bytes."
+  ],
+  "schema": "mastermind.hermes_attended_current_source_composition.v1",
+  "source": {
+    ".github/workflows/hermes-application-inference.yml": "4e16a0a9d0a444ac6aafbcac0f2531bfb6ffa0ee41f29a4b7e24d2a97d3ccd40",
+    "integrations/hermes_application_fabric/ATTENDED_INTEGRATION.md": "842c266222a80759cff1e2784347cf135e73db98562c254695340393d4bbbc8c",
+    "integrations/hermes_application_fabric/ENROLLMENT_CONTRACT.md": "92557f310c68f57157a85aa0b160d658c499001010695298e99f251aaab48292",
+    "integrations/hermes_application_fabric/GATEWAY_COMPOSITION.md": "cf1e947e24ad79d43a060b700e3483a060aa539d74e3baf08306faad78a1e728",
+    "integrations/hermes_application_fabric/README.md": "e37500905b9f5e2912045cde13c3a2264463a035c40b73d90f7bb6738a7f8d2b",
+    "integrations/hermes_application_fabric/RELEASE_INPUTS.md": "19e373e6064c4df03cd9c14a933566c3d1cdcae23684908f10610c7b56eb9430",
+    "integrations/hermes_application_fabric/attended_host.py": "8afe89f852e015f0ef868cbd13cfaa08d30f70846ff0d2fbf99ff463d654b56a",
+    "integrations/hermes_application_fabric/client.py": "9b0fc0441e2ed5360253a2a320e1a8376fef9709c9f6a3caf7eb91912b6cf500",
+    "integrations/hermes_application_fabric/gateway_plugin.py": "569c904b55c9cc43aaa03119594f240ee19a204e87f712965ed415008b0a0c13",
+    "integrations/hermes_application_fabric/gateway_plugin_entry/__init__.py": "0405a5846e7a03e9a82674fa3348c881d3a2a0e558696b60598ce3bce13779bb",
+    "integrations/hermes_application_fabric/gateway_plugin_entry/plugin.yaml": "7428da6a3f3ba672d93f4c77f57cc44ca5110472b7fb51272446a92b0bedaaa3",
+    "integrations/hermes_application_fabric/hermes_core/hermes-2bd378ed-host-bound.json": "a8e8278f78c5154fe33d95739a25c8055c97aaa7bd86992928b60cb6ef2cb056",
+    "integrations/hermes_application_fabric/hermes_core/hermes-2bd378ed-host-bound.patch": "0029f3c8cba4ad16a66f47af20a9efb6186eb1745db2d2436c2eeaa9218c61ba",
+    "integrations/hermes_application_fabric/native.py": "b37dfdf747bd6fc2a17c46bcbed55eaf026f946d1e87c95755de0bdfcec63b15",
+    "integrations/hermes_application_fabric/qualification/attended_composition_offline_receipt.json": "54ca1d98ea6af3e3b08d78931fadec4d8a76771572fbe5d69bf9bfbd3dec2f17",
+    "integrations/hermes_application_fabric/qualification/attended_native_receipt.json": "7f4346ce31b19fc171f4f25fba7b4c084f08c1de957d1e856deda0cfb15a762f",
+    "integrations/hermes_application_fabric/qualification/gateway_native_receipt.json": "c7895552518269dd234853a8c59a86b97abc4ba5579a47a1c43da3b55fb57837",
+    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py": "8ff823832a3d429b619e596b9e031e300dd1689992ba72e5465e3f55088aa66b",
+    "integrations/hermes_application_fabric/qualification/qualify_gateway.py": "940cc8944b2537a3477aaf3b39492b067db8810ed6d4ca0ad1776b1898111a10",
+    "integrations/hermes_application_fabric/qualification/qualify_installed.py": "74d997880905ec6ae1efe2e0ae1965c273deed8fa29cf8b920151b1e29365083",
+    "integrations/hermes_application_fabric/qualification/qualify_offline.py": "460c066f0e6c80c108f9242589e417dcd69c322f32a47fd6dbf961b8b31ec0b1",
+    "integrations/hermes_application_fabric/qualification/test_attended_native.py": "728297578397b9090cba2d5d0a819655cc97c10b2247cd511ac2dcff6daaf025",
+    "integrations/hermes_application_fabric/qualification/test_gateway_bound.py": "567242182e2799412baff42f5b0262c0069ddc8784f9f98c0c25f6d9a335ed06",
+    "integrations/hermes_application_fabric/tests/test_attended_host.py": "160a120d0bd4a0e65699b7d936d0f0dc3ce85f44e103fa761f221733ea16535f",
+    "ops/native_fabric/quota_continuity/candidate/native_go_entry.py": "eed37568f732d270ec420109601cd166fe23a8c07f714ac4f2a228504d3af320",
+    "tests/executive_fabric_release_identity_review.py": "2a026d117fa7c704515cd04c051dbd5f60467e55129296d3915a8397fcbc98ed",
+    "tests/test_hermes_primary_application_enrollment.py": "ec0ca7dd96e670c3ac2b6d454d15edca80ad18efe4469a1e22f85f9fe2e12525"
+  }
+}
