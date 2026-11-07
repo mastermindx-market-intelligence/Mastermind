@@ -531,17 +531,20 @@ merge, runner activation or product acceptance is claimed.
 
 | Carrier | Exact source or evidence | Observed outcome and remaining gate |
 | --- | --- | --- |
-| [Mastermind #2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065) | Current head **7a49a75341fbccf7cf3dc4898156718e21fcf38c**; capacity/qualification head `1b02680617008bd617a5d9be6da09a80b5a54cbf`; integrated native checkout `a91c52581a28434312013be584a03c767807df7d` | Original branch retained. Native [run 42353265679](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42353265679) completed **FAILURE** in about 25m30s: source qualification and five shards passed; shard 4 found the original-turn finalization race repaired in the newer source. Final-head [required CI 42355985590](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42355985590) and [shadow 42355985472](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42355985472) were observed pending. The 1b shadow was cancelled after superseding source. No queue or merge request issued. |
+| [Mastermind #2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065) | Current published head **b4406a06d553c1d210d5f5f466290961b5029ee9**, tree `c0c290323c21daf922291961cef89497afc2b865`; precollection implementation `19cb8b1599e7daa74d35f52eed20c87b5d3db2d2` | Green baseline 7a passed [required 42355985590](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42355985590) in **18m12s** and [shadow 42355985472](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42355985472). New [required 42360062449](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42360062449) finished **FAILURE in 18m03s**, solely from an old command-string expectation in `test_paid_initializer.py`; all 24 child completions were valid, all old module case counts matched, five shards and source qualification passed. The one-line contract repair has passed locally but is not yet published. New shadow 42360062169 was last observed running. Release HOLD remains; no queue or merge request. |
 | [Terminal #1297](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1297) | `689757a5fecab76bac601efbef9178f8115ae01e`; [run 42344305342](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42344305342) | **SUCCESS** across the full native matrix and required aggregate, approximately **64m13s**. This qualifies its scope composition, not fast CI. The integration's explicit 403 on branch-protection access blocks release-rule verification; no alternate carrier or queue request was used. |
-| [Macro #10825](https://github.com/mastermindx-market-intelligence/macro/pull/10825) | Continuity seed `d49837ea333bfef114466139d410ee217ed1c999`; existing `WS-CI-MERGE-CONTROL-PLANE` | Agent OS validation passed and exact source readback matched. `ci-gate`, all three packs and main authority succeeded; the distinct merge-queue-pilot authority context failed. Macro branch-protection verification also returned an explicit 403. No label, queue, approval or merge was requested. |
-| [Mastermind #2191](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2191) | This architecture carrier; previous checkpoint `e27af89163dbc1e255122b31501d733f167d5197` | Source-backed master plan, current evidence and staged execution contract. Its native required CI is red; job 128336049875 at the previous checkpoint confirms the same protected-base realm pin mismatch that #2065 repairs. Normal required checks and integration remain owed. |
+| [Macro #10825](https://github.com/mastermindx-market-intelligence/macro/pull/10825) | Accepted merge `efdf3577bb35607bb02a4a0a1900adb91a3784c6`, observed at 08:42:15Z; preceding source `d49837ea333bfef114466139d410ee217ed1c999` | **MERGED by the existing delivery process.** Preserve as accepted work. The session did not issue its merge, label or queue action and will not reuse its completed branch. |
+| [Macro #10827](https://github.com/mastermindx-market-intelligence/macro/pull/10827) | Additional continuity delta `0d110e969bac8347cf7a1e966d0b83581b6aeacf`, workstream blob `64ba16ac82005239c4e02181e615e54296f7ca30` | Fresh registered follow-up from accepted `efdf3577…`; published and byte-verified. Agent OS validation: **0 errors**, 193 existing warnings, 2,205 records. Changes only the existing workstream pointer/delta. The older unpublished local commit remains separately preserved. Branch-protection GET 403 still blocks this session’s release verification. |
+| [Mastermind #2191](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2191) | This architecture carrier; previous checkpoint `10c875b875cc69b19c60d9468ab71de035ea131b` | Source-backed master plan, measured experiments and staged execution contract. Earlier checkpoint job 128336049875 failed the then-current realm pin; protected master has since corrected the consumed historical input. Fresh checks and normal integration remain owed. |
 
 The protected procedure pin `615146aac6a1b0c0933bc9b815517a2fd285ed4a` remains
-compatible through current protected master `5199647e89166d163392905574097b2cfa16ca5b`.
+compatible through protected master `064a08b2c6360ece12999f1d7f2d712062ea0636`.
 The bounded comparison found no change in AGENTS, sol_skills, session review,
 delivery workflow or active-execution law, or the owned CI/capacity/gateway paths.
-The final protected ref was read again and still matched. No ancestry-only merge
-was performed merely to move the source revision.
+Three later accepted commits changed product/COO/workspace code and corrected the
+Brain fixture’s source input. A real conflict in that fixture blocked natural PR
+CI, so the existing branch integrated the exact accepted base. All eight
+precollection implementation blobs remained unchanged through that merge.
 
 An explicit [Release HOLD on #2065](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2065#issuecomment-6704040875)
 requires the gateway successor failure to be diagnosed/repaired and fresh native
@@ -699,15 +702,24 @@ production identity/ACL checks or declare the Release HOLD cleared from a rerun.
 Consume bounded context from any subsequent real failure and reproduce the actual
 mechanism before a fixture-isolation repair is accepted.
 
-**Explicit realm pin.** Accepted protected #1824 changed live realm blob
-`eeea4c0fafc7e6df5c534c731cb6046bbe4d3f37` to
-`a51e2bce8d9bb312107f975d503abd6541bd5000`. The integration fixture's single live
-`REALM_PINS` entry was advanced deliberately; exact Git hash verification and
-historical A/B preimages remain fixed. Current Brain composition passed 23 tests
-against paired Macro `f0375acf4ba076718e7cb420ed28ab61fb0a4f26`; 16 commercial realm
-tests passed. A different installed Codex-binary digest remained a real local
-refusal; no host binary/configuration/assertion was altered. Native qualification
-now passes this composition. Impact planning must model explicit source-pin edges.
+**Consumed realm input and protected integration.** The earlier 7a source advanced
+its extra live realm pin after protected #1824 changed that live module. That
+composition passed 23 paired tests and later native qualification; the historical
+preimages remained fixed. Protected master `064a08b2…` then corrected the fixture
+contract itself: `application_http_sources()` actually selects the retained
+`source/codex_provider_realm.py.preimage`, not the current realm file.
+
+The b440 merge adopts the [accepted translation fixture](https://github.com/mastermindx-market-intelligence/Mastermind/blob/064a08b2c6360ece12999f1d7f2d712062ea0636/tests/integration/test_fabric_translation_composition.py)
+verbatim, blob `b3e00e1c3d507dc276f0f24d40e0665448f1e18a`. It pins historical
+realm blob `eeea4c0fafc7e6df5c534c731cb6046bbe4d3f37`, retains the live protocol
+and filesystem pins, and removes the superseded live-realm pin/comment. The
+[builder](https://github.com/mastermindx-market-intelligence/Mastermind/blob/064a08b2c6360ece12999f1d7f2d712062ea0636/ops/native_fabric/quota_continuity/rollout/build_review_stage.py)
+refuses missing, symlinked or nonregular selected inputs; the projection verifies
+exact SHA-1 and SHA-256. No fallback to a different live input was introduced.
+All **23 enabled paired translation cases passed** on the resolved tree with exact
+Macro `f0375acf4ba076718e7cb420ed28ab61fb0a4f26`. The earlier installed Codex-binary
+digest refusal remains a distinct real local limitation, not a changed assertion.
+Impact planning must distinguish retained evidence inputs from current runtime code.
 
 The earlier CLI metadata repair changes only eleven parametrized IDs; the
 131,073-byte input and assertions are unchanged. All 99 tests passed locally;
@@ -800,13 +812,36 @@ ideal balancing, or roughly 54% less service work at 24. Neither is already
 qualified. The next experiment keeps capacity fixed so the collection effect can
 be measured before choosing the eventual work-reduction/capacity combination.
 
-### Next implementation: partition before collection, inside existing owners
+### Implemented precollection candidate, inside existing owners
 
-**Decision:** qualify independent prepartitioned pytest children before expanding
-the Actions matrix. Extend `ci_pytest.run_shards`, the existing guard and fixed
-diagnostics. Preserve six outer jobs, four actual child processes and the canonical
-root conftest/whole-module semantics. Keep native custody's separate eleven-file
-xdist lane unchanged during this experiment.
+**Implemented:** [19cb8b1](https://github.com/mastermindx-market-intelligence/Mastermind/commit/19cb8b1599e7daa74d35f52eed20c87b5d3db2d2),
+then integrated as [b4406a0](https://github.com/mastermindx-market-intelligence/Mastermind/commit/b4406a06d553c1d210d5f5f466290961b5029ee9).
+The existing runner now starts four serial children after dividing the outer
+selection. Its fixed new inner hash domain avoids the parity trap of applying
+`hash % 4` to a `hash % 6` selection. The six outer jobs, selected module policy,
+source qualification, final aggregate and separate native-custody xdist lane remain.
+
+Private child caches/diagnostics, exact process/module/case completion receipts,
+FIFO and replacement refusal, nested-pytest isolation, descendant cleanup and
+controller-exception drain are implemented. Only the four existing diagnostic
+JSON leaves are uploaded; raw completion receipts stay private. **37 new Linux
+cases passed**, followed by **710 host cases**. A real serial-shadow parser failure
+was reproduced and fixed by preserving its old plan record; **386 compatibility
+cases passed** afterward, overlapping the earlier suite. These are focused receipts,
+not a claim of 1,096 unique cases or native performance acceptance.
+
+The integrated source discovers **2,293 modules, zero exclusions**. The original
+implementation preserved all 2,284 old modules’ outer placement; accepted base
+changes explain the later inventory increase. The first native trial completed
+**2,287 runtime modules / 69,329 case occurrences**. All 2,283 old runtime modules
+remain with identical case counts. The 130 added cases are exactly 37 new
+precollection cases plus 79/8/6 cases in three accepted-base modules. The same six
+import-gated modules have no runtime record. All 24 children produced valid complete
+receipts. One old workflow-command expectation failed honestly; its focused repair
+retains every H1 custody/aggregate assertion. Exact parameter/mark equivalence and
+natural integration/reuse acceptance remain separate proof obligations.
+
+The implementation and its next qualification retain this contract:
 
 1. **Independent inner placement.** Preserve outer membership. Derive inner buckets
    from an explicit new hash domain or independent digest bits. Do not run the
@@ -836,18 +871,105 @@ xdist lane unchanged during this experiment.
    xdist topology at the same owner if the qualification fails. This is source
    rollback, not a retry/queue/authority service.
 
+### What the first precollection trial actually changed
+
+The [green 7a baseline](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42355985590)
+checked event-source merge **`c66cd096af7dcdf2652ff0b57b4009453810eec9`**. Its first
+checkout, `edd30b4686d3aaf358b4ca6ebd9485b04d15751d`, is the immutable corpus
+anchor and must not be mislabeled the integrated candidate. The b440 trial checked
+**`5d79f75a2d896bfcd26b32c1936adc754c01da1b`**. The rows below use only canonical
+step records after the exact command boundary; supplementary H1 work is excluded.
+
+| Shard | 7a startup/collection | b440 startup/collection | 7a test step | b440 test step | b440 result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 0 | 229.386s | 114.654s | 722s | 902s | Pass |
+| 1 | 172.225s | 65.874s | 587s | 589s | Pass |
+| 2 | 378.078s | 99.532s | 793s | 457s | Pass |
+| 3 | 261.523s | 66.273s | 850s | 684s | Pass |
+| 4 | 200.767s | 97.863s | 590s | 653s | Pass |
+| 5 | 277.888s | 80.375s | 781s | 622s | Old command expectation failed |
+
+Collection improved substantially, but the final required verdict moved only from
+**18m12s green to 18m03s red**. This is not an accepted whole-pack speedup. Static
+inner placement and changing service costs left shard 0 with a **786.683s execution
+tail**; its whole job took 968s. Source qualification took 582s in this trial and was
+off the critical path. The reported service sum changed from **9,829.741s** to
+**10,576.166s** under different grouping/load. Wall service is not a conserved CPU
+quantity. The largest trend module moved from 317.808s to 146.577s without a source
+change, illustrating why one noisy duration is insufficient calibration.
+
+**Next decision:** repair the exact command expectation, then evaluate a small
+explicit inner-placement map using conservative weights from both observed runs.
+Keep the six outer memberships, four-process limit and low-cost hash placements.
+A map must improve the modeled slowest child across both observations, preserve
+complete selection and remain stable for unrelated new modules. The next natural
+run must establish actual critical-path benefit; no model result is acceptance.
+If the apparent balance improvement fails under native load, retain the incumbent
+rollback path instead of increasing the worker budget reflexively.
+
+The separately reviewed two-job qualification split remains a ready later slice:
+move the entire native-custody step, unchanged, into its own qualification job with
+the same verified bootstrap. The remaining private HTTP, closed transport and Brain
+checks consume source/private fixtures rather than outputs of that native step.
+This adds one job and extra setup/concurrency. It requires the aggregate to account
+for both qualifications and the exact postmerge job inventory to advance from ten
+to eleven. Both qualifications still run when pytest is reused. **Do not implement
+it as the next latency claim while canonical pytest remains the measured bottleneck.**
+
+### Bounded Terminal runtime work independent of held delivery
+
+The [latest full green run](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42344305342)
+reinforces the earlier bottleneck: mobile-2 spent **3,308 of 3,352 job seconds** in
+Playwright. Its selection was 483 cases: 368 passed, 115 skipped, one worker.
+Fourteen route warmups took 12 seconds. News Flow reported 6.2 minutes and Options
+Companion 5.7 minutes. The unit job separately spent 549s capturing current-source
+evidence and 286s in Vitest. Its capture receipt binds integrated checkout
+`7328c5ce6193d8aa59943304c0d4ebb822146011` and source head `689757a5…`.
+The browser artifact contains images, not per-attempt timing data; do not invent a
+phase attribution from screenshots or timeout ceilings.
+
+The [News spec](https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/b0bda003b7abdc13364c18d342f8752455ea1627/terminal/e2e/news-flow-responsive.spec.ts)
+loads Terminal in its private `prepare()` helper and immediately reloads it in
+`setPresentation()` before any product assertion. Locale can instead be installed
+before one initial navigation while retaining routes, watchlist-cookie isolation,
+EventSource behavior, readiness/language/theme checks, interactions and crops.
+Its blob `182bf5eb7b059631420f9b02b9b3f2a050800745` is identical in the held #1223
+published source, its known unpublished tree and green #1297. No #1223 topology,
+tracing, timing or shared-fixture patch is being duplicated.
+
+Registered operation **`ci-lightning-terminal-news-20261107-c2`** starts from
+protected Terminal `b0bda003b7abdc13364c18d342f8752455ea1627`. Baseline measurement
+has started in that original workspace with one worker, zero diagnostic retries,
+private loopback port and the existing dev-fixture profile. No candidate speedup
+or application change is yet claimed. Compare identical project/title/parameter
+inventories, real journeys and named crops; then consume actual hosted CI. Options
+Companion’s later reloads prove changed archive/session/build states and must remain.
+
 ### Remaining cross-repository execution order
 
 | Ready or held lane | Next concrete action | Completion proof / blocker |
 | --- | --- | --- |
-| Mastermind source qualification | Consume the new exact-head required/shadow runs; repair only concrete failures; diagnose the held gateway cause using retained evidence | Six shards, all source qualifications, strict aggregate and owed native integration proof; Release HOLD remains binding |
-| Mastermind collection | Implement the above four-child partition in existing owners, then native fixed-budget qualification | Exact case and terminal proof, failure injection, measured collection and final-gate reduction |
-| Mastermind remaining work | After collection, split independent qualification and remaining long modules; recalibrate current weights | Advance current aggregate/postmerge shape deliberately; no unmeasured matrix expansion |
-| Terminal scope | Preserve green #1297 and its full selector/fanin repair | Release-rule verification is blocked by explicit integration 403; no cross-carrier replay |
-| Terminal performance | Reconcile #1223's original uncertain create-commit; then consume its already-authored weighted topology, Node discovery and attempt timing; profile capture/runtime separately | Do not duplicate/rehome the unpublished candidate. No global warmup or production-build parity is yet proven |
-| Macro integration | Preserve **#10755 already merged (cap 640) + #10674 held → #10745 → #10735**; reconcile overlapping FIF/worker/compaction source under existing owners | Original #10674 operation26751 remains EFFECT_UNKNOWN; #10656 remains held and main admission OFF. Branch-rule verification 403 blocks this session's release path |
-| Source continuity | Update this architecture and #10825's existing workstream pointer at material milestones | Readback and Agent OS validation; actual handoff only at a genuine continuity boundary |
-| Program acceptance | Measure successive eligible natural cohorts per risk class and cold/warm mix | At least 30 initial observations/class, preserved failures/fallback/cancellation and original product journeys; all target p95 values remain unproved |
+| Mastermind source qualification | Publish the narrowly verified command expectation with the next interpretable candidate; consume shadow and subsequent exact-head runs | All selected work, source qualifications, strict aggregate and owed integration proof; gateway Release HOLD remains binding |
+| Mastermind collection/placement | Use both current native profiles to qualify bounded heavy-module inner placement at unchanged capacity | Case conservation, valid child receipts, less collection and a shorter actual final-gate path; no overall speed acceptance yet |
+| Mastermind qualification chain | Preserve the concrete native-custody extraction design, aggregate and eleven-job proof contract | Take it when the native critical path makes its added setup/concurrency worthwhile |
+| Terminal scope | Preserve green #1297 and its selector/fanin repair | Release-rule verification is blocked by explicit integration 403; no alternate lookup |
+| Terminal News runtime | Complete the owned single-navigation A/B and full affected responsive proof | Existing spec is outside #1223’s changed source; preserve all product journeys and evidence images |
+| Terminal held topology | Preserve #1223’s original uncertain create-commit, authored 7/5/5 placement, Node discovery, trace and attempt-timing work | Reconcile that original effect before any further publication; independent profiling need not wait |
+| Macro integration | Preserve **#10755 already merged (cap 640) + #10674 held → #10745 → #10735** | Original #10674 operation26751 remains EFFECT_UNKNOWN; #10656 remains held and main admission OFF. Rule-read 403 blocks this session’s release path |
+| Macro duration truth | Reconcile the observed 69-minute pack with current per-command artifacts and #10788’s proposed three-way split | Its 537/555/538s weights are scaled local estimates, not current hosted observations; retain exact selected-job coverage and existing owner |
+| Source continuity | Update #2191 and the fresh #10827 follow-up at material milestones | Exact readback, Agent OS validation and preserved accepted #10825; actual handoff only at a real continuity boundary |
+| Program acceptance | Measure successive eligible natural cohorts per risk class and cold/warm mix | At least 30 initial observations/class, failures/fallback/cancellation and original journeys included; all final p95 targets remain unproved |
+
+**Named reuse acceptance pilot:** the existing Mastermind `ci_postmerge_proof`
+consumer, on the exact tested merge SHA followed by its protected push. Qualify the
+current ten-job shape (or the deliberately advanced eleven-job shape) through that
+real path. Wrong source/actor/workflow/attempt, stale evidence, missing/duplicate
+jobs or steps, and unknown results must execute the full selected pytest work.
+Source qualifications still execute. This completes the modified incumbent
+consumer’s acceptance before proposing broader cross-revision result reuse. A
+future semantic reuse candidate needs its own named logical task, transitive input
+closure, trusted producer and conservative miss proof; it is not a prerequisite
+for the current collection, runtime or calibration repairs.
 
 The release holds and access denials block their specific lanes, not source analysis
 or authorized repairs elsewhere. No message, queued CI, successful job or source PR
