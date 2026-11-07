@@ -1094,5 +1094,53 @@ class UnqualifiedJoinTest(unittest.TestCase):
             self.assertEqual(caught.exception.code, "invalid_application_grant")
 
 
+
+class QwenPlaintextControlTests(DriverFixture):
+    def payload(self, **changes):
+        return dict(model="qwen3.8-flash", messages=[{"role": "system", "content": "Be exact."},
+            {"role": "user", "content": "Question /no_think"}], max_tokens=128, stream=False,
+            temperature=0, reasoning_effort="none", **changes)
+
+    def test_exact_pair_is_in_wire_and_both_original_commitments(self):
+        logical = self.payload()
+        compiled = self.bailian.prepare_request(logical)
+        wire = json.loads(compiled.wire_body)
+        self.assertEqual((wire["temperature"], wire["reasoning"], wire["stream"]), (0, {"effort": "none"}, False))
+        self.assertEqual((wire["model"], wire["max_output_tokens"]), ("qwen3.8-flash", 128))
+        self.assertIn("/no_think", json.dumps(wire["input"]))
+        self.assertEqual(compiled.logical_payload_digest,
+            hashlib.sha256(transports._canonical(logical)).hexdigest())
+        self.assertEqual(compiled.wire_body_digest, hashlib.sha256(compiled.wire_body).hexdigest())
+        plain = {key: value for key, value in logical.items() if key not in {"temperature", "reasoning_effort"}}
+        baseline = self.bailian.prepare_request(plain)
+        self.assertNotEqual(compiled.logical_payload_digest, baseline.logical_payload_digest)
+        self.assertNotEqual(compiled.wire_body_digest, baseline.wire_body_digest)
+        self.assertEqual(self.spy.requests, [])
+
+    def test_partial_mistyped_wrong_model_tool_and_history_forms_refuse(self):
+        logical = self.payload()
+        variants = [{key: value for key, value in logical.items() if key != omitted}
+                    for omitted in ("temperature", "reasoning_effort", "stream", "max_tokens")]
+        variants += [dict(logical, **change) for change in (
+            {"temperature": False}, {"temperature": "0"}, {"temperature": 1}, {"reasoning_effort": None},
+            {"reasoning_effort": "low"}, {"model": "qwen3.8-max"}, {"stream": True},
+            {"tools": []}, {"tool_choice": "none"}, {"stop": []},
+            {"messages": [{"role": "assistant", "content": "answer"}]},
+            {"messages": [{"role": "user", "content": [{"type": "text", "text": "question"}]}]},
+        )]
+        for value in variants:
+            with self.subTest(value=value), self.assertRaises(TransportRefused):
+                self.bailian.prepare_request(value)
+        self.assertEqual(self.spy.requests, [])
+
+    def test_minimax_does_not_inherit_any_new_control(self):
+        value = dict(self.payload(), model="MiniMax-M3")
+        for supplied in (value, {k: v for k, v in value.items() if k != "reasoning_effort"},
+                         {k: v for k, v in value.items() if k != "temperature"}):
+            with self.assertRaises(TransportRefused):
+                self.minimax.prepare_request(supplied)
+        self.assertEqual(self.spy.requests, [])
+
+
 if __name__ == "__main__":
     unittest.main()
