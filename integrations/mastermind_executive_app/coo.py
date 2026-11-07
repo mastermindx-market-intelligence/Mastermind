@@ -60,6 +60,9 @@ class CooAppSettings:
     selected_child_target: ExecutiveSelectedChildTarget | None = None
     # Explicit installed Web-CEO v3 host composition, never a request field.
     public_mcp: bool = False
+    # Optional same-owner projections; absence preserves the v1 constructor.
+    catalogue_provider: Callable[..., str] | None = None
+    agentos_context_provider: Callable[..., Mapping[str, Any]] | None = None
 
     def __post_init__(self):
         policy = validate_resource_policy(self.policy)
@@ -78,6 +81,9 @@ class CooAppSettings:
             raise ValueError("COO must share the Executive resource and JWKS, with distinct exact scopes")
         if not all(callable(x) for x in (self.load_binding, self.authority_provider, self.mission_provider)):
             raise ValueError("COO requires explicit installed binding and canonical fact providers")
+        if any(value is not None and not callable(value) for value in
+               (self.catalogue_provider, self.agentos_context_provider)):
+            raise ValueError("COO context requires explicit installed providers")
         if (self.selected_child_target is not None
                 and type(self.selected_child_target) is not ExecutiveSelectedChildTarget):
             raise ValueError("COO requires the exact frozen selected-child target")
@@ -124,6 +130,9 @@ class CooApp:
         if type(settings) is not CooAppSettings or not callable(getattr(audit_sink, "emit", None)):
             raise ValueError("exact COO settings and existing audit sink required")
         self.settings = settings
+        self._context_settings = settings
+        self._context_callbacks = (settings.load_binding, settings.authority_provider,
+                                   settings.catalogue_provider, settings.agentos_context_provider)
         self._policy = validate_resource_policy(settings.policy)
         # The injected Executive cache belongs only to its primary resource.
         # Public COO gets the existing public pair's bounded cache factory;
@@ -206,6 +215,78 @@ class CooApp:
     async def _same_auth(self, request, expected):
         observed = await self._auth(request)
         return not isinstance(observed, JSONResponse) and observed == expected
+
+    def require_context_current(self):
+        settings = self._context_settings
+        if (self.settings is not settings or any(a is not b for a, b in zip(
+                self._context_callbacks, (settings.load_binding, settings.authority_provider,
+                                         settings.catalogue_provider, settings.agentos_context_provider)))):
+            raise ValueError("authority_refused")
+
+    async def catalogue(self, principal, stamp, *, work_ref=None):
+        from common import coo_agentos_context_contract as wire
+        self.require_context_current()
+        settings = self.settings
+        provider = settings.catalogue_provider
+        if provider is None:
+            return wire.LEGACY_CATALOGUE
+        value = await _owner_call(provider, principal, *(() if work_ref is None else (work_ref,)))
+        self.require_context_current()
+        if (type(value) is not str or value not in {wire.LEGACY_CATALOGUE, wire.CATALOGUE}
+                or self.settings is not settings or settings.catalogue_provider is not provider
+                or not self._policy_current() or self.authorizer.binding_digest(principal) != stamp):
+            raise ValueError("authority_refused")
+        return value
+
+    async def _agentos_context(self, request, authenticated, validated):
+        from common import coo_agentos_context_contract as wire
+        settings = self.settings
+        callbacks = (settings.load_binding, settings.authority_provider,
+                     settings.catalogue_provider, settings.agentos_context_provider)
+        principal, stamp = authenticated
+        def current():
+            self.require_context_current()
+            if (self.settings is not settings or any(a is not b for a, b in zip(callbacks,
+                    (settings.load_binding, settings.authority_provider,
+                     settings.catalogue_provider, settings.agentos_context_provider)))):
+                raise ValueError("authority_refused")
+        try:
+            current()
+            if settings.agentos_context_provider is None:
+                return refused()
+            selected_catalogue = await self.catalogue(principal, stamp, work_ref=validated["work_ref"])
+            current()
+            if selected_catalogue != wire.CATALOGUE:
+                return refused()
+            authority, context = await self._authority(principal, validated["work_ref"], stamp)
+            current()
+            if wire.ACTION not in authority.principal_actions:
+                return refused()
+            current()
+            if not await self._same_auth(request, authenticated):
+                return refused()
+            current()
+            data = await _owner_call(settings.agentos_context_provider, principal, context,
+                                     authority.capability_profile_digest)
+            current()
+            wire.validate_result(data, expected_context=dataclasses.asdict(context),
+                capability_profile_digest=authority.capability_profile_digest)
+            observed_authority = await self._authority(principal, validated["work_ref"], stamp)
+            current()
+            observed_catalogue = await self.catalogue(principal, stamp, work_ref=validated["work_ref"])
+            current()
+            same_auth = await self._same_auth(request, authenticated)
+            current()
+            if (observed_authority != (authority, context)
+                    or observed_catalogue != wire.CATALOGUE or not same_auth):
+                return refused()
+            current()
+            response = JSONResponse(self._read_result(wire.TOOL, data))
+            if len(response.body) > MAX_RESPONSE_BYTES:
+                return refused("output_too_large", 503)
+            return response
+        except Exception:
+            return refused("source_unavailable", 503)
 
     async def resolve_principal_dialogue_caller(self, request: Request, *,
                                                 work_ref: str, reasoning_surface: str):
@@ -412,7 +493,9 @@ class CooApp:
 
     async def call(self, request: Request):
         name = request.path_params["tool"]
-        if name not in COO_TOOL_NAMES:
+        from common import coo_agentos_context_contract as context_wire
+        from integrations.executive_mcp.coo import validate_coo_context_tool_arguments
+        if name not in (*COO_TOOL_NAMES, context_wire.TOOL):
             return refused("invalid_input", 404)
         authenticated = await self._auth(request)
         if isinstance(authenticated, JSONResponse):
@@ -422,9 +505,12 @@ class CooApp:
         if isinstance(arguments, JSONResponse):
             return arguments
         try:
-            validated = validate_coo_tool_arguments(name, arguments)
+            validated = (validate_coo_context_tool_arguments(name, arguments) if name == context_wire.TOOL
+                         else validate_coo_tool_arguments(name, arguments))
         except GatewayError as exc:
             return refused(exc.code, 400)
+        if name == context_wire.TOOL:
+            return await self._agentos_context(request, authenticated, validated)
         if name in COO_READ_NAMES:
             try:
                 result = await self._read_gateway.call(name, validated)
@@ -480,10 +566,11 @@ class CooApp:
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http":
+            from common.coo_agentos_context_contract import TOOL as context_tool
             path = scope.get("path", "")
             if (not path.isascii() or scope.get("raw_path") != path.encode("ascii")
                     or scope.get("query_string") or scope.get("method") != "POST"
-                    or path not in {"/v1/tools/" + name for name in COO_TOOL_NAMES}):
+                    or path not in {"/v1/tools/" + name for name in (*COO_TOOL_NAMES, context_tool)}):
                 await refused("invalid_input", 404)(scope, receive, send)
                 return
         await self._bounded(scope, receive, send)

@@ -2625,12 +2625,16 @@ def _service_from_config(
         coo_factories = {}
         from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
         from control_plane.coo_principal_host import CooHostProvider
-        if validate_control_coo(raw):
+        coo_effects_armed = validate_control_coo(raw)
+        if coo_effects_armed or (type(coo_source) is CooInstalledSource and coo_source.has_context_read_grant()):
             if type(coo_source) is not CooInstalledSource or "workspace_read_provider_factory" not in workspace_factories:
                 raise ServiceError("COO principal requires the sealed source and existing Workspace owner")
+            agentos_context_reader = packet_collector.agentos_context_reader(
+                macro_root=Path(raw["ceo_ingress_app_macro_root"]))
             def coo_factory(runtime):
-                return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
-            coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
+                return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime),
+                    agentos_context_reader=agentos_context_reader)
+            coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=coo_effects_armed,
                 principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
             # The SAME frozen selected-child publication the installed App
             # reads, loaded through the installed source's fixed currentness
@@ -3319,10 +3323,8 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
         ]
 
     coo_source = None
-    from ops.executive_os.coo_principal_host import CooInstalledSource, DEFAULT_INSTALL_PATH, validate_control_coo
-    if validate_control_coo(raw):
-        coo_source = CooInstalledSource.from_path(DEFAULT_INSTALL_PATH,
-            Path(__file__).resolve().parents[1], expected_uid=os.geteuid())
+    from ops.executive_os.coo_principal_host import load_control_coo_source
+    coo_source = load_control_coo_source(raw, Path(__file__).resolve().parents[1], expected_uid=os.geteuid())
     from ops.executive_os.dialogue_wake_canary_control import load_verified_profile
     dialogue_canary_profile = load_verified_profile(
         control_sha256=control_attestation["config_sha256"],
