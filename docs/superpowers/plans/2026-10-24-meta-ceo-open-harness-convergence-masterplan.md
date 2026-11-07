@@ -299,29 +299,41 @@ by these source edits. Source publication, merge, installation and real-path
 acceptance remain separate. No 99% availability claim is made without measured
 accepted-task outcomes.
 
-### P3/P7 source qualification for the first continuation slice
+### P3/P7 source qualification and concurrent-carrier reconciliation
 
-The original-result projection is now implemented with exact original-admission
-matching, a closed bounded observation validator, and separate missing/invalid/
-observed states. The regression failed before the repair with a missing
-`request_observation` field. Focused validation now passes **160 tests** on
-Python 3.14.7, including the actual pinned producer/codec/SQLite-read composition,
-historical-owner recovery and one-request AF_UNIX paths for both role contracts.
-No provider was invoked.
+The first private source slice passed 160 focused tests, including original
+producer/storage recovery and AF_UNIX reads. Its broader local runtime/harness
+run was 691 passed, 46 skipped and 83 failed, with Linux-only and workspace-path
+limitations retained in its receipt. PR #2185's original hosted runtime, harness
+and required repository checks passed.
 
-A broader M2 runtime/harness run produced 691 passed, 46 skipped, 353 passed
-subtests and 83 failures. The bounded diagnostic identifies Linux-only
-`/proc`/systemd/loopback assumptions and the enrolled workspace volume's space
-in `/Volumes/Mastermind 2` being rejected by existing runtime path guards.
-These are not reported as passing tests; canonical Linux hosted qualification
-is still required. Existing guards were not relaxed and fixture permission
-side effects were restored. Source self-check and `git diff --check` pass.
-The first installed consumer and the original multi-day reliability/learning
-acceptance remain unfinished.
+A later current-carrier check found #2181 already delivering the same original
+observation projection and ahead in the protected merge queue. Its exact source
+head is ca719fd5f74b5366a8ac57abacfff30c29bb5ffc. The #2185 queue entry was removed
+and read back absent; #2181's original branch, writer and queue entry were
+preserved. This operation now consumes that one projection contract instead of
+maintaining a second validator or response shape.
 
-### Next P3/P7 native-owner repairs
+The canonical contract returns the validated outer document as
+request_observation; invalid retained evidence supplies only
+request_observation_error: INVALID_RETAINED_OBSERVATION, while absence preserves
+the legacy result. Its historical scope and false provider/model proof flags
+remain unchanged. This branch adds the independent exact-admission lookup guard:
+if an explicit admission ID was requested, a different returned row is refused
+before reading its stored result. The counterexample failed against the captured
+#2181 implementation before this guard was added.
 
-Two additional counterexamples are confirmed on the unchanged native owner blobs
+The reader's unchanged numeric byte-limit literal retains its exact site; the
+whole-file source pin follows the composed implementation. Current qualification
+and source delivery are recorded in #2185. No new admission, provider call or
+installed consumer is implied by this source composition.
+
+### P3/P7 native-owner repairs — PR #2187
+
+The two additional counterexamples were repaired in PR #2187, including the
+packaged attended admission owner. Exact source/closure and qualification are
+retained in ops/native_fabric/quota_continuity/rollout/ROLLOUT_REVIEW.md.
+The original defects were confirmed on native owner blobs
 also present at protected `615146aac6a1b0c0933bc9b815517a2fd285ed4a`:
 
 - P3 original-run recovery: exclusive packet persistence can precede request JSON
