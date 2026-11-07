@@ -364,3 +364,56 @@ def test_installer_refuses_type_coercion_before_replacing_control(
     assert actual_destination == destination and destination.read_bytes() == before
     assert source.read_bytes() == source_before
     assert list(tmp_path.glob(".control.json.*.tmp")) == []
+
+
+@pytest.mark.parametrize("fault", [
+    "duplicate_arm", "duplicate_nested", "nan", "positive_infinity",
+    "negative_infinity", "positive_overflow", "negative_overflow",
+    "unpaired_surrogate",
+])
+def test_installer_refuses_ambiguous_or_nonfinite_source_before_any_replacement(
+    tmp_path: Path, fault: str,
+) -> None:
+    """Actual generator refusal preserves the prior file, mode and inode."""
+    import stat
+
+    value = _render_default_control_config(tmp_path)
+    if fault == "unpaired_surrogate":
+        value["model"] = "\ud800"
+    raw = json.dumps(value, sort_keys=True)
+    if fault == "duplicate_arm":
+        original = '"ceo_submit_armed": false'
+        assert raw.count(original) == 1
+        raw = raw.replace(original, original + ', "ceo_submit_armed": true')
+    elif fault == "duplicate_nested":
+        original = '"exact_worker_claim_target": {"mode": "disabled"}'
+        assert raw.count(original) == 1
+        raw = raw.replace(original,
+            '"exact_worker_claim_target": {"mode": "fixed", "mode": "disabled"}')
+    elif fault != "unpaired_surrogate":
+        token = {
+            "nan": "NaN", "positive_infinity": "Infinity",
+            "negative_infinity": "-Infinity", "positive_overflow": "1e999",
+            "negative_overflow": "-1e999",
+        }[fault]
+        original = '"broker_timeout_seconds": 30.0'
+        assert raw.count(original) == 1
+        raw = raw.replace(original, '"broker_timeout_seconds": ' + token)
+
+    source = tmp_path / "ambiguous-control.json"
+    source.write_text(raw, encoding="utf-8")
+    source_before = source.read_bytes()
+    destination = tmp_path / "control.json"
+    before = destination.read_bytes()
+    identity = destination.stat()
+
+    completed, actual_destination = _run_default_control_config(tmp_path, source=source)
+
+    assert completed.returncode != 0
+    assert "control config source must contain unambiguous finite UTF-8 JSON" in completed.stderr
+    assert actual_destination == destination and destination.read_bytes() == before
+    after = destination.stat()
+    assert (after.st_ino, after.st_mtime_ns, stat.S_IMODE(after.st_mode)) == (
+        identity.st_ino, identity.st_mtime_ns, stat.S_IMODE(identity.st_mode))
+    assert source.read_bytes() == source_before
+    assert list(tmp_path.glob(".control.json.*.tmp")) == []
