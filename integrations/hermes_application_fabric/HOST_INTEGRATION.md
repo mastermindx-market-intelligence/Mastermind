@@ -54,6 +54,31 @@ come from the original APPLICATION observation and are correlated to the exact
 native request. A configured AUTO label, capability ID or provider profile is not
 a physical-account receipt.
 
+## Existing dependency closure
+
+The real held launch already supplies PyYAML 6.0.3 through
+paid_yaml_runtime.held_yaml. release_manifest keeps that context alive around
+native_gateway_entry.run, so the original Macro capability loader uses that
+same verified module. Do not preload ambient YAML or add a second loader.
+The isolated conversation harness does not enter that production bootstrap;
+it installs the matching PyYAML version as an explicit fixture dependency.
+
+Structured output additionally requires requirements.txt's jsonschema 4.26.0
+and its complete resolved dependency set for the selected interpreter/platform.
+The upstream Hermes lock does not guarantee those packages. Publish them in a
+fresh immutable version of the existing third-party dependency tree, through
+the current native import_roots and dependency_inventory fields. Preserve the
+four-root limit and the exact held Macro root; do not edit a live qualified tree
+or add a separate dependency registry. The current NativeSourceClosure verifies
+all files and directory membership, including resolved native-extension bytes.
+
+The existing release dependency preparation verifies a previously frozen
+inventory; it does not download packages or bless new hashes discovered on the
+host. Final installed proof must exercise both factory.inspect() in the held
+YAML context and Draft202012Validator through that selected closure. An ordinary
+venv import proves only the isolated source fixture. Missing schema support
+already refuses before any provider request.
+
 ## Enrollment through the incumbent publisher
 
 The closed v9 service specification has two forms: one fixed grant, or a typed

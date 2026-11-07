@@ -180,3 +180,8 @@ separate.
 EVAL must still join genuine admissions, original outcomes, exact source facts
 and real held-out judgments. No downstream EVAL record or validity receipt is
 created by the producer or this authenticated retained-observation projection.
+
+An explicit original-admission lookup also requires the returned row's
+admission ID to equal the requested ID before any stored result is read.
+Matching principal, session and submission fields cannot substitute a different
+admission returned by a faulty or changed storage lookup.

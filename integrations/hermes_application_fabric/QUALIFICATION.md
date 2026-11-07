@@ -2,29 +2,39 @@
 
 ## Current source proof
 
-Exact product source: 352b32af7a3bffd68b0ba62d8a46e14610969bd4.
-GitHub tested its merge composition d6ff330abe14e6556b595f92b8694be757fd5e38
-with protected base de5c29e73be53ad40c4d165db197197d1d965c12.
-[Workflow 42342788841](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42342788841)
-completed all five jobs successfully on 2026-11-07.
+Exact tested source: 470b479b53e0120b26f238d9251489ebdef260c5.
+GitHub tested its merge composition 85ea06b9499b9b64bd3954df881e64934c8024ab
+with protected base 5f8c13da926011fb5fdc8cea21287b532ac968db.
+[Workflow 42345209599](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42345209599)
+completed all six jobs successfully on 2026-11-07. Later source composition
+must retain its own CI receipt; this record is not rewritten to imply that proof.
 
 | Proof | Result | Exact job |
 | --- | --- | --- |
-| Real pinned Hermes v0.23 primary/tools/AUTO | 61 passed; zero failures, errors, skips, standard OpenAI/AsyncOpenAI constructions or blocked external connection attempts | [128313952292](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42342788841/job/128313952292) |
-| Current native host admission/source/role contract | 49 passed | [128313952303](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42342788841/job/128313952303) |
-| Original and successor APPLICATION tunnel | 169 passed; zero failures, errors or skips in isolated Linux root fixtures | [128313952180](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42342788841/job/128313952180) |
-| Original APPLICATION client offline, Python 3.12 | 46 passed | [128313952302](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42342788841/job/128313952302) |
-| Original APPLICATION client offline, Python 3.13 | 46 passed | [128313952316](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42342788841/job/128313952316) |
+| Real pinned Hermes v0.23 primary/tools/AUTO | 61 passed; zero failures, errors, skips, standard OpenAI/AsyncOpenAI constructions or blocked external connection attempts | [128321352290](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42345209599/job/128321352290) |
+| Current native host admission/source/role contract | 49 passed | [128321352500](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42345209599/job/128321352500) |
+| Original and successor APPLICATION tunnel | 170 passed; zero failures, errors or skips in isolated Linux root fixtures | [128321352472](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42345209599/job/128321352472) |
+| Original APPLICATION client offline, Python 3.12 | 46 passed | [128321352526](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42345209599/job/128321352526) |
+| Original APPLICATION client offline, Python 3.13 | 46 passed | [128321352489](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42345209599/job/128321352489) |
+| Actual Hermes through original factory/client/Go handler/Gateway/Broker | 3 passed; zero failures, errors, skips, provider SDK constructions or external attempts | [128321352455](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42345209599/job/128321352455) |
 
-The five suites overlap; their counts must not be presented as distinct
+The six suites overlap; their counts must not be presented as distinct
 end-to-end production journeys. The synthetic internal bearer, endpoint,
 serving model, account metadata, usage and tool handler are fixture data.
 **Live provider/account/budget acceptance is false.**
 
-The next source change canonicalizes a carried predecessor CLI receipt so its
-normal trailing newline cannot break tunnel successor correlation. That new
-test and source need their own exact-head result; the 169-pass receipt above
-does not cover the later change.
+The 170-case tunnel result includes canonical predecessor receipt carriage
+through the actual CLI, including its normal trailing newline.
+
+The additional three-case conversation check joins the actual pinned native
+agent and tool registry to the original Macro factory/client and actual native
+APPLICATION handler, gateway and Broker/SQLite. Only qualification inputs and
+the external provider are synthetic. The provider receives two original calls
+with one tool effect, one physical account/lease and complete tool history. The
+original max_steps limit denies a follow-up before another provider dispatch.
+An incomplete second response retains its unknown request and lease; both a
+rebuilt native facade and original request readback produce no replay. The
+original usage rows remain est_usd=null: this is not monetary acceptance.
 
 ## Pinned dependencies
 
@@ -35,16 +45,37 @@ does not cover the later change.
 | Client SHA256 | 1a9cebd2269ff489815823f762fdcbe791f3b308aa339c41cb70bb3aa0833569 |
 | JSON validator | jsonschema 4.26.0 |
 | Native dependency installation | Exact committed uv.lock and declared overrides, uv 0.13.5, Python 3.14 |
-| Paired factory proposal | Macro #10818 at 1a21d83955993e9c1bc45130445bd8c5b2388238 |
+| Paired factory proposal | Macro #10818 at 6612f6aba4ac431d38432b500ed5c5d66122f1d0 |
+| Actual native APPLICATION owner fixture | Mastermind #2186 at f5c4a2365e4ec83bb5de92e7e64213264ada9324 |
+| Original YAML in isolated full-owner fixture | PyYAML 6.0.3; production uses the existing held_yaml owner |
 
-Macro's [owner composition run 42341359603](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42341359603)
+Macro's [owner composition run 42344055518](https://github.com/mastermindx-market-intelligence/macro/actions/runs/42344055518)
 passed 56 tests at that exact proposal head. Those tests cover existing service
 identity, held per-role fixed/AUTO relations and numeric endpoints; they do not
 qualify a live provider account.
 
-Native enrollment #2186/52a46af2308b6c63df9ec70962d30b9a8a95d8b8 has its own
-required v9/v1–v8 regression run 42341514594. Its terminal result must be read
-separately. A prior 25-minute timeout is retained as a timeout, not a pass.
+Native enrollment #2186/f5c4a2365e4ec83bb5de92e7e64213264ada9324 passed all
+318 v9/v1–v8 regression cases with zero failures, errors or skips in
+[run 42343959388](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343959388),
+job 128317539854, in 1001.50 seconds. The actual checkout d341249 combined f5c4
+with the incumbent #2175/312be661 source. Prior timeout and two bad fixture
+account-layout assertions remain historical failures, not pass receipts.
+
+## Incumbent protected-test composition
+
+Protected #1824 introduced the disabled commercial ModelArk catalog. The inherited
+Hermes package test still required that catalog to be absent, causing the separate
+Hermes harness workflow to fail even while all six APPLICATION jobs passed.
+The original #2180 owner already repaired this exact assertion and published a
+quiescent source. This proposal adopts its test blob
+a7cc6976bcd71872a18a1675a8df73887520f918 verbatim from
+d7d5bfdb4bc656473a7e940dee07d0b437aed40d, retaining present-but-disabled checks and
+the explicit legacy-absence case. It does not alter the router, grant authority,
+provider state, or the active #2109 source hold.
+
+[Original repair and custody](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2180#issuecomment-6702850319)
+remain with that owner. Its reported 23-case local proof is not a substitute for
+this proposal's new composed hosted result.
 
 ## Real native behavior exercised
 

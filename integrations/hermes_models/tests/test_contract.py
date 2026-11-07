@@ -107,7 +107,7 @@ class ContractTests(unittest.TestCase):
         from control_plane.model_router import ModelRouter
 
         router = ModelRouter.load()
-        before = (router.providers["byteplus"].enabled, router.providers["minimax"].enabled)
+        before = {name: (provider.enabled, provider.autonomous_allowed) for name, provider in router.providers.items()}
         report = bind_model_router(router)
         self.assertFalse(report["authority_granted"])
         self.assertFalse(report["production_armed"])
@@ -116,8 +116,33 @@ class ContractTests(unittest.TestCase):
         self.assertFalse(report["personal_coding_plan_used"])
         self.assertEqual(report["minimax_attended_model"], "MiniMax-M3")
         self.assertEqual(report["personal_coding_plan_alias"], "byteplus.attended")
-        self.assertTrue(all(row["status"] == "absent_until_pr_1824_merges" for row in report["modelark_aliases"]))
-        self.assertEqual(before, (router.providers["byteplus"].enabled, router.providers["minimax"].enabled))
+        # Protected #1824 now supplies the exact catalog entries, still inert.
+        # Presence must not be mistaken for worker eligibility or provider activation.
+        self.assertEqual(report["modelark_aliases"], [
+            {"alias": alias, "status": "present", "served_model": served,
+             "worker_eligible": False, "provider_enabled": False}
+            for alias, served in MODELARK_CONTRACT["aliases"].items()
+        ])
+        self.assertEqual(before, {name: (provider.enabled, provider.autonomous_allowed)
+                                  for name, provider in router.providers.items()})
+
+    def test_legacy_absent_modelark_catalog_still_grants_no_authority(self):
+        from types import SimpleNamespace
+        from control_plane.model_router import ModelRouter
+
+        current = ModelRouter.load()
+        legacy = SimpleNamespace(policy_version=current.policy_version, providers=current.providers,
+            model_aliases={name: profile for name, profile in current.model_aliases.items()
+                           if name not in MODELARK_CONTRACT["aliases"]})
+        report = bind_model_router(legacy)
+        self.assertEqual(report["modelark_aliases"], [
+            {"alias": alias, "status": "absent_until_pr_1824_merges", "served_model": served,
+             "worker_eligible": False}
+            for alias, served in MODELARK_CONTRACT["aliases"].items()
+        ])
+        self.assertFalse(report["authority_granted"])
+        self.assertFalse(report["production_armed"])
+        self.assertFalse(report["capacity_claimed"])
 
     def test_router_model_drift_is_refused(self):
         class Alias:

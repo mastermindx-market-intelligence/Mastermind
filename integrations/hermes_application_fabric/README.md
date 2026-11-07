@@ -26,17 +26,22 @@ plane. Provider credentials never enter Hermes.
 | [Macro #10818](https://github.com/mastermindx-market-intelligence/macro/pull/10818) | Additive role-specific fixed/AUTO declarations and numeric loopback endpoints, stacked on #10740. |
 | [Mastermind #2175](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175) / [Macro #10740](https://github.com/mastermindx-market-intelligence/macro/pull/10740) | Existing final APPLICATION composition and provider/request/lease/settlement ownership. |
 
-The protected Brain consumer, Hermes model package and attended-worker package
-are not modified by this lane. Native worker delegation #2147 stays separate.
+The protected Brain consumer and attended-worker package remain unchanged.
+Hermes model production code remains unchanged; its stale catalog test is
+adopted verbatim from the quiescent #2180 owner, with provenance recorded in
+QUALIFICATION.md. Native worker delegation #2147 stays separate.
 
 ## Qualified native behavior
 
 The pinned Hermes v0.23 source is 1c0cd667746d3395fe9e1b6c74f8f85952486f18.
-At adapter commit 352b32af7a3bffd68b0ba62d8a46e14610969bd4, its actual native
+At adapter commit 470b479b53e0120b26f238d9251489ebdef260c5, its actual native
 primary/tool implementation passed 61 tests, including AUTO attribution and
 post-tool disconnect. The host contract passed 49; the original/successor tunnel
-fixture passed 169 without skips; the offline client suite passed 46 on both
-Python 3.12 and 3.13. See [exact qualification evidence](QUALIFICATION.md).
+fixture passed 170 without skips; the offline client suite passed 46 on both
+Python 3.12 and 3.13. Three additional cases join actual Hermes, the original
+factory/client, and the actual APPLICATION handler/Gateway/Broker to a loopback
+provider, proving tool history, the step limit and unknown-effect recovery.
+See [exact qualification evidence](QUALIFICATION.md).
 These are isolated source/loopback proofs, not a real Fabric account.
 
 The adapter uses the real ProviderProfile client hook and a unique keyless

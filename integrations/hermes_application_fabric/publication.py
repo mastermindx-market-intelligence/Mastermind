@@ -27,7 +27,8 @@ ROLE_RELATIONS = {
 APPLICATION_PORT = 50142
 PACKAGE_FILES = (
     "__init__.py", "client.py", "codec.py", "errors.py", "host.py", "native.py",
-    "publication.py", "structured.py", "model_provider/__init__.py", "model_provider/plugin.yaml",
+    "publication.py", "structured.py", "requirements.txt",
+    "model_provider/__init__.py", "model_provider/plugin.yaml",
 )
 PACKAGE_ROOT = "integrations/hermes_application_fabric/"
 

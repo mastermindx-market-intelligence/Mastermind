@@ -107,8 +107,9 @@ def prepare_structured_request(request: dict) -> tuple[dict, StructuredResult | 
     error = None
     validator = None
     try:
-        # Already supplied by the installed Hermes runtime. No auto-install,
-        # network schema resolver, hand-written validator, or permissive fallback.
+        # Required from the host's qualified dependency closure; the upstream
+        # Hermes lock does not guarantee it. No auto-install, network schema
+        # resolver, hand-written validator, or permissive fallback.
         from jsonschema import Draft202012Validator
         Draft202012Validator.check_schema(schema)
         validator = Draft202012Validator(schema)
