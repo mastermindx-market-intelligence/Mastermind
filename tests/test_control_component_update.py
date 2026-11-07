@@ -1693,7 +1693,57 @@ def test_the_mcp_component_update_keeps_its_own_owner_and_behaviour():
     assert "AUTONOMY_TRANSACTION" not in source
     # The MCP component verbs still bind to the MCP helper, not to the new one.
     control = Path(ac.__file__).read_text(encoding="utf-8")
-    assert "mcp_component_update" not in control
+    import ast
+    tree = ast.parse(control)
+    parents = {id(child): node for node in ast.walk(tree)
+               for child in ast.iter_child_nodes(node)}
+    pure_imports = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            assert all(alias.name != "ops.executive_os.mcp_component_update"
+                       for alias in node.names)
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.module == "ops.executive_os":
+            assert all(alias.name != "mcp_component_update" for alias in node.names)
+        if node.module != "ops.executive_os.mcp_component_update":
+            continue
+        assert len(node.names) == 1 and node.names[0].asname is None
+        owner = parents[id(node)]
+        while (not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef))
+               and id(owner) in parents):
+            owner = parents[id(owner)]
+        assert isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef))
+        pure_imports.append((owner.name, node.names[0].name))
+    # Source adoption shares only these pure reads/transforms. It cannot
+    # import the component's owner, verbs, transaction or a namespace alias.
+    assert sorted(pure_imports) == sorted([
+        ("derive_capability_profile_digests", "derive_sealed_capability_profile_digests"),
+        ("prepare_gateway_publication", "_mission_capability_profile_digests"),
+        ("_verify_gateway_postimages", "_apply_capability_profile_digests"),
+    ])
+    shell = (Path(ac.__file__).parent / "service-control.sh").read_text(encoding="utf-8")
+    dispatch = shell.split("dispatch_mcp_component() {\n", 1)[1].split("\n}\n", 1)[0]
+    assert ('exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B '
+            '"$component_dir/mcp_component_update.py" "${MCP_COMPONENT_ARGV[@]}"') in dispatch
+    assert "autonomy_control.py" not in dispatch
+
+
+
+@pytest.mark.parametrize("foreign_import", [
+    "from ops.executive_os.mcp_component_update import main",
+    "import ops.executive_os.mcp_component_update as component_namespace",
+    "from ops.executive_os import mcp_component_update",
+])
+def test_mcp_effect_or_namespace_import_is_not_a_pure_helper_exception(monkeypatch, foreign_import):
+    path = Path(ac.__file__)
+    original = Path.read_text
+    source = original(path, encoding="utf-8") + "\n" + foreign_import + "\n"
+    def read_text(candidate, *args, **kwargs):
+        return source if candidate == path else original(candidate, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", read_text)
+    with pytest.raises(AssertionError):
+        test_the_mcp_component_update_keeps_its_own_owner_and_behaviour()
 
 
 def test_the_observation_publisher_still_requires_the_genuine_held_owner(host):
