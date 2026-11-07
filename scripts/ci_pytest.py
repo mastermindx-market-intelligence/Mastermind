@@ -427,6 +427,17 @@ _MEASURED_SIX_JOB_PLACEMENT = {
 }
 
 
+_MEASURED_FOUR_CHILD_PLACEMENT = {
+    # Canonical runs 42355985590 and 42360062449 exposed heavy child tails.
+    # These three whole-module moves lower the maximum under both observed
+    # profiles, without changing outer membership or any other child hash.
+    # Apply only to four-child precollection; observed costs are not bounds.
+    "tests/test_native_fabric_quota_continuity_p_z.py": 2,
+    "tests/test_executive_dr.py": 0,
+    "tests/test_trend_persistence_walkforward.py": 0,
+}
+
+
 def partition_modules(
     included: Sequence[str], *, jobs: int, inner: bool = False
 ) -> tuple[tuple[str, ...], ...]:
@@ -445,11 +456,11 @@ def partition_modules(
     same checkout would shard differently on every run and a failure would not
     reproduce.
 
-    For the production three-job gate, the explicitly measured hot modules
-    are pinned to less-loaded shards. Every other path keeps stable hash
-    placement, including when a new test is added. Other job counts retain
-    unmodified hashes. This is placement, not exclusion: verify_partition
-    checks the exact complete test coverage.
+    For the outer three- and six-job gates and inner four-child gate, the
+    explicitly measured hot modules are pinned to less-loaded shards. Every
+    other path keeps stable hash placement, including when a new test is
+    added. Other partition modes retain unmodified hashes. This is placement,
+    not exclusion: verify_partition checks the exact complete test coverage.
     Shard sizes remain visible in the plan line. (Do not introduce bare
     three-digit constants outside tests/: the identity guard forbids them.)
     """
@@ -472,6 +483,7 @@ def partition_modules(
         hashed = int.from_bytes(digest[:8], "big") % jobs
         target = (_MEASURED_THREE_JOB_PLACEMENT.get(path, hashed) if jobs == 3 and not inner
                   else _MEASURED_SIX_JOB_PLACEMENT.get(path, hashed) if jobs == 6 and not inner
+                  else _MEASURED_FOUR_CHILD_PLACEMENT.get(path, hashed) if jobs == 4 and inner
                   else hashed)
         buckets[target].append(path)
     shards = tuple(tuple(bucket) for bucket in buckets)

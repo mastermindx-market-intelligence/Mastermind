@@ -41,6 +41,27 @@ def test_inner_hash_is_independent_stable_and_preserves_outer_exact_cover():
     assert ci.partition_modules(modules, jobs=6) == outer
 
 
+@pytest.mark.parametrize("inner,jobs", [
+    (False, 3), (False, 4), (False, 6), (True, 3), (True, 4), (True, 5),
+])
+def test_measured_child_pin_changes_only_four_child_placement(monkeypatch, inner, jobs):
+    modules = tuple(f"tests/test_fixture_{index}.py" for index in range(160))
+    baseline = ci.partition_modules(modules, jobs=jobs, inner=inner)
+    before = {path: index for index, bucket in enumerate(baseline) for path in bucket}
+    pinned = modules[0]
+    destination = (before[pinned] + 1) % jobs
+    monkeypatch.setattr(ci, "_MEASURED_FOUR_CHILD_PLACEMENT", {pinned: destination})
+
+    candidate = ci.partition_modules(modules, jobs=jobs, inner=inner)
+    ci.verify_partition(modules, candidate)
+    after = {path: index for index, bucket in enumerate(candidate) for path in bucket}
+    assert all(after[path] == before[path] for path in modules if path != pinned)
+    if inner and jobs == 4:
+        assert after[pinned] == destination != before[pinned]
+    else:
+        assert candidate == baseline
+
+
 def test_four_process_entry_uses_exact_outer_membership_and_preserves_failure(tmp_path, monkeypatch):
     modules = tuple(f"tests/test_fixture_{index}.py" for index in range(240))
     workflow = tmp_path / ".github/workflows"
