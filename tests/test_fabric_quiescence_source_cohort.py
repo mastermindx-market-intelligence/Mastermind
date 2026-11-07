@@ -13,7 +13,8 @@ builder=importlib.util.module_from_spec(spec);spec.loader.exec_module(builder)
 
 class Cohort(unittest.TestCase):
     def setUp(self):
-        self.manifest=json.loads((ROLLOUT/'native-manifest.json').read_bytes())
+        self.actual_manifest=json.loads((ROLLOUT/'native-manifest.json').read_bytes())
+        self.manifest=builder.before_sparse_index_advice(self.actual_manifest)
 
     def test_exact_one_member_forward_normalization_retains_emitted_source(self):
         original=dict(self.manifest)
