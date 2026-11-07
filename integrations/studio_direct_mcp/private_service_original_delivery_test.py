@@ -781,8 +781,13 @@ class ComposedPreservingMigrationTests(unittest.TestCase):
         self.assertEqual(json.loads(self.paths['manifest'].read_text())['dependencyTreeHash'],self.prior['dependencyTreeHash'])
         descriptor_path=self.home/'descriptor.json';descriptor_path.write_text(json.dumps(configuration))
         driver=self.home/'driver.mjs';driver.write_text(DRIVER)
+        child_env={'HOME':str(self.home),'PATH':'/usr/bin:/bin','LANG':'C'}
+        # Hosted Linux Python can depend on setup-python's shared-library path.
+        # Keep that loader dependency when the real sealed helper is executed.
+        if 'LD_LIBRARY_PATH' in os.environ:
+            child_env['LD_LIBRARY_PATH']=os.environ['LD_LIBRARY_PATH']
         completed=subprocess.run([node,str(driver),str(self.paths['base']/'original-delivery.mjs'),str(descriptor_path)],
-            cwd=self.fixture.empty,env={'HOME':str(self.home),'PATH':'/usr/bin:/bin','LANG':'C'},
+            cwd=self.fixture.empty,env=child_env,
             capture_output=True,text=True,timeout=30)
         self.assertEqual(completed.returncode,0,completed.stderr)
         returned=json.loads(completed.stdout.strip().splitlines()[-1])
@@ -815,6 +820,7 @@ const collectAfter = text(await owner.call('fabric_collect_original', { run_id: 
 const reconcile = text(await owner.call('fabric_original_collection_reconcile',
   { run_id: runId, predecessor_sha256: configuration.predecessor.receipt_sha256 }, principal));
 const parsed = JSON.parse(reconcile);
+if (parsed.state !== 'COMPLETE') throw new Error('composed reconciliation failed: ' + reconcile);
 const resultText = text(await owner.call('fabric_original_collection_result',
   { run_id: runId, receipt_sha256: parsed.receipt_sha256 }, principal));
 await owner.close();
