@@ -23,7 +23,9 @@ Model-agnostic via ``role="deep"`` (Opus/Fable resolved by config/agents.yml).
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from brain import client
@@ -49,21 +51,45 @@ def enabled() -> bool:
 _DEFENSIVE_BENCHMARK_BASKET: tuple[str, ...] = ("XLU", "XLV", "XLF", "XLP")
 
 
-def _read_market_view() -> dict | None:
-    """Read data/market_view/latest.json, returning None on any miss/error.
+_MARKET_VIEW_PATH = Path(__file__).resolve().parent.parent / "data" / "market_view" / "latest.json"
 
-    E1.1 — the view artifact is the single source of truth for the perception enrichment the
-    seats receive.  Lazy: returns None while the organ is unbuilt (W-E.0 is a prior wave;
-    graceful degrade is the invariant).  Never raises.
+
+def _read_market_view(*, now: datetime | None = None) -> dict | None:
+    """Read one publication for CURRENT reasoning, withdrawing expired eligibility.
+
+    Autonomous, strategist and MCP callers share this boundary. It neither publishes
+    evidence nor changes portfolio policy. Historical journal/gate readers retain
+    their separate point-in-time contracts. Missing or malformed artifacts remain an
+    explicit unavailable assessment instead of silently reverting to a label-only read.
     """
+    d = None
     try:
-        p = Path(__file__).resolve().parent.parent / "data" / "market_view" / "latest.json"
-        if p.exists():
-            d = json.loads(p.read_text())
-            return d if isinstance(d, dict) else None
+        from brain import market_view
+
+        payload = _MARKET_VIEW_PATH.read_bytes()
+        d = json.loads(payload)
+        if isinstance(d, dict):
+            projected = market_view.serving_view(d, now=now)
+            projected["serving_freshness"]["source_artifact_sha256"] = hashlib.sha256(payload).hexdigest()
+            return projected
     except Exception:  # noqa: BLE001
         pass
-    return None
+    published = d if isinstance(d, dict) else {}
+    return {
+        **{key: published.get(key) for key in ("asof", "built_at", "seq")},
+        "planes": {},
+        "label_vs_planes": {"relationship": "unavailable", "confirmed": False},
+        "brief": {"posture_implication": (
+            "Current confirmation is unavailable. Missing or invalid evidence does not "
+            "establish recovery or release existing protection."
+        )},
+        "serving_freshness": {
+            "checked_at": (now or datetime.now(tz=timezone.utc)).isoformat(),
+            "current_confirmation_available": False,
+            "current_posture_floor_available": False,
+            "reason": "publication_absent_or_invalid",
+        },
+    }
 
 
 def _market_view_enrichment(view: dict | None) -> dict:
@@ -164,6 +190,15 @@ def _market_view_enrichment(view: dict | None) -> dict:
     if summaries:
         out["plane_summaries"] = summaries
     out["label_vs_planes_line"] = label_vs_planes_line
+    if isinstance(view.get("serving_freshness"), dict):
+        out["publication"] = {key: view.get(key) for key in ("asof", "built_at", "seq")}
+        source_hash = view["serving_freshness"].get("source_artifact_sha256")
+        if source_hash:
+            out["publication"]["artifact_sha256"] = source_hash
+        if isinstance(view.get("publication"), dict):
+            out["publication"]["publication_id"] = view["publication"].get("publication_id")
+            out["publication"]["source_identity"] = view["publication"].get("source_identity")
+        out["serving_freshness"] = view["serving_freshness"]
     return out
 
 
@@ -229,7 +264,9 @@ def _full_regime_slice(regime: dict | None) -> dict:
     try:
         from brain import decision_context as _dc
 
-        dc = _dc.prompt_summary()
+        dc = _dc.prompt_summary(
+            expected_publication=(reg.get("market_view") or {}).get("publication")
+        )
         if dc:
             reg["decision_context"] = dc
     except Exception:  # noqa: BLE001
@@ -460,6 +497,13 @@ def _build_prompt(payload: dict, directive: str | None = None) -> str:
         _gov = _dc.get("governor") or {}
         _dq = _dc.get("data_quality") or {}
         lines += ["## Canonical decision context v2 (typed, point-in-time)"]
+        _eligibility = _dc.get("serving_freshness") or {}
+        if _eligibility.get("current_assessment_available") is False:
+            lines += [
+                "Current typed assessment UNAVAILABLE: "
+                + ", ".join(_eligibility.get("reasons") or [])
+                + ". Expiry does not establish recovery or release existing protection."
+            ]
         lines += [
             "Regime state: "
             f"hard={_hard.get('quad')} {_hard.get('name')} conf={_hard.get('confidence')}; "

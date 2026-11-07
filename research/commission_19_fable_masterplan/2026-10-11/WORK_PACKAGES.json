@@ -1,0 +1,1119 @@
+{
+  "kind": "planning_document_not_runtime_queue",
+  "packages": [
+    {
+      "id": "WP00",
+      "title": "Recover the existing mission without duplicating it",
+      "orchestrator": "Fable",
+      "phase": "M0",
+      "issues": [
+        "MAS-263"
+      ],
+      "depends_on": [],
+      "candidate_paths": [
+        "Existing MAS-263 / #1243 continuation records"
+      ],
+      "mission": "Recover original parent, live receiver, source custody, pending effects, accepted returns and current allowed operator lane. Separate an absent historical chat from an active writer. Record the present native-Opus coordination directive for C19 without rewriting unrelated programs.",
+      "positive_proof": "One exact recoverable frontier with operation/carrier identity, tested read capabilities, specific write envelopes and independently ready lanes. A harmless read proves the selected operator path only to its observed extent.",
+      "negative_cases": [
+        "Old owner name treated as runtime liveness",
+        "Refused/not_found treated as permission to resubmit",
+        "Native child count multiplied into new root capacity"
+      ],
+      "gate": "Freeze the old uncertain submission. Preserve real leases/denials. No duplicate dispatch. Do not turn the recovery into an Executive/Fabric build.",
+      "source_refs": [
+        "S04",
+        "S18",
+        "S19"
+      ]
+    },
+    {
+      "id": "WP01",
+      "title": "Preserve original reports and resolve missing-source obligations",
+      "orchestrator": "Fable",
+      "phase": "M0",
+      "issues": [
+        "MAS-264",
+        "MAS-265",
+        "MAS-266",
+        "MAS-282"
+      ],
+      "depends_on": [
+        "WP00"
+      ],
+      "candidate_paths": [
+        "Existing C19 research directories and original report carriers; new evidence index only"
+      ],
+      "mission": "Use the 19-carrier manifest. Recover C6 and the original full package from actual artifacts or precise source pointers. Attach retain/correct/supersede/reject decisions at recommendation level. A missing original is not permission to write a substitute and call it recovered.",
+      "positive_proof": "Every intended topic has immutable evidence plus a disposition, or an explicit bounded missing-source obligation. Complete original bytes, if recovered, are hash-checked without changing their history.",
+      "negative_cases": [
+        "Adjacent report relabeled C6",
+        "New masterplan misrepresented as original ZIP",
+        "A source-access failure claimed to prove nonexistence"
+      ],
+      "gate": "Missing C6 blocks its unsupported method, not independent truth or consumer work. Archive recovery remains owned, not a universal stall.",
+      "source_refs": [
+        "S01",
+        "S02",
+        "S05"
+      ]
+    },
+    {
+      "id": "WP02",
+      "title": "Repair the acceptance crosswalk and freeze interfaces",
+      "orchestrator": "Fable",
+      "phase": "M0",
+      "issues": [
+        "MAS-267",
+        "MAS-268",
+        "MAS-271",
+        "MAS-272",
+        "MAS-273",
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP00"
+      ],
+      "candidate_paths": [
+        "Existing C19 owner/capability mapping; I1 composition spec references"
+      ],
+      "mission": "Replace ambiguous Hxx shorthand in execution packets with exact issue outcome plus owner capability. Explicitly separate MAS-273 macro-release work from FIF publication; query-kernel acceptance from MAS-268 actual data/reader acceptance; capture inspection from normalized expectations; and direct share facts from fully diluted selection.",
+      "positive_proof": "One decision table binds each claim, source owner, required evidence, consumer, specific acceptance and effect boundary. Incumbent activation holds remain explicit. Each ready package has a path-scoped writer or a named missing binding.",
+      "negative_cases": [
+        "Accepted financial kernel closes all bitemporal proof",
+        "Nine display legs called event-to-earnings reasoning",
+        "Full diluted-share program required for every direct revenue scenario"
+      ],
+      "gate": "Freeze only the interfaces needed now; do not wait for every historical report to be republished before independent packages start.",
+      "source_refs": [
+        "S08",
+        "S09",
+        "S32"
+      ]
+    },
+    {
+      "id": "WP03",
+      "title": "Prove native financial time and correction truth",
+      "orchestrator": "O1",
+      "phase": "M1",
+      "issues": [
+        "MAS-268"
+      ],
+      "depends_on": [
+        "WP02"
+      ],
+      "candidate_paths": [
+        "macro/engine/fundamental_forensics/query.py",
+        "macro/engine/fundamental_forensics/attested_history_pilot.py",
+        "Existing attested_query_snapshots owner and tests"
+      ],
+      "mission": "Qualify one real original financial occurrence plus correction through the existing dual-cutoff query and native reader. Reuse the accepted kernel and inventory/attestation machinery. Resolve actual source custody instead of substituting the public summary.",
+      "positive_proof": "Exact source and recorded cutoffs, filing attestation, occurrence/conversion inventory, fiscal/unit/basis identity and actual consumer receipt; original and corrected selections reproduce independently.",
+      "negative_cases": [
+        "Post-cutoff correction",
+        "Unknown timestamp interval",
+        "Incomplete candidate inventory",
+        "Wrong fiscal/unit/basis",
+        "Rights-blocked requested use",
+        "Source reconstruction labeled actual system memory"
+      ],
+      "gate": "A fixture-only pass cannot close MAS-268. Cross-security composition is a separate bridge gate, not required for native-only proof.",
+      "source_refs": [
+        "S24",
+        "S32"
+      ]
+    },
+    {
+      "id": "WP04",
+      "title": "Qualify issuer/security bindings used by the answer",
+      "orchestrator": "O1",
+      "phase": "M1",
+      "issues": [
+        "MAS-268",
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP02"
+      ],
+      "candidate_paths": [
+        "Produced Data OS identities",
+        "macro/engine/company_intelligence/ identity contracts",
+        "Existing K1 bridge input if required by its owner"
+      ],
+      "mission": "Bind the chosen company event, financial subject, listing and expectation target using incumbent effective-dated identity evidence. Permit same-native-subject reading while the cross-type bridge is held; never translate a CIK/ticker by assertion.",
+      "positive_proof": "A real event-to-financial-to-expectation join has named native IDs, as-of aliases and correction lineage. Reused bridge contract is accepted by its owner and consumed by the intended path.",
+      "negative_cases": [
+        "Ticker reuse",
+        "A/H listing conflation",
+        "Company-name approximate match promoted to canonical ID",
+        "A valid pointer taken as evidence of identity completeness"
+      ],
+      "gate": "No new identity service. GMI-owned edges are read-only dependencies; no graph rebuild or ownership takeover.",
+      "source_refs": [
+        "S22",
+        "S24"
+      ]
+    },
+    {
+      "id": "WP05",
+      "title": "Preserve correction and dependence semantics in K1",
+      "orchestrator": "O1",
+      "phase": "M1",
+      "issues": [
+        "MAS-264",
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP02"
+      ],
+      "candidate_paths": [
+        "macro/lib/evidence_foundation.py",
+        "macro/contracts/evidence_foundation/",
+        "Existing consumer adapters"
+      ],
+      "mission": "Expose evidence lineage, revision/withdrawal and declared overlap without converting absent dependence annotations into proven independence. Keep owner-native references, source spans and corrected block ancestry.",
+      "positive_proof": "One qualified native reader-to-K1-to-consumer receipt retains shared origins and a correction, reproducing original and updated packet identity without duplicating a fact store.",
+      "negative_cases": [
+        "Two syndications counted twice",
+        "Correction treated as new corroboration",
+        "Missing dependence edge labeled empirically independent",
+        "Rehash hides a changed denominator"
+      ],
+      "gate": "Automatic K1 effects stay disabled. Statistical incremental value is WP31, not a schema label.",
+      "source_refs": [
+        "S25"
+      ]
+    },
+    {
+      "id": "WP06",
+      "title": "Repair or explicitly refuse nondurable trial accounting",
+      "orchestrator": "O7",
+      "phase": "M1",
+      "issues": [
+        "MAS-269"
+      ],
+      "depends_on": [
+        "WP02"
+      ],
+      "candidate_paths": [
+        "macro/engine/trial_ledger.py",
+        "Existing TrialLedger tests and admitted caller seams"
+      ],
+      "mission": "Check current writer/candidates and fix the demonstrated memory-before-successful-append behavior in the canonical ledger. Define failure, corruption, crash and concurrent-write semantics without adding a ledger or a retry daemon.",
+      "positive_proof": "Successful append and reload agree; append failure cannot produce a false durable receipt; permitted retry persists exactly once; unreadable/corrupt accounting prevents evaluation; real process-concurrency and crash-boundary tests match the declared guarantee.",
+      "negative_cases": [
+        "In-memory seen state suppresses missing record",
+        "Silent corrupted-line loss accepted as complete budget",
+        "Thread lock asserted to protect processes",
+        "Renaming a family resets exposed outcomes"
+      ],
+      "gate": "Original uncertain MAS-269 request is not replayed. Independent cleared source repair must have its own legitimate binding and not duplicate an active modifier.",
+      "source_refs": [
+        "S10",
+        "S11"
+      ]
+    },
+    {
+      "id": "WP07",
+      "title": "Qualify the existing evaluation primitives and admission",
+      "orchestrator": "O7",
+      "phase": "M1",
+      "issues": [
+        "MAS-269"
+      ],
+      "depends_on": [
+        "WP02"
+      ],
+      "candidate_paths": [
+        "macro/engine/lab.py",
+        "macro/engine/validation.py",
+        "macro/lib/dataos/temporal.py",
+        "Original C9 P0A Q01-Q20"
+      ],
+      "mission": "Preserve all Q01-Q20 and inspect the original cost-warmup, initial-capital drawdown and singular-design findings against current candidate code. Repair only current demonstrated gaps, reusing pending owner carriers where present.",
+      "positive_proof": "Positive/negative synthetic datasets exercise exact admitted evaluation paths; non-anticipating costs, initial wealth, rank deficiency, attempt accounting and cohort exposure are all enforced before outcome access.",
+      "negative_cases": [
+        "Future data in cost warmup",
+        "Initial loss omitted from drawdown",
+        "Singular VIF treated as finite evidence",
+        "Strong score compensates for bad rights/time/identity"
+      ],
+      "gate": "No protected market outcomes or broadened holdout exposure. Do not rerun accepted unchanged probes as progress.",
+      "source_refs": [
+        "S11",
+        "S32"
+      ]
+    },
+    {
+      "id": "WP08",
+      "title": "Bind source health to bytes actually consumed",
+      "orchestrator": "O8",
+      "phase": "M1",
+      "issues": [
+        "MAS-270"
+      ],
+      "depends_on": [
+        "WP02"
+      ],
+      "candidate_paths": [
+        "macro/engine/output_health.py",
+        "Existing Macro and Terminal consumer read seams",
+        "Mastermind/brain/portfolio_intelligence.py only if that consumer is selected"
+      ],
+      "mission": "Reuse T4/Data OS rather than build monitoring. At the actual read boundary bind the source bytes, generation, interval, contract/watermark, denominator and consumer version. Instrument only a demonstrated gap in existing receipts.",
+      "positive_proof": "A real consumer receipt distinguishes fresh producer/stale reader, actual use/unobserved use, partial universe coverage and source-specific staleness without a second state store.",
+      "negative_cases": [
+        "Hash of later reread substituted for consumed bytes",
+        "Missing receipt called unused",
+        "Coverage improves by denominator drift",
+        "Fresh transport timestamp rescues stale content"
+      ],
+      "gate": "No portfolio behavior changes. Observer blindness remains unknown; source-health status is not an alpha multiplier.",
+      "source_refs": [
+        "S26"
+      ]
+    },
+    {
+      "id": "WP09",
+      "title": "Finish native expectation comparability",
+      "orchestrator": "O3",
+      "phase": "M2",
+      "issues": [
+        "MAS-271"
+      ],
+      "depends_on": [
+        "WP02"
+      ],
+      "candidate_paths": [
+        "macro/engine/k3e_expectation_surface.py",
+        "macro/collectors/equity_revisions.py",
+        "Existing K3E provider-family / semantic-seam qualification tests"
+      ],
+      "mission": "Reconcile merged EXP-1, current strict-xfail gaps and source-owner repairs. Separate captured values from admitted baseline. Qualify issuer, immutable fiscal target, unit, currency, GAAP/adjusted and basic/diluted basis, provider response and clocks.",
+      "positive_proof": "At least one lawful real comparable pair is consumed with exact original observation/attempt receipts and correction behavior. Unsupported families remain explicitly null rather than guessed.",
+      "negative_cases": [
+        "+1q/FY1 roll compared as same target",
+        "Null anchor treated as equal",
+        "Contributor entry interpreted as same-analyst revision",
+        "Guidance mixed with consensus",
+        "One closed gap leaves its strict xfail unchanged"
+      ],
+      "gate": "Merged reader is DO_NOT_REDO. Missing paid consensus does not block qualifying native fields, but normalized baseline must not be invented.",
+      "source_refs": [
+        "S15",
+        "S23"
+      ]
+    },
+    {
+      "id": "WP10",
+      "title": "Prove a guidance-versus-prior-guidance financial comparison",
+      "orchestrator": "O3",
+      "phase": "M2",
+      "issues": [
+        "MAS-271",
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP02",
+        "WP04"
+      ],
+      "candidate_paths": [
+        "Existing Earnings event and guidance owners",
+        "macro/engine/expectation_state.py context only",
+        "FIF normalized metric reader"
+      ],
+      "mission": "Choose a real issuer guidance update with prior comparable range. Treat guidance revision as its own expectation channel, not consensus surprise. Lock period, currency, accounting/share basis and event availability.",
+      "positive_proof": "Actual new/prior low-high-midpoint values yield deterministic named changes in one consumer; baseline unavailability and comparable consensus absence remain visible.",
+      "negative_cases": [
+        "Different fiscal periods",
+        "Negative denominator percentage misleading",
+        "Prior release called analyst consensus",
+        "Model midpoint mistaken for a surveyed expectation"
+      ],
+      "gate": "A guidance-only proof can advance company reasoning but cannot by itself close MAS-271 full native-analyst comparison or claim earnings surprise.",
+      "source_refs": [
+        "S22",
+        "S23"
+      ]
+    },
+    {
+      "id": "WP11",
+      "title": "Repair MRI producer-to-reader compatibility",
+      "orchestrator": "O3",
+      "phase": "M2",
+      "issues": [
+        "MAS-273"
+      ],
+      "depends_on": [
+        "WP02"
+      ],
+      "candidate_paths": [
+        "macro/scripts/build_release_forecast.py",
+        "macro/engine/event_window.py",
+        "macro/engine/release_actuals.py",
+        "Existing MRI tests/readers"
+      ],
+      "mission": "Confirm no accepted compatibility adapter already resolves the unchanged path/envelope mismatch. Bind the intended release target, array element, unit and native sigma meaning; changing only the filename is insufficient.",
+      "positive_proof": "Full producer-fixture-to-reader contract proof, then one permitted real official actual/baseline bundle with exact source generation and reader receipt. Show original print, correction, nowcast, market pricing and economist poll separately.",
+      "negative_cases": [
+        "Uppercase top-level key assumed on upcoming array",
+        "First matching CPI object selected blindly",
+        "Mixed nowcast/market median called street consensus",
+        "Date-only vintage admitted intraday",
+        "Revision delta called revision surprise"
+      ],
+      "gate": "Do not require FOMC expansion or a new regime engine. Missing economist consensus stays unavailable; raw schema health is not forecast skill.",
+      "source_refs": [
+        "S13",
+        "S14",
+        "S31"
+      ]
+    },
+    {
+      "id": "WP12",
+      "title": "Prove real event evolution and evidence spans",
+      "orchestrator": "O2",
+      "phase": "M2",
+      "issues": [
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP02",
+        "WP04"
+      ],
+      "candidate_paths": [
+        "macro/engine/company_intelligence/events.py",
+        "macro/engine/company_intelligence/event_workspace.py",
+        "macro/app/company_intelligence.py",
+        "Existing news/event ledger and source pipeline"
+      ],
+      "mission": "Use an actual permitted company event, amendment and evidence span to demonstrate event-to-workspace-to-reader evolution. Keep source announcement, legal/effective state, schedule and inference distinct.",
+      "positive_proof": "A user can inspect what changed, original evidence, baseline and revision timeline. The same source revision is used in the ticker and research views.",
+      "negative_cases": [
+        "Proposal treated as enacted policy",
+        "Framework ceiling treated as revenue",
+        "Syndicated copy creates independent event",
+        "Retraction erased",
+        "Scheduled future event treated as future-knowledge leak merely because its effective date is later"
+      ],
+      "gate": "No second news engine, event warehouse or persistent thesis lobe. News writer/Terminal rail activation remains with incumbent owners.",
+      "source_refs": [
+        "S22",
+        "S33"
+      ]
+    },
+    {
+      "id": "WP13",
+      "title": "Qualify cutoff-safe retained debt inputs",
+      "orchestrator": "O4",
+      "phase": "M1",
+      "issues": [
+        "MAS-272",
+        "MAS-278"
+      ],
+      "depends_on": [
+        "WP02"
+      ],
+      "candidate_paths": [
+        "macro/engine/debt_maturity.py",
+        "Existing Capital Structure retained-input adapters",
+        "FIF source-version selection"
+      ],
+      "mission": "Check for an existing qualifying wrapper before writing one. Select a cutoff-eligible retained filing and parser/correction generation before calling deterministic debt/cash extraction. Keep economic issuer versus sponsor-held bond position separate.",
+      "positive_proof": "Actual retained original/amended filing inputs reproduce the correct earlier and later maturity ladder with explicit period, unit, perimeter and selected accession.",
+      "negative_cases": [
+        "Latest ineligible filing hides older eligible filing",
+        "Post-cutoff parser extract leaks",
+        "Wrong CIK/entity perimeter",
+        "Bond fund holding mistaken for issuer liability"
+      ],
+      "gate": "Default/live callers and held capital publication do not change merely because an opt-in qualifier works.",
+      "source_refs": [
+        "S12",
+        "S24"
+      ]
+    },
+    {
+      "id": "WP14",
+      "title": "Qualify direct share and capital-action observations",
+      "orchestrator": "O4",
+      "phase": "M1",
+      "issues": [
+        "MAS-272",
+        "MAS-278"
+      ],
+      "depends_on": [
+        "WP02",
+        "WP04"
+      ],
+      "candidate_paths": [
+        "Existing Capital Structure/CCW direct-observation contracts",
+        "macro/docs/CAPITAL_STRUCTURE_INTELLIGENCE_CONTRACT.md",
+        "FIF facts/corrections"
+      ],
+      "mission": "Preserve security class, split basis, observation date and metric meaning across direct disclosed counts, public float value, EPS weighted-average denominator, warrants and authorizations. Produce only the specifically supported observation.",
+      "positive_proof": "One actual share/capital observation reaches its owner consumer with original source and correction lineage; a numerical request gets the correct denominator or a typed refusal.",
+      "negative_cases": [
+        "Float dollars interpreted as shares",
+        "Weighted-average shares used as current outstanding",
+        "Authorization treated as executed buyback",
+        "Unexercised warrant treated as issued share",
+        "Split double counted"
+      ],
+      "gate": "Fully diluted/current selected denominator W4/W6 holds remain separate. Revenue-only scenarios need not wait for an EPS denominator they do not use.",
+      "source_refs": [
+        "S24"
+      ]
+    },
+    {
+      "id": "WP15",
+      "title": "Build a real operating-driver financial scenario",
+      "orchestrator": "O2",
+      "phase": "M2",
+      "issues": [
+        "MAS-265",
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP03",
+        "WP04",
+        "WP12"
+      ],
+      "candidate_paths": [
+        "Existing FIF / Single Name Intelligence / Earnings scenario seams",
+        "Existing company KPI and metric definitions"
+      ],
+      "mission": "Choose a direct issuer mechanism supported by actual filings/events, such as disclosed volume x realized price or guidance change with an explicit margin assumption. Separate facts, statistical estimates and scenario assumptions. Reuse existing financial arithmetic owners.",
+      "positive_proof": "An actual event changes a documented driver; deterministic arithmetic returns a range/conditional consequence with units, period, assumptions, sensitivity, evidence and falsifiers. At least one meaningful numeric consequence is supported; no invented exposure.",
+      "negative_cases": [
+        "Supply-chain mention assigned arbitrary economic share",
+        "Correlated stock move used as causal coefficient",
+        "Inconsistent units",
+        "Margin versus markup confusion",
+        "Double-counted segment revenue",
+        "Assumed probability printed as calibrated"
+      ],
+      "gate": "C4/GMI supplies already-qualified relationship references only. Direct issuer path avoids a new graph dependency. New selected-share or valuation authority is not smuggled in.",
+      "source_refs": [
+        "S22",
+        "S24"
+      ]
+    },
+    {
+      "id": "WP16",
+      "title": "Repair composer time, generation and claim-readiness semantics",
+      "orchestrator": "O8",
+      "phase": "M2",
+      "issues": [
+        "MAS-270",
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP02"
+      ],
+      "candidate_paths": [
+        "macro/app/integrated_answer.py",
+        "macro/tests/test_integrated_answer_v0.py",
+        "Existing owner response contracts"
+      ],
+      "mission": "Turn the fresh source findings into exact tests, reconcile current writer and repair this composer rather than build another. Preserve timestamp precision, source/economic clocks, actual served generation, per-domain freshness and claim-level required/optional inputs.",
+      "positive_proof": "Exact current-source tests reject future/invalid clocks, retain date intervals, mark all-old evidence stale against request time and the proper source SLA, and never upgrade missing clocks to source truth. Independently reviewed contract aligns product copy and actual behavior.",
+      "negative_cases": [
+        "Date-only becomes midnight factual availability",
+        "Naive time silently UTC",
+        "All equally old legs stay ok",
+        "Undated event assigned composed_at and ok",
+        "Global publication receipt proves issuer-specific permission",
+        "Future leg pushes page clock forward"
+      ],
+      "gate": "Do not activate the default-off route as part of a clock repair. Native source validators are reused; transport failures remain distinct from no data.",
+      "source_refs": [
+        "S06",
+        "S07",
+        "S08"
+      ]
+    },
+    {
+      "id": "WP17",
+      "title": "Generalize financial selection and compose claim-bearing answers",
+      "orchestrator": "O8",
+      "phase": "M3",
+      "issues": [
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP03",
+        "WP04",
+        "WP05",
+        "WP08",
+        "WP09",
+        "WP10",
+        "WP12",
+        "WP15",
+        "WP16"
+      ],
+      "candidate_paths": [
+        "macro/app/integrated_answer.py",
+        "Existing financial query provider and company consumers"
+      ],
+      "mission": "Replace fixed AAPL/old-period use in the C19 consumer with an explicitly admitted issuer, target, cutoff and generation selection. The answer must consume financial results and scenario evidence, not only expose query pointers. Retain references, not a merged fact warehouse.",
+      "positive_proof": "One real company answer traces every material sentence and number to the exact underlying source/assumption/calculation. Different user tiers receive only entitled evidence. Unsupported core claims make the answer partial, not complete.",
+      "negative_cases": [
+        "AAPL golden fixture presented as broad coverage",
+        "Current evidence combined with old fixed cutoffs without label",
+        "Schema says v0 but marketing says complete intelligence",
+        "Missing optional context renormalizes to confidence",
+        "Current global receipt authorizes unrelated subject"
+      ],
+      "gate": "Dependencies are for the full company-answer acceptance, not for starting independent source work or building dark UI. Existing release holds still apply.",
+      "source_refs": [
+        "S06",
+        "S22",
+        "S23",
+        "S26"
+      ]
+    },
+    {
+      "id": "WP18",
+      "title": "Deliver the company research user journey",
+      "orchestrator": "O8",
+      "phase": "M3",
+      "issues": [
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP02",
+        "WP16"
+      ],
+      "candidate_paths": [
+        "Existing Stock Dossier / Company Intelligence UI",
+        "Existing design system and entitlement boundaries"
+      ],
+      "mission": "Implement a coherent evidence-backed answer panel in the existing company experience, using the agreed data contract. Show what changed, business effect, expectation comparison, market observation, uncertainties and evidence drill-down; handle loading, partial, stale and correction states.",
+      "positive_proof": "Authorized browser proof at desktop and narrow mobile width; keyboard-readable evidence drill-down; actual network response maps to displayed generation and no fabricated fixture content. Final acceptance additionally requires WP17.",
+      "negative_cases": [
+        "UI renders absent data as zero",
+        "Stale badge hidden after client refresh",
+        "Evidence click opens another revision",
+        "Premium text leaks through public cache",
+        "Unsupported calibrated language"
+      ],
+      "gate": "Dark UI implementation can overlap source qualification. Do not rebuild the entire frontend, design system, Market OS, Prophet or GMI.",
+      "source_refs": [
+        "S06",
+        "S26"
+      ]
+    },
+    {
+      "id": "WP19",
+      "title": "Integrate the same answer into Terminal",
+      "orchestrator": "O8",
+      "phase": "M3",
+      "issues": [
+        "MAS-270",
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP02",
+        "WP16"
+      ],
+      "candidate_paths": [
+        "Existing Terminal ticker/research consumer and auth route; exact paths resolved on intake",
+        "Existing Macro API contract"
+      ],
+      "mission": "Bind one existing Terminal consumer to the same answer identity and evidence revision. Reuse auth, quote owner and generation semantics. Preserve ticker changes, request cancellation and cached-response identity.",
+      "positive_proof": "Real signed-in Terminal browser session opens the same source-backed answer; symbol changes cannot show a prior company; denied users learn no private content. Final acceptance requires WP17 and valid deployed sources.",
+      "negative_cases": [
+        "Late response overwrites new ticker",
+        "Two independent generated narratives disagree",
+        "Cross-user cache leak",
+        "Repeated polling creates duplicate events",
+        "Raw quote freshness becomes evidence freshness"
+      ],
+      "gate": "Exact Terminal path/custody has not been cleared in this assessment. Discover before editing; preserve news #831 and adjacent user-interface writers.",
+      "source_refs": [
+        "S26",
+        "S33"
+      ]
+    },
+    {
+      "id": "WP20",
+      "title": "Deliver useful correction-aware refresh without alert inflation",
+      "orchestrator": "O8",
+      "phase": "M3",
+      "issues": [
+        "MAS-270",
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP12",
+        "WP16"
+      ],
+      "candidate_paths": [
+        "Existing reactive projection / news event publication owners",
+        "Existing dossier/Terminal refresh path"
+      ],
+      "mission": "Use the existing change transport to invalidate only affected answer components and show a material source delta. Source corrections append; sealed historical answers remain unchanged. No new queue, watcher, publisher or alert daemon.",
+      "positive_proof": "A real later source generation updates the relevant current answer, is explainable as a delta, and does not duplicate the underlying event or resend unchanged user notifications. Old recorded answer remains reproducible.",
+      "negative_cases": [
+        "Transport reconnect replays duplicate effect",
+        "Correction mutates sealed packet",
+        "Silent drop on partial provider failure",
+        "Every price tick triggers expensive synthesis"
+      ],
+      "gate": "User notifications or live signal promotion require their own existing product/release permissions; an internal display update is not signal authority.",
+      "source_refs": [
+        "S22",
+        "S25",
+        "S26"
+      ]
+    },
+    {
+      "id": "WP21",
+      "title": "Accept the first integrated P0 capability",
+      "orchestrator": "Fable",
+      "phase": "M3",
+      "issues": [
+        "MAS-268",
+        "MAS-269",
+        "MAS-270",
+        "MAS-271",
+        "MAS-272",
+        "MAS-273",
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP06",
+        "WP07",
+        "WP11",
+        "WP13",
+        "WP14",
+        "WP17",
+        "WP18",
+        "WP19",
+        "WP20"
+      ],
+      "candidate_paths": [
+        "Existing evidence records and exact release candidates; no new source owner"
+      ],
+      "mission": "Adjudicate end-to-end P0 across the company answer and parallel macro/debt/accounting obligations. Do not force macro or debt into an unrelated company explanation, but do not silently drop their P0 acceptance from the program.",
+      "positive_proof": "Named actual producer-to-consumer traces; independent adversarial review; meaningful financial comparison; real user task completion; correction, rights, clock and partial states; exact distinction between source acceptance, release, served SHA and natural-use proof.",
+      "negative_cases": [
+        "Unit-test green equals user acceptance",
+        "All-null answer called golden",
+        "One component DEC closes unrelated ticket",
+        "Synthetic event substituted for natural evidence"
+      ],
+      "gate": "Route activation only through its incumbent reserved owner. A blocked release retains exact prepared candidate and next action; independent P1 qualification may proceed where its own prerequisites pass.",
+      "source_refs": [
+        "S01",
+        "S32"
+      ]
+    },
+    {
+      "id": "WP22",
+      "title": "Prove generality beyond a hand-picked exemplar",
+      "orchestrator": "O2",
+      "phase": "M3",
+      "issues": [
+        "MAS-274"
+      ],
+      "depends_on": [
+        "WP17"
+      ],
+      "candidate_paths": [
+        "Same existing driver and answer owners",
+        "A second evidence-qualified issuer/mechanism"
+      ],
+      "mission": "Choose the second case by prospective evidence sufficiency, not best realized return. Freeze its selection before opening evaluation outcomes. Exercise a different driver or industry and preserve rejected candidates/coverage.",
+      "positive_proof": "Second real issuer/driver traverses the same reusable contracts; a contradictory or negative event is handled usefully without changing requirements to fit the winner.",
+      "negative_cases": [
+        "Winner selected using later price",
+        "Hardcoded company labels",
+        "Same event mirrored and counted as second case",
+        "Different failure silently excluded"
+      ],
+      "gate": "This is generalization/coverage evidence, not proof of alpha. Use existing registered exposure controls.",
+      "source_refs": [
+        "S01",
+        "S22",
+        "S11"
+      ]
+    },
+    {
+      "id": "WP23",
+      "title": "Qualify native two-period institutional ownership",
+      "orchestrator": "O5",
+      "phase": "M4",
+      "issues": [
+        "MAS-275"
+      ],
+      "depends_on": [
+        "WP04",
+        "WP08"
+      ],
+      "candidate_paths": [
+        "macro/lib/institutional_13f_adapter.py",
+        "macro/lib/institutional_intelligence.py",
+        "Existing Smart Money or company-context consumer"
+      ],
+      "mission": "Reconcile current K2-C carrier and feed an actual two-period receipt into one chosen consumer. Preserve filer/manager/vehicle/issuer/security and reporting/publication clocks; present reported position change, not current money flow.",
+      "positive_proof": "Same filer/security/unit/perimeter across ordered periods, original/amended filing lineage and source receipts; actual consumer shows correct change plus incomplete-coverage caveats.",
+      "negative_cases": [
+        "Missing row inferred sale",
+        "13F + N-PORT + ETF assets summed",
+        "Put/call principal shares conflated",
+        "Future filing used at earlier cutoff",
+        "Store corruption turned into missing holding"
+      ],
+      "gate": "No ownership master, current-flow claim or portfolio effects. Other legal planes need separate source-specific acceptance.",
+      "source_refs": [
+        "S27"
+      ]
+    },
+    {
+      "id": "WP24",
+      "title": "Preserve immutable short/borrow captures and censoring",
+      "orchestrator": "O5",
+      "phase": "M4",
+      "issues": [
+        "MAS-276"
+      ],
+      "depends_on": [
+        "WP04",
+        "WP08"
+      ],
+      "candidate_paths": [
+        "macro/collectors/finra_short_volume.py",
+        "macro/collectors/finra.py",
+        "macro/collectors/ibkr_borrow.py",
+        "Existing short_pressure and short_volume readers"
+      ],
+      "mission": "Extend incumbent retention only where a current gap remains. Keep original/corrected generations while preserving convenience latest views. Separate short-sale activity, settlement positions and broker-specific indicative inventory.",
+      "positive_proof": "Real same-date correction and reread preserve original generation; actual consumer distinguishes observed zero, no observation, partial, parse error, unavailable and censored/lower-bound inventory.",
+      "negative_cases": [
+        "Short volume becomes short position",
+        "Broker inventory called market-wide supply",
+        "Censored greater-than value treated exact",
+        "Rerun overwrites replay history"
+      ],
+      "gate": "Rights/retention needed for this use are qualified, not inferred from keyless access. No new crowding score/store.",
+      "source_refs": [
+        "S28"
+      ]
+    },
+    {
+      "id": "WP25",
+      "title": "Qualify actual options/quote measurement grain",
+      "orchestrator": "O5",
+      "phase": "M4",
+      "issues": [
+        "MAS-279"
+      ],
+      "depends_on": [
+        "WP04",
+        "WP08"
+      ],
+      "candidate_paths": [
+        "Existing Terminal Quote Plane",
+        "macro/engine/thetadata_store.py",
+        "macro/engine/live_flow.py",
+        "macro/contracts/options/options.trade_nbbo_microstructure.v1.schema.json"
+      ],
+      "mission": "Reconcile current richer quote/TP1/options carriers before repairing. Bind measurement to actual trade/quote mode, source timestamps, sequence, conditions, corrections, prior-OI availability and coverage.",
+      "positive_proof": "One actual measured source block reaches the existing consumer with exact source grain and lawful use. A richer-source requirement either matches a qualified source or returns unsupported.",
+      "negative_cases": [
+        "Sparse BBO used for continuous OFI",
+        "Post-trade quote leaks into earlier measurement",
+        "Quote location identifies dealer/customer",
+        "Coalesced contract batch called atomic print",
+        "OI joined before known"
+      ],
+      "gate": "No order-book acquisition project, new quote plane, dealer inventory inference or automatic alpha promotion.",
+      "source_refs": [
+        "S28",
+        "S33"
+      ]
+    },
+    {
+      "id": "WP26",
+      "title": "Qualify one physical source-to-existing consumer path",
+      "orchestrator": "O6",
+      "phase": "M4",
+      "issues": [
+        "MAS-277"
+      ],
+      "depends_on": [
+        "WP08"
+      ],
+      "candidate_paths": [
+        "macro/collectors/eia.py",
+        "macro/scripts/build_commodities.py",
+        "macro/engine/commodity_supply_context.py"
+      ],
+      "mission": "Qualify an actual EIA refinery-utilization generation through the existing oil supply view, including its crude-stock prerequisite. Keep source edition, release precision, observation, correction and partial-series coverage.",
+      "positive_proof": "Real source artifact and actual page/reader generation agree on aggregate metric, unit, period and partialness; original and corrected releases remain distinguishable where archived.",
+      "negative_cases": [
+        "2023 edition labeled 2026 observation",
+        "Missing crude prerequisite treated zero",
+        "Latest revised series called original vintage",
+        "Same EIA lineage counted twice for C12/C16"
+      ],
+      "gate": "The aggregate context proof is useful but does not complete the issuer-KPI bridge in WP27.",
+      "source_refs": [
+        "S29",
+        "S30"
+      ]
+    },
+    {
+      "id": "WP27",
+      "title": "Deliver or reject one evidenced physical-to-company KPI bridge",
+      "orchestrator": "O6",
+      "phase": "M4",
+      "issues": [
+        "MAS-277"
+      ],
+      "depends_on": [
+        "WP03",
+        "WP04",
+        "WP26"
+      ],
+      "candidate_paths": [
+        "Existing company KPI/FIF/SNI consumers",
+        "Existing admitted physical source owner"
+      ],
+      "mission": "Choose one economically justified issuer exposure and KPI, such as a disclosed refining footprint with a matching operating metric. Separate observed aggregate measurement, exposure, operating response and financial assumption.",
+      "positive_proof": "Real source/issuer mapping generations, disclosure-supported exposure, matching KPI denominator and actual company consumer. Compare KPI skill separately from investment value; publish a justified reject/defer when no defensible bridge exists.",
+      "negative_cases": [
+        "Generation/storage queue called datacenter load",
+        "Queued capacity called energized production",
+        "Aggregate utilization automatically becomes company EPS",
+        "Correlation offered as identified causality"
+      ],
+      "gate": "No new GMI graph. Unsupported industry/company link remains a dependency or rejected hypothesis; no broad vendor purchase.",
+      "source_refs": [
+        "S29",
+        "S30"
+      ]
+    },
+    {
+      "id": "WP28",
+      "title": "Qualify financing and capital-action consequences",
+      "orchestrator": "O4",
+      "phase": "M4",
+      "issues": [
+        "MAS-278"
+      ],
+      "depends_on": [
+        "WP13",
+        "WP14",
+        "WP08"
+      ],
+      "candidate_paths": [
+        "Existing Capital Structure / CCW / FIF consumer and correction owners"
+      ],
+      "mission": "Extend qualified observations into a bounded financing/capital-action view only after its owner holds are resolved. Distinguish announcement, authorization, execution, liability terms, contingent supply and maturity.",
+      "positive_proof": "One actual action or retained financing change is correctly reflected in its existing user view with selected source versions, units, dates and uncertainty. Fully diluted effects require separately qualified share selection.",
+      "negative_cases": [
+        "Authorization booked as cash spent",
+        "Future liability selected",
+        "Convertible double counted as debt and issued equity without basis",
+        "Corporate-action correction rewrites old decision"
+      ],
+      "gate": "W2/W4/W6 and publication flags stay with incumbent release authority. Do not open unrelated capital programs by implication.",
+      "source_refs": [
+        "S24"
+      ]
+    },
+    {
+      "id": "WP29",
+      "title": "Prove one regional evidence-equivalence slice",
+      "orchestrator": "O6",
+      "phase": "M4",
+      "issues": [
+        "MAS-280"
+      ],
+      "depends_on": [
+        "WP04",
+        "WP08",
+        "WP09"
+      ],
+      "candidate_paths": [
+        "Existing regional source and identity owners",
+        "Data OS applicability metadata",
+        "Existing country/ticker consumer"
+      ],
+      "mission": "Pick a measured gap in one non-US market. Preserve regional calendar, language, listing class, legal plane, denominator and availability. Answer the same user question with honestly different evidence where appropriate.",
+      "positive_proof": "A bounded expected universe and source generation show coverage, structural unavailability, source precision and actual consumption; one regional capability is accepted or specifically rejected/deferred with evidence.",
+      "negative_cases": [
+        "CN reversal rev_z relabeled analyst revision",
+        "CCASS treated as US beneficial holdings",
+        "A/H ticker price or currency mixed",
+        "Missing equivalent column becomes zero"
+      ],
+      "gate": "Do not launch all regions or a universal parity/identity registry. External regulatory claims must be rechecked before use.",
+      "source_refs": [
+        "S26"
+      ]
+    },
+    {
+      "id": "WP30",
+      "title": "Make evidence-based paid-data decisions",
+      "orchestrator": "O3",
+      "phase": "M4",
+      "issues": [
+        "MAS-280",
+        "MAS-281"
+      ],
+      "depends_on": [
+        "WP09"
+      ],
+      "candidate_paths": [
+        "Existing procurement decision records",
+        "Existing expectations consumer/evaluation owners"
+      ],
+      "mission": "Specify the exact historical consensus or contributor gap, sample period/universe, original vintages, corrections, allowed uses, consumer integration and cheapest adequate baseline. Request approved samples only through actual procurement authority.",
+      "positive_proof": "A documented no-buy/defer/substitution/buy-candidate decision follows delivered sample evidence and total cost. No quote, right or incremental value is invented.",
+      "negative_cases": [
+        "Vendor brand assumed to supply required history",
+        "Current sample treated as original vintage",
+        "Contributor detail purchased before baseline need",
+        "Price estimate treated binding quote"
+      ],
+      "gate": "No spending, contact, new credential or contract acceptance is authorized by this packet alone. Paid data is not a blanket P0 dependency.",
+      "source_refs": [
+        "S23",
+        "S01"
+      ]
+    },
+    {
+      "id": "WP31",
+      "title": "Evaluate incremental information and sustain prospective evidence",
+      "orchestrator": "O7",
+      "phase": "M5",
+      "issues": [
+        "MAS-281"
+      ],
+      "depends_on": [
+        "WP06",
+        "WP07",
+        "WP21",
+        "WP22"
+      ],
+      "candidate_paths": [
+        "Existing TrialLedger / Lab / validation / prediction-outcome owners"
+      ],
+      "mission": "Freeze the question, universe, temporal view, exact sources/features/labels, baseline, useful effect, costs, sample-dependence and exposure accounting before outcomes. Compare source-backed answer utility and incremental information, not just headline returns.",
+      "positive_proof": "Common-support comparisons, source-family/descendant-aware ablations, qualified uncertainty, realistic costs and prospective natural evidence. Report null, inconclusive and adverse results. Preserve already-exposed holdouts and model historical-knowledge contamination limits.",
+      "negative_cases": [
+        "Row count equals independent N",
+        "Trials hidden after a bad result",
+        "Descendant feature remains during source ablation",
+        "Backtest alone certifies live skill",
+        "Research prompt affects portfolio while labeled read-only"
+      ],
+      "gate": "Natural outcome maturity cannot be accelerated by more agents. Leave a verified existing external execution owner/return path when waiting; no invented scheduling.",
+      "source_refs": [
+        "S11",
+        "S25",
+        "S01"
+      ]
+    },
+    {
+      "id": "WP32",
+      "title": "Production rollout, performance and recovery proof",
+      "orchestrator": "O8",
+      "phase": "M5",
+      "issues": [
+        "MAS-270",
+        "MAS-274",
+        "MAS-281"
+      ],
+      "depends_on": [
+        "WP21"
+      ],
+      "candidate_paths": [
+        "Existing release/deployment configuration and product observability",
+        "Exact Macro/Terminal candidate and consumer paths"
+      ],
+      "mission": "Prepare dark deployment, entitled canary, actual flag/cutover approval where reserved, observed latency/resource/cost budgets, failure rollback and source-to-served identity. Keep expensive synthesis off the request/render critical path through existing owners.",
+      "positive_proof": "Exact released and served SHA, real authorized browser task, natural source update, correction behavior, denial isolation, latency/cache/availability evidence and a demonstrated rollback. Installation, activation and usage are separately proven.",
+      "negative_cases": [
+        "Merged means deployed",
+        "Feature flag alone fixes missing evidence",
+        "Global cache ignores entitlement",
+        "Full history loaded per request without bound",
+        "Retry duplicates source effects"
+      ],
+      "gate": "No bypass of CI, protected release or human-only approval. Genuine external gate is precise and leaves independent work active.",
+      "source_refs": [
+        "S07",
+        "S26",
+        "S33"
+      ]
+    },
+    {
+      "id": "WP33",
+      "title": "Close the whole program or leave a truthful owned frontier",
+      "orchestrator": "Fable",
+      "phase": "M5",
+      "issues": [
+        "MAS-263",
+        "MAS-264",
+        "MAS-265",
+        "MAS-266",
+        "MAS-267",
+        "MAS-268",
+        "MAS-269",
+        "MAS-270",
+        "MAS-271",
+        "MAS-272",
+        "MAS-273",
+        "MAS-274",
+        "MAS-275",
+        "MAS-276",
+        "MAS-277",
+        "MAS-278",
+        "MAS-279",
+        "MAS-280",
+        "MAS-281",
+        "MAS-282"
+      ],
+      "depends_on": [
+        "WP01",
+        "WP21",
+        "WP22",
+        "WP23",
+        "WP24",
+        "WP25",
+        "WP26",
+        "WP27",
+        "WP28",
+        "WP29",
+        "WP30",
+        "WP31",
+        "WP32"
+      ],
+      "candidate_paths": [
+        "Existing Agent OS workstream/decisions/handoffs",
+        "GitHub #1243 and delivery/evidence carriers",
+        "Existing Linear project projection"
+      ],
+      "mission": "Reconcile every research recommendation and every P0/P1 outcome against original intent. Preserve accepted code and evidence, valid rejected hypotheses, justified deferrals, unresolved original-package custody and live child returns. Do not equate a packet or PR count to completion.",
+      "positive_proof": "P0 real capability proven, P1 dispositions justified by evidence, M5 maturity accurately stated, no orphaned child or silent blocked lane, and the user knows what works. Product completion, scientific qualification and external wait remain separate.",
+      "negative_cases": [
+        "One golden answer closes all 18 topics",
+        "All P1 lanes deferred merely to finish",
+        "Archival omission disappears",
+        "Child marked done at unreviewed PR",
+        "Future planned proof stated as executed"
+      ],
+      "gate": "Stop only for proven requested outcome, real external gate after useful independent work, or actual continuity risk with verified frontier. A save is not a stop.",
+      "source_refs": [
+        "S01",
+        "S03",
+        "S32"
+      ]
+    }
+  ]
+}

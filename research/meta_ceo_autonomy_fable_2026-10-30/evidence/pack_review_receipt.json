@@ -1,0 +1,23 @@
+{
+  "scope": "Independent review request for the new research/design pack; not a product mission or canonical Executive Job",
+  "reviewed_target_requested": "Mastermind PR #1895 at 11549f4fc1b694e9c86b3b45b9759061cf39c205",
+  "run_id": "autonomy-fable-pack-review-20261030-01",
+  "request_root_id": "meta-ceo-autonomy-census-20261030",
+  "request_parent_id": "web-autonomy-research-principal-20261030",
+  "initial_delivery": "CONTROLLER_CREATED",
+  "latest_native_state": "REQUEST_REFUSED_BEFORE_LAUNCH",
+  "acceptance_reason": "EXECUTION_NOT_ELIGIBLE",
+  "controller_return": "RECORDED",
+  "controller_reason": "request_refused_before_launch",
+  "native_exit_observed": 75,
+  "worker_start_proven": false,
+  "result_available": false,
+  "root_verified": false,
+  "native_status_execution_absence_proven": true,
+  "outer_envelope_execution_absence_proven": false,
+  "retry_allowed": false,
+  "cause": "Not specified by the retained response; do not infer quota, permission or provider failure from exit 75 alone",
+  "disposition": "No independent pack verdict. No retry, alternate provider, replacement or fabricated approval. Draft source remains pending normal independent review.",
+  "diagnostic": "One bounded original-controller output read returned MMX_FABRIC_BEGIN and MMX_FABRIC_EXIT=75; it did not return a worker response",
+  "other_audit": "The separate completed source audit and its qualified parent adjudication remain in fabric_audit_receipt.json and 08_FABRIC_SOURCE_AUDIT_ADJUDICATION.md; neither is a review of this authored pack"
+}

@@ -149,13 +149,14 @@ def _latest_lifecycle() -> dict[str, Any]:
 
 
 def _latest_benchmark() -> dict[str, Any]:
-    """Read the most recent benchmark ledger artifact.  Returns {} on any failure."""
+    """Read the most recent benchmark ledger artifact.  Returns {} on any failure.
+
+    Delegates to brain.benchmark_ledger.latest() — the ledger module owns the on-disk selection
+    contract (dated-LEDGER filenames only, never the co-located _series*.json sidecars)."""
     try:
-        bench_dir = _ROOT / "data" / "benchmark"
-        files = sorted(bench_dir.glob("*.json")) if bench_dir.exists() else []
-        if not files:
-            return {}
-        return json.loads(files[-1].read_text())
+        from brain import benchmark_ledger
+        out = benchmark_ledger.latest()
+        return out if isinstance(out, dict) else {}
     except Exception:  # noqa: BLE001
         return {}
 
@@ -471,63 +472,41 @@ def build_latest(
             pkts = mandate_packets
 
         artifact = _compute(lc, bm, pkts, book_ids=book_ids)
-        if not _persist(artifact):
-            return {
-                **artifact,
-                "computed": True,
-                "persist_status": "unavailable",
-                "error": "firm_allocator_persist_unavailable",
-                "reason": "firm allocator computed but persistence unavailable",
-            }
+        _persist(artifact)
         return artifact
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         return {
             "asof": date.today().isoformat(),
             "formula_version": _FORMULA_VERSION,
             "advisory_only": True,
             "computed": False,
-            "build_status": "unavailable",
-            "error": "firm_allocator_build_unavailable",
-            "reason": "firm allocator unavailable",
-            "books": None,
-            "firm": None,
+            "reason": f"firm_allocator.build_latest crashed: {exc!r}"[:400],
+            "books": {},
+            "firm": {},
         }
 
 
-def latest_artifact_checked() -> tuple[str, dict | None]:
-    """Read the newest persisted artifact with an explicit absent/unavailable distinction."""
+def latest_artifact() -> dict | None:
+    """Read the most recent persisted allocator artifact.  Returns None if absent."""
     try:
         files = sorted(_OUT_DIR.glob("*.json")) if _OUT_DIR.exists() else []
+        if not files:
+            return None
+        return json.loads(files[-1].read_text())
     except Exception:  # noqa: BLE001
-        return "unavailable", None
-    if not files:
-        return "absent", None
-    try:
-        artifact = json.loads(files[-1].read_text())
-    except Exception:  # noqa: BLE001
-        return "unavailable", None
-    if not isinstance(artifact, dict):
-        return "unavailable", None
-    return "available", artifact
-
-
-def latest_artifact() -> dict | None:
-    """Legacy read: artifact when available, otherwise None."""
-    status, artifact = latest_artifact_checked()
-    return artifact if status == "available" else None
+        return None
 
 
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------
 
-def _persist(artifact: dict) -> bool:
-    """Write artifact to data/allocator/<asof>.json and report durability."""
+def _persist(artifact: dict) -> None:
+    """Write artifact to data/allocator/<asof>.json.  Never raises."""
     try:
         _OUT_DIR.mkdir(parents=True, exist_ok=True)
         asof = artifact.get("asof") or date.today().isoformat()
         p = _OUT_DIR / f"{asof}.json"
         p.write_text(json.dumps(artifact, indent=2))
-        return True
     except Exception:  # noqa: BLE001
-        return False
+        pass
