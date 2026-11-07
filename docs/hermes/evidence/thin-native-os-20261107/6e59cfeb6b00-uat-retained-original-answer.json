@@ -1,0 +1,75 @@
+{
+  "sourceHead": "6e59cfeb6b00e1508eae51ec0a9dc5c03b8c193a",
+  "originalSessionId": "local-1fb461715a98699c3b536f523edff78784ebd84f6a5d131b4e2318ec38db02fb",
+  "acceptedOriginalSource": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "originalCanonicalReceiptSha256": "f128fe6d3cbd90cf0bbf1505d4dd2030d7f90d88d66224e47a3993c58ba92f51",
+  "bothOriginalMessagesMatchCanonical": true,
+  "observation": {
+    "at": "2026-11-07T09:25:49.399Z",
+    "pid": 23348,
+    "signedIn": "Signed in",
+    "hermesHeader": [
+      null,
+      "Hermes v0.23.0",
+      "Connect local Hermes"
+    ],
+    "controls": [
+      null,
+      null,
+      null,
+      "New conversation",
+      "Local history",
+      "Local Hermes conversations",
+      "Mastermind OS \u00b7 Meta-CEO",
+      "Read original conversation",
+      null,
+      "Native conversation messages",
+      null,
+      "The message is sent exactly as written. No automatic resend.",
+      "Check and send message"
+    ],
+    "messages": {
+      "names": [
+        null,
+        null
+      ],
+      "groups": [
+        {
+          "index": 0,
+          "names": [
+            "YOU",
+            null
+          ],
+          "groups": [
+            {
+              "index": 1,
+              "names": [
+                "Turn these Hermes integration acceptance requirements into a concise five-bullet internal checklist: use the existing local runtime and original conversation; recover an original request without automatic resend; reopen saved history; clear the displayed conversation on logout and reconnect safely; keep public Apple signing, notarization and updater distribution on hold until separately qualified. Mark these as requirements, not proven results. Do not use tools."
+              ],
+              "groups": []
+            }
+          ]
+        },
+        {
+          "index": 1,
+          "names": [
+            "HERMES",
+            null
+          ],
+          "groups": [
+            {
+              "index": 1,
+              "names": [
+                "- **Session Context Preservation**: Maintain original local runtime and conversation state; avoid automatic request resends or session resets.  \n- **Request Recovery**: Support reopening and verifying saved history without relying on resent requests or external triggers.  \n- **Logout Security**: Clear all displayed conversation data upon logout; ensure safe reconnection to the same session without\u6b8b\u7559.  \n- **Apple Ecosystem Hold**: Suspend public Apple signing, notarization, and updater distribution until separately approved by authorized channels.  \n- **Runtime Isolation**: Use the original conversation context and local runtime strictly; prohibit dynamic tool invocation for validation."
+              ],
+              "groups": []
+            }
+          ]
+        }
+      ]
+    },
+    "pendingPointerVisible": false,
+    "organization": "Organization and goal lineage"
+  },
+  "additionalSubmitCreateCancelCount": 0
+}

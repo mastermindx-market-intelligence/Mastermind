@@ -1,0 +1,32 @@
+[
+  {
+    "path": "/Users/chriswong/.codex/AGENTS.md",
+    "changed": true,
+    "before_sha256": "b82788b12c6357e94e52c1debd310c6317d30a0a9914a4131022299fb6f16565",
+    "after_sha256": "00a111d69ffbf52ebadbdccf6e5d7b8ae13d45c1b0b6dabe0b56b84ab99bdc93",
+    "before_bytes": 25624,
+    "after_bytes": 26169,
+    "backup": "/Volumes/Mastermind 2/evidence/execution-bureaucracy-20261015-astra-001/native-backups/4ea1dd2fecb5549f-b82788b12c6357e94e52c1debd310c6317d30a0a9914a4131022299fb6f16565.md",
+    "profile": "codex",
+    "scope": "Surgical missing-implementation paragraph only",
+    "unmanaged_text_unchanged": true,
+    "concurrent_risk_review_amendment_preserved": true,
+    "full_block_equals_repository_brief": false,
+    "served_behavior_verified": false
+  },
+  {
+    "path": "/Users/chriswong/.claude/CLAUDE.md",
+    "changed": true,
+    "before_sha256": "63d1a2222bd091cfe551596d46be19b473e817326153c9456735ad4802a51ae8",
+    "after_sha256": "20e74f5395257a9e94d99e0b6a9dec2a9c0c5e26f0d227a9adc6fe707118e10e",
+    "before_bytes": 22908,
+    "after_bytes": 23453,
+    "backup": "/Volumes/Mastermind 2/evidence/execution-bureaucracy-20261015-astra-001/native-backups/aa4815bb969cbbf4-63d1a2222bd091cfe551596d46be19b473e817326153c9456735ad4802a51ae8.md",
+    "profile": "claude",
+    "scope": "Surgical missing-implementation paragraph only",
+    "unmanaged_text_unchanged": true,
+    "concurrent_risk_review_amendment_preserved": true,
+    "full_block_equals_repository_brief": false,
+    "served_behavior_verified": false
+  }
+]

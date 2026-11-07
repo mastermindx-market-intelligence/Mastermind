@@ -312,7 +312,7 @@ body.page-mv .footnote {
     <h1>Market View <span class="pill validated" style="vertical-align:middle">PERCEPTION</span></h1>
     <div class="sub" id="mv-sub">loading the one view…</div>
   </div>
-  <p class="mm-page-note">One read-only view of validated signal planes, disagreements, and posture implications.</p>
+  <p class="mm-page-note">Published observations with source dates, current eligibility, and historical disagreements.</p>
 </div>
 
 <div id="mv-root">
@@ -373,7 +373,13 @@ body.page-mv .footnote {
       relationship === "confirmed" ? "agree" : "unconfirmed"
     );
     var title, detail;
-    if (conflict) {
+    var freshness = view.serving_freshness || {};
+    if (freshness.current_confirmation_available === false) {
+      cls = "unconfirmed";
+      title = "CURRENT CONFIRMATION UNAVAILABLE";
+      detail = "This publication cannot support current confirmation. Original observations remain " +
+        "visible with their source dates. Expired evidence does not establish recovery or release existing protection.";
+    } else if (conflict) {
       var diss = (lvp.dissenting_planes || []).join(", ") || "—";
       title = "LABEL vs PLANES — CONFLICT";
       detail = "The regime label reads <b>" + esc(lvp.label_direction) +
@@ -404,8 +410,8 @@ body.page-mv .footnote {
     var t = view.net_posture_tilt || {};
     var a = view.assembly || {};
     var kvs = [
-      ["Tilt", dirPill(t.direction) + ' <span class="num">' + fmtNum(t.tilt, 3) + "</span>"],
-      ["Validated planes", '<span class="num">' + (t.n_validated == null ? "—" : t.n_validated) + "</span>"],
+      ["Tilt", dirPill(t.direction) + ' <span class="num">' + fmtNum(t.direction == null ? null : t.tilt, 3) + "</span>"],
+      ["Eligible planes", '<span class="num">' + (a.eligible_validated == null ? (a.validated || 0) : a.eligible_validated) + "</span>"],
       ["Decision coverage", '<span class="num">' + fmtNum(a.decision_coverage, 3) + "</span>"],
       ["Coherence", '<span class="num">' + fmtNum(view.coherence, 3) + "</span>"],
       ["Availability", '<span class="num">' + fmtNum(view.coverage, 3) + "</span>"],
@@ -497,10 +503,13 @@ body.page-mv .footnote {
       pairs = (raw.headline_episode && raw.headline_episode.top_pairs) || null;
     }
     if (!Array.isArray(pairs) || !pairs.length) {
-      var note = (rt.raw && rt.raw.note) || "rotation_tensor organ not present";
+      var note = (rt.raw && rt.raw.note) || "No rotation pairs were captured in this publication.";
       return '<div class="msg">' + esc(note) + "</div>";
     }
-    var out = '<div class="pairs">';
+    var f = rt.freshness || {};
+    var out = '<div class="footnote">Rotation source: ' + esc(f.asof || "unknown") +
+      (f.stale ? " · historical / unavailable for current confirmation" : "") + "</div>";
+    out += '<div class="pairs">';
     pairs.slice(0, 8).forEach(function (p) {
       var accel = p.accelerating ? " accel" : "";
       out += '<div class="pair' + accel + '">' +
@@ -516,7 +525,8 @@ body.page-mv .footnote {
   function render(view) {
     sub.textContent = "region " + (view.region || "us") + " · asof " +
       (view.asof || "—") + " · seq " + (view.seq == null ? 0 : view.seq) +
-      " · " + (view.schema_version || "");
+      " · published " + (view.built_at || "unknown") +
+      " · freshness checked " + ((view.serving_freshness || {}).checked_at || "unavailable");
     var html = "";
     html += renderBanner(view);
     html += '<div class="panel"><h2>Net Posture Tilt (validated planes only)</h2>' +
@@ -524,8 +534,9 @@ body.page-mv .footnote {
     html += '<div class="panel"><h2>Planes</h2>' + renderPlanes(view) + "</div>";
     html += '<div class="panel"><h2>Brief (deterministic — zero LLM)</h2>' + renderBrief(view) + "</div>";
     html += '<div class="panel"><h2>Top Rotation Pairs</h2>' + renderPairs(view) + "</div>";
-    html += '<div class="footnote">Read-only mirror of data/market_view/latest.json. This view sizes ' +
-      "nothing (W-E wave contract: zero behavior change).</div>";
+    html += '<div class="footnote">Original source dates and publication time are preserved. ' +
+      "Eligibility is checked when this page loads; it is not a forecast accuracy rating. " +
+      "Portfolio decisions remain with the existing policy.</div>";
     root.innerHTML = html;
   }
 

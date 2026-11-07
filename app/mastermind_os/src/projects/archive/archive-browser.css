@@ -1,0 +1,6 @@
+.project-archive-browser { min-width: 0; }
+.project-archive-browser__continuation { display: grid; gap: var(--sp-3); margin-block-start: var(--sp-4); }
+.project-archive-browser__continuation p { color: var(--muted); margin: 0; }
+.project-archive-browser__continuation button { min-height: 44px; justify-self: start; white-space: normal; }
+.project-archive-browser__continuation button:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.project-archive-browser:lang(zh) .project-archive-browser__continuation { letter-spacing: normal; text-transform: none; }

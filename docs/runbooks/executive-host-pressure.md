@@ -165,6 +165,86 @@ the snapshot to a separately owned evidence location, validate it again through
 scan the artifact for prohibited raw fields. It must not install a daemon,
 modify policy, kill a process, create a reservation, or claim an idle baseline.
 
+
+## Operational fleet-hygiene guardrails
+
+These guardrails record operator lessons for integrating temporary/local execution
+harnesses with the existing Capacity and physical-resource owners. They do not arm
+HP0, create a host registry, define production thresholds, or make a local harness
+canonical.
+
+1. **Provider concurrency is not physical-host capacity.** A provider/account pool
+   may admit more model calls than one Mac can execute safely. Provider leases and
+   physical host admission remain separate gates. A launcher must not translate a
+   provider cap directly into local CPU/process concurrency.
+2. **Control-plane seats fail closed for autonomous execution.** A machine serving
+   interactive control, browser, or principal duties should not become a generic
+   worker merely because a caller sets an environment flag. Any local-only
+   exception must be a bounded capability requirement (for example, an engine that
+   is genuinely unavailable on qualified remote hosts), declared by the existing
+   placement policy and still subject to physical load and active-lane limits.
+3. **Remote binding is physical, not nominal.** A logical host key must reconcile to
+   the observed physical host/generation before execution. Copying a launcher or
+   registry file to another machine must not make that machine impersonate the
+   selected host.
+4. **Recheck at launch.** Load, active-lane count, disk headroom and required power/
+   availability gates are observation-time facts. Long-lived queue daemons must
+   reload accepted policy or be recycled only at a proven idle boundary; a stale
+   daemon must not preserve older, looser startup limits.
+5. **Started work stays on its carrier.** Once a lane or external process has
+   STARTED, host pressure does not authorize re-home, duplicate launch or blind
+   retry. Lower scheduling priority when appropriate, preserve the carrier, and
+   reconcile its terminal/effect state there.
+6. **Terminalization includes bounded workspace hygiene.** After the durable result
+   is written, a lane may remove only its own clean, registered worktree under the
+   configured worktree root. Dirty, locked, unregistered, process-referenced or
+   path-ambiguous worktrees are preserved. Cleanup precedes the terminal success
+   marker so a completed lane does not silently leak disk indefinitely.
+7. **Orphan cleanup requires ownership proof.** High CPU alone is not permission to
+   kill a process. Trace parentage, open file/pipe endpoints, current output
+   progress and the owning service/session. A process whose parent/control path is
+   gone and whose output cannot be consumed may be terminated only after preserving
+   ambiguous/incomplete output as evidence. Active CI workers, browser realms and
+   other sessions remain intact.
+8. **Storage pressure is a placement concern.** Remote execution can fail from
+   accumulated worktrees long before CPU or memory is exhausted. Reclaim only
+   clean, inactive, registered worktrees with an immediate pre-remove process
+   recheck; never use broad raw deletion as a substitute for owner-aware cleanup.
+9. **Investigation should be bounded.** Avoid filesystem-wide scans and recursive
+   disk walks on a pressured host. Prefer owner metadata, exact worktree registries,
+   process trees and bounded roots. Completed search helpers that outlive their
+   owner should be reconciled as support-process leaks rather than left consuming
+   I/O indefinitely.
+10. **Persistent support loops need a durable supervisor, not a chat lifetime.**
+    A queue consumer or feeder that must survive login, session rotation or process
+    death should be owned by the existing host service supervisor and restart the
+    same carrier/queue identity. Prove one bounded crash/restart recovery. Supervisor
+    recovery must never mint a second queue, placement authority or duplicate
+    in-flight operation, and policy must still be re-read after restart.
+11. **Proof-only browser/server resources have a terminal lifecycle.** Headless
+    browsers, CDP endpoints and local proof servers used for a bounded acceptance
+    journey should be retired after the owning proof is terminal and recent-use,
+    port and process-owner checks show no continuing consumer. Never infer
+    orphanhood from CPU alone, and never kill an active browser realm to improve a
+    load number.
+12. **Physical recovery readiness is independent from load admission.** A low-load
+    host can still be unrecoverable after power loss, while an intentionally busy
+    host may be perfectly recoverable. Use the existing host-recovery readiness
+    owner for sleep, auto-restart, Remote Login, preboot and required control-service
+    predicates. Do not start an intentionally unarmed Executive service merely to
+    make a recovery check green, and do not let a recovery result rank or reserve
+    workload capacity.
+13. **Useful-idle is subordinate to real queued work.** Optional quota-saturation
+    or audit work may consume only spare physical/provider capacity. Before an idle
+    launch, consult the existing real-work queues/backlog and recheck immediately
+    before provider/physical admission. If real work is pending, yield. This is a
+    priority guard on the incumbent owners, not permission to create a second
+    scheduler, reservation service, queue or retry plane.
+
+A local seat harness that implements these rules remains an interim operational
+consumer of Capacity/Fleet policy. It does not become a second scheduler, resource
+authority, lifecycle owner or production-armed physical-resource registry.
+
 ## Continuation
 
 HP0 stops at a reviewed Draft/Hold source and one read-only Mac canary. A later,
