@@ -438,3 +438,50 @@ This closes the source publication/recovery connection while preserving
 explicitly incomplete, invalid trial evidence. It does not confer runtime
 admission, complete effect or cleanup observations, valid learning evidence,
 promotion, or acceptance of the actual hosted whole-PR fence.
+
+## Composed attended caller and current owners — 2026-11-07
+
+The qualified source at `dc7aac298cc17d2f6d6b3b4c7508ac8e7ea21946`
+retains original EVAL `4d8e0d6acbc3daabeca469672bde8e3c41f52bc2`, original
+Brain `51b4abe1f68b58b2c41f9aa45aceaf2ab45670f3`, discovery
+`9353ce08dc37cb1e0d30ec9c6831dc0613db27c7` and the earlier complete publisher.
+The source and original retired-admission identity remain in their existing
+owners. Current native control is `e9cb6e19a5bccd42a30366ddc2fddf8bfb8566f0d938fa70d05542b73dbf82c3`.
+
+The shared operator preparation preserves conditional APPLICATION and EVAL
+configuration checks, and attaches TCP policy exactly once before the event
+loop. APPLICATION preparation passes its qualified launch to the existing
+connect-only policy. A real profile/configuration/port-selection regression
+exercises that path without enrolling a session or opening a listener.
+
+The focused caller/publication/enrollment/input/host/source group passed
+**276 behavioral cases** under Python 3.14.7. Its five archive-entry cases
+initially refused with the fixed interpreter qualification marker; a repeated
+actual-commit run established that committing the source did not resolve it.
+The cause was the proof interpreter, not an archive-age defect: the release
+entry requires CPython 3.12. The exact five archive modes then passed under
+**CPython 3.12.13**, retaining `-I -S -B`, the held import checks and the original
+fixture boundaries. No production version predicate or source check was relaxed.
+Archive log: `cabcf6e8ed79ef38534a65f40506878bd52ccd3a824387db8d3c2c09c0ce5ba5`.
+Archive JUnit: `2098b7c4130b01d66bfee3b31db04816f4aad56a366c87ff9861ff23020423a3`.
+The actual-commit identity, finite EVAL connection and D8 controls separately
+passed **232 cases**. Their combined run retains the five wrongly-interpreted
+archive failures in log `780fcbf4c04d5d2d20ff6338beca5815a6258ff896726b8a884351701ce45f6b`;
+the succeeding five-case receipt above closes that interpreter-specific gap.
+
+The strict saved-paper composition is byte-identical to original Brain887,
+SHA256 `b601b4fa84295aa19e2c4dd6331842824e99030b2499e995359a83250afe8ffb`.
+An exact-source cohort at joined source2e12 and Macro f36 passed **54 evidence
+gate cases and 23 original Fabric saved-paper journeys**, including strict
+pending/completed reads and refusal of partial newer evidence with unchanged
+operation counts. The broader invocation passed92 cases and11 subtests;
+four pre-existing market-data tests explicitly skipped for absent vendored data.
+Log: `89ab5edd385a9f62e2a4adeca818ed0bfc9fb9b34c09987743bd01b4ade466c8`.
+JUnit: `bd8aa27a5cb117e3a72365678a4b5923e3876422cd5b6196a1af332febd90191`.
+A no-conftest baseline omitted the existing disabled-LLM environment default;
+the corrected invocation explicitly restored that default without a code change.
+
+These receipts qualify the stated source and fixture boundaries. The original
+carrier's active context/source-observation continuation remains separate.
+Protected prerequisite integration, installed provenance, one-account admission,
+valid held-out learning trials, promotion and measured availability remain owed.
