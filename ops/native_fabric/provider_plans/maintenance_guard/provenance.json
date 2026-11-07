@@ -1,0 +1,17 @@
+{
+  "accepted_guard_broker_sha256": "5dedf63c1c8f2a7c098ca6669d509971e5118a4693f8341d27c2f17f8b0b836a",
+  "accepted_guard_commit": "c43cda68a5fb8848ff6f648b5707534d9ba698da",
+  "broker_current_sha256": "a841230c4030d178f309f311f199caad7767d3b45b44c41c021fdc14eacc3640",
+  "broker_pre_plan_sha256": "42d45e5cefaa9829dae3c7741cbffdc7fe772f534782ee4bb6aa1311fbeacd6b",
+  "composition_changed_paths": [
+    "ext/lease_broker.py"
+  ],
+  "first_profile_commit": "7bc8a208d5cf867fcc269d9c049d53e52445347b",
+  "guard_method_ast_sha256": {
+    "inspect_qualification_quiescence": "8dfe85c0bcd5d30c8ad51cf34fac640e6b76fd50c537d127ed6b4b6db0f14923",
+    "qualification_maintenance_guard": "ae206e014ec4a895f9f7538f2ba03d2bbe223b362a862c0fefe04995e7392acc"
+  },
+  "runtime_effects_performed": false,
+  "schema": "mastermind.current116_guard_source_provenance.v1",
+  "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b"
+}
