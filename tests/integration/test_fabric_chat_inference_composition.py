@@ -87,15 +87,29 @@ class ChatCompositionTests(unittest.TestCase):
 
     def setUp(self):
         _text_fixture.FabricCompositionTests.setUp(self)
-        chat_transport_id = self.owner._SERVICE_FABRIC_RELATIONS["mastermind_chat_fabric"].transport_id
-        self.start(patch.dict(self.owner._APPLICATION_FABRIC_TRANSPORTS, {
-            chat_transport_id: self.owner._APPLICATION_FABRIC_TRANSPORTS[self.transport_id],
-        }))
-        self.document["application_fabric_modes"]["mastermind_chat_fabric"] = {
-            **self.mode, "transport_id": chat_transport_id,
-        }
-        self.manifest["capabilities"][0]["allowed_lanes"].append("mastermind-chat")
+        self.text_mode = dict(self.mode)
+        self.text_capability = dict(self.manifest["capabilities"][0])
+        text_transport = self.owner._APPLICATION_FABRIC_TRANSPORTS[self.transport_id]
+        transport = self.owner._ApplicationFabricTransport(
+            text_transport.base_url, "TEST_FABRIC_CHAT_TOKEN",
+            "actual-fixture-provider", MODEL, "unknown",
+            "fabric:chat-fixture", "chat_fixture",
+            qualified=True, application_allowed=True,
+        )
+        self.transport_id = self.owner._SERVICE_FABRIC_RELATIONS["mastermind_chat_fabric"].transport_id
+        self.start(patch.dict(self.owner._APPLICATION_FABRIC_TRANSPORTS, {self.transport_id: transport}))
+        self.mode = {key: getattr(transport, key) for key in self.owner._APPLICATION_IDENTITY_FIELDS}
+        self.mode.update(transport_id=self.transport_id, enabled=True, application_allowed=True,
+                         qualification=self.owner.PROFILE_QUALIFIED_CANARY,
+                         qualification_ref="fixture:source-only",
+                         qualified_until=self.text_mode["qualified_until"])
+        self.document["application_fabric_modes"] = {"mastermind_chat_fabric": self.mode}
+        self.manifest = {"capabilities": [{
+            "capability_id": "chat_fixture", "secret_ref": "TEST_FABRIC_CHAT_TOKEN",
+            "kill_state": "active", "allowed_lanes": ["mastermind-chat"],
+        }]}
         self.save()
+        os.environ["TEST_FABRIC_CHAT_TOKEN"] = _text_fixture.PROXY_TOKEN
         os.environ["MM_PROVIDER_WORKLOAD_PROFILE"] = "site_interactive"
         self.start(patch.object(advisor, "_ROOT", self.root))
         self.start(patch.object(advisor, "_HISTORY", self.root / "history"))
@@ -115,6 +129,16 @@ class ChatCompositionTests(unittest.TestCase):
 
     def conversation_document(self, conv="chat-1"):
         return json.loads(advisor._hist_path(conv).read_text())
+
+    def test_text_service_grant_cannot_substitute_for_chat_identity(self):
+        self.document["application_fabric_modes"] = {"mastermind_text_fabric": self.text_mode}
+        text_capability = dict(self.text_capability, allowed_lanes=["mastermind-text", "mastermind-chat"])
+        self.manifest = {"capabilities": [text_capability]}
+        self.save()
+        events = self.events()
+        self.assertEqual(events[-1]["error"], "fabric_chat_unavailable", events)
+        self.assertEqual(self.dispatches, [])
+        self.assertFalse(advisor._hist_path("chat-1").exists())
 
     def test_tool_only_round_and_final_response_use_real_owner_and_handler_once(self):
         plans = [packet(None, calls=[tool_call()]), packet("Proposal queued; no trade was executed.")]

@@ -13,7 +13,8 @@ def main():
         raise SystemExit("the transport proof requires its isolated Linux root fixture")
     root = Path(__file__).resolve().parents[2]
     suites = ["tests/test_application_tunnel_entry.py", "tests/test_application_tunnel_control.py",
-              "tests/test_application_tunnel_lifecycle.py", "tests/test_os_tunnel_entry.py"]
+              "tests/test_application_tunnel_lifecycle.py", "tests/test_os_tunnel_entry.py",
+              "tests/test_hermes_primary_application_tunnel.py"]
     with tempfile.TemporaryDirectory(prefix="application-transport-proof-") as directory:
         report = Path(directory) / "proof.xml"
         result = subprocess.run([sys.executable, "-B", "-m", "pytest", "-q", "-o", "addopts=",
@@ -24,7 +25,12 @@ def main():
         document = ET.parse(report).getroot()
         totals = {key: sum(int(node.get(key, "0")) for node in document.iter("testsuite"))
                   for key in ("tests", "failures", "errors", "skipped")}
-        required = {"test_real_cli_stage_server_apply_and_reconciliation",
+        required = {"test_role_successor_preserves_credential_inode_and_original_journals",
+                    "test_role_server_lost_ack_reconciles_original_acl_once",
+                    "test_role_partial_client_publication_recovers_from_original_v2_intent",
+                    "test_role_client_stage_requires_no_server_filesystem",
+                    "test_unknown_original_start_never_authorizes_role_successor",
+                    "test_real_cli_stage_server_apply_and_reconciliation",
                     "test_server_lost_ack_reconciles_original_committed_grant",
                     "test_loaded_label_without_running_pid_cannot_claim_start",
                     "test_actual_linux_process_image_observation_binds_this_running_python",
@@ -39,3 +45,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
