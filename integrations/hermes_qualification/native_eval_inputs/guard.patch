@@ -988,3 +988,23 @@
          conn.execute('DELETE FROM state_meta WHERE key IN (?,?,?)', (key, RESULT_PREFIX + row['admission_id'],
                       identity_key(row['principal_id'], row['target_session_id'], row['request_id'])))
      conn.execute(f'DELETE FROM state_meta WHERE key GLOB ? AND {_EXPIRED}', (WORKER_PREFIX + '*', cutoff))
+--- a/hermes_state_common.py
++++ b/hermes_state_common.py
+@@ -602,6 +602,7 @@
+     outcome TEXT,
+     owner_epoch INTEGER,
+     generation INTEGER,
++    eval_publication_json TEXT,
+     UNIQUE (principal_id, target_session_id, request_id),
+     CHECK (status != 'started' OR (owner_epoch IS NOT NULL AND generation IS NOT NULL))
+ );
+--- a/hermes_state_runtime.py
++++ b/hermes_state_runtime.py
+@@ -104,6 +104,7 @@
+     result.pop('payload_digest')
+     result.pop('lineage_json')
+     result.pop('retired_at', None)  # tombstone retention stamp, not admission state
++    result.pop('eval_publication_json', None)  # private immutable publication, never public admission state
+     return result
+ 
+ 

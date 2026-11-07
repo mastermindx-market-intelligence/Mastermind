@@ -386,8 +386,11 @@ _WORKSPACE_OAUTH_PACKAGE = "integrations/hermes_qualification/workspace_oauth_pr
 # Explicit cumulative source selection. Historical derivation meanings and
 # postimages remain unchanged; no arbitrary patch stack is admitted.
 EVAL_INPUTS_DERIVATION_KIND = "native_eval_inputs"
-EVAL_INPUTS_DERIVATION_PATCH = "ef85e2546fb69b735b87f1dc72b492e22fdb20ea20ad6d11db1aceebffa5c17c"
+EVAL_INPUTS_DERIVATION_PATCH = "8c2a20ab5b7dde2bda052ad275a0defe5f5e689b1cabf6e5882c412d948a9211"
 EVAL_INPUTS_DERIVATION_POSTIMAGES = {**WORKSPACE_OAUTH_DERIVATION_POSTIMAGES,
+    "hermes_state_common.py": "bc77e0f3b74596030016ff72bc6c8eff959507e9cc414dfc102c8e8140a972e8",
+    "hermes_state_runtime.py": "5b30be6913da982c7cb50dd3ad8c37700229288eab0eb101dce1843b27777340",
+    "hermes_state_schema.py": "08abad090492db461eca6205f2791e47fa0b6238065c1c4f284420420ca45b37",
     "gateway/session_authority.py": "7779fd227b5e3105ded5a3407434c7a8c77e1d998cdf087e1e8a492d0cd9ae99",
     "hermes_state_mutation_retirement.py": "12c890e1a2ae4a3b89b01de58c3f5330b87431f48f7672c04cd3b68c7e8e677c"}
 _EVAL_INPUTS_PACKAGE = "integrations/hermes_qualification/native_eval_inputs"

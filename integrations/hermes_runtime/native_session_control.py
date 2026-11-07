@@ -433,6 +433,75 @@ def _request_observation(value, *, receipt: dict, role: str) -> dict:
     return projected
 
 
+def _original_binding(home, params, principal, row):
+    """One historical admission join shared by readback and publication."""
+    sid, submission = _id(params["session_id"]), _id(params["submission_id"])
+    if (row.get("principal_id") != principal or row.get("target_session_id") != sid
+            or (params["admission_id"] is not None and row.get("admission_id") != params["admission_id"])
+            or row.get("request_id") != submission or row.get("intent") != "queue"
+            or type(row.get("payload")) is not dict
+            or row["payload"].get("finite") is not True
+            or input_digest(row["payload"].get("text")) != params["input_sha256"]):
+        raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
+    marker = None
+    if set(row["payload"]) != {"text", "finite"}:
+        from .native_eval_inputs import MARKER_KEY, validate_marker
+        if set(row["payload"]) != {"text", "finite", MARKER_KEY}:
+            raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
+        marker = validate_marker(row["payload"][MARKER_KEY], text=row["payload"]["text"])
+        if (marker["source"]["profile_id"] != str(home)
+                or marker["input"]["principal_id"] != principal
+                or marker["input"]["session_id"] != sid or marker["input"]["submission_id"] != submission):
+            raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
+    if params.get("evaluation_binding") is not None and (marker is None or params["evaluation_binding"] != {
+            "run_id": marker["run_id"], "binding_sha256": marker["binding_sha256"]}):
+        raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
+    receipt = _admission(row, home, sid, stored=True)
+    return receipt, marker
+
+
+def _project_original_result(receipt, marker, saved, *, role):
+    """Bounded projections of siblings from one original retained result."""
+    result = _result("OBSERVED", role=role, admission=receipt)
+    if marker is not None:
+        result["evaluation_binding"] = {"run_id": marker["run_id"], "binding_sha256": marker["binding_sha256"]}
+    if type(saved) is dict and receipt["status"] == "terminal":
+        value = saved.get("result")
+        answer = value.get("final_response") if type(value) is dict else None
+        valid_answer = (type(answer) is str and len(answer) <= MAX_ANSWER_BYTES
+                        and not any(ord(c) < 32 and c not in "\n\r\t" for c in answer))
+        if valid_answer:
+            try:
+                valid_answer = len(answer.encode("utf-8")) <= MAX_ANSWER_BYTES
+            except UnicodeEncodeError:
+                valid_answer = False
+        if valid_answer:
+            result["answer"] = answer
+            result["successful"] = not any(value.get(key) for key in ("failed", "error", "interrupted"))
+        if type(value) is dict:
+            result["terminal_metadata"] = _terminal_metadata(value, answer if valid_answer else None)
+        if "mastermind_request_observation" in saved:
+            try:
+                result["request_observation"] = _request_observation(
+                    saved["mastermind_request_observation"], receipt=receipt, role=role)
+            except (ValueError, TypeError, UnicodeError, RecursionError):
+                # Close only the evidence projection. Preserve the original
+                # answer, native outcome and existing terminal metadata.
+                result["request_observation_error"] = "INVALID_RETAINED_OBSERVATION"
+        if marker is not None:
+            from .native_eval_inputs import RESULT_KEY as EVAL_RESULT_KEY, validate_observation
+            if EVAL_RESULT_KEY not in saved:
+                result["evaluation_inputs_error"] = "OBSERVATION_NOT_RETAINED"
+            else:
+                try:
+                    result["evaluation_inputs"] = validate_observation(
+                        saved[EVAL_RESULT_KEY], marker=marker, receipt=receipt,
+                        request_observation=result.get("request_observation"))
+                except Exception:
+                    result["evaluation_inputs_error"] = "INVALID_RETAINED_OBSERVATION"
+    return result
+
+
 def _read_original(home: Path, params, principal: str, *, role: str = "mmsecretary"):
     from hermes_state_runtime import find_session_admission, get_session_admission
     from gateway.session_results import admission_result
@@ -455,66 +524,9 @@ def _read_original(home: Path, params, principal: str, *, role: str = "mmsecreta
         if row is None:
             # Active-row absence is not proof of nonexecution or permission to resend.
             return _result("EFFECT_UNKNOWN", role=role)
-        if (row.get("principal_id") != principal or row.get("target_session_id") != sid
-                or (params["admission_id"] is not None and row.get("admission_id") != params["admission_id"])
-                or row.get("request_id") != submission or row.get("intent") != "queue"
-                or type(row.get("payload")) is not dict
-                or row["payload"].get("finite") is not True
-                or input_digest(row["payload"].get("text")) != params["input_sha256"]):
-            raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
-        marker = None
-        if set(row["payload"]) != {"text", "finite"}:
-            from .native_eval_inputs import MARKER_KEY, validate_marker
-            if set(row["payload"]) != {"text", "finite", MARKER_KEY}:
-                raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
-            marker = validate_marker(row["payload"][MARKER_KEY], text=row["payload"]["text"])
-            if (marker["source"]["profile_id"] != str(home)
-                    or marker["input"]["principal_id"] != principal
-                    or marker["input"]["session_id"] != sid or marker["input"]["submission_id"] != submission):
-                raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
-        if evaluation_expected is not None and (marker is None or evaluation_expected != {
-                "run_id": marker["run_id"], "binding_sha256": marker["binding_sha256"]}):
-            raise RuntimeRefusal("NATIVE_SECRETARY_ORIGINAL_MISMATCH")
-        receipt = _admission(row, home, sid, stored=True)
-        result = _result("OBSERVED", role=role, admission=receipt)
-        if marker is not None:
-            result["evaluation_binding"] = {"run_id": marker["run_id"], "binding_sha256": marker["binding_sha256"]}
+        receipt, marker = _original_binding(home, params, principal, row)
         saved = admission_result(db, receipt["admission_id"])
-        if type(saved) is dict and receipt["status"] == "terminal":
-            value = saved.get("result")
-            answer = value.get("final_response") if type(value) is dict else None
-            valid_answer = (type(answer) is str and len(answer) <= MAX_ANSWER_BYTES
-                            and not any(ord(c) < 32 and c not in "\n\r\t" for c in answer))
-            if valid_answer:
-                try:
-                    valid_answer = len(answer.encode("utf-8")) <= MAX_ANSWER_BYTES
-                except UnicodeEncodeError:
-                    valid_answer = False
-            if valid_answer:
-                result["answer"] = answer
-                result["successful"] = not any(value.get(key) for key in ("failed", "error", "interrupted"))
-            if type(value) is dict:
-                result["terminal_metadata"] = _terminal_metadata(value, answer if valid_answer else None)
-            if "mastermind_request_observation" in saved:
-                try:
-                    result["request_observation"] = _request_observation(
-                        saved["mastermind_request_observation"], receipt=receipt, role=role)
-                except (ValueError, TypeError, UnicodeError, RecursionError):
-                    # Close only the evidence projection. Preserve the original
-                    # answer, native outcome and existing terminal metadata.
-                    result["request_observation_error"] = "INVALID_RETAINED_OBSERVATION"
-            if marker is not None:
-                from .native_eval_inputs import RESULT_KEY as EVAL_RESULT_KEY, validate_observation
-                if EVAL_RESULT_KEY not in saved:
-                    result["evaluation_inputs_error"] = "OBSERVATION_NOT_RETAINED"
-                else:
-                    try:
-                        result["evaluation_inputs"] = validate_observation(
-                            saved[EVAL_RESULT_KEY], marker=marker, receipt=receipt,
-                            request_observation=result.get("request_observation"))
-                    except Exception:
-                        result["evaluation_inputs_error"] = "INVALID_RETAINED_OBSERVATION"
-        return result
+        return _project_original_result(receipt, marker, saved, role=role)
     finally:
         db.close()
 
@@ -1182,6 +1194,21 @@ def install_private_control(runner, home: Path, role: str, *,
                 return role_result("TARGET", target=_target(runner, home, _id(params["session_id"]), peer_subject))
             if operation == "read_original":
                 return _read_original(home, params, peer_subject, role=role)
+            if operation == "publish_evaluation":
+                from .native_eval_publication import publish_original
+                return publish_original(runner, home, params, peer_subject,
+                                        owner=evaluation_owner, role=role)
+            if operation == "evaluation_capabilities":
+                from .native_eval_publication import _selected_owner
+                if set(params) != {"operation", "profile_id"} or params["profile_id"] != str(home):
+                    raise RuntimeRefusal("NATIVE_EVAL_PUBLICATION_REQUEST_INVALID")
+                _selected_owner(runner, home, evaluation_owner)
+                return role_result("OBSERVED", evaluation={
+                    "producer": dict(evaluation_owner.producer),
+                    "profile_id": evaluation_owner.profile_id,
+                    "profile_digest": evaluation_owner.profile_digest,
+                    "run_schema": "mastermind.agent_evaluation_run.v2",
+                    "complete_evaluation": False})
             if operation in {"consumer_extension", "consumer_capabilities"}:
                 # A finite read-only qualification of the serving process. The
                 # caller selects no target and no route: the profile is the
@@ -1218,9 +1245,19 @@ def install_private_control(runner, home: Path, role: str, *,
             input_digest(params["text"])
             if type(params["ticket"]) is not str or not 1 <= len(params["ticket"]) <= 256:
                 raise RuntimeRefusal("NATIVE_SECRETARY_REQUEST_INVALID")
-        except Exception:
+        except Exception as exc:
+            if operation == "publish_evaluation":
+                from .native_eval_publication import PublicationEffectUnknown
+                if isinstance(exc, PublicationEffectUnknown):
+                    return role_result("EFFECT_UNKNOWN", reason="EVALUATION_PUBLICATION_RECONCILIATION_REQUIRED")
+                # Typed pre-write refusals and unavailable preflight reads are
+                # distinct from uncertainty after a possible original commit.
+                if isinstance(exc, RuntimeRefusal):
+                    return role_result("REFUSED", reason=exc.code)
+                return role_result("UNAVAILABLE", reason="EVALUATION_PUBLICATION_UNAVAILABLE")
             return role_result("UNAVAILABLE" if operation in {
-                "observe", "read_original", "consumer_extension", "consumer_capabilities"} else "REFUSED")
+                "observe", "read_original", "consumer_extension", "consumer_capabilities",
+                "evaluation_capabilities"} else "REFUSED")
         # This is the native control server's existing executor. The native
         # loop owns the bounded coroutine; never create a new event loop.
         # Detach caller-owned containers before crossing into the original loop.
@@ -1398,6 +1435,21 @@ class NativeSecretaryClient:
         owner, creates no session and mutates nothing.
         """
         return self._call({"operation": "consumer_extension", "profile_id": str(self.home)})
+
+    def evaluation_capabilities(self):
+        """Read the held producer descriptor; never an execution grant."""
+        return self._call({"operation": "evaluation_capabilities", "profile_id": str(self.home)})
+
+    def publish_evaluation(self, *, session_id, submission_id, input_sha256, admission_id, evaluation_binding):
+        from .native_eval_publication import _request
+        params = _request({"operation": "publish_evaluation", "profile_id": str(self.home),
+            "session_id": session_id, "submission_id": submission_id, "input_sha256": input_sha256,
+            "admission_id": admission_id, "evaluation_binding": evaluation_binding}, self.home)
+        try:
+            return self._call(params)
+        except Exception:
+            return _result("EFFECT_UNKNOWN", role=self._role,
+                           reason="EVALUATION_PUBLICATION_RECONCILIATION_REQUIRED")
 
     def consumer_capabilities(self):
         """Private v2 capability observation; not a role HTTP dispatch verb."""

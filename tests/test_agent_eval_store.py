@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import os
+import stat
 import uuid
 
 import pytest
@@ -667,3 +668,124 @@ def test_legacy_store_constructor_still_creates_private_root(tmp_path):
     opened = store.ArtifactStore(root)
     assert opened.root == root.resolve(strict=True)
     assert root.is_dir() and not any(root.iterdir())
+
+
+@pytest.mark.parametrize("fail_again", [False, True])
+def test_post_link_sync_failure_reconciles_same_bytes_through_full_barrier(tmp_path, monkeypatch, fail_again):
+    artifact_store = store.ArtifactStore(tmp_path / "previously-missing" / "nested" / "eval")
+    scenario = build_baseline_scenario()
+    final_path = artifact_store.root / store.scenario_path(scenario["scenario_id"], scenario["scenario_version"])
+    original_fsync = os.fsync
+    calls = []
+    fail = [True]
+
+    def sync(fd):
+        info = os.fstat(fd)
+        calls.append((stat.S_ISDIR(info.st_mode), info.st_dev, info.st_ino))
+        if stat.S_ISDIR(info.st_mode) and fail[0]:
+            fail[0] = False
+            raise OSError("simulated directory sync failure")
+        return original_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", sync)
+    with pytest.raises(OSError, match="simulated directory sync failure"):
+        artifact_store.create(scenario)
+    assert final_path.is_file()
+    before = final_path.read_bytes()
+    identity = final_path.stat()
+    calls.clear()
+    fail[0] = fail_again
+    if fail_again:
+        with pytest.raises(OSError, match="simulated directory sync failure"):
+            artifact_store.create(scenario)
+    else:
+        replay = artifact_store.create(scenario)
+        assert replay.disposition == store.WriteDisposition.IDEMPOTENT
+        expected_directories = []
+        directory = final_path.parent
+        while True:
+            info = directory.stat()
+            expected_directories.append((True, info.st_dev, info.st_ino))
+            if directory.parent == directory:
+                break
+            directory = directory.parent
+        assert [entry for entry in calls if entry[0]] == expected_directories
+    assert calls[0] == (False, identity.st_dev, identity.st_ino)
+    assert final_path.read_bytes() == before
+    assert final_path.stat().st_ino == identity.st_ino
+    assert not list(final_path.parent.glob(".tmp-write-*.part"))
+
+
+def test_concurrent_identical_winner_final_inode_is_synced_and_read_back(fresh_store, monkeypatch):
+    scenario = build_baseline_scenario()
+    final = fresh_store.root / store.scenario_path(scenario["scenario_id"], scenario["scenario_version"])
+    synced = []
+    original_fsync = os.fsync
+    original_read = fresh_store.read_shape
+    readbacks = []
+
+    def other_publisher(src, dst):
+        # A distinct real inode wins, rather than the losing temporary inode.
+        store.Path(dst).write_bytes(store.Path(src).read_bytes())
+        raise FileExistsError(dst)
+
+    def sync(fd):
+        info = os.fstat(fd)
+        if stat.S_ISREG(info.st_mode):
+            synced.append((info.st_dev, info.st_ino))
+        return original_fsync(fd)
+
+    def readback(path):
+        readbacks.append(path)
+        return original_read(path)
+
+    monkeypatch.setattr(os, "link", other_publisher)
+    monkeypatch.setattr(os, "fsync", sync)
+    monkeypatch.setattr(fresh_store, "read_shape", readback)
+    result = fresh_store.create(scenario)
+    assert result.disposition == store.WriteDisposition.IDEMPOTENT
+    info = final.stat()
+    assert synced[-1] == (info.st_dev, info.st_ino)
+    assert synced[0] != synced[-1]
+    assert readbacks == [store.scenario_path(scenario["scenario_id"], scenario["scenario_version"])]
+
+
+def test_concurrent_symlink_collision_is_refused_before_reading_target(fresh_store, monkeypatch):
+    scenario = build_baseline_scenario()
+    final = fresh_store.root / store.scenario_path(scenario["scenario_id"], scenario["scenario_version"])
+    original_read = fresh_store._read_bytes_bounded
+
+    def other_publisher(src, dst):
+        store.Path(dst).symlink_to(src)
+        raise FileExistsError(dst)
+
+    def no_follow(path):
+        assert path != final, "must classify the collision before reading its target"
+        return original_read(path)
+
+    monkeypatch.setattr(os, "link", other_publisher)
+    monkeypatch.setattr(fresh_store, "_read_bytes_bounded", no_follow)
+    with pytest.raises(ContractError) as caught:
+        fresh_store.create(scenario)
+    assert "SYMLINK_ARTIFACT_REJECTED" in {d.code for d in caught.value.defects}
+    assert final.is_symlink()
+
+
+def test_dangling_parent_symlink_is_refused_before_publication(fresh_store, tmp_path):
+    (fresh_store.root / "scenarios").symlink_to(tmp_path / "missing-target", target_is_directory=True)
+    with pytest.raises(ContractError) as caught:
+        fresh_store.create(build_baseline_scenario())
+    assert "SYMLINK_PARENT_REJECTED" in {d.code for d in caught.value.defects}
+    assert not (tmp_path / "missing-target").exists()
+
+
+def test_idempotent_readback_failure_never_acknowledges_or_removes_original(fresh_store, monkeypatch):
+    scenario = build_baseline_scenario()
+    first = fresh_store.create(scenario)
+    target = fresh_store.root / first.path
+    original = target.read_bytes()
+    monkeypatch.setattr(fresh_store, "read_shape", lambda path: {"changed": True})
+    with pytest.raises(ContractError) as caught:
+        fresh_store.create(scenario)
+    assert "READBACK_MISMATCH" in {d.code for d in caught.value.defects}
+    assert target.read_bytes() == original

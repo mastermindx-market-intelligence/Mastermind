@@ -14,9 +14,13 @@ import copy
 import hashlib
 from urllib.parse import urlparse
 import json
+import logging
+import os
 from pathlib import Path
 import sqlite3
+import stat
 import sys
+import tempfile
 import uuid
 from types import SimpleNamespace
 
@@ -31,6 +35,7 @@ from integrations.hermes_runtime.tests.test_native_request_observation import na
 from integrations.hermes_runtime.tests.test_native_transport_observation import engine, success
 from integrations.hermes_models.contract import native_provider
 from scripts.agent_eval import contracts
+from ops.executive_os.native_gateway_sources import DERIVATION_BASE, EVAL_INPUTS_DERIVATION_PATCH
 from scripts.agent_eval.canonical import add_document_digest, canonical_json_bytes, digest_value
 from scripts.agent_eval.harness2_native import harness_digest
 from scripts.agent_eval.store import ArtifactStore
@@ -53,7 +58,8 @@ def documents(profile_id, *, context="Known fixture facts.\n", files=None):
     config = _configuration_fields(arm_marker="native_fixture")
     config["capabilities"]["profile_id"] = profile_id
     config["execution"].update(execution_surface="hermes-native", provider="custom",
-        model_requested="glm-5.3", reasoning_effort="low")
+        model_requested="glm-5.3", reasoning_effort="low", execution_surface_version=inputs.producer_descriptor(
+            "a" * 40, DERIVATION_BASE, EVAL_INPUTS_DERIVATION_PATCH)["execution_surface_version"])
     config["randomness"]["seed"] = 0
     config["procedure"]["instruction_bundle"]["digest"] = harness_digest({k: v.encode() for k, v in files.items()})
     config["context"]["context_packet"]["digest"] = "sha256:" + hashlib.sha256(context.encode()).hexdigest()
@@ -76,6 +82,11 @@ def source_owner(root, profile_id, *, scenario=None, configuration=None, context
     owner.store, owner.release = store, "a" * 40
     owner.profile_id = profile_id
     owner.profile_digest = configuration["capabilities"]["profile_digest"]
+    info = store.root.lstat()
+    owner.root_identity = (info.st_dev, info.st_ino, info.st_uid, stat.S_IMODE(info.st_mode))
+    owner.producer = inputs.producer_descriptor(owner.release, DERIVATION_BASE, EVAL_INPUTS_DERIVATION_PATCH)
+    owner.publication = {"artifact_root": str(store.root), "root_identity": dict(zip(
+        ("device", "inode", "uid", "mode"), owner.root_identity))}
     owner.provider_spec = native_provider("mmmeta", "zai.glm-5.3")
     owner.check = lambda: None  # Explicit held-source/host custody edge.
     owner.require_enrollment = lambda *_: None  # Explicit enrollment edge.
@@ -117,7 +128,49 @@ def test_existing_store_selection_is_detached_and_exact(trial):
     assert value["configuration"]["randomness"]["seed"] == 0
     assert value["input"]["submission_id"] == inputs.submission_id_for_run(value["run_id"])
     assert value["source"]["release"] == "a" * 40
+    assert value["producer"] == trial.owner.producer
+    assert value["publication"] == trial.owner.publication
     assert trial.owner.store.resolve_run(value["run_id"]) is None
+
+
+def test_historical_v1_bytes_remain_readable_without_new_provenance_or_live_store():
+    path = Path(__file__).parent / "fixtures/native_eval_inputs/legacy_marker_v1.json"
+    raw = path.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == "c6252ddb43104a4752a9ee8da9a9a1da3576a3b287a95b3a5a1dcb3e9bafbd87"
+    payload = json.loads(raw)
+    old = payload[inputs.MARKER_KEY]
+    assert old["schema"] == inputs.LEGACY_MARKER_SCHEMA
+    assert inputs.validate_marker(old, text=payload["text"]) == old
+    assert "producer" not in old and "publication" not in old
+    assert inputs.retained_admission_payload(payload) == payload
+
+
+@pytest.mark.parametrize("mutation", ["release", "runner", "surface", "version", "root_relative", "root_parent",
+    "root_alias", "mode", "inode", "extra", "legacy_with_new_fields"])
+def test_marker_v2_closes_original_producer_and_store_identity(trial, mutation):
+    value = marker(trial)
+    if mutation == "release":
+        value["producer"]["runner_code_ref"] = "git:mastermindx-market-intelligence/Mastermind@" + "b" * 40
+    elif mutation == "runner":
+        value["producer"]["runner_id"] = "other-runner"
+    elif mutation == "surface":
+        value["producer"]["execution_surface"] = "configured-label"
+    elif mutation == "version":
+        value["producer"]["execution_surface_version"] = inputs.producer_descriptor("a" * 40,
+            DERIVATION_BASE, "b" * 64)["execution_surface_version"]
+    elif mutation.startswith("root_"):
+        value["publication"]["artifact_root"] = {"root_relative": "relative", "root_parent": "/tmp/../changed",
+                                                   "root_alias": "/tmp//changed"}[mutation]
+    elif mutation == "mode":
+        value["publication"]["root_identity"]["mode"] = 0o755
+    elif mutation == "inode":
+        value["publication"]["root_identity"]["inode"] = 0
+    elif mutation == "extra":
+        value["publication"]["configured_fallback"] = True
+    else:
+        value["schema"] = inputs.LEGACY_MARKER_SCHEMA
+    with pytest.raises(RuntimeRefusal):
+        inputs.validate_marker(reseal(value), text=trial.text)
 
 
 @pytest.mark.parametrize("field,value", [
@@ -223,7 +276,7 @@ def test_private_marker_is_not_a_public_payload_or_reusable_request_id(trial):
         select(trial)
 
 
-def test_qualification_patch_preserves_existing_nine_postimages_and_changes_only_private_admission():
+def test_qualification_patch_preserves_existing_privacy_and_extends_original_admission_owners():
     from integrations.hermes_qualification.native_eval_inputs import qualify
     from integrations.hermes_qualification.workspace_oauth_privacy import qualify as privacy
     root = Path(__file__).resolve().parents[2] / "hermes_qualification/workspace_oauth_privacy/fixtures"
@@ -231,6 +284,8 @@ def test_qualification_patch_preserves_existing_nine_postimages_and_changes_only
               for path in privacy.PATHS}
     source["gateway/session_authority.py"] = (Path(__file__).parent / "fixtures/request_observation/gateway__session_authority.py.source").read_bytes()
     source["hermes_state_mutation_retirement.py"] = (Path(__file__).parent / "fixtures/native_eval_inputs/hermes_state_mutation_retirement.py.source").read_bytes()
+    for name in ("hermes_state_common.py", "hermes_state_runtime.py", "hermes_state_schema.py"):
+        source[name] = (Path(__file__).parent / "fixtures/native_eval_inputs" / (name + ".source")).read_bytes()
     before = dict(source)
     patched = qualify.prepare_sources(source)
     assert source == before
@@ -239,6 +294,9 @@ def test_qualification_patch_preserves_existing_nine_postimages_and_changes_only
     authority = patched["gateway/session_authority.py"].decode()
     assert "_mmx_eval=None" in authority and "private_inputs_payload" in authority
     assert patched["gateway/session_authority.py"] != source["gateway/session_authority.py"]
+    assert patched["hermes_state_schema.py"] == source["hermes_state_schema.py"]
+    assert b"    eval_publication_json TEXT," in patched["hermes_state_common.py"]
+    assert b"result.pop('eval_publication_json', None)" in patched["hermes_state_runtime.py"]
     with pytest.raises(qualify.QualificationError, match="PREIMAGE"):
         qualify.prepare_sources(patched)
 
@@ -523,7 +581,7 @@ def qualified_sources():
     values = {}
     for path in qualify.PATHS:
         source_root = (fixtures / "request_observation" if path == "gateway/session_authority.py" else
-            fixtures / "native_eval_inputs" if path == "hermes_state_mutation_retirement.py" else root)
+            fixtures / "native_eval_inputs" if path.startswith("hermes_state_") else root)
         values[path] = (source_root / (path.replace("/", "__") + ".source")).read_bytes()
     return qualify.prepare_sources(values)
 
@@ -534,6 +592,64 @@ def compile_selected(raw, names, namespace, path):
     future = ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0)
     exec(compile(ast.fix_missing_locations(ast.Module(body=[future, *nodes], type_ignores=[])), path, "exec"), namespace)
     return namespace
+
+
+def test_original_declarative_schema_upgrades_nullable_publication_and_hides_it(tmp_path, monkeypatch):
+    from integrations.hermes_runtime.tests.test_native_request_observation import module
+    patched = qualified_sources()
+    root = Path(__file__).parent / "fixtures/native_eval_inputs"
+
+    def schema_sql(raw):
+        tree = ast.parse(raw)
+        assignment = next(node for node in tree.body if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "SCHEMA_SQL" for target in node.targets))
+        # Only the incumbent unrelated cron-principal constant is a fixture
+        # edge. Actual complete SQL and column-reconciliation bodies execute.
+        values = {"CRON_PRINCIPAL_ID": "fixture:cron"}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[assignment], type_ignores=[])),
+                     "hermes_state_common.py", "exec"), values)
+        return values["SCHEMA_SQL"]
+
+    old_sql = schema_sql((root / "hermes_state_common.py.source").read_bytes())
+    new_sql = schema_sql(patched["hermes_state_common.py"])
+    module(monkeypatch, "hermes_constants", get_hermes_home=lambda: tmp_path / "native-home")
+    values = dict(contextlib=contextlib, hashlib=hashlib, json=json, os=os, sqlite3=sqlite3,
+                  tempfile=tempfile, logger=logging.getLogger(__name__), SCHEMA_SQL=new_sql)
+    compile_selected(patched["hermes_state_schema.py"], {"_q"}, values, "hermes_state_schema.py")
+    cls = next(node for node in ast.parse(patched["hermes_state_schema.py"]).body
+               if isinstance(node, ast.ClassDef) and node.name == "SessionSchemaMixin")
+    cls.body = [node for node in cls.body if getattr(node, "name", None) in {"_parse_schema_columns", "_reconcile_columns"}]
+    assert len(cls.body) == 2
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[])),
+                 "hermes_state_schema.py", "exec"), values)
+    owner = values["SessionSchemaMixin"]()
+    # The old cached DDL must not hide the new column.
+    assert "eval_publication_json" not in owner._parse_schema_columns(old_sql)["session_admissions"]
+    with sqlite3.connect(":memory:") as conn:
+        conn.row_factory = sqlite3.Row
+        conn.executescript(old_sql)
+        conn.execute("INSERT INTO sessions(id,source,started_at) VALUES('old-session','fixture',0)")
+        conn.execute("""INSERT INTO session_admissions(admission_id,request_id,principal_id,target_session_id,
+            lineage_json,payload_json,payload_digest,intent,status,outcome,owner_epoch)
+            VALUES('old-admission','old-request','fixture','old-session','[]','{}','original-digest',
+                   'queue','terminal','cancelled',2)""")
+        original = dict(conn.execute("SELECT * FROM session_admissions").fetchone())
+        trace = []
+        conn.set_trace_callback(trace.append)
+        owner._reconcile_columns(conn.cursor())
+        owner._reconcile_columns(conn.cursor())
+        after = dict(conn.execute("SELECT * FROM session_admissions").fetchone())
+        assert after == {**original, "eval_publication_json": None}
+        additions = [sql for sql in trace if sql.startswith('ALTER TABLE "session_admissions"')]
+        assert len(additions) == 1 and "eval_publication_json" in additions[0]
+        public = compile_selected(patched["hermes_state_runtime.py"], {"_row"}, {"json": json},
+                                  "hermes_state_runtime.py")["_row"]
+        after["eval_publication_json"] = '{"fixture":"private-publication"}'
+        assert "eval_publication_json" not in public(after)
+        assert "eval_publication_json" not in public({**after, "retired_at": 1})
+    cache = json.loads((tmp_path / "native-home/cache/schema_columns.json").read_text())
+    assert cache["schema_hash"] == hashlib.sha256(new_sql.encode()).hexdigest()
+    assert cache["tables"]["session_admissions"]["eval_publication_json"] == "TEXT"
 
 
 @pytest.fixture
@@ -553,6 +669,7 @@ def admission_db(monkeypatch):
             request_id TEXT NOT NULL, principal_id TEXT NOT NULL, target_session_id TEXT NOT NULL,
             lineage_json TEXT NOT NULL, payload_json TEXT NOT NULL, payload_digest TEXT NOT NULL,
             intent TEXT NOT NULL, status TEXT NOT NULL, outcome TEXT, owner_epoch INTEGER, generation INTEGER,
+            eval_publication_json TEXT,
             UNIQUE(principal_id,target_session_id,request_id));
     """)
     class DB:
@@ -565,9 +682,11 @@ def admission_db(monkeypatch):
     # SessionDB locking/inode custody is an explicit edge; actual SQLite
     # transaction, native replay-before-guard and INSERT bodies execute.
     fingerprint = lambda **kw: digest_value(kw)
-    core = pinned_functions("hermes_state_runtime.py", {"RuntimeStoreError", "_one_line", "_text", "_json",
+    patched = qualified_sources()
+    core = compile_selected(patched["hermes_state_runtime.py"], {"RuntimeStoreError", "_one_line", "_text", "_json",
         "_epoch", "_session", "_admission", "_row", "admit_session_input"},
-        {"json": json, "uuid": uuid, "ADMISSION_QUEUE_MAX": 32, "admission_fingerprint": fingerprint})
+        {"json": json, "uuid": uuid, "ADMISSION_QUEUE_MAX": 32, "admission_fingerprint": fingerprint},
+        "hermes_state_runtime.py")
     terminal_path = Path(__file__).parent / "fixtures/request_observation/hermes_state_terminal.py.source"
     prefixes = {"ADMISSION_PREFIX": "gateway.terminal_admission.v1.", "RESULT_PREFIX": "gateway.admission.result.v1.",
         "WORKER_PREFIX": "gateway.terminal_worker.v1.", "IDENTITY_PREFIX": "gateway.terminal_identity.v1."}
@@ -584,7 +703,6 @@ def admission_db(monkeypatch):
         _EXPIRED="json_valid(value) AND json_extract(value, '$.retired_at') < ?", json=json,
         time=SimpleNamespace(time=lambda: 2000000), _json=core["_json"], RuntimeStoreError=core["RuntimeStoreError"],
         _TRANSCRIPT_FIELDS=frozenset({"messages", "last_reasoning", "tools", "_turn_user_row"}))
-    patched = qualified_sources()
     compile_selected(patched["hermes_state_mutation_retirement.py"], {"_reclaim_expired", "prune_retired_tombstones",
         "_compact_result", "retire_terminal_receipts"},
                      vars(retirement), "hermes_state_mutation_retirement.py")
@@ -653,6 +771,8 @@ def test_real_terminal_retirement_preserves_safe_input_and_only_fences_uninterpr
     admission_id = row["admission_id"]
     persisted = dict(a.conn.execute("SELECT * FROM session_admissions WHERE admission_id=?", (admission_id,)).fetchone())
     a.conn.execute("UPDATE session_admissions SET status='terminal',outcome='completed' WHERE admission_id=?", (admission_id,))
+    publication = json.dumps({"fixture": "original-frozen-publication"})
+    a.conn.execute("UPDATE session_admissions SET eval_publication_json=? WHERE admission_id=?", (publication, admission_id))
     result_key = a.terminal.RESULT_PREFIX + admission_id
     original_result = {"result": {"final_response": "retained answer", "messages": [
         {"role": "user", "content": "expired transcript"}, {"role": "assistant", "content": "retained answer"}],
@@ -667,6 +787,8 @@ def test_real_terminal_retirement_preserves_safe_input_and_only_fences_uninterpr
     assert kept == (payload if kind == "safe" else {} if kind == "ordinary" else {inputs.MARKER_KEY: None})
     assert retired["payload_digest"] == persisted["payload_digest"]
     assert retired["lineage_json"] == "[]"
+    assert retired["eval_publication_json"] == publication
+    assert "eval_publication_json" not in a.core["_row"](retired)
     compacted = a.terminal.load_result(a.conn.execute("SELECT value FROM state_meta WHERE key=?", (result_key,)).fetchone()[0])
     assert compacted["result"] == {"final_response": "retained answer", "messages": []}
     assert compacted["usage"] == original_result["usage"]
@@ -679,6 +801,7 @@ def test_real_terminal_retirement_preserves_safe_input_and_only_fences_uninterpr
                  for key in (admission_key, identity_key, result_key)]
     assert remaining == ([False, False, False] if kind == "ordinary" else [True, True, False])
     if kind != "ordinary":
+        assert json.loads(a.conn.execute("SELECT value FROM state_meta WHERE key=?", (admission_key,)).fetchone()[0])["eval_publication_json"] == publication
         monkeypatch.setattr(inputs, "private_inputs_payload", lambda *_: copy.deepcopy(value))
         guard = inputs.private_inputs_admission_guard(None, None, None, None, None)
         with pytest.raises(RuntimeRefusal, match="ORIGINAL_CARRIER"):

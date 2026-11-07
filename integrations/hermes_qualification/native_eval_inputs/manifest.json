@@ -4,11 +4,11 @@
   "qualified_source_commits": [
     "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
   ],
-  "patch_sha256": "ef85e2546fb69b735b87f1dc72b492e22fdb20ea20ad6d11db1aceebffa5c17c",
+  "patch_sha256": "8c2a20ab5b7dde2bda052ad275a0defe5f5e689b1cabf6e5882c412d948a9211",
   "license": "MIT",
   "license_file": "UPSTREAM_LICENSE",
   "installed": false,
-  "proof_scope": "Cumulative privacy/OAuth, original native EVAL admission, safe terminal input and request-identity retention; normal output expiry; no runtime/effect grant",
+  "proof_scope": "Cumulative privacy/OAuth, original EVAL admission/retirement and private publication column; existing declarative schema owner; no alternate result envelope or execution grant",
   "files": {
     "agent/agent_init.py": {
       "before_bytes": 126617,
@@ -97,6 +97,30 @@
       "after_bytes": 26566,
       "after_git_blob": "c85f512500c6438a02c2598c1abb1ed695c3c955",
       "after_sha256": "12c890e1a2ae4a3b89b01de58c3f5330b87431f48f7672c04cd3b68c7e8e677c"
+    },
+    "hermes_state_common.py": {
+      "before_bytes": 74542,
+      "before_git_blob": "c31526f02c6516cdd25cd611df8a388098564366",
+      "before_sha256": "1e089e97c9440647a91e0c559d9a7691c61290cc72a0c337ccfcd1c39d97b1b7",
+      "after_bytes": 74574,
+      "after_git_blob": "967552962c5decd7fb19dfe504fb75eb9a13b86a",
+      "after_sha256": "bc77e0f3b74596030016ff72bc6c8eff959507e9cc414dfc102c8e8140a972e8"
+    },
+    "hermes_state_runtime.py": {
+      "before_bytes": 56549,
+      "before_git_blob": "516e3ea46152226e320dc0b6236e6af0b2a00ccb",
+      "before_sha256": "1553a9e5091413092dd30d7613b9aaa7338919bfc5a5d3ac3f4cf8c57de4411b",
+      "after_bytes": 56658,
+      "after_git_blob": "0b36f253a4f0d6577f06bfddb1282395d24f0051",
+      "after_sha256": "5b30be6913da982c7cb50dd3ad8c37700229288eab0eb101dce1843b27777340"
+    },
+    "hermes_state_schema.py": {
+      "before_bytes": 83019,
+      "before_git_blob": "c83e6b21566121ec5c39f1a2893a6d7921aa036c",
+      "before_sha256": "08abad090492db461eca6205f2791e47fa0b6238065c1c4f284420420ca45b37",
+      "after_bytes": 83019,
+      "after_git_blob": "c83e6b21566121ec5c39f1a2893a6d7921aa036c",
+      "after_sha256": "08abad090492db461eca6205f2791e47fa0b6238065c1c4f284420420ca45b37"
     }
   }
 }
