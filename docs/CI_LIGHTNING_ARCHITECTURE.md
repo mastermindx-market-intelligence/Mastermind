@@ -127,10 +127,10 @@ contract proves that omitted work is irrelevant.
 | Macro #10658 / #10738 FIF parallelism | Overlapping existing lanes | Reconcile exact owners/diffs; one resulting source implementation |
 | Macro #10752 narrowed-pack compaction | Open 4ddd347bb74a1a04d3f608cae698c203b30effbf | Preserve baseline checks and selected work; measure slots saved versus critical path |
 | Macro #10770 adaptive proof cap | Merged in latest checkpoint | Observe actual mature-run capacity decisions; no guessed cap increase |
-| Macro #10764 manifest-scoped freshness / #10745 replay environment | Existing source lanes with inherited-red/freshness dependencies | Retain trusted definition identity and accurate base comparison; integrate without repeated global churn |
+| Macro #10764 manifest-scoped freshness / #10745 replay environment | Existing source lanes with inherited-red/freshness dependencies | #10755 board-cap repair is already merged; preserve #10674 hold, then #10745, then existing-owner refresh of #10735 |
 | Macro #10656 authored/refresh admission and #10674 continuation | Existing control-plane work; #10674 original operation26751 uncertain | Preserve uncertain effect and live source; this plan does not replay or replace it |
 | Terminal #1320 native browser dedup / #1324 scoped QA | Merged | Preserve current integrated contracts |
-| Terminal #1297 trusted docs scope | Open 6a7137dc41e189a1cbd2437469be8764aa5b9dd5 | Compose with current responsive selector; prove natural docs PR latency |
+| Terminal #1297 trusted docs scope | Intake 6a7137dc; now integrated/published as 10230a0b on the same PR | Consume natural exact-head CI, then prove natural docs PR latency; release-rule read is currently denied |
 | Terminal #1306 optional isolated e2e lane | Open a709b18c3bd25e3aaa264fe3236dbda3155733c9 | Qualify trust/isolation and complete matrix before activation; no implicit host install |
 | Terminal #1223 weighted 7/5/5 + serial browser topology, trace and timing work | Draft e34862900a09bfbcf124397ffe0db02a4f509a49; unpublished candidate and uncertain create-commit | Reconcile original effect; preserve already-authored on-first-retry tracing, explicit zero-retry traces, per-attempt JSON timings and one-time Node unit discovery; do not reimplement or replay |
 
@@ -204,8 +204,11 @@ accepted #2129 trusted merge-group scope.
    serially on one runner are not valid automatically for four concurrent workers.
    Optimize the maximum job path, not equal numbers of files.
 
-The fixture audit is read-only. Any subsequent source change gets its own exact
-scope and qualification, and must remain compatible with the original #2065 owner.
+The completed audit separates a fixture-only candidate from production Git batching.
+The next source slice caches initial test-repository construction only, gives each
+test a private full Git copy, and must qualify independently of #2065. Production
+batching remains deferred; the audit's 138 common failures do not establish full
+security parity. See the adjudication and exact implementation child below.
 
 ### Macro: smaller semantic units and less unnecessary reproof
 
@@ -405,12 +408,110 @@ shadow CI is [42340989046](https://github.com/mastermindx-market-intelligence/Ma
 Both were pending at source readback. The earlier green head is not reused to
 claim qualification of this integration. No release request has been issued.
 
-Two read-only paid Fabric audits retain original root
-ci-lightning-architecture-20261107-c2 and child IDs
-ci-lightning-mastermind-hotspot-audit-20261107-c2-01 and
-ci-lightning-terminal-runtime-audit-20261107-c2-01. Controller-created/poll evidence
-has not yet established worker START or an accepted return. No retry is authorized.
-Native C3 architecture advice was consumed; it performed no source mutation.
+### Terminal original-branch integration
+
+[Terminal #1297](https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1297)
+is now published at [10230a0bf622da83b6acd6c2d9bb2134e9593918](https://github.com/mastermindx-market-intelligence/mastermind-terminal/commit/10230a0bf622da83b6acd6c2d9bb2134e9593918),
+parents 6a7137dc and protected dd49fa9b. The original clean workspace was first
+reconciled to its bot-created remote merge, then the two selectors were composed.
+Two explicit conflict sites and duplicate YAML needs/if/env keys were resolved;
+five paths differ from the current protected source. Original #1223 and #1306
+source/effects remain untouched.
+
+The docs selector is an optional optimization: an invalid/failed selector runs
+ordinary validation. The independent browser selector is mandatory for all events.
+Only a successful, exact docs classification on an actual pull_request can excuse
+the intentional unit/browser skips. The accepted merge_group browser skip remains.
+The stable aggregate checks both selectors and required job outcomes, and explicitly
+fails cancellation; missing, failed or unqualified skipped work cannot pass it.
+
+Executed qualification: **207 Python tests passed in 18.98s**, including actual
+aggregate-shell truth cases, existing scope/matrix contracts, recursive duplicate-key
+checks and cancellation behavior; **10 TypeScript guard tests passed**. No timeout,
+test exclusion or required context was weakened. The natural exact-head run is
+[42342421881](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42342421881).
+Both selectors passed and all expected native jobs were admitted at readback.
+Full browser qualification and actual docs-latency acceptance remain pending.
+
+The connector's Terminal branch-protection read returned **403, Resource not
+accessible by integration**. That action is stopped; no alternate-account/carrier
+replay was attempted. The pre-integration formal review is not claimed as review
+of this new source. No new queue or merge request was issued.
+
+### Macro dependency correction
+
+The old #10735 run's board-headroom failure was real at its tested source, but
+[the existing #10755 repair](https://github.com/mastermindx-market-intelligence/macro/pull/10755)
+already merged as d7843f7f on November 5. Current main c0f0597e has
+DISPLAY_BOARD_CAP=640. Do not recreate the repair or describe 480 as current main.
+The repair's historical cost estimates are not new VPS runtime qualification.
+
+The source-linked order in
+[#10735's owner disposition](https://github.com/mastermindx-market-intelligence/macro/pull/10735#issuecomment-6656361530)
+therefore reduces to: preserve/reconcile the existing #10674 held source/effects;
+qualify #10745's replay environment through its existing release owner; let the
+incumbent update-branch/sweeper reprove #10735 on the resulting base. #10674 currently
+remains merge-blocked; its old operation26751 uncertainty is not cleared by a newer
+visible branch head. No duplicate cap repair, queue request or rerun is authorized
+by finding a stale failure.
+
+### Audit adjudication and next performance slice
+
+Both paid audits returned terminal rc0 with root verified and complete response
+bytes consumed. These are research returns, not formal GitHub approval or hosted
+performance acceptance. Native C3 advice addressed prioritization and isolation
+only; it performed no source mutation.
+
+- **Mastermind audit:** ci-lightning-mastermind-hotspot-audit-20261107-c2-01,
+  response SHA256 64b507a2109331a75b795148d361e4195ddebfb5eff41d912c3605907153e5a6.
+  The pinned timing artifact directly confirms 788.9s for
+  tests/test_capacity_host_artifacts.py. The worker reports 24,846 Git subprocesses
+  in its local baseline and 8,584 after three combined proposals; local wall falls
+  41.33s to 36.94s. Its approximately 300s hosted forecast assumes spawn latency
+  fitted to the old timing and is **not a measured hosted result**. Both local
+  variants retained 138 failures, so zero outcome divergence is not full assurance.
+  The complete audit return was accepted by manual_result_review with the exact
+  response digest above; that receipt does not accept the proposed source patch.
+  Accept the diagnostic hypothesis and a fixture-only experiment. Defer both
+  production batching proposals until their filesystem-change, path/object,
+  malformed-output, refusal-order and tamper semantics have direct qualification.
+- **Terminal audit:** ci-lightning-terminal-runtime-audit-20261107-c2-01,
+  response SHA256 5693da53b5eba5e7337243586acea8c0bc0136b1f614bece787c776685a32837.
+  Its dev-only auth and existing-writer map are useful. Its claim that a passing
+  first-retry trace is removed is **rejected**: the
+  [Playwright contract](https://playwright.dev/docs/api/class-testoptions#test-options-trace)
+  records and keeps that retry. Its assertion that adding seven routes leaves
+  every shard's total compile work unchanged is also unproved, especially for
+  focused shards. Do not implement blanket warmup additions from this report.
+  This return is not accepted as a complete correct performance recommendation.
+
+Direct parent inspection fills part of the Terminal audit's missing evidence:
+[mobile-2 job128182990557](https://github.com/mastermindx-market-intelligence/mastermind-terminal/actions/runs/42302235414/job/128182990557)
+reports **14 warmup routes in 12s**, **368 passed /115 skipped in 55.0m**, and no
+flaky/retry count. Slow files include news-flow-responsive (6.3m) and
+options-companion (5.8m). This run does not support warmup as the dominant cost.
+Its startup also executes Node-test diagnostics before the Playwright run; the
+already-authored #1223 discovery repair remains material. The unit job's
+current-checkout capture decision reports full-pr-proof despite zero drifted
+files; preserving its assurance while reducing capture/setup remains a separate
+design task. Do not claim unmeasured route or trace savings.
+
+The next admitted request is paid Fabric child
+**ci-lightning-mastermind-fixture-impl-20261107-c2-01**, root/parent
+ci-lightning-architecture-20261107-c2, task_class fix_build / C2_COMPLEX_BOUNDED.
+It must return an exact fixture-only diff, isolated-copy regressions, unchanged
+collection/outcomes and separate timing evidence; no repository publication,
+production changes or descendants. Controller52548 is created; this alone is not
+START. Observe the same run, do not duplicate it.
+
+Its principal-owned integration workspace is existing-owner operation
+ci-lightning-fixture-20261107-c2 at exact base
+7fee845723c44dafe1e9e1159058ad9bd3f3e06b, target fixture blob
+b3341d2768bbc21c229bd25d86261cb9d05c3231 (unchanged from the audited source).
+A full-module baseline is running on the intended macOS host before any candidate
+edit. Template construction must precede per-test monkeypatches; copies may not
+share writable Git objects/index/refs, hardlinks or alternates. Security assertions
+still run for each test. Publish a new source slice only after actual qualification.
 
 Posting a PR status comment was rejected by automatic approval review because
 explicit permission to message others was absent. That comment is not retried or
