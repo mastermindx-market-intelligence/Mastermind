@@ -1,9 +1,11 @@
 # ModelArk and Experiential plan integration
 
-This profile adds two explicit providers to the incumbent native Fabric. It
-composes over selected M2 generation `ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46`
-(sequence 35), preserves all 107 original files, and adds nine source-owned
-dependencies. Six existing files receive exact preimage/postimage patches.
+This successor connects the two enrolled plans to ordinary eligible AUTO
+requests as well as explicit native selections. It composes over selected M2
+generation `205b8321c22858b568fe37b7f11b861ee9aeed9c6615bd47847d986b14dfea08` (sequence 36),
+preserves the complete 116-file predecessor, and changes the existing picker,
+request adapter, local controller, slot and provider worker. The original
+publisher owns selection.
 
 ## Request policy
 
@@ -43,6 +45,34 @@ Malformed question/answer identities and substituted protocols fail closed.
 A new selection can choose an available eligible model. A request already sent
 never changes model, retries, or falls through to another paid model.
 
+## Ordinary automatic selection
+
+An unpinned fabric_task.py request can select an enrolled plan for bounded
+C0/C1 work. Consent-qualified, response-only free chat work considers
+Experiential first; supported coding work considers BytePlus. The existing
+selector continues through its ordinary providers when those candidates are
+ineligible or unavailable. A preference for another pool retains its existing
+selection behavior.
+
+Experiential AUTO requires --experiential-response-only,
+--experiential-retention-acknowledged and
+--experiential-sensitive-data-opt-in. Proprietary code additionally requires
+the existing code-exposure opt-in. Response-only means the task can be completed
+solely from its supplied packet; this transport does not inspect or edit a
+workspace. Ordinary callers without these facts can use BytePlus for qualified
+coding work. Paid Uncensored and typed Jev/Decisions selection remain explicit.
+
+The request keeps its original cwd and task facts. The launch seals the selected
+pool/model and the resolved local cwd, including the ordinary tilde directory
+contract. The send boundary rechecks both. The existing shared-active binding
+is verified before its real read-only occupancy observation. Host load/disk,
+physical holds, quality floor, cooldowns and shared account caps remain binding.
+
+This local AUTO path excludes operator children and unsupported commission
+deadlines, artifact/native-return, new-worktree and CPU-scope contracts. Those
+requests retain ordinary compatible routing. No selection change occurs after
+a possible send.
+
 ## Original owners
 
 - Existing `fabric_task.request` owns the original run and retained packet.
@@ -55,8 +85,15 @@ never changes model, retries, or falls through to another paid model.
 - The one-shot send reserves the original `.task-cli-started.json` artifact.
   A restart cannot send that run again.
 - `native_plan_worker.py` composes the existing owned-process receipt, provider
-  outcome parser, Broker `observe-provider` and pool ledger before lease release.
-  Post-dispatch uncertainty remains reconciliation-required.
+  outcome parser and Broker `observe-provider`. After the slot returns, the
+  existing local controller retains `lanes/<run>.remote.stdout`, verifies the
+  raw provider frame, process cleanup, quota observation and released custody,
+  then publishes one strict terminal ledger row under the original run/root.
+- Actual slot refusals before provider acquisition retain a bound phase witness.
+  A generic exit code without that witness never invents no-send proof.
+  `LOCAL_RETURNED` is settling; `DONE` follows durable ledger acknowledgement.
+  Post-dispatch uncertainty remains reconciliation-required, and duplicate
+  captures cannot append a new refusal over an earlier completed run.
 - Existing `native_generation.py` owns publication and CAS selection.
 
 M2's enrollment adds only `byteplus` and `experiential` to

@@ -52,6 +52,7 @@ export interface MetaCeoOfficeProps {
   onInspectWork?: () => void;
   /** Existing explicit selected-project journal reader, not company history. */
   projectJournal?: ReactNode;
+  companyPriorities?: ReactNode;
   draft: OfficeDraft;
   onDraftChange: (text: string) => void;
   /** Only the existing signed-in Executive owner may supply a continuation. */
@@ -208,7 +209,7 @@ function SourceBadge({ source }: { source: SourceClaim }) {
 
 export function MetaCeoOffice({
   projection, draft, onDraftChange, nativeContinuation, onInspectWorkerResult, programmeDirection,
-  selectedProject, onOpenProjects, acceptedDirection, organizationObservation, workRead, onInspectWork, projectJournal,
+  selectedProject, onOpenProjects, acceptedDirection, organizationObservation, workRead, onInspectWork, projectJournal, companyPriorities,
   onOpenProject, onStartNewWork, byokObservation = { state: "SOURCE_UNBOUND" },
   canRefreshByok = false, onRefreshByok, locale = "en",
 }: MetaCeoOfficeProps) {
@@ -378,6 +379,7 @@ export function MetaCeoOffice({
       </aside>
     </div>
 
+    {companyPriorities}
     {acceptedDirection ? <details className="office-disclosure office-accepted-direction">
       <summary>{t("Accepted direction and history")}</summary>
       <p className="office-muted">{t("Read the accepted direction for this project. Its authored objective is a separate source record.")}</p>

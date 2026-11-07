@@ -326,7 +326,10 @@ def rich_strategic_result(profile=CeoIngressReadGateway):
     assert set(summary) == {
         "schema", "company_phase", "north_star", "p0", "constraints",
         "resource_policy", "core_product_value_model", "phase_gates", "review_triggers",
+        "authored_orientation",
     }
+    from control_plane.company_orientation import validate
+    assert validate(summary["authored_orientation"]) == summary["authored_orientation"]
     wire = canonical_result(profile)
     wire["data"]["strategic_state"] = copy.deepcopy(summary)
     return wire
