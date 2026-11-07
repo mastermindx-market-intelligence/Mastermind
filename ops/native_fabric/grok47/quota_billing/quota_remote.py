@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import math
 import selectors
@@ -16,6 +17,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -29,6 +31,7 @@ BAILIAN_USAGE = os.path.join(HERE, "bailian_usage.json")
 REFRESH_INTERVAL_S = 300
 TIMEOUT_S = 10
 FRESH_S = 600
+CACHE_LOCK_WAIT_S = 1.0
 
 GLM_URL = "https://api.z.ai/api/monitor/usage/quota/limit"
 MINIMAX_URL = "https://www.minimax.io/v1/token_plan/remains"
@@ -170,10 +173,22 @@ def _binding_generation(binding: Any) -> Optional[str]:
     return value if isinstance(value, str) and value else None
 
 
+def _has_pending(entry: Any) -> bool:
+    return isinstance(entry, dict) and "refresh_pending" in entry
+
+
+def _pending_matches(pending: Any, attempt_id: Any, provider: str,
+                     account: Optional[str], binding: Any, started_at: float) -> bool:
+    return (isinstance(pending, dict) and isinstance(attempt_id, str) and bool(attempt_id)
+            and pending.get("attempt_id") == attempt_id and pending.get("provider") == provider
+            and pending.get("account") == account and pending.get("binding") == binding
+            and pending.get("started_at") == started_at)
+
+
 def _cache_fresh(entry: Any, now: float, binding: Any = None) -> bool:
     if not isinstance(entry, dict) or not isinstance(entry.get("states"), list):
         return False
-    if entry.get("refresh_error") or entry.get("terminal_refusal"):
+    if entry.get("refresh_error") or entry.get("terminal_refusal") or _has_pending(entry):
         return False
     stamp = _num(entry.get("refreshed_at"))
     if stamp is None or not 0 <= now - stamp < REFRESH_INTERVAL_S:
@@ -812,7 +827,7 @@ def _cache_states(entry: Any, reason: str,
     rows = entry.get("states") if isinstance(entry, dict) else None
     if not isinstance(rows, list):
         return []
-    failure = entry.get("refresh_error")
+    failure = entry.get("refresh_error") or ("REFRESH_IN_PROGRESS" if _has_pending(entry) else None)
     states = [
         state for state in (
             _from_cache_entry(row, reason, keep_authoritative and not failure)
@@ -825,29 +840,174 @@ def _cache_states(entry: Any, reason: str,
 
 
 def _record_refresh_failure(cache_path: str, provider: str, account: Optional[str],
-                            entry: Any, binding: Any, now: float, exc: Exception) -> str:
+                            entry: Any, binding: Any, now: float, exc: Exception,
+                            *, attempt_id: Optional[str] = None) -> str:
     """Retain failure alongside the original cache, never in a second ledger."""
     terminal = (isinstance(exc, ProviderQuotaRefusal)
                 or isinstance(exc, urllib.error.HTTPError) and exc.code in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN))
     if isinstance(exc, urllib.error.HTTPError):
         exc.close()
     code = "PROVIDER_REFUSED" if terminal else "REMOTE_READ_FAILED"
-    row = dict(entry) if isinstance(entry, dict) else {"states": [], "binding": binding}
-    row.update(refresh_error=code, refresh_failed_at=now, failure_binding=binding,
-               terminal_refusal=bool(terminal or row.get("terminal_refusal")))
-    cache = _load_cache(cache_path)
-    if account is None:
-        cache[provider] = row
-    else:
-        provider_entry = cache.get(provider)
-        provider_entry = dict(provider_entry) if isinstance(provider_entry, dict) else {}
-        accounts = provider_entry.get("accounts")
-        accounts = dict(accounts) if isinstance(accounts, dict) else {}
-        accounts[account] = row
-        provider_entry["accounts"] = accounts
-        cache[provider] = provider_entry
-    _atomic_write(cache_path, cache)
+    def update(cache):
+        container, key = _cache_target(cache, provider, account)
+        current = container.get(key)
+        if isinstance(current, dict) and current.get("terminal_refusal"):
+            return False, current
+        pending = current.get("refresh_pending") if isinstance(current, dict) else None
+        if _has_pending(current) and not _pending_matches(pending, attempt_id, provider, account, binding, now):
+            return False, current
+        # An older read cannot erase a later observation/failure. A permission
+        # refusal is retained even when a concurrent read happened to succeed.
+        if not terminal and _attempt_at(current) > now:
+            return False, current
+        row = dict(current) if isinstance(current, dict) else {"states": [], "binding": binding}
+        row.pop("refresh_pending", None)
+        row.update(refresh_error=code, refresh_failed_at=now, failure_binding=binding,
+                   terminal_refusal=bool(terminal or row.get("terminal_refusal")))
+        container[key] = row
+        return True, row
+    _update_cache(cache_path, update)
     return code
+
+
+def _attempt_at(entry: Any) -> float:
+    if not isinstance(entry, dict):
+        return float("-inf")
+    stamps = [_num(entry.get(k)) for k in
+              ("refresh_started_at", "refreshed_at", "refresh_failed_at")]
+    return max((s for s in stamps if s is not None), default=float("-inf"))
+
+
+def _cache_target(cache: Dict[str, Any], provider: str,
+                  account: Optional[str]) -> Tuple[Dict[str, Any], str]:
+    if account is None:
+        return cache, provider
+    if not isinstance(cache.get(provider), dict):
+        cache[provider] = {}
+    if not isinstance(cache[provider].get("accounts"), dict):
+        cache[provider]["accounts"] = {}
+    return cache[provider]["accounts"], account
+
+
+def _update_cache(path: str, update: Callable) -> Any:
+    """Serialize only publication in the incumbent cache, never network I/O.
+
+    Atomic rename alone loses concurrent account changes. This advisory lock is
+    shared by every writer in this successor. A bounded wait acquires this same
+    short lock; it never repeats a provider request or a failed publication.
+    """
+    try:
+        with open(path + ".lock", "a", encoding="utf-8") as lock:
+            deadline = time.monotonic() + CACHE_LOCK_WAIT_S
+            while True:
+                try:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise
+                    time.sleep(min(.02, remaining))
+            try:
+                cache = _load_cache(path)
+                changed, result = update(cache)
+                if changed:
+                    _atomic_write(path, cache)
+                return result
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    except QuotaCacheWriteError:
+        raise
+    except OSError:
+        raise QuotaCacheWriteError("quota cache publication unavailable; reconcile original owner") from None
+
+
+def _begin_refresh(path: str, provider: str, account: Optional[str],
+                   binding: Any, started_at: float) -> Optional[str]:
+    """Invalidate old positive evidence before a GET can return a refusal.
+
+    Completion must replace this exact marker in the existing cache. If final
+    publication fails or the reader exits, the unresolved marker remains closed
+    until the original owner reconciles it; force/TTL cannot replay that read.
+    """
+    marker = {"attempt_id": uuid.uuid4().hex, "provider": provider,
+              "account": account, "binding": binding, "started_at": started_at}
+    def update(cache):
+        container, key = _cache_target(cache, provider, account)
+        current = container.get(key)
+        if (isinstance(current, dict) and
+                (current.get("terminal_refusal") or _has_pending(current))
+                or _attempt_at(current) > started_at):
+            return False, current
+        row = dict(current) if isinstance(current, dict) else {"states": [], "binding": binding}
+        marker["previous_error"] = row.get("refresh_error")
+        row.update(refresh_pending=marker, refresh_error="REFRESH_IN_PROGRESS",
+                   refresh_started_at=started_at, failure_binding=binding)
+        container[key] = row
+        return True, row
+    retained = _update_cache(path, update)
+    if isinstance(retained, dict) and retained.get("refresh_pending") == marker:
+        return marker["attempt_id"]
+    return None
+
+
+def _publish_observation(path: str, provider: str, account: Optional[str],
+                         states: List[ProviderQuotaState], binding: Any,
+                         started_at: float, *, attempt_id: Optional[str] = None) -> Dict[str, Any]:
+    def update(cache):
+        container, key = _cache_target(cache, provider, account)
+        current = container.get(key)
+        pending = current.get("refresh_pending") if isinstance(current, dict) else None
+        matched = _pending_matches(pending, attempt_id, provider, account, binding, started_at)
+        if (isinstance(current, dict) and current.get("terminal_refusal")
+                or _has_pending(current) and not matched
+                or _attempt_at(current) > started_at
+                or isinstance(current, dict) and current.get("refresh_error")
+                and _attempt_at(current) == started_at and not matched):
+            return False, current
+        row = {"refreshed_at": started_at, "refresh_started_at": started_at,
+               "binding": binding, "states": [asdict(state) for state in states]}
+        if provider == "glm" and account is not None:
+            previous = dict(current, refresh_error=pending.get("previous_error")) if matched else current
+            row["quota_change"] = _glm_quota_change(previous, row, account)
+        container[key] = row
+        return True, row
+    return _update_cache(path, update)
+
+
+def _glm_quota_change(previous: Any, current: Dict[str, Any], account: str) -> Dict[str, Any]:
+    """Describe observed counter/clock changes, without inferring voucher use."""
+    change = {"cause": "UNDETERMINED", "windows": []}
+    if (not isinstance(previous, dict) or previous.get("binding") != current.get("binding")
+            or previous.get("refresh_error") or previous.get("terminal_refusal")):
+        return change
+    prior_states = previous.get("states")
+    if not isinstance(prior_states, list):
+        return change
+    for window in ("5h", "weekly"):
+        old = [s for s in prior_states if isinstance(s, dict)
+               and s.get("window") == window and s.get("account") == account]
+        new = [s for s in current["states"] if s.get("window") == window]
+        if len(old) != 1 or len(new) != 1:
+            continue
+        a, b = old[0], new[0]
+        if any(s.get("source") != "PROVIDER_AUTHORITATIVE" or
+               _num(s.get("remaining_pct")) is None or
+               not 0 <= _num(s.get("remaining_pct")) <= 100 or
+               not _iso(s.get("observed_at")) or
+               s.get("reset_at") is not None and not _iso(s.get("reset_at"))
+               for s in (a, b)):
+            continue
+        if _iso(b["observed_at"]) <= _iso(a["observed_at"]):
+            continue
+        before, after = _num(a["remaining_pct"]), _num(b["remaining_pct"])
+        if after > before or _iso(b.get("reset_at")) != _iso(a.get("reset_at")):
+            change["windows"].append({
+                "window": window, "previous_remaining_pct": before,
+                "remaining_pct": after, "previous_reset_at": a.get("reset_at"),
+                "reset_at": b.get("reset_at"), "observed_at": b["observed_at"],
+            })
+    return change
 
 
 def _load_cache(path: Optional[str] = None) -> Dict[str, Any]:
@@ -915,13 +1075,8 @@ def read_provider(provider: str, force: bool = False,
                 return [state for state in cached_states if state is not None]
             try:
                 live = READERS["glm"]()
-                cache = _load_cache(path)
-                cache["glm"] = {
-                    "refreshed_at": int(now),
-                    "states": [asdict(state) for state in live],
-                }
-                _atomic_write(path, cache)
-                return live
+                retained = _publish_observation(path, "glm", None, live, None, now)
+                return _cache_states(retained, "cached", keep_authoritative=True)
             except QuotaCacheWriteError:
                 raise
             except Exception as exc:
@@ -946,7 +1101,7 @@ def read_provider(provider: str, force: bool = False,
     binding = _config_binding(provider) if provider == "minimax" else None
     same_binding = binding is not None and isinstance(entry, dict) and entry.get("binding") == binding
     cached_states = _cache_states(entry, "cached", keep_authoritative=True)
-    if isinstance(entry, dict) and entry.get("terminal_refusal"):
+    if isinstance(entry, dict) and (entry.get("terminal_refusal") or _has_pending(entry)):
         return cached_states if same_binding else []
     if not force and same_binding and _cache_fresh(entry, now, binding):
         return [state for state in cached_states if state is not None]
@@ -963,24 +1118,23 @@ def read_provider(provider: str, force: bool = False,
                 "bailian", "7d", None, None, None, None, "UNKNOWN", now,
                 0.0, ALIBABA_DETAIL,
             )]
+    attempt_id = _begin_refresh(path, provider, None, binding, now)
+    if attempt_id is None:
+        return _cache_states(_load_cache(path).get(provider), "cached", keep_authoritative=True)
     try:
         live = READERS[provider]()
         after = _config_binding(provider)
         if binding != after:
+            _record_refresh_failure(path, provider, None, entry, binding, now,
+                                    ValueError("configuration changed during refresh"), attempt_id=attempt_id)
             return []
         live = _bind_states(live, "default", binding)
-        cache = _load_cache(path)
-        cache[provider] = {
-            "refreshed_at": int(now),
-            "binding": binding,
-            "states": [asdict(state) for state in live],
-        }
-        _atomic_write(path, cache)
-        return live
+        retained = _publish_observation(path, provider, None, live, binding, now, attempt_id=attempt_id)
+        return _cache_states(retained, "cached", keep_authoritative=True)
     except QuotaCacheWriteError:
         raise
     except Exception as exc:
-        code = _record_refresh_failure(path, provider, None, entry, binding, now, exc)
+        code = _record_refresh_failure(path, provider, None, entry, binding, now, exc, attempt_id=attempt_id)
         if same_binding and isinstance(entry.get("states"), list):
             stale = [
                 _from_cache_entry(row, type(exc).__name__)
@@ -1012,7 +1166,7 @@ def cached_glm_account_parked(account: str, *, now_ts: Optional[float] = None,
         entry = cache["glm"]["accounts"][account]
         if (not config_generation or not isinstance(entry.get("binding"), dict)
                 or entry["binding"].get("config_generation") != config_generation
-                or entry.get("refresh_error") or entry.get("terminal_refusal")):
+                or entry.get("refresh_error") or entry.get("terminal_refusal") or _has_pending(entry)):
             return False
         refreshed = entry.get("refreshed_at")
         if (type(refreshed) not in (int, float)
@@ -1048,139 +1202,108 @@ def cached_glm_account_parked(account: str, *, now_ts: Optional[float] = None,
     return False
 
 
+def glm_config_binding() -> Optional[Dict[str, Any]]:
+    """Public, secret-free binding from the existing GLM configuration owner."""
+    return _config_binding("glm")
+
+
+def _glm_cached_entry(path: str, account: str) -> Dict[str, Any]:
+    provider = _load_cache(path).get("glm")
+    accounts = provider.get("accounts") if isinstance(provider, dict) else None
+    entry = accounts.get(account) if isinstance(accounts, dict) else None
+    return entry if isinstance(entry, dict) else {}
+
+
+def cached_glm_account_view(account: str, *, binding: Any,
+                            now_ts: Optional[float] = None,
+                            cache_path: Optional[str] = None) -> Dict[str, Any]:
+    """Cache-only paired evidence for the incumbent broker; never refresh here."""
+    now = _utc_now().timestamp() if now_ts is None else now_ts
+    binding = binding if isinstance(binding, dict) else None
+    entry = _glm_cached_entry(cache_path or CACHE_PATH, account)
+    matches = bool(binding and entry.get("binding") == binding)
+    result = account_quota_view(
+        "glm", account, _cache_states(entry, "cached", keep_authoritative=True) if matches else [],
+        config_generation=_binding_generation(binding),
+        endpoint=(binding or {}).get("endpoint"), now_ts=now,
+        refresh_error=("PROVIDER_REFUSED" if entry.get("terminal_refusal") else
+                       entry.get("refresh_error") or
+                       ("REFRESH_IN_PROGRESS" if _has_pending(entry) else None))
+                      if matches else "CONFIG_UNQUALIFIED",
+        failure_config_generation=_binding_generation(entry.get("failure_binding")))
+    result["refresh_started_at"] = _num(entry.get("refresh_started_at")) if matches else None
+    result["quota_change"] = entry.get("quota_change") if matches else None
+    result["refresh_due"] = not _cache_fresh(entry, now, binding)
+    return result
+
+
 def glm_accounts_state(
     now_ts: Optional[float] = None,
     cache_path: Optional[str] = None,
     force: bool = False,
+    *, account: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Per-account GLM quota state (W4-G9).
+    """Refresh current GLM accounts through their original owner and cache.
 
-    Returns one entry per account in ``glm_keys.accounts()``:
-
-        {
-            "name": str,
-            "states": List[ProviderQuotaState],
-            "source": str,
-            "observed_at": Optional[str],
-            "error": Optional[str],
-        }
-
-    Reads from ``cache["glm"]["accounts"][<name>]`` when fresh; otherwise
-    falls back to ``_live_glm(name, key)`` and writes the result back.
-    Stale-cache entries are preserved on live-read failure.
+    An explicit account selects only that configured account. The normal 300s
+    on-demand cadence still visits quota-exhausted accounts. A manual reset can
+    therefore replace both windows before the previously recorded deadline.
+    This function never redeems a reset card or clears a broker hold.
     """
     now = _utc_now().timestamp() if now_ts is None else float(now_ts)
     path = cache_path or CACHE_PATH
-    cache = _load_cache(path)
-    glm_entry = cache.get("glm")
-    if not isinstance(glm_entry, dict):
-        glm_entry = {}
-    accounts_block = glm_entry.get("accounts")
-    if not isinstance(accounts_block, dict):
-        accounts_block = {}
-    new_accounts_block = dict(accounts_block)
-
     binding = _config_binding("glm")
     accounts = _glm_accounts_dict()
     if binding != _config_binding("glm"):
         return []
+    if account is not None:
+        if not isinstance(account, str) or account not in accounts:
+            raise ValueError("GLM account is not configured")
+        accounts = {account: accounts[account]}
     out: List[Dict[str, Any]] = []
-    changed = False
-
     for name, info in accounts.items():
-        key = ""
-        if isinstance(info, dict):
-            key = str(info.get("api_key") or "")
-        cached = new_accounts_block.get(name)
-        same_binding = binding is not None and isinstance(cached, dict) and cached.get("binding") == binding
-
-        states: List[ProviderQuotaState] = []
-        source = "UNKNOWN"
-        observed_at: Optional[str] = None
-        error: Optional[str] = None
-
-        if isinstance(cached, dict) and cached.get("terminal_refusal"):
-            states = _cache_states(cached, "provider refused") if same_binding else []
-            failed_binding = cached.get("failure_binding")
-            refusal = ("PROVIDER_REFUSED" if failed_binding == binding else
-                       "PRIOR_GENERATION_REFUSAL_UNRECONCILED")
-            out.append({"name": name, "states": states, "source": "UNKNOWN",
-                        "observed_at": states[0].observed_at if states else None,
-                        "error": refusal,
-                        "failure_config_generation": _binding_generation(failed_binding),
-                        "config_generation": (binding or {}).get("config_generation"),
-                        "endpoint": (binding or {}).get("endpoint")})
-            continue
-
-        fresh_cache = (
-            not force
-            and same_binding
-            and _cache_fresh(cached, now, binding)
-        )
-        if fresh_cache:
-            cached_states = _cache_states(cached, "cached", keep_authoritative=True)
-            states = list(cached_states)
-            if states:
-                source = states[0].source
-                observed_at = states[0].observed_at
-
-        if not states:
-            try:
-                states = _bind_states(_live_glm(name, key), name, binding)
-                if binding != _config_binding("glm"):
-                    # A changed credential/configuration cannot inherit a read
-                    # begun with its predecessor. Keep the retained evidence.
-                    return []
-                source = "PROVIDER_AUTHORITATIVE"
-                observed_at = states[0].observed_at if states else None
-                new_accounts_block[name] = {
-                    "refreshed_at": int(now),
-                    "binding": binding,
-                    "states": [asdict(state) for state in states],
-                }
-                changed = True
-            except Exception as exc:
-                error = _record_refresh_failure(path, "glm", name, cached, binding, now, exc)
-                new_accounts_block[name] = _load_cache(path).get("glm", {}).get("accounts", {}).get(name, {})
-                # Stale-cache fallback: keep the previous authoritative
-                # reading, demoted to LOCAL_RECONSTRUCTION.
-                if same_binding and isinstance(
-                    cached.get("states"), list
-                ):
-                    stale = [
-                        s for s in (
-                            _from_cache_entry(row, error)
-                            for row in cached["states"]
-                            if isinstance(row, dict)
-                        ) if s is not None
-                    ]
-                    if stale:
-                        states = [replace(state, refresh_error=error,
-                                          failure_config_generation=(binding or {}).get("config_generation"))
-                                  for state in stale]
-                        source = stale[0].source
-                        observed_at = stale[0].observed_at
-
+        cached = _glm_cached_entry(path, name)
+        same_binding = bool(binding and isinstance(cached, dict) and cached.get("binding") == binding)
+        terminal = isinstance(cached, dict) and (cached.get("terminal_refusal") or _has_pending(cached))
+        failed_at = _num(cached.get("refresh_failed_at"))
+        retry_due = (force or cached.get("failure_binding") != binding or failed_at is None
+                     or not 0 <= now - failed_at < REFRESH_INTERVAL_S)
+        if not terminal and retry_due and (force or not same_binding or not _cache_fresh(cached, now, binding)):
+            key = str(info.get("api_key") or "") if isinstance(info, dict) else ""
+            attempt_id = _begin_refresh(path, "glm", name, binding, now)
+            if attempt_id is not None:
+                try:
+                    states = _bind_states(_live_glm(name, key), name, binding)
+                except Exception as exc:
+                    _record_refresh_failure(path, "glm", name, cached, binding, now, exc, attempt_id=attempt_id)
+                else:
+                    if binding != _config_binding("glm"):
+                        _record_refresh_failure(path, "glm", name, cached, binding, now,
+                                                ValueError("configuration changed during refresh"), attempt_id=attempt_id)
+                        return []
+                    # No provider I/O occurs while holding the publication lock.
+                    _publish_observation(path, "glm", name, states, binding, now, attempt_id=attempt_id)
+        # A concurrent newer observation/refusal wins, including on this return.
+        retained = _glm_cached_entry(path, name)
+        same_binding = bool(binding and retained.get("binding") == binding)
+        states = _cache_states(retained, "cached", keep_authoritative=True) if same_binding else []
+        error = retained.get("refresh_error") or ("REFRESH_IN_PROGRESS" if _has_pending(retained) else None)
+        if retained.get("terminal_refusal"):
+            error = ("PROVIDER_REFUSED" if retained.get("failure_binding") == binding
+                     else "PRIOR_GENERATION_REFUSAL_UNRECONCILED")
         out.append({
-            "name": name,
-            "states": states,
-            "source": source,
-            "observed_at": observed_at,
+            "name": name, "states": states,
+            "source": states[0].source if states and not error else "UNKNOWN",
+            "observed_at": states[0].observed_at if states else None,
             "error": error,
-            "failure_config_generation": (binding or {}).get("config_generation") if error else None,
-            "config_generation": (binding or {}).get("config_generation"),
+            "failure_config_generation": _binding_generation(retained.get("failure_binding")),
+            "config_generation": _binding_generation(binding),
             "endpoint": (binding or {}).get("endpoint"),
+            "refresh_started_at": _num(retained.get("refresh_started_at")),
+            "quota_change": retained.get("quota_change"),
         })
-
     if binding != _config_binding("glm"):
         return []
-    if changed:
-        # Preserve other providers refreshed by the incumbent owner meanwhile.
-        cache = _load_cache(path)
-        glm_entry = cache.get("glm") if isinstance(cache.get("glm"), dict) else {}
-        glm_entry["accounts"] = new_accounts_block
-        cache["glm"] = glm_entry
-        _atomic_write(path, cache)
     return out
 
 
@@ -1188,9 +1311,14 @@ def fresh_authoritative(provider: str, window: str,
                         now_ts: Optional[float] = None,
                         cache_path: Optional[str] = None,
                         account: Optional[str] = None) -> Optional[ProviderQuotaState]:
-    now = _utc_now().timestamp() if now_ts is None else float(now_ts)
+    read_started = _utc_now().timestamp()
+    now = read_started if now_ts is None else float(now_ts)
     eligible = []
-    for state in read_provider(provider, now_ts=now, cache_path=cache_path):
+    observed_states = read_provider(provider, now_ts=now, cache_path=cache_path)
+    # The provider response can arrive after the read began. Judge its clock
+    # against completion time, without rewriting the producer's observation.
+    now += max(0.0, _utc_now().timestamp() - read_started)
+    for state in observed_states:
         if state.window != window or account is not None and state.account != account:
             continue
         observed = _iso(state.observed_at)
@@ -1232,7 +1360,8 @@ def glm_quota_decision(now_ts: Optional[float] = None,
     breakdown under ``accounts`` (ordered list, one entry per configured
     account).
     """
-    now = _utc_now().timestamp() if now_ts is None else float(now_ts)
+    read_started = _utc_now().timestamp()
+    now = read_started if now_ts is None else float(now_ts)
     per_account: List[Dict[str, Any]] = []
     if read_remote:
         if _legacy_glm_mode():
@@ -1278,6 +1407,7 @@ def glm_quota_decision(now_ts: Optional[float] = None,
         estimate.setdefault("accounts", [])
         return estimate
 
+    now += max(0.0, _utc_now().timestamp() - read_started)
     breakdown: List[Dict[str, Any]] = []
     best_idx = -1
     best_score: Optional[Tuple[float, float, int]] = None
@@ -1452,24 +1582,31 @@ def _print_glm_accounts(
 
 def qualified_provider_view(provider: str, *, force: bool = False,
                             now_ts: Optional[float] = None,
-                            cache_path: Optional[str] = None) -> List[Dict[str, Any]]:
+                            cache_path: Optional[str] = None,
+                            account: Optional[str] = None) -> List[Dict[str, Any]]:
     """Join the incumbent GLM/MiniMax refresh to its per-account read view.
 
     This does not perform Go authentication or replace the GoRouter refresh
     owner. That owner must supply its original observation clock and binding to
     parse_go_usage_payload/account_quota_view before publishing Go readiness.
     """
-    now = _utc_now().timestamp() if now_ts is None else _num(now_ts)
+    read_started = _utc_now().timestamp()
+    now = read_started if now_ts is None else _num(now_ts)
+    if now is None or now <= 0:
+        raise ValueError("invalid observation time")
     if provider == "glm":
-        entries = glm_accounts_state(force=force, now_ts=now, cache_path=cache_path)
+        entries = glm_accounts_state(force=force, now_ts=now, cache_path=cache_path,
+                                     account=account)
     elif provider == "minimax":
+        if account not in (None, "default"):
+            raise ValueError("MiniMax account is not configured")
         before = _config_binding(provider)
         states = read_provider(provider, force=force, now_ts=now, cache_path=cache_path)
         after = _config_binding(provider)
         retained = _load_cache(cache_path or CACHE_PATH).get(provider)
         retained = retained if isinstance(retained, dict) else {}
         failure_binding = retained.get("failure_binding")
-        error = retained.get("refresh_error")
+        error = retained.get("refresh_error") or ("REFRESH_IN_PROGRESS" if _has_pending(retained) else None)
         if retained.get("terminal_refusal") and failure_binding != after:
             error = "PRIOR_GENERATION_REFUSAL_UNRECONCILED"
         entries = [{"name": "default", "states": states if before == after else [],
@@ -1479,12 +1616,27 @@ def qualified_provider_view(provider: str, *, force: bool = False,
                     "error": error if before == after else "CONFIG_CHANGED"}]
     else:
         raise ValueError("qualified live reader only available for glm/minimax")
-    return [account_quota_view(provider, entry["name"], entry.get("states") or [],
+    now += max(0.0, _utc_now().timestamp() - read_started)
+    return [dict(account_quota_view(provider, entry["name"], entry.get("states") or [],
                                config_generation=entry.get("config_generation"),
                                endpoint=entry.get("endpoint"), now_ts=now,
                                refresh_error=entry.get("error"),
-                               failure_config_generation=entry.get("failure_config_generation"))
+                               failure_config_generation=entry.get("failure_config_generation")),
+                 refresh_started_at=entry.get("refresh_started_at"),
+                 quota_change=entry.get("quota_change"))
             for entry in entries]
+
+
+def reconcile_glm_reset(account: str, *, now_ts: Optional[float] = None,
+                        cache_path: Optional[str] = None) -> Dict[str, Any]:
+    """One named-account quota read after an operator's reset; no redemption."""
+    rows = qualified_provider_view("glm", force=True, account=account,
+                                   now_ts=now_ts, cache_path=cache_path)
+    ready = len(rows) == 1 and rows[0]["quota_ready"]
+    return {"account": account, "state": "QUOTA_READY" if ready else "QUOTA_NOT_READY",
+            "redemption": "NOT_PERFORMED", "reset_cause": "UNDETERMINED",
+            "automatic_redemption": "NO_SUPPORTED_PUBLIC_CONTRACT",
+            "broker_hold": "NOT_MUTATED", "quota": rows[0] if len(rows) == 1 else None}
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -1494,13 +1646,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     show.add_argument("--provider", choices=("glm", "minimax", "bailian", "grok"))
     show.add_argument("--force", action="store_true")
     show.add_argument("--json", action="store_true")
+    show.add_argument("--account", help="read only this configured GLM account")
     show.add_argument("--qualified", action="store_true",
                       help="per-account freshness/binding view; does not grant admission")
+    reconcile = sub.add_parser("reconcile-reset", help="refresh GLM after a manual reset; never consume a card")
+    reconcile.add_argument("--account", required=True)
     args = parser.parse_args(argv)
+    if args.command == "reconcile-reset":
+        try:
+            result = reconcile_glm_reset(args.account)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(json.dumps(result, indent=2, sort_keys=True, allow_nan=False))
+        return 0 if result["state"] == "QUOTA_READY" else 2
+    if args.account and args.provider != "glm":
+        parser.error("--account requires --provider glm")
     if args.qualified:
         if args.provider not in ("glm", "minimax"):
             parser.error("--qualified requires --provider glm or minimax")
-        print(json.dumps(qualified_provider_view(args.provider, force=args.force),
+        print(json.dumps(qualified_provider_view(args.provider, force=args.force, account=args.account),
                          indent=2, sort_keys=True, allow_nan=False))
         return 0
     providers = (args.provider,) if args.provider else ("glm", "minimax", "bailian")
@@ -1508,7 +1672,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     for provider in providers:
         if provider == "glm":
             per_account = glm_accounts_state(
-                now_ts=now_ts, force=args.force,
+                now_ts=now_ts, force=args.force, account=args.account,
             )
             _print_glm_accounts(per_account, args.json)
             continue

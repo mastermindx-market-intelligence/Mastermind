@@ -155,7 +155,7 @@ selection, cache modification times, producer clocks and balances are in
 [the structured original-owner receipt](evidence/hermes-pool-h2-original-refresh-reset-2026-11-07.json)
 and the [same H2 return carrier](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706283300).
 
-## Source qualification and remaining consumer joins
+## Initial source qualification and remaining consumer joins (05454ec)
 
 27 H2 regression tests passed locally, including all-three-window Go conjunction,
 malformed/missing/future clocks, null/reset boundaries, separate physical entries,
@@ -217,3 +217,33 @@ The canonical C0–C5 plan remains
 Agent OS owns organisational continuity; the inspected `WS-EXECUTIVE-CAPACITY-FABRIC`
 record did not expose a strict November 7 dated handoff. Do not invent that linkage or
 mark the programme complete. This source document and #983 retain H2 recovery evidence.
+
+## GLM reset-card continuation
+
+The Chairman subsequently requested manual reset-card investigation and complete
+automatic counter/cooldown recovery. The [reset implementation and operating
+contract](HERMES_POOL_H2_GLM_RESET_RECOVERY.md) records official cycle semantics,
+the unsupported public automatic-redemption contract, and the exact consumer joins.
+
+The H2 successor now includes the original quota-circuit successor and bounded
+Broker/picker patches. These supply the GLM paired-window generation join and keep
+on-demand refresh reachable while the account is quota-blocked. Fresh evidence can
+open one original half-open probe; its exact successful-work receipt clears the
+matching old cooldown. This supersedes the initial missing GLM cache-only consumer
+argument listed above. H3's broader expiry ranking, physical/shared-account identity
+and operation ceilings remain distinct; Go freshness, H4 grants/no-overage, H5
+projection and final native selection still require their actual owner receipts.
+
+The concurrent same-carrier CI repair at `d538ca9dc42135cb43c769f1a124a2b7286c3dd4`
+is preserved. It names terminal HTTP statuses with `HTTPStatus` and changes no
+provider behavior. Reset implementation continues on that head, the original branch
+and operation; no source or runtime effect is moved to a replacement programme.
+
+Final reset continuation qualification passed 43 account/quota, 16 broker/picker
+journey and 7 existing Grok cases. The same 16 journeys passed after composition
+against isolated copies of the actual sequence-35 selected native predecessor;
+[the byte-bound receipt](evidence/hermes-pool-h2-glm-reset-predecessor-2026-11-07.json)
+records all input hashes and the unchanged selection. Overlapping rate holds,
+refusal-publication contention/failure and a refresh arriving during atomic claim
+are covered. Source and fixture qualification remain distinct from installation
+or live exhausted-account/reset-card recovery.

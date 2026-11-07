@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -236,6 +237,8 @@ class AccountQuotaCacheTests(unittest.TestCase):
              patch.object(q, "_live_glm", side_effect=RuntimeError("offline")) as reader:
             first = q.glm_accounts_state(now_ts=STAMP, cache_path=self.cache, force=True)
             second = q.glm_accounts_state(now_ts=STAMP + 1, cache_path=self.cache)
+            self.assertEqual(reader.call_count, 1)
+            q.glm_accounts_state(now_ts=STAMP + q.REFRESH_INTERVAL_S, cache_path=self.cache)
         self.assertEqual(reader.call_count, 2)
         for result in (first, second):
             self.assertEqual(result[0]["states"][0].source, "LOCAL_RECONSTRUCTION")
@@ -369,7 +372,7 @@ class AccountQuotaCacheTests(unittest.TestCase):
             self.assertEqual(q.glm_accounts_state(now_ts=STAMP, cache_path=self.cache), [])
         remote.assert_not_called()
 
-    def test_refusal_persistence_failure_is_visible_and_does_not_retry(self):
+    def test_failed_pending_publication_performs_no_provider_request(self):
         self.write_cache()
         with patch.object(q, "_config_binding", return_value=BINDING), \
              patch.object(q, "_glm_accounts_dict", return_value={"a": {"api_key": "fixture"}}), \
@@ -377,9 +380,227 @@ class AccountQuotaCacheTests(unittest.TestCase):
              patch.object(q.os, "replace", side_effect=PermissionError("fixture denial")) as write:
             with self.assertRaises(q.QuotaCacheWriteError):
                 q.glm_accounts_state(now_ts=STAMP, cache_path=self.cache, force=True)
-        self.assertEqual(remote.call_count, 1)
+        remote.assert_not_called()
         self.assertEqual(write.call_count, 1)
         self.assertNotIn("terminal_refusal", json.loads(Path(self.cache).read_text())["glm"]["accounts"]["a"])
+
+    def test_failed_refusal_publication_retains_pending_fence_across_later_invocations(self):
+        self.write_cache()
+        real_replace = q.os.replace
+        calls = []
+        def replace_once(source, target):
+            calls.append(target)
+            if len(calls) == 1:
+                return real_replace(source, target)
+            raise PermissionError("fixture final publication failure")
+        with patch.object(q, "_config_binding", return_value=BINDING), \
+             patch.object(q, "_glm_accounts_dict", return_value={"a": {}}), \
+             patch.object(q, "_live_glm", side_effect=q.ProviderQuotaRefusal()) as remote:
+            with patch.object(q.os, "replace", side_effect=replace_once):
+                with self.assertRaises(q.QuotaCacheWriteError):
+                    q.glm_accounts_state(now_ts=STAMP, cache_path=self.cache, force=True)
+            later = q.reconcile_glm_reset("a", now_ts=STAMP+q.FRESH_S+1, cache_path=self.cache)
+        remote.assert_called_once()
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(later["state"], "QUOTA_NOT_READY")
+        self.assertTrue(q._glm_cached_entry(self.cache, "a")["refresh_pending"])
+        self.assertFalse(q.cached_glm_account_view("a", binding=BINDING,
+                         now_ts=STAMP, cache_path=self.cache)["quota_ready"])
+
+    def test_brief_terminal_publication_contention_retains_refusal_for_next_invocation(self):
+        self.write_cache()
+        with open(self.cache + ".lock", "a") as held:
+            timers = []
+            def refuse(name, key):
+                q.fcntl.flock(held.fileno(), q.fcntl.LOCK_EX | q.fcntl.LOCK_NB)
+                timer = threading.Timer(.05, lambda: q.fcntl.flock(held.fileno(), q.fcntl.LOCK_UN))
+                timers.append(timer)
+                timer.start()
+                raise q.ProviderQuotaRefusal()
+            with patch.object(q, "_config_binding", return_value=BINDING), \
+                 patch.object(q, "_glm_accounts_dict", return_value={"a": {}}), \
+                 patch.object(q, "_live_glm", side_effect=refuse) as remote:
+                first = q.glm_accounts_state(now_ts=STAMP, cache_path=self.cache, force=True)
+                later = q.glm_accounts_state(now_ts=STAMP+1, cache_path=self.cache, force=True)
+            for timer in timers:
+                timer.join()
+        remote.assert_called_once()
+        self.assertEqual(first[0]["error"], "PROVIDER_REFUSED")
+        self.assertEqual(later[0]["error"], "PROVIDER_REFUSED")
+        self.assertFalse(q.cached_glm_account_view("a", binding=BINDING,
+                         now_ts=STAMP+1, cache_path=self.cache)["quota_ready"])
+
+    def test_pending_attempt_has_exact_completion_and_cannot_be_replaced_by_force_or_new_config(self):
+        self.write_cache()
+        attempt = q._begin_refresh(self.cache, "glm", "a", BINDING, STAMP)
+        self.assertTrue(attempt)
+        self.assertIsNone(q._begin_refresh(self.cache, "glm", "a", BINDING, STAMP))
+        q._publish_observation(self.cache, "glm", "a", states(), BINDING, STAMP, attempt_id="other")
+        q._record_refresh_failure(self.cache, "glm", "a", None, BINDING, STAMP, RuntimeError(), attempt_id="other")
+        self.assertEqual(q._glm_cached_entry(self.cache, "a")["refresh_pending"]["attempt_id"], attempt)
+        with patch.object(q, "_config_binding", return_value=dict(BINDING, config_generation="config-b")), \
+             patch.object(q, "_glm_accounts_dict", return_value={"a": {}}), \
+             patch.object(q, "_live_glm") as remote:
+            q.glm_accounts_state(now_ts=STAMP+q.FRESH_S+1, cache_path=self.cache, force=True)
+        remote.assert_not_called()
+        q._publish_observation(self.cache, "glm", "a", states(), BINDING, STAMP, attempt_id=attempt)
+        self.assertNotIn("refresh_pending", q._glm_cached_entry(self.cache, "a"))
+        self.assertTrue(q.cached_glm_account_view("a", binding=BINDING,
+                        now_ts=STAMP, cache_path=self.cache)["quota_ready"])
+
+    def test_manual_weekly_reset_replaces_both_windows_before_old_deadline(self):
+        old = self.write_cache(states(remaining=0))
+        retained = json.loads(Path(self.cache).read_text())
+        retained["glm"]["accounts"]["b"] = dict(old, states=[asdict(s) for s in states(account="b", remaining=8)])
+        Path(self.cache).write_text(json.dumps(retained))
+        now = STAMP + 31
+        renewed = [replace(s, observed_at=q._iso(now),
+                           reset_at=q._iso(now + (7 * 86400 if s.window == "weekly" else 5 * 3600)))
+                   for s in states(remaining=99)]
+        with patch.object(q, "_config_binding", return_value=BINDING), \
+             patch.object(q, "_utc_now", return_value=datetime.fromtimestamp(now, timezone.utc)), \
+             patch.object(q, "_glm_accounts_dict", return_value={"a": {}, "b": {}}), \
+             patch.object(q, "_live_glm", return_value=renewed) as reader:
+            result = q.reconcile_glm_reset("a", now_ts=now, cache_path=self.cache)
+        self.assertEqual(reader.call_count, 1)
+        self.assertEqual(reader.call_args.args[0], "a")
+        self.assertEqual(result["state"], "QUOTA_READY")
+        self.assertEqual(result["redemption"], "NOT_PERFORMED")
+        self.assertEqual(result["broker_hold"], "NOT_MUTATED")
+        self.assertEqual(result["quota"]["quota_change"]["cause"], "UNDETERMINED")
+        self.assertEqual(len(result["quota"]["quota_change"]["windows"]), 2)
+        latest = json.loads(Path(self.cache).read_text())
+        self.assertEqual(latest["glm"]["accounts"]["b"], retained["glm"]["accounts"]["b"])
+        self.assertEqual(latest["glm"]["accounts"]["a"]["states"][1]["reset_at"], q._iso(now + 7 * 86400))
+        self.assertFalse(q.cached_glm_account_parked("a", now_ts=now,
+                         cache_path=self.cache, config_generation="config-a"))
+
+    def test_normal_due_read_discovers_manual_reset_without_waiting_for_old_week(self):
+        self.write_cache(states(remaining=0))
+        now = STAMP + q.REFRESH_INTERVAL_S
+        renewed = [replace(s, observed_at=q._iso(now), reset_at=None) for s in states(remaining=100)]
+        with patch.object(q, "_config_binding", return_value=BINDING), \
+             patch.object(q, "_glm_accounts_dict", return_value={"a": {}}), \
+             patch.object(q, "_live_glm", return_value=renewed) as reader:
+            before = q.glm_quota_decision(now_ts=now-1, cache_path=self.cache)
+            self.assertEqual(before["state"], "PARKED")
+            reader.assert_not_called()
+            with patch.object(q, "_utc_now", return_value=datetime.fromtimestamp(now, timezone.utc)):
+                after = q.glm_quota_decision(now_ts=now, cache_path=self.cache)
+        self.assertEqual(reader.call_count, 1)
+        self.assertEqual(after["state"], "OK")
+        self.assertIsNone(after["reset_at_week"])
+
+    def test_five_hour_refill_does_not_release_exhausted_week(self):
+        self.write_cache(states(remaining=0))
+        renewed = [replace(s, observed_at=q._iso(STAMP+1),
+                           remaining_pct=100 if s.window == "5h" else 0) for s in states()]
+        with patch.object(q, "_config_binding", return_value=BINDING), \
+             patch.object(q, "_glm_accounts_dict", return_value={"a": {}}), \
+             patch.object(q, "_utc_now", return_value=datetime.fromtimestamp(STAMP+1, timezone.utc)), \
+             patch.object(q, "_live_glm", return_value=renewed):
+            result = q.reconcile_glm_reset("a", now_ts=STAMP+1, cache_path=self.cache)
+        self.assertEqual(result["state"], "QUOTA_NOT_READY")
+
+    def test_selected_read_preserves_concurrent_failure_for_another_account(self):
+        self.write_cache()
+        def live(name, key):
+            self.assertEqual(name, "a")
+            q._record_refresh_failure(self.cache, "glm", "b", None, BINDING,
+                                      STAMP+2, q.ProviderQuotaRefusal())
+            return states()
+        with patch.object(q, "_config_binding", return_value=BINDING), \
+             patch.object(q, "_glm_accounts_dict", return_value={"a": {}, "b": {}}), \
+             patch.object(q, "_live_glm", side_effect=live) as reader:
+            q.glm_accounts_state(now_ts=STAMP+1, cache_path=self.cache, account="a", force=True)
+        self.assertEqual(reader.call_count, 1)
+        self.assertTrue(q._glm_cached_entry(self.cache, "b")["terminal_refusal"])
+
+    def test_late_success_cannot_replace_newer_refill_or_failure(self):
+        self.write_cache(states(remaining=0))
+        newer = [replace(s, observed_at=q._iso(STAMP+2)) for s in states(remaining=99)]
+        q._publish_observation(self.cache, "glm", "a", newer, BINDING, STAMP+2)
+        result = q._publish_observation(self.cache, "glm", "a", states(remaining=0), BINDING, STAMP+1)
+        self.assertEqual(result["states"][0]["remaining_pct"], 99)
+        q._record_refresh_failure(self.cache, "glm", "a", None, BINDING, STAMP+3, RuntimeError())
+        result = q._publish_observation(self.cache, "glm", "a", newer, BINDING, STAMP+2)
+        self.assertEqual(result["refresh_error"], "REMOTE_READ_FAILED")
+
+    def test_late_nonterminal_failure_keeps_newer_success_but_permission_refusal_remains(self):
+        self.write_cache()
+        q._publish_observation(self.cache, "glm", "a", states(remaining=99), BINDING, STAMP+2)
+        q._record_refresh_failure(self.cache, "glm", "a", None, BINDING, STAMP+1, RuntimeError())
+        self.assertNotIn("refresh_error", q._glm_cached_entry(self.cache, "a"))
+        q._record_refresh_failure(self.cache, "glm", "a", None, BINDING, STAMP+1, q.ProviderQuotaRefusal())
+        result = q._publish_observation(self.cache, "glm", "a", states(), BINDING, STAMP+3)
+        self.assertTrue(result["terminal_refusal"])
+
+    def test_reset_command_cannot_retry_terminal_refusal_or_unknown_account(self):
+        self.write_cache(refresh_error="PROVIDER_REFUSED", terminal_refusal=True,
+                         failure_binding=BINDING, refresh_failed_at=STAMP)
+        with patch.object(q, "_config_binding", return_value=BINDING), \
+             patch.object(q, "_glm_accounts_dict", return_value={"a": {}}), \
+             patch.object(q, "_live_glm") as reader:
+            result = q.reconcile_glm_reset("a", now_ts=STAMP+1, cache_path=self.cache)
+            with self.assertRaisesRegex(ValueError, "not configured"):
+                q.reconcile_glm_reset("unknown", now_ts=STAMP+1, cache_path=self.cache)
+        reader.assert_not_called()
+        self.assertEqual(result["state"], "QUOTA_NOT_READY")
+
+    def test_cache_lock_timeout_is_visible_without_repeating_publication(self):
+        self.write_cache()
+        with open(self.cache + ".lock", "a") as held:
+            q.fcntl.flock(held.fileno(), q.fcntl.LOCK_EX | q.fcntl.LOCK_NB)
+            with patch.object(q, "CACHE_LOCK_WAIT_S", .01), self.assertRaises(q.QuotaCacheWriteError):
+                q._publish_observation(self.cache, "glm", "a", states(remaining=99), BINDING, STAMP+1)
+        self.assertEqual(q._glm_cached_entry(self.cache, "a")["states"][0]["remaining_pct"], 60)
+
+    def test_malformed_cache_projection_stays_unknown(self):
+        for value in ({"glm": []}, {"glm": {"accounts": []}}, {"glm": {"accounts": {"a": []}}}):
+            Path(self.cache).write_text(json.dumps(value))
+            self.assertFalse(q.cached_glm_account_view("a", binding=BINDING,
+                             now_ts=STAMP, cache_path=self.cache)["quota_ready"])
+
+    def test_reset_cli_calls_only_named_read_and_reports_unqualified_exit(self):
+        with patch.object(q, "reconcile_glm_reset", return_value={"state": "QUOTA_NOT_READY"}) as read, \
+             patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(q.main(["reconcile-reset", "--account", "a"]), 2)
+        read.assert_called_once_with("a")
+
+    def test_live_response_is_judged_at_completion_not_the_earlier_request_clock(self):
+        clock = [STAMP]
+        def live(name, key):
+            clock[0] += 2
+            return [replace(s, observed_at=q._iso(clock[0])) for s in states()]
+        with patch.object(q, "_config_binding", return_value=BINDING), \
+             patch.object(q, "_glm_accounts_dict", return_value={"a": {}}), \
+             patch.object(q, "_utc_now", side_effect=lambda: datetime.fromtimestamp(clock[0], timezone.utc)), \
+             patch.object(q, "_live_glm", side_effect=live):
+            result = q.reconcile_glm_reset("a", now_ts=STAMP, cache_path=self.cache)
+        self.assertEqual(result["state"], "QUOTA_READY")
+        self.assertEqual(result["quota"]["refresh_started_at"], STAMP)
+        self.assertEqual(result["quota"]["windows"][0]["observed_at"], q._iso(STAMP+2))
+
+    def test_later_failure_cannot_relabel_an_already_recorded_terminal_refusal(self):
+        self.write_cache()
+        q._record_refresh_failure(self.cache, "glm", "a", None, BINDING, STAMP+1, q.ProviderQuotaRefusal())
+        changed = dict(BINDING, config_generation="config-b")
+        q._record_refresh_failure(self.cache, "glm", "a", None, changed, STAMP+2, RuntimeError())
+        retained = q._glm_cached_entry(self.cache, "a")
+        self.assertEqual(retained["failure_binding"], BINDING)
+        self.assertEqual(retained["refresh_error"], "PROVIDER_REFUSED")
+
+    def test_malformed_change_history_does_not_block_a_valid_new_observation(self):
+        self.write_cache()
+        retained = json.loads(Path(self.cache).read_text())
+        retained["glm"]["accounts"]["a"]["states"] = None
+        Path(self.cache).write_text(json.dumps(retained))
+        row = q._publish_observation(self.cache, "glm", "a", states(remaining=99), BINDING, STAMP+1)
+        self.assertEqual(row["states"][0]["remaining_pct"], 99)
+        self.write_cache(terminal_refusal=True)
+        projected = q.cached_glm_account_view("a", binding=BINDING, now_ts=STAMP, cache_path=self.cache)
+        self.assertFalse(projected["quota_ready"])
+        self.assertEqual(projected["refresh_error"], "PROVIDER_REFUSED")
 
 
 if __name__ == "__main__":
