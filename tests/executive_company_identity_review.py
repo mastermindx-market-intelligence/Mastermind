@@ -34,7 +34,7 @@ REVIEWED_ANCHORS = {
         # in addition to the method AST; all three literal lines are ASCII.
         # Selected-child App-peer admission changes the enclosing ingress AST.
         # The original Fabric reply operands and Company listener remain unchanged.
-        "source_sha256": "ea7aee823d3b38eb5c8b102d713678cc35a818213bb6777560cdce09a7976720",
+        "source_sha256": "03067cd8295da7e4205469af5cc02034ea04abbbe937048c49965732ad8852f1",
         "ast_sha256": "d6dc49f5ec033025ac0fbf1903374049a4ec7c5cde5daa504c3f0473e5507164",
         "sites": (
             (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
