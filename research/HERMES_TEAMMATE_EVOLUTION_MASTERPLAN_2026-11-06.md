@@ -937,3 +937,57 @@ Its original Fabric run `hermes-native-request-observation-20261107-c3-01`, cont
 Memory enrollment design is pinned to the original held native recipe/loader/current-claim owner. An additional concrete issue must be resolved before implementing its compiler runner: Macro's compiler imports YAML and local helper code, so an entry-script hash alone does not qualify its executable closure. The reader's actual `sys.executable -B` subprocess must use a qualified source/dependency recipe and a closed environment. Do not guess a Macro host path, widen native import_roots, or treat a duck-typed callback as custody. Also7a3160 does not contain the merged recall provider; compose the actual2163 merge `5ca25e561ffaeacb4ef94bb08f507617f80d0607` when implementing this lane.
 
 No admitted turn, provider dispatch, valid EVAL, browser account enrollment, fleet activation or endurance proof is claimed. Original Ubuntu1 C26 root/admin connection restoration remains the exact installed-runtime gate; no alternate carrier or account was used to replay its denied journal read. Outcome Learning398 stays held.
+
+
+## 23. Protected native merge, scoped conflict repair, and request-observation producer — 2026-11-07 03:17 UTC
+
+MISSION_COMPLETE=false. BUILT_NOT_PROVEN remains the overall classification. Source integration, installed capability, actual inference, EVAL validity, and user acceptance remain different facts.
+
+### Current protected law and concrete company purpose
+Protected master advanced through PR2134 merge4d1561bcba1bfad583c75e419ced9a6ff0f3fa40 to e37dc82f070fd391e29f0dbd0bf46b022166beea. Material AGENTS/CLAUDE changes distinguish Strategic State company portfolio from the domain-limited Improvement Agenda and require an active-P0 capability mapping. INDEX and applicable laws were refreshed together at e37dc82f; schema/master skillpack1.0.1/minimumbootstrap1 verified. All previously loaded procedural-law bytes remain identical; the strategic delta was read. The actual strategic_state.load_strategic_state loader verified active AUTONOMY_FORCE_MULTIPLIER.
+
+This mission advances the concrete Chairman/machine journey: one authorized objective -> native teammate recalls canonical WS/DEC/DSC context -> Executive/Fabric executes scoped work -> original-operation evidence and continuity survive handoffs/restarts -> Chairman receives proved results without routine message shuttling or resupplying lost context. New source does not create another company-priority owner or claim AUTONOMY_BASELINE passed.
+
+### Native integration and dependent branches
+- Original PR2134 is MERGED as4d1561bcba1bfad583c75e419ced9a6ff0f3fa40. No re-arm or new original operation.
+- GitHub automatically retargeted original2170 and2171 to master. Both showed conflicts caused by the older pre-squash common ancestor. Each conflicted file's immediate-parent bytes were independently verified identical to current protected-master bytes. Only the original scoped additions were retained; all other newer protected source/CI/law/memory/OMH/intake changes were preserved.
+- PR2170 current head113134217efdb40a1a737a091ad5bf353e25c18c, parents f2a8ae6b5c2a517a882f8001d35e823676bc6ac2 +e37dc82f. Qualified treef0006fd1868ffc528fdddf9bd9758d86adcc1f0e; exact GitHub tree/ref readback. Four-file delta unchanged from qualified feature postimages. Local integration:107 native tests +184 source-identity tests passed. Hosted exact-head CI is rerunning; no new release effect yet.
+- PR2171 current head332d20b5bf03e3427a8c16a0fa0ecedf479e9e87, parents7413842fb903d6a0d62d3d29d5af0fe9e73038f7 +e37dc82f. Qualified tree8e2bd3288cad054eda45a35ec3d374b22159bebb; exact tree/ref readback. Six-file own delta unchanged; guard2165 already comes from protected master. Local Linux integration:192 tests +2 subtests passed, including install lifecycle and D8 protected defaults. Original M1 385pass/1platformskip evidence remains historical. Readiness transition is being reconciled; do not invent merge/installation.
+- Default branch enforcement freshly read: strict required test, zero mandatory approving reviews, CODEOWNERS reviewfalse, admins enforced; native SQUASH merge queue active, no bypass. No self-approval or direct self-merge occurred.
+
+### Request-observation producer
+Original paid Fabric run hermes-native-request-observation-20261107-c3-01 was refused before launch. It was not replayed. Parent implemented the original bounded source task directly.
+
+Draft PR2176:
+https://github.com/mastermindx-market-intelligence/Mastermind/pull/2176
+branch sol/hermes-request-observation-20261107-c3
+head726120186328e9ab8653c35f1de2936242636297
+base e37dc82f070fd391e29f0dbd0bf46b022166beea
+tree63c09e424ed40b0064d090e8d5a3e0490bd99001, independently matched to local complete Git tree.
+13files: two production modules, one test module, one contract document, six unmodified MIT donor source files, one exact executor-method excerpt, provenance and license.
+
+Actual receiving path: original SessionAuthority claim -> actual _execute_claimed -> actual finite/ingress -> original native executor context-copy -> actual request builder and pre-request helper -> original outer pending result -> native compaction/redaction/storage codec. Wrappers call originals once, preserve original failures/cancellation, never synthesize a result or register SessionEvents delivery observers. Final claim/adopted-agent identity checks and attachment use the original stream RLock then the scope lock. Native stored-generation checks remain outside that lock.
+
+Digest stage is assembled_content_after_pre_request_hooks. Presence-sensitive messages/input/system/instructions are detached as bounded strict JSON, UTF8/sortedkeys/no spaces/custom canonicalization. At most8 events/16KiB metadata; content work cap4MiB/65,536nodes/depth64. Raw prompts, outputs, headers, credentials and model labels are not retained. Empty coverage is explicit, late executor contexts are sealed, overflow/errors remain visible. provider_dispatch_proven=false and model_identity_verified=false always.
+
+38 focused source/composition tests passed on the integrated e37dc82f base, including actual native executor, actual claim-owner ordering, cancellation with a surviving thread, successor-claim isolation, interleaved admissions, deterministic adoption race, exactbytes, bounds, original outcome semantics and source qualification. Full local existing runtime suite had327pass/1skip/211subtestpass and6 failures in unchanged loopback/procfs/socket fixtures (two role subcases included). These failures are not waived; hosted Linux CI is required. Original child processes were bounded; a process reconciliation found no remaining test Python process. Restore-only tracked test fixture chmod was verified against exact unchanged bytes.
+
+PR2170 does not yet expose this new outer document. A separate closed authenticated projection is owed before EVAL can consume it. Actual provider dispatch, full request/window inclusion of AgentOS memory, served model identity, real held-out judgments, and EVAL validity remain unproven.
+
+### Adopted Agent OS receiver selected; original worker refusal
+Source-linked concrete brief:
+https://github.com/mastermindx-market-intelligence/Mastermind/blob/9eb293ca99e01b34b8527c82eac9c1f1bbd65633/research/hermes/HERMES_AGENTOS_ADOPTED_RECEIVER_BRIEF_2026-11-07.md
+Exact readback blobdf6fcdfb051f26fcfc6712f2cb3341aa9782a11a.
+
+Use existing InstalledBootPacketCollector + nominal installed-reader issuance + verified Macro private materialization + incumbent CF2 runtime. First leaf reads fixed WS context budget4000 from actual adopted snapshot, preserves rawbytes and complete source/runtime provenance. CODE/DATA/repo revision coincide. No latest-DATA permission is inferred from fresh bundle generation.
+Actual fixture already exists at tests/fixtures/agentos-project-plan-owner-contract.json; verified Macro138a2c5cdc391b6319c797d9206bc66faa635cdc, full compiler/helper hashes in brief. Do not substitute a fake emitter or partial compiler entry hash.
+
+Paid Fabric run hermes-agentos-adopted-receiver-20261107-c3-01, controller87331:
+REQUEST_REFUSED_BEFORE_LAUNCH, retainedrequesttrue, innerexecutionabsenceproventrue; outer root verificationfalse/request-correlationonly; controllerMMX_FABRIC_EXIT=75/nativewrapperrc0. No result/START/worker/accepted implementation; same-run replayfalse. One original-controller read completed. No replay, no alternate worker or false durable execution. Parent may continue permitted direct source work.
+
+Compatibility decision: same Executive server/process/endpoint will eventually select one fixed v1 or context catalogue from the existing authenticated principal's enrolled mission/profile/grants. Preserve v1 digest/profile material. New explicit grant/profile required; mixed/unknown catalogue association refuses. No second identity/catalogue owner, no union, no silent refresh of native publications. The present receiver leaf adds no public tool, grants, native provider activation or installation.
+
+### Current frontier and preserved blocks
+Next: consume exact-head CI/normal releases for2170/2171, qualify2176 hosted runtime checks, implement the bounded adopted receiver directly, then same-owner catalogue/transport/native provider composition and authenticated request-observation projection. Follow with real context inclusion/window/revocation/restart proof and honest EVAL acceptance.
+
+C26 original Ubuntu1 root/admin journal access remains explicitly denied; do not retry by another carrier/account. Original service identity/installation and original Runtime Job must be reconciled on restored authorized access, not replaced. No Secretary/Meta START, model inference, credential-vault enrollment, browser account grant, fleet/endurance or overall teammate completion is claimed. Outcome Learning#398 remains held. M2 OMH and independent ControlRoom/R2 obligations are preserved.
