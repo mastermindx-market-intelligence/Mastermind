@@ -63,7 +63,10 @@ export const STUDIO_SELECT_HOST_TOOL = Object.freeze({
   name: 'studio_select_host',
   title: 'Select Studio Fleet Host',
   description:
-    'Bind this MCP session once to one operator-configured fleet host before using Desktop Commander tools. ' +
+    'Bind this MCP session once to one operator-configured REMOTE fleet route before using Desktop Commander tools. ' +
+    'For the local gateway host (including M2 Studio), leave the MCP session unselected and use local tools; ' +
+    'do NOT select the gateway host as a remote hostRef. Only fleetRouting.routes entries are selectable; ' +
+    'studio_fleet_status.physicalFleet is advisory, not the route allowlist. ' +
     'The selection is preflighted against the remote Studio tool contract. It does not start work, move an ' +
     'existing process, retry an effect, or change Fleet/Capacity placement. This is NOT required for studio_git_*, ' +
     'studio_fleet_status or paper_* tools, which have independent owners; a refused host bind affects only routed ' +
