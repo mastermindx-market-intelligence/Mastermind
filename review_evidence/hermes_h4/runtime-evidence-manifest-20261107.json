@@ -17,6 +17,9 @@
     },
     "installed-diagnostic-native-proof-20261107.json": {
       "sha256": "af32bf1118b00ee914e05c7775b40948f032f2570bd5f31e011a326d1b6e6749"
+    },
+    "native-writer-delta-20261107.json": {
+      "sha256": "b378d4f5b7194c8a05d7e52fe412c8db28139f16c8ed18ea4f60cca00b1a9340"
     }
   }
 }

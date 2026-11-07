@@ -77,3 +77,32 @@ The active c2 worker issuer retains the SessionGrant/original-run admission join
 No duplicate implementation, new runner, idle watcher or background execution is
 created by this return. The first qualified primary plus harmless native-tool
 journey remains useful independently of optional pools and scorers.
+
+## Latest native source observation — 14:25–14:28 UTC
+
+A final bounded read found two additional tracked on-disk edits,
+`agent/agent_init_fallback.py` and `agent/chat_completion_helpers.py`,
+plus untracked `tests/test_fallback_family_first.py`. The previously known
+untracked `tests/tui_gateway/test_omit_messages_resume_bounded_ack.py` remains.
+The new tracked diff adds an opt-in `fallback.family_first` chain reordering
+helper, default off; this is another writer's source change, not an H4-installed
+runtime feature or a proven effective configuration.
+
+`native-writer-delta-20261107.json` captures all six tracked and two untracked
+paths with stable file identities. All ten core preimage hashes remain unchanged
+and the previous four TUI files retain exact bytes and identities. The new paths
+do not overlap the ten-file activation patch. No second apply/reverse test was
+needed to establish this path/hash comparison.
+
+The active combined-fixture owner must consume this current source snapshot
+before activation. The 13:31 preimage receipt is still a dated ten-file
+preimage/rollback observation; it does not establish combined behavior for later
+fallback changes. No live file was reset, patched or cleaned.
+
+At 14:25 UTC the original gateway PID/start and installed bridge postimage were
+unchanged, CURRENT remained sequence35/generation
+`ef94479b8c768088e7c6b611d498879b9b6896ba24faa2558135ad8465f8be46`,
+and no TCP4142 listener was present. A bounded local launch/process metadata
+inspection did not identify a running `go_shim.py` or `go_router.py` process;
+it does not establish fleet-wide service absence or authenticate any endpoint.
+No provider request was made.
