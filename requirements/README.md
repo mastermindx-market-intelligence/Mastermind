@@ -1,12 +1,12 @@
 # Hash-locked test-gate environments (RWE-P0)
 
-This directory holds per-platform, hash-pinned `pip` lockfiles for the
-**repository test-gate environment only** -- the pilot scope of
-`research/REPRODUCIBLE_WORKER_ENVIRONMENTS_MASTERPLAN_V1.md` §5-6 (macro
-repo). Nothing here changes the existing `pip install -e ".[dev]"` path used
-by `.github/workflows/ci.yml` today; these locks are consumed exclusively by
-the new `scripts/rwe_env.py` task interface and the shadow CI job in
-`.github/workflows/rwe-shadow.yml`.
+This directory holds per-platform, hash-pinned Python lockfiles. Files named
+`gate-*` are the **repository test-gate environment** owned by the RWE-P0 pilot
+(`research/REPRODUCIBLE_WORKER_ENVIRONMENTS_MASTERPLAN_V1.md` §5-6 in Macro).
+Product-specific names are separate reviewed runtime closures: currently
+`workbench-read-macos-arm64-py312.*` and `executive-mcp-macos-arm64-py312.*`.
+They are not consumed by `scripts/rwe_env.py` and do not change the existing
+`pip install -e ".[dev]"` CI path.
 
 ## What a lock is
 

@@ -1,0 +1,72 @@
+{
+  "at": "2026-11-07T09:27:10.781145+00:00",
+  "complete_actual_translation": {
+    "added_exact_input": {
+      "git_blob": "117dc03971230945fcf50816447f7e6a2e651a5a",
+      "path": "scripts/translate_all.py",
+      "sha256": "b432449ee8fae9b11e27030d14fe5f3266c5620c4cf7fb370b36fa67b767f1c1"
+    },
+    "command": [
+      "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests/integration",
+      "-p",
+      "test_fabric_translation_composition.py",
+      "-v"
+    ],
+    "composed_tree": "b6b8c94e5e752c58150c2f56bb4965de9de903c8",
+    "effects": "Synthetic providers and temporary files only; no installed Codex/provider invocation",
+    "exit": 0,
+    "initial_incomplete_export_receipt": "mmx-2187-protected-translation.json",
+    "log_sha256": "ea509ad0367a2a748ffd43b65f9a68042344e1be3ecea84774c6b5a9c831dd0b",
+    "macro_archive_sha256": "3d11791620c625bd9cf17b2c801a73163f3aebe23cab609143dd2dcf45063d22",
+    "macro_source": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+    "protected_parent": "547a880894b0f3d28a6d5118ee2534287b3fc1c0",
+    "resolved_test_blob": "b3e00e1c3d507dc276f0f24d40e0665448f1e18a",
+    "seconds": 5.36,
+    "source_archive_sha256": "d7ea47f4cdb6286eaecf74ae360eb26029d1fb68d0bd65d3c07f1b8336730959",
+    "source_head": "0a41dd135dcba6ca6951ab1ec582bd96960fbab7",
+    "summary": [
+      "Ran 23 tests in 4.978s",
+      "OK"
+    ]
+  },
+  "first_incomplete_export": {
+    "command": [
+      "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "tests/integration",
+      "-p",
+      "test_fabric_translation_composition.py",
+      "-v"
+    ],
+    "composed_tree": "b6b8c94e5e752c58150c2f56bb4965de9de903c8",
+    "effects": "Synthetic providers and temporary files only; no installed Codex/provider invocation",
+    "exit": 1,
+    "log_sha256": "b9965a67bf86050df236f6e7bc725ae6a578b3206026cbb1260842a1e55e89aa",
+    "macro_archive_sha256": "3d11791620c625bd9cf17b2c801a73163f3aebe23cab609143dd2dcf45063d22",
+    "macro_source": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+    "protected_parent": "547a880894b0f3d28a6d5118ee2534287b3fc1c0",
+    "resolved_test_blob": "b3e00e1c3d507dc276f0f24d40e0665448f1e18a",
+    "seconds": 6.494,
+    "source_archive_sha256": "d7ea47f4cdb6286eaecf74ae360eb26029d1fb68d0bd65d3c07f1b8336730959",
+    "source_head": "0a41dd135dcba6ca6951ab1ec582bd96960fbab7",
+    "summary": [
+      "Ran 23 tests in 6.006s",
+      "FAILED (errors=1)"
+    ]
+  },
+  "installed_generation_selection": "Not attempted; retained APPLICATION constraint remains binding.",
+  "native_manifest_unchanged": true,
+  "original_queue_removal": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/issues/events/35423056040",
+  "original_queue_removed_at": "2026-11-07T08:45:46Z",
+  "removal_cause": "Not inferred from the event; actual current source conflict independently observed.",
+  "resolution": "Consume byte-identical protected translation test b3e00e1c3d507dc276f0f24d40e0665448f1e18a: exact historical realm preimage replaces unrelated current-module pin.",
+  "source_conflict": "Only tests/integration/test_fabric_translation_composition.py"
+}

@@ -489,3 +489,83 @@ def test_existing_artifact_refresh_removes_newly_closed_plan(monkeypatch, tmp_pa
     assert pf.plan_for("AAA") is None
     assert pf.plans() == []
     assert pf.index()["plans"][0]["closed"] is True
+
+
+def _snapshot_for_binding_test(stamp, *, entry, action):
+    plan = _plan("AAAA", entry=entry, invalidation=entry - 10, t1=entry + 20,
+                 t2=entry + 40, trigger=entry + 1, conviction=70,
+                 phase="pre_trigger", action=action, signal_days_ago=0)
+    # Both snapshots retain an old signal: per-plan filtering must not mask the race.
+    plan["_signal_date"] = "2026-07-15"
+    snapshot = _index([plan])
+    snapshot["asof"] = stamp
+    return snapshot
+
+
+@pytest.mark.parametrize("reader", ["index", "plan_for"])
+def test_bounded_reader_binds_admission_to_returned_snapshot(monkeypatch, tmp_path, reader):
+    before = _snapshot_for_binding_test("2026-07-19", entry=100, action="wait")
+    after = _snapshot_for_binding_test("2026-09-16", entry=200, action="enter")
+    path = _install(monkeypatch, tmp_path, before)
+    initial_stamp = path.stat().st_mtime_ns
+    real_read = pf._raw_index
+    published = []
+
+    def replace_after_read():
+        snapshot = real_read()
+        if not published:
+            path.write_text(json.dumps(after))
+            new_stamp = initial_stamp + 1_000_000_000
+            os.utime(path, ns=(new_stamp, new_stamp))
+            published.append(path.stat().st_mtime_ns)
+        return snapshot
+
+    monkeypatch.setattr(pf, "_raw_index", replace_after_read)
+    if reader == "index":
+        result = pf.index("2026-07-20")
+        assert result == before, "future snapshot escaped under the earlier snapshot's admission"
+    else:
+        result = pf.plan_for("AAAA", "2026-07-20")
+        assert result is not None
+        assert (result["entry"], result["invalidation"], result["t1"], result["t2"],
+                result["trigger"], result["recommended_action"]) == (100, 90, 120, 140, 101, "wait"), (
+                    "future action/geometry escaped despite its old signal date")
+    assert published == [initial_stamp + 1_000_000_000]
+    # No cache reset: a later independent read must observe B and refuse its future date.
+    assert pf.availability("2026-07-20")["reason"] == "future_artifact"
+    assert pf.index("2026-07-20") == {}
+    assert pf.plan_for("AAAA", "2026-07-20") is None
+
+
+@pytest.mark.parametrize("bound", ["2026-07-20", None])
+def test_snapshot_binding_preserves_unchanged_and_live_reads(monkeypatch, tmp_path, bound):
+    stamp = "2026-07-19" if bound is not None else date.today().isoformat()
+    snapshot = _snapshot_for_binding_test(stamp, entry=100, action="wait")
+    if bound is None:
+        snapshot["plans"][0]["_signal_date"] = stamp
+    _install(monkeypatch, tmp_path, snapshot)
+    assert pf.availability(bound)["available"] is True
+    assert pf.index(bound) == snapshot
+    plan = pf.plan_for("AAAA", bound)
+    assert plan is not None and plan["entry"] == 100
+    assert plan["recommended_action"] == "wait"
+
+
+@pytest.mark.parametrize("reader", ["availability", "index"])
+@pytest.mark.parametrize("reason", ["invalid_asof", "flag_off"])
+def test_snapshot_binding_rejects_before_artifact_read(monkeypatch, reader, reason):
+    calls = []
+
+    def forbidden_read():
+        calls.append(True)
+        raise AssertionError("refused request must not read the artifact")
+
+    monkeypatch.setattr(pf, "_raw_index", forbidden_read)
+    monkeypatch.setenv("MASTERMIND_PROPHET_FEED", "0" if reason == "flag_off" else "1")
+    bound = "2026-07-20" if reason == "flag_off" else "invalid"
+    result = getattr(pf, reader)(bound)
+    if reader == "availability":
+        assert result["available"] is False and result["reason"] == reason
+    else:
+        assert result == {}
+    assert calls == []

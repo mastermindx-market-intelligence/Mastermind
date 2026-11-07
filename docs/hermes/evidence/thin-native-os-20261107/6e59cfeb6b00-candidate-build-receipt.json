@@ -1,0 +1,46 @@
+{
+  "source_revision": "6e59cfeb6b00e1508eae51ec0a9dc5c03b8c193a",
+  "build_identity": "hermes-thin-native-6e59cfeb6b00-20261107-pro-06",
+  "app_tree": "d27925e195d5649ca1fd0cf723cda54b756a0dd7",
+  "source_public_profile": "/Volumes/Mastermind 2/agent-workspaces/web/mmos-project-team-launch-20261105-sol-002/app/mastermind_os/src-tauri/target/mmos-project-teams-fca92d5a-20261106-sol-002/PUBLIC_BUILD_INPUTS.json",
+  "source_public_profile_sha256": "ddfeea5e9ef02c1780f97e54b987e58ea9e2e6aa9471c960e90f241e4946926d",
+  "native_refresh_enabled": false,
+  "launch_sha256": "1997aa4d84f091146637394ca739040a826ced67f00b9e9c19022b2108f7fb5b",
+  "terminal_public_input_path": "/Volumes/Mastermind/evidence/mmos-commission-01a15741/product-parity/inbox-sharing-mounted/TERMINAL_PUBLIC_BUILD_INPUT.json",
+  "terminal_public_input_sha256": "988448e0881733d2d4eb28980cf17565ded693ab8ecdbc604b4873fc8011779e",
+  "terminal_public_key_sha256": "98ab2fb28d5c1082247e9c1b55661869ffd4f29fd5d9adba66034eee0b0634b4",
+  "build_exit": 0,
+  "application_source_unchanged": true,
+  "observed_head_after": "6e59cfeb6b00e1508eae51ec0a9dc5c03b8c193a",
+  "log": "/tmp/hermes-thin-package-6e59cfeb6b00-20261107-pro-06.log",
+  "created_at": "2026-11-07T09:16:50.460376+00:00",
+  "profile": "debug",
+  "production_distribution_qualified": false,
+  "installed_journey_qualified": false,
+  "path": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-6e59cfeb6b00/Mastermind OS.app",
+  "bundle_id": "com.mastermind.os",
+  "version": "0.1.0",
+  "native_client_ref": "native-client:v1:47cabc2a4fe992f317c895bb619d0fcf64b49f1e03d9992781d1dca7c77cb423",
+  "files": [
+    {
+      "path": "Contents/Info.plist",
+      "sha256": "bbedad1d282a7b38e342da00c798ddfac8273bf9e016a12e3247b8635a8ad4ca",
+      "bytes": 1466
+    },
+    {
+      "path": "Contents/MacOS/mastermind-os",
+      "sha256": "a43bd5cde4bc45950ae9fb6781c4e03b0da239a8ea91a4894c9aa1a26ee3b20e",
+      "bytes": 45759024
+    },
+    {
+      "path": "Contents/MacOS/verify_update",
+      "sha256": "511c5fe8f6b02147a041ff328493e2e73891b7c4b81a91eedc5a2448f68cf831",
+      "bytes": 1499568
+    },
+    {
+      "path": "Contents/Resources/icon.icns",
+      "sha256": "71ca38f65a520713890786db51e6f350103f47df9feb3181315e0751fceb909b",
+      "bytes": 485020
+    }
+  ]
+}

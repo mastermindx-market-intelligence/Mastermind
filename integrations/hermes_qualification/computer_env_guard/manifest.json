@@ -1,0 +1,30 @@
+{
+  "files": {
+    "tools/computer_use/cua_backend.py": {
+      "after_sha256": "b106ce6b1086a932648c141a517821fd503a54b75d52e7cf5b127c94df1de78f",
+      "before_git_blob": "ec903cbf7fc75d44fd1c3f0f80ba31ad93a3ddc4",
+      "before_sha256": "6c0287de53eb3fbfd3307d961898554343271e406c4e6bd31ba4a43194ab5821"
+    },
+    "tools/computer_use/permissions.py": {
+      "after_sha256": "c1b1f7b1de10fc14ff2892ec8b0dd7ca2c1976ef76a0d6884e93577caeea8d0d",
+      "before_git_blob": "2cdc00ddd71fa90bac50613925ccbbdab749d00c",
+      "before_sha256": "1723fcfb656581149daeb8bc6f4a59f35048ba1772e828832835fb5b9abae729"
+    }
+  },
+  "installed": false,
+  "license": "MIT",
+  "license_file": "UPSTREAM_LICENSE",
+  "patch_sha256": "d17af87e60a1f92a52ef446ad393ce2841c876a28e2ae0580bc7e6db09d6721f",
+  "proof_scope": "Exact donor source patch; isolated original function/caller behavior; no host or driver qualification",
+  "qualified_source_commits": [
+    "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+    "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
+  ],
+  "repository": "https://github.com/NousResearch/hermes-agent",
+  "schema": "mastermind.hermes_computer_env_patch.v1",
+  "test_fixtures": {
+    "fixtures/tools/computer_use/cua_backend.py.source": "6c0287de53eb3fbfd3307d961898554343271e406c4e6bd31ba4a43194ab5821",
+    "fixtures/tools/computer_use/cua_backend_driver.py.source": "8031564bf9e19111b295496a4312ce96087163ba6b9f9ff6e0b1da6796159d67",
+    "fixtures/tools/computer_use/permissions.py.source": "1723fcfb656581149daeb8bc6f4a59f35048ba1772e828832835fb5b9abae729"
+  }
+}
