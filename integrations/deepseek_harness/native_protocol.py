@@ -10,6 +10,8 @@ import json
 import re
 from typing import Any
 
+from control_plane.operator_harness_contract import ObservedHarnessAttestation
+
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}\Z")
 CLAIM_SCHEMA = "mastermind.dsh.native_prompt_claim.v1"
 TERMINAL_SCHEMA = "mastermind.dsh.native_prompt_terminal.v1"
@@ -47,6 +49,58 @@ def document(value: Any) -> dict[str, Any]:
     if type(value) is not dict:
         raise NativeProtocolError("NATIVE_DOCUMENT_REFUSED")
     return value
+
+
+EXTENSION_V2 = {"schema": "mastermind.dsh.native_prompt_extension.v2",
+                "claimMethod": "_mastermind/native_claim", "cancelMethod": "_mastermind/native_cancel",
+                "observeMethod": "_mastermind/native_observe"}
+OBSERVATION_REQUEST_SCHEMA = "mastermind.dsh.native_observation_request.v1"
+OBSERVATION_SCHEMA = "mastermind.dsh.native_observation.v1"
+OBSERVATION_MAX_BYTES = 32 * 1024
+
+
+def native_extension(value: Any) -> dict[str, str]:
+    """Accept one complete negotiated version, never v1 with added authority."""
+    if type(value) is not dict or value not in (EXTENSION, EXTENSION_V2):
+        raise NativeProtocolError("NATIVE_EXTENSION_REFUSED")
+    return dict(value)
+
+
+def native_observation(value: Any, session_id: str) -> ObservedHarnessAttestation:
+    """Decode the original session's passive OHF facts, preserving explicit nulls."""
+    # The general OHF wire also imports native result types from this module.
+    from control_plane.operator_harness_wire import observed_harness_attestation
+    try:
+        if (type(value) is not dict or set(value) != {"schema", "sessionId", "attestation"}
+                or value["schema"] != OBSERVATION_SCHEMA
+                or native_id(value["sessionId"]) != native_id(session_id)
+                or len(json.dumps(value, ensure_ascii=False, allow_nan=False,
+                                  separators=(",", ":")).encode("utf-8")) > OBSERVATION_MAX_BYTES):
+            raise ValueError()
+        raw = value["attestation"]
+        observed = observed_harness_attestation(raw)  # existing closed nested OHF codecs
+        def text(item, *, nullable=False):
+            if item is None and nullable:
+                return
+            if type(item) is not str or not item:
+                raise ValueError()
+        for key in ("served_model", "harness_version", "harness_binary_digest",
+                    "sandbox_state", "approval_state", "network_state", "effective_config_digest"):
+            text(raw[key], nullable=True)
+        for key in ("effective_skills", "effective_mcp", "effective_plugins_or_apps", "unknown_fields"):
+            for item in raw[key]:
+                text(item)
+        for capability in raw["capabilities"]:
+            for key, item in capability.items():
+                text(item, nullable=key not in {"kind", "name"})
+        for key, item in raw["auth"].items():
+            text(item, nullable=key in {"auth_class", "plan_type", "nonsecret_provider_account_id"})
+        if raw["workspace"] is not None:
+            for key, item in raw["workspace"].items():
+                integer(item) if key in {"device", "inode", "uid", "gid"} else text(item)
+        return observed
+    except (TypeError, ValueError, KeyError, OverflowError, RecursionError):
+        raise NativeProtocolError("NATIVE_OBSERVATION_REFUSED") from None
 
 
 @dataclasses.dataclass(frozen=True)

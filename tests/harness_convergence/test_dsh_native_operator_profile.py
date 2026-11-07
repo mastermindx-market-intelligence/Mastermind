@@ -51,14 +51,17 @@ async def generation(supply, node, state, mode, session_id=None):
     def verify_source():
         assert sha(node) == binary.sha256
         assert sha(COMPAT/"native-company-profile-fixture.mjs") == expected_fixture
-    def fixture_attestation(native):
+    async def fixture_attestation(native):
         assert native.initialization["agentInfo"]["name"] == "deepseek-harness-acp"
         assert native.provider_session_id
-        return ObservedHarnessAttestation(
+        observed = await native.observe()
+        expected = ObservedHarnessAttestation(
             "fixture", binary.version, binary.sha256, (), (), (), (),
             "laboratory-unconfined", "laboratory-explicit", "laboratory-native-loopback",
             None, AuthRealmFact("fixture-dsh", "acp"), identity,
             unknown_fields=("installed_authority", "account", "production_capability_inventory"))
+        assert observed == expected
+        return observed
     epoch = SessionEpochRef("epoch-native-fixture", "attempt-native-fixture", "fixture-dsh", 1)
     generation = ProcessGenerationRef("generation-native-"+mode, epoch.session_epoch_id,
                                      1 if mode == "new" else 2, epoch.worker_id)
@@ -129,6 +132,7 @@ async def generation(supply, node, state, mode, session_id=None):
         assert closed.provider_writer_state is ProviderWriterState.RELEASED
         report = json.loads(report_path.read_bytes())
         assert report["model_calls"] == 1 and report["native_close_settled"] and report["root_teardown_settled"]
+        assert report["native_observation_reads"] == 2  # after initialize and before the one original Send
         return original_id, {"native": report, "result": result.to_wire(),
             "actual_process": vars(started.process), "currentness_checks": len(calls),
             "turn_writer_state": held.provider_writer_state.value, "closed_writer_state": closed.provider_writer_state.value}

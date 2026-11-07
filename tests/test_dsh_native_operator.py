@@ -311,3 +311,108 @@ def test_close_never_replaces_revoked_prompt_guard_with_cleanup_permission(tmp_p
             f.adapter._before_write()
         assert f.adapter.current.operation == OperationId("ohf-op:fixture-prompt")
     asyncio.run(exercise())
+
+
+def test_original_native_start_accepts_async_observation_without_another_owner(tmp_path, monkeypatch):
+    async def exercise():
+        f = await fixture(tmp_path, monkeypatch)
+        calls = []
+        class Observation:
+            def __await__(self):
+                async def resolve():
+                    await asyncio.sleep(0)
+                    return f.observed
+                return resolve().__await__()
+        def observe(native):
+            calls.append(native)
+            return Observation()
+        f.adapter.binding = replace(f.adapter.binding, observe_attestation=observe)
+        started = await start(f)
+        assert started.provider_session_id == f.adapter.native.provider_session_id
+        assert calls == [f.adapter.native] and f.adapter.native.open_calls == 1
+        assert f.adapter.attestation == f.observed
+        await begin(f)
+        assert calls == [f.adapter.native, f.adapter.native] and f.adapter.native.prompt_calls == 1
+    asyncio.run(exercise())
+
+
+def test_failed_async_start_observation_keeps_original_process_uncertain(tmp_path, monkeypatch):
+    async def exercise():
+        f = await fixture(tmp_path, monkeypatch)
+        async def unavailable(_native):
+            await asyncio.sleep(0)
+            raise ValueError("fixture observation unavailable")
+        f.adapter.binding = replace(f.adapter.binding, observe_attestation=unavailable)
+        with pytest.raises(NativeOperatorError) as failure:
+            await start(f)
+        assert failure.value.effect_unknown is True
+        assert failure.value.failure_class is module.AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE
+        original = f.adapter.native
+        assert original.open_calls == 1 and original.provider_session_id == "native-fixture-session"
+        assert f.adapter.attestation is None
+        with pytest.raises(NativeOperatorError):
+            await start(f)
+        assert f.adapter.native is original and original.open_calls == 1
+    asyncio.run(exercise())
+
+
+def test_async_observation_inventory_drift_never_dispatches_or_reseals(tmp_path, monkeypatch):
+    async def exercise():
+        f = await fixture(tmp_path, monkeypatch); await start(f)
+        sealed = f.adapter.attestation
+        async def changed(_native):
+            await asyncio.sleep(0)
+            return replace(f.observed, effective_plugins_or_apps=("unexpected-plugin",))
+        f.adapter.binding = replace(f.adapter.binding, observe_attestation=changed)
+        with pytest.raises(NativeOperatorError, match="configuration changed"):
+            await begin(f)
+        assert f.adapter.attestation is sealed and f.adapter.native.prompt_calls == 0
+        assert f.adapter.current is None and f.adapter.turns == {}
+    asyncio.run(exercise())
+
+
+def test_overlapping_async_begin_observations_admit_at_most_one_original_prompt(tmp_path, monkeypatch):
+    async def exercise():
+        f = await fixture(tmp_path, monkeypatch); await start(f)
+        entered, release = asyncio.Event(), asyncio.Event(); observations = []
+        async def observe(native):
+            observations.append(native)
+            if len(observations) == 2: entered.set()
+            await release.wait()
+            return f.observed
+        f.adapter.binding = replace(f.adapter.binding, observe_attestation=observe)
+        first = asyncio.create_task(begin(f))
+        other = replace(f.turn, turn_id="other-turn")
+        second = asyncio.create_task(begin(f, turn=other))
+        await entered.wait(); release.set()
+        results = await asyncio.gather(first, second, return_exceptions=True)
+        assert sum(isinstance(value, NativeOperatorError) for value in results) == 1
+        assert sum(isinstance(value, module.TurnStartObservation) for value in results) == 1
+        assert f.adapter.native.prompt_calls == 1 and len(f.adapter.turns) == 1
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("change", ["close", "binding", "generation", "sealed-attestation"])
+def test_begin_observation_cannot_outlive_original_admission(tmp_path, monkeypatch, change):
+    async def exercise():
+        f = await fixture(tmp_path, monkeypatch); await start(f)
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def observe(_native):
+            entered.set(); await release.wait()
+            return f.observed
+        f.adapter.binding = replace(f.adapter.binding, observe_attestation=observe)
+        task = asyncio.create_task(begin(f)); await entered.wait()
+        if change == "close":
+            await asyncio.to_thread(f.adapter.graceful_stop, f.generation,
+                                    operation_id=OperationId("ohf-op:close-during-observation"))
+        elif change == "binding":
+            f.adapter.binding = replace(f.adapter.binding, verify_source=lambda: None)
+        elif change == "generation":
+            f.adapter.generation = replace(f.generation, process_generation_id="other-generation")
+        else:
+            f.adapter.attestation = replace(f.observed)
+        release.set()
+        with pytest.raises(NativeOperatorError):
+            await task
+        assert f.adapter.native.prompt_calls == 0 and f.adapter.current is None
+    asyncio.run(exercise())

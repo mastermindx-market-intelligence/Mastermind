@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
+import math
 from importlib.metadata import version
 from pathlib import Path
 import socket
@@ -17,7 +18,8 @@ from control_plane.worker_execution_contract import BinaryAttestation, ProcessIn
 from integrations.acp_worker.process_resource import NativeProcessResource, NativeProcessSettlement
 from integrations.acp_worker.turn import AcpProfile, _model_option
 from integrations.deepseek_harness.native_protocol import (
-    EXTENSION, NativeClaim, NativeProtocolError, NativeResult, document, integer, native_id,
+    EXTENSION_V2, OBSERVATION_REQUEST_SCHEMA, NativeClaim, NativeProtocolError, NativeResult,
+    document, integer, native_extension, native_id, native_observation,
     request_id as checked_request_id,
 )
 from scripts.ohf.acp_probe_boundary import BoundaryViolation, ProbeClient, ProbeLimits, StrictFrameReader
@@ -69,12 +71,16 @@ class NativeClient(ProbeClient):
     def admit_frame(self, message: dict[str, Any]) -> None:
         current = self.current
         if current is not None:
+            if current.wire_terminal:
+                if message.get("method") in {"session/update", "session/request_permission", "_mastermind/native_claim"}:
+                    self.poison("NATIVE_CALLBACK_AFTER_TERMINAL")
+                    raise BoundaryViolation(self.violation)
+                # Ordinary observation/close responses belong to their own SDK
+                # requests. StrictFrameReader still enforces the global budget.
+                return
             current.frames += 1
             if current.frames > 512:
                 self.poison("NATIVE_TURN_FRAME_BUDGET_EXCEEDED")
-                raise BoundaryViolation(self.violation)
-            if current.wire_terminal and message.get("method") in {"session/update", "session/request_permission", "_mastermind/native_claim"}:
-                self.poison("NATIVE_CALLBACK_AFTER_TERMINAL")
                 raise BoundaryViolation(self.violation)
 
     def _matching_claim(self, value: Any) -> NativeClaim:
@@ -220,6 +226,7 @@ class NativeAcpProcess:
         self.connection = self.writer = self.sender_tasks = None
         self.provider_session_id: str | None = None
         self.initialization: dict[str, Any] | None = None
+        self.native_extension: dict[str, str] | None = None
         self.session_options: dict[str, Any] | None = None
         self._tasks: set[asyncio.Task] = set()
         self._closing: asyncio.Task[NativeConnectionSettlement] | None = None
@@ -285,9 +292,9 @@ class NativeAcpProcess:
                 client_info=Implementation(name="mastermind-native-owner", version="1")), 60))
             info = initialized.get("agentInfo", {})
             if (initialized.get("protocolVersion") != PROTOCOL_VERSION
-                    or info.get("name") != protocol_profile.agent_name or info.get("version") != protocol_profile.agent_version
-                    or initialized.get("_meta", {}).get("mastermindNative") != EXTENSION):
+                    or info.get("name") != protocol_profile.agent_name or info.get("version") != protocol_profile.agent_version):
                 raise NativeProtocolError("NATIVE_INITIALIZATION_MISMATCH")
+            self.native_extension = native_extension(initialized.get("_meta", {}).get("mastermindNative"))
             self.initialization = initialized
             self.client.advertised = True
             if provider_session_id is None:
@@ -310,6 +317,27 @@ class NativeAcpProcess:
             child.close()
             if self.writer is None:
                 parent.close()
+
+
+    async def observe(self, *, timeout_seconds: float = 30):
+        """Read facts from the same retained connection; no prompt or new owner."""
+        connection, session_id = self.connection, self.provider_session_id
+        def require_current():
+            if (connection is None or session_id is None or self.connection is not connection
+                    or self.provider_session_id != session_id or self.client.session_id != session_id
+                    or self._closing is not None or self.client.violation
+                    or self.native_extension != EXTENSION_V2):
+                raise NativeProtocolError("NATIVE_OBSERVATION_OWNER_UNAVAILABLE")
+        require_current()  # a v1 peer is refused before any extension request
+        if (type(timeout_seconds) not in (int, float) or not math.isfinite(timeout_seconds)
+                or not 0 < timeout_seconds <= 60):
+            raise NativeProtocolError("NATIVE_OBSERVATION_BOUND_REFUSED")
+        value = await self._bounded(connection.ext_method("mastermind/native_observe", {
+            "schema": OBSERVATION_REQUEST_SCHEMA, "sessionId": session_id,
+        }), timeout_seconds)
+        observed = native_observation(value, session_id)
+        require_current()
+        return observed
 
     async def begin_prompt(self, operation_id: str, text: str, *, timeout_seconds: float = 30) -> NativeClaim:
         if self._closing is not None or self.connection is None or not isinstance(text, str) or not 0 < len(text.encode()) <= 128*1024:

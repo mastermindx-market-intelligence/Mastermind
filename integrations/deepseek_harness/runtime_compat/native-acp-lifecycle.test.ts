@@ -41,7 +41,7 @@ class FixtureAdapter extends LlmAdapter{
     }else for(const chunk of next){options.signal?.throwIfAborted();yield chunk;}
   }
 }
-async function host(script:(StreamChunk[]|"hang")[],opted=true,guard?:(facts:any)=>boolean){
+async function host(script:(StreamChunk[]|"hang")[],opted=true,guard?:(facts:any)=>boolean,observer?:(facts:any,signal:AbortSignal)=>any){
   const ctx=new Context(),root=await mkdtemp(join(tmpdir(),"mmx-native-acp-"));
   cleanup.push(async()=>{await ctx.fiber.dispose();await rm(root,{recursive:true,force:true});});
   await mountAgentLoopTestDependencies(ctx,{systemPrompt:{personaPrefix:""}});
@@ -52,6 +52,7 @@ async function host(script:(StreamChunk[]|"hang")[],opted=true,guard?:(facts:any
   const claims:any[]=[],updates:any[]=[];
   const config:any={provider:"fixture",model:"fixture",stream:ndJsonStream(a.writable,b.readable)};
   if(opted)config.nativePromptAdmission=guard??(()=>true);
+  if(observer!==undefined)config.nativeObservation=observer;
   await ctx.plugin({name:"native-acp-fixture",inject:[...Acp.inject],apply(inner:Context){Acp.apply(inner,config);}});
   const app=createClient({name:"original-native-acp-client"})
     .onNotification(methods.client.session.update,({params})=>{updates.push(params);})
@@ -281,4 +282,159 @@ it("exact current-turn Stop preserves unrelated pending native inbox work",async
   expect(h.agent.inbox.nextTurn.map((item:any)=>item.id)).toContain(later.id);
   expect(nativeCancel).toHaveBeenCalledExactlyOnceWith({kind:"user"},{keepInbox:true});
   expect(h.adapter.requests).toHaveLength(1);
+});
+
+
+const observedWire=()=>({
+  served_model:null,harness_version:null,harness_binary_digest:null,capabilities:[],
+  effective_skills:[],effective_mcp:[],effective_plugins_or_apps:[],
+  sandbox_state:null,approval_state:null,network_state:null,effective_config_digest:null,
+  auth:{worker_id:"fixture-worker",provider:"acp",auth_class:null,plan_type:null,
+    nonsecret_provider_account_id:null,identity_confidence:"UNKNOWN",attestation_status:"fixture-only"},
+  workspace:null,supports_subagent_capability_ceiling:"UNKNOWN",unknown_fields:[],
+});
+const observationRequest=(sessionId:string)=>({schema:"mastermind.dsh.native_observation_request.v1",sessionId});
+
+it("advertises exact v2 only with an original passive observer and preserves null facts",async()=>{
+  const seen:any[]=[];
+  const h=await host([],true,undefined,(facts,signal)=>{
+    seen.push({facts,signal});return observedWire();
+  });
+  expect(h.initialized._meta).toEqual({mastermindNative:{
+    schema:"mastermind.dsh.native_prompt_extension.v2",
+    claimMethod:"_mastermind/native_claim",cancelMethod:"_mastermind/native_cancel",
+    observeMethod:"_mastermind/native_observe",
+  }});
+  const flush=vi.spyOn(h.ctx.sessions,"flush"),cancel=vi.spyOn(h.agent,"cancel");
+  const response=await h.client.request("_mastermind/native_observe",observationRequest(h.sessionId));
+  expect(response).toEqual({schema:"mastermind.dsh.native_observation.v1",sessionId:h.sessionId,attestation:observedWire()});
+  expect(seen).toHaveLength(1);expect(seen[0].facts.agent).toBe(h.agent);
+  expect(h.ctx.agents).not.toBe(h.ctx.agents);expect(h.ctx.sessions).not.toBe(h.ctx.sessions);
+  expect(seen[0].facts.selection).toEqual({provider:"fixture",model:"fixture"});
+  expect(Object.isFrozen(seen[0].facts)).toBe(true);expect(Object.isFrozen(seen[0].facts.selection)).toBe(true);
+  expect(h.adapter.requests).toHaveLength(0);expect(h.claims).toHaveLength(0);
+  expect(cancel).not.toHaveBeenCalled();expect(flush).not.toHaveBeenCalled();
+});
+
+it("keeps the exact v1 advertisement and no observation method for admission-only hosts",async()=>{
+  const h=await host([]);
+  expect(h.initialized._meta).toEqual({mastermindNative:{
+    schema:"mastermind.dsh.native_prompt_extension.v1",
+    claimMethod:"_mastermind/native_claim",cancelMethod:"_mastermind/native_cancel",
+  }});
+  await expect(h.client.request("_mastermind/native_observe",observationRequest(h.sessionId))).rejects.toThrow();
+  expect(h.adapter.requests).toHaveLength(0);
+});
+
+it("refuses observation composition without original admission",async()=>{
+  await expect(host([],false,undefined,()=>observedWire())).rejects.toThrow();
+});
+
+it.each(["extra","schema","session","missing"])("rejects a %s observation request without calling the observer",async(change)=>{
+  const observer=vi.fn(()=>observedWire()),h=await host([],true,undefined,observer);
+  const request:any=observationRequest(h.sessionId);
+  if(change==="extra")request.authority=true;
+  else if(change==="schema")request.schema="other";
+  else if(change==="session")request.sessionId="unknown-session";
+  else delete request.schema;
+  await expect(h.client.request("_mastermind/native_observe",request)).rejects.toThrow();
+  expect(observer).not.toHaveBeenCalled();expect(h.adapter.requests).toHaveLength(0);
+});
+
+it.each(["callback","admission","agent","session","selection","selection-value","watermark","close"])(
+  "rejects %s replacement during passive observation",async(change)=>{
+    const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+    let record:any;
+    const original=AcpSession.prototype.observationSnapshot;
+    const snapshot=vi.spyOn(AcpSession.prototype,"observationSnapshot");
+    // The spy wraps the original implementation and exposes only the existing record.
+    snapshot.mockImplementation(function(this:any){record=this;return original.apply(this);});
+    const h=await host([],true,undefined,async()=>{entered.resolve();await release.promise;return observedWire();});
+    const waiting=h.client.request("_mastermind/native_observe",observationRequest(h.sessionId))
+      .then(value=>({ok:true,value}),error=>({ok:false,error}));
+    await Promise.race([entered.promise,waiting.then(()=>{throw Error("observer did not reach its await");})]);
+    let restore=()=>{};
+    if(change==="callback")h.config.nativeObservation=()=>observedWire();
+    else if(change==="admission")h.config.nativePromptAdmission=()=>true;
+    else if(change==="agent"){
+      const get=h.ctx.agents.get.bind(h.ctx.agents),spy=vi.spyOn(h.ctx.agents,"get");
+      spy.mockImplementation((id:any)=>id===h.agent.id?({} as any):get(id));restore=()=>spy.mockRestore();
+    }else if(change==="session"){
+      const get=h.ctx.sessions.get.bind(h.ctx.sessions),spy=vi.spyOn(h.ctx.sessions,"get");
+      spy.mockImplementation((id:any)=>id===h.agent.session.id?({} as any):get(id));restore=()=>spy.mockRestore();
+    }else if(change==="selection"){
+      record.modelControl.selection.current={...record.modelControl.snapshot()};
+    }else if(change==="selection-value"){
+      record.modelControl.selection.current.model="changed";
+    }else if(change==="watermark"){
+      const session=h.agent.session as any,seq=session.seq,descriptor=Object.getOwnPropertyDescriptor(session,"seq");
+      Object.defineProperty(session,"seq",{configurable:true,get:()=>seq+1});
+      restore=()=>{if(descriptor)Object.defineProperty(session,"seq",descriptor);else delete session.seq;};
+    }else{
+      await h.client.request(methods.agent.session.close,{sessionId:h.sessionId});
+    }
+    release.resolve();
+    try{expect(await waiting).toMatchObject({ok:false});expect(h.adapter.requests).toHaveLength(0);expect(h.claims).toHaveLength(0);}
+    finally{restore();snapshot.mockRestore();}
+  },
+);
+
+it("refuses a busy observation without cancelling or advancing the native turn",async()=>{
+  const observer=vi.fn(()=>observedWire()),h=await host(["hang"],true,undefined,observer);
+  const pending=h.prompt("observed-busy"),claim=await h.claimed();
+  const cancel=vi.spyOn(h.agent,"cancel");
+  await expect(h.client.request("_mastermind/native_observe",observationRequest(h.sessionId))).rejects.toThrow();
+  expect(observer).not.toHaveBeenCalled();expect(cancel).not.toHaveBeenCalled();
+  expect(h.adapter.requests).toHaveLength(1);
+  await h.cancel(claim);await pending;
+});
+
+it.each(["extra","missing-null","oversized","accessor","sparse","custom-serializer","secret"])(
+  "rejects %s observation output without executing data accessors",async(change)=>{
+    const output:any=observedWire(),executed=vi.fn();
+    if(change==="extra")output.extra=true;
+    else if(change==="missing-null")delete output.workspace;
+    else if(change==="oversized")output.unknown_fields=["x".repeat(32*1024)];
+    else if(change==="accessor")Object.defineProperty(output,"served_model",{enumerable:true,get(){executed();return null;}});
+    else if(change==="sparse")output.effective_skills=new Array(1);
+    else if(change==="custom-serializer")output.toJSON=()=>{executed();return observedWire();};
+    else output.auth.auth_class="auth.json";
+    const observer=vi.fn(()=>output),h=await host([],true,undefined,observer);
+    await expect(h.client.request("_mastermind/native_observe",observationRequest(h.sessionId))).rejects.toThrow();
+    expect(observer).toHaveBeenCalledTimes(1);expect(executed).not.toHaveBeenCalled();expect(h.adapter.requests).toHaveLength(0);
+  },
+);
+
+it("keeps native selection and a returned observation detached from observer mutation",async()=>{
+  const output=observedWire();let facts:any;
+  const h=await host([],true,undefined,(value)=>{facts=value;return output;});
+  const response:any=await h.client.request("_mastermind/native_observe",observationRequest(h.sessionId));
+  expect(()=>{facts.selection.model="changed";}).toThrow();
+  output.auth.worker_id="changed";
+  expect(response.attestation.auth.worker_id).toBe("fixture-worker");
+  const next:any=await h.client.request("_mastermind/native_observe",observationRequest(h.sessionId));
+  expect(facts.selection.model).toBe("fixture");expect(next.attestation.auth.worker_id).toBe("changed");
+});
+
+
+it("cancels only the observation waiter and retains its idle native owner",async()=>{
+  const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>();
+  let calls=0,originalSignal:AbortSignal|undefined;
+  const h=await host([],true,undefined,async(_facts,signal)=>{
+    calls++;originalSignal=signal;
+    if(calls===1){entered.resolve();await release.promise;}
+    return observedWire();
+  });
+  const cancel=vi.spyOn(h.agent,"cancel"),abort=new AbortController();
+  const waiting=h.client.request("_mastermind/native_observe",observationRequest(h.sessionId),{cancellationSignal:abort.signal})
+    .then(value=>({ok:true,value}),error=>({ok:false,error}));
+  await Promise.race([entered.promise,waiting.then(()=>{throw Error("observer did not reach its await");})]);
+  let settled=false;void waiting.then(()=>{settled=true;});
+  abort.abort();
+  await vi.waitFor(()=>expect(originalSignal?.aborted).toBe(true));
+  expect(settled).toBe(false); // original SDK cancellation waits for the peer response
+  release.resolve();expect(await waiting).toMatchObject({ok:false});
+  const response:any=await h.client.request("_mastermind/native_observe",observationRequest(h.sessionId));
+  expect(response.sessionId).toBe(h.sessionId);expect(h.ctx.agents.get(h.agent.id)).toBe(h.agent);
+  expect(cancel).not.toHaveBeenCalled();expect(h.adapter.requests).toHaveLength(0);expect(h.claims).toHaveLength(0);
 });

@@ -5,44 +5,103 @@
  import { AcpMcpConfigError } from './mcp.ts'
  import { AcpModelConfigError } from './model-control.ts'
 -import { AcpSession } from './session.ts'
-+import { AcpSession, type NativePromptClaim, type NativePromptContext, type NativePromptFacts } from './session.ts'
++import { AcpSession, type NativePromptClaim, type NativePromptContext, type NativePromptFacts, type NativeObservationFacts } from './session.ts'
  
  const DEFAULT_SESSION_LIST_PAGE_SIZE = 100
  
-@@ -81,6 +81,8 @@
+@@ -69,6 +69,50 @@
+ /** Preserve failed-turn detail; plain handler errors become a generic wire internal error. */
+ function internalError(detail: string): RequestError {
+   return RequestError.internalError(undefined, detail)
++}
++
++
++/** Existing OHF observed-attestation wire, not a serializable configuration knob. */
++export interface NativeObservedAttestation {
++  readonly served_model: string | null
++  readonly harness_version: string | null
++  readonly harness_binary_digest: string | null
++  readonly capabilities: readonly {
++    readonly kind: string
++    readonly name: string
++    readonly skill_content_digest: string | null
++    readonly tool_schema_digest: string | null
++    readonly mcp_server_identity: string | null
++    readonly mcp_server_version: string | null
++    readonly mcp_auth_status: string | null
++    readonly resource_contract_digest: string | null
++  }[]
++  readonly effective_skills: readonly string[]
++  readonly effective_mcp: readonly string[]
++  readonly effective_plugins_or_apps: readonly string[]
++  readonly sandbox_state: string | null
++  readonly approval_state: string | null
++  readonly network_state: string | null
++  readonly effective_config_digest: string | null
++  readonly auth: {
++    readonly worker_id: string
++    readonly provider: string
++    readonly auth_class: string | null
++    readonly plan_type: string | null
++    readonly nonsecret_provider_account_id: string | null
++    readonly identity_confidence: 'UNKNOWN' | 'SLOT_ONLY' | 'PROVIDER_REPORTED'
++    readonly attestation_status: string
++  }
++  readonly workspace: {
++    readonly workspace_path: string
++    readonly base_sha: string
++    readonly device: number
++    readonly inode: number
++    readonly uid: number
++    readonly gid: number
++  } | null
++  readonly supports_subagent_capability_ceiling: 'VERIFIED' | 'FALSE' | 'UNKNOWN'
++  readonly unknown_fields: readonly string[]
+ }
+ 
+ /** Plugin config: the provider/model selection used for each ACP-created agent. */
+@@ -81,6 +125,10 @@
    sessionListPageSize?: number
    /** Runtime-only transport override; production uses stdio. */
    stream?: Stream
 +  /** Runtime-only trusted owner check. JSON correlation never creates authority. */
 +  nativePromptAdmission?: (facts: NativePromptFacts) => boolean
++  /** Passive runtime-only facts on the original retained Agent and session. */
++  nativeObservation?: (facts: NativeObservationFacts, signal: AbortSignal) => NativeObservedAttestation | Promise<NativeObservedAttestation>
  }
  
  export const Config: Schema<AcpConfig> = Schema.object({
-@@ -104,6 +106,10 @@
+@@ -104,6 +152,14 @@
    const activating = new Set<SessionId>()
    let closed = false
    let imagePromptEnabled = false
 +  const nativePromptAdmission = config.nativePromptAdmission
++  const nativeObservation = config.nativeObservation
++  if (nativeObservation !== undefined && (typeof nativeObservation !== 'function' || nativePromptAdmission === undefined)) {
++    throw invalidParams('native observation requires the original trusted admission')
++  }
 +  if (nativePromptAdmission !== undefined && typeof nativePromptAdmission !== 'function') {
 +    throw invalidParams('native prompt admission requires a trusted runtime function')
 +  }
  
    /** Return the bridge-owned record for an agent, rejecting same-id impostors. */
    const ownedRecord = (agent: Parameters<AcpSession['owns']>[0]): AcpSession | undefined => {
-@@ -190,6 +196,12 @@
+@@ -190,6 +246,14 @@
            sessionCapabilities: { close: {}, list: {}, resume: {} },
          },
          authMethods: [],
 +        ...nativePromptAdmission === undefined ? {} : {
 +          _meta: { mastermindNative: {
-+            schema: 'mastermind.dsh.native_prompt_extension.v1',
++            schema: nativeObservation === undefined ? 'mastermind.dsh.native_prompt_extension.v1'
++              : 'mastermind.dsh.native_prompt_extension.v2',
 +            claimMethod: '_mastermind/native_claim', cancelMethod: '_mastermind/native_cancel',
++            ...nativeObservation === undefined ? {} : { observeMethod: '_mastermind/native_observe' },
 +          } },
 +        },
        }
      },
  
-@@ -362,13 +374,39 @@
+@@ -362,13 +426,39 @@
        return {}
      },
  
@@ -84,7 +143,7 @@
        sessions.get(brandString<SessionId>(params.sessionId))?.cancel()
        return Promise.resolve()
      },
-@@ -390,8 +428,15 @@
+@@ -390,8 +480,38 @@
      .onRequest(methods.agent.session.resume, ({ params, signal }) => implementation.resumeSession(params, signal))
      .onRequest(methods.agent.session.close, ({ params }) => implementation.closeSession(params))
      .onRequest(methods.agent.session.setConfigOption, ({ params, signal }) => implementation.setSessionConfigOption(params, signal))
@@ -98,10 +157,33 @@
 +      return record?.cancelNative(params) ?? { status: 'not_current' }
 +    })
 +  }
++
++  if (nativeObservation !== undefined) {
++    app.onRequest('_mastermind/native_observe', parseNativeObservationRequest, async ({ params, signal }) => {
++      const sessionId = brandString<SessionId>(params.sessionId)
++      const record = requireSession(sessionId)
++      const requireCurrent = (): void => {
++        assertOpen()
++        signal.throwIfAborted()
++        if (sessions.get(sessionId) !== record || config.nativeObservation !== nativeObservation
++            || config.nativePromptAdmission !== nativePromptAdmission) {
++          throw invalidParams('native observation owner changed')
++        }
++      }
++      requireCurrent()
++      const snapshot = record.observationSnapshot()
++      const observed = await nativeObservation(snapshot.facts, signal)
++      const response = nativeObservationResponse(params.sessionId, observed)
++      // Detach and validate first, then recheck the original owner immediately.
++      requireCurrent()
++      snapshot.requireCurrent()
++      return response
++    })
++  }
    const connection = app.connect(stream)
    const conn: AgentContext = connection.client
  
-@@ -438,6 +483,27 @@
+@@ -438,6 +558,131 @@
    /* v8 ignore stop */
  
    ctx.effect(() => quiesce, 'acp.connection')
@@ -109,6 +191,110 @@
 +
 +function nativeIdentifier(value: unknown): value is string {
 +  return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
++}
++
++
++function parseNativeObservationRequest(value: unknown): {
++  schema: 'mastermind.dsh.native_observation_request.v1'; sessionId: string
++} {
++  const fields = nativeObservationObject(value, ['schema', 'sessionId'])
++  if (fields.schema !== 'mastermind.dsh.native_observation_request.v1' || !nativeIdentifier(fields.sessionId)) {
++    throw invalidParams('native observation request is invalid')
++  }
++  return { schema: fields.schema, sessionId: fields.sessionId }
++}
++
++
++function nativeObservationObject(value: unknown, keys: readonly string[]): Record<string, unknown> {
++  if (value === null || typeof value !== 'object' || Array.isArray(value)
++      || ![Object.prototype, null].includes(Object.getPrototypeOf(value))
++      || Reflect.ownKeys(value).length !== keys.length) {
++    throw invalidParams('native observation fields are invalid')
++  }
++  const descriptors = Object.getOwnPropertyDescriptors(value)
++  const result: Record<string, unknown> = {}
++  for (const key of keys) {
++    const descriptor = descriptors[key]
++    if (descriptor === undefined || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) {
++      throw invalidParams('native observation fields are invalid')
++    }
++    result[key] = descriptor.value
++  }
++  return result
++}
++
++function nativeObservationArray(value: unknown): unknown[] {
++  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype
++      || value.length > 4096 || Reflect.ownKeys(value).length !== value.length + 1) throw Error()
++  const descriptors = Object.getOwnPropertyDescriptors(value)
++  return Array.from({ length: value.length }, (_, index) => {
++    const descriptor = descriptors[String(index)]
++    if (descriptor === undefined || !Object.hasOwn(descriptor, 'value') || !descriptor.enumerable) throw Error()
++    return descriptor.value as unknown
++  })
++}
++
++function nativeObservationResponse(sessionId: string, value: NativeObservedAttestation): {
++  schema: 'mastermind.dsh.native_observation.v1'; sessionId: string; attestation: NativeObservedAttestation
++} {
++  try {
++    const facts = nativeObservationObject(value, [
++      'served_model', 'harness_version', 'harness_binary_digest', 'capabilities',
++      'effective_skills', 'effective_mcp', 'effective_plugins_or_apps', 'sandbox_state',
++      'approval_state', 'network_state', 'effective_config_digest', 'auth', 'workspace',
++      'supports_subagent_capability_ceiling', 'unknown_fields',
++    ])
++    let textBytes = 0
++    const text = (item: unknown, nullable = false): void => {
++      if (nullable && item === null) return
++      if (typeof item !== 'string' || item.length === 0 || item.length > 32 * 1024) throw Error()
++      textBytes += Buffer.byteLength(item, 'utf8')
++      if (textBytes > 32 * 1024) throw Error()
++    }
++    for (const key of ['served_model', 'harness_version', 'harness_binary_digest', 'sandbox_state',
++      'approval_state', 'network_state', 'effective_config_digest']) text(facts[key], true)
++    for (const key of ['effective_skills', 'effective_mcp', 'effective_plugins_or_apps', 'unknown_fields']) {
++      const values = nativeObservationArray(facts[key])
++      for (const entry of values) text(entry)
++      facts[key] = values
++    }
++    facts.capabilities = nativeObservationArray(facts.capabilities).map(item => {
++      const capability = nativeObservationObject(item, [
++        'kind', 'name', 'skill_content_digest', 'tool_schema_digest', 'mcp_server_identity',
++        'mcp_server_version', 'mcp_auth_status', 'resource_contract_digest',
++      ])
++      for (const [key, entry] of Object.entries(capability)) text(entry, key !== 'kind' && key !== 'name')
++      return capability
++    })
++    const auth = nativeObservationObject(facts.auth, [
++      'worker_id', 'provider', 'auth_class', 'plan_type', 'nonsecret_provider_account_id',
++      'identity_confidence', 'attestation_status',
++    ])
++    for (const [key, entry] of Object.entries(auth)) {
++      text(entry, ['auth_class', 'plan_type', 'nonsecret_provider_account_id'].includes(key))
++    }
++    if (!['UNKNOWN', 'SLOT_ONLY', 'PROVIDER_REPORTED'].includes(auth.identity_confidence as string)) throw Error()
++    const realm = [auth.auth_class, auth.plan_type, auth.nonsecret_provider_account_id]
++      .filter(x => x !== null).join(' ').toLowerCase()
++    if (['token', 'refresh', 'secret', 'auth.json', 'credential'].some(part => realm.includes(part))) throw Error()
++    facts.auth = auth
++    if (facts.workspace !== null) {
++      const workspace = nativeObservationObject(facts.workspace, ['workspace_path', 'base_sha', 'device', 'inode', 'uid', 'gid'])
++      text(workspace.workspace_path); text(workspace.base_sha)
++      for (const key of ['device', 'inode', 'uid', 'gid']) {
++        const item = workspace[key]
++        if (typeof item !== 'number' || !Number.isSafeInteger(item) || item < 0) throw Error()
++      }
++      facts.workspace = workspace
++    }
++    if (!['VERIFIED', 'FALSE', 'UNKNOWN'].includes(facts.supports_subagent_capability_ceiling as string)) throw Error()
++    const response = { schema: 'mastermind.dsh.native_observation.v1', sessionId, attestation: facts }
++    // Only the closed, detached plain data reaches JSON; no getters or serializers run.
++    if (Buffer.byteLength(JSON.stringify(response), 'utf8') > 32 * 1024) throw Error()
++    return response as unknown as ReturnType<typeof nativeObservationResponse>
++  } catch {
++    throw invalidParams('native observation response is invalid')
++  }
 +}
 +
 +function parseNativeClaim(value: unknown): NativePromptClaim {
@@ -131,15 +317,18 @@
  /**
 --- a/packages/acp/acp/src/session.ts
 +++ b/packages/acp/acp/src/session.ts
-@@ -3,6 +3,7 @@
- import type { Context } from '@deepseek-ai/cordis'
+@@ -1,8 +1,9 @@
+ /** One standard ACP session's Agent, configuration, prompt, update, and teardown lifecycle. */
+ 
+-import type { Context } from '@deepseek-ai/cordis'
++import { symbols, type Context } from '@deepseek-ai/cordis'
  import {
    RequestError,
 +  type JsonRpcId,
    type McpServer,
    type PromptRequest,
    type PromptResponse,
-@@ -47,7 +48,46 @@
+@@ -47,7 +48,53 @@
    sessionId: SessionId
  }
  
@@ -149,6 +338,13 @@
 +  readonly operationId: string
 +  readonly requestId: JsonRpcId
 +  readonly action: 'admit' | 'claim' | 'cancel' | 'settle'
++}
++
++
++/** Passive facts for one retained idle Agent; no requested profile or authority. */
++export interface NativeObservationFacts {
++  readonly agent: Agent
++  readonly selection: Readonly<ModelSelection> | undefined
 +}
 +
 +/** Actual first inbox claim; throughSeq is its observed inclusive log watermark. */
@@ -186,7 +382,43 @@
    resolve: (reason: StopReason) => void
    reject: (error: Error) => void
    messageId: string | undefined
-@@ -247,6 +287,7 @@
+@@ -187,6 +234,35 @@
+    */
+   ownsSession(session: Session): boolean {
+     return this.agent.session === session
++  }
++
++  /** Retain the original idle owner while an installed observer awaits facts. */
++  observationSnapshot(): { readonly facts: NativeObservationFacts; readonly requireCurrent: () => void } {
++    const agent = this.agent, session = agent.session
++    const serviceIdentity = <T extends object>(value: T): T =>
++      (value as T & { [symbols.original]?: T })[symbols.original] ?? value
++    const agents = serviceIdentity(this.ctx.agents), sessions = serviceIdentity(this.ctx.sessions)
++    const sequence = session.seq, selectedRef = this.modelControl.selection.current
++    const selected = this.modelControl.snapshot()
++    const requireCurrent = (): void => {
++      const now = this.modelControl.snapshot()
++      const currentAgents = this.ctx.agents, currentSessions = this.ctx.sessions
++      const sameSelection = selected === undefined ? now === undefined
++        : now !== undefined && selected.provider === now.provider && selected.model === now.model
++          && selected.reasoningEffort === now.reasoningEffort
++      if (this.closing !== undefined || this.inflight !== undefined || agent.status !== 'idle'
++          || serviceIdentity(currentAgents) !== agents || serviceIdentity(currentSessions) !== sessions
++          || currentAgents.get(agent.id) !== agent || agent.session !== session
++          || currentSessions.get(session.id) !== session || session.seq !== sequence
++          || this.modelControl.selection.current !== selectedRef || !sameSelection) {
++        throw invalidParams('native observation owner changed or is busy')
++      }
++    }
++    requireCurrent()
++    return Object.freeze({
++      facts: Object.freeze({ agent, selection: selected === undefined ? undefined : Object.freeze(selected) }),
++      requireCurrent,
++    })
+   }
+ 
+   /**
+@@ -247,6 +323,7 @@
      params: PromptRequest,
      imageEnabled: boolean,
      requestSignal?: AbortSignal,
@@ -194,7 +426,7 @@
    ): Promise<PromptResponse> {
      this.assertActive()
      if (this.inflight !== undefined) throw invalidParams('a prompt is already in flight for this session')
-@@ -254,6 +295,11 @@
+@@ -254,6 +331,11 @@
      const admission = Promise.withResolvers<void>()
      const admissionController = new AbortController()
      const inflight: InflightPrompt = {
@@ -206,7 +438,7 @@
        resolve: completion.resolve,
        reject: completion.reject,
        messageId: undefined,
-@@ -270,7 +316,30 @@
+@@ -270,7 +352,30 @@
        agentError: undefined,
      }
      this.inflight = inflight
@@ -238,7 +470,7 @@
      requestSignal?.addEventListener('abort', onRequestAbort, { once: true })
      /* v8 ignore next -- the SDK dispatches a live signal, then notifies abort through its listener. */
      if (requestSignal?.aborted === true) onRequestAbort()
-@@ -278,6 +347,8 @@
+@@ -278,6 +383,8 @@
        let admissionFailure: unknown
        const promptSelection = this.modelControl.snapshot()
        try {
@@ -247,7 +479,7 @@
          if (this.ctx.agents.get(this.agent.id) !== this.agent) {
            throw internalError('prompt was not queued: the agent was disposed outside the bridge')
          }
-@@ -288,6 +359,8 @@
+@@ -288,6 +395,8 @@
            imageEnabled,
            admissionController.signal,
          )
@@ -256,7 +488,7 @@
          admissionController.signal.throwIfAborted()
          if (this.ctx.agents.get(this.agent.id) !== this.agent) {
            throw internalError('prompt was not queued: the agent was disposed outside the bridge')
-@@ -314,7 +387,7 @@
+@@ -314,7 +423,7 @@
  
        if (inflight.admissionController.signal.aborted) {
          this.settleAfterQuiescence(inflight)
@@ -265,7 +497,7 @@
        }
        if (admissionFailure !== undefined) {
          this.inflight = undefined
-@@ -328,10 +401,37 @@
+@@ -328,10 +437,37 @@
        }
  
        this.settleAfterQuiescence(inflight)
@@ -304,7 +536,7 @@
    }
  
    /** Cancel the active prompt, or autonomous work when no ACP prompt exists. */
-@@ -347,6 +447,17 @@
+@@ -347,6 +483,17 @@
     * @param event - committed durable event.
     */
    onSessionEvent(session: Session, event: SessionEvent): void {
@@ -322,7 +554,7 @@
      if (event.type === 'turn/start' && this.inflight?.turn !== undefined) {
        this.inflight.turn = event.data.turn
        this.inflight.endReason = undefined
-@@ -403,7 +514,33 @@
+@@ -403,7 +550,33 @@
     * @param turn - allocated Agent turn.
     */
    onInboxClaimed(message: UserMessage, turn: number): void {
@@ -357,7 +589,7 @@
      const selection = this.pendingSelections.get(message.id)
      this.pendingSelections.delete(message.id)
      if (selection !== undefined) this.modelControl.pinTurn(turn, selection)
-@@ -490,7 +627,37 @@
+@@ -490,7 +663,37 @@
      if (this.closing !== undefined) throw invalidParams(`session is closing: ${this.agent.session.id}`)
    }
  
@@ -396,7 +628,7 @@
      const inflight = this.inflight
      if (inflight === undefined) return
      const firstCancellation = !inflight.admissionController.signal.aborted
-@@ -501,7 +668,8 @@
+@@ -501,7 +704,8 @@
        inflight.cancellationDone.resolve()
        return
      }
@@ -406,7 +638,7 @@
      if (firstCancellation) {
        const done = inflight.cancellationDone
        // Plugin disposal can detach status observers before this activity retires.
-@@ -527,9 +695,18 @@
+@@ -527,9 +731,18 @@
            if (isCancelled()) break
            if (children || !idleAt(idleSeq)) continue
            await this.outputTail

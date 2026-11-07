@@ -331,3 +331,28 @@ encoded-upload authorization arguments and remains uninstalled. See
 [`../NATIVE_COMPANY_JOIN_FRONTIER.md`](../NATIVE_COMPANY_JOIN_FRONTIER.md)
 for the exact Runtime, authenticated consumer, governed-tool and production
 work still owed.
+
+### Passive native observation on the retained SDK connection
+
+The exact opt-in prompt extension v2 adds `_mastermind/native_observe` beside
+the existing claim and exact-cancel methods. It requires both original runtime
+admission and a callable runtime observer. Admission-only v1 and default ACP
+remain unchanged; the observation hook is not serializable configuration.
+
+Observation resolves the current idle Agent/Session, captures model selection
+and journal watermark, awaits its trusted callback, validates and detaches the
+closed 32 KiB OHF result, then rechecks original service/object/callback/lifetime
+identities. It never discovers, creates, resumes, prompts, cancels or flushes.
+The Python native connection uses the same retained SDK and rechecks its owner
+after the await; the OHF adapter repeats launch/turn admission before publication.
+Closed-turn passive responses do not consume that turn's frame budget, while
+the original global frame limits and late-callback refusal remain.
+
+C21 qualifies **191 donor/extension cases**, zero TypeScript diagnostics,
+**85 Python/package cases**, all seven full native build gates, and the actual
+full-process SDK observation/Stop/same-Session recovery test. Exact source,
+receipt, failed-attempt and physical evidence is in
+[the C21 evidence](../../../research/evidence/deepseek-native-passive-observation-20261107.json).
+The full-process observer is explicitly a laboratory fixture. The installed
+observer and launcher must supply actual original account/model/capability and
+confinement facts before production admission.

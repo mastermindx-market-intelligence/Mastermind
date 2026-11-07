@@ -213,3 +213,159 @@ def test_sdk_generated_id_binds_before_send_can_yield_to_a_fast_claim():
             await wrapper.send(message)
         assert len(calls) == 1
     asyncio.run(exercise())
+
+
+def observation_wire():
+    from control_plane.operator_harness_contract import AuthRealmFact, ObservedHarnessAttestation
+    from control_plane.operator_harness_wire import to_wire
+    from integrations.deepseek_harness.native_protocol import OBSERVATION_SCHEMA
+    facts = ObservedHarnessAttestation(None, None, None, (), (), (), (),
+                                      None, None, None, None, AuthRealmFact("fixture-worker", "acp"), None)
+    return {"schema": OBSERVATION_SCHEMA, "sessionId": "session-1", "attestation": to_wire(facts)}
+
+
+def test_native_observation_preserves_closed_nullable_ohf_fields():
+    from control_plane.operator_harness_wire import to_wire
+    from integrations.deepseek_harness.native_protocol import native_observation
+    wire = observation_wire()
+    assert to_wire(native_observation(wire, "session-1")) == wire["attestation"]
+    assert "workspace" in wire["attestation"] and wire["attestation"]["workspace"] is None
+
+
+@pytest.mark.parametrize("case", ["session", "extra", "missing-null", "nested-extra", "wrong-scalar", "oversized"])
+def test_native_observation_rejects_foreign_or_incomplete_facts(case):
+    from integrations.deepseek_harness.native_protocol import native_observation
+    wire = observation_wire()
+    if case == "session":
+        wire["sessionId"] = "other"
+    elif case == "extra":
+        wire["requestedProfile"] = {}
+    elif case == "missing-null":
+        del wire["attestation"]["workspace"]
+    elif case == "nested-extra":
+        wire["attestation"]["auth"]["extra"] = True
+    elif case == "wrong-scalar":
+        wire["attestation"]["served_model"] = 7
+    else:
+        wire["attestation"]["unknown_fields"] = ["x" * (32 * 1024)]
+    with pytest.raises(NativeProtocolError, match="NATIVE_OBSERVATION_REFUSED"):
+        native_observation(wire, "session-1")
+
+
+def test_exact_extension_versions_never_accept_mixed_advertisements():
+    from integrations.deepseek_harness.native_protocol import EXTENSION, EXTENSION_V2, native_extension
+    assert native_extension(EXTENSION) == EXTENSION
+    assert native_extension(EXTENSION_V2) == EXTENSION_V2
+    for value in ({**EXTENSION, "observeMethod": "_mastermind/native_observe"},
+                  {**EXTENSION_V2, "extra": True}, {"schema": EXTENSION_V2["schema"]}):
+        with pytest.raises(NativeProtocolError, match="EXTENSION_REFUSED"):
+            native_extension(value)
+
+
+@pytest.mark.parametrize("case", ["v1", "session", "closing", "violation"])
+def test_native_observation_requires_retained_v2_owner_before_send(case):
+    from integrations.deepseek_harness.native_protocol import EXTENSION, EXTENSION_V2
+    async def exercise():
+        client = NativeClient(); client.bind_session("session-1")
+        owner = NativeAcpProcess(client); owner.provider_session_id = "session-1"
+        owner.native_extension = EXTENSION if case == "v1" else EXTENSION_V2
+        calls = []
+        async def request(*args):
+            calls.append(args)
+            return observation_wire()
+        owner.connection = SimpleNamespace(ext_method=request)
+        if case == "session": owner.provider_session_id = "other"
+        elif case == "closing": owner._closing = object()
+        elif case == "violation": client.poison("fixture violated")
+        with pytest.raises(NativeProtocolError, match="OWNER_UNAVAILABLE"):
+            await owner.observe()
+        assert calls == []
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("change", ["connection", "session", "closing", "violation", "none"])
+def test_native_observation_rechecks_owner_after_await(change):
+    from integrations.deepseek_harness.native_protocol import EXTENSION_V2, OBSERVATION_REQUEST_SCHEMA
+    async def exercise():
+        client = NativeClient(); client.bind_session("session-1")
+        owner = NativeAcpProcess(client); owner.provider_session_id = "session-1"
+        owner.native_extension = EXTENSION_V2
+        entered, release = asyncio.Event(), asyncio.Event()
+        calls = []
+        async def request(*args):
+            calls.append(args); entered.set(); await release.wait()
+            return observation_wire()
+        connection = SimpleNamespace(ext_method=request); owner.connection = connection
+        task = asyncio.create_task(owner.observe()); await entered.wait()
+        if change == "connection": owner.connection = SimpleNamespace(ext_method=request)
+        elif change == "session": owner.provider_session_id = "other"
+        elif change == "closing": owner._closing = object()
+        elif change == "violation": client.poison("fixture violated")
+        release.set()
+        if change == "none":
+            assert (await task).served_model is None
+        else:
+            with pytest.raises(NativeProtocolError, match="OWNER_UNAVAILABLE"):
+                await task
+        assert calls == [("mastermind/native_observe", {
+            "schema": OBSERVATION_REQUEST_SCHEMA, "sessionId": "session-1"})]
+        assert client.current is None and client.turns == 0
+    asyncio.run(exercise())
+
+
+def test_observation_timeout_retains_original_read_and_process():
+    from integrations.deepseek_harness.native_protocol import EXTENSION_V2
+    async def exercise():
+        client = NativeClient(); client.bind_session("session-1")
+        owner = NativeAcpProcess(client); owner.provider_session_id = "session-1"
+        owner.native_extension = EXTENSION_V2
+        release, entered = asyncio.Event(), asyncio.Event()
+        resource = object(); owner.resource = resource
+        calls = []
+        async def request(*args):
+            calls.append(args); entered.set(); await release.wait()
+            return observation_wire()
+        owner.connection = SimpleNamespace(ext_method=request)
+        with pytest.raises(NativeEffectUnknown, match="OUTCOME_UNOBSERVED"):
+            await owner.observe(timeout_seconds=0.01)
+        await entered.wait()
+        assert len(owner._tasks) == 1
+        original = next(iter(owner._tasks))
+        assert not original.done() and not original.cancelled()
+        assert owner.resource is resource and owner._closing is None
+        release.set(); assert await original == observation_wire()
+        assert len(calls) == 1 and client.current is None
+    asyncio.run(exercise())
+
+
+def test_passive_response_after_full_terminal_budget_preserves_global_frame_limit():
+    async def exercise():
+        client = await prepared_client()
+        original = client.current
+        original.frames = 512; original.wire_terminal = True
+        reader = asyncio.StreamReader(limit=client.limits.frame_bytes)
+        frame = (json.dumps({"jsonrpc": "2.0", "id": 2, "result": observation_wire()}) + "\n").encode()
+        reader.feed_data(frame)
+        guard = StrictFrameReader(reader, client, extension_policy=client)
+        assert await guard.readuntil() == frame
+        assert guard._frames == 1 and original.frames == 512 and client.current is original
+        assert client.violation is None
+        guard._frames = client.limits.frames
+        reader.feed_data(frame)
+        with pytest.raises(BoundaryViolation, match="FRAME_BUDGET_EXCEEDED"):
+            await guard.readuntil()
+        assert original.frames == 512
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("method", ["session/update", "session/request_permission", "_mastermind/native_claim"])
+def test_full_terminal_budget_still_refuses_every_late_native_callback(method):
+    async def exercise():
+        client = await prepared_client()
+        client.current.frames = 512; client.current.wire_terminal = True
+        reader = asyncio.StreamReader(limit=client.limits.frame_bytes)
+        reader.feed_data((json.dumps({"jsonrpc": "2.0", "method": method, "params": claim_wire()}) + "\n").encode())
+        with pytest.raises(BoundaryViolation, match="NATIVE_CALLBACK_AFTER_TERMINAL"):
+            await StrictFrameReader(reader, client, extension_policy=client).readuntil()
+        assert client.current.frames == 512
+    asyncio.run(exercise())

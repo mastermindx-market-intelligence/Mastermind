@@ -2,7 +2,7 @@
 import {createRequire} from "node:module";
 import {pathToFileURL} from "node:url";
 import {join,resolve,dirname} from "node:path";
-import {readFile,writeFile,realpath} from "node:fs/promises";
+import {readFile,writeFile,realpath,stat} from "node:fs/promises";
 import {createHash} from "node:crypto";
 import {Socket} from "node:net";
 import {Readable,Writable} from "node:stream";
@@ -46,7 +46,7 @@ const report={schema:"mastermind.dsh_native_company_profile_proof.v1",production
   pre_ready_owner_denied:false,company_page_observed:false,reader_retirement_keeps_owner:false,
   pre_admission_absent:false,native_start_source:null,isolated_native_home:false,
   native_close_settled:false,root_teardown_settled:false,model_calls:0,agent_creates:0,
-  lifecycle,stream_partial:false,native_signal_aborted:false,model_stream_settled:false,
+  lifecycle,stream_partial:false,native_signal_aborted:false,model_stream_settled:false,native_observation_reads:0,
   interrupted_seq:null,interrupted_history:false,recovered_interrupted:false};
 let reportTail=Promise.resolve();
 const persist=()=>{
@@ -235,6 +235,26 @@ try{
     await root.plugin({name:"original-company-acp-fixture",inject:[...Acp.inject],apply(ctx){
       acpFiber=ctx.fiber;
       Acp.apply(ctx,{provider:"fixture",model:"fixture",stream:ndJsonStream(Writable.toWeb(socket),Readable.toWeb(socket)),
+        ...ohfLifecycle?{async nativeObservation(facts,signal){
+          // Explicit laboratory facts. This callback is never installed authority,
+          // account verification, complete capability inventory or confinement.
+          signal.throwIfAborted();generation.signal.throwIfAborted();ctx.fiber.assertActive();
+          if(facts.agent.id!==selected||root.agents.get(selected)!==facts.agent||
+            root.sessions.get(selected)!==facts.agent.session||facts.selection?.provider!=="fixture")
+            throw Error("Original fixture observation owner differs");
+          const workspace=await stat(join(state,"workspace")),binary=hash(await readFile(process.execPath));
+          signal.throwIfAborted();generation.signal.throwIfAborted();ctx.fiber.assertActive();
+          report.native_observation_reads++;
+          return{served_model:facts.selection.model,harness_version:process.versions.node,
+            harness_binary_digest:binary,capabilities:[],effective_skills:[],effective_mcp:[],effective_plugins_or_apps:[],
+            sandbox_state:"laboratory-unconfined",approval_state:"laboratory-explicit",network_state:"laboratory-native-loopback",
+            effective_config_digest:null,auth:{worker_id:"fixture-dsh",provider:"acp",auth_class:null,plan_type:null,
+              nonsecret_provider_account_id:null,identity_confidence:"UNKNOWN",attestation_status:"ACCOUNT_REALM_ATTESTATION_UNPROVEN"},
+            workspace:{workspace_path:join(state,"workspace"),base_sha:"b".repeat(40),device:workspace.dev,inode:workspace.ino,
+              uid:workspace.uid,gid:workspace.gid},
+            supports_subagent_capability_ceiling:"UNKNOWN",
+            unknown_fields:["installed_authority","account","production_capability_inventory"]};
+        }}:{},
         ...lifecycle?{nativePromptAdmission(facts){
           generation.signal.throwIfAborted();ctx.fiber.assertActive();
           return facts.agent.id===selected&&root.agents.get(selected)===facts.agent&&

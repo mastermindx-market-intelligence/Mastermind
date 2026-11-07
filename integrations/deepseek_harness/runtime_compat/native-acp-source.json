@@ -12,10 +12,10 @@
     "packages/acp/acp/src/updates.ts": "b4c48504777ad309b3b461d92275a39add79914f9202f9d94ff1c29e9e561d0d"
   },
   "output_sha256": {
-    "packages/acp/acp/src/index.ts": "140451c95d17e4b17546db85b2837ec402cbdee57d2e9607960b5a1dbbdb1150",
-    "packages/acp/acp/src/session.ts": "26cdca620c3caa6d373ff664728b686a9228877a165278c8ac5e8988f46aa008"
+    "packages/acp/acp/src/index.ts": "2dddbe6ac99263bfb0b465054ce90b878147660c674c4d18ee82a6660c0ee23a",
+    "packages/acp/acp/src/session.ts": "a8c0eceb09630e55690c30663c6fa94f30180217b8c3507a12b964de6a284f6c"
   },
-  "patch_sha256": "d30cb5aabed255c90251151f79848576baf8daa9c109fe6198690f36ca2ea55b",
+  "patch_sha256": "6e699a188e9dddff19f81a166540e1f6d97ab1cf76f84c4b5c6ab6a8b9494861",
   "installed": false,
   "provider_calls": 0,
   "production_armed": false

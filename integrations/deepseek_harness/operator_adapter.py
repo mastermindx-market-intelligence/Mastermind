@@ -11,13 +11,14 @@ import asyncio
 import concurrent.futures
 from dataclasses import dataclass
 import math
+import inspect
 import os
 from pathlib import Path
 import pwd
 import stat
 import threading
 from types import MappingProxyType
-from typing import Any, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping
 
 from control_plane.codex_worker import ProcessIdentityError, _process_group_exists
 from control_plane.executive_orchestration_principal import (
@@ -64,7 +65,7 @@ class NativeLaunchBinding:
     capture_root: Path
     protocol_profile: AcpProfile
     verify_source: Callable[[], None]
-    observe_attestation: Callable[[NativeAcpProcess], ObservedHarnessAttestation]
+    observe_attestation: Callable[[NativeAcpProcess], ObservedHarnessAttestation | Awaitable[ObservedHarnessAttestation]]
     require_current_effect: Callable[
         [OperationId, SessionEpochRef, ProcessGenerationRef, str, str | None], None]
     inspector: ProcessInspector | None = None
@@ -233,6 +234,16 @@ class NativeOperatorAdapter:
             raise NativeOperatorError("original provider session handoff required")
         return self._call(self._open(operation_id, requested, epoch, generation, provider_session.provider_session_id))
 
+
+    async def _observe_attestation(self, native):
+        binding = self.binding
+        observed = binding.observe_attestation(native)
+        if inspect.isawaitable(observed):
+            observed = await observed
+        if self.binding is not binding or not isinstance(observed, ObservedHarnessAttestation):
+            raise NativeOperatorError("native installed observation unavailable")
+        return observed
+
     async def _open(self, operation, requested, epoch, generation, provider_session_id):
         if (self.native is not None or not isinstance(operation, OperationId)
                 or not self.validate_requested_profile(requested).accepted
@@ -255,13 +266,19 @@ class NativeOperatorAdapter:
             environment=self.binding.environment, cwd=self.workspace, capture_directory=capture,
             protocol_profile=self.binding.protocol_profile, model=requested.requested_model,
             provider_session_id=provider_session_id, inspector=self.binding.inspector)
-        observed = self.binding.observe_attestation(self.native)
-        if (not isinstance(observed, ObservedHarnessAttestation)
-                or observed.harness_binary_digest != self.binding.binary.sha256
-                or observed.harness_version != self.binding.binary.version):
+        native = self.native
+        try:
+            observed = await self._observe_attestation(native)
+            if (self.native is not native or self.epoch is not epoch or self.generation is not generation
+                    or self.launch_operation is not operation or self.close_operation is not None
+                    or observed.harness_binary_digest != self.binding.binary.sha256
+                    or observed.harness_version != self.binding.binary.version):
+                raise NativeOperatorError("native installed observation changed")
+        except Exception as exc:
+            # The original process/session already exists and remains retained.
             raise NativeOperatorError("native installed observation unavailable",
                                       failure_class=AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
-                                      effect_unknown=True)
+                                      effect_unknown=True) from exc
         self.attestation = observed
         return SessionStartObservation(self.native.provider_session_id, self._identity(),
                                        initialization_notes=("original-native-acp",))
@@ -308,17 +325,26 @@ class NativeOperatorAdapter:
 
     async def _begin(self, operation, turn, generation, launch, text):
         native = self._require_generation(generation)
-        existing = self._require_turn(turn)
-        if (existing is not None or len(self.turns) >= 64 or not isinstance(operation, OperationId)
-                or self.close_operation is not None or self.attestation is None
-                or not isinstance(launch, LaunchComparison)
-                or launch != compare_launch(self.requested, self.attestation)
-                or launch.decision is not LaunchDecision.ALLOW
-                or (self.current is not None and (self.current.result is None
-                    or (self.current.interrupt_operation is not None and self.current.interrupt_status is None)))):
-            raise NativeOperatorError("native turn admission refused")
-        if (not isinstance(text, str) or not 0 < len(text.encode("utf-8")) <= 128*1024
-                or self.binding.observe_attestation(native) != self.attestation):
+        epoch, sealed, previous = self.epoch, self.attestation, self.current
+        def require_admission():
+            if (self._require_generation(generation) is not native or self.epoch is not epoch
+                    or self.attestation is not sealed or self.current is not previous
+                    or self._require_turn(turn) is not None or len(self.turns) >= 64
+                    or not isinstance(operation, OperationId) or self.close_operation is not None
+                    or sealed is None or not isinstance(launch, LaunchComparison)
+                    or launch != compare_launch(self.requested, sealed)
+                    or launch.decision is not LaunchDecision.ALLOW
+                    or (previous is not None and (previous.result is None
+                        or (previous.interrupt_operation is not None and previous.interrupt_status is None)))):
+                raise NativeOperatorError("native turn admission refused")
+        require_admission()
+        if not isinstance(text, str) or not 0 < len(text.encode("utf-8")) <= 128*1024:
+            raise NativeOperatorError("native input or observed configuration changed")
+        observed = await self._observe_attestation(native)
+        # Observation may yield to another begin, close or source replacement.
+        # Recheck every original admission condition before publishing the turn.
+        require_admission()
+        if observed != sealed:
             raise NativeOperatorError("native input or observed configuration changed")
         state = _Turn(turn, operation)
         self.turns[turn.turn_id] = self.current = state

@@ -322,3 +322,72 @@ The package is not installed and this is not signed-in production acceptance.
 4. Execute the signed-in production journey and reconcile current CI, source
    release and installed revision. Local native or browser success alone
    cannot close this frontier.
+
+
+## C21: passive attestation over the original native connection
+
+The source consumer now accepts the exact native prompt extension v2 while
+retaining exact v1 behavior. A runtime-only observation callback serves a
+bounded, closed OHF observation on the same original ACP connection. The
+request resolves the existing Agent and Session; it cannot create, resume,
+flush, prompt, cancel, discover models, or acquire another writer. Standard ACP
+and admission-only v1 remain unchanged.
+
+The observer snapshots the actual idle Agent, Session, journal watermark and
+selected model. It compares the original Cordis service identities as well as
+the actual registered objects before and after the asynchronous callback.
+Closed output copying rejects accessors, serialization hooks, sparse arrays,
+extra fields, secret-bearing auth fields and oversized values. A changed
+callback, service, model, Session, watermark or lifetime refuses the observation.
+The Python adapter rechecks the same binding, generation, original turn and
+launch comparison after awaiting it, before publishing the next turn. A timed
+out request remains with the existing SDK owner.
+
+Ordinary responses after a terminal prompt no longer consume that closed turn's
+512-frame allowance. Late update, permission and native-claim callbacks still
+refuse; the original 4096-frame connection limit and 64 KiB frame limit remain.
+No counter, retained prompt or violation is cleared to permit observation.
+
+Qualification is recorded in
+[the bounded C21 evidence](../../research/evidence/deepseek-native-passive-observation-20261107.json):
+
+- Final Python protocol, adapter and package custody: **85 passed**.
+- Original donor plus extension: **191 passed** in 12 files; zero TypeScript diagnostics.
+- Isolated complete native build: **seven gates passed**, 325 client artifacts,
+  116,128 runtime inventory entries. This closure is not installed.
+- Actual SDK/full native OHF fixture: **one passed**. Session
+  `2830a46c-8bd7-42af-bc73-b3431c24ad9f` streams turn 1, observes exact Stop,
+  flushes interrupted history, releases its original process/writer, then
+  recovers that same Session and completes turn 2. Each generation performs two
+  passive observation reads on its own original connection.
+- The earlier broad Python candidate passed **469**, with one optional native
+  fixture skip. That run precedes the final frame-boundary repair; final focused
+  and full-process receipts qualify the changed paths.
+
+The physical fixture uses explicit laboratory authority and model responses;
+its account, installed authority and production inventory remain unknown.
+Provider calls are zero. The original build, source, test and native result
+hashes, failed attempts and corrected causes remain in the evidence, with
+losslessly recoverable input manifests.
+
+### Current implementation frontier after C19–C21
+
+C19 joined native-v2 creation, original answer/history, continuation, exact
+pending-operation recovery, Stop and same-Session resume to their existing
+Runtime and authenticated UI owners. C20 composed protected source
+`2541a68e9240ca3fb5c1fda7b68e1df8984c973b`, retaining Company priorities,
+Paperclip and Hermes. Those source/fixture results do not enable the disabled
+installed native profile.
+
+The next source consumer is the existing pinned installed composition:
+one exact existing Worker/quota/model/host binding, the native claimed factory
+alongside the original primary operator, and the same-process native launcher.
+Actual account, model, capability and confinement facts must come from their
+original native owners, not from requested policy or laboratory callbacks.
+
+The read-only Executive V3 observation at 18:51:29 UTC returned
+`backend_unavailable`; it did not establish execution readiness or an installed
+Worker/account binding. Previously denied live-config and Fabric lanes remain
+closed. The signed-in packaged DeepSeek journey, actual eligible tool
+invocation/settlement and installed source/routing evidence are still owed.
+Hermes #2180 remains separately merged and proven; its canary is not repeated.
