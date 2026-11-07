@@ -18,6 +18,7 @@ function detach(v:unknown,depth=0):unknown{
  if(v===null||typeof v==="string"||typeof v==="boolean"||(typeof v==="number"&&Number.isFinite(v)))return v;
  if(!v||typeof v!=="object"||(!Array.isArray(v)&&![Object.prototype,null].includes(Object.getPrototypeOf(v))))return bad();
  if(Reflect.ownKeys(v).some(k=>typeof k!=="string"))return bad();
+ const own=Reflect.ownKeys(v);if(own.length!==Object.keys(v).length+(Array.isArray(v)?1:0))return bad();
  const out:Record<string,unknown>|unknown[]=Array.isArray(v)?[]:{};
  for(const key of Object.keys(v)){const d=Object.getOwnPropertyDescriptor(v,key);if(!d||!("value" in d)||!d.enumerable||key==="__proto__")return bad();(out as Record<string,unknown>)[key]=detach(d.value,depth+1)}
  if(Array.isArray(v)&&Object.keys(v).length!==v.length)return bad();

@@ -1,0 +1,7 @@
+/* Authored strategy is reading prose; metadata keeps the existing Office scale.
+   Dark graphite and light research material remain the accepted Office tokens. */
+.office-company-priorities .office-lanes > li > div > p {
+  font-size: inherit;
+  line-height: inherit;
+  max-width: 75ch;
+}

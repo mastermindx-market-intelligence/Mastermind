@@ -448,16 +448,22 @@ export function bindMissionHost(
       sourceRead({work_ref:workRef,source_ref:sourceRef,expected_revision:expectedRevision,signal}) as Promise<FileSearchSource>,
   }):undefined;
   const command = completeOrchestratorCommandBinding(commandBinding);
+  const companyTransport=client.executive, companyRead=companyTransport?.companyPriorities;
+  const companyGeneration=companyTransport?.authGeneration, companyAvailable=companyTransport?.available;
+  const companySubscribe=companyTransport?.subscribe;
+  const companyCurrent=()=>!!companyTransport && client.executive===companyTransport &&
+    companyTransport.companyPriorities===companyRead && companyTransport.authGeneration===companyGeneration &&
+    companyTransport.available===companyAvailable && companyTransport.subscribe===companySubscribe;
   return {
-    ...(client.executive?.companyPriorities ? {companyPriorities: {
-      generation: () => client.executive!.authGeneration(),
-      available: () => client.executive!.available(),
-      subscribe: (listener:()=>void) => client.executive!.subscribe(listener),
+    ...(companyTransport && companyRead && companyGeneration && companyAvailable && companySubscribe ? {companyPriorities: {
+      generation: () => companyCurrent() ? companyGeneration.call(companyTransport) : -1,
+      available: () => companyCurrent() && companyAvailable.call(companyTransport),
+      subscribe: (listener:()=>void) => companySubscribe.call(companyTransport,listener),
       read: async (signal:AbortSignal) => {
-        const owner=client.executive!, read=owner.companyPriorities!, generation=owner.authGeneration(), started=epoch;
-        const current=()=>!signal.aborted && epoch===started && client.executive===owner && owner.companyPriorities===read && owner.authGeneration()===generation && owner.available();
+        const generation=companyGeneration.call(companyTransport), started=epoch;
+        const current=()=>!signal.aborted && epoch===started && companyCurrent() && companyGeneration.call(companyTransport)===generation && companyAvailable.call(companyTransport);
         if(!current())throw new Error("COMPANY_READ_UNAVAILABLE");
-        const raw=await read.call(owner,signal);
+        const raw=await companyRead.call(companyTransport,signal);
         if(!current())throw new Error("READ_CANCELLED");
         const value=decodeCompanyPriorities(raw);
         if(!current())throw new Error("READ_CANCELLED");
