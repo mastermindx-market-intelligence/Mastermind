@@ -1793,3 +1793,55 @@ Next authentic observation work remains on the actual owners:
 Original Ubuntu1/root C26 journal-read PermissionError remains unretried. The assigned session owns recovery of the **original authorized administrative connection and retained operation**; C3 source validation is not a runtime substitute. Preserve original M2 operation `meta-ceo-byok-followon-parent-20261106-c35-01`, workspace/effect custody, paid Fabric refusals, denied local socket cases and Outcome Learning #398/#409 holds. Native children supplied principal judgment only; parent performed source work.
 
 Still required: serving v4/context readback; correct role/resource grants; correction-to-fresh-context; durable cross-session memory/compaction/forgetting; complete original native EVAL publication and Harness2 consumption; held-out improvement with rollback; entitled vault/browser/computer workflows; actual child START and parent consumption; restart/revocation/endurance and the original fleet acceptance campaign. Source merging, CI, metadata retention and a disabled candidate profile do not satisfy these journeys.
+
+
+## 42. Native EVAL incomplete attempts and actual retirement transition (2026-11-07)
+
+**MISSION_COMPLETE=false; MORE_WORK_EXISTS.** Chairman implementation continuation remains active. This is source implementation and qualification, not installed acceptance, complete EVAL validity, learning efficacy, or permission to reopen held runtime effects.
+
+### Canonical source advancement
+
+PR [#2234](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234) remains DRAFT on its original branch. Current head **6280c656e71d3ec88e58031c857a17c465660502**, tree **8103a6af929b5fd6a004d48c3ec378786121ba0a**, parent **7e2739fd124b3d94c788e8af5dee90cceded633f**. The 19-file advancement was published with exact expected-head CAS and read back; the v2 contract document's bytes match publication.
+
+The existing EVAL owner now supports explicit run/draft v2. All selected identities, runner/surface provenance, source/procedure/context/profile bindings and terminal status remain required. Exactly 22 named observations may be null with closed reasons; nine coverage claims distinguish complete, partial and unobserved collections/delivery. Missingness is a hard invalidity reason, cannot be an allowed degradation, and never copies configured values into observations. V1 stays closed and unchanged.
+
+Existing verification, scoring, CLI, store and Harness2 consumers now handle absence. Both versions share the same create-only run path and complete population enumeration. Tests reject omission of incomplete attempts in both single- and multiple-scenario evidence references, forged validity, synthetic evidence references and acceptance of invalid Harness2 trials. Known starts cannot occur after validation even if completion timing is unavailable.
+
+### Original retention defect and repair
+
+Read-only principal review found that the earlier pruner-only change was insufficient: original `retire_terminal_receipts` erased `payload_json` before the pruner saw it. The current cumulative derivation repairs that actual transition in the original owner. Closed historical PUBLIC_SAFE input is retained; a malformed/unknown marked payload becomes only `{mastermind_eval_inputs_v1:null}`, preserving original identity/digest while preventing content publication. Ordinary input clearing, original result serialization/transcript compaction, and output expiry remain unchanged. Pruning never uses today's live profile/enrollment to decide whether a spent request may disappear.
+
+The final test executes original admission, actual terminal retirement and result compaction, commits those original SQLite transactions, advances the horizon, prunes, and proves that a second principal/session cannot admit the same run request. It does not preconstruct the tombstone it is meant to prove. Earlier four test failures were fixture mistakes (reading a projected receipt as a raw database row, then failing to commit retirement before the later intentional admission refusal); both were corrected and the full final suite passed.
+
+Current MIT derivation: Hermes **1c0cd667746d3395fe9e1b6c74f8f85952486f18**; patch **ef85e2546fb69b735b87f1dc72b492e22fdb20ea20ad6d11db1aceebffa5c17c**. Retirement postimage SHA-256 **12c890e1a2ae4a3b89b01de58c3f5330b87431f48f7672c04cd3b68c7e8e677c**, Git blob **c85f512500c6438a02c2598c1abb1ed695c3c955**, 26,566 bytes. The other ten postimages are unchanged, including private authority parameter `_mmx_eval`. Previous 750385… patch was historical, superseded by this source.
+
+### Source fence and qualification
+
+At 7e, Hermes runtime/harness, Workspace OAuth, OS, candidate qualification and proxy workflows passed. Main CI 42393836658 failed the old EVAL whole-delta path fence at preflight, not the feature tests. The current repair adds only exact native EVAL-owned paths and a separate finite contextual shared-owner set. Shared gateway/install/observer/proxy paths do not independently trigger EVAL ownership. Core import/environment/process fences, corpus constraints, forbidden control/config/dependency/workflow rules, and original PR/queue diff calculation remain unchanged. No permanent exemption for prerequisite content was added.
+
+Final C3 source-composition proofs:
+
+- **618 evaluator/native-input tests/subtests PASS**, zero failure/error/skip, process 19380 exit 0. JUnit SHA-256 **6e71594c6bf1c14762263bb61821feba3ddec60553bdedac45f43a7d52af3608**.
+- **155 inertness/scope tests PASS**, zero failure/error/skip, process 20631 exit 0. JUnit **d07ce21093f3782a051848716c8c33a3aa1f1c9744967fda62e9681d4398f59f**. Real temporary Git fence journeys are included. The two top-level whole-repository delta entry tests were excluded from this composed checkout run; their actual refreshed GitHub synthetic-merge result remains owed.
+- Actual pristine 11-file donor qualification process 21049 exit 0; receipt **9620e57e7c28afe72d88b067fcd877363caef4c60c2aa1ffbf3a13cf64c409e0**; no donor modification, driver, install or runtime grant.
+- Original production D8 working-source collector, process 27502 exit 0: **131 source files, no identity/evidence findings**.
+- Local prior qualification: 553 evaluator/Harness2 cases, 155 inertness cases and four repaired retirement cases all passed. These do not supersede hosted required CI.
+- The previous broad macOS/Linux-dependent failures and skip remain honestly recorded; no blanket full-suite pass. Previously denied AF_UNIX actions were not rerun.
+
+Source validation location remains `/Users/chriswong/hermes-discovery-correction-20261107-a52esz9q/eval-inputs-validation`. Its exact 19-file overlay checked every original and final Git blob before/after writes. The one-shot overlay and retirement derivation scripts have executed; do not repeat them blindly.
+
+### Release state
+
+[#2228](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2228) is canonically **MERGED** at **28cbe35a87a2575b57d8a2d7a4721dcdf13a5d6a**, mergedAt **2026-11-07T17:05:32Z**, verified by GitHub GraphQL. Its original queue/request is finished; DO_NOT_REDO. The exhaustive 66780→28c compare contains only the 20 transport paths, with no protected source-law change; compatible law pin 66780 remains usable.
+
+[#2217](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2217) remains OPEN at **5bba402b3de999cbcb48d8d36728c40749946637** with its original auto request enabled 16:49:24Z. Latest job read: shards 1/2/4/5 passed; 0/3 still running. Runtime/harness/OAuth/OS passed. Do not repeat the request. Prerequisite convergence must naturally remove its foreign paths from #2234's real CI delta; do not weaken EVAL gates to conceal an unmerged stack.
+
+### Next connected source work
+
+1. Add a closed historical marker version that freezes the original qualified runner/surface descriptor and original ArtifactStore root/identity before the existing admission fingerprint. Keep v1 readable, preserve its stable payload key, and never backfill old missing provenance from today's runtime/configuration.
+2. Factor original row/result loading from native control into one authenticated snapshot that reaches live and retired admissions; publication requires the original admission ID and exact run/binding digest. Keep readback read-only.
+3. Assemble v2 only from retained native facts, preserving partial/unknown source, effect, cleanup, environment and model evidence. Missing result alone means NOT_RETAINED unless actual expiry is separately recorded; do not infer expiry from age.
+4. Freeze one final receipt in the existing result owner before create-only ArtifactStore publication. Reconcile lost responses on that exact path/digest; retain original publication provenance through retirement. Never call submission, enrollment restoration, inference or a new runner to publish a historical receipt.
+5. Check the existing store's idempotent publication durability before relying on a replay after directory-sync failure; visible matching bytes alone are not a new fsync receipt.
+
+Original C26 root diagnostic denial, original runtime carrier, vault/login and physical isolation/fleet acceptance boundaries are unchanged. No alternate identity or C3 runtime substitution. Paid Fabric denials remain unretried; native children supplied principal judgments only. Outcome Learning #398 / #409 remains held. Source implementation continues.
