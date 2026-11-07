@@ -635,3 +635,28 @@ predecessor/generation/sequence verification, the existing immutable
 publisher/selector and authenticated consumer acceptance remain separate.
 No live provider/account invocation, runtime selection, live enrollment, new
 scheduler or generic transition registry was introduced by this contribution.
+
+
+### Remaining paired-consumer qualification at the d5 epoch — 2026-11-07
+
+Hosted CI 42347674382/job128329140052 independently passed the exact-scoped Macro proof (31 tests, zero failures/errors/skips), the 47 inference cases and eight buffered-chat cases at 73967dc143f19ccb8391f55d413280f4d427774a. It then stopped at the native-text fixture's missing agents.yml prerequisite. The local same-epoch proof reproduced that failure before repair. A separate local continuation also exposed six stale native pins in the translation fixture and four in the shared AUTO fixture used by both portfolio suites; these previously unexecuted later stages were not inferred green from the earlier steps.
+
+The repair supplies only the inert _cfg prerequisite inside the late-selection test and asserts that the candidate callback actually ran once. Production ordering and all existing before/after selection guards remain unchanged. Both source fixtures now pin the exact d5 carrier blobs already present in the composition. Complete source checks remain intact, the other nine translation native pins and all three realm pins retain their actual current values, and historical input pins are unchanged. The protected commercial realm must be consumed together with its corresponding current fixture pin; it is not stamped into the standalone d5 source.
+
+Separate actual paired Macro abab96df55f82cb5c26459a6f51b568d73a6a6f8 requalification produced:
+
+| Consumer | Cases | Result | Test-log SHA256 |
+| --- | ---: | --- | --- |
+| Native text and selection fences | 32 | passed | 3bf8cfad81a37b09d6fedd9943aa660f8aabb07c6be64ecc4ccefbb7bb4db81e |
+| Translation original operations and durable cache | 23 | passed | b5294a2235a4adb187ef6cd5521e093817a05e62fa48ef588a28381b3986f2c2 |
+| Cross-pool AUTO | 14 | passed | 151296dbb9410bf3338143bfa003974d1069117bdd0f16557c4cb3af4d05b8f9 |
+| U.S. portfolio original-operation paths | 32 | passed | 26c4dba294866b3b86f36870a3de744f1611085a33a1ee2bac4f2d8b5dd6b1c2 |
+| Actual chat asset in Chromium / Playwright 1.62.0 | 3 | passed | c9e3e9dc17ca196f9c2b4bf6cf4b3f6824cdd65f9406239aba2508be853d3054 |
+
+The regional suite is not qualified by these results. Its log stopped advancing for approximately 295 seconds in the China daily/first-run case. A bounded interrupt of that original disposable test process at 5m20s found that the case had subsequently completed and the suite had progressed to the lost-submission-ack case awaiting the actual provider observation thread. The run ended with signal status -2 and no complete test summary; log SHA256 f31c1df9062faa790271e135ba208b3f5507dca69a2c69ef985bacebc2923426. The main-thread trace does not establish the blocked worker's cause. No production timeout, guard, account or runtime state was changed to mask this incomplete proof.
+
+The browser proof used actual app/static/chat.js SHA256 a8d10d9edda239164167ee633ed1c7fc41b888ed17ab42855e8909b07547ec2e, preserving partial text, unresolved tools and original-request recovery; failed identity storage sends no HTTP request. It is local browser/source proof, not authenticated live provider acceptance.
+
+Source ancestry was explicitly completed after the attended commit tool retained a pending MERGE_HEAD while committing a single-parent source tree. The completed local merge 820ce4a0d88bd7fed3979fef6b8408d47c53d41b has parents 73967dc143f19ccb8391f55d413280f4d427774a and d5df6b2ad8b2a49e9c0a98e33f8c7cca14a630a6; its source tree is byte-identical to 73967dc. Original #2175 has now published its protected-source merge as 3ec62ffe02f277e3bab530e3ba069f2f86dcd18d. Its original active workspace remains untouched; further contribution qualification must name the actual consumed epoch.
+
+Original J source-repair custody remains separate. A bounded canonical fabric_status read for fabric-app-j-preserving-migration-20261107-02 under root fabric-application-integration-20261104-sol observed ACTIVE_OR_WAITING / worker UNKNOWN, no result or return code, root_verified=false and execution_absence_proven=false. The retained controller poll had advanced to 07:02Z / 3144 seconds against its 7189-second wait. Retry, dispatch and result-consumption authorization were all false. No replacement task, result consumption, installation, cleanup or transition was attempted. The earlier unavailable process session does not prove absence; no host/cache path is inferred from it.
