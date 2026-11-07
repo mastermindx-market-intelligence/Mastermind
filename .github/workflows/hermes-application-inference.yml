@@ -7,6 +7,10 @@ on:
       - 'integrations/hermes_runtime/**'
       - 'ops/executive_os/release_manifest.py'
       - 'tests/test_hermes_primary_application_host.py'
+      - 'tests/test_hermes_primary_application_tunnel.py'
+      - 'tests/application_tunnel_ci/**'
+      - 'ops/executive_os/application_tunnel_control.py'
+      - 'ops/executive_os/os_tunnel_entry.py'
       - '.github/workflows/hermes-application-inference.yml'
   merge_group:
     types: [checks_requested]
@@ -17,12 +21,35 @@ on:
       - 'integrations/hermes_runtime/**'
       - 'ops/executive_os/release_manifest.py'
       - 'tests/test_hermes_primary_application_host.py'
+      - 'tests/test_hermes_primary_application_tunnel.py'
+      - 'tests/application_tunnel_ci/**'
+      - 'ops/executive_os/application_tunnel_control.py'
+      - 'ops/executive_os/os_tunnel_entry.py'
       - '.github/workflows/hermes-application-inference.yml'
 
 permissions:
   contents: read
 
 jobs:
+  original-tunnel-owner:
+    name: Hermes aliases through original tunnel custody
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Qualify original and successor in isolated Linux root fixture
+        run: |
+          set -euo pipefail
+          hermes_transport_source="$(mktemp -d "${RUNNER_TEMP}/hermes-transport-source.XXXXXX")"
+          trap 'rm -rf "$hermes_transport_source"' EXIT
+          git archive --format=tar HEAD | tar -x -C "$hermes_transport_source"
+          chmod 0755 "$hermes_transport_source"
+          docker build --file tests/application_tunnel_ci/Dockerfile --tag hermes-transport:${{ github.sha }} tests/application_tunnel_ci
+          docker run --rm --network=none --cap-drop=ALL --security-opt=no-new-privileges --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 --tmpfs /fixture:rw,exec,nosuid,nodev,mode=0755 \
+            --mount "type=bind,src=${hermes_transport_source},dst=/repo,readonly" hermes-transport:${{ github.sha }}
   pinned-native-contract:
     name: Hermes pinned v0.23 primary and tools
     runs-on: ubuntu-latest

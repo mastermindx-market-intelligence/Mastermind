@@ -49,7 +49,7 @@ def profile(tmp_path, role="mmsecretary"):
         hermes_home=tmp_path / role / "current/hermes-home", secrets_file=tmp_path / (role + ".env"))
     return replace(base, model_provider=pub.PROVIDER, model_default=document()["model"],
         native_provider_id=None, gateway_backend="native-session-authority",
-        gateway_host=pub.ROLE_RELATIONS[role][3])
+        gateway_host=pub.ROLE_RELATIONS[role][3], tool_allowlist=frozenset({"clarify"}))
 
 
 @pytest.mark.parametrize("role", pub.ROLE_RELATIONS)

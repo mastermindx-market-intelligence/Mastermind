@@ -93,6 +93,82 @@ class InstalledNativeTests(unittest.TestCase):
         self.assertEqual(self.native_calls[0].session_id, "session-1")
         self.assertEqual(self.calls[0]["request_id"], self.binding.request_id(self.native_calls[0]))
 
+    def _use_auto_owner(self):
+        from engine.fabric_inference_client import FabricInferenceClient, NATIVE_PROTOCOL, validate_auto_route_scope
+        scope, digest = validate_auto_route_scope({"schema": "mastermind.application_route_scope.v1", "pools": ["go"]})
+        self.auto_inspection = dict(schema="mastermind.fabric_application_inspection.v2", requested_model=None,
+            route_scope=scope, route_scope_digest=digest, output_limit_mode="hard_maximum",
+            cap_id="fabric:fixture", capability_id="fabric_fixture", workload_policy={"fixture": True},
+            transport_identity="b" * 64)
+        # The fixed fixture client has made no request or admission. Replace
+        # that unstarted test fixture only; production never replaces an owner.
+        self.assertEqual(self.calls, [])
+        self.owner = FabricInferenceClient(base_url=f"http://127.0.0.1:{self.server.server_port}/v1",
+            proxy_token="t" * 40, model=None, protocol=NATIVE_PROTOCOL, operation_id="owner-turn-1",
+            auto_inspection=self.auto_inspection)
+        self.binding._owner, self.binding.automatic, self.binding.model = self.owner, True, None
+
+    def _assert_native_auto_observation(self, observation, index):
+        from engine.fabric_inference_client import _auto_request_digest, validate_auto_observation
+        native_call, wire = self.native_calls[index], self.calls[index]
+        self.assertIs(self.binding._owner, self.owner)
+        self.assertEqual(wire["turn_id"], self.binding.operation_id)
+        self.assertIsNone(wire["payload"]["model"])
+        self.assertTrue(wire["authenticated"])
+        self.assertEqual(wire["request_id"], self.binding.request_id(native_call))
+        verified = validate_auto_observation(observation, self.auto_inspection,
+            operation_id=self.binding.operation_id, request_id=self.binding.request_id(native_call),
+            request_digest=_auto_request_digest(wire["payload"]),
+            routed_request_digest=_auto_request_digest(dict(wire["payload"], model="model-1")),
+            max_tokens=wire["payload"]["max_tokens"], require_success=True)
+        self.assertEqual(verified["serving_model"], "model-1")
+        self.assertEqual(verified["routing"]["pool"], "go")
+        self.assertEqual(verified["usage"], {"input_tokens": 11, "output_tokens": 7})
+
+    def test_real_native_auto_turn_correlates_original_owner_selection(self):
+        self._use_auto_owner()
+        native = self.agent(enabled_toolsets=[])
+        result = native.run_conversation("Reply with the fixture result.", task_id="task-auto")
+        self.assertEqual(result.get("final_response"), "Result 世界")
+        self.assertEqual(len(self.calls), 1)
+        self._assert_native_auto_observation(self.owner.application_observation.document, 0)
+        # The native model remains the host route label. The immutable owner
+        # observation is the serving receipt, not that configuration label.
+        self.assertEqual(native.model, "host-selection")
+
+    def test_real_native_auto_tools_preserve_both_original_request_observations(self):
+        self._use_auto_owner()
+        observations = []
+        original_result = self.owner._auto_result
+
+        def observe(*args, **kwargs):
+            result = original_result(*args, **kwargs)
+            observations.append(result.application_observation.document)
+            return result
+
+        with patch.object(self.owner, "_auto_result", side_effect=observe):
+            _, result, executed = self._tool_turn("native-conversation")
+        self.assertEqual(result.get("final_response"), "Result 世界")
+        self.assertEqual(executed, [{"value": "native fixture"}])
+        self.assertEqual((len(self.calls), len(observations)), (2, 2))
+        for index, observation in enumerate(observations):
+            self._assert_native_auto_observation(observation, index)
+        self.assertEqual(self.calls[1]["payload"]["messages"][-1]["tool_call_id"], "tool-original")
+
+    def test_real_native_auto_disconnect_does_not_replay_or_misattribute_last_observation(self):
+        self._use_auto_owner()
+        _, result, executed = self._tool_turn("native-effect-disconnect")
+        self.assertNotEqual(result.get("final_response"), "Result 世界")
+        self.assertEqual(executed, [{"value": "native fixture"}])
+        self.assertEqual((len(self.calls), len(self.native_calls), self.closed), (2, 2, 1))
+        retained = self.owner.application_observation.document
+        self._assert_native_auto_observation(retained, 0)
+        self.assertNotEqual(retained["request_id"], self.binding.request_id(self.native_calls[-1]))
+        from engine.fabric_inference_client import FabricInferenceError
+        with self.assertRaises(FabricInferenceError):
+            self._assert_native_auto_observation(retained, 1)
+        self.assertTrue(self.owner._closed)
+
     def test_actual_error_classifier_disables_all_recovery_flags(self):
         from agent.error_classifier import classify_api_error
         for error in (HermesFabricError("hermes_fabric_owner_refused", effect_unknown=True),

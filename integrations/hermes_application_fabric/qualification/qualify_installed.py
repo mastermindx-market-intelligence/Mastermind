@@ -87,7 +87,7 @@ def main():
         "errors": len(result.errors), "skips": len(result.skipped),
         "sdk_constructions": sdk_constructions, "blocked_external_connections": len(blocked_connections),
         "live_provider_acceptance": False}), flush=True)
-    return 0 if result.wasSuccessful() and result.testsRun == 58 and not result.skipped and not sdk_constructions else 1
+    return 0 if result.wasSuccessful() and result.testsRun == 61 and not result.skipped and not sdk_constructions else 1
 
 
 if __name__ == "__main__":
