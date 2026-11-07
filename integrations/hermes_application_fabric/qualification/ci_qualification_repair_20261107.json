@@ -1,0 +1,49 @@
+{
+  "additional_identity_is_visible": true,
+  "baseline_unreviewed_literals": 11,
+  "complete_hosted_gate_owed": true,
+  "composed_original": "51b4abe1f68b58b2c41f9aa45aceaf2ab45670f3",
+  "content_drift_restores_all_findings": true,
+  "failed_source": {
+    "actual_merge": "14fd8df04c3a9736a869df0db7e098707d3a405a",
+    "head": "b605207c315b476472520735148499d8ac34510b",
+    "identity_job": 128481497882,
+    "packaging_job": 128481497768,
+    "workflow_run": 42398655821
+  },
+  "live_provider_acceptance": false,
+  "monetary_acceptance": false,
+  "original_repair_already_adopted": true,
+  "packaging_repair": {
+    "builder_unchanged": "74678de5b6e2d302a9dc367bc63ba08f788f8f45",
+    "current_head_execution_claimed": false,
+    "donor": "ce625f44bb200b04df9590e9b07df3eae55102f3",
+    "inventory_unchanged": "827117ec1a254cf80c70e71711bf10341fde31d5",
+    "later_cases": 5,
+    "later_errors": 0,
+    "later_executed_join": "67b8dd5db8775d90c1545365929f42b6d90c37aa",
+    "later_failures": 0,
+    "later_skips": 0,
+    "manifest_unchanged": "558371550588012c92699a5b0bc578fda7d331b5",
+    "test_postimage": "394e98d8aca9004c3f17899ee72431a3d4b7a545",
+    "test_preimage": "1ec2c14b5d0330702d9b81340696d344915ecc3e"
+  },
+  "path_drift_refuses_masking": true,
+  "preserved": {
+    "held_runtime_source_files_fetched_or_edited": false,
+    "hermes_workflow_blob": "63959f89d674da998b3d201ac3a962b2ea2584e5",
+    "identity_guard_scanner_changed": false,
+    "native_patch_sha256": "0029f3c8cba4ad16a66f47af20a9efb6186eb1745db2d2436c2eeaa9218c61ba",
+    "runtime_package_sha256": "c8bb8e02f42dd41d31e36fa255f87df619216d5e55a7f55194016ed6ce2bc5aa",
+    "shared_ci_workflow_blob": "441b4f2032edfaab367200e6d62c4ba67568c43b"
+  },
+  "provider_calls": 0,
+  "registry_composition": "Preserve original51b complete record set including its exact readiness record once, then carry only the four distinct Hermes contribution records.",
+  "registry_sha256": "0e4ee8392196c8c583aabd038222512c8d8ce29834f1ef8cc895ba71ea86ae69",
+  "review_record_scope": "One exact retained proposal plus one exact previously qualified evidence observation. Existing original and Hermes records preserved; source, path or literal drift remains visible.",
+  "reviewed_remaining_literals": 0,
+  "runtime_sources_imported": false,
+  "schema": "mastermind.hermes_ci_review_qualification.v1",
+  "scope": "unchanged public scanner helper bodies with exact postimages; no full D8 Git-diff gate",
+  "superseded_unmergeable_head": "f782ac0be36d652d27c8df1937e1c1a170df9755"
+}

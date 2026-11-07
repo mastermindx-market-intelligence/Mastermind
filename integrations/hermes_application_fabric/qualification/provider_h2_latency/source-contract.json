@@ -1,0 +1,136 @@
+{
+  "schema": "mastermind.hermes_application_latency_after_provider_h2_source/v1",
+  "source_parent": "0a6d33bfa3280e397c1c3d32a8a6bbcae014c17c",
+  "adopted_original_head": "d0c543124b47372becd8ee632a1c29b32ffc3ef0",
+  "stage_manifest_sha256": "5da35ef46dc2a89449132c5043d4dd66cd30f020f3865ce2ad9cf3e8930d0479",
+  "stage_inventory_sha256": "ce030bcc70b725f0e4f2eb6b3159954416f12fa2205e5cb20ad16173d3fccac9",
+  "patch_sha256": "dd4f53955a43db64ca19c077e1a8e2d7692d3b1ae4e1b0aa6d1f879d7cbc4463",
+  "runtime_preimages": {
+    "ext/go_application_handler.py": "1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7",
+    "ext/go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "ext/lease_broker.py": "3a210b259681460ec1e8ded91c45f84f6807e6ba4da1704b1ce587693d6531ed",
+    "ext/pick.py": "a61e4bd966cb3ce94cb00c262170453840edea02c4eb4d42b1521d097476a1dc"
+  },
+  "runtime_postimages": {
+    "ext/go_application_handler.py": "e51ef79dc0c2319ec264ab3f93865e3b012c8d360bc5af2cea97aa8b69fa2dd9",
+    "ext/go_lease_gateway.py": "ac49c893c39cd9c8b1337dc0a5df19276cf1b3ddb530ced97e39de650c41e704",
+    "ext/lease_broker.py": "b0b7b99bebddfe89ad828d8b6ab625d8ba5b0c2a72472e5f17c946829413be5e",
+    "ext/pick.py": "cac81aea3e9391378e89e8c76286aa6ce4c0a787dfcd6c2e3f1977dd687a13de"
+  },
+  "public_stage_members": {
+    "ext/application_http_realm_projection.py": "b7802a9981cd14ece381a448cfe547ab5e78dd6e40dc65a74120d1034ffe52f7",
+    "ext/application_http_transports.py": "f03f2136de0be2d0238073e88ccb893343e8fe4bc09cd39b864a9078b40df259",
+    "ext/bailian_keys.py": "a6a775dd3204c4e508dedf9a892d80d3dd42069e88c1e9462c049e9cedbee085",
+    "ext/byteplus_coding_plan.py": "4a359b5a534524623c436d0ac801651084308c11c7c10525ae177f9da73fa6d4",
+    "ext/codex_provider_realm.py": "07367ea8db85df09414a7668af8c3c2cfc9fae705a457816071da8177b232623",
+    "ext/commission_deadline.py": "76d6523f94d9d8a7323766eb957b93bdd37240c7b4c13a4b097555ed53e8829a",
+    "ext/experiential_plan_policy.py": "4c0927912ffb247d4ba4bda41143471e31322ea7c9bf4541573ba0f6ca013ae8",
+    "ext/fabric_operator_contract.py": "e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e",
+    "ext/fabric_operator_owner.py": "90c6eee6bd7f2ca7d36c6b915a4fe2cae42b749d99ec2170fb39f55c5f72c0c7",
+    "ext/fabric_policy_snapshot.py": "a711a79f89f135d0434bea1161da3cd0d786522998904e692f316b5e5628ba20",
+    "ext/fs_security.py": "4a9aa64a34cbc84601fbfd5ea68b9792eb1c5558116c48d52c797ad0c83758a5",
+    "ext/glm_host_account_source.py": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
+    "ext/glm_keys.py": "0d84fe666e8e2c1e29297a31a99ce225a30a832c20e9514a5afcb2816a38d458",
+    "ext/go_application_handler.py": "1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7",
+    "ext/go_lease_capability.py": "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940",
+    "ext/go_lease_gateway.py": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+    "ext/lease_broker.py": "3a210b259681460ec1e8ded91c45f84f6807e6ba4da1704b1ce587693d6531ed",
+    "ext/model_tier.py": "507a8aa66015848873f1831dfaa7efabc619362c0dafb28238aa21a1ad8e2d7d",
+    "ext/native_runtime_bindings.py": "2ce5e047ba76e17754c538c993a593787bc0dd5c541c1616e69bf183e7741cce",
+    "ext/pick.py": "a61e4bd966cb3ce94cb00c262170453840edea02c4eb4d42b1521d097476a1dc",
+    "ext/pool_ledger.py": "a9ba8724ad1d6f9a78944cd87f95c1cb70a0832d71612402565111fb04100ef2",
+    "ext/pool_status.py": "494bcc3a0115ba98160139bdc1452a8b8850b966844fcc2634fe0fdeffaa9111",
+    "ext/provider_outcome.py": "ff909ac6fb0a734ce0ea1aa78c2b04e992c170e5be413c1b7778e6ffd7c7907e",
+    "ext/quota_circuit.py": "93d85e50c3a0641c3b8709c6ee330848d616a812e594cf735c716c634560c563",
+    "ext/quota_remote.py": "91c89d4197d791a078e804db9c591c4cddc197f1e35f54f46fba95fe7b27a9a5",
+    "ext/lane_runtime.py": "b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b"
+  },
+  "source_fixture_blobs": {
+    "ops/native_fabric/quota_continuity/tests/_offline_boundary.py": "e511ab65fe1cd30bf4d2addac6700ca43c3468da",
+    "ops/native_fabric/quota_continuity/tests/test_application_auto_request.py": "6e990aa3be10cea5dc6ee19c621bd0b3583de909",
+    "ops/native_fabric/quota_continuity/tests/test_application_cross_pool_auto.py": "0d70a47906a23176d5eaed71a4575e925a500341",
+    "ops/native_fabric/quota_continuity/tests/test_application_turn_admission.py": "4cc542888358bf6b46a1e78c581af5ef2f7178aa",
+    "ops/native_fabric/quota_continuity/tests/test_application_turn_pick.py": "354a36a9b726e6b04426d046fdb41bcb88e7be13",
+    "ops/native_fabric/quota_continuity/tests/test_application_turn_pick_go_composition.py": "7de223f357ea1ad6689d03b08d9196e1837bcb8f",
+    "ops/native_fabric/quota_continuity/tests/test_application_turn_selection_admission.py": "2e5443a0b55ef76e3c84c26708621143138af420",
+    "ops/native_fabric/quota_continuity/tests/test_go_application_handler_composition.py": "13ebd6bcee5167926807d7ccdc63bcabed0cf1b1",
+    "ops/native_fabric/quota_continuity/tests/test_application_registered_pool_selection.py": "754d6d8c1a6391fcfefdbd26417f87944403ea2b",
+    "ops/native_fabric/quota_continuity/tests/test_application_registered_pool_composition.py": "3c1bb6f596fa8821af19c71eb2ea2327147b19eb",
+    "tests/test_native_fabric_glm_reset_recovery.py": "d051a11f1734e5f22cb7a8814482426f8528fd23"
+  },
+  "shared_source_blobs": {
+    "control_plane/codex_provider_realm.py": "b200d7c24f5de2d656cdfcfcec9714e1c679f78a",
+    "control_plane/provider_protocols.py": "92452237ac3956e8104e45ab9ee386c2fa016b76",
+    "control_plane/fs_security.py": "16617789dc115b5748a3e72cc0d9a53fbc368918"
+  },
+  "historical_fixture_patch_sha256": "02dd1fd3174a7c76c3441993f781e8307b16c5f6c854cbf6c3cd54224ecd9919",
+  "embedded_fixture_blobs": {
+    "ops/native_fabric/quota_continuity/tests/test_hermes_application_latency_qualification.py": "6e11c67d6d7fa73d0e3a78950186f47244173cf1",
+    "tests/test_hermes_provider_preserving_application_join.py": "178057005810404e9a0add85c4f8f15e4651ee2e"
+  },
+  "interaction_fixture_git_blob": "37888a99f42673e9e22cfdb05d6f488153a02284",
+  "function_changes": {
+    "go_lease_gateway.py": {
+      "added": [],
+      "changed": [
+        "GoLeaseGateway.select_application",
+        "GoLeaseGateway.begin_application",
+        "GoLeaseGateway.prepare_application"
+      ],
+      "preserved_count": 26
+    },
+    "go_shim.py": {
+      "added": [
+        "Router.application_latency_binding"
+      ],
+      "changed": [
+        "Router.status",
+        "Router.application_transport",
+        "Router._learn_wire_incompatibility",
+        "make_server",
+        "make_server.Handler._application_select",
+        "make_server.Handler._application_post"
+      ],
+      "preserved_count": 146
+    },
+    "lease_broker.py": {
+      "added": [
+        "_application_latency_fact",
+        "_application_latency_qualification"
+      ],
+      "changed": [
+        "_application_selection_purpose",
+        "_application_selection_task",
+        "_read_application_accounts",
+        "Broker._application_grant_from_document",
+        "Broker.application_selection_facts",
+        "Broker.begin_application_turn",
+        "Broker.prepare_application_request"
+      ],
+      "preserved_count": 121
+    },
+    "pick.py": {
+      "added": [],
+      "changed": [
+        "_application_observation",
+        "select_application"
+      ],
+      "preserved_count": 127
+    }
+  },
+  "critical_functions": {
+    "lease_broker.py": [
+      "Broker._base_account_cap",
+      "Broker._try_acquire_in_transaction"
+    ],
+    "pick.py": [
+      "hard_filter",
+      "_eligible_host_routes"
+    ]
+  },
+  "expected_test_cases": 266,
+  "stage_materialization_only": true,
+  "provider_request": false,
+  "live_acceptance": false,
+  "held_source_bodies_required": false
+}

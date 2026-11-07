@@ -1,0 +1,60 @@
+{
+  "changed_test_paths": 5,
+  "d7_anchor_sha256": "060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819",
+  "d7_source_sha256": "2216eecd0b53534f0b211c5bd408ce23cfc3d4108be220144b87db27a92de17e",
+  "exact_original_assertions_preserved": true,
+  "failures": 0,
+  "fixture_empty_defaults_match_full_installer": {
+    "tests/test_executive_release_publication.py": [
+      "HERMES_ATTENDED_SOURCE"
+    ],
+    "tests/test_os_release_assets.py": [
+      "HERMES_ATTENDED_CONFIGURATION",
+      "HERMES_ATTENDED_CONFIGURATION_SHA256",
+      "HERMES_ATTENDED_SOURCE"
+    ]
+  },
+  "focused_original_pytest_cases": 12,
+  "full_publication_and_optional_asset_suites": "natural hosted CI still required",
+  "held_builder_read_or_executed": false,
+  "live_acceptance": false,
+  "log_sha256": "984c3de29e3348b19b76c03453bc2474ab33c8442f899441b2d01605c4883300",
+  "one_expected_provenance_tuple_updated": true,
+  "production_source_changed": false,
+  "provider_request": false,
+  "schema": "mastermind.hermes_primary_current_ci_fixture_repair/v1",
+  "source_identities": {
+    "tests/test_ceo_submit_armed_composition.py": {
+      "assertions": 209,
+      "postimage_git_blob": "bcb7d06edbe24c66fdd66221a80eb2365c673f86",
+      "preimage_git_blob": "ccacfcbeac3d2d974207520d1eaf78a5d1b73ac3",
+      "sha256": "8f07cc51512cfd225af23d0555c678dbae9ac9f7ca93e256e359fffa54cc47cc"
+    },
+    "tests/test_executive_launchd_config.py": {
+      "assertions": 354,
+      "postimage_git_blob": "c19320a9f259756df9a3e82d254867347213dbb1",
+      "preimage_git_blob": "64c2440b20ba85ed20c8f14237c13d4415b8db9b",
+      "sha256": "6694db436f505c1843f172551848f7ca2f84ee96b4941790d553c5219c30220e"
+    },
+    "tests/test_executive_python_runtime_provisioner.py": {
+      "assertions": 138,
+      "postimage_git_blob": "3af9b134fea3b24f69b74d860588e3f0b7d859ca",
+      "preimage_git_blob": "bec660b4a8df255f28a04f4c75ce5d7406b1b24e",
+      "sha256": "fb065a98dbf9d1593cb9dfd07ca2ec485d56549d328d4e485571166704416519"
+    },
+    "tests/test_executive_release_publication.py": {
+      "assertions": 32,
+      "postimage_git_blob": "e4f775c9d69a9c7051f70f9a515067d6f34528e3",
+      "preimage_git_blob": "7aaf47f6196ecba22decc4d0c59d346cb35b844d",
+      "sha256": "326c153777470e4b4cc785b5bd5da265cad790baae5fb593507d0fe1e4810c33"
+    },
+    "tests/test_os_release_assets.py": {
+      "assertions": 138,
+      "postimage_git_blob": "5840d597e509c6cce226f4a18e12ac88a6bf5e2b",
+      "preimage_git_blob": "9341a8ddd3c78840aee1b058448e5706ee14ac3d",
+      "sha256": "531098ff59a6ca35fdea5b7e104fbffe891c5f1972917dc14f87766fbea9e5f5"
+    }
+  },
+  "source_parent": "683a1a53810a72b83e4c9ea751f09b8663450800",
+  "strict_schema_equality_verified_from_exact_source_constants": true
+}

@@ -1,0 +1,54 @@
+"""Latency evidence cannot multiply an incumbent physical account's slots."""
+import json
+import os
+import unittest
+from test_hermes_application_latency_qualification import LatencyIngressFixture
+from go_lease_gateway import ApplicationSelectionRefused
+
+
+class LatencyPhysicalAccountTests(LatencyIngressFixture):
+    def test_fast_second_model_cannot_bypass_a_real_worker_lease(self):
+        self.document["providers"]["go"]["accounts"] = [
+            {"name": "account-a", "per_account_cap": 1}]
+        self.grant["accounts"] = ["account-a"]
+        self.policy_document["pools"]["go"]["worker_models"] = [
+            "fixture-model", "other-model"]
+        self.policy_path.write_text(json.dumps(self.policy_document))
+        self.qualify()
+        worker = self.broker.acquire("latency-worker", "go", account="account-a",
+            host="vps", pid=os.getpid(), model="fixture-model", wait=0)
+        self.assertTrue(worker.ok, worker.reason)
+        original_leases = self.rows("leases")
+        original_quota = self.rows("quota_cooldowns")
+        payload = {**self.payload, "model": "other-model"}
+        scope = {**self.original_scope(), "model": "other-model"}
+        with self.assertRaises(ApplicationSelectionRefused):
+            self.gateway.select_application(scope, principal_id="macro", host="vps",
+                credential_ref="MACRO_APPLICATION_TOKEN", purpose=self.purpose_document,
+                payload=payload,
+                latency_transport_binding=self.router.application_latency_binding())
+        self.assertEqual(self.rows("leases"), original_leases)
+        self.assertEqual(self.rows("quota_cooldowns"), original_quota)
+        self.assertEqual(self.rows("application_turns"), [])
+        self.assertEqual(self.rows("application_requests"), [])
+        self.assertEqual((self.gets, self.posts, self.usage_rows()), ([], [], []))
+        self.assertTrue(self.broker.release(worker.lease_id, "latency-worker"))
+        self.response["model"] = "other-model"
+        self.assertEqual(self.request(payload=payload)[0], 200)
+        turns = self.rows("application_turns")
+        self.assertEqual(len(turns), 1)
+        self.assertEqual((turns[0]["account"], turns[0]["model"]),
+                         ("account-a", "other-model"))
+        selected = json.loads(turns[0]["selection_json"])
+        self.assertEqual(selected["commitments"]["expected_latency_ms"], 100)
+        self.assertEqual(len(self.rows("application_requests")), 1)
+        self.assertEqual(len(self.posts), 1)
+        self.assertEqual(len(self.usage_rows()), 1)
+        held = [row for row in self.rows("leases")
+                if row["state"] in ("held", "rented")]
+        self.assertEqual(len(held), 1)
+        self.assertNotEqual(held[0]["id"], worker.lease_id)
+
+
+if __name__ == "__main__":
+    unittest.main()

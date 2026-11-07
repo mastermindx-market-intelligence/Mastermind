@@ -1,0 +1,576 @@
+{
+  "schema": "mastermind.hermes_primary_completed_ci.v1",
+  "recorded_at": "2026-11-07T17:53:00Z",
+  "head": "12f57f414253150e921a7da404890a4ef4405669",
+  "test_merge": "d69f9bef2b9fab21be35b853383d6cee774e7d21",
+  "focused": {
+    "schema": "mastermind.hermes_primary.focused_qualification.v1",
+    "head": "12f57f414253150e921a7da404890a4ef4405669",
+    "tree": "1ae9f58cf550ba2bf4cd8547c70fb13e22f34c4b",
+    "test_merge": "d69f9bef2b9fab21be35b853383d6cee774e7d21",
+    "original_application_parent": "72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0",
+    "run": {
+      "id": 42391562175,
+      "status": "completed",
+      "conclusion": "success",
+      "completed_at": "2026-11-07T16:35:56Z"
+    },
+    "jobs": [
+      {
+        "id": 128460051140,
+        "label": "Native Hermes v0.23 ABI",
+        "result": "85 passed",
+        "conclusion": "success",
+        "receipts": [
+          {
+            "candidate": "d69f9bef2b9fab21be35b853383d6cee774e7d21",
+            "hermes": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+            "owner": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+            "owner_source_verified": true,
+            "owner_verification_scope": "client_bytes_only",
+            "python": "3.14.10",
+            "jsonschema": "4.26.0",
+            "mode": "installed-native-loopback-fixture",
+            "live_provider_acceptance": false
+          },
+          {
+            "tests_run": 85,
+            "failures": 0,
+            "errors": 0,
+            "skips": 0,
+            "sdk_constructions": [],
+            "blocked_external_connections": 0,
+            "live_provider_acceptance": false
+          }
+        ]
+      },
+      {
+        "id": 128460051250,
+        "label": "Original tunnel custody",
+        "result": "170 passed",
+        "conclusion": "success",
+        "receipts": []
+      },
+      {
+        "id": 128460051283,
+        "label": "Attended gateway and role coexistence",
+        "result": "100 passed",
+        "conclusion": "success",
+        "receipts": [
+          {
+            "candidate": "d69f9bef2b9fab21be35b853383d6cee774e7d21",
+            "hermes": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+            "owner": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+            "owner_source_verified": true,
+            "owner_verification_scope": "client_bytes_only",
+            "python": "3.14.10",
+            "jsonschema": "4.26.0",
+            "mode": "pinned-native-host-patch-loopback-fixture",
+            "live_provider_acceptance": false
+          },
+          {
+            "tests_run": 100,
+            "failures": 0,
+            "errors": 0,
+            "skips": 0,
+            "sdk_constructions": [],
+            "blocked_external_connections": 0,
+            "live_provider_acceptance": false
+          }
+        ]
+      },
+      {
+        "id": 128460051337,
+        "label": "Studio diagnostic",
+        "result": "848 passed; isolated baseline 1 and observed 1",
+        "conclusion": "success",
+        "receipts": [
+          {
+            "driver_interceptions": 0,
+            "errors": 0,
+            "failures": 0,
+            "fixture_blob": "41dae1f1e0f29b542137ebf53f01a3e16b7f473d",
+            "implementation_modified": false,
+            "instrumented": false,
+            "mode": "baseline",
+            "observations": [],
+            "production_effects": false,
+            "python": "3.12.16",
+            "release_acceptance": false,
+            "schema": "mastermind.studio_fixture_diagnostic.v1",
+            "skipped": 0,
+            "source_head": "d69f9bef2b9fab21be35b853383d6cee774e7d21",
+            "tests": 1,
+            "unmatched_candidates": 0
+          },
+          {
+            "driver_interceptions": 1,
+            "errors": 0,
+            "failures": 0,
+            "fixture_blob": "41dae1f1e0f29b542137ebf53f01a3e16b7f473d",
+            "implementation_modified": false,
+            "instrumented": true,
+            "mode": "single",
+            "observations": [
+              {
+                "instrumented": true,
+                "observer_complete": true,
+                "observer_error": null,
+                "reports": [
+                  {
+                    "dropped": 0,
+                    "parentPid": 2759,
+                    "pid": 2782,
+                    "records": [
+                      {
+                        "api": "spawn",
+                        "environment": null,
+                        "executable": "node",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 0,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "ChildProcess.spawn",
+                        "environment": {
+                          "homePresent": true,
+                          "ldLibraryPathPresent": true,
+                          "pythonPathPresent": false
+                        },
+                        "executable": "node",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 0,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "spawn",
+                        "environment": null,
+                        "executable": "python",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 0,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "ChildProcess.spawn",
+                        "environment": {
+                          "homePresent": true,
+                          "ldLibraryPathPresent": true,
+                          "pythonPathPresent": false
+                        },
+                        "executable": "python",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 0,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "spawn",
+                        "environment": null,
+                        "executable": "python",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 0,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "ChildProcess.spawn",
+                        "environment": {
+                          "homePresent": true,
+                          "ldLibraryPathPresent": true,
+                          "pythonPathPresent": false
+                        },
+                        "executable": "python",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 0,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "spawn",
+                        "environment": null,
+                        "executable": "python",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 75,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "ChildProcess.spawn",
+                        "environment": {
+                          "homePresent": true,
+                          "ldLibraryPathPresent": true,
+                          "pythonPathPresent": false
+                        },
+                        "executable": "python",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 75,
+                        "thrownCode": null
+                      }
+                    ],
+                    "schema": "mastermind.disposable_launch_observation.v1",
+                    "scope": "standard-exports-and-childprocess-prototype"
+                  }
+                ],
+                "returncode": 0
+              }
+            ],
+            "production_effects": false,
+            "python": "3.12.16",
+            "release_acceptance": false,
+            "schema": "mastermind.studio_fixture_diagnostic.v1",
+            "skipped": 0,
+            "source_head": "d69f9bef2b9fab21be35b853383d6cee774e7d21",
+            "tests": 1,
+            "unmatched_candidates": 0
+          },
+          {
+            "driver_interceptions": 1,
+            "errors": 0,
+            "failures": 0,
+            "fixture_blob": "41dae1f1e0f29b542137ebf53f01a3e16b7f473d",
+            "implementation_modified": false,
+            "instrumented": true,
+            "mode": "suite",
+            "observations": [
+              {
+                "instrumented": true,
+                "observer_complete": true,
+                "observer_error": null,
+                "reports": [
+                  {
+                    "dropped": 0,
+                    "parentPid": 2804,
+                    "pid": 3831,
+                    "records": [
+                      {
+                        "api": "spawn",
+                        "environment": null,
+                        "executable": "node",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 0,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "ChildProcess.spawn",
+                        "environment": {
+                          "homePresent": true,
+                          "ldLibraryPathPresent": true,
+                          "pythonPathPresent": false
+                        },
+                        "executable": "node",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 0,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "spawn",
+                        "environment": null,
+                        "executable": "python",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 0,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "ChildProcess.spawn",
+                        "environment": {
+                          "homePresent": true,
+                          "ldLibraryPathPresent": true,
+                          "pythonPathPresent": false
+                        },
+                        "executable": "python",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 0,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "spawn",
+                        "environment": null,
+                        "executable": "python",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 0,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "ChildProcess.spawn",
+                        "environment": {
+                          "homePresent": true,
+                          "ldLibraryPathPresent": true,
+                          "pythonPathPresent": false
+                        },
+                        "executable": "python",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 0,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "spawn",
+                        "environment": null,
+                        "executable": "python",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 75,
+                        "thrownCode": null
+                      },
+                      {
+                        "api": "ChildProcess.spawn",
+                        "environment": {
+                          "homePresent": true,
+                          "ldLibraryPathPresent": true,
+                          "pythonPathPresent": false
+                        },
+                        "executable": "python",
+                        "outputClass": null,
+                        "signal": null,
+                        "status": 75,
+                        "thrownCode": null
+                      }
+                    ],
+                    "schema": "mastermind.disposable_launch_observation.v1",
+                    "scope": "standard-exports-and-childprocess-prototype"
+                  }
+                ],
+                "returncode": 0
+              }
+            ],
+            "production_effects": false,
+            "python": "3.12.16",
+            "release_acceptance": false,
+            "schema": "mastermind.studio_fixture_diagnostic.v1",
+            "skipped": 0,
+            "source_head": "d69f9bef2b9fab21be35b853383d6cee774e7d21",
+            "tests": 848,
+            "unmatched_candidates": 0
+          }
+        ]
+      },
+      {
+        "id": 128460051413,
+        "label": "Native APPLICATION handler and Broker",
+        "result": "3 materialization boundaries; 383 proposal; 21 proposal native; 21 original native",
+        "conclusion": "success",
+        "receipts": [
+          {
+            "sources": {
+              "adapter_root": "d69f9bef2b9fab21be35b853383d6cee774e7d21",
+              "macro_root": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+              "native_owner_root": "d69f9bef2b9fab21be35b853383d6cee774e7d21",
+              "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
+            },
+            "source_support_proposal": {
+              "original_owner_commit": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+              "contract_sha256": "7952878b5662a83687982ad4d86bed72c774fc3362115572a9ff42424c4e7d66",
+              "patch_sha256": "9ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d",
+              "postimages": {
+                "engine/provider_production_modes.py": "4df41a878c1368ad3d18da3d6b4eda9f3e4a6ea2afcdf38429a29518bf6464e8",
+                "tests/test_hermes_application_source_support.py": "e3253732804c5adb33b1b2360b1366f9425026897a47e4e843877538d28133bd",
+                "tests/test_hermes_attended_fabric_identity.py": "f344443fd3325ddac1a91d6f77b4add154b40e2c4f6aaa1cf99eb19d50922866",
+                "tests/test_hermes_primary_fabric_identity.py": "d99109e8d8dc59e029d985dcc7cc17e5b6599717ae1877f70f865635772e4f21"
+              },
+              "fixture_files": 2539,
+              "source_materialization": {
+                "method": "verified_local_committed_blobs",
+                "files": 2538,
+                "unique_blobs": 2534,
+                "bytes": 74768348,
+                "lazy_fetch_permitted": false,
+                "worktree_content_used": false
+              },
+              "original_source_unchanged": true,
+              "runtime_enrollment": false,
+              "unit_qualification": {
+                "tests": 383,
+                "failures": 0,
+                "errors": 0,
+                "skipped": 0,
+                "junit_sha256": "123933299e671dc9a3528c2eda011e4a6f33e764a7ee4c396fa687f7eee98db1",
+                "live_acceptance": false
+              }
+            },
+            "fixture_overrides_source_flags": false,
+            "tests_run": 21,
+            "network_counter_scope": "native_conversation_process_after_source_preparation",
+            "failures": 0,
+            "errors": 0,
+            "skips": 0,
+            "blocked_external_connections": 0,
+            "provider_sdk_constructions": 0,
+            "real_application_handler": true,
+            "real_broker": true,
+            "provider_is_fixture": true,
+            "live_provider_acceptance": false,
+            "monetary_acceptance": false
+          },
+          {
+            "sources": {
+              "adapter_root": "d69f9bef2b9fab21be35b853383d6cee774e7d21",
+              "macro_root": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+              "native_owner_root": "d69f9bef2b9fab21be35b853383d6cee774e7d21",
+              "hermes_root": "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
+            },
+            "source_support_proposal": null,
+            "fixture_overrides_source_flags": true,
+            "tests_run": 21,
+            "network_counter_scope": "native_conversation_process_after_source_preparation",
+            "failures": 0,
+            "errors": 0,
+            "skips": 0,
+            "blocked_external_connections": 0,
+            "provider_sdk_constructions": 0,
+            "real_application_handler": true,
+            "real_broker": true,
+            "provider_is_fixture": true,
+            "live_provider_acceptance": false,
+            "monetary_acceptance": false
+          }
+        ]
+      },
+      {
+        "id": 128460051421,
+        "label": "Offline Python 3.12",
+        "result": "66 passed",
+        "conclusion": "success",
+        "receipts": [
+          {
+            "blocked_external_connections": 0,
+            "errors": 0,
+            "failures": 0,
+            "jsonschema": "4.26.0",
+            "live_provider_acceptance": false,
+            "mode": "offline-original-client-loopback-fixture",
+            "owner": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+            "owner_client_sha256": "0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e",
+            "owner_verification_scope": "client_bytes_only",
+            "python": "3.12.16",
+            "skips": 0,
+            "tests_run": 66
+          }
+        ]
+      },
+      {
+        "id": 128460051437,
+        "label": "Offline Python 3.13",
+        "result": "66 passed",
+        "conclusion": "success",
+        "receipts": [
+          {
+            "blocked_external_connections": 0,
+            "errors": 0,
+            "failures": 0,
+            "jsonschema": "4.26.0",
+            "live_provider_acceptance": false,
+            "mode": "offline-original-client-loopback-fixture",
+            "owner": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+            "owner_client_sha256": "0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e",
+            "owner_verification_scope": "client_bytes_only",
+            "python": "3.13.18",
+            "skips": 0,
+            "tests_run": 66
+          }
+        ]
+      },
+      {
+        "id": 128460051464,
+        "label": "Original paired APPLICATION gate",
+        "result": "52/8/32/23/32/42/16/14/3 unittest groups; 42 pytest cases and 16 subtests",
+        "conclusion": "success",
+        "receipts": []
+      },
+      {
+        "id": 128460051524,
+        "label": "Native host composition",
+        "result": "137 passed",
+        "conclusion": "success",
+        "receipts": []
+      }
+    ],
+    "runtime_package_sha256": "c8bb8e02f42dd41d31e36fa255f87df619216d5e55a7f55194016ed6ce2bc5aa",
+    "native_patch_sha256": "0029f3c8cba4ad16a66f47af20a9efb6186eb1745db2d2436c2eeaa9218c61ba",
+    "live_provider_acceptance": false,
+    "monetary_acceptance": false,
+    "counts_are_overlapping": true
+  },
+  "general": {
+    "run": 42391562298,
+    "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42391562298",
+    "jobs": [
+      {
+        "id": 128460174052,
+        "name": "PR test scope",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 128460231172,
+        "name": "pytest shard 3",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 128460231190,
+        "name": "pytest shard 4",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 128460231219,
+        "name": "pytest shard 2",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 128460231220,
+        "name": "pytest shard 5",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 128460231222,
+        "name": "pytest shard 0",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 128460231241,
+        "name": "pytest shard 1",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 128460232274,
+        "name": "PR fast checks",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "id": 128471471103,
+        "name": "test",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "paired_macro": {
+    "source_head": "913c8a874f21393e8f9b0a577ccb4863247b9903",
+    "test_merge": "fc935c8cc6d48dac42789fa70124800ad1ae58f2",
+    "workflow": 42395459795,
+    "job": 128471754020,
+    "mastermind_fixture": "41e86c7aa89905f9b4592d57fbf32c2d7c0f1458",
+    "tests": 219,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "live_provider_acceptance": false,
+  "monetary_acceptance": false,
+  "operational_enrollment": false
+}

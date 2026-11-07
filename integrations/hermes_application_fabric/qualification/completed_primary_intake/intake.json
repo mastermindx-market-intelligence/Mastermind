@@ -1,0 +1,509 @@
+{
+  "completed_source": "60894ba27aebc645e36b4c34478d599af07457c4",
+  "completed_source_tree": "062ab44e8f22216c62ba544a221443f6ca25ef1e",
+  "executed_offline": {
+    "blocked_external_connections": 0,
+    "errors": 0,
+    "failures": 0,
+    "jsonschema": "4.26.0",
+    "live_provider_acceptance": false,
+    "mode": "offline-original-client-loopback-fixture",
+    "owner": "fff0025e10de394c6a297c7878518513f1dbe633",
+    "owner_client_sha256": "0817202d609637ce024b5f4f1bbe6ba4507825424649f407a235bdf5ef441b8e",
+    "owner_verification_scope": "client_bytes_only",
+    "python": "3.12.14",
+    "skips": 0,
+    "tests_run": 68
+  },
+  "executed_source_materialization": {
+    "errors": 0,
+    "failures": 0,
+    "scope": "Existing current/proposal exact-object source guards in disposable Git repositories",
+    "skips": 0,
+    "tests": 10
+  },
+  "identity_review": {
+    "git_blob": "54aa4c4db8faac6c3eb5138629c84e16df521e9d",
+    "opaque_oauth_review_import_unchanged": true,
+    "replaced_or_added": [
+      "integrations/hermes_application_fabric/qualification/qualify_application_owner.py",
+      "integrations/hermes_application_fabric/qualification/qualify_attended_configuration.py",
+      "integrations/hermes_application_fabric/source_context.py",
+      "ops/executive_os/install.sh",
+      "review_evidence/hermes_primary/attended-native-preimages-20-files-20261107.json"
+    ],
+    "retained_other_records": 89,
+    "schema": "hermes-completed-primary-review-composition.v1",
+    "sha256": "3e4bb12eca1a536866532483d49865ce2fc9e91dbf9e7c50841efe5535101b68"
+  },
+  "intact_source_entries": [
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/ATTENDED_INSTALLATION.md",
+      "prior": null,
+      "sha": "9c0aaee569d2f8194e523fc343748ca3dfeb255d"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/GATEWAY_COMPOSITION.md",
+      "prior": "de4f42c5dc3debb37c3e7b40ad5e32e785deb8e4",
+      "sha": "815302ef701b3e5b61527dbcfdb97e8fa971d61d"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/HOST_INTEGRATION.md",
+      "prior": "2a50c2615a707590d9c815348a4f5a852d659912",
+      "sha": "4dd2376e3042772b523f03345e43169c1be3600f"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/README.md",
+      "prior": "a9b28c774fb76f61b6776aff305aef9bec825699",
+      "sha": "ebe9d38de38f147754f8f300928c9eddb448445f"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/RELEASE_INPUTS.md",
+      "prior": "64f9e7c622f0c0f84a00383239cc64176d69c5c1",
+      "sha": "52fa6f86fff3312205d7a40d8e6ec94e72fff081"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/__init__.py",
+      "prior": "48a6a96a35b61358f33547f7a81fff8a92e8c12f",
+      "sha": "527bbd6d3a3688e7745fe627c8502338874d06b6"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/attended-runtime-files.json",
+      "prior": null,
+      "sha": "2e895fcb569a82eb2e68cdfda8889a53dd514f42"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/attended_host.py",
+      "prior": "62acd7bd63f8e500b699d41371e9f5b381e80f4e",
+      "sha": "da4de40113d1ad2c1e58e0bc7e42cdb78353d90f"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/gateway_plugin.py",
+      "prior": "dcb1dada16c726a4d3062b9c2dfa322aa280bddc",
+      "sha": "99f3d8b221b8e870d45e090de4c7aa03bd5f3f4f"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/gateway_plugin_entry/plugin.yaml",
+      "prior": "48d6e3261041c446b477b916e1f90ebd58659eed",
+      "sha": "e8d47d96570baf13854b5ef602e74a9ae869c229"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/hermes_core/hermes-2bd378ed-host-bound.json",
+      "prior": "222996954bb4e20e13dd9a67df14732a695221a2",
+      "sha": "a35c4fbabb0f1de5c6a95e472ec38b9169bf6022"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/hermes_core/hermes-2bd378ed-host-bound.patch",
+      "prior": "c0b62fe50e0314bc6161a401b3e6405295d08848",
+      "sha": "468ba62547ad127fcac39f6a7faa1caa5ed1252e"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/macro-source.json",
+      "prior": null,
+      "sha": "c4feeae188fd64040651c57a6a249b64aa5802a3"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/model_provider/plugin.yaml",
+      "prior": "14b51a72ae42ef93b6f275dc19fd2136f29a5411",
+      "sha": "e984b750fed8de3a8a741e8bcc26eab9cc1adebe"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/native.py",
+      "prior": "085aa20b2edac21806c05ebb45f62a511578aaa4",
+      "sha": "f51b890fe9d53ef1997b09ec1be99af2fc4b7160"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/plugin.yaml",
+      "prior": null,
+      "sha": "e8d47d96570baf13854b5ef602e74a9ae869c229"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/pyproject.toml",
+      "prior": null,
+      "sha": "dfe7289f10192af7e321760d25c433462fb16fc1"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/application_owner_support/README.md",
+      "prior": "cf80926546a44656bf6f36e1e6b70b90de7cd038",
+      "sha": "09121749f97e009cf56d6ab9ef4240db8a8c604f"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/application_owner_support/attended-auto-current.json",
+      "prior": null,
+      "sha": "bc41537d2d73bf2c8a1ed2547b282f164d9f9677"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/owner_source_support.py",
+      "prior": "5d44d3fb8ddb3767fbc4b051c7d543ca3046a5a8",
+      "sha": "5ba1ed6de54545bc353dd5265c08160ec3a01bec"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/qualify_application_owner.py",
+      "prior": "8148ea7bfde52a26b0f27457f991f50c63b62632",
+      "sha": "2ec16a7687bd6c006866ff3236d7f669275af997"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/qualify_attended_configuration.py",
+      "prior": null,
+      "sha": "13d9b5c8ef567c140bdf1cdf621060e239ff4ceb"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/qualify_gateway.py",
+      "prior": "6e3b09e48a70e32c072f33d7344ea4ac57c94cb4",
+      "sha": "ec083638a3ae332b56c43e5a7550a7a69da98216"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/qualify_installed.py",
+      "prior": "e27ef77e5c2bf57015c1afdfd35bac82f05d2381",
+      "sha": "fbbb0fa3a2b27109e2b0b1710640e0347a5ed20f"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/qualify_live_preimages.py",
+      "prior": "9c5ef4a72f0b0adcea752496c27dc61ffa322d2d",
+      "sha": "dbced3d8672ff3112ceeaf1402ad70803a7b751c"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/qualify_offline.py",
+      "prior": "5a6a51b181364efc7de203188c67a2742f02e6f9",
+      "sha": "8cdb1c25aff9be90a4a8ea6aa18d2810431d55bb"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/test_attended_native.py",
+      "prior": "9d4d2e9d8cd2a6e1e03e34cbfba9514e9b7c9020",
+      "sha": "07975c002e321d65c72338f751e80d605466d244"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/test_gateway_bound.py",
+      "prior": "1c4966489281268afcf55c388d2a5f0297f18697",
+      "sha": "807885f52079de27456fa70de71a94477a6ded5a"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/test_native_inventory.py",
+      "prior": null,
+      "sha": "14dd3723198c4375f48a20e29c2dc289c9950ef9"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/verify_source_materialization.py",
+      "prior": "3d689b59edb5762571badadec1163e40cfbbd585",
+      "sha": "4c089914e1374966103dc1791accb80e6a5bf0fe"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/requirements.txt",
+      "prior": "97ec57c170d159a0bb1c580a43c75d37d9896f27",
+      "sha": "b0e5c93e33c30bf78017a302cf45ce12f411939a"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/source_context.py",
+      "prior": null,
+      "sha": "9be1019625e28b1752a8919eda5fef5039e3bb00"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/tests/test_attended_host.py",
+      "prior": "9a316e77eef295157fc1d1a17e4e83457ca9063a",
+      "sha": "3cf73bd4bc3bac2c18607f62d047e8418b452bda"
+    },
+    {
+      "group": "producers",
+      "mode": "100644",
+      "path": "ops/executive_os/capacity_host_artifacts.py",
+      "prior": "9a81a3d5c95b56437962e81bbcc9c506dbd5c0ce",
+      "sha": "aa1c2a429c038a6b12d192f4765f2afb90058c66"
+    },
+    {
+      "group": "producers",
+      "mode": "100644",
+      "path": "ops/executive_os/hermes_attended_configuration.py",
+      "prior": null,
+      "sha": "013ebe5bf8548ef964fbeb0fb2935a453f75dfcd"
+    },
+    {
+      "group": "producers",
+      "mode": "100755",
+      "path": "ops/executive_os/install.sh",
+      "prior": "b7940e71907e91e420d1466a7f975ffe7be34c49",
+      "sha": "448497f99be5ee9fc8559a7585037d7ac08eaa99"
+    },
+    {
+      "group": "producers",
+      "mode": "100644",
+      "path": "control_plane/executive_control_observation.py",
+      "prior": "24bcce0411013ce15967789d88a6b06977da0f24",
+      "sha": "e3446dd36ef51a35b2929c5274a9adc34e49644e"
+    },
+    {
+      "group": "producers",
+      "mode": "100644",
+      "path": "scripts/executive_os_phase1c.py",
+      "prior": "c88144f187e2a93dd60a838ac2de77142af2f001",
+      "sha": "357d33c9fce1fc142b5763fb15d7151224008954"
+    },
+    {
+      "group": "producers",
+      "mode": "100644",
+      "path": "ops/native_fabric/quota_continuity/rollout/export_application_consumer.py",
+      "prior": null,
+      "sha": "f10cc4183dbec7887e3cf79ebe871f08cf6d0994"
+    },
+    {
+      "group": "tests",
+      "mode": "100644",
+      "path": "tests/test_hermes_attended_sources.py",
+      "prior": null,
+      "sha": "cebdbe9ea79852e918dafd3b6122bf17db27edde"
+    },
+    {
+      "group": "tests",
+      "mode": "100644",
+      "path": "tests/test_hermes_attended_source_projection.py",
+      "prior": null,
+      "sha": "5707ee4abe53c6761e9cb3f7968df9f1b9c208b0"
+    },
+    {
+      "group": "tests",
+      "mode": "100644",
+      "path": "tests/test_hermes_application_consumer_export.py",
+      "prior": null,
+      "sha": "dd0f9e4d3983d5685b50599d00921649a48580d0"
+    },
+    {
+      "group": "tests",
+      "mode": "100644",
+      "path": "tests/test_control_observation.py",
+      "prior": "0fd9291cfa3600f447c0af9810a609037eb19703",
+      "sha": "51cae00c143d8e1560fa08506b7076be83b98038"
+    },
+    {
+      "group": "tests",
+      "mode": "100644",
+      "path": "tests/test_c1_installer_control_config.py",
+      "prior": "4f9dc104408b8b5ba3716fb2e834086ab5f8edc7",
+      "sha": "f272cdc8a7445762e2d0165f7e4dac07297aec90"
+    },
+    {
+      "group": "workflow",
+      "mode": "100644",
+      "path": ".github/workflows/hermes-application-inference.yml",
+      "prior": "63959f89d674da998b3d201ac3a962b2ea2584e5",
+      "sha": "c2b5abf3e34d2a0c5181db7f552f8b66c9800425"
+    },
+    {
+      "group": "evidence",
+      "mode": "100644",
+      "path": "review_evidence/fabric_application/hermes-committed-owner-proof-20261107.json",
+      "prior": null,
+      "sha": "405337734081b9a01b67900bf5a030f4954cd8b7"
+    },
+    {
+      "group": "evidence",
+      "mode": "100644",
+      "path": "review_evidence/hermes_primary/attended-installed-source-qualification-20261107.json",
+      "prior": null,
+      "sha": "1e777e632439c51258f892d1482057662f14e78e"
+    },
+    {
+      "group": "evidence",
+      "mode": "100644",
+      "path": "review_evidence/hermes_primary/attended-configuration-qualification-20261107.json",
+      "prior": null,
+      "sha": "b1b879a71ad9bfcf4445f17b1dc85fbc1b648e34"
+    },
+    {
+      "group": "evidence",
+      "mode": "100644",
+      "path": "review_evidence/hermes_primary/attended-native-observation-20261107.json",
+      "prior": null,
+      "sha": "10dc588c421ac5721c6b60597bfccb18bcefb4b5"
+    },
+    {
+      "group": "evidence",
+      "mode": "100644",
+      "path": "review_evidence/hermes_primary/attended-native-preimages-20-files-20261107.json",
+      "prior": null,
+      "sha": "fb12c2664c8f707fdf18a4292c3d7bfedf0402af"
+    },
+    {
+      "group": "completed-fixture-isolation",
+      "mode": "100644",
+      "path": "tests/test_fabric_participant_owner.py",
+      "prior": "b69a16a4721721cdba76d182e87c5a631b34d855",
+      "sha": "281c3c13756203733cdee86eecb516fdd95ec113"
+    },
+    {
+      "group": "evidence",
+      "mode": "100644",
+      "path": "review_evidence/fabric_application/native-worker-source-isolation-20261107.json",
+      "prior": null,
+      "sha": "b11a88924decc75eaee4e59ed398057afba50192"
+    }
+  ],
+  "live_acceptance": false,
+  "logs": {
+    "materialization-intake.log": "a623e955f8a2dadf110abfe443d8b3d269ae96a29b497462fdd5c74411213e89",
+    "offline-intake.log": "fa962c8c1590276286fcb451f06aa2193e33dcf3c2fa49c62cbbcda305b9e4b1"
+  },
+  "macro_projection": {
+    "current_original_carrier": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+    "existing_publisher_continuation": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2225#issuecomment-6711964100",
+    "rebuilt_for_current_carrier": false,
+    "retained_commit": "fff0025e10de394c6a297c7878518513f1dbe633"
+  },
+  "native_installation": false,
+  "package_proof": {
+    "all58_materialized_files_match_selected_git_blobs": true,
+    "attended_package_files": 17,
+    "attended_package_sha256": "7307c43984fe15297706af9b289c0d5aed7c665f3cfee12cbff33f29a0c68376",
+    "role_package_files": 11,
+    "role_package_sha256": "c801409819ce3cbc2e95414d685ccc7663753bd992e81158448488fd4ac06be2"
+  },
+  "parent": "e3ff065ccec6be40037e5e86cce7a73113ece594",
+  "parent_tree": "336830cc585f536f02418c188d2b3af9d8a5d916",
+  "preserved_enrollment_contract": {
+    "mode": "100644",
+    "path": "integrations/hermes_application_fabric/ENROLLMENT_CONTRACT.md",
+    "sha": "d51e1cb2dc0a0bf003546fd7af293c77c4cd4184"
+  },
+  "preserved_ours_only_entries": [
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/application_latency/README.md",
+      "sha": "9c8d6e13131512a724f7c8172159fb0baf171d8c"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/application_latency/application-owner-latency.patch",
+      "sha": "08584e6f39fd23d323ecf02024e6f742e108cce6"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/application_latency/contract.json",
+      "sha": "bb532bb876a5e58b3de602ef374a35422e369e6c"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/application_latency/latency-tests.log",
+      "sha": "7f54becbf16415643da79eb0f62b6d79e86a8fd6"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/application_latency/local-proof.json",
+      "sha": "b92b010a74e63ed178fdab831ec7bd1910878114"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/application_latency/owner-regressions.log",
+      "sha": "02542a61f7e77d7d80b72cf4317da87a7b7d2f35"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/application_owner_repairs/translation-historical-realm-proof.json",
+      "sha": "1ac368433776b69def01963d79fcbd7b12d86b3d"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/application_owner_repairs/translation-historical-realm.patch",
+      "sha": "33bcac6937cc422e7705ede9fa6d4e0a7ce87c99"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/ci_qualification_repair_20261107.json",
+      "sha": "ac3c0263d6bca1f92739053496704e6eb53649bc"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/completed_12f_ci_receipt.json",
+      "sha": "b0f308de744e3ec48edb316994b064e6f03ed69c"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/provider_preserving_application/README.md",
+      "sha": "963dec56cdc3e62182708bdf190778e8e120fbaf"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/provider_preserving_application/application-provider-latency.patch",
+      "sha": "201792a44d03657221174e555b4c1b806ec85c9e"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/provider_preserving_application/combined-application-tests.log",
+      "sha": "d0deeaa278a323114dd0169ad88976b1d963c0a1"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/provider_preserving_application/combined-public-join-tests.log",
+      "sha": "0ca383efd14471b70ed1d664fb5873044aab937d"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/provider_preserving_application/original-regressions.log",
+      "sha": "9c8258f2f2730e6acd466f4ae74ecbf0fac09de0"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/provider_preserving_application/qualification.json",
+      "sha": "1181a3c8c42259956e4fe390cd7bcbb26ab192e8"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/provider_preserving_application/source-contract.json",
+      "sha": "d09776cb0a79db0ba8bd5d5db3ef09005c9c43e3"
+    },
+    {
+      "mode": "100644",
+      "path": "integrations/hermes_application_fabric/qualification/provider_preserving_application/source-review-proof.json",
+      "sha": "029b833c5793ca794204d3cf6bb3b0939e095386"
+    }
+  ],
+  "preserved_shared_ci": {
+    "mode": "100644",
+    "path": ".github/workflows/ci.yml",
+    "sha": "441b4f2032edfaab367200e6d62c4ba67568c43b"
+  },
+  "preserved_source_custody": [
+    "brain/fabric_inference.py",
+    "integrations/hermes_models/",
+    "integrations/hermes_attended_fabric/",
+    "integrations/studio_direct_mcp/",
+    ".github/workflows/ci.yml",
+    "active H4 historical fixture repair",
+    "active APPLICATION provider-preserving cohort",
+    "original J collection"
+  ],
+  "provider_call": false,
+  "resulting_head_required_ci_owed": true,
+  "schema": "mastermind.hermes_completed_primary_intake.v1",
+  "source_return": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6711828478"
+}

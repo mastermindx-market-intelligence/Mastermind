@@ -1,0 +1,49 @@
+{
+  "schema": "hermes-completed-primary-review-proof.v1",
+  "scope": "unchanged public scanner/helper bodies, not full committed Git-diff gate",
+  "checked": [
+    {
+      "path": "ops/executive_os/install.sh",
+      "git_blob": "448497f99be5ee9fc8559a7585037d7ac08eaa99",
+      "sha256": "6f19581f58b1f7009093150d0446823c0f1f19f1eab6ec3a5923d736b77836e2",
+      "exact_sites": 1,
+      "content_and_path_drift_refuse": true,
+      "injected_identity_visible": true
+    },
+    {
+      "path": "integrations/hermes_application_fabric/qualification/qualify_application_owner.py",
+      "git_blob": "2ec16a7687bd6c006866ff3236d7f669275af997",
+      "sha256": "192ff0bf4321f0006cb34ba68dd4d648da3a3825dccc8cd731f220f61e793f32",
+      "exact_sites": 1,
+      "content_and_path_drift_refuse": true,
+      "injected_identity_visible": true
+    },
+    {
+      "path": "integrations/hermes_application_fabric/source_context.py",
+      "git_blob": "9be1019625e28b1752a8919eda5fef5039e3bb00",
+      "sha256": "887799a569cc04d5e0327e2c2732ee389064929e241c060328dcbecedcab3597",
+      "exact_sites": 2,
+      "content_and_path_drift_refuse": true,
+      "injected_identity_visible": true
+    },
+    {
+      "path": "integrations/hermes_application_fabric/qualification/qualify_attended_configuration.py",
+      "git_blob": "13d9b5c8ef567c140bdf1cdf621060e239ff4ceb",
+      "sha256": "96dbbd9572b9323e2f1da20882b2170b21932e119d4768925ca030d50399bf92",
+      "exact_sites": 2,
+      "content_and_path_drift_refuse": true,
+      "injected_identity_visible": true
+    },
+    {
+      "path": "review_evidence/hermes_primary/attended-native-preimages-20-files-20261107.json",
+      "git_blob": "fb12c2664c8f707fdf18a4292c3d7bfedf0402af",
+      "sha256": "7b5af848fa6bdc47b178b73fc027a46c34f897e2a9bade655b9dec09af6d1a12",
+      "exact_sites": 21,
+      "content_and_path_drift_refuse": true,
+      "injected_identity_visible": true
+    }
+  ],
+  "runtime_sources_imported": false,
+  "registry_sha256": "3e4bb12eca1a536866532483d49865ce2fc9e91dbf9e7c50841efe5535101b68",
+  "resulting_head_hosted_gate_owed": true
+}

@@ -1,0 +1,14 @@
+{
+  "schema": "mastermind.hermes.provider_preserving_source_review.v1",
+  "scope": "Actual unchanged public scanner/helper bodies; not the full committed Git-diff gate",
+  "unreviewed_findings": 2,
+  "remaining_exact_postimage_findings": 0,
+  "content_drift_restores_findings": true,
+  "path_drift_refuses_masking": true,
+  "injected_identity_remains_visible": true,
+  "existing_records_preserved": true,
+  "registry_preimage_blob": "14915f0c3395e2e85cd3f6e704ec1a6a6a5902b1",
+  "registry_postimage_sha256": "37601b35e7bc8bf86b2a3c4cc5ad4407116c7a262f8d59a8ade262996198e382",
+  "runtime_source_imported": false,
+  "complete_hosted_gate_owed": true
+}

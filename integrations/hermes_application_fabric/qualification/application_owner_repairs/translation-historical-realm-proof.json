@@ -1,0 +1,30 @@
+{
+  "after_mismatches": [],
+  "all_other_pin_values_unchanged": true,
+  "also_pending_owner_contribution": "ce625f44bb200b04df9590e9b07df3eae55102f3",
+  "assertions_and_test_bodies_ast_identical": true,
+  "before_mismatches": [
+    {
+      "actual": "b200d7c24f5de2d656cdfcfcec9714e1c679f78a",
+      "expected": "a51e2bce8d9bb312107f975d503abd6541bd5000",
+      "path": "control_plane/codex_provider_realm.py"
+    }
+  ],
+  "failed_job": 128473147053,
+  "failed_test_merge": "0ba3aa04e4957fdfd91b542cfa2392fca9e39103",
+  "held_builder_read": false,
+  "original_head": "0d8174951141b1790e6121e13202e4036d1bdc20",
+  "patch_sha256": "3ce9c00bc11400bb84401462981415d174a95dbc1236abdbd233fa90adcfcd1a",
+  "path": "tests/integration/test_fabric_translation_composition.py",
+  "postimage_blob": "6a51de4708997518df04adeae6bcd518c165da1d",
+  "postimage_sha256": "5de3e87872de585508e2cad2d02b3713d6a7e76fce490108644fa74370ba76f6",
+  "preimage_blob": "da17699f386e2ed17221f620fb63480e89600e1e",
+  "projection_compiler_blob": "684c54d5c9d8dbdd5bc046d123af31d20fc99dd1",
+  "projection_historical_realm_sha256": "8587cdd50407b48e0f82ffe468ce0435a365b1ba97da8a2403d72c500c633ac6",
+  "protected_correction_source": "7bc8a208d5cf867fcc269d9c049d53e52445347b",
+  "protected_fixture_blob": "b3e00e1c3d507dc276f0f24d40e0665448f1e18a",
+  "qualification": "AST/source-contract and complete merged-tree metadata; paired runtime test remains with original owner",
+  "runtime_test_executed": false,
+  "schema": "mastermind.hermes_original_owner_repair.v1",
+  "validated_source_pins": 18
+}

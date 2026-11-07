@@ -998,3 +998,9 @@ REVIEWED_FILES["integrations/session_bridge/installed_web_observation.py"] = {
     "sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
     "sites": ((252, 46, 49, "int", "512"),),
 }
+
+
+# Retain the three exact Hermes proposal/acceptance records absent from d0.
+REVIEWED_FILES['integrations/hermes_application_fabric/qualification/application_latency/application-owner-latency.patch'] = {'sha256': 'bccdbeaafd5535f399b3c1c60ed6dee897ce31924f648d883009de3b61e16010', 'sites': ((174, 81, 84, 'int', '512'), (598, 80, 83, 'int', '500'), (723, 48, 51, 'int', '500'), (856, 56, 59, 'int', '401'), (945, 85, 88, 'int', '400'), (953, 68, 71, 'int', '409'), (963, 49, 52, 'int', '409'), (1026, 49, 52, 'int', '503'), (1031, 45, 48, 'int', '409'), (1048, 34, 37, 'int', '409'))}
+REVIEWED_FILES['integrations/hermes_application_fabric/qualification/provider_preserving_application/application-provider-latency.patch'] = {'sha256': '02dd1fd3174a7c76c3441993f781e8307b16c5f6c854cbf6c3cd54224ecd9919', 'sites': ((918, 48, 51, 'int', '500'), (1051, 56, 59, 'int', '401'))}
+REVIEWED_FILES['integrations/hermes_application_fabric/qualification/native_acceptance_source_proof.json'] = {'sha256': '761af79c686dd9f7a53c46ae4ab3819e4f1da0a4a060ab4b71472d2113ea5d36', 'sites': (), 'utf8_sites': ((108, 9, 12, 'int', '501'),)}

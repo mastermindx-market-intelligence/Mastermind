@@ -1,0 +1,55 @@
+{
+  "completed_at": "2026-11-07T21:15:10.750185+00:00",
+  "errors": 0,
+  "exact_inverse_roundtrip": true,
+  "failures": 0,
+  "full_stage_bytes_verified": false,
+  "held_source_bodies_read": false,
+  "live_acceptance": false,
+  "log_sha256": "60825e25048b1e3cd0625cea9fad914c11a52523d692a0e3c9e4c81a5a3e170c",
+  "module_counts": {
+    "emitted_existing_h2": 16,
+    "test_application_auto_request": 37,
+    "test_application_cross_pool_auto": 30,
+    "test_application_registered_pool_composition": 15,
+    "test_application_registered_pool_selection": 15,
+    "test_application_turn_admission": 24,
+    "test_application_turn_pick": 42,
+    "test_application_turn_pick_go_composition": 6,
+    "test_application_turn_selection_admission": 24,
+    "test_go_application_handler_composition": 21,
+    "test_hermes_application_h2_latency_interaction": 1,
+    "test_hermes_application_latency_qualification": 28,
+    "test_hermes_provider_preserving_application_join": 7
+  },
+  "numeric_loopback_operations": {
+    "bind": 406,
+    "connect": 399,
+    "dns": 400
+  },
+  "patch_sha256": "dd4f53955a43db64ca19c077e1a8e2d7692d3b1ae4e1b0aa6d1f879d7cbc4463",
+  "postimages": {
+    "ext/go_application_handler.py": "e51ef79dc0c2319ec264ab3f93865e3b012c8d360bc5af2cea97aa8b69fa2dd9",
+    "ext/go_lease_gateway.py": "ac49c893c39cd9c8b1337dc0a5df19276cf1b3ddb530ced97e39de650c41e704",
+    "ext/lease_broker.py": "b0b7b99bebddfe89ad828d8b6ab625d8ba5b0c2a72472e5f17c946829413be5e",
+    "ext/pick.py": "cac81aea3e9391378e89e8c76286aa6ce4c0a787dfcd6c2e3f1977dd687a13de"
+  },
+  "provider_h2_functions_preserved": true,
+  "provider_request": false,
+  "public_stage_members_verified": 26,
+  "python_version": "3.14.7",
+  "qualifier_sha256": "40ab160026be8407b680637563a14698e6903f30ca37e1a48d9e9ab4bfd81251",
+  "runtime_selected_or_installed": false,
+  "schema": "mastermind.hermes_provider_h2_latency_qualification/v1",
+  "skipped": 0,
+  "source_ref": "0a6d33bfa3280e397c1c3d32a8a6bbcae014c17c",
+  "stage_manifest_sha256": "5da35ef46dc2a89449132c5043d4dd66cd30f020f3865ce2ad9cf3e8930d0479",
+  "started_at": "2026-11-07T21:14:41.987307+00:00",
+  "successful": true,
+  "test_dependency": {
+    "module": "yaml",
+    "version": "6.0.3"
+  },
+  "tests": 266,
+  "unexpected_effect_attempts": []
+}

@@ -1,0 +1,15 @@
+test_exports_committed_bytes_and_modes_without_worktree_or_untracked_data (__main__.CommittedSourceTests.test_exports_committed_bytes_and_modes_without_worktree_or_untracked_data) ... ok
+test_missing_local_blob_refuses_without_lazy_fetch (__main__.CommittedSourceTests.test_missing_local_blob_refuses_without_lazy_fetch) ... ok
+test_refuses_a_committed_link_before_exporting_any_member (__main__.CommittedSourceTests.test_refuses_a_committed_link_before_exporting_any_member) ... ok
+test_composed_exports_its_actual_postimages_and_preserves_historical_contract (__main__.CurrentSourceTests.test_composed_exports_its_actual_postimages_and_preserves_historical_contract) ... ok
+test_composed_refuses_changed_factory_even_when_root_and_contract_owner_match (__main__.CurrentSourceTests.test_composed_refuses_changed_factory_even_when_root_and_contract_owner_match) ... ok
+test_current_exports_committed_support_without_replaying_the_proposal (__main__.CurrentSourceTests.test_current_exports_committed_support_without_replaying_the_proposal) ... ok
+test_current_refuses_another_clean_owner_commit (__main__.CurrentSourceTests.test_current_refuses_another_clean_owner_commit) ... ok
+test_current_refuses_changed_required_input_even_with_a_matching_root (__main__.CurrentSourceTests.test_current_refuses_changed_required_input_even_with_a_matching_root) ... ok
+test_current_refuses_committed_disabled_support_even_with_a_matching_root (__main__.CurrentSourceTests.test_current_refuses_committed_disabled_support_even_with_a_matching_root) ... ok
+test_current_refuses_dirty_tracked_source_before_export (__main__.CurrentSourceTests.test_current_refuses_dirty_tracked_source_before_export) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.794s
+
+OK

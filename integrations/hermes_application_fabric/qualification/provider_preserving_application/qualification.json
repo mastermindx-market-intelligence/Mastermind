@@ -1,0 +1,41 @@
+{
+  "schema": "mastermind.hermes.provider_preserving_application_qualification.v1",
+  "python": "3.12.14",
+  "contract_sha256": "6e3752e9bcb30bba2c145af0da4fee265da33c0966112d1522a43ebf405aac61",
+  "patch_sha256": "02dd1fd3174a7c76c3441993f781e8307b16c5f6c854cbf6c3cd54224ecd9919",
+  "suites": {
+    "combined-public-join-tests.log": {
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "3b9c377bd392b1b5a1f2193f8fe8bffd40914f8013703e90c09e3671a5ea23d1",
+      "source": "combined proposal"
+    },
+    "combined-application-tests.log": {
+      "tests": 145,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "391755605bc8bed81325f65f675eb271140520e268b306103b810f501c7a491b",
+      "source": "combined proposal"
+    },
+    "original-regressions.log": {
+      "tests": 2,
+      "failures": 2,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "a8ba65cf1a0823301af0b076eb07bfe99c59e47f5584832c9471fe16f16eb66b",
+      "source": "unmodified APPLICATION preimage"
+    }
+  },
+  "combined_cases_passed": 152,
+  "baseline_behavioral_failures_reproduced": 2,
+  "boundary": "Real local Broker/picker/Gateway/handler; inert data and incumbent loopback-only provider fixture; no installed runtime source or real provider call.",
+  "excluded": [
+    "Full provider-auto worker-stage suite (held controller/source closure)",
+    "Native installed selection/enrollment",
+    "Live account or financial acceptance"
+  ],
+  "complete_integration_claimed": false
+}

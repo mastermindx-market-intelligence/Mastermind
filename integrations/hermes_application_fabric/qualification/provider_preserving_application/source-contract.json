@@ -1,0 +1,291 @@
+{
+  "schema": "mastermind.hermes.provider_preserving_application_join.v1",
+  "application_preimage_ref": "51b4abe1f68b58b2c41f9aa45aceaf2ab45670f3",
+  "selected_provider_observation": {
+    "sequence": 37,
+    "generation": "9c557397a9fbbcb88fa300b20063d6982c82fe5e768da951c74fa14a298d27b4",
+    "profile_blob": "ef808289fd862a586b1a82d5a1c57a5a862039df",
+    "declared_members": 116,
+    "evidence": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6711529944"
+  },
+  "prior_latency_patch_sha256": "bccdbeaafd5535f399b3c1c60ed6dee897ce31924f648d883009de3b61e16010",
+  "reused_provider_inputs": [
+    {
+      "input": "broker-provider-guard",
+      "git_blob": "a352bdf9d2924042b5862342038c9078d1312cd0",
+      "patch_sha256": "c5f30b3d4de767b12b68b16cd9418595e961d910f8f15b5d9e64d3fbdb863a6c",
+      "commands": [
+        {
+          "flags": [
+            "--check"
+          ],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "flags": [],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "input": "initial-pick",
+      "git_blob": "d3b7e0137a229bc3f19dc0fa3178d53c6ef25765",
+      "patch_sha256": "58be497624ade12e46fed03385a9bf5b339bf7130ee72a80e1be8b7a65836daa",
+      "commands": [
+        {
+          "flags": [
+            "--check"
+          ],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "flags": [],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    {
+      "input": "current-pick",
+      "git_blob": "e5059ac1a8e9773fc39c2431a5b08e210d2b8a54",
+      "patch_sha256": "96e1462bc9b0ccab54ede69f3c60c5ad118ae13f008c5c3d728f8df61874c442",
+      "commands": [
+        {
+          "flags": [
+            "--check"
+          ],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        {
+          "flags": [],
+          "returncode": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    }
+  ],
+  "provider_only_changes": [
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/lease_broker.py",
+      "preimage_blob": "d8577c6ee5cc9bd3e7fc22905530f4755b860ae0",
+      "postimage_blob": "b8c13f2159b272fe704194a5ad5f1aabf30fcca9",
+      "preimage_sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+      "postimage_sha256": "05880dc3e6f0849ff1f39094e2dbfe778797ebaddc04acd3b7474598888ca4cd"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/pick.py",
+      "preimage_blob": "d17447c3c9f472b061733e36fa49a7f8d7e34ee5",
+      "postimage_blob": "6b53ed815f772fb5e9281551e423fc43aab3b592",
+      "preimage_sha256": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
+      "postimage_sha256": "37c8809c1fbb7106f98f133347efe20524dbaec176122ed5ad40dbf244fa04b3"
+    }
+  ],
+  "combined_changes": [
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/lease_broker.py",
+      "preimage_blob": "d8577c6ee5cc9bd3e7fc22905530f4755b860ae0",
+      "preimage_sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+      "postimage_blob": "95f0974bebe0b02d3c01c3c5aa5e9eaa050856bd",
+      "postimage_sha256": "4afacbf9f45d6a62ce87b8e9545ac96542a01e8e64971a77e9189ee3f720bb75"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/pick.py",
+      "preimage_blob": "d17447c3c9f472b061733e36fa49a7f8d7e34ee5",
+      "preimage_sha256": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
+      "postimage_blob": "b645a6130f61c79635af798998f057ceb2fde220",
+      "postimage_sha256": "4ed3fa4b6268c2616e0f5c064bccc00f0457c25e8051afc20cf3fe0cddbeaad0"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/go_lease_gateway.py",
+      "preimage_blob": "e21b6d6a4e4230fce5f55d90820c6391d4b79324",
+      "preimage_sha256": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
+      "postimage_blob": "9ba7f2c3e13c26c203bf9fd2e957de96dbf8bd0e",
+      "postimage_sha256": "ac49c893c39cd9c8b1337dc0a5df19276cf1b3ddb530ced97e39de650c41e704"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/go_shim.py",
+      "preimage_blob": "066d87cd23275204fb6d30af45ac03db1d4dbb4f",
+      "preimage_sha256": "1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7",
+      "postimage_blob": "36e91dca30c4788d1acd769272735475db64be39",
+      "postimage_sha256": "e51ef79dc0c2319ec264ab3f93865e3b012c8d360bc5af2cea97aa8b69fa2dd9"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/test_hermes_application_latency_qualification.py",
+      "preimage_blob": null,
+      "preimage_sha256": null,
+      "postimage_blob": "6e11c67d6d7fa73d0e3a78950186f47244173cf1",
+      "postimage_sha256": "e81bdf4e366d4dfba01628158e9c18263bf693304804cce135330aa718b02092"
+    },
+    {
+      "path": "tests/test_hermes_provider_preserving_application_join.py",
+      "preimage_blob": null,
+      "preimage_sha256": null,
+      "postimage_blob": "178057005810404e9a0add85c4f8f15e4651ee2e",
+      "postimage_sha256": "2d9712bdc0fe727648eb1e935744d183de14cef1e111db572cdcc4a07eb3e023"
+    }
+  ],
+  "preimage_inputs": [
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/commission_deadline.py",
+      "git_blob": "fade630ed75c1b93334a5711a6df7a554fbd24ee",
+      "sha256": "76d6523f94d9d8a7323766eb957b93bdd37240c7b4c13a4b097555ed53e8829a"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/go_lease_capability.py",
+      "git_blob": "38856700331b3fb3a7706a5745e23fb7b3d18cf0",
+      "sha256": "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/go_lease_gateway.py",
+      "git_blob": "e21b6d6a4e4230fce5f55d90820c6391d4b79324",
+      "sha256": "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/go_shim.py",
+      "git_blob": "066d87cd23275204fb6d30af45ac03db1d4dbb4f",
+      "sha256": "1cab35bdf7ee8fce5f12237035556a9ab4314299c5d7b71c0f44df320fe0dab7"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/lease_broker.py",
+      "git_blob": "d8577c6ee5cc9bd3e7fc22905530f4755b860ae0",
+      "sha256": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/pick.py",
+      "git_blob": "d17447c3c9f472b061733e36fa49a7f8d7e34ee5",
+      "sha256": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/pool_ledger.py",
+      "git_blob": "61dc4d5e83172e6c647d058ec844f00a0b3955a6",
+      "sha256": "a9ba8724ad1d6f9a78944cd87f95c1cb70a0832d71612402565111fb04100ef2"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/provider_outcome.py",
+      "git_blob": "981f35a01183e83fdb9f0b8a4175b290cdeb85f8",
+      "sha256": "ff909ac6fb0a734ce0ea1aa78c2b04e992c170e5be413c1b7778e6ffd7c7907e"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/quota_circuit.py",
+      "git_blob": "1583a6ba773e56dbc3f295b65ffc08dea2d31d48",
+      "sha256": "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/quota_remote.py",
+      "git_blob": "5519f1eb97f0453e68ae64519b6de1e3e2d063f9",
+      "sha256": "3c1484864848b5cdf4daeecde092f7c407ab313a9f0d94a7f0fd204dbcf813b8"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/source/fabric_policy_snapshot.py",
+      "git_blob": "53f0cab2d1aaa2c07f9ec137ecdece939da74d0e",
+      "sha256": "a711a79f89f135d0434bea1161da3cd0d786522998904e692f316b5e5628ba20"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/source/model_tier.py",
+      "git_blob": "96093c2747d2dda69b3f2255cb84e656355c87ea",
+      "sha256": "507a8aa66015848873f1831dfaa7efabc619362c0dafb28238aa21a1ad8e2d7d"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/source/pool_status.py",
+      "git_blob": "02922043357d63b4bcfa3791899df27a5c42be12",
+      "sha256": "494bcc3a0115ba98160139bdc1452a8b8850b966844fcc2634fe0fdeffaa9111"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/_offline_boundary.py",
+      "git_blob": "e511ab65fe1cd30bf4d2addac6700ca43c3468da",
+      "sha256": "a89278e46aff2c71bffb2b8112eb55a09f6607c9c34812bd42f7fbebf146c9eb"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/test_application_auto_request.py",
+      "git_blob": "6e990aa3be10cea5dc6ee19c621bd0b3583de909",
+      "sha256": "3b1abc96ef9bb52f0dc784376cb51721b8b83f9a79d94df1985c0d1af05e06d6"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/test_application_cross_pool_auto.py",
+      "git_blob": "0d70a47906a23176d5eaed71a4575e925a500341",
+      "sha256": "361d536d97f34680466e218ab0a22f0e6eeef6a65b019c45eaa73ff5f0ba33f8"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/test_application_turn_admission.py",
+      "git_blob": "4cc542888358bf6b46a1e78c581af5ef2f7178aa",
+      "sha256": "df0581b2c27a4c42807989e295f92dc9e73664fcbcdcbb670fb3b204b37bdcc4"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/test_application_turn_pick.py",
+      "git_blob": "354a36a9b726e6b04426d046fdb41bcb88e7be13",
+      "sha256": "584937f1436f420489f8b39c91f0ab58b54dbb0e4f9d538b4401830b6dc3245c"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/test_application_turn_pick_go_composition.py",
+      "git_blob": "7de223f357ea1ad6689d03b08d9196e1837bcb8f",
+      "sha256": "74b912df5104cfaef4bdef492db1d2db25bf29306e5419cb7989687a9ea9bc96"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/test_application_turn_selection_admission.py",
+      "git_blob": "2e5443a0b55ef76e3c84c26708621143138af420",
+      "sha256": "1d29c241d4e83549a0a8cb617d500ccfd924a2ada18a516c722f0d6d39dbbc5c"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/test_go_application_handler_composition.py",
+      "git_blob": "13ebd6bcee5167926807d7ccdc63bcabed0cf1b1",
+      "sha256": "fcc6c0f16abd727ca97c6089f499d0de1b439032e8eb6afcf5bfa0176b1700a8"
+    }
+  ],
+  "provider_dependencies": [
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/byteplus_coding_plan.py",
+      "git_blob": "a57e31398b67047aec3e0dc4aa069de9552de505",
+      "sha256": "4a359b5a534524623c436d0ac801651084308c11c7c10525ae177f9da73fa6d4"
+    },
+    {
+      "path": "control_plane/experiential_plan_policy.py",
+      "git_blob": "75ac83a25c7808479b02688baaedbe6ac1ce3afc",
+      "sha256": "4c0927912ffb247d4ba4bda41143471e31322ea7c9bf4541573ba0f6ca013ae8"
+    }
+  ],
+  "preservation": {
+    "provider_only_picker_equals_selected37": true,
+    "provider_only_broker_changed_methods": [
+      "Broker._base_account_cap"
+    ],
+    "selected37_worker_functions_retained_in_latency_join": [
+      "hard_filter",
+      "_plan_active_directory",
+      "_plan_auto_pick",
+      "format_pick"
+    ],
+    "selected37_account_guard_retained_in_latency_join": true,
+    "application_authority_not_expanded_to_worker_plan_pools": true
+  },
+  "patch_sha256": "02dd1fd3174a7c76c3441993f781e8307b16c5f6c854cbf6c3cd54224ecd9919",
+  "patch_roundtrip": [
+    {
+      "flags": [
+        "--check"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "flags": [],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "release_cohort_complete": false,
+  "scope": "Public Broker/picker preservation and composed latency proposal only; existing owner must finish all remaining selected-source overlaps and exact component/manifest closure.",
+  "held_source_read_or_executed": false,
+  "native_selection_or_provider_effect": false
+}
