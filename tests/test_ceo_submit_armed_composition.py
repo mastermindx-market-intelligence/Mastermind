@@ -816,21 +816,25 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
 
 
 def _is_js_mkdir_mode_literal(line: str, token_text: str) -> bool:
-    """Admit only an exact JS mkdir(directory, {recursive:true, mode:octal}) statement.
+    """Admit only the reviewed, closed JS directory-permission statements.
 
-    Like the Python mkdir keyword-mode exemption, this is a permission, not a
-    UID/GID or service-port literal. The exact closed one-statement shape
-    prevents unrelated identities, extra properties, callees or operations
-    from being smuggled through the exemption.
+    Keep the existing recursive dir form and the publisher's nonrecursive
+    current/quarantineDir forms. These octal mode slots are permissions, not
+    UID/GID values. Operand shape, options and the complete single statement
+    remain closed; attached identities or other operations stay guarded.
     """
     if not re.fullmatch(r"0o[0-7]{3,4}", token_text):
         return False
     matched = re.fullmatch(
-        r"\s*await\s+mkdir\(\s*dir\s*,\s*\{\s*recursive\s*:\s*true"
-        r"\s*,\s*mode\s*:\s*(0o[0-7]{3,4})\s*\}\s*\)\s*;\s*",
+        r"\s*await\s+mkdir\(\s*(dir|current|quarantineDir)\s*,\s*\{\s*"
+        r"(recursive\s*:\s*true\s*,\s*)?"
+        r"mode\s*:\s*(0o[0-7]{3,4})\s*\}\s*\)\s*;\s*",
         line,
     )
-    return matched is not None and matched.group(1) == token_text
+    if matched is None or matched.group(3) != token_text:
+        return False
+    return (matched.group(1) == "dir" if matched.group(2)
+            else matched.group(1) in {"current", "quarantineDir"})
 
 
 def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
@@ -3367,3 +3371,26 @@ def test_d8_x_engagement_quoted_handler_cannot_reuse_geometry_pin():
     # source change still invalidates every frozen site and is rejected by D8.
     assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, source) == ()
     assert _d8_x_engagement_scan(source) == _X_ENGAGEMENT_GEOMETRY
+
+
+def test_d8_nonrecursive_publisher_mkdir_modes_keep_identity_operands_guarded():
+    """Exercise the reviewed mode-only statements in real identity context."""
+    safe = (
+        "await mkdir(current, {mode: 0o700});",
+        "await mkdir(quarantineDir, {mode: 0o700});",
+    )
+    for line in safe:
+        assert _scan_identity_source_lines(
+            [line], identity_aliases={"current", "quarantineDir"}) == [], line
+    guarded = (
+        "await mkdir(current, {mode: 448});",
+        "await mkdir(current.uid, {mode: 0o700});",
+        "await mkdir(current, {mode: 0o700, owner: 501});",
+        "await other(current, {mode: 0o700});",
+        "await mkdir(current, {mode: 0o700}); uid = 501;",
+        "await mkdir(current, {mode: 0o700}); extra = 502;",
+        "await mkdir(current, {recursive: true, mode: 0o700});",
+        "await mkdir(unreviewed, {mode: 0o700});",
+    )
+    for line in guarded:
+        assert _scan_identity_source_lines([line], path_identity=True), line

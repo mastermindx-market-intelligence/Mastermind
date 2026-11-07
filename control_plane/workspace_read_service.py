@@ -1431,12 +1431,23 @@ class WorkspaceReadService:
         try:
             if not _qualified(before, selected):
                 return plan_unavailable(selected, "SOURCE_UNAVAILABLE")
-            policy_before = CooCyclePolicy.load().policy_sha256
+            def policy_digest(version):
+                try:
+                    return CooCyclePolicy.load(version=version).policy_sha256
+                except Exception:
+                    return None
+            # The admitted version is known only after the single Runtime read.
+            # Capture both existing policy owners beforehand, then recheck only
+            # the selected version; an unavailable unrelated policy is no grant
+            # and must not invalidate an otherwise qualified legacy read.
+            policies_before = {version: policy_digest(version) for version in (1, 2)}
             bounded = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
             with bounded.observe_bounded_read() as observation:
                 snapshot = observation.read_admitted_plan_bounded(selected["root_job_id"])
             receipt = observation.receipt  # finalized only after physical close
-            policy_after = CooCyclePolicy.load().policy_sha256
+            admitted_policy = CooCyclePolicy.for_digest(snapshot.admission.get("policy_sha"))
+            policy_before = policies_before.get(admitted_policy.schema_version)
+            policy_after = admitted_policy.policy_sha256
             if (not isinstance(snapshot, BoundedAdmittedPlanSnapshot)
                     or not isinstance(snapshot.root_metadata, BoundedRoleResultRootMetadata)
                     or snapshot.root_job_id != selected["root_job_id"]

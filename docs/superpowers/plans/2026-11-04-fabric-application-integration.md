@@ -117,3 +117,19 @@ Current publication, check and original runtime-effect observations belong to th
 ### CI structure reconciliation
 
 The first dedicated-job attempt produced a successful hosted 14-test composition but violated the protected four-job parallel-CI structure. It was replaced with a required step inside existing shard zero, before full-suite reuse. The normal vendor-bootstrap fixture passes all 14 tests; the unchanged protected `validate_parallel_workflow` accepts the revised YAML. No CI policy, fast-scope classifier, full-suite membership or fan-in rule was weakened. Fresh hosted full-CI evidence remains required for the revised source.
+
+## H6 assigned recovery — 2026-11-07 C2
+
+The assigned receiver resumed [the existing H6 handoff](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6707238210) under protected source `4fb0d3825b5b4b4439e65e7382660112b7c2ef8c`. Root `fabric-application-integration-20261104-sol`, final Mastermind #2175 and paired Macro #10740 remain the owners. This plan's P1–P4 and original acceptance surfaces remain open.
+
+The original final M1 worktree is unreachable. Its current writer and retained Studio/native/J effects were not overwritten or replayed. An independently registered M2 workspace `h6-contract-compose-20261107-c2` holds a subordinate source qualification contribution, not another final composition carrier.
+
+Source convergence joined complete Hermes `a03e3672b1a144599488e33327e8762260ab9f75` with protected `4fb0d3825b5b4b4439e65e7382660112b7c2ef8c` and resolved 12 conflicts. The combined Studio successor retains historical mode qualification and the protected C4 publisher postimage checks. The native builder retains the complete APPLICATION cohort, both immutable admission histories, corruption tests and the pool → admission → APPLICATION inverse order. The protected two-member admission repair is already byte-identical in that contribution.
+
+On the actual combined source, 87 Studio successor tests and the composed migration fixture passed on M2 macOS. The native-stage log reached all 148 cases with no failure output; the truncated initial tool result did not preserve its exit code, so it is not represented as a complete exit receipt. Hosted Linux still needs its own migration result. Exact commands, log hashes, tested tree and limitations are in `review_evidence/fabric_application/h6-recovery-20261107-c2/qualification.json`.
+
+The original accepted cohort return was collected without rerun and its existing changes were preserved. A distinct bounded paid diagnostic request refused before launch with `UNCLASSIFIED_PRELAUNCH_REFUSAL`; its one controller diagnostic exited internally 75. No replay or native labor substitution followed.
+
+Next in this same assignment: consume the documentation-only Hermes `c821b2df717022e3f3b6abcebeabeb2eadeb35a6` successor; compose exact H2 `69ead1bdc1b7f6e1b62ef186d955d07cbd718dce`, H3 `ef95049fa2e1f8c981497c8a21b643fcbe59f25b` and publisher `b5d7ece3acac6569d60b428e63af535e81ddd417` deltas; close native generation and installer/preimage/rollback evidence; diagnose the Linux preflight predicate. H2 percentage views remain insufficient for H3 integer-meter admission. Publish/claim atomicity and retained liabilities remain required source joins. Preserve no-overage, workload and physical-account qualification for the first legitimate primary/tool vertical.
+
+No runtime install/select, APPLICATION enrollment, provider call, protected merge, formal approval or live acceptance is claimed. MISSION_COMPLETE=false. Continue useful source work while the original custody and release lanes remain blocked.

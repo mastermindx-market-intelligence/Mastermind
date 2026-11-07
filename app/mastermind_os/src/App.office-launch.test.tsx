@@ -24,7 +24,7 @@ const invoke = vi.fn().mockResolvedValue({
   transport: "UNCONFIGURED",
   state: "BUILT_NOT_PROVEN",
 });
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invoke(...args) }));
+vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => false, invoke: (...args: unknown[]) => invoke(...args) }));
 
 const DIRECTION = "Ship the bounded launch slice.";
 const MANIFEST = {

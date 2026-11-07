@@ -47,6 +47,7 @@ const invoke = vi.fn().mockResolvedValue({
   state: "BUILT_NOT_PROVEN",
 });
 vi.mock("@tauri-apps/api/core", () => ({
+  isTauri: () => false,
   invoke: (...args: unknown[]) => invoke(...args),
 }));
 const deferred = <T,>() => {
@@ -893,8 +894,9 @@ describe("installed authentication and permitted content", () => {
     ).toBeNull();
   });
 
-  it("consumes the fixed content callback and clears visible text on sign-out", async () => {
+  it.each([null, "USER_SIGNED_OUT"])("consumes the fixed content callback and clears visible text on sign-out (%s)", async reason => {
     let listener!: (state: import("./host").AuthState) => void;
+    const signIn = vi.fn(async () => {});
     const h = "a".repeat(64),
       readCurrentWindow = vi.fn(async () => ({
         schema: "mastermind.workspace.window_read_candidate.v1" as const,
@@ -945,11 +947,11 @@ describe("installed authentication and permitted content", () => {
           listener = fn;
           return () => {};
         },
-        signIn: async () => {},
+        signIn,
         signOut: async () => {
           listener({
             status: "signed_out",
-            reason: null,
+            reason,
             acquisition: false,
             content: false,
           });
@@ -965,6 +967,23 @@ describe("installed authentication and permitted content", () => {
     });
     await user.click(screen.getByRole("button", { name: "Sign out" }));
     expect(screen.queryByText("Permitted fixture response")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Welcome back." })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
+    expect(screen.queryByText("Sign-in could not complete. Please try again.")).toBeNull();
+    expect(signIn).not.toHaveBeenCalled();
+  });
+
+  it("retains real entry errors after a failed native sign-out", async () => {
+    window.MastermindMissionHost = {
+      auth: {
+        getState: () => ({ status: "error", reason: "KEYCHAIN_DELETE_FAILED", acquisition: false, content: false }),
+        subscribe: () => () => {},
+        signIn: async () => {},
+        signOut: async () => {},
+      },
+    };
+    render(<App />);
+    expect((await screen.findByRole("alert")).textContent).toContain("Sign-in could not complete. Please try again.");
   });
 
   it("associates a v2 window with a qualifying current plan child and stays unbound for v1", async () => {

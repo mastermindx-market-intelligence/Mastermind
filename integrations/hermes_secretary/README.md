@@ -1,6 +1,6 @@
 # Hermes secretary — WP5 shadow port
 
-**Status:** `SOURCE-ONLY / SHADOW / PRODUCTION_INERT`. This directory ports Grok Secretary's skills, routines, and standing rules onto the Hermes harness qualified in PR #1865. It does not install Hermes, post to Slack, submit Fabric, approve, merge, or arm the `mmsecretary` / `mmmeta` profiles. Those profiles stay `clarify`-only.
+**Status:** `SOURCE-ONLY / SHADOW / PRODUCTION_INERT`. This directory ports Grok Secretary's skills, routines, and standing rules onto the Hermes harness qualified in PR #1865. It does not install Hermes, post to Slack, submit Fabric, approve, merge, or arm the `mmsecretary` / `mmmeta` profiles. Those profiles stay `clarify`-only. Slack transport is the single-app Executive Relay bridge (roster unit `hermes-mmrelay`); `relay_mux.py` plans DM/channel routing and per-role attribution and never writes.
 
 Upstream pin: `NousResearch/hermes-agent@1c0cd667746d3395fe9e1b6c74f8f85952486f18`.
 

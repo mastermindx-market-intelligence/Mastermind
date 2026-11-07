@@ -175,3 +175,47 @@ it("disables explicit reads when no authenticated read owner is available", () =
   expect((screen.getByRole("button", { name: "Read project runs" }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByRole("button", { name: "Open run" })).toBeNull();
 });
+
+it("handles Escape at the reader focus handoff and cleans up after return or unmount", async () => {
+  const e = setup();
+  const view = render(<ProjectExecutionHistory workRef={work} owner={e.owner}/>);
+  const gestures: { unrelatedPrevented: boolean; readerRetained: boolean; escapePrevented: boolean }[] = [];
+  let escapeOnFocus = true;
+  const onFocus = (event: FocusEvent) => {
+    if (!escapeOnFocus || event.target !== screen.queryByRole("heading", { name: "Project team conversation" }) ||
+        !screen.queryByRole("button", { name: "Back to project runs" })) return;
+    const unrelated = new KeyboardEvent("keydown", { key: "x", bubbles: true, cancelable: true });
+    document.dispatchEvent(unrelated);
+    const readerRetained = !!screen.queryByRole("button", { name: "Back to project runs" });
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    document.dispatchEvent(escape);
+    gestures.push({ unrelatedPrevented: unrelated.defaultPrevented, readerRetained, escapePrevented: escape.defaultPrevented });
+  };
+  document.addEventListener("focusin", onFocus);
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "Read project runs" }));
+    await screen.findByRole("button", { name: "Open run" });
+    for (const reads of [1, 2]) {
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Open run" })); });
+      expect(gestures).toHaveLength(reads);
+      expect(gestures[reads - 1]).toEqual({ unrelatedPrevented: false, readerRetained: true, escapePrevented: true });
+      expect(screen.queryByRole("button", { name: "Back to project runs" })).toBeNull();
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open run" }));
+      expect(e.references).toHaveBeenCalledTimes(1); expect(e.read).toHaveBeenCalledTimes(reads);
+      const afterReturn = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+      document.dispatchEvent(afterReturn);
+      expect(afterReturn.defaultPrevented).toBe(false);
+    }
+    escapeOnFocus = false;
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Open run" })); });
+    expect(screen.getByRole("button", { name: "Back to project runs" })).toBeTruthy();
+    view.unmount();
+    const afterUnmount = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    document.dispatchEvent(afterUnmount);
+    expect(afterUnmount.defaultPrevented).toBe(false);
+    expect(e.references).toHaveBeenCalledTimes(1); expect(e.read).toHaveBeenCalledTimes(3);
+    expect(e.send).not.toHaveBeenCalled(); expect(e.target).not.toHaveBeenCalled();
+  } finally {
+    document.removeEventListener("focusin", onFocus);
+  }
+});
