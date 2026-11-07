@@ -69,7 +69,12 @@ _VERSION_RE = re.compile(r"(?P<version>\d+\.\d+\.\d+)\s+\(Claude Code\)")
 _MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_BINARY_BYTES = 1 << 29
 _MAX_TURNS = 64
-_MOVING_MODEL_ALIASES = frozenset({"haiku", "opus", "sonnet"})
+# These selectors can change the served model or even switch model families.
+# In particular, best can consume Fable quota and opusplan switches to Sonnet.
+# Native worker construction requires a reviewed exact model, never a selector.
+_MOVING_MODEL_ALIASES = frozenset(
+    {"best", "default", "fable", "haiku", "opus", "opusplan", "sonnet"}
+)
 _READ_TOOLS = ("Glob", "Grep", "Read")
 _WRITE_TOOLS = ("Edit", "Write")
 _TEST_TOOL = "Bash"
@@ -103,6 +108,8 @@ def _subprocess_sandbox_request() -> dict[str, Any]:
 _MAX_POLICY_GENERATION = 2**63 - 1
 _FORBIDDEN_TOOLS = (
     "Agent",
+    "AskUserQuestion",
+    "ExitPlanMode",
     "NotebookEdit",
     "Skill",
     "Task",
@@ -122,6 +129,8 @@ _MAX_PROCESS_CENSUS_BYTES = 64 * 1024
 _MAX_PROCESS_CENSUS_MEMBERS = 256
 _DARWIN_PROCESS_RUN_STATES = frozenset("IRSTUZ")
 _DARWIN_PROCESS_STATE_FLAGS = frozenset("+<>AELNSsVWX")
+# procps ps state= is one character; Darwin state= may include flags.
+_LINUX_PROCESS_RUN_STATES = frozenset("DIRSTtWXZ")
 _LAUNCH_QUARANTINE_CLEANUP_SECONDS = 0.2
 _LOCAL_TASK_SETTLEMENT_SECONDS = 0.2
 _DENIED_PROVIDER_ENV_KEYS = frozenset(
@@ -135,7 +144,13 @@ _DENIED_PROVIDER_ENV_KEYS = frozenset(
 _RAW_AUTH_ALLOWED_KEYS = frozenset(
     {
         "loggedIn", "authMethod", "apiProvider", "subscriptionType", "apiKeySource",
+        # Known provider PII is tolerated as INPUT only so it can be discarded.
+        # It is never returned or persisted by this module. The current native
+        # 2.1.275 wire exposes organization identity under `orgId`/`orgName`
+        # alongside the older `organization`/`organizationId` aliases; both
+        # shapes are accepted and discarded, never projected.
         "email", "organization", "accountId", "organizationId",
+        "orgId", "orgName", "analyticsDisabled", "projectsDirectory", "configDirectory",
     }
 )
 _SECRET_KEY_RE = re.compile(
@@ -507,6 +522,23 @@ def _validate_exact_model(exact_model: str) -> str:
     return exact_model
 
 
+def _validate_known_model_runtime(exact_model: str, version: str) -> None:
+    """Enforce documented native floors, without granting model admission.
+
+    Source: https://code.claude.com/docs/en/model-config (2026-09-27).
+    The caller must still attest the binary against its reviewed version set.
+    """
+    minimum = {
+        "claude-opus-5-5": (2, 1, 280),
+        "claude-fable-5-1": (2, 1, 257),
+    }.get(exact_model)
+    if minimum is not None and tuple(int(part) for part in version.split(".")) < minimum:
+        required = ".".join(str(part) for part in minimum)
+        raise ClaudeWorkerContractError(
+            f"{exact_model} requires Claude Code {required} or later"
+        )
+
+
 def _canonical_policy_generation(value: object) -> int:
     """Accept only a canonical bounded ``int`` policy generation; never coerce."""
 
@@ -650,6 +682,12 @@ def _tool_policy(
     spec: WorkerLaunchSpec,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     requested = _requested_capabilities(spec)
+    return _compile_tool_policy(requested, write_paths=(
+        _allowed_write_paths(spec) if "WRITE_BRANCH" in requested else ()))
+
+
+def _compile_tool_policy(requested, *, write_paths=()):
+    """Pure policy compiler; callers separately validate actual authority."""
     tools: list[str] = []
     preapproved: list[str] = []
     forbidden = list(_FORBIDDEN_TOOLS)
@@ -658,7 +696,7 @@ def _tool_policy(
         tools.extend(_READ_TOOLS)
         preapproved.extend(f"{tool}(./**)" for tool in _READ_TOOLS)
     if "WRITE_BRANCH" in requested:
-        paths = _allowed_write_paths(spec)
+        paths = write_paths
         if not paths:
             raise ClaudeWorkerContractError("unsupported or unmapped Claude capabilities")
         tools.extend(_WRITE_TOOLS)
@@ -989,7 +1027,9 @@ def _run_bounded_auth_status(argv: Sequence[str], *, timeout: float, env: Mappin
 def _process_group_member_pids(pgid: int) -> tuple[_ProcessGroupMember, ...]:
     """Observe group membership through the OS, never infer it from a PGID alone."""
 
-    exact_group_query = platform.system() == "Darwin"
+    observed_platform = platform.system()
+    exact_group_query = observed_platform == "Darwin"
+    linux_state_column = observed_platform == "Linux"
     argv = (
         ("/bin/ps", "-g", str(pgid), "-o", "pid=,pgid=,state=")
         if exact_group_query
@@ -1044,11 +1084,14 @@ def _process_group_member_pids(pgid: int) -> tuple[_ProcessGroupMember, ...]:
             if pid > 0 and observed_group == pgid:
                 if (
                     not state_token
-                    or state_token[0] not in _DARWIN_PROCESS_RUN_STATES
-                    or any(
-                        flag not in _DARWIN_PROCESS_STATE_FLAGS
-                        for flag in state_token[1:]
-                    )
+                    or (linux_state_column and (
+                        len(state_token) != 1 or state_token not in _LINUX_PROCESS_RUN_STATES
+                    ))
+                    or (not linux_state_column and (
+                        state_token[0] not in _DARWIN_PROCESS_RUN_STATES
+                        or any(flag not in _DARWIN_PROCESS_STATE_FLAGS
+                               for flag in state_token[1:])
+                    ))
                 ):
                     raise ValueError
                 members.append(_ProcessGroupMember(pid, state_token[0]))
@@ -1101,6 +1144,7 @@ class ClaudeCodeWorkerAdapter:
         binary = attest_claude_code_binary(
             claude_binary, allowed_versions=allowed_versions
         )
+        _validate_known_model_runtime(validated_model, binary.version)
         observation = _require_typed_observation(managed_policy_observer.observe())
         generation = _canonical_policy_generation(observation.generation)
         _validate_managed_observation(
@@ -1186,6 +1230,9 @@ class ClaudeCodeWorkerAdapter:
             "enabledMcpjsonServers": [],
             "permissions": {
                 "allow": list(preapproved),
+                # The worker is noninteractive by construction. dontAsk keeps
+                # the reviewed allowlist meaningful while converting every
+                # would-be permission prompt into a deterministic refusal.
                 "ask": [],
                 "defaultMode": "dontAsk",
                 "deny": deny,
@@ -1226,6 +1273,20 @@ class ClaudeCodeWorkerAdapter:
         if not isinstance(permissions, Mapping):
             raise ClaudeWorkerContractError(
                 "protected path file-tool deny fence drifted: mutation refuses"
+            )
+        # Autonomy is a launch invariant, not a remembered user preference.
+        # Hooks, ask rules, project MCP servers, or the bypass-disable setting
+        # could all reintroduce a human prompt or silently downgrade this worker.
+        if (
+            observed.get("disableAllHooks") is not True
+            or observed.get("enableAllProjectMcpServers") is not False
+            or observed.get("enabledMcpjsonServers") != []
+            or permissions.get("ask") != []
+            or permissions.get("defaultMode") != "dontAsk"
+            or permissions.get("disableBypassPermissionsMode") != "disable"
+        ):
+            raise ClaudeWorkerContractError(
+                "unattended permission fence drifted: mutation refuses"
             )
         allow = permissions.get("allow") or []
         if not isinstance(allow, list) or any(not isinstance(rule, str) for rule in allow):
@@ -1275,6 +1336,9 @@ class ClaudeCodeWorkerAdapter:
             "isolation_manifest_sha256": spec.isolation_manifest_sha256,
             "network_enabled": False,
             "safe_mode": True,
+            "permission_mode": "dontAsk",
+            "noninteractive": True,
+            "human_interaction_policy": "deny",
             "session_persistence": False,
             "mcp_servers": [],
             "shell_environment_policy": "include_only",
@@ -1472,6 +1536,8 @@ class ClaudeCodeWorkerAdapter:
                 "",
                 "auth",
                 "status",
+                # Explicit JSON; safe-mode diagnostics remain discard-only input.
+                "--json",
             ),
             timeout=timeout,
             env=_closed_auth_environment(),
@@ -1488,9 +1554,15 @@ class ClaudeCodeWorkerAdapter:
             or (exit_code == 0) is not logged_in
         ):
             raise ClaudeAuthStatusError("auth observation response is unsupported")
+        if "analyticsDisabled" in parsed and type(parsed["analyticsDisabled"]) is not bool:
+            raise ClaudeAuthStatusError("auth diagnostics response is unsupported")
+        for key in ("projectsDirectory", "configDirectory"):
+            if key in parsed and not isinstance(parsed[key], str):
+                raise ClaudeAuthStatusError("auth diagnostics response is unsupported")
         for key in (
             "email", "organization", "subscriptionType", "apiKeySource",
-            "accountId", "organizationId",
+            "accountId", "organizationId", "orgId", "orgName",
+            "projectsDirectory", "configDirectory",
         ):
             if key in parsed:
                 _validate_discard_only(parsed[key])
@@ -1909,6 +1981,7 @@ class ClaudeCodeWorkerAdapter:
                 binary=self.binary,
                 rendered_argv=_redacted_launch_argv(argv),
                 environment_keys=tuple(sorted(environment)),
+                isolation_manifest_sha256=spec.isolation_manifest_sha256,
                 permission_profile_sha256=self.permission_profile_digest(spec),
                 prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8", "strict")).hexdigest(),
                 expected_base_sha=spec.expected_base_sha,

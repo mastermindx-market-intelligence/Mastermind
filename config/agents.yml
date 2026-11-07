@@ -27,7 +27,9 @@ default_role: pm
 reasoning:
   max_turns: 1
   allowed_tools: [Read, Grep, Glob]   # plain reason() = read-only; research() arms more
-  permission_mode: default
+  # Headless Claude is permanently noninteractive: unapproved actions are denied,
+  # never escalated into a human permission prompt.
+  permission_mode: dontAsk
   add_dirs: [vendor/macro]            # expose the dashboard engine + data to Claude
   effort: high                        # opus/sonnet effort for deep reasoning
   research_max_turns: 8               # armed multi-turn research loop (MCP tools + web); 16→8 2026-07-25 cost ruling

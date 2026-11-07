@@ -37,6 +37,7 @@ def test_profile_is_claude_specific(profile):
     assert profile.native_helper.mechanism == "claude-code-agent-inherit-parent"
     assert profile.native_helper.default_model == "inherit-parent"
     assert profile.native_helper.default_reasoning_effort == "inherit"
+    assert profile.mcp_server_grants == ()
 
 
 def test_codex_native_helper_grant_is_refused():
@@ -116,7 +117,24 @@ def _roster():
     )
 
 
+def _mcp_projection_profile(profile):
+    """Synthetic MCP facts for syntax projection, never a sealed-worker grant.
+
+    The fixture's executable profile remains zero-MCP under the current registry.
+    Its unassigned reviewed MCP definition is used only for inert projection tests,
+    matching the existing opt-in conformance consumer's explicit replacement.
+    """
+    registry = ExecutionCapabilityRegistry.load(
+        Path("tests/fixtures/executive_agent_capabilities_claude_native_helper_v3.json"),
+        source_root=Path.cwd(),
+    )
+    return dataclasses.replace(
+        profile, mcp_server_grants=tuple(registry.mcp_servers.values())
+    )
+
+
 def _catalog_pair(profile):
+    profile = _mcp_projection_profile(profile)
     grants = []
     catalogs = {}
     for grant in profile.mcp_server_grants:
@@ -397,6 +415,7 @@ def test_duplicate_or_nondeterministic_roster_refuses(profile):
 
 
 def test_mcp_profile_requires_complete_observed_catalog(profile):
+    profile = _mcp_projection_profile(profile)
     with pytest.raises(
         ClaudeNativeHelperProjectionError,
         match="MCP projection is not closed",
@@ -408,3 +427,20 @@ def test_mcp_profile_requires_complete_observed_catalog(profile):
             execution_mode="noninteractive",
             supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
         )
+
+
+def test_sealed_worker_fixture_cannot_enroll_mcp_grants(tmp_path):
+    source = Path(
+        "tests/fixtures/executive_agent_capabilities_claude_native_helper_v3.json"
+    )
+    raw = json.loads(source.read_text(encoding="utf-8"))
+    raw["profiles"]["operator.claude.readonly.native-helper.v1"]["mcp_servers"] = [
+        "openai-developer-docs-v1"
+    ]
+    candidate = tmp_path / "capabilities.json"
+    candidate.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(
+        CapabilityPolicyError,
+        match="cannot grant MCP/plugins or resources to sealed worker",
+    ):
+        ExecutionCapabilityRegistry.load(candidate, source_root=Path.cwd())

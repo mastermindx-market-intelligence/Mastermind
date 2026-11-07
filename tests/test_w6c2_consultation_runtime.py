@@ -1924,6 +1924,35 @@ def _requester_answer_projection(
     )
 
 
+def test_requester_answer_wake_extension_preserves_projection_emitted_at(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import control_plane.wake_events as wake_events
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        RequesterAnswerWakeExtension,
+    )
+
+    runtime = _runtime_at(tmp_path)
+    consultations = _consultations(runtime, tmp_path)
+    projection = _requester_answer_projection(runtime, consultations, tmp_path)
+    repository = WakeLedgerRepository(runtime)
+    frozen_emitted_at = projection.obligation.emitted_at
+
+    monkeypatch.setattr(
+        wake_events,
+        "utc_now_iso",
+        lambda now=None: "2099-12-31T23:59:59Z",
+    )
+
+    extension = RequesterAnswerWakeExtension(
+        repository=repository,
+        projection=projection,
+    )
+
+    assert extension.obligation().emitted_at == frozen_emitted_at
+
+
 def test_requester_answer_wake_extension_binds_exact_projection_and_request(
     tmp_path: Path,
 ) -> None:

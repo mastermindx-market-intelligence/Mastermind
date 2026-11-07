@@ -369,6 +369,22 @@ def test_omitted_and_explicit_legacy_profile_keep_installed_reader(monkeypatch, 
         assert captured["ceo_ingress_armed"] is False
 
 
+def test_personal_read_profile_reuses_legacy_v1_installed_reader(monkeypatch, tmp_path):
+    from control_plane.executive_service import CEO_APP_READ_SCHEMA
+    from integrations.executive_mcp.installed import InstalledExecutiveReaders
+
+    module = _module()
+    raw = _app_raw(tmp_path)
+    raw["executive_mcp_profile"] = "personal_read"
+    captured = _capture_service(module, monkeypatch)
+    module._service_from_config(raw)
+    binding = captured["ceo_ingress_app_binding"]
+    assert type(binding.read_provider) is InstalledExecutiveReaders
+    assert binding.read_schema == CEO_APP_READ_SCHEMA
+    assert binding.read_provider is binding.grounding_provider
+    assert captured["ceo_ingress_armed"] is False
+
+
 def test_exact_v2_profile_selects_accepted_reader_and_inert_bind(monkeypatch, tmp_path):
     from control_plane.executive_service import CEO_WEB_CEO_V2_READ_SCHEMA
     from control_plane.fabric_job_view import ARM_KEYS
