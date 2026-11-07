@@ -1152,7 +1152,6 @@ class EnrolledRetainedReceiptTests(unittest.TestCase):
 
 
 
-
 class C4PublisherSuccessorTests(unittest.TestCase):
     """Real prior transactions and exclusive filesystem publication, inert runtime."""
     build = EnrolledRetainedReceiptTests.build

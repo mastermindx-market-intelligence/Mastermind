@@ -1,0 +1,458 @@
+........................................................................ [ 61%]
+..............F...............................                           [100%]
+=================================== FAILURES ===================================
+____________________ test_run_e3a_eval_hermetic_end_to_end _____________________
+tests/test_company_intelligence_event_compiler_e3a.py:813: in test_run_e3a_eval_hermetic_end_to_end
+    assert bindings.get(key), f"receipt missing binding {key}"
+E   AssertionError: receipt missing binding git_head
+E   assert ''
+E    +  where '' = <built-in method get of dict object at 0x108455ac0>('git_head')
+E    +    where <built-in method get of dict object at 0x108455ac0> = {'git_head': '', 'compiler_sha256': 'b9de46ca99caf4847ee5a4f38dd3f63263d50098980d83099dad66d39bd26156', 'system_prompt...4bab9dd46bae0cba00d0d1df2b09d', 'gold_sha256': 'fc6df84d2a8d0d96475ce697ba92ffdd071d5c283b8daee97c1b3381382fa42c', ...}.get
+----------------------------- Captured stdout call -----------------------------
+[e3_shadow_compiler] Attempting Qwen via earnings-worker override...
+[e3_shadow_compiler] Freezing comparator, then attempting llm_auth...
+[e3_shadow_compiler] Scoring against frozen gold via shadow validator...
+[e3_shadow_compiler] Eval receipt written: /private/tmp/pytest-of-chriswong/pytest-3006/test_run_e3a_eval_hermetic_end0/eval_receipt.json
+=============================== warnings summary ===============================
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/cacheprovider.py:469
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/cacheprovider.py:469: PytestCacheWarning: could not create cache path /dev/.pytest_cache/v/cache/nodeids: [Errno 1] Operation not permitted: '/dev/pytest-cache-files-kyxoijn4'
+    config.cache.set("cache/nodeids", sorted(self.cached_nodeids))
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/cacheprovider.py:423
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/cacheprovider.py:423: PytestCacheWarning: could not create cache path /dev/.pytest_cache/v/cache/lastfailed: [Errno 1] Operation not permitted: '/dev/pytest-cache-files-akp5sa1z'
+    config.cache.set("cache/lastfailed", self.lastfailed)
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-e8c66512-6ff8-4e6c-a47d-6df51566c06c/test_actual_archive_private_ru0/remote-data/lanes/support-releases/5e3b92c365bd335dce13cd639f216d732305735fd2c75425d915a7adef7d3478
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-e8c66512-6ff8-4e6c-a47d-6df51566c06c/test_actual_archive_private_ru0/remote-data/lanes/support-releases/5e3b92c365bd335dce13cd639f216d732305735fd2c75425d915a7adef7d3478'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-e8c66512-6ff8-4e6c-a47d-6df51566c06c/test_actual_archive_private_ru0/remote-data/lanes/support-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-e8c66512-6ff8-4e6c-a47d-6df51566c06c/test_actual_archive_private_ru0/remote-data/lanes/support-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-e8c66512-6ff8-4e6c-a47d-6df51566c06c/test_actual_archive_private_ru0/remote-data/lanes
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-e8c66512-6ff8-4e6c-a47d-6df51566c06c/test_actual_archive_private_ru0/remote-data/lanes'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-e8c66512-6ff8-4e6c-a47d-6df51566c06c/test_actual_archive_private_ru0/remote-data
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-e8c66512-6ff8-4e6c-a47d-6df51566c06c/test_actual_archive_private_ru0/remote-data'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-e8c66512-6ff8-4e6c-a47d-6df51566c06c/test_actual_archive_private_ru0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-e8c66512-6ff8-4e6c-a47d-6df51566c06c/test_actual_archive_private_ru0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-e8c66512-6ff8-4e6c-a47d-6df51566c06c
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-e8c66512-6ff8-4e6c-a47d-6df51566c06c'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner1/owned_installation/native-code-releases/b4c4d71e37928c02a5ada9ed877cc8d33f81c8b9fec895ffbdfc20ba74ce95a5
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner1/owned_installation/native-code-releases/b4c4d71e37928c02a5ada9ed877cc8d33f81c8b9fec895ffbdfc20ba74ce95a5'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner1/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner1/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner1/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner1/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner1
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner1'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner0/owned_installation/native-code-releases/dbb6b52af1e2a04277f324ce70f62db7b3b02f415ffa7732947881f287669fbc
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner0/owned_installation/native-code-releases/dbb6b52af1e2a04277f324ce70f62db7b3b02f415ffa7732947881f287669fbc'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_cancelled_modifying_owner0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_changed_selected_generati0/owned_installation/native-code-releases/861460cc37db3663163551b7d3c4f8acb3e9143f478d71c81d6e8405396e3bd6
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_changed_selected_generati0/owned_installation/native-code-releases/861460cc37db3663163551b7d3c4f8acb3e9143f478d71c81d6e8405396e3bd6'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_changed_selected_generati0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_changed_selected_generati0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_changed_selected_generati0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_changed_selected_generati0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_changed_selected_generati0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_changed_selected_generati0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_operator_uses_real_select0/owned_installation/native-code-releases/678afa9987e99dbe100e3f921b221a338e59ea68b4f2256fcc2df938835ee28b
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_operator_uses_real_select0/owned_installation/native-code-releases/678afa9987e99dbe100e3f921b221a338e59ea68b4f2256fcc2df938835ee28b'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_operator_uses_real_select0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_operator_uses_real_select0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_operator_uses_real_select0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_operator_uses_real_select0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_operator_uses_real_select0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_operator_uses_real_select0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_lost_owner_reply_is_unkno0/owned_installation/native-code-releases/edf3cc2d1cba547d83ba9fe890dbd0620bf443d13c67f46a0b361eb5db55d29b
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_lost_owner_reply_is_unkno0/owned_installation/native-code-releases/edf3cc2d1cba547d83ba9fe890dbd0620bf443d13c67f46a0b361eb5db55d29b'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_lost_owner_reply_is_unkno0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_lost_owner_reply_is_unkno0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_lost_owner_reply_is_unkno0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_lost_owner_reply_is_unkno0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_lost_owner_reply_is_unkno0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_lost_owner_reply_is_unkno0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_older_installed_owner_is_0/owned_installation/native-code-releases/2837c00bf117e0c1423430e782f58e21cc7c0f80e91390f3e257b825d23d84a7
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_older_installed_owner_is_0/owned_installation/native-code-releases/2837c00bf117e0c1423430e782f58e21cc7c0f80e91390f3e257b825d23d84a7'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_older_installed_owner_is_0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_older_installed_owner_is_0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_older_installed_owner_is_0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_older_installed_owner_is_0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_older_installed_owner_is_0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956/test_older_installed_owner_is_0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-fa9dcdd2-5c01-4ec7-a885-722616265956'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner1/owned_installation/native-code-releases/e1b3ecf6a8885d8987384dc8a9ae41468f3548d824078ba522491640a1c18123
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner1/owned_installation/native-code-releases/e1b3ecf6a8885d8987384dc8a9ae41468f3548d824078ba522491640a1c18123'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner1/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner1/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner1/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner1/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner1
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner1'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner0/owned_installation/native-code-releases/7c11e706f9ffd915959aa9bc0c480ef3c1719a0b8f03855be83989be0a79f3e7
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner0/owned_installation/native-code-releases/7c11e706f9ffd915959aa9bc0c480ef3c1719a0b8f03855be83989be0a79f3e7'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_cancelled_modifying_owner0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_changed_selected_generati0/owned_installation/native-code-releases/9f8872ec0fd54b50358630cca4094b1a4fc09ceb4c85449a965ea292e4c0aa69
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_changed_selected_generati0/owned_installation/native-code-releases/9f8872ec0fd54b50358630cca4094b1a4fc09ceb4c85449a965ea292e4c0aa69'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_changed_selected_generati0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_changed_selected_generati0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_changed_selected_generati0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_changed_selected_generati0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_changed_selected_generati0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_changed_selected_generati0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_operator_uses_real_select0/owned_installation/native-code-releases/78b24bc5f8d9249caf10043d5517b10196acae724b46eedd4c14b31642a58004
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_operator_uses_real_select0/owned_installation/native-code-releases/78b24bc5f8d9249caf10043d5517b10196acae724b46eedd4c14b31642a58004'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_operator_uses_real_select0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_operator_uses_real_select0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_operator_uses_real_select0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_operator_uses_real_select0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_operator_uses_real_select0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_operator_uses_real_select0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_lost_owner_reply_is_unkno0/owned_installation/native-code-releases/7f90ab80ba57f296b70b218fef68a325e487741079e812d0a841fb97e1c752e9
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_lost_owner_reply_is_unkno0/owned_installation/native-code-releases/7f90ab80ba57f296b70b218fef68a325e487741079e812d0a841fb97e1c752e9'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_lost_owner_reply_is_unkno0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_lost_owner_reply_is_unkno0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_lost_owner_reply_is_unkno0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_lost_owner_reply_is_unkno0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_lost_owner_reply_is_unkno0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_lost_owner_reply_is_unkno0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_older_installed_owner_is_0/owned_installation/native-code-releases/162ee31d02d0e03878450b84938371c31602846c4babce37a68134e217c03c38
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_older_installed_owner_is_0/owned_installation/native-code-releases/162ee31d02d0e03878450b84938371c31602846c4babce37a68134e217c03c38'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_older_installed_owner_is_0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_older_installed_owner_is_0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_older_installed_owner_is_0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_older_installed_owner_is_0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_older_installed_owner_is_0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81/test_older_installed_owner_is_0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-85de9055-5431-4e51-94d2-45148c59af81'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner1/owned_installation/native-code-releases/c2e2e2f07ad07aed5bdf67f020354329bfda4a00809d735acfc283d7fb7441da
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner1/owned_installation/native-code-releases/c2e2e2f07ad07aed5bdf67f020354329bfda4a00809d735acfc283d7fb7441da'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner1/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner1/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner1/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner1/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner1
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner1'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner0/owned_installation/native-code-releases/a9b9210ebf6c8a2dea290a92606f0af270026f54ea4f9e196b9832272e92057a
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner0/owned_installation/native-code-releases/a9b9210ebf6c8a2dea290a92606f0af270026f54ea4f9e196b9832272e92057a'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_cancelled_modifying_owner0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_changed_selected_generati0/owned_installation/native-code-releases/3581e430904a88bdf708ede95f2ea520566a4ae7fdc9d248c3076c04f90cc66b
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_changed_selected_generati0/owned_installation/native-code-releases/3581e430904a88bdf708ede95f2ea520566a4ae7fdc9d248c3076c04f90cc66b'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_changed_selected_generati0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_changed_selected_generati0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_changed_selected_generati0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_changed_selected_generati0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_changed_selected_generati0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_changed_selected_generati0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_operator_uses_real_select0/owned_installation/native-code-releases/87de10791576d165a13ed26ce915e7dafc84ac27b8b419367a6afcaeda09a2f5
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_operator_uses_real_select0/owned_installation/native-code-releases/87de10791576d165a13ed26ce915e7dafc84ac27b8b419367a6afcaeda09a2f5'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_operator_uses_real_select0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_operator_uses_real_select0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_operator_uses_real_select0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_operator_uses_real_select0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_operator_uses_real_select0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_operator_uses_real_select0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_lost_owner_reply_is_unkno0/owned_installation/native-code-releases/f8b52f42b43a7226c890bce4f16ff9f436e51b5c65fd3607758e283bdf3a04dc
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_lost_owner_reply_is_unkno0/owned_installation/native-code-releases/f8b52f42b43a7226c890bce4f16ff9f436e51b5c65fd3607758e283bdf3a04dc'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_lost_owner_reply_is_unkno0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_lost_owner_reply_is_unkno0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_lost_owner_reply_is_unkno0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_lost_owner_reply_is_unkno0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_lost_owner_reply_is_unkno0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_lost_owner_reply_is_unkno0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_older_installed_owner_is_0/owned_installation/native-code-releases/d0fc07b0a3462dfe4d7983f15e934410c953d836de84b5cc0f71d1b3b838826e
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_older_installed_owner_is_0/owned_installation/native-code-releases/d0fc07b0a3462dfe4d7983f15e934410c953d836de84b5cc0f71d1b3b838826e'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_older_installed_owner_is_0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_older_installed_owner_is_0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_older_installed_owner_is_0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_older_installed_owner_is_0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_older_installed_owner_is_0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a/test_older_installed_owner_is_0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-1294160b-b416-452d-b856-fd91180adb9a'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-aa4dd2b6-529d-42f9-94e3-9175ed159329/test_operator_uses_real_select0/owned_installation/native-code-releases/3a70a166d0997187d83d394246f674523de36e3a0e20986a6c9b144478497468
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-aa4dd2b6-529d-42f9-94e3-9175ed159329/test_operator_uses_real_select0/owned_installation/native-code-releases/3a70a166d0997187d83d394246f674523de36e3a0e20986a6c9b144478497468'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-aa4dd2b6-529d-42f9-94e3-9175ed159329/test_operator_uses_real_select0/owned_installation/native-code-releases
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-aa4dd2b6-529d-42f9-94e3-9175ed159329/test_operator_uses_real_select0/owned_installation/native-code-releases'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-aa4dd2b6-529d-42f9-94e3-9175ed159329/test_operator_uses_real_select0/owned_installation
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-aa4dd2b6-529d-42f9-94e3-9175ed159329/test_operator_uses_real_select0/owned_installation'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-aa4dd2b6-529d-42f9-94e3-9175ed159329/test_operator_uses_real_select0
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-aa4dd2b6-529d-42f9-94e3-9175ed159329/test_operator_uses_real_select0'
+    warnings.warn(
+
+../../../Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95
+  /Users/chriswong/Library/Python/3.14/lib/python/site-packages/_pytest/pathlib.py:95: PytestWarning: (rm_rf) error removing /private/tmp/pytest-of-chriswong/garbage-aa4dd2b6-529d-42f9-94e3-9175ed159329
+  <class 'OSError'>: [Errno 66] Directory not empty: '/private/tmp/pytest-of-chriswong/garbage-aa4dd2b6-529d-42f9-94e3-9175ed159329'
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED ../../../dev::test_run_e3a_eval_hermetic_end_to_end - AssertionError: ...
+1 failed, 117 passed, 88 warnings in 17.89s

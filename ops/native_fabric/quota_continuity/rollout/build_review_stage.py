@@ -8,6 +8,7 @@ No directory scan decides what to transport; this fixed list is the inventory.
 import argparse
 import hashlib
 import json
+import re
 import io
 import zipfile
 import subprocess
@@ -480,7 +481,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
     """
     actual_manifest = manifest
     manifest = normalize_application_carrier_base_manifest(
-        before_host_pull_integrity(before_provider_application(manifest)))
+        before_provider_application(before_quota_reset_recovery(manifest)))
     expected = {"pool"} | {"ext/" + name for name in BASE_FILES | ADDITIONS}
     previous_expected = expected - {"ext/" + name for name in GO_ORIGINAL_ARTIFACT_ADDITIONS}
     prior_expected = previous_expected - {"ext/" + name for name in GO_PARTICIPANT_ADDITIONS}
@@ -647,6 +648,181 @@ def compose_application_http_stage(root, output, manifest, files):
             "installed_preimage_sha256": None, "bytes": len(raw)}
 
 
+
+# Optional H2 successor: one closed four-member cohort over the complete
+# APPLICATION parent. Historical/default generations retain their exact bytes.
+QUOTA_RESET_PARENT_SHA256 = '59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a'
+# The former whole parent remains a historical inverse, never a new build base.
+QUOTA_RESET_REVIEWED_PARENT_SHA256S = frozenset({'c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459', QUOTA_RESET_PARENT_SHA256, 'bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e', '59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a'})
+QUOTA_RESET_PREIMAGES = {
+    "quota_remote.py": "3c1484864848b5cdf4daeecde092f7c407ab313a9f0d94a7f0fd204dbcf813b8",
+    "quota_circuit.py": "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303",
+    "lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+    "pick.py": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
+}
+QUOTA_RESET_DIGESTS = {
+    "quota_remote.py": "91c89d4197d791a078e804db9c591c4cddc197f1e35f54f46fba95fe7b27a9a5",
+    "quota_circuit.py": "93d85e50c3a0641c3b8709c6ee330848d616a812e594cf735c716c634560c563",
+    "lease_broker.py": "100d6bff060ded3e8606d94cd9a3453b062bf2063f844bbb98b4d709e604d85e",
+    "pick.py": "38b843380913be38839fc7f604d5f490c8914dc773f7a4556368db80bb1d6f8a",
+}
+QUOTA_RESET_PATCHES = {
+    "lease_broker.py": "1ec36d5b9da4af0e54980eab8608260ad2bff60d981d59ae7e351cbe2c7b775f",
+    "pick.py": "dc8f3a48b32972a82067ee20b646a195ae6fa143a715adfed07bac7c6114c590",
+}
+
+
+def _quota_reset_file(path, expected):
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("quota reset source must be a regular file")
+    raw = path.read_bytes()
+    if sha(raw) != expected:
+        raise ValueError("quota reset source digest differs")
+    return raw
+
+
+def _quota_reset_patch(original, patch, name):
+    """Apply the pinned patch to its pinned whole preimage, without fuzz.
+
+    Upstream hunk line numbers precede APPLICATION additions. Every complete
+    old context must occur exactly once in order; no omitted context, guessed
+    offset, subprocess, mutable Git checkout or replacement input is accepted.
+    The caller also authenticates the exact resulting whole-file postimage.
+    """
+    lines = patch.splitlines(keepends=True)
+    if lines[:2] != [("--- a/ext/" + name + "\n").encode(),
+                     ("+++ b/ext/" + name + "\n").encode()]:
+        raise ValueError("quota reset patch paths differ")
+    hunks, current = [], None
+    for line in lines[2:]:
+        if line.startswith(b"@@ "):
+            header = re.fullmatch(
+                rb"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@[^\n]*\n?", line)
+            if header is None:
+                raise ValueError("quota reset patch header invalid")
+            current = (int(header[2] or b"1"), int(header[4] or b"1"), [])
+            hunks.append(current)
+        elif current is None or line[:1] not in (b" ", b"+", b"-"):
+            raise ValueError("quota reset patch body invalid")
+        else:
+            current[2].append(line)
+    if not hunks:
+        raise ValueError("quota reset patch is empty")
+    cursor, output = 0, []
+    for old_count, new_count, rows in hunks:
+        old_rows = [line[1:] for line in rows if line[:1] in (b" ", b"-")]
+        new_rows = [line[1:] for line in rows if line[:1] in (b" ", b"+")]
+        if not old_rows or len(old_rows) != old_count or len(new_rows) != new_count:
+            raise ValueError("quota reset patch hunk counts differ")
+        before, after = b"".join(old_rows), b"".join(new_rows)
+        position = original.find(before, cursor)
+        if position < 0 or original.find(before, position + 1) >= 0:
+            raise ValueError("quota reset patch exact context absent or ambiguous")
+        output.extend((original[cursor:position], after))
+        cursor = position + len(before)
+    output.append(original[cursor:])
+    return b"".join(output)
+
+
+def quota_reset_sources(root):
+    """Capture all four reviewed successors and their exact source provenance."""
+    root = Path(root)
+    overlay = root.parent / "grok47/quota_billing"
+    captured = {}
+    for name, preimage in QUOTA_RESET_PREIMAGES.items():
+        original = _quota_reset_file(root / "candidate" / name, preimage)
+        if name in QUOTA_RESET_PATCHES:
+            patch_source = "../grok47/quota_billing/" + name + ".patch"
+            patch = _quota_reset_file(overlay / (name + ".patch"), QUOTA_RESET_PATCHES[name])
+            raw = _quota_reset_patch(original, patch, name)
+            provenance = {
+                "schema": "native-exact-forward-patch.v1",
+                "preimage_sha256": preimage,
+                "patch_source": patch_source,
+                "patch_sha256": QUOTA_RESET_PATCHES[name],
+            }
+            source = "candidate/" + name
+        else:
+            source = "../grok47/quota_billing/" + name
+            raw = _quota_reset_file(overlay / name, QUOTA_RESET_DIGESTS[name])
+            provenance = {"schema": "native-exact-replacement.v1",
+                          "preimage_sha256": preimage}
+        if sha(raw) != QUOTA_RESET_DIGESTS[name]:
+            raise ValueError("quota reset postimage differs")
+        captured[name] = (raw, source, provenance)
+    return captured
+
+
+def before_quota_reset_recovery(manifest):
+    """Reverse only the complete H2 successor of the exact APPLICATION parent."""
+    if type(manifest) is not dict:
+        return manifest
+    if not any(manifest.get("ext/" + name) == digest
+               for name, digest in QUOTA_RESET_DIGESTS.items()):
+        return dict(manifest)
+    if any(manifest.get("ext/" + name) != digest
+           for name, digest in QUOTA_RESET_DIGESTS.items()):
+        raise ValueError("quota reset cohort incomplete or foreign")
+    previous = dict(manifest)
+    previous.update({"ext/" + name: digest for name, digest in QUOTA_RESET_PREIMAGES.items()})
+    if sha((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) not in QUOTA_RESET_REVIEWED_PARENT_SHA256S:
+        raise ValueError("quota reset parent closure differs")
+    return previous
+
+
+def go_application_dependencies(root, *, staged_manifest=None):
+    """The builder and installer authenticate the same actual dependency bytes."""
+    root = Path(root)
+    quota = None
+    if staged_manifest is not None:
+        base = dict(staged_manifest)
+        pair = {"ext/native_go_entry.py", "ext/go_application_handler.py"}
+        present_pair, present_http = pair & set(base), HTTP_GENERATION_MEMBERS & set(base)
+        if ((present_pair and present_pair != pair)
+                or (present_http and (present_http != HTTP_GENERATION_MEMBERS or present_pair != pair))):
+            raise ValueError("quota reset Go or HTTP closure incomplete")
+        for name in present_pair | present_http:
+            del base[name]
+        parent = before_quota_reset_recovery(base)
+        if parent != base:
+            quota = quota_reset_sources(root)
+    dependencies = {}
+    for name in GO_APPLICATION_DEPENDENCIES:
+        if quota is not None and name in quota:
+            raw, source, provenance = quota[name]
+            dependencies[name] = {"sha256": sha(raw), "bytes": len(raw),
+                                  "source": source, "composition": provenance}
+        else:
+            path = root / "candidate" / name
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("external Go application dependency unavailable")
+            raw = path.read_bytes()
+            dependencies[name] = {"sha256": sha(raw), "bytes": len(raw), "source": "candidate/" + name}
+    return dependencies
+
+
+def compose_quota_reset_stage(root, output, manifest, files):
+    """Replace four existing members only after authenticating their whole parent."""
+    if sha((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode()) != QUOTA_RESET_PARENT_SHA256:
+        raise ValueError("quota reset requires exact complete APPLICATION parent")
+    captured = quota_reset_sources(root)
+    targets = {}
+    for name, preimage in QUOTA_RESET_PREIMAGES.items():
+        relative = "ext/" + name
+        target = Path(output) / "native-code-stage" / relative
+        if manifest.get(relative) != preimage:
+            raise ValueError("quota reset staged preimage differs")
+        _quota_reset_file(target, preimage)
+        targets[name] = target
+    for name, (raw, source, provenance) in captured.items():
+        relative = "ext/" + name
+        targets[name].write_bytes(raw)
+        manifest[relative] = sha(raw)
+        files[relative] = {**files[relative], "source": source, "sha256": sha(raw),
+                           "bytes": len(raw), "composition": provenance}
+    before_quota_reset_recovery(manifest)
+
+
 def stage_external_go_component(root, output, stable_ext, *, staged_manifest=None):
     """One closed external-owner bundle; never installs or changes a generation.
 
@@ -667,13 +843,7 @@ def stage_external_go_component(root, output, stable_ext, *, staged_manifest=Non
         raw[name] = path.read_bytes()
     if sha(raw["source-go_shim.py"]) != GO_INSTALLED_PREIMAGE:
         raise ValueError("external Go installed preimage mismatch")
-    dependencies = {}
-    for name in GO_APPLICATION_DEPENDENCIES:
-        path = root / "candidate" / name
-        if path.is_symlink() or not path.is_file():
-            raise ValueError("external Go application dependency unavailable")
-        data = path.read_bytes()
-        dependencies[name] = {"sha256": sha(data), "bytes": len(data), "source": "candidate/" + name}
+    dependencies = go_application_dependencies(root, staged_manifest=staged_manifest)
     staged_dependencies = None
     if staged_manifest is not None:
         staged_dependencies = go_staged_dependency_hashes(staged_manifest,
@@ -915,6 +1085,7 @@ def normalize_application_carrier_base_manifest(manifest):
         return manifest
     # Qualify the exact repaired parent before the existing APPLICATION inverse.
     # main() and Go validation share this ordering and retain actual output hashes.
+    manifest = before_host_pull_integrity(before_quota_reset_recovery(manifest))
     if manifest.get("ext/support_bundle.py") == APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]:
         manifest = before_application_pool_composition(manifest)
     else:
@@ -950,6 +1121,8 @@ def main():
                         help='seal fixed HTTP transport metadata; requires Go ingress and grants no application permission')
     parser.add_argument('--include-provider-plan-application', action='store_true',
                         help='preserve the exact selected provider plan in the reviewed APPLICATION source')
+    parser.add_argument('--include-quota-reset-recovery', action='store_true',
+                        help='compose the exact four-member H2 successor; does not qualify accounts or select a runtime')
     args = parser.parse_args()
     if args.include_application_http and not args.include_go_application:
         parser.error('--include-application-http requires --include-go-application')
@@ -1044,9 +1217,12 @@ def main():
             if (name not in {'LICENSE','METADATA'} and not (name.startswith('yaml/') and name.endswith('.py'))
                     or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
                 raise ValueError('qualified pure YAML member differs')
-    normalize_application_carrier_base_manifest(before_host_pull_integrity(manifest))
     if args.include_provider_plan_application:
         compose_provider_application_stage(root, output, manifest, files)
+    if args.include_quota_reset_recovery:
+        compose_quota_reset_stage(root, output, manifest, files)
+    normalize_application_carrier_base_manifest(
+        before_provider_application(before_quota_reset_recovery(manifest)))
     component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
     if args.include_go_application:
         compose_go_stage(root, output, manifest, files, component)

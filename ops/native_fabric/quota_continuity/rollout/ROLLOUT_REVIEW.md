@@ -995,3 +995,25 @@ composition. Source qualification and a protected merge do not authorize an
 installed generation, CURRENT change, launchctl action, H1 admission, provider
 or worker start. Existing APPLICATION #2175 composition and enrollment
 constraints remain separate; no installed generation was replaced or selected.
+
+### H2 quota-reset successor over current sparse parent — 2026-11-07
+
+The optional --include-quota-reset-recovery flag uses the existing builder and
+installer to replace the complete four-member quota reader/circuit/broker/picker
+cohort. New output requires exact whole parent
+bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e.
+The earlier c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459
+parent remains a separately pinned historical inverse; it cannot authorize new
+emission against current source. Partial or foreign members and any other whole
+parent refuse. All four H2 preimages and postimages are unchanged by this join.
+
+Validation reverses H2 first, then the existing APPLICATION pool/exact-scoped,
+sparse-preflight, admission-integrity and APPLICATION carrier cohorts in order.
+Actual emitted H2 dependency bytes remain authoritative for the Go component;
+the inverse view is not substituted into its installed-source receipt. The
+native entry preloads the existing quota_remote and glm_keys modules through its
+original authenticated loader, preserving foreign-module rejection and stable
+cache ownership on repeated inspection. Source qualification and regenerated
+artifact identities are recorded under review_evidence/fabric_application/
+h6-recovery-20261107-c2. No live installation, selection or account admission is
+implied by this optional artifact. H3 optimization remains excluded.
