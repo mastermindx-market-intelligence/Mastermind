@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 import inspect
 import io
 import json
@@ -27,6 +28,7 @@ import httpx
 import pytest
 
 from control_plane import surface_bindings as sb
+from integrations.chairman_surfaces import chatgpt
 from integrations.chairman_surfaces import mas115_multilogin_port_policy as port_policy
 from integrations.chairman_surfaces import nonseat_canary as core
 from integrations.chairman_surfaces import nonseat_canary_vendors as vendors
@@ -92,11 +94,16 @@ def _environment_loader_for(provision: dict, *, running=False):
     def _load():
         return {
             "multilogin": [{
+                "workspace_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
                 "profile_id": provision["profile_id"],
                 "folder_id": provision["folder_id"],
                 "running": running,
             }],
-            "gologin": [],
+            "gologin": [
+                {"profile_id": "111111111111111111111111", "running": True},
+                {"profile_id": "222222222222222222222222", "running": True},
+                {"profile_id": "333333333333333333333333", "running": True},
+            ],
         }
     return _load
 
@@ -1588,7 +1595,7 @@ def test_vendor_configure_operation_emits_only_redacted_configuration_receipt(tm
         profile_id=provision["profile_id"], folder_id=provision["folder_id"],
     )
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         [
             "configure-canary-port", "--vendor", "multilogin",
             "--provision-path", str(path),
@@ -1617,7 +1624,7 @@ def test_vendor_run_refuses_default_policy_without_update_or_start(tmp_path):
         profile_id=provision["profile_id"], folder_id=provision["folder_id"],
     )
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["run", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
@@ -1658,7 +1665,7 @@ def test_vendor_run_requires_exact_preflight_and_postflight_without_update(tmp_p
     monkeypatch.setattr(vendors._core, "run_matrix", fake_matrix)
     monkeypatch.setattr(vendors, "live_process_probe", lambda provision: lambda: {})
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["run", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
@@ -1700,7 +1707,7 @@ def test_vendor_run_postflight_drift_vetoes_matrix_pass(tmp_path, monkeypatch):
     monkeypatch.setattr(vendors._core, "run_matrix", fake_matrix)
     monkeypatch.setattr(vendors, "live_process_probe", lambda provision: lambda: {})
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["run", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
@@ -2032,9 +2039,10 @@ def test_hostile_helper_vendor_provision_mismatch_refuses_before_keychain_or_cli
             raise AssertionError("client must never be constructed on a vendor mismatch")
 
     buf = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["--vendor", "multilogin", "--provision-path", str(path)],
         stdout=buf, bindings_loader=_no_collision_loader,
+        environment_loader=_environment_loader_for(_valid_provision("multilogin")),
         credential_stream_factory=_boom_credential_factory,
         client_factory=_BoomClient, now=_NOW,
     )
@@ -2168,9 +2176,10 @@ def test_hostile_bindings_unavailable_prevents_keychain_http_origin_and_launch(t
         raise AssertionError("binding refusal must precede origin/browser construction")
 
     buf = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["--vendor", "multilogin", "--provision-path", str(path)],
         stdout=buf, bindings_loader=lambda: (None, []),
+        environment_loader=_environment_loader_for(_valid_provision("multilogin")),
         credential_stream_factory=_credential_stream_factory,
         client_factory=_client_factory, origin_factory=_origin_factory, now=_NOW,
     )
@@ -2179,18 +2188,22 @@ def test_hostile_bindings_unavailable_prevents_keychain_http_origin_and_launch(t
     assert calls == {"keychain_spawn": 0, "client": 0, "origin": 0}
 
 
-def test_non_mimic_provision_refuses_before_local_census_origin_keychain_or_http(tmp_path):
-    """Catches deferring the approved Mimic gate until after secret access."""
+def test_non_mimic_provision_refuses_after_census_but_before_origin_keychain_or_http(tmp_path):
+    """The trusted census is acquired first, while the Mimic gate still precedes secrets."""
     provision = _valid_provision("multilogin", browser_type="stealthfox")
     path = _write_provision(tmp_path, provision)
     calls = []
+    def _environment():
+        calls.append("environment")
+        return _environment_loader_for(provision)()
+
     boom = lambda *args, **kwargs: calls.append("unexpected")
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["configure-canary-port", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
-        environment_loader=boom,
+        environment_loader=_environment,
         origin_factory=boom,
         credential_stream_factory=boom,
         client_factory=boom,
@@ -2198,14 +2211,14 @@ def test_non_mimic_provision_refuses_before_local_census_origin_keychain_or_http
     )
     assert code == 2
     assert json.loads(out.getvalue())["code"] == "UNSUPPORTED_PORT_STATE"
-    assert calls == []
+    assert calls == ["environment"]
 
 
 @pytest.mark.parametrize(
     ("environment", "expected"),
     (
-        ({"multilogin": [], "gologin": []}, "PROFILE_NOT_FOUND"),
-        ("running", "BUSY_PROFILE"),
+        ("missing", "PROFILE_NOT_FOUND"),
+        ("running", "BINDINGS_UNAVAILABLE"),
     ),
 )
 def test_local_disposable_census_refuses_before_origin_keychain_or_http(
@@ -2218,14 +2231,16 @@ def test_local_disposable_census_refuses_before_origin_keychain_or_http(
     if environment == "running":
         environment_loader = _environment_loader_for(provision, running=True)
     else:
-        environment_loader = lambda: environment
+        current = _realm1_environment(provision)
+        current["multilogin"].clear()
+        environment_loader = lambda: current
 
     def unexpected(*args, **kwargs):
         calls.append("unexpected")
         raise AssertionError("local refusal must precede origin, Keychain, and HTTP")
 
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["run", "--vendor", "multilogin", "--provision-path", str(path)],
         stdout=out,
         bindings_loader=_no_collision_loader,
@@ -2251,7 +2266,7 @@ def test_busy_fixed_port_refuses_before_keychain_or_http(tmp_path):
         raise OSError("synthetic busy port")
 
     buf = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
         ["--vendor", "multilogin", "--provision-path", str(path)],
         stdout=buf,
         bindings_loader=_no_collision_loader,
@@ -2972,9 +2987,9 @@ def _authorized_peer_main(argv, **kwargs):
         kwargs.setdefault("peer_intent_path", test_parent / "peer-state.json")
         kwargs.setdefault("peer_provision_path", test_parent / "peer-profile.json")
     if operation == "create-peer-profile":
-        return vendors.run_coordinator_peer_create(rest, **kwargs)
+        return vendors._run_coordinator_peer_create(rest, **kwargs)  # noqa: SLF001
     if operation == "rollback-peer-profile":
-        return vendors.run_coordinator_peer_rollback(rest, **kwargs)
+        return vendors._run_coordinator_peer_rollback(rest, **kwargs)  # noqa: SLF001
     raise AssertionError(f"not a peer operation: {operation}")
 
 
@@ -3086,7 +3101,8 @@ def test_peer_d2_running_anchor_profile_refuses_before_keychain_or_http(tmp_path
     )
     assert code == 2
     assert json.loads(out.getvalue())["code"] == (
-        "BUSY_PROFILE" if operation == "create-peer-profile" else "PROVISION_MISSING"
+        "BINDINGS_UNAVAILABLE"
+        if operation == "create-peer-profile" else "PROVISION_MISSING"
     )
 
 
@@ -3433,6 +3449,583 @@ def test_peer_d10_hostile_leak_scan_vendor_error_body_never_escapes():
         intent_present=False, commit_intent=_committing_intent(),
     )
     assert _SECRET not in json.dumps(receipt)
+
+
+# --- REALM1-C1 source diagnostic: initial census only ----------------------
+
+
+def _initial_peer_census_http_receipt(handler, *, commit_intent=None):
+    """Run one initial create census through the real bounded transport."""
+    inner = httpx.Client(
+        transport=httpx.MockTransport(handler), trust_env=False, follow_redirects=False,
+    )
+    bounded = vendors.BoundedHttpClient(client=inner)
+    commit = commit_intent or (
+        lambda: (_ for _ in ()).throw(
+            AssertionError("an initial census refusal must not commit intent"),
+        )
+    )
+    try:
+        return vendors.MultiloginClient(
+            core.Credential(_SECRET, "stdin"), bounded,
+        ).create_peer_profile(
+            folder_id=_PEER_FOLDER,
+            anchor_profile_id=_PEER_ANCHOR,
+            intent_present=False,
+            commit_intent=commit,
+        )
+    finally:
+        bounded.close()
+
+
+def _peer_search_payload(data):
+    return {
+        "status": {"error_code": "", "http_code": 200, "message": "advisory prose"},
+        "data": data,
+    }
+
+
+_INITIAL_DECODE_CONTEXT_NONE = {
+    "status_class": "NONE",
+    "declared_media_type_class": "NONE",
+    "decoder_class": "NONE",
+}
+
+
+def _assert_initial_decode_context(receipt, expected=None):
+    context = receipt["initial_peer_census_decode_context"]
+    assert set(context) == {
+        "status_class", "declared_media_type_class", "decoder_class",
+    }
+    assert context == (expected or _INITIAL_DECODE_CONTEXT_NONE)
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    (
+        ("transport", "TRANSPORT_FAILURE"),
+        ("body-limit", "RESPONSE_BODY_LIMIT"),
+        ("decode", "RESPONSE_DECODE_FAILURE"),
+    ),
+)
+def test_peer_initial_census_transport_failure_classes_are_closed_and_redacted(failure, expected):
+    secret = "private transport body url folder profile credential"
+
+    def _handler(_request):
+        if failure == "transport":
+            raise RuntimeError(secret)
+        if failure == "body-limit":
+            return httpx.Response(200, content=(secret.encode() + b"x" * vendors._MAX_RESPONSE_BYTES))
+        return httpx.Response(200, content=(secret + "{").encode())
+
+    receipt = _initial_peer_census_http_receipt(_handler)
+    assert receipt["schema"] == "mastermind.mas115_nonseat_peer_lifecycle.v3"
+    assert receipt["initial_peer_census_diagnostic"] == expected
+    if failure == "decode":
+        _assert_initial_decode_context(receipt, {
+            "status_class": "HTTP_200",
+            "declared_media_type_class": "MISSING",
+            "decoder_class": "JSON_VALUE_REJECTED",
+        })
+    else:
+        _assert_initial_decode_context(receipt)
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert secret not in json.dumps(receipt)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "code", "diagnostic"),
+    (
+        (401, "AUTH_EXPIRED", "NONE"),
+        (403, "AUTH_EXPIRED", "NONE"),
+        (429, "VENDOR_ERROR", "HTTP_RATE_LIMITED"),
+        (400, "VENDOR_ERROR", "HTTP_REQUEST_REJECTED"),
+        (404, "VENDOR_ERROR", "HTTP_REQUEST_REJECTED"),
+        (500, "VENDOR_ERROR", "HTTP_SERVICE_UNAVAILABLE"),
+        (599, "VENDOR_ERROR", "HTTP_SERVICE_UNAVAILABLE"),
+        (302, "VENDOR_ERROR", "HTTP_UNEXPECTED"),
+    ),
+)
+def test_peer_initial_census_http_status_mapping_preserves_receipt_semantics(
+    status_code, code, diagnostic,
+):
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(status_code, json={"private": _SECRET}),
+    )
+    assert receipt["initial_peer_census_diagnostic"] == diagnostic
+    _assert_initial_decode_context(receipt)
+    assert receipt["code"] == code
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert _SECRET not in json.dumps(receipt)
+
+
+@pytest.mark.parametrize(
+    ("payload", "diagnostic"),
+    (
+        ({"status": {"message": _SECRET}, "data": {}, "extra": _SECRET},
+         "STATUS_ENVELOPE_INVALID"),
+        (_peer_search_payload(_SECRET), "DATA_SCHEMA_INVALID"),
+        (_peer_search_payload({"profiles": _SECRET, "total_count": 0}),
+         "DATA_SCHEMA_INVALID"),
+        (_peer_search_payload({
+            "profiles": [{"id": _SECRET, "folder_id": _PEER_FOLDER, "name": _SECRET}],
+            "total_count": 1,
+        }), "PROFILE_ITEM_INVALID"),
+        (_peer_search_payload({"profiles": [], "total_count": 1}),
+         "PAGINATION_INVALID"),
+    ),
+)
+def test_peer_initial_census_shape_failure_classes_are_closed_and_redacted(payload, diagnostic):
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(200, json=payload),
+    )
+    assert receipt["initial_peer_census_diagnostic"] == diagnostic
+    _assert_initial_decode_context(receipt)
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["effect"] == "NONE"
+    assert _SECRET not in json.dumps(receipt)
+
+
+def test_peer_initial_census_valid_page_keeps_existing_behavior_and_none_is_not_success():
+    commit = _refusing_intent()
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(
+            200, json=_peer_search_payload({"profiles": [], "total_count": 0}),
+        ),
+        commit_intent=commit,
+    )
+    assert receipt["initial_peer_census_diagnostic"] == "NONE"
+    _assert_initial_decode_context(receipt)
+    assert receipt["code"] == "PROVISION_MISSING"
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert commit.calls == [True]
+
+
+def test_peer_post_dispatch_census_failure_cannot_populate_initial_diagnostic():
+    calls = []
+
+    def _handler(request):
+        calls.append(request.url.path)
+        if request.url.path == "/profile/create":
+            return httpx.Response(201, json={"private": _SECRET})
+        if calls.count("/profile/search") == 1:
+            return httpx.Response(
+                200, json=_peer_search_payload({"profiles": [], "total_count": 0}),
+            )
+        return httpx.Response(429, json={"private": _SECRET})
+
+    receipt = _initial_peer_census_http_receipt(
+        _handler, commit_intent=_committing_intent(),
+    )
+    assert calls == ["/profile/search", "/profile/create", "/profile/search"]
+    assert receipt["initial_peer_census_diagnostic"] == "NONE"
+    _assert_initial_decode_context(receipt)
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["verdict"] == "HOLD"
+    assert _SECRET not in json.dumps(receipt)
+
+
+def test_peer_initial_census_diagnostic_is_invocation_local_not_last_error_state():
+    calls = []
+
+    def _handler(_request):
+        calls.append(True)
+        if len(calls) == 1:
+            return httpx.Response(429, json={"private": _SECRET})
+        return httpx.Response(
+            200, json=_peer_search_payload({"profiles": [], "total_count": 0}),
+        )
+
+    inner = httpx.Client(
+        transport=httpx.MockTransport(_handler), trust_env=False, follow_redirects=False,
+    )
+    bounded = vendors.BoundedHttpClient(client=inner)
+    client = vendors.MultiloginClient(core.Credential(_SECRET, "stdin"), bounded)
+    try:
+        first = client.create_peer_profile(
+            folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+            intent_present=False,
+            commit_intent=lambda: (_ for _ in ()).throw(
+                AssertionError("failed census must not commit"),
+            ),
+        )
+        commit = _refusing_intent()
+        second = client.create_peer_profile(
+            folder_id=_PEER_FOLDER, anchor_profile_id=_PEER_ANCHOR,
+            intent_present=False, commit_intent=commit,
+        )
+    finally:
+        bounded.close()
+    assert first["initial_peer_census_diagnostic"] == "HTTP_RATE_LIMITED"
+    _assert_initial_decode_context(first)
+    assert second["initial_peer_census_diagnostic"] == "NONE"
+    _assert_initial_decode_context(second)
+    assert second["code"] == "PROVISION_MISSING"
+    assert commit.calls == [True]
+
+
+def test_peer_receipt_v3_diagnostic_is_additive_closed_and_defaults_none():
+    predicates = dict(vendors._PEER_BASE_PREDICATES)
+    digests = {
+        "folder": "a" * 64,
+        "peer_name": "b" * 64,
+        "peer_profile": None,
+        "anchor_profile": "c" * 64,
+    }
+    receipt = vendors.peer_receipt(
+        effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
+        digests=digests, **predicates,
+    )
+    assert receipt["schema"] == "mastermind.mas115_nonseat_peer_lifecycle.v3"
+    assert receipt["initial_peer_census_diagnostic"] == "NONE"
+    _assert_initial_decode_context(receipt)
+    assert set(receipt) == {
+        "schema", "operation", "initial_peer_census_diagnostic",
+        "initial_peer_census_decode_context", "verdict",
+        "effect", "effect_detail", "code", "detail", "removal_disposition",
+        "removal_disposition_detail", "digests", "predicates",
+    }
+    assert set(vendors.INITIAL_PEER_CENSUS_DIAGNOSTICS) == {
+        "NONE", "TRANSPORT_FAILURE", "RESPONSE_BODY_LIMIT",
+        "RESPONSE_DECODE_FAILURE", "HTTP_RATE_LIMITED",
+        "HTTP_REQUEST_REJECTED", "HTTP_SERVICE_UNAVAILABLE",
+        "HTTP_UNEXPECTED", "STATUS_ENVELOPE_INVALID", "DATA_SCHEMA_INVALID",
+        "PROFILE_ITEM_INVALID", "PAGINATION_INVALID",
+    }
+    assert set(vendors.INITIAL_PEER_CENSUS_STATUS_CLASSES) == {
+        "NONE", "HTTP_200", "HTTP_3XX", "HTTP_AUTH", "HTTP_RATE_LIMITED",
+        "HTTP_OTHER_4XX", "HTTP_5XX", "HTTP_OTHER",
+    }
+    assert set(vendors.INITIAL_PEER_CENSUS_MEDIA_TYPE_CLASSES) == {
+        "NONE", "MISSING", "JSON", "HTML", "TEXT", "OTHER",
+    }
+    assert set(vendors.INITIAL_PEER_CENSUS_DECODER_CLASSES) == {
+        "NONE", "UNICODE_REJECTED", "JSON_VALUE_REJECTED",
+    }
+    with pytest.raises(ValueError):
+        vendors.peer_receipt(
+            effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
+            digests=digests, initial_peer_census_diagnostic="SUCCESS", **predicates,
+        )
+    with pytest.raises(ValueError):
+        vendors.peer_receipt(
+            effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
+            digests=digests, initial_peer_census_diagnostic=[], **predicates,
+        )
+    with pytest.raises(ValueError):
+        vendors.peer_receipt(
+            effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
+            digests=digests,
+            initial_peer_census_decode_context={"status_class": "HTTP_200"},
+            **predicates,
+        )
+    with pytest.raises(ValueError):
+        vendors.peer_receipt(
+            effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
+            digests=digests,
+            initial_peer_census_decode_context={
+                "status_class": "HTTP_200",
+                "declared_media_type_class": "JSON",
+                "decoder_class": "JSON_VALUE_REJECTED",
+            },
+            **predicates,
+        )
+    with pytest.raises(ValueError):
+        vendors.peer_receipt(
+            effect="NONE", code="VENDOR_ERROR", verdict="REFUSED",
+            digests=digests,
+            initial_peer_census_diagnostic="RESPONSE_DECODE_FAILURE",
+            initial_peer_census_decode_context={
+                "status_class": "HTTP_200",
+                "declared_media_type_class": "RAW_SECRET_HEADER",
+                "decoder_class": "JSON_VALUE_REJECTED",
+            },
+            **predicates,
+        )
+
+
+@pytest.mark.parametrize(
+    ("status_code", "status_class"),
+    (
+        (200, "HTTP_200"),
+        (302, "HTTP_3XX"),
+        (401, "HTTP_AUTH"),
+        (403, "HTTP_AUTH"),
+        (429, "HTTP_RATE_LIMITED"),
+        (400, "HTTP_OTHER_4XX"),
+        (418, "HTTP_OTHER_4XX"),
+        (503, "HTTP_5XX"),
+        (201, "HTTP_OTHER"),
+    ),
+)
+def test_peer_initial_decode_context_status_cross_product_preserves_public_refusal(
+    status_code, status_class,
+):
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(
+            status_code,
+            content=("<html>" + _SECRET).encode(),
+            headers={"Content-Type": "text/html; charset=UTF-8"},
+        ),
+    )
+    assert receipt["initial_peer_census_diagnostic"] == "RESPONSE_DECODE_FAILURE"
+    _assert_initial_decode_context(receipt, {
+        "status_class": status_class,
+        "declared_media_type_class": "HTML",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    })
+    # Decode still precedes public status handling, including for 401/403.
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["verdict"] == "REFUSED"
+    assert receipt["effect"] == "NONE"
+    assert _SECRET not in json.dumps(receipt)
+
+
+@pytest.mark.parametrize(
+    ("headers", "media_class"),
+    (
+        (None, "MISSING"),
+        ({"Content-Type": "Application/JSON; Charset=UTF-8"}, "JSON"),
+        ({"Content-Type": "application/problem+json; version=1"}, "JSON"),
+        ({"Content-Type": "text/html"}, "HTML"),
+        ({"Content-Type": "TEXT/PLAIN; charset=us-ascii"}, "TEXT"),
+        ({"Content-Type": "application/octet-stream"}, "OTHER"),
+        ({"Content-Type": "application/+json"}, "OTHER"),
+        ({"Content-Type": "application/json, text/html"}, "OTHER"),
+        ([
+            ("Content-Type", "application/json"),
+            ("Content-Type", "text/html"),
+        ], "OTHER"),
+    ),
+)
+def test_peer_initial_decode_context_declared_media_type_is_closed_and_bounded(
+    headers, media_class,
+):
+    kwargs = {} if headers is None else {"headers": headers}
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(
+            200, content=("{" + _SECRET).encode(), **kwargs,
+        ),
+    )
+    assert receipt["initial_peer_census_diagnostic"] == "RESPONSE_DECODE_FAILURE"
+    _assert_initial_decode_context(receipt, {
+        "status_class": "HTTP_200",
+        "declared_media_type_class": media_class,
+        "decoder_class": "JSON_VALUE_REJECTED",
+    })
+    dumped = json.dumps(receipt)
+    assert _SECRET not in dumped
+    if headers is not None:
+        assert str(headers) not in dumped
+
+
+def test_peer_initial_decode_context_oversized_or_hostile_media_never_escapes():
+    hostile = "application/" + _SECRET + (
+        "x" * vendors._MAX_DECLARED_MEDIA_TYPE_BYTES
+    )
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(
+            200,
+            content=("{" + _SECRET).encode(),
+            headers={"Content-Type": hostile},
+        ),
+    )
+    _assert_initial_decode_context(receipt, {
+        "status_class": "HTTP_200",
+        "declared_media_type_class": "OTHER",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    })
+    dumped = json.dumps(receipt)
+    assert _SECRET not in dumped
+    assert hostile not in dumped
+
+
+@pytest.mark.parametrize(
+    ("declared", "media_class"),
+    (
+        ("application/\u212a+json", "OTHER"),
+        ("\u00a0application/json", "OTHER"),
+        ("application/json\u00a0", "OTHER"),
+        ("application/\x0bjson", "OTHER"),
+        (" \tApplication/Vnd.Example+Json\t ", "JSON"),
+    ),
+)
+def test_peer_initial_decode_context_validates_raw_ascii_media_tokens_before_casefold(
+    declared, media_class,
+):
+    headers = httpx.Headers(
+        [(b"content-type", declared.encode("utf-8"))], encoding="utf-8",
+    )
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(
+            200, content=("{" + _SECRET).encode(), headers=headers,
+        ),
+    )
+    assert receipt["initial_peer_census_diagnostic"] == "RESPONSE_DECODE_FAILURE"
+    _assert_initial_decode_context(receipt, {
+        "status_class": "HTTP_200",
+        "declared_media_type_class": media_class,
+        "decoder_class": "JSON_VALUE_REJECTED",
+    })
+    dumped = json.dumps(receipt)
+    assert declared not in dumped
+    assert _SECRET not in dumped
+
+
+@pytest.mark.parametrize(
+    ("body", "decoder_class"),
+    (
+        (b"\xff", "UNICODE_REJECTED"),
+        (b"{", "JSON_VALUE_REJECTED"),
+    ),
+)
+def test_peer_initial_decode_context_distinguishes_unicode_from_json_rejection(
+    body, decoder_class,
+):
+    receipt = _initial_peer_census_http_receipt(
+        lambda _request: httpx.Response(
+            200, content=body, headers={"Content-Type": "application/json"},
+        ),
+    )
+    _assert_initial_decode_context(receipt, {
+        "status_class": "HTTP_200",
+        "declared_media_type_class": "JSON",
+        "decoder_class": decoder_class,
+    })
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert receipt["effect"] == "NONE"
+
+
+def test_peer_initial_decode_context_sink_is_first_write_and_has_no_mutable_alias():
+    sink = vendors._InitialPeerCensusDiagnosticSink(
+        vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+    )
+    first = {
+        "status_class": "HTTP_200",
+        "declared_media_type_class": "HTML",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    }
+    vendors._record_initial_peer_census_diagnostic(
+        sink, "RESPONSE_DECODE_FAILURE", decode_context=first,
+    )
+    first["status_class"] = "HTTP_5XX"
+    escaped = sink.decode_context
+    escaped["decoder_class"] = "UNICODE_REJECTED"
+    vendors._record_initial_peer_census_diagnostic(
+        sink, "TRANSPORT_FAILURE",
+    )
+    assert sink.value == "RESPONSE_DECODE_FAILURE"
+    assert sink.decode_context == {
+        "status_class": "HTTP_200",
+        "declared_media_type_class": "HTML",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    }
+
+    first_non_decode = vendors._InitialPeerCensusDiagnosticSink(
+        vendors._INITIAL_PEER_CENSUS_DIAGNOSTIC_SEAL,
+    )
+    vendors._record_initial_peer_census_diagnostic(
+        first_non_decode, "RESPONSE_BODY_LIMIT",
+    )
+    vendors._record_initial_peer_census_diagnostic(
+        first_non_decode, "RESPONSE_DECODE_FAILURE", decode_context={
+            "status_class": "HTTP_5XX",
+            "declared_media_type_class": "HTML",
+            "decoder_class": "JSON_VALUE_REJECTED",
+        },
+    )
+    assert first_non_decode.value == "RESPONSE_BODY_LIMIT"
+    assert first_non_decode.decode_context == _INITIAL_DECODE_CONTEXT_NONE
+
+
+def test_peer_initial_decode_context_is_invocation_local_across_reused_client():
+    calls = []
+
+    def _handler(_request):
+        calls.append(True)
+        if len(calls) == 1:
+            return httpx.Response(
+                503,
+                content=("<html>" + _SECRET).encode(),
+                headers={"Content-Type": "text/html"},
+            )
+        return httpx.Response(
+            200, json=_peer_search_payload({"profiles": [], "total_count": 0}),
+        )
+
+    inner = httpx.Client(
+        transport=httpx.MockTransport(_handler), trust_env=False, follow_redirects=False,
+    )
+    bounded = vendors.BoundedHttpClient(client=inner)
+    client = vendors.MultiloginClient(core.Credential(_SECRET, "stdin"), bounded)
+    try:
+        first = client.create_peer_profile(
+            folder_id=_PEER_FOLDER,
+            anchor_profile_id=_PEER_ANCHOR,
+            intent_present=False,
+            commit_intent=lambda: (_ for _ in ()).throw(
+                AssertionError("failed census must not commit"),
+            ),
+        )
+        commit = _refusing_intent()
+        second = client.create_peer_profile(
+            folder_id=_PEER_FOLDER,
+            anchor_profile_id=_PEER_ANCHOR,
+            intent_present=False,
+            commit_intent=commit,
+        )
+    finally:
+        bounded.close()
+    assert first["initial_peer_census_diagnostic"] == "RESPONSE_DECODE_FAILURE"
+    _assert_initial_decode_context(first, {
+        "status_class": "HTTP_5XX",
+        "declared_media_type_class": "HTML",
+        "decoder_class": "JSON_VALUE_REJECTED",
+    })
+    assert second["initial_peer_census_diagnostic"] == "NONE"
+    _assert_initial_decode_context(second)
+    assert second["code"] == "PROVISION_MISSING"
+    assert commit.calls == [True]
+
+
+def test_peer_post_dispatch_decode_failure_cannot_populate_initial_context():
+    calls = []
+
+    def _handler(request):
+        calls.append(request.url.path)
+        if request.url.path == "/profile/create":
+            return httpx.Response(201, json={"private": _SECRET})
+        if calls.count("/profile/search") == 1:
+            return httpx.Response(
+                200, json=_peer_search_payload({"profiles": [], "total_count": 0}),
+            )
+        return httpx.Response(
+            503,
+            content=("<html>" + _SECRET).encode(),
+            headers={"Content-Type": "text/html"},
+        )
+
+    receipt = _initial_peer_census_http_receipt(
+        _handler, commit_intent=_committing_intent(),
+    )
+    assert calls == ["/profile/search", "/profile/create", "/profile/search"]
+    assert receipt["initial_peer_census_diagnostic"] == "NONE"
+    _assert_initial_decode_context(receipt)
+    assert receipt["effect"] == "CREATE_EFFECT_UNKNOWN"
+    assert receipt["code"] == "VENDOR_ERROR"
+    assert _SECRET not in json.dumps(receipt)
+
+
+def test_peer_diagnostic_does_not_change_generation_or_lifecycle_fence_contract():
+    assert vendors.PEER_SOURCE_GENERATION == _REALM1_GENERATION
+    assert vendors.PEER_INTENT_SCHEMA == "mastermind.mas115_nonseat_peer_lifecycle_state.v5"
+    assert vendors.PEER_GENESIS_WITNESS_SCHEMA == "mastermind.mas115_nonseat_peer_genesis_witness.v1"
+    assert vendors.PEER_BOOTSTRAP_FENCE_SCHEMA == "mastermind.mas115_nonseat_peer_bootstrap_fence.v1"
 
 
 # --- #385-11: provision-write failure after a known create ----------------
@@ -4346,7 +4939,7 @@ def test_peer_r2_unsafe_fixed_path_refuses_before_anchor_environment_secret_or_c
         return _raise
 
     out = io.StringIO()
-    code = vendors.run_coordinator_peer_create(
+    code = vendors._run_coordinator_peer_create(  # noqa: SLF001
         ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
         peer_intent_path=state_path,
         peer_provision_path=tmp_path / "peer-provision.json",
@@ -4485,12 +5078,15 @@ def test_peer_r2_peer_provision_refuses_byte_identical_foreign_replacement(
             injected = True
 
     monkeypatch.setattr(vendors.os, "fsync", _replace_after_leaf_fsync)
+    current_environment_snapshot = _seal_realm1_environment(_realm1_environment())
+    assert current_environment_snapshot is not None
     written, loaded = vendors._write_peer_provision(
         provision_path,
         profile_id=_PEER_CREATED_UUID,
         folder_id=_PEER_FOLDER,
         bindings_loader=lambda: binding_calls.append(True),
         now=_NOW,
+        current_environment_snapshot=current_environment_snapshot,
     )
 
     assert injected is True
@@ -5456,7 +6052,7 @@ def test_peer_r2_invalid_ownership_receipt_refuses_before_secret_or_vendor(
         return _call
 
     out = io.StringIO()
-    code = vendors.run_coordinator_peer_rollback(
+    code = vendors._run_coordinator_peer_rollback(  # noqa: SLF001
         ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
         peer_intent_path=state_path,
         peer_provision_path=peer_provision_path,
@@ -5521,7 +6117,7 @@ def test_peer_r2_rollback_reloads_fresh_ownership_receipt_before_remove(
         else _NOW,
     ))
     out = io.StringIO()
-    code = vendors.run_coordinator_peer_rollback(
+    code = vendors._run_coordinator_peer_rollback(  # noqa: SLF001
         ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
         peer_intent_path=state_path,
         peer_provision_path=peer_provision_path,
@@ -5582,7 +6178,7 @@ def test_peer_r2_wrong_forged_or_cross_operation_authorization_is_inert(
         return _call
 
     out = io.StringIO()
-    code = vendors.main(
+    code = vendors._main(  # noqa: SLF001 — authorization seam under test
         [operation, "--vendor", "multilogin", "--provision-path", str(tmp_path / "anchor.json")],
         peer_intent_path=tmp_path / "peer-state.json",
         peer_provision_path=tmp_path / "peer-provision.json",
@@ -5631,7 +6227,7 @@ def test_peer_r2_path_aliases_refuse_before_anchor_secret_or_vendor(
         return _call
 
     out = io.StringIO()
-    code = vendors.run_coordinator_peer_create(
+    code = vendors._run_coordinator_peer_create(  # noqa: SLF001
         ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
         peer_intent_path=state_path,
         peer_provision_path=peer_provision_path,
@@ -5684,7 +6280,7 @@ def test_peer_r2_foreign_inode_replacement_between_preflights_refuses_presecret(
         return _call
 
     out = io.StringIO()
-    code = vendors.run_coordinator_peer_create(
+    code = vendors._run_coordinator_peer_create(  # noqa: SLF001
         ["--vendor", "multilogin", "--provision-path", str(anchor_path)],
         peer_intent_path=state_path,
         peer_provision_path=peer_provision_path,
@@ -5832,12 +6428,15 @@ def test_peer_r2_refused_provision_replacement_is_never_reaccepted(
             injected["value"] = True
 
     monkeypatch.setattr(vendors.os, "fsync", _replace_at_durability_boundary)
+    current_environment_snapshot = _seal_realm1_environment(_realm1_environment())
+    assert current_environment_snapshot is not None
     first = vendors._write_peer_provision(
         path,
         profile_id=_PEER_CREATED_UUID,
         folder_id=_PEER_FOLDER,
         bindings_loader=_no_collision_loader,
         now=_NOW,
+        current_environment_snapshot=current_environment_snapshot,
     )
     assert first[0] is False
 
@@ -5848,6 +6447,7 @@ def test_peer_r2_refused_provision_replacement_is_never_reaccepted(
         folder_id=_PEER_FOLDER,
         bindings_loader=_no_collision_loader,
         now=_NOW,
+        current_environment_snapshot=current_environment_snapshot,
     )
     assert second[0] is False
 
@@ -6164,7 +6764,11 @@ def _peer_bootstrap_census(provision, *, running=False):
             "folder_id": provision["folder_id"],
             "running": running,
         }],
-        "gologin": [],
+        "gologin": [
+            {"profile_id": "111111111111111111111111", "running": True},
+            {"profile_id": "222222222222222222222222", "running": True},
+            {"profile_id": "333333333333333333333333", "running": True},
+        ],
     }
 
 
@@ -7058,3 +7662,1058 @@ def test_mutation_kill_canary_refusal_exception_chain_stays_severed():
     assert exc.__context__ is None
     assert _SECRET not in str(exc)
     assert _SECRET not in repr(exc)
+
+
+# ---------------------------------------------------------------------------
+# REALM1 live-seat census snapshot gate repair (Mastermind #432)
+# ---------------------------------------------------------------------------
+
+
+_REALM1_WORKSPACE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+_REALM1_OLD_GENERATION = "c39dac9ab0c51047b442ac5e8bb2683f2780dd6045c5489b79560b4ce6b131a8"
+_REALM1_GENERATION = "4b4c77c81a19dafdd6c0ecbed58f14025a41eea77efb2ec070a537e52c999f49"
+
+
+def _strict_inventory_roots(tmp_path):
+    mlx_root = tmp_path / "mlx"
+    gologin_root = tmp_path / "gologin"
+    mlx_root.mkdir()
+    gologin_root.mkdir()
+    return mlx_root, gologin_root
+
+
+def _strict_ps(stdout=""):
+    return {
+        "code": 0,
+        "stdout": stdout,
+        "stderr": "",
+        "timed_out": False,
+    }
+
+
+def test_realm1_strict_producer_returns_row_201_that_legacy_drops_and_gate_refuses_it(tmp_path):
+    """The trusted census cannot inherit the public discovery helper's 200-row truncation."""
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    workspace = mlx_root / _REALM1_WORKSPACE
+    candidate_folder = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    candidate_profile = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    (workspace / candidate_folder / candidate_profile).mkdir(parents=True)
+    seats = [
+        "111111111111111111111111",
+        "222222222222222222222222",
+        "333333333333333333333333",
+    ]
+    extra = "f" * 24
+    ids = sorted([f"{index:024x}" for index in range(197)] + seats + [extra])
+    for profile_id in ids:
+        (gologin_root / profile_id).mkdir()
+    running = seats + [extra]
+    stdout = "\n".join(
+        f"browser --user-data-dir={gologin_root / profile_id}"
+        for profile_id in running
+    )
+
+    legacy = chatgpt.list_local_environments(
+        mlx_profiles_root=os.fspath(mlx_root),
+        gologin_profiles_root=os.fspath(gologin_root),
+        process_args_reader=lambda: stdout.splitlines(),
+    )
+    strict = chatgpt._strict_list_local_environments(  # noqa: SLF001
+        mlx_profiles_root=os.fspath(mlx_root),
+        gologin_profiles_root=os.fspath(gologin_root),
+        process_runner=lambda *_args, **_kwargs: _strict_ps(stdout),
+    )
+    assert len(legacy["gologin"]) == 200
+    assert extra not in {row["profile_id"] for row in legacy["gologin"]}
+    assert len(strict["gologin"]) == 201
+    assert strict["gologin"][-1] == {"profile_id": extra, "running": True}
+
+    snapshot = _seal_realm1_environment(strict)
+    assert snapshot is not None
+    provision = _stored_provision(_valid_provision("multilogin"))
+    provision_path = _write_provision(tmp_path, provision)
+    loaded, code = core.load_provision(
+        provision_path,
+        bindings_loader=lambda: (_stale_realm1_bindings(), []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    assert loaded is None and code == "BINDINGS_UNAVAILABLE"
+
+
+def test_realm1_strict_producer_samples_once_before_traversal_and_uses_plus_four_cap(tmp_path):
+    """The one process epoch precedes inventory traversal and preserves a split UTF-8 sentinel."""
+    mlx_root = tmp_path / "mlx"
+    gologin_root = tmp_path / "gologin"
+    calls = []
+
+    def _runner(argv, *, timeout, max_bytes):
+        calls.append((argv, timeout, max_bytes))
+        mlx_root.mkdir()
+        gologin_root.mkdir()
+        raw = (
+            "x" * chatgpt._PS_SNAPSHOT_MAX_BYTES + "\N{EURO SIGN}"
+        ).encode("utf-8")
+        # Model runner._cap exactly: a +1 margin drops the split scalar and
+        # falsely looks complete, while +4 preserves bytes beyond the limit.
+        capped = raw[:max_bytes].decode("utf-8", errors="ignore")
+        return _strict_ps(capped)
+
+    with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=_runner,
+        )
+    assert calls == [
+        (["/bin/ps", "-axo", "args="], 5.0, chatgpt._PS_SNAPSHOT_MAX_BYTES + 4),
+    ]
+
+
+@pytest.mark.parametrize(
+    "result",
+    (
+        None,
+        {},
+        {"code": True, "stdout": "", "stderr": "", "timed_out": False},
+        {"code": 1, "stdout": "", "stderr": "secret", "timed_out": False},
+        {"code": None, "stdout": "", "stderr": "", "timed_out": True},
+        {"code": 0, "stdout": b"", "stderr": "", "timed_out": False},
+        {"code": 0, "stdout": "\ufffd", "stderr": "", "timed_out": False},
+        {"code": 0, "stdout": "", "stderr": "\ufffd", "timed_out": False},
+    ),
+)
+def test_realm1_strict_producer_refuses_malformed_process_envelopes_without_leakage(tmp_path, result):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    with pytest.raises(RuntimeError) as exc_info:
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: result,
+        )
+    assert str(exc_info.value) == "strict local environment inventory unavailable"
+    assert exc_info.value.__cause__ is None
+    assert "secret" not in repr(exc_info.value)
+
+
+def test_realm1_strict_producer_refuses_process_envelope_dict_subclass(tmp_path):
+    class HostileEnvelope(dict):
+        pass
+
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    result = HostileEnvelope(_strict_ps())
+    with pytest.raises(RuntimeError) as exc_info:
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: result,
+        )
+    assert str(exc_info.value) == "strict local environment inventory unavailable"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
+def test_realm1_strict_producer_refuses_runner_exception_without_raw_context(tmp_path):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+
+    def _raise(*_args, **_kwargs):
+        raise OSError("SECRET /private/profile/path")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=_raise,
+        )
+    assert str(exc_info.value) == "strict local environment inventory unavailable"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert "SECRET" not in repr(exc_info.value)
+
+
+def test_realm1_strict_producer_accepts_exactly_1000_and_refuses_1001(tmp_path):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    for index in range(1001):
+        (gologin_root / f"{index:024x}").mkdir()
+    kwargs = {
+        "mlx_profiles_root": os.fspath(mlx_root),
+        "gologin_profiles_root": os.fspath(gologin_root),
+        "process_runner": lambda *_args, **_kwargs: _strict_ps(),
+    }
+    with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
+        chatgpt._strict_list_local_environments(**kwargs)  # noqa: SLF001
+    (gologin_root / f"{1000:024x}").rmdir()
+    assert len(chatgpt._strict_list_local_environments(**kwargs)["gologin"]) == 1000  # noqa: SLF001
+
+
+@pytest.mark.parametrize("bad_kind", ("root_symlink", "identity_symlink", "uppercase_gologin"))
+def test_realm1_strict_producer_refuses_ambiguous_filesystem_identities(tmp_path, bad_kind):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    if bad_kind == "root_symlink":
+        mlx_root.rmdir()
+        target = tmp_path / "real-mlx"
+        target.mkdir()
+        mlx_root.symlink_to(target, target_is_directory=True)
+    elif bad_kind == "identity_symlink":
+        target = tmp_path / "real-profile"
+        target.mkdir()
+        (gologin_root / ("a" * 24)).symlink_to(target, target_is_directory=True)
+    else:
+        (gologin_root / ("A" * 24)).mkdir()
+    with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: _strict_ps(),
+        )
+
+
+@pytest.mark.parametrize(
+    "unreadable_level", ("root", "workspace", "folder", "profile"),
+)
+def test_realm1_strict_producer_refuses_unreadable_nested_path_without_leakage(
+    tmp_path, monkeypatch, unreadable_level,
+):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    workspace = mlx_root / _REALM1_WORKSPACE
+    folder = workspace / "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    profile = folder / "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    profile.mkdir(parents=True)
+    target = {
+        "root": mlx_root,
+        "workspace": workspace,
+        "folder": folder,
+        "profile": folder,
+    }[unreadable_level]
+    target_identity = target.stat()
+    original_scandir = os.scandir
+    original_strict_entries = chatgpt._strict_entries  # noqa: SLF001
+
+    class _UnreadableProfileEntry:
+        name = profile.name
+
+        @staticmethod
+        def stat(*, follow_symlinks):
+            assert follow_symlinks is False
+            raise PermissionError("SECRET unreadable inventory path")
+
+    def _is_target_fd(fd):
+        try:
+            observed = os.fstat(fd)
+        except OSError:
+            return False
+        return (observed.st_dev, observed.st_ino) == (
+            target_identity.st_dev,
+            target_identity.st_ino,
+        )
+
+    def _scandir(fd):
+        if unreadable_level != "profile" and _is_target_fd(fd):
+            raise PermissionError("SECRET unreadable inventory path")
+        return original_scandir(fd)
+
+    def _strict_entries(fd):
+        if unreadable_level == "profile" and _is_target_fd(fd):
+            return [_UnreadableProfileEntry()]
+        return original_strict_entries(fd)
+
+    monkeypatch.setattr(chatgpt.os, "scandir", _scandir)
+    monkeypatch.setattr(chatgpt, "_strict_entries", _strict_entries)
+    with pytest.raises(RuntimeError) as exc_info:
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: _strict_ps(),
+        )
+    assert str(exc_info.value) == "strict local environment inventory unavailable"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert "SECRET" not in repr(exc_info.value)
+
+
+@pytest.mark.parametrize("disappearance_phase", ("before_open", "before_revalidation"))
+def test_realm1_strict_producer_refuses_nested_disappearance_race_without_leakage(
+    tmp_path, monkeypatch, disappearance_phase,
+):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    workspace = mlx_root / _REALM1_WORKSPACE
+    folder = workspace / "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    profile = folder / "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    profile.mkdir(parents=True)
+    tombstone = folder / "removed-profile"
+    original_open = os.open
+    original_stat = os.stat
+    profile_stats = 0
+
+    def _open(path, flags, *args, **kwargs):
+        if (
+            disappearance_phase == "before_open"
+            and path == profile.name
+            and kwargs.get("dir_fd") is not None
+            and profile.exists()
+        ):
+            profile.rename(tombstone)
+        return original_open(path, flags, *args, **kwargs)
+
+    def _stat(path, *args, **kwargs):
+        nonlocal profile_stats
+        if path == profile.name and kwargs.get("dir_fd") is not None:
+            profile_stats += 1
+            if disappearance_phase == "before_revalidation" and profile_stats == 2:
+                profile.rename(tombstone)
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(chatgpt.os, "open", _open)
+    monkeypatch.setattr(chatgpt.os, "stat", _stat)
+    with pytest.raises(RuntimeError) as exc_info:
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: _strict_ps(),
+        )
+    assert str(exc_info.value) == "strict local environment inventory unavailable"
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
+def test_realm1_strict_producer_refuses_cross_workspace_authority_duplicate(tmp_path):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    folder = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    profile = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    for workspace in (
+        "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    ):
+        (mlx_root / workspace / folder / profile).mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: _strict_ps(),
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation", ("unmatched", "wrong_depth", "multiple", "quoted", "double_slash"),
+)
+def test_realm1_strict_producer_refuses_managed_process_ambiguity(tmp_path, mutation):
+    mlx_root, gologin_root = _strict_inventory_roots(tmp_path)
+    profile = "a" * 24
+    (gologin_root / profile).mkdir()
+    if mutation == "unmatched":
+        line = f"browser --user-data-dir={gologin_root / ('b' * 24)}"
+    elif mutation == "wrong_depth":
+        line = f"browser --user-data-dir={gologin_root / profile / 'nested'}"
+    elif mutation == "multiple":
+        line = (
+            f"browser --user-data-dir={gologin_root / profile} "
+            f"--user-data-dir={gologin_root / profile}"
+        )
+    elif mutation == "quoted":
+        line = f'browser --user-data-dir="{gologin_root / profile}"'
+    else:
+        line = f"browser --user-data-dir=/{gologin_root / profile}"
+    with pytest.raises(RuntimeError, match="^strict local environment inventory unavailable$"):
+        chatgpt._strict_list_local_environments(  # noqa: SLF001
+            mlx_profiles_root=os.fspath(mlx_root),
+            gologin_profiles_root=os.fspath(gologin_root),
+            process_runner=lambda *_args, **_kwargs: _strict_ps(line),
+        )
+
+
+def test_realm1_strict_producer_ignores_unrelated_browser_process_and_missing_roots(tmp_path):
+    missing_mlx = tmp_path / "missing-mlx"
+    missing_gologin = tmp_path / "missing-gologin"
+    result = chatgpt._strict_list_local_environments(  # noqa: SLF001
+        mlx_profiles_root=os.fspath(missing_mlx),
+        gologin_profiles_root=os.fspath(missing_gologin),
+        process_runner=lambda *_args, **_kwargs: _strict_ps(
+            "chrome --user-data-dir=/tmp/ordinary-chrome"
+        ),
+    )
+    assert result == {"multilogin": [], "gologin": []}
+
+
+def test_realm1_vendor_live_census_uses_only_the_strict_private_producer(monkeypatch):
+    strict = _realm1_environment()
+    monkeypatch.setattr(chatgpt, "_strict_list_local_environments", lambda: strict, raising=False)
+    monkeypatch.setattr(
+        chatgpt,
+        "list_local_environments",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy discovery is not trusted")),
+    )
+    assert vendors._coordinator_local_census() is strict  # noqa: SLF001
+
+
+def _realm1_environment(provision=None) -> dict:
+    provision = provision or _stored_provision(_valid_provision("multilogin"))
+    return {
+        "gologin": [
+            {"profile_id": "111111111111111111111111", "running": True},
+            {"profile_id": "222222222222222222222222", "running": True},
+            {"profile_id": "333333333333333333333333", "running": True},
+        ],
+        "multilogin": [{
+            "workspace_id": _REALM1_WORKSPACE,
+            "folder_id": provision["folder_id"],
+            "profile_id": provision["profile_id"],
+            "running": False,
+        }],
+    }
+
+
+def _seal_realm1_environment(raw):
+    seal = getattr(core, "_seal_current_environment_snapshot", None)
+    assert callable(seal), "the private current-environment snapshot sealer is missing"
+    return seal(raw)
+
+
+def test_realm1_live_snapshot_accepts_only_exact_rows_normalizes_uuids_and_detaches_aliases():
+    """Catches permissive row reduction, mutable aliases, and noncanonical UUIDs."""
+    raw = _realm1_environment()
+    for key in ("workspace_id", "folder_id", "profile_id"):
+        raw["multilogin"][0][key] = raw["multilogin"][0][key].upper()
+    snapshot = _seal_realm1_environment(raw)
+    assert snapshot is not None
+    assert core._is_current_environment_snapshot(snapshot) is True  # noqa: SLF001
+
+    rows = tuple(dict(row) for row in snapshot.rows)
+    candidate = next(row for row in rows if row["env_manager"] == "multilogin")
+    assert candidate == {
+        "env_manager": "multilogin",
+        "workspace_id": _REALM1_WORKSPACE,
+        "folder_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "profile_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "running": False,
+    }
+    assert re.fullmatch(r"[0-9a-f]{64}", snapshot.digest)
+
+    frozen_rows = rows
+    frozen_digest = snapshot.digest
+    raw["multilogin"][0]["running"] = True
+    raw["multilogin"].clear()
+    raw["gologin"][0]["profile_id"] = "f" * 24
+    assert tuple(dict(row) for row in snapshot.rows) == frozen_rows
+    assert snapshot.digest == frozen_digest
+    with pytest.raises(TypeError):
+        snapshot.rows[0]["running"] = False
+    with pytest.raises((AttributeError, TypeError)):
+        snapshot.digest = "0" * 64
+
+    class _Lookalike:
+        rows = snapshot.rows
+        digest = snapshot.digest
+
+    assert core._is_current_environment_snapshot(_realm1_environment()) is False  # noqa: SLF001
+    assert core._is_current_environment_snapshot(_Lookalike()) is False  # noqa: SLF001
+
+
+def test_realm1_live_snapshot_has_an_exact_total_cardinality_ceiling():
+    """The authority snapshot is bounded before any downstream decision."""
+    raw = _realm1_environment()
+    raw["gologin"].extend(
+        {"profile_id": f"{index:024x}", "running": False}
+        for index in range(996)
+    )
+    assert len(raw["gologin"]) + len(raw["multilogin"]) == 1000
+    assert _seal_realm1_environment(raw) is not None
+    raw["gologin"].append({"profile_id": f"{996:024x}", "running": False})
+    assert _seal_realm1_environment(raw) is None
+
+
+def test_realm1_snapshot_order_and_digest_are_canonical_over_closed_rows():
+    """Input order cannot change authority, and the digest covers canonical rows."""
+    first_raw = _realm1_environment()
+    first_raw["gologin"].reverse()
+    first = _seal_realm1_environment(first_raw)
+    second = _seal_realm1_environment(_realm1_environment())
+    assert first is not None and second is not None
+    assert tuple(dict(row) for row in first.rows) == tuple(
+        dict(row) for row in second.rows
+    )
+    canonical = json.dumps(
+        [dict(row) for row in first.rows],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    assert first.digest == hashlib.sha256(canonical).hexdigest()
+    assert first.digest == second.digest
+
+    changed_raw = _realm1_environment()
+    changed_raw["multilogin"][0]["workspace_id"] = (
+        "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    )
+    changed = _seal_realm1_environment(changed_raw)
+    assert changed is not None
+    assert changed.digest != first.digest
+
+
+def test_realm1_snapshot_digest_is_revalidated_by_every_consumer(tmp_path):
+    """Forced corruption cannot turn a once-valid object into freshness authority."""
+    provision = _stored_provision(_valid_provision("multilogin"))
+    path = _write_provision(tmp_path, provision)
+    snapshot = _seal_realm1_environment(_realm1_environment(provision))
+    assert snapshot is not None
+    object.__setattr__(snapshot, "digest", "0" * 64)
+    assert core._is_current_environment_snapshot(snapshot) is False  # noqa: SLF001
+    loaded, code = core.load_provision(
+        path,
+        bindings_loader=lambda: (_stale_realm1_bindings(), []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    assert loaded is None and code == "BINDINGS_UNAVAILABLE"
+    assert vendors._local_disposable_preflight(  # noqa: SLF001
+        provision, current_environment_snapshot=snapshot,
+    ) == "BINDINGS_UNAVAILABLE"
+
+
+def test_realm1_raw_or_lookalike_snapshot_never_activates_live_freshness(tmp_path):
+    """Only the private sealed value can bypass stale navigation timestamps."""
+    provision = _stored_provision(_valid_provision("multilogin"))
+    path = _write_provision(tmp_path, provision)
+    snapshot = _seal_realm1_environment(_realm1_environment(provision))
+    assert snapshot is not None
+
+    class _Lookalike:
+        rows = snapshot.rows
+        digest = snapshot.digest
+
+    for untrusted in (_realm1_environment(provision), _Lookalike()):
+        loaded, code = core.load_provision(
+            path,
+            bindings_loader=lambda: (_stale_realm1_bindings(), []),
+            current_environment_snapshot=untrusted,
+            now=_NOW,
+        )
+        assert loaded is None and code == "BINDINGS_UNAVAILABLE"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "unknown_top", "missing_top", "nonlist", "nondict_row",
+        "unknown_row", "missing_row", "nonstring", "nonbool", "malformed",
+        "uppercase_gologin", "duplicate", "contradictory", "cross_workspace",
+    ),
+)
+def test_realm1_live_snapshot_rejects_every_ambiguous_or_malformed_shape(mutation):
+    """Each mutation can otherwise forge a partial or contradictory live census."""
+    raw = _realm1_environment()
+    row = raw["multilogin"][0]
+    if mutation == "unknown_top":
+        raw["shadow"] = []
+    elif mutation == "missing_top":
+        raw.pop("gologin")
+    elif mutation == "nonlist":
+        raw["gologin"] = {}
+    elif mutation == "nondict_row":
+        raw["gologin"][0] = "not-a-row"
+    elif mutation == "unknown_row":
+        row["name"] = "ignored-by-old-reducer"
+    elif mutation == "missing_row":
+        row.pop("workspace_id")
+    elif mutation == "nonstring":
+        row["folder_id"] = None
+    elif mutation == "nonbool":
+        row["running"] = 1
+    elif mutation == "malformed":
+        row["profile_id"] = "not-a-uuid"
+    elif mutation == "uppercase_gologin":
+        raw["gologin"][0]["profile_id"] = "A" * 24
+    elif mutation == "duplicate":
+        raw["multilogin"].append(dict(row))
+    elif mutation == "contradictory":
+        changed = dict(row)
+        changed["running"] = True
+        raw["multilogin"].append(changed)
+    else:
+        changed = dict(row)
+        changed["workspace_id"] = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        raw["multilogin"].append(changed)
+    assert _seal_realm1_environment(raw) is None
+
+
+def _stale_realm1_bindings() -> dict:
+    document = _binding_doc()
+    for binding in document["bindings"]:
+        binding["observed_at"] = "2026-08-01T00:00:00Z"
+    return document
+
+
+def test_realm1_stale_bindings_pass_only_with_sealed_exact_live_seats_and_candidate(tmp_path):
+    """The live snapshot supplements stale navigation timestamps without rewriting them."""
+    provision = _stored_provision(_valid_provision("multilogin"))
+    path = _write_provision(tmp_path, provision)
+    bindings = _stale_realm1_bindings()
+    agreeing = copy.deepcopy(bindings["bindings"][0])
+    agreeing["binding_id"] = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    agreeing["work_ref"] = "WS:ANOTHER-CHAT"
+    bindings["bindings"].append(agreeing)
+    before = copy.deepcopy(bindings)
+
+    loaded, code = core.load_provision(
+        path, bindings_loader=lambda: (bindings, []), now=_NOW,
+    )
+    assert loaded is None and code == "BINDINGS_UNAVAILABLE"
+
+    snapshot = _seal_realm1_environment(_realm1_environment(provision))
+    assert snapshot is not None
+    loaded, code = core.load_provision(
+        path,
+        bindings_loader=lambda: (bindings, []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    assert code is None
+    assert loaded == provision
+    assert bindings == before
+
+
+def test_realm1_candidate_collision_uses_exact_manager_folder_profile_identity(tmp_path):
+    """A shared UUID in another folder is distinct; the exact seat identity is forbidden."""
+    candidate = _stored_provision(_valid_provision("multilogin"))
+    path = _write_provision(tmp_path, candidate)
+    bindings = _binding_doc(colliding_profile_id=candidate["profile_id"])
+    for binding in bindings["bindings"]:
+        binding["observed_at"] = "2026-08-01T00:00:00Z"
+    seat_folder = bindings["bindings"][0]["locator"]["folder_id"]
+    raw = {
+        "gologin": [
+            {"profile_id": "222222222222222222222222", "running": True},
+            {"profile_id": "333333333333333333333333", "running": True},
+        ],
+        "multilogin": [
+            {
+                "workspace_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                "folder_id": seat_folder,
+                "profile_id": candidate["profile_id"],
+                "running": True,
+            },
+            {
+                "workspace_id": _REALM1_WORKSPACE,
+                "folder_id": candidate["folder_id"],
+                "profile_id": candidate["profile_id"],
+                "running": False,
+            },
+        ],
+    }
+    snapshot = _seal_realm1_environment(raw)
+    assert snapshot is not None
+    loaded, code = core.load_provision(
+        path,
+        bindings_loader=lambda: (bindings, []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    assert code is None and loaded == candidate
+
+    exact = dict(candidate, folder_id=seat_folder)
+    exact_path = _write_provision(tmp_path, exact)
+    loaded, code = core.load_provision(
+        exact_path,
+        bindings_loader=lambda: (bindings, []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    assert loaded is None and code == "DISALLOWED_TARGET"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "seat_missing", "seat_stopped", "extra_running",
+        "binding_disagrees", "seat_identity_reused",
+    ),
+)
+def test_realm1_live_gate_refuses_running_set_and_binding_mutations(tmp_path, mutation):
+    """Catches any relaxation of exact three-seat equality or binding identity."""
+    provision = _stored_provision(_valid_provision("multilogin"))
+    path = _write_provision(tmp_path, provision)
+    raw = _realm1_environment(provision)
+    bindings = _stale_realm1_bindings()
+    if mutation == "seat_missing":
+        raw["gologin"].pop(0)
+    elif mutation == "seat_stopped":
+        raw["gologin"][0]["running"] = False
+    elif mutation == "extra_running":
+        raw["gologin"].append({"profile_id": "444444444444444444444444", "running": True})
+    elif mutation == "binding_disagrees":
+        conflict = copy.deepcopy(bindings["bindings"][0])
+        conflict["binding_id"] = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        conflict["work_ref"] = "WS:ANOTHER-CHAT"
+        conflict["locator"]["profile_id"] = "444444444444444444444444"
+        bindings["bindings"].append(conflict)
+    else:
+        bindings["bindings"][1]["locator"]["profile_id"] = (
+            bindings["bindings"][0]["locator"]["profile_id"]
+        )
+    snapshot = _seal_realm1_environment(raw)
+    assert snapshot is not None
+    loaded, code = core.load_provision(
+        path,
+        bindings_loader=lambda: (bindings, []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    assert loaded is None
+    assert code == "BINDINGS_UNAVAILABLE"
+
+
+def test_realm1_multilogin_seat_requires_exact_folder_identity(tmp_path):
+    """A running Multilogin row in another folder cannot satisfy a bound seat."""
+    provision = _stored_provision(_valid_provision("multilogin"))
+    path = _write_provision(tmp_path, provision)
+    seat_profile = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    bindings = _binding_doc(colliding_profile_id=seat_profile)
+    for binding in bindings["bindings"]:
+        binding["observed_at"] = "2026-08-01T00:00:00Z"
+    seat_folder = bindings["bindings"][0]["locator"]["folder_id"]
+    raw = {
+        "gologin": [
+            {"profile_id": "222222222222222222222222", "running": True},
+            {"profile_id": "333333333333333333333333", "running": True},
+        ],
+        "multilogin": [
+            {
+                "workspace_id": _REALM1_WORKSPACE,
+                "folder_id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+                "profile_id": seat_profile,
+                "running": True,
+            },
+            {
+                "workspace_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                "folder_id": provision["folder_id"],
+                "profile_id": provision["profile_id"],
+                "running": False,
+            },
+        ],
+    }
+    assert raw["multilogin"][0]["folder_id"] != seat_folder
+    snapshot = _seal_realm1_environment(raw)
+    assert snapshot is not None
+    loaded, code = core.load_provision(
+        path,
+        bindings_loader=lambda: (bindings, []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    assert loaded is None and code == "BINDINGS_UNAVAILABLE"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    (
+        ("candidate_running", "BUSY_PROFILE"),
+        ("candidate_missing", "PROFILE_NOT_FOUND"),
+        ("candidate_wrong_folder", "VENDOR_ERROR"),
+    ),
+)
+def test_realm1_local_gate_requires_exact_distinct_stopped_candidate(
+    tmp_path, mutation, expected,
+):
+    """The separate local gate owns candidate presence and stopped-state proof."""
+    provision = _stored_provision(_valid_provision("multilogin"))
+    path = _write_provision(tmp_path, provision)
+    raw = _realm1_environment(provision)
+    if mutation == "candidate_running":
+        raw["multilogin"][0]["running"] = True
+    elif mutation == "candidate_missing":
+        raw["multilogin"].clear()
+    else:
+        raw["multilogin"][0]["folder_id"] = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    snapshot = _seal_realm1_environment(raw)
+    assert snapshot is not None
+    loaded, code = core.load_provision(
+        path,
+        bindings_loader=lambda: (_stale_realm1_bindings(), []),
+        current_environment_snapshot=snapshot,
+        now=_NOW,
+    )
+    if mutation == "candidate_running":
+        # The seat gate sees this as the forbidden fourth running identity;
+        # the local candidate gate independently retains its BUSY result.
+        assert loaded is None and code == "BINDINGS_UNAVAILABLE"
+    else:
+        assert code is None and loaded == provision
+    assert vendors._local_disposable_preflight(  # noqa: SLF001
+        provision, current_environment_snapshot=snapshot,
+    ) == expected
+
+
+def test_realm1_public_vendor_entrypoints_cannot_accept_inventory_injection():
+    """Only the private hermetic seam may replace the trusted census owner."""
+    forbidden = {
+        "census_loader", "environment_loader",
+        "current_environment_snapshot", "raw_rows",
+    }
+    for entrypoint in (
+        vendors.main,
+        vendors.run_coordinator_peer_create,
+        vendors.run_coordinator_peer_rollback,
+        vendors.mint_coordinator_peer_bootstrap_evidence,
+        vendors.run_coordinator_peer_bootstrap,
+    ):
+        signature = inspect.signature(entrypoint)
+        assert not any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in signature.parameters.values()
+        )
+        assert forbidden.isdisjoint(signature.parameters)
+    private_main = getattr(vendors, "_main", None)
+    assert callable(private_main), "the hermetic-only vendor entry seam is missing"
+
+    with pytest.raises(TypeError):
+        vendors.main([], environment_loader=lambda: _realm1_environment())
+    for coordinator in (
+        vendors.run_coordinator_peer_create,
+        vendors.run_coordinator_peer_rollback,
+    ):
+        with pytest.raises(TypeError):
+            coordinator([], environment_loader=lambda: _realm1_environment())
+    with pytest.raises(TypeError):
+        vendors.mint_coordinator_peer_bootstrap_evidence(
+            census_loader=lambda: _realm1_environment(),
+        )
+    with pytest.raises(TypeError):
+        vendors.run_coordinator_peer_bootstrap(
+            authorization=object(),
+            census_loader=lambda: _realm1_environment(),
+        )
+
+
+@pytest.mark.parametrize("loader_result", ("raises", "malformed"))
+def test_realm1_inventory_failure_refuses_before_core_origin_secret_or_client(
+    loader_result,
+):
+    """No downstream owner is reached unless one strict snapshot was sealed."""
+    calls = []
+
+    def _inventory():
+        calls.append("inventory")
+        if loader_result == "raises":
+            raise RuntimeError("synthetic census failure")
+        return {"gologin": [], "multilogin": [], "unknown": []}
+
+    def _unexpected(*_args, **_kwargs):
+        calls.append("unexpected")
+        raise AssertionError("invalid inventory must refuse before downstream work")
+
+    out = io.StringIO()
+    code = vendors._main(  # noqa: SLF001 — hermetic dependency seam
+        ["run", "--vendor", "multilogin", "--provision-path", "/unused.json"],
+        stdout=out,
+        environment_loader=_inventory,
+        bindings_loader=_unexpected,
+        origin_factory=_unexpected,
+        credential_stream_factory=_unexpected,
+        client_factory=_unexpected,
+        now=_NOW,
+    )
+    assert code == 2
+    assert json.loads(out.getvalue())["code"] == "BINDINGS_UNAVAILABLE"
+    assert calls == ["inventory"]
+
+
+def test_realm1_all_peer_revalidation_sites_thread_the_current_snapshot():
+    """Every nested peer-provision gate must remain bound to the same epoch."""
+    tree = ast.parse(VENDORS_PATH.read_text(encoding="utf-8"))
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    for function_name in (
+        "_write_peer_provision",
+        "_create_peer_profile_cli",
+        "_main",
+    ):
+        calls = [
+            node for node in ast.walk(functions[function_name])
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_validate_provision_document"
+        ]
+        assert len(calls) == 1
+        snapshot_keyword = next(
+            keyword for keyword in calls[0].keywords
+            if keyword.arg == "current_environment_snapshot"
+        )
+        assert isinstance(snapshot_keyword.value, ast.Name)
+        assert snapshot_keyword.value.id == "current_environment_snapshot"
+
+    create_calls = [
+        node for node in ast.walk(functions["_main"])
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_create_peer_profile_cli"
+    ]
+    assert len(create_calls) == 1
+    snapshot_keyword = next(
+        keyword for keyword in create_calls[0].keywords
+        if keyword.arg == "current_environment_snapshot"
+    )
+    assert isinstance(snapshot_keyword.value, ast.Name)
+    assert snapshot_keyword.value.id == "current_environment_snapshot"
+
+
+def test_realm1_private_vendor_seam_samples_once_and_threads_one_snapshot_presecret(monkeypatch):
+    """Dropping, rebuilding, or resampling the snapshot opens a TOCTOU gap."""
+    private_main = getattr(vendors, "_main", None)
+    assert callable(private_main), "the hermetic-only vendor entry seam is missing"
+    provision = _stored_provision(_valid_provision("multilogin"))
+    raw = _realm1_environment(provision)
+    calls = []
+
+    def _inventory():
+        calls.append(("inventory", None))
+        return raw
+
+    def _load(_path, **kwargs):
+        snapshot = kwargs.get("current_environment_snapshot")
+        assert core._is_current_environment_snapshot(snapshot) is True  # noqa: SLF001
+        calls.append(("load", snapshot))
+        return provision, None
+
+    def _local(_provision, **kwargs):
+        snapshot = kwargs.get("current_environment_snapshot")
+        assert core._is_current_environment_snapshot(snapshot) is True  # noqa: SLF001
+        calls.append(("local", snapshot))
+        return None
+
+    def _secret():
+        calls.append(("secret", None))
+        return io.BytesIO(b"")
+
+    monkeypatch.setattr(vendors._core, "load_provision", _load)
+    monkeypatch.setattr(vendors, "_local_disposable_preflight", _local)
+    out = io.StringIO()
+    code = private_main(
+        ["run", "--vendor", "multilogin", "--provision-path", "/hermetic/provision.json"],
+        stdout=out,
+        environment_loader=_inventory,
+        credential_stream_factory=_secret,
+        origin_factory=_ReadyOrigin,
+        client_factory=lambda: (_ for _ in ()).throw(AssertionError("empty credential must precede client")),
+        now=_NOW,
+    )
+    assert code == 2
+    assert [name for name, _value in calls] == ["inventory", "load", "local", "secret"]
+    snapshots = [value for name, value in calls if name in ("load", "local")]
+    assert len(snapshots) == 2 and snapshots[0] is snapshots[1]
+
+
+def test_realm1_peer_provision_post_effect_validation_reuses_snapshot_without_persisting_it(
+    tmp_path, monkeypatch,
+):
+    """The post-create provision gate cannot fall back to stale timestamps."""
+    snapshot = _seal_realm1_environment(_realm1_environment())
+    assert snapshot is not None
+    observed = []
+
+    def _validate(document, **kwargs):
+        observed.append(kwargs.get("current_environment_snapshot"))
+        return dict(document), None
+
+    monkeypatch.setattr(vendors._core, "_validate_provision_document", _validate)
+    path = tmp_path / "peer-provision.json"
+    written, loaded = vendors._write_peer_provision(  # noqa: SLF001
+        path,
+        profile_id=_PEER_CREATED_UUID,
+        folder_id=_PEER_FOLDER,
+        bindings_loader=_no_collision_loader,
+        now=_NOW,
+        current_environment_snapshot=snapshot,
+    )
+    assert written is True and loaded is not None
+    assert observed == [snapshot]
+    serialized = path.read_text(encoding="utf-8")
+    assert snapshot.digest not in serialized
+    assert "current_environment_snapshot" not in serialized
+
+
+def test_realm1_bootstrap_digest_rejects_shape_old_reducer_ignored(tmp_path):
+    """Mint and consume must independently seal the entire strict census shape."""
+    provision, anchor_path, state_path, peer_path, fence_path, _anchor = (
+        _peer_bootstrap_preimage(tmp_path)
+    )
+    current = [_peer_bootstrap_census(provision)]
+    census_calls = []
+
+    def census_loader():
+        census_calls.append("sample")
+        return current[0]
+
+    authorization, bindings_path, _loader = _mint_peer_bootstrap_authorization(
+        provision, anchor_path, census_loader=census_loader,
+    )
+    assert census_calls == ["sample"]
+    current[0] = copy.deepcopy(current[0])
+    current[0]["ignored-by-old-reducer"] = []
+    assert _bootstrap_existing_peer(
+        anchor_path,
+        state_path,
+        peer_path,
+        fence_path,
+        authorization=authorization,
+        bindings_path=bindings_path,
+        census_loader=census_loader,
+    ) == vendors.REFUSED
+    assert census_calls == ["sample", "sample"]
+    assert not fence_path.exists()
+
+
+def test_realm1_bootstrap_one_validation_uses_one_snapshot_for_both_predicates(
+    monkeypatch,
+):
+    """Bootstrap cannot mix candidate state from one observation with seats from another."""
+    provision = _stored_provision(_valid_provision("multilogin"))
+    raw = _realm1_environment(provision)
+    observed = []
+
+    def _local(_provision, **kwargs):
+        observed.append(kwargs.get("current_environment_snapshot"))
+        return None
+
+    def _seats(*_args, **kwargs):
+        observed.append(kwargs.get("current_environment_snapshot"))
+        return "clear"
+
+    monkeypatch.setattr(vendors, "_local_disposable_preflight", _local)
+    monkeypatch.setattr(vendors._core, "_current_chairman_profile_census", _seats)
+    digest = vendors._validate_peer_bootstrap_evidence_documents(  # noqa: SLF001
+        provision,
+        _stale_realm1_bindings(),
+        raw,
+        now=_NOW,
+    )
+    assert len(observed) == 2 and observed[0] is observed[1]
+    assert core._is_current_environment_snapshot(observed[0]) is True  # noqa: SLF001
+    assert digest == observed[0].digest
+
+
+def test_realm1_peer_generation_is_frozen_and_old_generation_is_not_current(tmp_path):
+    """Old lifecycle bytes cannot inherit authority after the census contract changes."""
+    assert vendors.PEER_SOURCE_GENERATION == _REALM1_GENERATION
+    state_path = tmp_path / "peer-state.json"
+    peer_path = tmp_path / "peer-provision.json"
+    outcome = vendors.initialize_peer_lifecycle_state(
+        state_path,
+        folder_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        anchor_profile_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        peer_name=vendors.peer_profile_name(
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        ),
+        peer_provision_path=peer_path,
+        generation=_REALM1_OLD_GENERATION,
+    )
+    assert outcome == vendors.CREATED_THIS_CALL
+    with pytest.raises(vendors._PeerStateRefusal):  # noqa: SLF001
+        vendors._preflight_peer_paths(  # noqa: SLF001
+            operation="create-peer-profile",
+            state_path=state_path,
+            provision_path=peer_path,
+            generation=_REALM1_GENERATION,
+        )

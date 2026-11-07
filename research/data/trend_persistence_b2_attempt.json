@@ -1,0 +1,12 @@
+{
+ "attempts": [
+  {
+   "started_utc": "2026-10-03T12:47:29+00:00",
+   "git_head": "aadb15d206217fb5ca051f87bbbabf47e851a8da",
+   "code_sha256": "5c976ce89c44a5a61f0bc0e8d4e45fefb08fa419eda33b3ca17b96bff9dcfca6",
+   "prereg_sha256": "79764bf5f9bf18c6ce8a6161fa221188dc1a5859fe82d715711fecb7bb0380aa",
+   "reference_sha256": "e2caf7e88db91b9494a248c64f410bfed357ad203777c1af82aca7ce21a920f3",
+   "retry_reason": null
+  }
+ ]
+}

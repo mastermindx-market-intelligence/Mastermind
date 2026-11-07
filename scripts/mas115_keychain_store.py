@@ -18,6 +18,7 @@ import ctypes
 import getpass
 import re
 import sys
+import warnings
 
 
 _KEYCHAIN_SERVICE = b"mastermind.mas115.multilogin.disposable"
@@ -131,10 +132,14 @@ class _SecurityFramework:
 
 
 def _validated_secret(prompt_fn=getpass.getpass) -> bytes:
-    value = prompt_fn(
-        "Paste the current short-lived Multilogin access token "
-        "(input is hidden), then press Return: "
-    )
+    # Refuse before getpass can consume stdin with echo control unavailable.
+    # This dedicated helper is single-threaded; restore the caller's policy.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", getpass.GetPassWarning)
+        value = prompt_fn(
+            "Paste the current short-lived Multilogin access token "
+            "(input is hidden), then press Return: "
+        )
     if not isinstance(value, str) or value != value.strip():
         raise CredentialStoreRefusal("credential is missing or malformed")
     try:

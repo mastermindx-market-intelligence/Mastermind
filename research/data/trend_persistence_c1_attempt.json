@@ -1,0 +1,13 @@
+{
+ "attempts": [
+  {
+   "started_utc": "2026-10-05T00:06:21+00:00",
+   "git_head": "1644ace945a83985ad45cd4bdec3edb155914a63",
+   "code_sha256": "7c07c533d31fc977926a86d9b81f7ec0a49ff96309bfde6cb2079431466e84e7",
+   "prereg_sha256": "f22b0cee218c381dd3fd078d67301c985eb9415faa0e75ffdc57d520374bf4cc",
+   "b2_result_sha256": "e0b177cb51dececc173e67817e76356f201d498626022440487cce0a3a2ba443",
+   "sector_snapshot_sha256": "cba7fc07da53a6230122fec5797b15163bbe3b31f78918839f5722e885c00de3",
+   "retry_reason": null
+  }
+ ]
+}

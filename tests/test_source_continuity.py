@@ -23,6 +23,7 @@ CURRENT_BASE_SHA = "6" * 40
 BLOB_A = "a" * 40
 BLOB_B = "b" * 40
 EFFECT_FINGERPRINT = "c" * 64
+COLLISION_EVIDENCE_FINGERPRINT = "d" * 64
 VERIFIED_AT = "2026-09-03T05:00:00Z"
 OPERATION = "agent-dialogue-source-continuity-rchp0-rch1-20260903-sol-001"
 REPOSITORY = "mastermindx-market-intelligence/Mastermind"
@@ -96,6 +97,7 @@ def _remote(module, **overrides):
         path_entries=_entries(module),
         collision_state=module.CollisionState.NONE,
         colliding_pr_numbers=(),
+        collision_evidence_fingerprint=COLLISION_EVIDENCE_FINGERPRINT,
         pagination_complete=True,
     )
     values.update(overrides)
@@ -171,6 +173,12 @@ def _assert_refusal(module, result, code: str, *, exit_code: int):
     assert BRANCH not in encoded
 
 
+def test_source_receipt_v2_is_isolated_from_writer_gate_v1() -> None:
+    module = _contract()
+    assert module.SOURCE_RECEIPT_VERSION == "v2"
+    assert module.WRITER_GATE_RECEIPT_VERSION == "v1"
+
+
 def test_checkpoint_receipt_binds_complete_identity_without_authority() -> None:
     module = _contract()
     result = _verify(module)
@@ -206,8 +214,9 @@ def test_checkpoint_receipt_binds_complete_identity_without_authority() -> None:
         "external_effect_evidence_fingerprint": EFFECT_FINGERPRINT,
         "collision_state": "NONE",
         "colliding_pr_numbers": [],
+        "collision_evidence_fingerprint": COLLISION_EVIDENCE_FINGERPRINT,
         "receipt_kind": "CHECKPOINT_VERIFIED",
-        "receipt_version": "v1",
+        "receipt_version": "v2",
         "verified_at": VERIFIED_AT,
         "authority_effect": "NONE",
         "writer_release_authorized": False,
@@ -237,6 +246,19 @@ def test_receipt_is_canonical_and_order_independent() -> None:
     assert module.canonical_json(first.to_dict()) == json.dumps(
         first.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
+
+
+def test_collision_evidence_fingerprint_is_bound_into_receipt_digest() -> None:
+    module = _contract()
+    first = _verify(module)
+    second = _verify(
+        module,
+        remote=_remote(module, collision_evidence_fingerprint="e" * 64),
+    )
+    assert isinstance(first, module.SourceContinuityReceipt)
+    assert isinstance(second, module.SourceContinuityReceipt)
+    assert first.collision_evidence_fingerprint != second.collision_evidence_fingerprint
+    assert first.receipt_digest != second.receipt_digest
 
 
 def test_local_branch_is_bound_into_receipt_digest() -> None:
@@ -435,6 +457,8 @@ def test_hostile_request_scalar_range_hash_time_and_enum_shapes_refuse(
         {"changed_paths": list(OWNED_PATHS)},
         {"collision_state": "NONE"},
         {"colliding_pr_numbers": (True,)},
+        {"collision_evidence_fingerprint": "d" * 63},
+        {"collision_evidence_fingerprint": "G" * 64},
         {"pagination_complete": 1},
     ],
 )
@@ -892,39 +916,96 @@ class _ProbeRunner:
         self.calls.append(call)
         self.kwargs.append(dict(kwargs))
 
-        if call == ("/usr/bin/git", "rev-parse", "--show-toplevel"):
+        commands = {
+            "rev-parse",
+            "symbolic-ref",
+            "cat-file",
+            "merge-base",
+            "rev-list",
+            "config",
+            "diff",
+            "ls-files",
+            "ls-tree",
+            "status",
+        }
+        command_index = next(
+            index for index, value in enumerate(call) if index and value in commands
+        )
+        assert call[:3] == ("/usr/bin/git", "--no-pager", "--no-replace-objects")
+        assert call[command_index - 1] == "--work-tree=."
+        prefix = call[3 : command_index - 1]
+        assert len(prefix) % 2 == 0
+        assert all(prefix[index] == "-c" for index in range(0, len(prefix), 2))
+        assert {
+            "core.fsmonitor=false",
+            "core.untrackedCache=false",
+            "core.hooksPath=/dev/null",
+            "core.attributesFile=/dev/null",
+            "core.excludesFile=/dev/null",
+            "diff.external=",
+            "diff.renames=false",
+            "core.checkStat=default",
+            "core.trustctime=true",
+            "core.symlinks=true",
+            "credential.helper=",
+            "protocol.allow=never",
+            "protocol.file.allow=always",
+        } <= set(prefix[1::2])
+        call = call[command_index:]
+
+        if call == ("rev-parse", "--show-toplevel"):
             return self._done(stdout=f"{WORKSPACE}\n")
-        if call == ("/usr/bin/git", "symbolic-ref", "--short", "HEAD"):
+        if call == ("symbolic-ref", "--short", "HEAD"):
             return self._done(stdout=f"{BRANCH}\n")
-        if call == ("/usr/bin/git", "rev-parse", "HEAD^{commit}"):
+        if call == ("rev-parse", "HEAD^{commit}"):
             return self._done(stdout=f"{HEAD_SHA}\n")
-        if call == ("/usr/bin/git", "rev-parse", "HEAD^{tree}"):
+        if call == ("rev-parse", "HEAD^{tree}"):
             return self._done(stdout=f"{TREE_SHA}\n")
+        if call == ("rev-parse", "--git-common-dir"):
+            return self._done(stdout=f"{WORKSPACE}/.git\n")
         if call in {
-            ("/usr/bin/git", "cat-file", "-e", f"{HEAD_SHA}^{{commit}}"),
-            ("/usr/bin/git", "cat-file", "-e", f"{BASE_SHA}^{{commit}}"),
+            ("cat-file", "-e", f"{HEAD_SHA}^{{commit}}"),
+            ("cat-file", "-e", f"{BASE_SHA}^{{commit}}"),
         }:
             return self._done()
-        if call == ("/usr/bin/git", "merge-base", "--is-ancestor", HEAD_SHA, "HEAD"):
+        if call == ("merge-base", "--is-ancestor", HEAD_SHA, "HEAD"):
             return self._done()
-        if call == ("/usr/bin/git", "rev-list", "--count", f"{HEAD_SHA}..HEAD"):
+        if call == ("rev-list", "--count", f"{HEAD_SHA}..HEAD"):
             return self._done(stdout="0\n")
-        if call == ("/usr/bin/git", "diff", "--name-only", "-z", "HEAD"):
-            return self._done()
-        if call == ("/usr/bin/git", "diff", "--cached", "--name-only", "-z"):
-            return self._done()
-        if call == ("/usr/bin/git", "ls-files", "--others", "--exclude-standard", "-z"):
+        if call == (
+            "config", "--null", "--name-only", "--get-regexp",
+            r"^filter\..*\.(clean|process)$",
+        ):
+            return self._done(returncode=1)
+        if call == (
+            "diff", "--no-renames", "--no-ext-diff", "--no-textconv",
+            "--ignore-submodules=none", "--name-only", "-z", "HEAD", "--",
+        ):
             return self._done()
         if call == (
-            "/usr/bin/git",
+            "diff", "--cached", "--no-renames", "--no-ext-diff", "--no-textconv",
+            "--ignore-submodules=none", "--name-only", "-z", "--",
+        ):
+            return self._done()
+        if call == ("ls-files", "-v", "-z"):
+            return self._done(
+                stdout="".join(f"H {path}\0" for path in FINAL_OWNED_PATHS)
+            )
+        if call == ("ls-files", "--others", "-z", "--"):
+            return self._done()
+        if call == (
             "diff",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--ignore-submodules=none",
             "--name-only",
             "-z",
             f"{BASE_SHA}..{HEAD_SHA}",
+            "--",
         ):
             return self._done(stdout="\0".join(FINAL_OWNED_PATHS) + "\0")
         if call == (
-            "/usr/bin/git",
             "ls-tree",
             "-z",
             "-l",
@@ -981,7 +1062,7 @@ class _ProbeHTTP:
         if endpoint == f"repos/{REPOSITORY}/compare/{CURRENT_BASE_SHA}...{HEAD_SHA}":
             return {"merge_base_commit": {"sha": BASE_SHA}}
         if endpoint == f"repos/{REPOSITORY}/pulls/{PR_NUMBER}/files?per_page=100&page=1":
-            return [{"filename": path} for path in FINAL_OWNED_PATHS]
+            return [{"filename": path, "status": "modified"} for path in FINAL_OWNED_PATHS]
         if endpoint == f"repos/{REPOSITORY}/pulls?state=open&per_page=100&page=1":
             return [{"number": PR_NUMBER}]
         raise AssertionError(f"unexpected HTTP probe endpoint: {endpoint}")
@@ -1041,15 +1122,24 @@ def test_cli_collects_facts_with_canonical_read_only_probes_and_prints_one_recei
     assert runner.calls
     for call, kwargs in zip(runner.calls, runner.kwargs, strict=True):
         assert call[0] == "/usr/bin/git"
-        assert call[1] not in forbidden
+        assert not forbidden.intersection(call)
         assert kwargs.get("cwd") == WORKSPACE
         assert kwargs.get("env", {}).get("GIT_OPTIONAL_LOCKS") == "0"
         assert kwargs.get("env", {}).get("GIT_NO_LAZY_FETCH") == "1"
         assert "GITHUB_TOKEN" not in kwargs.get("env", {})
-    assert any(call[1] == "ls-tree" for call in runner.calls)
+    assert any("ls-tree" in call for call in runner.calls)
     assert any(
-        call[1:4] == ("diff", "--name-only", "-z")
-        and call[-1] == f"{BASE_SHA}..{HEAD_SHA}"
+        "diff" in call
+        and f"{BASE_SHA}..{HEAD_SHA}" in call
+        and {
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--name-only",
+            "-z",
+            "--",
+        }
+        <= set(call)
         for call in runner.calls
     )
     assert http.calls
@@ -1330,7 +1420,8 @@ class _CollisionFenceHTTP(_ProbeHTTP):
                     pulls.append({"number": self.OTHER_PR})
                 return pulls
             if self.final_incomplete and self.census_reads == 2:
-                return [{"number": 9999}]
+                # Keep the closing census genuinely over the current fixed ceiling.
+                return [{"number": page * 1000 + index} for index in range(100)]
             return []
 
         other_files = (
@@ -1345,7 +1436,7 @@ class _CollisionFenceHTTP(_ProbeHTTP):
                 else self.final_other_path
             )
             assert selected is not None
-            return [{"filename": selected}]
+            return [{"filename": selected, "status": "modified"}]
 
         return super().__call__(url, token=token, timeout=timeout)
 

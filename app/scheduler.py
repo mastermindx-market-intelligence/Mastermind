@@ -69,15 +69,70 @@ def _ledger_start(job: str, book: str | None = None, trigger: str = "cron"):
         return None
 
 
-def _ledger_end(handle, status: str, *, severity: str | None = None):
+def _ledger_end(handle, status: str, *, severity: str | None = None,
+                extra: dict | None = None):
     """End a run-ledger record.  Never raises."""
     if handle is None:
         return
     try:
         from control_plane import run_ledger
-        run_ledger.end_run(handle, status, severity=severity)
+        run_ledger.end_run(handle, status, severity=severity, extra=extra)
     except Exception:  # noqa: BLE001
         pass
+
+
+def _brain_job_outcome(result: object) -> tuple[str, str | None, dict]:
+    """Translate a Brain runner result into truthful job-level health.
+
+    A function returning is not the same as the portfolio manager producing a
+    valid target.  Keep raw provider diagnostics in the private decision record;
+    the scheduler ledger receives only a closed, secret-safe reason vocabulary.
+    """
+    if not isinstance(result, dict) or not result:
+        return "error", "FREEZE", {"reason": "invalid_result"}
+
+    target = str(result.get("target_status") or "").strip().lower()
+    extra = {"target_status": target or None}
+    if any(result.get(key) for key in (
+        "publish_error", "write_error", "decision_log_error", "mark_error"
+    )):
+        return "error", "FREEZE", {**extra, "reason": "projection_failed"}
+    if result.get("cost_capped") is True:
+        return "skip", "ADVISORY_ONLY", {**extra, "reason": "cost_capped"}
+
+    skipped = str(result.get("skipped") or "").strip().lower()
+    if skipped:
+        if skipped in {"legacy_etf_migration_pending", "market_closed", "nothing_queued"}:
+            return "skip", "ADVISORY_ONLY", {**extra, "reason": skipped}
+        return "error", "FREEZE", {**extra, "reason": "runner_failed"}
+
+    if target in {"queued", "executed"}:
+        if result.get("decision_effective") is True:
+            # Accepted execution and completed receipt projections are separate facts.
+            # No receipt is legitimate; a reported finalization must include its ACK.
+            finalization = result.get("settlement_receipt_finalization")
+            if result.get("settlement_receipt_retained") is True or (
+                "settlement_receipt_finalization" in result
+                and (
+                    not isinstance(finalization, dict)
+                    or finalization.get("ok") is not True
+                    or finalization.get("receipt_acknowledged") is not True
+                    or finalization.get("receipt_retained") is True
+                    or bool(finalization.get("finalization_errors"))
+                )
+            ):
+                return "error", "FREEZE", {
+                    **extra, "reason": "settlement_finalization_incomplete"
+                }
+            return "ok", None, extra
+        return "error", "FREEZE", {**extra, "reason": "inconsistent_result"}
+    if target == "rejected_no_submission":
+        return "error", "FREEZE", {**extra, "reason": "missing_submission"}
+    if target == "rejected_execution_error":
+        return "error", "FREEZE", {**extra, "reason": target}
+    if target.startswith("rejected_") or target.startswith("frozen_"):
+        return "warn", "FREEZE", {**extra, "reason": target}
+    return "error", "FREEZE", {**extra, "reason": "invalid_result"}
 
 
 def _step_failed_event(job: str, book: str, step: str, exc: BaseException,
@@ -470,7 +525,8 @@ def _autonomous_job():
             from bot.autonomous import run_autonomous
             _result = run_autonomous()
             _post_mark_forward_evaluation("autonomous", _result)
-        _ledger_end(handle, "ok")
+        _status, _severity, _extra = _brain_job_outcome(_result)
+        _ledger_end(handle, _status, severity=_severity, extra=_extra)
         _maybe_schedule_brain_retry("autonomous_daily", "autonomous", _started)
     except Exception as exc:  # noqa: BLE001
         _ledger_end(handle, "error")
@@ -518,7 +574,8 @@ def _china_job():
             from bot.china import run_china
             _result = run_china()
             _post_mark_forward_evaluation("china", _result)
-        _ledger_end(handle, "ok")
+        _status, _severity, _extra = _brain_job_outcome(_result)
+        _ledger_end(handle, _status, severity=_severity, extra=_extra)
         _maybe_schedule_brain_retry("china_daily", "china", _started)
     except Exception as exc:  # noqa: BLE001
         _ledger_end(handle, "error")
@@ -542,7 +599,8 @@ def _hk_job():
             from bot.hk import run_hk
             _result = run_hk()
             _post_mark_forward_evaluation("hk", _result)
-        _ledger_end(handle, "ok")
+        _status, _severity, _extra = _brain_job_outcome(_result)
+        _ledger_end(handle, _status, severity=_severity, extra=_extra)
         _maybe_schedule_brain_retry("hk_daily", "hk", _started)
     except Exception as exc:  # noqa: BLE001
         _ledger_end(handle, "error")
@@ -819,8 +877,16 @@ def _macro_refresh_job():
     handle = _ledger_start("macro_refresh", trigger="cron")
     try:
         from data_layer import macro_refresh
-        macro_refresh.refresh_and_check()
-        _ledger_end(handle, "ok")
+        info = macro_refresh.refresh_and_check()
+        from brain import perception_publication
+        publication = perception_publication.publish_after_refresh(info)
+        accepted = publication.get("status") in {"published", "unchanged"}
+        _ledger_end(handle, "ok" if accepted else "error")
+        if not accepted:
+            log.warning("perception publication unavailable: %s", publication.get("reason"))
+        else:
+            log.info("perception publication %s seq=%s",
+                     publication.get("status"), publication.get("seq"))
     except Exception as exc:  # noqa: BLE001 — a refresh miss must never kill the scheduler
         _ledger_end(handle, "error")
         log.warning("macro_refresh failed: %s", exc)
@@ -1334,22 +1400,38 @@ def _daily_mark_job():
     try:
         from portfolio import self_directed, marks
         _sd_state = self_directed._load_account()
+    except Exception as exc:  # noqa: BLE001 — Self-Directed setup failure must be queryable
+        _step_failed_event("daily_mark", "self_directed", "self_directed_setup", exc, severity="FREEZE")
+    else:
         # only advance a NAV history once the hand-driven book actually HOLDS something (an empty
         # book has nothing to mark; this also keeps the empty-books contract of the daily sweep).
         if _sd_state.get("positions"):
-            self_directed.set_price_resolver(lambda t: marks.mark_one(t, asof))
             try:
-                self_directed.mark(prices=union_usd, asof=asof)
-                # W6/T3 — PUBLISH the self-directed book to data/portfolios/self_directed/latest.json
-                # so it becomes a first-class published book: visible to firm_exposure.summary() as the
-                # named-yardstick row and joinable to Heavyweight's firm-union universe. Best-effort;
-                # publish() never raises and firm_exposure EXCLUDES it from all clamp/headroom math, so
-                # this only ADDS the display-only yardstick — it can never shape the books it measures.
-                self_directed.publish(prices=union_usd, asof=asof)
-            finally:
-                self_directed.set_price_resolver(None)  # never leave the seam installed
-    except Exception:  # noqa: BLE001
-        pass
+                self_directed.set_price_resolver(lambda t: marks.mark_one(t, asof))
+            except Exception as exc:  # noqa: BLE001
+                _step_failed_event("daily_mark", "self_directed", "self_directed_setup", exc, severity="FREEZE")
+            else:
+                try:
+                    try:
+                        marked = self_directed.mark(prices=union_usd, asof=asof)
+                        if marked is None:
+                            raise self_directed.SelfDirectedMarkUnavailable("self-directed mark returned unavailable")
+                    except Exception as exc:  # noqa: BLE001 — truthful-mark refusal is a visible FREEZE
+                        _step_failed_event("daily_mark", "self_directed", "mark:self_directed", exc, severity="FREEZE")
+                    else:
+                        try:
+                            # W6/T3 — publish only after a truthful mark succeeds; firm_exposure
+                            # excludes this yardstick from all binding clamp/headroom math.
+                            published = self_directed.publish(prices=union_usd, asof=asof)
+                            if published is None:
+                                raise self_directed.SelfDirectedMarkUnavailable("self-directed publication returned unavailable")
+                        except Exception as exc:  # noqa: BLE001
+                            _step_failed_event("daily_mark", "self_directed", "publish:self_directed", exc, severity="FREEZE")
+                finally:
+                    try:
+                        self_directed.set_price_resolver(None)  # never leave the seam installed
+                    except Exception as exc:  # noqa: BLE001
+                        _step_failed_event("daily_mark", "self_directed", "self_directed_resolver_cleanup", exc, severity="FREEZE")
     _ledger_end(handle, "ok")
 
 
@@ -1870,7 +1952,8 @@ def scheduler_health() -> list[dict]:
     Each record:
       id, next_run_time (ISO or null), last_started (ISO or null),
       last_finished (ISO or null), last_skipped (ISO or null),
-      last_status (str or null), last_severity (str or null).
+      last_status (str or null), last_severity (str or null),
+      last_reason (str or null), last_target_status (str or null).
 
     Reads the tail of data/governance/run_events.jsonl.  Never raises.
     """
@@ -1938,6 +2021,9 @@ def scheduler_health() -> list[dict]:
 
         last_status = finished_ev.get("status") if finished_ev else None
         last_severity = finished_ev.get("severity") if finished_ev else None
+        finished_extra = finished_ev.get("extra") if finished_ev else {}
+        if not isinstance(finished_extra, dict):
+            finished_extra = {}
 
         records.append({
             "id": jid,
@@ -1950,6 +2036,8 @@ def scheduler_health() -> list[dict]:
             "last_skipped": skipped_ev.get("ts") if skipped_ev else None,
             "last_status": last_status,
             "last_severity": last_severity,
+            "last_reason": finished_extra.get("reason"),
+            "last_target_status": finished_extra.get("target_status"),
         })
     return records
 
@@ -1996,7 +2084,8 @@ def maybe_first_autonomous_run() -> bool:
                 from bot.autonomous import run_autonomous
                 _result = run_autonomous()
                 _post_mark_forward_evaluation("autonomous", _result)
-            _ledger_end(handle, "ok")
+            _status, _severity, _extra = _brain_job_outcome(_result)
+            _ledger_end(handle, _status, severity=_severity, extra=_extra)
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
             log.warning("autonomous first-run failed: %s", exc)
@@ -2087,7 +2176,8 @@ def maybe_first_china_run() -> bool:
                 from bot.china import run_china
                 _result = run_china()
                 _post_mark_forward_evaluation("china", _result)
-            _ledger_end(handle, "ok")
+            _status, _severity, _extra = _brain_job_outcome(_result)
+            _ledger_end(handle, _status, severity=_severity, extra=_extra)
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
             log.warning("china first-run failed: %s", exc)
@@ -2129,7 +2219,8 @@ def maybe_first_hk_run() -> bool:
                 from bot.hk import run_hk
                 _result = run_hk()
                 _post_mark_forward_evaluation("hk", _result)
-            _ledger_end(handle, "ok")
+            _status, _severity, _extra = _brain_job_outcome(_result)
+            _ledger_end(handle, _status, severity=_severity, extra=_extra)
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
             log.warning("hk first-run failed: %s", exc)

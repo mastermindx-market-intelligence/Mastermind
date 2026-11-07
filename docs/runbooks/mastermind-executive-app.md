@@ -8,6 +8,65 @@ exposing the existing five-tool Executive MCP contract
 or Sol) over plain HTTP, without the MCP SDK, without a new admission path,
 and without touching the general Executive control socket.
 
+## Temporary E1 four-read mode
+
+The source-only `e1-read` mode is explicit-root and production-inert: it
+requires Mastermind, Macro, and temporary runtime roots, accepts no ingress
+socket, constructs no admission writer, and exposes only the four reader tool
+paths. The outer MCP request authenticates its single current bearer before
+the inner E1 app independently re-verifies it. Duplicate Authorization fields,
+non-loopback configuration, production-root aliases, malformed frames, and
+bounded request/response overflow refuse without fallback, retry, or partial
+success. This is neither an installed-runtime nor deployment proof.
+
+Use the profile only with all operator coordinates named explicitly:
+
+```bash
+python3 scripts/executive_mcp.py \
+  --profile e1-read --mode readonly \
+  --policy /approved/temporary/e1-policy.json \
+  --repo-root /approved/reviewed/mastermind \
+  --macro-root /approved/reviewed/macro \
+  --read-runtime-root /approved/temporary/e1-runtime \
+  --host 127.0.0.1 --port 9123
+```
+
+E1 serves the stateless authenticated MCP surface at `POST /mcp`, with exactly
+`executive_state`, `executive_inbox`, `executive_job`, and
+`ceo_intent_status`. The in-process `/v1/tools/...` reader map is not a second
+listener and has no submit/reconcile route. A sole raw bearer must have the
+exact read scope; missing, duplicate, malformed, wider submit-scope, or invalid
+bearers stop at the outer gate. Valid MCP arguments are passed through the
+existing strict validator before the one inner request. Only a complete
+canonical reader envelope crosses back unchanged; invalid JSON, foreign
+envelopes, non-200 responses, response loss, and response overflow return the
+canonical `backend_unavailable` envelope without retry.
+
+The request ceiling is 65,536 bytes across all ASGI frames (not the declared
+`Content-Length`); incomplete, malformed, or 65,537-byte input refuses before
+MCP dispatch. The inner response is held until it is fully framed and within
+262,144 bytes, preventing partial healthy responses. Every temporary runtime
+root is fenced lexically and after symlink resolution at construction and again
+before each reader. Missing, foreign, unreadable, or moved runtime state remains
+an explicit degradation/unavailable result and never falls back to repository
+lifecycle data or causes the reader to create files.
+
+`--describe` confirms the pinned four-reader profile without reading the policy,
+importing the serving SDK, or binding a listener. It still requires the explicit
+coordinate flags so the production-path refusal is exercised:
+
+```bash
+python3 scripts/executive_mcp.py --profile e1-read --mode readonly --describe \
+  --policy /approved/temporary/e1-policy.json \
+  --repo-root /approved/reviewed/mastermind \
+  --macro-root /approved/reviewed/macro \
+  --read-runtime-root /approved/temporary/e1-runtime --port 9123
+```
+
+This runbook documents a source-only temporary composition. It does not grant
+authority to install, start, tunnel, connect a custom app, read a real runtime,
+or describe the composition as production-ready.
+
 * The four READ tools (`executive_state`, `executive_inbox`, `executive_job`,
   `ceo_intent_status`) are reused verbatim through
   `integrations.executive_mcp.adapter.ExecutiveMcpGateway` — same schemas,
@@ -87,6 +146,18 @@ connects to one that already exists.
 
 ## HTTP surface
 
+* `GET <ResourcePolicy.resource_metadata_url path>` — an unauthenticated RFC
+  9728 protected-resource metadata document. The route is derived from the
+  validated read policy, not a host header or hard-coded hostname, and returns
+  exactly its A1-owned `resource`, `authorization_servers`, and
+  `scopes_supported` projection. Read and submit policy instances must name
+  the same resource, metadata URL, issuer, and authorization-server set when
+  the app starts; otherwise construction refuses the incoherent generation.
+  An authority-only metadata URL maps to HTTP path `/`; percent-encoded or
+  duplicate-slash path spellings are refused at construction because the
+  raw-path fence deliberately will not serve them.
+  The exact path accepts only a query-free `GET`: trailing-slash, query,
+  encoded-separator, duplicate-slash, and non-GET forms never alias it.
 * `POST /v1/tools/{executive_state|executive_inbox|executive_job|ceo_intent_status}`
   — body `{"arguments": {...}}`, `Authorization: Bearer <read-scope token>`.
   Returns the exact `ExecutiveMcpGateway.call()` envelope.
@@ -123,6 +194,12 @@ close). Any reverse proxy or gateway placed in front of
 `scripts/mastermind_executive_app.py` MUST forward the original raw path
 byte-for-byte and must not apply its own path normalization/decoding ahead
 of this app's own fence.
+
+The metadata document is a public resource-server configuration projection,
+not an authorization-server endpoint. This app never proxies, caches,
+rewrites, or fabricates `/.well-known/oauth-authorization-server`, JWKS,
+token, registration, callback, consent, or other IdP discovery routes; those
+remain owned by the configured authorization server.
 
 ## effect_unknown — what a caller must do
 
@@ -168,3 +245,116 @@ socket.
   the MCP SDK anywhere in this app, no reference to `send_control_request`
   or a `.submit_intent(` call site, the frozen schema digest, and zero diff
   on `control_plane/executive_service.py`.
+
+## Native five-tool MCP composition
+
+`integrations.executive_mcp.server.build_executive_mcp_app(settings,
+audit_sink=...)` composes the frozen five-tool contract over stateless
+Streamable HTTP `POST /mcp`. It owns one existing Executive App instance;
+readers use its canonical gateway and submit uses its existing dedicated
+CeoIngress client. It adds no admission queue, token store or retry service.
+
+The builder accepts the exact read policy or the exact two-scope submit
+policy through two unchanged A1 adapters. A token upgraded for submission can
+also read through an explicit App setting, with the full submit policy
+independently verified by the App. The default direct HTTP App and temporary
+`e1-read` profile retain their original policy boundaries. Tool OAuth metadata
+and the insufficient-scope challenge use the existing A1 helpers; the input
+schemas and annotations remain unchanged.
+
+Both request and inner response buffering reuse the existing bounded ASGI
+boundary. The final escaped MCP result has its own budget, reserving space
+for the admitted JSON-RPC request ID. Literal routes refuse query strings,
+encoded aliases and trailing-slash redirects. The MCP backend accepts loopback
+Host values and is intended for the existing Secure MCP Tunnel.
+
+The composition also exposes the existing authenticated
+`POST /v1/tools/submit_ceo_intent/reconcile` status route. This is an operator
+status endpoint, not a sixth MCP tool. A lost, oversized, malformed or
+identity-mismatched reply after possible admission returns `effect_unknown`
+with the original `request_ref`; reconcile that same reference before taking
+another modifying action. No transport retry is performed.
+
+Focused proof lives in `tests/test_executive_mcp_app_composition.py`: real
+A1-signed test tokens, real temporary repositories, a real temporary
+CeoIngress/Runtime with execution disabled, exact tool scan, authorization
+upgrade, one queued Job, duplicate/conflict behavior and loss-after-admission
+reconciliation. These tests do not establish production installation or a
+successful ChatGPT call.
+
+### Installed production binding
+
+The installed composition gives the network MCP process its own non-login
+service identity. `ceo_ingress_app_peer_uid`, `ceo_ingress_app_armed`, and
+`ceo_ingress_app_macro_root` must be supplied together in the existing protected
+control configuration. Its peer must differ from control, Operator, worker,
+and C1 identities. C1 retains its existing peer, grounding provider and arming
+setting.
+
+The full-schema `control.json.template` includes an unarmed App binding, an
+explicit Macro snapshot placeholder, and an optional `ceo_ingress_app_boot_python`
+coordinate. The three App identity/arm/Macro fields remain the binding atom; the
+boot interpreter is additive so an older install can still start and degrade
+honestly instead of failing closed during rollout. Production should bind it to a
+root-owned, executable, non-group/other-writable Python runtime that already carries
+the read-only YAML dependency. The control process itself remains `-I -S -B` and
+never imports that third-party package tree.
+
+When configured, the control loader first attests `ceo_ingress_app_boot_python`
+against the existing CF2 capacity-runtime owner: exact runtime root and interpreter,
+root-owned/non-writable metadata, reviewed Python digest, PyYAML RECORD digest, full
+runtime-tree digest, and a bounded `-I -S -B` import probe that explicitly inserts
+the reviewed site-packages directory. This attestation does not replace the boot
+child's dependency-loading mode: the actual immutable boot-packet helper runs with
+`-I -B`, which is required for PyYAML 6.0.3 to remain importable from the sealed
+capacity runtime. If no boot interpreter is configured, #697's backward-compatible
+stdlib-only degraded path remains available and never changes admission state.
+
+With a boot interpreter bound, `InstalledExecutiveReaders` executes
+`scripts/ceo_boot_packet.py` only from the root-owned immutable installed release;
+the control-owned administrative Mastermind checkout contributes grounding identity
+only. Git observation is fail-closed before object traversal for gitfiles/external
+gitdirs, `commondir`, shallow state, alternates, promisor/partial-clone/helper
+configuration and `.promisor` packs, with `GIT_NO_LAZY_FETCH=1`. The Macro snapshot
+is copied to a same-filesystem temporary materialization for the child read, while
+pre/post path metadata seals on the canonical roots reject transient mutate-and-
+restore races. The packet must retain the exact source/Macro SHAs, path/type closure,
+load-bearing raw blob identities, schema and roots before it is projected back to the
+canonical Macro path.
+
+Supply the actual sealed Macro snapshot when provisioning the App, or omit the App
+binding when installing control without it. The existing installer preserves the
+optional boot coordinate from a reviewed control-config source; it does not create a
+second runtime/configuration authority.
+
+The App peer can use existing v2 submit/status frames and two closed internal
+read frames on the same CeoIngress socket. The four public tools and schemas
+remain unchanged. `InstalledExecutiveReaders` runs inside the control process,
+using the existing gateway projections and read-only Runtime handle. The
+network App receives canonical envelopes and freshly observed grounding over
+the socket; it has no filesystem access to the Runtime database or worker
+leases. The admission owner independently rechecks grounding before effect.
+Temporary E1/fixture roots and all their production-path refusals remain intact.
+
+On macOS, the control process applies one named-user ACL for socket read/write.
+The existing bootstrap's root-owned 0755 socket directory already permits
+traversal and remains untouched. A private control-owned parent receives only
+a traversal ACL. Socket ownership, group and POSIX mode remain unchanged, and a
+normal restart does not duplicate the ACL. The App identity is not added to the
+C1 group or the general Operator allowlist. Before activation, the host installer
+must establish the socket directory using the existing bootstrap's ownership
+and mode; the network process cannot create it.
+
+`ops/executive_os/executive_mcp_entry.py` is the installed network-process
+launcher. It requires an explicit root-owned configuration, the matching sealed
+release directory, dedicated process uid, loopback port, real A1 policies and
+separate directories for the existing read/submit durable authentication audit
+sinks. It refuses user-writable installation configuration. Run it under a
+separately provisioned network Python environment with `-I -B`; the sealed
+Executive control Python remains SDK-free.
+
+Deployment evidence belongs in the private operation receipt. Source tests do
+not establish an installed generation, accepted identity provider, live tunnel,
+or real ChatGPT canary. Production qualification still requires all five tools
+through the actual registered app, one separately confirmed harmless admission,
+same-operation duplicate/conflict checks, and zero Attempts or Workers.

@@ -517,9 +517,10 @@ def _nudges_block() -> list[dict]:
         if not p.exists():
             return []
         rep = json.loads(p.read_text())
+        from brain.nw_reflection import nudge_is_evaluable
         out: list[dict] = []
         for n in (rep.get("nudges") or []):
-            if not isinstance(n, dict):
+            if not nudge_is_evaluable(rep, n):
                 continue
             code = str(n.get("code", ""))
             if not _NUDGE_CODE_RE.match(code):
