@@ -1,0 +1,270 @@
+{
+  "pid": 35606,
+  "observed_at": "2026-11-07T06:44:59.272Z",
+  "rows": [
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        0,
+        0,
+        0
+      ],
+      "text": "LOCAL NATIVE RUNTIME"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        0,
+        1,
+        0
+      ],
+      "text": "Hermes "
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        0,
+        1,
+        1
+      ],
+      "text": "v0.23.0"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        1,
+        0
+      ],
+      "text": "Your existing local conversations, one native runtime. Worker dispatch is not enabled by this connection."
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        2,
+        0
+      ],
+      "text": "Conversation purpose"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        6,
+        0
+      ],
+      "text": "Mastermind OS \u00b7 Meta-CEO"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        8,
+        0
+      ],
+      "text": "Configured model"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        8,
+        1
+      ],
+      "text": ": "
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        8,
+        2
+      ],
+      "text": "qwen3:14b"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        8,
+        3
+      ],
+      "text": " \u00b7 "
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        8,
+        4
+      ],
+      "text": "Saved history \u00b7 current send access is checked when you send"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        9,
+        0,
+        0
+      ],
+      "text": "YOU"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        9,
+        0,
+        1,
+        0
+      ],
+      "text": "Reply exactly MASTERMIND_NATIVE_CANARY_OK. Do not call tools."
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        9,
+        1,
+        0
+      ],
+      "text": "HERMES"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        9,
+        1,
+        1,
+        0
+      ],
+      "text": "MASTERMIND_NATIVE_CANARY_OK"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        10,
+        0
+      ],
+      "text": "Message Hermes"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        10,
+        1,
+        0,
+        0
+      ],
+      "text": "What should we work through?"
+    },
+    {
+      "path": [
+        0,
+        0,
+        0,
+        0,
+        2,
+        2,
+        7,
+        11
+      ],
+      "text": "The message is sent exactly as written. No automatic resend."
+    }
+  ],
+  "original_answer_visible": true,
+  "original_input_visible": true
+}

@@ -38,6 +38,7 @@ export function observePlanWorkers(
 ): ReadonlyMap<string, PlanWorkerObservation> {
   const result = new Map<string, PlanWorkerObservation>();
   const current = missionSourceState === "CURRENT" &&
+    plan.root_job_id === selection.root_job_id &&
     mission?.read_state.state === "CURRENT" &&
     mission.program.work_ref === selection.work_ref &&
     mission.mission.root_job_id === selection.root_job_id &&
@@ -53,7 +54,10 @@ export function observePlanWorkers(
   for (const step of plan.steps) {
     // Mission DTO may be PARTIAL/truncated, so even no matches is NOT proof
     // that an admitted plan step has no workers.
-    const matching = mission.children.items.filter(child => child.plan_step_id === step.step_id);
+    // Step IDs are local to a coordinator. Nested plans may reuse this ID;
+    // only immediate children of the selected original root belong here.
+    const matching = mission.children.items.filter(child =>
+      child.parent_job_id === plan.root_job_id && child.plan_step_id === step.step_id);
     const workers = matching.slice(0, MAX_WORKER_DISPLAY).map(child => ({
       job_id: child.job_id,
       status: child.status,

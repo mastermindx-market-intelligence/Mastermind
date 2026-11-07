@@ -19,7 +19,7 @@ from unittest import mock
 from urllib.parse import urlencode
 
 
-FIXTURE_BLOB = "07297e4a111a2e56e7be337f43042f5f718b589a"
+FIXTURE_BLOB = "41dae1f1e0f29b542137ebf53f01a3e16b7f473d"
 TARGET = ("private_service_original_delivery_test.ComposedPreservingMigrationTests."
           "test_composed_preserving_migration_imports_then_observes_once")
 

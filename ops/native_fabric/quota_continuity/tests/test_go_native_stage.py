@@ -218,6 +218,9 @@ def test_default_build_stays_exact_reviewed_107_and_go_adds_only_the_fixed_pair(
     historical.update({"ext/" + name: value for name, value in builder.GO_SELECTION_SUPPORT_PREIMAGES.items()})
     assert default["ext/provider_outcome.py"] == builder.GO_PROTECTED_PROVIDER_OUTCOME_SHA256
     historical["ext/provider_outcome.py"] = builder.GO_BASE_PROVIDER_OUTCOME_SHA256
+    # Assert the repaired current payload separately from the original
+    # request-refusal carrier used to reconstruct historical predecessors.
+    assert actual_default["ext/fabric_task.py"] == builder.ADMISSION_INTEGRITY_DIGESTS["ext/fabric_task.py"]
     for name, original in builder.GO_UBUNTU4_PREIMAGES.items():
         expected = (builder.GO_REQUEST_REFUSAL_TASK_DIGEST if name == "fabric_task.py"
                     else builder.GO_UBUNTU4_DIGESTS[name])
