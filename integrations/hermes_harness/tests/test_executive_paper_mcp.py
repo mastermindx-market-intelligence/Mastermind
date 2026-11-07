@@ -101,6 +101,31 @@ class ExecutivePaperMcpTests(unittest.TestCase):
             with self.subTest(mutant=repr(mutant)), self.assertRaises(ValueError):
                 plugin.augment_disarmed_document(mutant)
 
+    def test_supervisor_catalog_accepts_only_exact_disabled_bytes(self):
+        from integrations.hermes_steward.client import ALLOWED_TOOLS
+        for role in ("mmsecretary", "mmmeta"):
+            with self.subTest(role=role), tempfile.TemporaryDirectory() as tmp:
+                profile = self.profile(Path(tmp), role)
+                rendered = plugin.render_disarmed_native_exec_paper(profile).encode()
+                expected = plugin.exact_disarmed_catalog(profile, rendered)
+                self.assertEqual(expected, {
+                    "mastermind_steward": tuple(ALLOWED_TOOLS),
+                    "mastermind_executive_v3": plugin.EXECUTIVE_READ_TOOLS,
+                    "mastermind_paper": plugin.PAPER_READ_TOOLS,
+                })
+                for modified in (
+                    rendered + b"\\n",
+                    rendered.replace(b"enabled: false", b"enabled: true", 1),
+                    rendered.replace(b"paper_read", b"paper_edit", 1),
+                    rendered.replace(b"${MASTERMIND_PAPER_MCP_SERVER}", b"/tmp/unsafe.py", 1),
+                    rendered[:100],
+                    rendered.decode(),
+                    b"x" * (64 * 1024 + 1),
+                ):
+                    with self.subTest(modified_type=type(modified).__name__,
+                                      modified_size=len(modified)):
+                        self.assertIsNone(plugin.exact_disarmed_catalog(profile, modified))
+
     def test_duplicate_yaml_rejected_without_installed_effect(self):
         from integrations.hermes_harness import native_byok
         with tempfile.TemporaryDirectory() as tmp:
