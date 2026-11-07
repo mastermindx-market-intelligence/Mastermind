@@ -122,10 +122,36 @@ it("a source-supplied kept receipt needs pure review, never another Keep or auto
   expect(screen.queryByRole("button",{name:"Send message"})).toBeNull();
   for(const fn of Object.values(h.transport))expect(fn).not.toHaveBeenCalled();
 });
+it("a status check before Keep releases authoritative absence without submitting an operation",async()=>{
+  const h=setup(),settled=vi.fn();h.props.onOriginalSettled=settled;
+  h.transport.consumeStatus.mockImplementation(async()=>({...fixture.consume_status,data:{...fixture.consume_status.data,state:"ABSENT",effect:"NONE",initial_consumption:null}}));
+  render(<Harness config={h.props}/>);await readyKeep();
+  fireEvent.click(screen.getByRole("button",{name:"Check original request"}));
+  await waitFor(()=>expect(h.transport.consumeStatus).toHaveBeenCalledTimes(1));await readyKeep();
+  expect(screen.getByText("No held original")).toBeTruthy();expect(h.binding.controller.getState().status).toBe("idle");
+  expect(h.peek()).toBeNull();expect(h.store.reserve).not.toHaveBeenCalled();expect(h.store.clearIfEqual).not.toHaveBeenCalled();
+  expect(h.transport.consume).not.toHaveBeenCalled();expect(h.transport.turn).not.toHaveBeenCalled();expect(settled).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button",{name:"Keep first response"}));
+  await screen.findByText("The original request needs a status check. Don’t send it again.");
+  expect(h.transport.consume).toHaveBeenCalledTimes(1);expect(h.peek()?.kind).toBe("conversation_consume");
+});
+it("an absent status check preserves a foreign request that arrives during the read",async()=>{
+  const h=setup();let finish!:(value:unknown)=>void;
+  h.transport.consumeStatus.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  render(<Harness config={h.props}/>);await readyKeep();
+  fireEvent.click(screen.getByRole("button",{name:"Check original request"}));
+  await waitFor(()=>expect(h.transport.consumeStatus).toHaveBeenCalledTimes(1));
+  const foreign:OperationPointer={kind:"conversation_create",operationKey:fixture.request.operation_key,targetKey:fixture.request.work_ref};
+  h.setPointer(foreign);await act(async()=>finish({...fixture.consume_status,data:{...fixture.consume_status.data,state:"ABSENT",effect:"NONE",initial_consumption:null}}));
+  await screen.findByText("Another request needs its existing status controls before continuing.");
+  expect(screen.getByText("Held original")).toBeTruthy();expect(screen.queryByRole("button",{name:"Keep first response"})).toBeNull();
+  expect(h.peek()).toBe(foreign);expect(h.store.reserve).not.toHaveBeenCalled();expect(h.store.clearIfEqual).not.toHaveBeenCalled();
+  expect(h.transport.consume).not.toHaveBeenCalled();expect(h.transport.turn).not.toHaveBeenCalled();
+});
 it("an absent original after attempted Keep stays held with no consume replay",async()=>{
   const h=setup();
   // Named synthetic negative only; this is not an owner success fixture.
-  h.transport.consumeStatus.mockImplementation(async()=>({...fixture.consume_status,data:{...fixture.consume_status.data,state:"ABSENT",effect:"NONE",initial_consumption:null,locator:null}}) as never);
+  h.transport.consumeStatus.mockImplementation(async()=>({...fixture.consume_status,data:{...fixture.consume_status.data,state:"ABSENT",effect:"NONE",initial_consumption:null}}) as never);
   render(<Harness config={h.props}/>);await readyKeep();fireEvent.click(screen.getByRole("button",{name:"Keep first response"}));
   await screen.findByText("The original request needs a status check. Don’t send it again.");const original=h.peek();
   fireEvent.click(screen.getByRole("button",{name:"Check original request"}));

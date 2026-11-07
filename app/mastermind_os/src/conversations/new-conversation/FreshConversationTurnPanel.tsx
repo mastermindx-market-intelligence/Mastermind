@@ -14,6 +14,8 @@ export interface FreshConversationTurnPanelProps {
   responsePending?: boolean;
   /** Only the caller's verified original read releases the next draft. */
   allowNextMessage?:boolean;
+  /** Only an owner-confirmed absence before any submission can offer initial Keep. */
+  allowInitialKeep?:boolean;
   /** Previously verified local reads, retained for this open conversation. */
   recordedTurns?:readonly {data:FreshConversationTurnData;message:string|null}[];
   /** Complete older entries were omitted from the bounded local presentation. */
@@ -68,7 +70,9 @@ function turnStatus(zh: boolean, activity: FreshConversationTurnPanelProps["acti
   if (data?.state === "ABSENT") {
     return {
       key: "absent",
-      title: text("No follow-up is recorded for this original request yet.", "此原请求尚未记录后续回复。"),
+      title: data.turn_key===null&&data.initial_consumption===null
+        ? text("First response not kept yet", "首条回复尚未保留")
+        : text("No follow-up is recorded for this original request yet.", "此原请求尚未记录后续回复。"),
     };
   }
   if (controller === "refused") {
@@ -128,7 +132,7 @@ function sourceRows(zh: boolean, operationState: OperationState | null,
  * decoded window and every guarded action; this component renders the handed
  * state, forwards exact draft text and never mints or infers a permission. */
 export function FreshConversationTurnPanel({ locale, data, operationState, activity, message,
-  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null, responsePending = false, allowNextMessage = false, recordedTurns = [], historyLimited = false, messageReadOnly = false, onMessageFocus, messagePreview }: FreshConversationTurnPanelProps) {
+  onMessageChange, readOnly, keepControl, sendControl, checkControl, feedback, originalTurnMessage, initialConsumption = null, responsePending = false, allowNextMessage = false, allowInitialKeep = false, recordedTurns = [], historyLimited = false, messageReadOnly = false, onMessageFocus, messagePreview }: FreshConversationTurnPanelProps) {
   const inputId=useId();
   const zh = locale === "zh-CN";
   const text = (en: string, cn: string) => zh ? cn : en;
@@ -139,8 +143,9 @@ export function FreshConversationTurnPanel({ locale, data, operationState, activ
   const absent = status?.key === "absent";
   const receipt = data?.initial_consumption ?? initialConsumption;
   const result = data?.result ?? null;
-  /** An absent turn is a hold, not clearance: neither slot is offered for replay. */
-  const holdActions = busy || unresolved || recorded && !allowNextMessage || absent || responsePending || status?.key === "refused";
+  /** Absent submitted turns stay held; the owner alone may qualify an initial Keep. */
+  const unsubmittedInitial=allowInitialKeep&&absent&&data?.turn_key===null&&receipt==null;
+  const holdActions = busy || unresolved || recorded && !allowNextMessage || absent && !unsubmittedInitial || responsePending || status?.key === "refused";
   const keepVisible = keepControl != null && receipt == null && !holdActions;
   const sendVisible = sendControl != null && receipt != null && !holdActions;
   const inputHeld = readOnly || busy || unresolved || recorded && !allowNextMessage || responsePending;

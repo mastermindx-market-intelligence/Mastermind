@@ -112,7 +112,11 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     return current.current.lastKind==="turn"&&!current.current.turnSettled||
       !!latest.current.draftSubmission?.submittedTurnKey;
   }
-  async function readBack(c:Capture,kind:"consume"|"turn",turnKey:string|null,sentMessage?:string){
+  function noSubmittedOriginal(){
+    return !current.current.attempted&&!current.current.lastKind&&!current.current.data?.initial_consumption&&
+      !latest.current.draftSubmission?.submittedTurnKey&&!currentConsumption();
+  }
+  async function readBack(c:Capture,kind:"consume"|"turn",turnKey:string|null,sentMessage?:string,allowUnsubmittedAbsence=false){
     if(!valid(c)||!c.read||c.read.current()!==true){if(valid(c))patch({error:"readFirst"});return;}
     const selection=c.read.selection;
     const request=validateFreshConversationTurnRequest(kind==="consume"
@@ -127,7 +131,8 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     patch({data:decoded.data,error:null});
     const settled=kind==="consume"?decoded.data.state==="CONSUMED"&&decoded.data.initial_consumption!==null
       :decoded.data.state==="RECORDED"&&decoded.data.result!==null;
-    if(!settled||decoded.data.effect!=="COMMITTED")return;
+    const absent=allowUnsubmittedAbsence&&kind==="consume"&&decoded.data.state==="ABSENT"&&decoded.data.effect==="NONE";
+    if(!absent&&(!settled||decoded.data.effect!=="COMMITTED"))return;
     // A remounted controller can be idle after its genuine accepted receipt
     // cleared the hint. The exact source read settles the original; it never
     // manufactures controller acceptance or clears a newer unresolved pointer.
@@ -135,6 +140,12 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     if(!valid(c)||latest.current.read!==c.read||c.read.current()!==true)return;
     const operation=c.b.controller.getState();
     patch({operation,pending:pointer??null,error:pointer?(belongs(pointer,c)?"pending":"other"):pointer===null?null:"unavailable"});
+    if(absent){
+      // A status-only check before Keep has no original effect to recover.
+      // Release only this read hold after fresh empty/idle owner observations.
+      if(pointer===null&&operation.status==="idle"&&noSubmittedOriginal())patch({recoveryHeld:false});
+      return;
+    }
     if(pointer!==null||operation.status!=="accepted"&&operation.status!=="idle")return;
     if(kind==="turn"&&turnKey){
       const draft=latest.current.draftSubmission;
@@ -231,7 +242,8 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
           ...(kind==="turn"&&!sameTurn?{originalTurnMessage:null,draftCapture:null,turnSettled:false}:{})});
         if(state.status!=="accepted")return;
       }
-      await readBack(c,kind,key);
+      const allowUnsubmittedAbsence=kind==="consume"&&!held.pointer&&noSubmittedOriginal()&&c.b.controller.getState().status==="idle";
+      await readBack(c,kind,key,undefined,allowUnsubmittedAbsence);
     }catch{if(valid(c))patch({error:"unavailable"});}finally{leave(c);}
   }
   const ownsDraft=sameOwner(props.draftOwner,liveOwner);
@@ -256,7 +268,9 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
   const canReview=editable&&!props.messageReadOnly&&!turnAttempted&&!!consumption&&props.message.length>0;
   const panel=<div ref={root} className="new-conversation-journey" lang={props.locale}>
     <FreshConversationTurnPanel locale={props.locale} data={turnAttempted&&view.data?.turn_key!==(view.lastTurnKey??submittedTurnKey)?null:view.data} initialConsumption={consumption}
-      responsePending={turnAttempted} allowNextMessage={view.turnSettled} recordedTurns={view.recordedTurns} historyLimited={view.historyLimited} operationState={view.operation}
+      responsePending={turnAttempted} allowNextMessage={view.turnSettled}
+      allowInitialKeep={view.data?.state==="ABSENT"&&!held&&view.operation?.status==="idle"&&noSubmittedOriginal()}
+      recordedTurns={view.recordedTurns} historyLimited={view.historyLimited} operationState={view.operation}
       activity={view.busy==="reviewing"?null:view.busy} message={ownsDraft?props.message:""} originalTurnMessage={view.originalTurnMessage}
       onMessageChange={value=>{if(latest.current.messageReadOnly||unsettledTurn()||!capture(true)||!ownsDraft)return;patch({prepared:null,error:null});props.onMessageChange(value);}}
       messagePreview={prepared?<section className="new-conversation-preview"><h3 data-turn-review tabIndex={-1}>{t("Review message","预览消息")}</h3>
