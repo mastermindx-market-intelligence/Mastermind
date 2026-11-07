@@ -117,8 +117,17 @@ def test_actual_owner_signed_read_and_source_export(owned, rsa_key):
         )
         combined = await request(owner, _submit_token(rsa_key))
         assert combined.status_code == 200
-        # Actual scope identity differs between policy namespaces; neither is relabeled.
-        assert combined.json()["source"] == value["source"]
+        # Independent authenticated reads retain the same immutable source; each
+        # carries its own observation time and may cross a wall-clock second.
+        from datetime import datetime
+        combined_source = combined.json()["source"]
+        assert set(combined_source) == set(value["source"])
+        assert {k: v for k, v in combined_source.items() if k != "observed_at"} == {
+            k: v for k, v in value["source"].items() if k != "observed_at"
+        }
+        for source in (value["source"], combined_source):
+            assert source["observed_at"].endswith("Z")
+            assert datetime.fromisoformat(source["observed_at"]).utcoffset().total_seconds() == 0
         if os.environ.get("MMOS_COMPANY_FIXTURE"):
             Path(os.environ["MMOS_COMPANY_FIXTURE"]).write_text(
                 json.dumps(
