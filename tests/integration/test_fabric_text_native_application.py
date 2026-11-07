@@ -32,7 +32,8 @@ class NativeTextApplicationTests(unittest.TestCase):
 
     def setUp(self):
         import yaml
-        _helpers.BufferedNativeChatTests.setUp(self)
+        # This epoch still exercises the protected text caller's generic binding.
+        _helpers.BufferedNativeChatTests.setUp(self, service_mode_id=None)
         manifest = yaml.safe_load(self.config_paths[1].read_text())
         manifest["capabilities"][0]["allowed_lanes"] = ["mastermind-text"]
         self.config_paths[1].write_text(yaml.safe_dump(manifest))

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import inspect
+import hashlib
 import re
 
 from control_plane.executive_fabric_composition import FabricBindingSource
@@ -40,6 +41,17 @@ _NATIVE_STATUSES = frozenset({
     "OBSERVED", "ADMITTED", "NOT_SUBMITTED", "REFUSED", "EFFECT_UNKNOWN", "UNAVAILABLE",
 })
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
+_TERMINAL_EXTENSIONS = frozenset({
+    "terminal_metadata", "request_observation", "request_observation_error",
+})
+_TERMINAL_BOOL_FIELDS = frozenset({
+    "completed", "failed", "partial", "interrupted", "response_transformed",
+    "response_previewed", "response_reused",
+})
+_TERMINAL_TEXT_FIELDS = frozenset({
+    "session_id", "model", "requested_model", "provider", "turn_exit_reason",
+})
+_TERMINAL_REPORTED_FIELDS = _TERMINAL_BOOL_FIELDS | _TERMINAL_TEXT_FIELDS | {"api_calls"}
 
 
 def _canonical(value):
@@ -128,6 +140,57 @@ def validate_public_result(value):
     return json.loads(_canonical(value))
 
 
+def _terminal_extensions(native_result, *, answer, family):
+    """Validate private retained metadata without promoting it to public proof.
+
+    Native owns these observations. They neither change the original admission
+    nor establish a provider call, serving model, physical account or success.
+    """
+    if "terminal_metadata" in native_result:
+        metadata = native_result["terminal_metadata"]
+        if (type(metadata) is not dict or set(metadata) != {
+                "schema", "reported", "invalid_fields", "output", "model_identity_verified"}
+                or metadata["schema"] != "mastermind.hermes_native_terminal_metadata/v1"
+                or metadata["model_identity_verified"] is not False):
+            raise ValueError("invalid native terminal metadata")
+        reported, invalid = metadata["reported"], metadata["invalid_fields"]
+        if (type(reported) is not dict or not set(reported) <= _TERMINAL_REPORTED_FIELDS
+                or type(invalid) is not list or len(invalid) > len(_TERMINAL_REPORTED_FIELDS)
+                or any(type(key) is not str or key not in _TERMINAL_REPORTED_FIELDS for key in invalid)
+                or len(set(invalid)) != len(invalid) or set(invalid) & set(reported)):
+            raise ValueError("invalid native reported fields")
+        for key, value in reported.items():
+            if key in _TERMINAL_BOOL_FIELDS:
+                if type(value) is not bool:
+                    raise ValueError("invalid native reported flag")
+            elif key in _TERMINAL_TEXT_FIELDS:
+                if value is not None and len(_text(value, empty=True, limit=256).encode("utf-8")) > 256:
+                    raise ValueError("invalid native reported label")
+            elif type(value) is not int or not 0 <= value <= 2**53 - 1:
+                raise ValueError("invalid native reported counter")
+        expected_output = None
+        if answer is not None:
+            raw = answer.encode("utf-8", "strict")
+            expected_output = {"stage": "retained_redacted_final_response",
+                               "sha256": hashlib.sha256(raw).hexdigest(), "utf8_bytes": len(raw)}
+        output = metadata["output"]
+        if (output != expected_output or (output is not None and (
+                type(output) is not dict or set(output) != set(expected_output)
+                or type(output["utf8_bytes"]) is not int))):
+            raise ValueError("native output metadata differs from original answer")
+    if "request_observation" in native_result and "request_observation_error" in native_result:
+        raise ValueError("ambiguous native request observation")
+    if "request_observation" in native_result:
+        from integrations.hermes_runtime.native_session_control import _request_observation
+
+        role = {"hermes_secretary": "mmsecretary", "hermes_meta": "mmmeta"}[family.kind]
+        _request_observation(native_result["request_observation"],
+                             receipt=native_result["admission"], role=role)
+    if ("request_observation_error" in native_result
+            and native_result["request_observation_error"] != "INVALID_RETAINED_OBSERVATION"):
+        raise ValueError("invalid native request observation error")
+
+
 def public_result(request_event, request, *, commit_started, native_result=None):
     """Project only actual native evidence joined to the stored original request."""
     from control_plane.native_continuation import _digest
@@ -145,14 +208,21 @@ def public_result(request_event, request, *, commit_started, native_result=None)
             keys = {"schema", "status", "admission"}
             if status == "OBSERVED" and "answer" in native_result:
                 keys |= {"answer", "successful"}
+            admission = _admission(native_result["admission"], request["binding"])
+            extensions = _TERMINAL_EXTENSIONS & native_result.keys()
+            if extensions:
+                if status != "OBSERVED" or admission["status"] != "terminal":
+                    raise ValueError("native metadata is not a terminal original result")
+                keys |= extensions
             if set(native_result) != keys:
                 raise ValueError("invalid native result fields")
-            admission = _admission(native_result["admission"], request["binding"])
             if "answer" in native_result:
                 answer = _answer(native_result["answer"])
                 successful = native_result["successful"]
                 if type(successful) is not bool or admission["status"] != "terminal":
                     raise ValueError("invalid terminal native answer")
+            if extensions:
+                _terminal_extensions(native_result, answer=answer, family=family)
         else:
             if set(native_result) not in ({"schema", "status"}, {"schema", "status", "reason"}):
                 raise ValueError("invalid native refusal fields")

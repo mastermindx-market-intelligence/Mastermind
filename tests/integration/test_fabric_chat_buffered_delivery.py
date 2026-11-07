@@ -76,7 +76,7 @@ class BufferedNativeChatTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         return patcher.start()
 
-    def setUp(self):
+    def setUp(self, *, service_mode_id="mastermind_chat_fabric"):
         import yaml
         from engine.fabric_inference_client import NATIVE_PROTOCOL
 
@@ -90,13 +90,18 @@ class BufferedNativeChatTests(unittest.TestCase):
             f"http://127.0.0.1:{self.native.server.server_port}/v1",
             self.native.service.credential_ref, "go", MODEL, "unknown", "fabric:chat-fixture",
             "chat_fixture", qualified=True, application_allowed=True, protocol=NATIVE_PROTOCOL)
-        self.start(patch.dict(self.owner._APPLICATION_FABRIC_TRANSPORTS, {"chat_fixture_v1": transport}))
+        # Chat consumes its dedicated owner relation. The retained text fixture
+        # explicitly selects its unchanged generic binding through this helper.
+        transport_id = ("chat_fixture_v1" if service_mode_id is None else
+                        self.owner._SERVICE_FABRIC_RELATIONS[service_mode_id].transport_id)
+        record_id = "shared_fabric" if service_mode_id is None else service_mode_id
+        self.start(patch.dict(self.owner._APPLICATION_FABRIC_TRANSPORTS, {transport_id: transport}))
         row = {key: getattr(transport, key) for key in self.owner._APPLICATION_IDENTITY_FIELDS}
-        row.update(transport_id="chat_fixture_v1", enabled=True, application_allowed=True,
+        row.update(transport_id=transport_id, enabled=True, application_allowed=True,
                    qualification=self.owner.PROFILE_QUALIFIED_CANARY,
                    qualification_ref="fixture:buffered-source-only", qualified_until=time.time()+3600)
         document = json.loads(self.originals[self.config_paths[0]])
-        document["application_fabric_modes"] = {"shared_fabric": row}
+        document["application_fabric_modes"] = {record_id: row}
         self.config_paths[0].write_text(json.dumps(document))
         self.config_paths[1].write_text(yaml.safe_dump({"capabilities": [{
             "capability_id": "chat_fixture", "secret_ref": self.native.service.credential_ref,
@@ -196,8 +201,15 @@ class BufferedNativeChatTests(unittest.TestCase):
                 self.assertFalse(loop_errors, loop_errors)
             finally:
                 self.native.block.set()
-                await stream.aclose()
-                loop.set_exception_handler(original_handler)
+                try:
+                    # A failed arrival assertion still owns the outstanding
+                    # anext task. Reap it before closing its async generator.
+                    if not waiting.done():
+                        waiting.cancel()
+                    await asyncio.gather(waiting, return_exceptions=True)
+                    await stream.aclose()
+                finally:
+                    loop.set_exception_handler(original_handler)
         asyncio.run(exercise())
         self.assertEqual(len(self.native.posts), 1)
         self.assertEqual(len(self.costs()), 1)

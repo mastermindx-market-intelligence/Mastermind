@@ -40,7 +40,8 @@ def _bind(operation_id):
 
     owner, shared, root = _owner()
     chosen, factory = owner.configured_application_fabric(
-        lane=_LANE, workload_profile=_PROFILE, root=root)
+        lane=_LANE, workload_profile=_PROFILE, root=root,
+        service_mode_id="mastermind_chat_fabric")
     if chosen is not True or type(factory) is not owner.ApplicationFabricFactory:
         raise advisor.FabricConversationError("fabric_binding_unavailable")
     provider = shared.build_fabric_provider(factory, request_id=operation_id,
