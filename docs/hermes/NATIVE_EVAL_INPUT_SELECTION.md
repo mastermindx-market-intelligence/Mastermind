@@ -538,3 +538,45 @@ strong six-field request/content join and selected-record-source behavior.
 Historical records cannot acquire a new witness from the current runtime.
 These two conditional session fields do not close the remaining observation,
 coverage, effect, cleanup, Harness2 execution or learning-promotion gates.
+
+
+## Scoped intake of the primary composition — 2026-11-07
+
+The completed source return
+[da1713d77eeaa24e34b42cb53f1a0cf942a327a6](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2234#issuecomment-6713577715)
+contains the connected APPLICATION/EVAL launch, host, configuration, credential
+environment and TCP-policy composition. Its primary/Fabric dependencies remain
+under the original protected-release carrier #2175. #2232 merged into that
+source branch, not protected master. Its executable d590 receipts remain
+attributed to that returned composition.
+
+This independent intake takes only its mixed-selection refusals into the
+existing EVAL owners. Public installation rejects a selected EVAL recipe with a
+primary selection or APPLICATION profile before secrets, source inspection,
+state or unit preparation. The leaf release helper refuses that combination
+before creating its directories or rendering configuration. The existing
+supervisor configuration API refuses an EVAL selection with an APPLICATION
+profile before inspecting the configuration file.
+
+Profile and recipe validators remain unchanged. The APPLICATION route, v4
+launch support, provider registration, primary host/env/configuration and port
+expansion remain in their connected original contribution. No APPLICATION
+import, new provider acceptance, TCP port, test fixture path or EVAL scope
+exception is added here. The original selected-child interpreter fixture repair
+belongs to its context fixture owner outside this PR's finite path surface.
+
+The new public-boundary ordering case explicitly substitutes the profile-loader
+edge to reach the downstream refusal; a separate real-parser case preserves the
+earlier unsupported-profile refusal. Leaf and supervisor cases exercise their
+actual existing helpers and fail if directory, renderer, credential, unit or
+configuration work is reached. These are source refusal proofs, not APPLICATION
+admission or an authenticated provider/tool continuation.
+
+The hosted three-attempt provider test exposed real shared-metadata exhaustion:
+all three requests occurred but only two attempts were retained. The publisher
+correctly withheld the scalar with NOT_OBSERVED. The positive fixture now uses a
+shorter synthetic request identifier, preserving all three observed selector
+values and every original request/content join under the unchanged16KiB budget.
+A separate valid longer-identifier fixture exercises actual reservation failure
+and requires incomplete/invalid evidence. Production limits, reservation rules,
+provider conflict semantics and publisher validity checks remain unchanged.

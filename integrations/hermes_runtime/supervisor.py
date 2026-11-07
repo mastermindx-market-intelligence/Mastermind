@@ -106,6 +106,8 @@ def expected_disabled_mcp(profile: RuntimeProfile, consumer=None, *, evaluation_
     reviewed Executive entry whose tool filter is empty. No unknown or
     enabled MCP/server plugin is allowed.
     """
+    if evaluation_inputs is not None and profile.model_provider == "mastermind-fabric":
+        raise RuntimeRefusal("NATIVE_EVAL_INPUTS_UNQUALIFIED")
     path = profile.hermes_home / "profiles" / profile.role / "config.yaml"
     if not path.exists() and not path.is_symlink():
         if evaluation_inputs is not None or (profile.state_dir / "install-manifest.json").exists():

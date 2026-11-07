@@ -94,6 +94,10 @@ def install(
             native = _hermes_native_gateway(native_installation, role=profile.role)
         except (ReleaseManifestError, TypeError, ValueError):
             raise RuntimeRefusal("NATIVE_INSTALLATION_REQUIRED") from None
+        if native.get("evaluation_inputs") is not None and (
+                native.get("primary_application") is not None
+                or profile.model_provider == "mastermind-fabric"):
+            raise RuntimeRefusal("NATIVE_EVAL_INPUTS_UNQUALIFIED")
         if (fetch or upstream_source is None
                 or upstream_source.resolve() != Path(native["vendor_root"])):
             raise RuntimeRefusal("NATIVE_VENDOR_SELECTION_MISMATCH")
@@ -324,11 +328,14 @@ def _write_release(
     *, native_installation: dict | None = None,
     native_derivation: dict | None = None,
 ) -> None:
+    consumer = (native_installation or {}).get("executive_consumer")
+    evaluation_inputs = (native_installation or {}).get("evaluation_inputs")
+    primary = (native_installation or {}).get("primary_application")
+    if evaluation_inputs is not None and (primary is not None or profile.model_provider == "mastermind-fabric"):
+        raise RuntimeRefusal("NATIVE_EVAL_INPUTS_UNQUALIFIED")
     home = release / "hermes-home"
     role_dir = home / "profiles" / profile.role
     role_dir.mkdir(parents=True, mode=0o700)
-    consumer = (native_installation or {}).get("executive_consumer")
-    evaluation_inputs = (native_installation or {}).get("evaluation_inputs")
     if native_installation is not None and hermes_config_renderer is None:
         from integrations.hermes_harness.native_byok import expected_native_config
         hermes_config_renderer = lambda profile: expected_native_config(
