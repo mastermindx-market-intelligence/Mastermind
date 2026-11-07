@@ -325,7 +325,7 @@ def reviewed_literal_spans(path: str, source: str):
     # Exact native upload HTTP statuses; changed source or identity data remains visible.
     if path == "integrations/deepseek_harness/runtime_compat/native-owner-access.patch":
         if hashlib.sha256(source.encode()).hexdigest() != (
-                "7da8eb25fe3bd1821f37970d5b573348be9016e93c9d5eb5fc32f0aeb7b29208"):
+                "81658504603d40b53eb288c9f206ba7646128cfab9f4e81ff6c58863623bbb00"):
             return ()
         anchors = (
             ("-          if (peer.principal.kind !== 'owner' || this.ownerRestricted) return Promise.resolve(new Response('forbidden', { status: 403 }))", '403'),

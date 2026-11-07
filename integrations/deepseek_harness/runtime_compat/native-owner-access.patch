@@ -764,6 +764,15 @@
 +}
 --- a/packages/api/remote-access/src/types.ts
 +++ b/packages/api/remote-access/src/types.ts
+@@ -19,7 +19,7 @@
+   TypertResourceMap,
+ } from '@deepseek-ai/dsh-typert-protocol'
+
+-/** Canonical `<namespace>/<method>` Remote endpoint; its segments never contain `:`. */
++/** Canonical `<namespace>/<method>` operation for Remote calls or explicitly qualified native HTTP routes. */
+ export type RemoteAccessEndpoint = `${string}/${string}`
+
+ /** A Remote endpoint, or `event:<name>` for one forwarded event. */
 @@ -140,3 +140,16 @@
    | { readonly type: 'baseline'; readonly owner: false; readonly grants: readonly RemoteAccessGrant[] }
    | { readonly type: 'upsert'; readonly grant: RemoteAccessGrant }
@@ -848,7 +857,34 @@
          else agent.followup(message)
 --- a/packages/api/session-controller/src/index.ts
 +++ b/packages/api/session-controller/src/index.ts
-@@ -161,10 +161,30 @@
+@@ -13,10 +13,10 @@
+ import type { SessionInspection } from '@deepseek-ai/dsh-session-persistence'
+ import type {} from '@deepseek-ai/dsh-session-projection-cache'
+ import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
+-import { Remote, RemoteError, TypertRemoteService, principalOf } from '@deepseek-ai/dsh-typert-protocol'
++import { Remote, RemoteError, TypertRemoteService, principalOf, type PeerScope } from '@deepseek-ai/dsh-typert-protocol'
+ import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
+ import { assertNever } from '@deepseek-ai/dsh-util-values'
+-import type {} from '@deepseek-ai/dsh-api-remote-access'
++import type { OwnerAccessScope } from '@deepseek-ai/dsh-api-remote-access'
+ import {
+   ApiSessionAgentController,
+   inspectApiSession,
+@@ -137,6 +137,7 @@
+     listWorkSliceMs: z.natural().min(1).default(16),
+   })
+
++  private readonly changeReadAccess: Context['remoteAccess']
+   private readonly agents: ApiSessionAgentController
+   private readonly commands: SessionCommandController
+   private readonly controlState: SessionControlController
+@@ -156,15 +157,36 @@
+    */
+   constructor(ctx: Context, config: Config, internals: SessionControllerInternals = {}) {
+     super(ctx, 'sessionController', { namespace: 'session' })
++    this.changeReadAccess = ctx.remoteAccess
+     ctx.typert.resources.register('session', { field: 'sessionId' })
+     const resolved = SessionController.Config(config)
      installModelSelectionProjection(ctx)
      this.agents = new ApiSessionAgentController(ctx)
      this.commands = new SessionCommandController(ctx, this.agents, process.cwd())
@@ -881,7 +917,43 @@
      }), 'session-controller: file-upload Agent resolver')
      this.controlState = new SessionControlController(ctx)
      // Registered before history so reverse-order teardown closes every
-@@ -279,17 +299,24 @@
+@@ -222,6 +244,35 @@
+     })
+   }
+
++  /** Capture one explicit native change read; event coordinates never grant a path read. */
++  captureChangeReadAccess(
++    action: 'changes/summary' | 'changes/diff',
++    request: { readonly sessionId: SessionId; readonly seq: number; readonly index?: number },
++    peer: PeerScope, signal: AbortSignal,
++  ): OwnerAccessScope | undefined {
++    const access = this.changeReadAccess.captureOwnerRestriction()
++    if (access === undefined) return undefined
++    const coordinates = Object.freeze({ sessionId: request.sessionId, seq: request.seq,
++      ...(request.index === undefined ? {} : { index: request.index }) })
++    const args = Object.freeze({ request: coordinates })
++    const requireCurrent = (): void => {
++      access.requireCurrent()
++      signal.throwIfAborted()
++      peer.signal.throwIfAborted()
++      const decision = this.changeReadAccess.decide({ principal: peer.principal, action,
++        resources: [{ kind: 'session', id: coordinates.sessionId }], args })
++      if (decision.kind !== 'allow') {
++        throw new RemoteError('remote-access/denied', 'native change read access is unavailable',
++          { action, reason: decision.reason })
++      }
++      access.requireCurrent()
++      signal.throwIfAborted()
++      peer.signal.throwIfAborted()
++    }
++    requireCurrent()
++    return Object.freeze({ signal: access.signal, requireCurrent })
++  }
++
+   private promote(observation: SessionObservation, signal: AbortSignal): void {
+     const sessionId = observation.header.id
+     const task = (async () => {
+@@ -279,17 +330,24 @@
    }
 
    /**
@@ -911,7 +983,7 @@
    }
 
    /**
-@@ -482,7 +509,27 @@
+@@ -482,7 +540,27 @@
        ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
        ...(principal === undefined ? {} : { principal }),
      }
@@ -1425,3 +1497,53 @@
    }
 
    private assertOrdinaryAgent(agent: Agent): void {
+--- a/packages/client/ui-deliverables/src/present-open.ts
++++ b/packages/client/ui-deliverables/src/present-open.ts
+@@ -4,7 +4,7 @@
+ import type {} from '@deepseek-ai/dsh-api-workspace-files'
+ import type {} from '@deepseek-ai/dsh-fs'
+ import type {} from '@deepseek-ai/dsh-sandbox-policy'
+-import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
++import { remoteErrorOf, type PeerScope } from '@deepseek-ai/dsh-typert-protocol'
+ import type {} from '@deepseek-ai/dsh-client-connection'
+ import type {} from '@deepseek-ai/dsh-session-query'
+ import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
+@@ -26,6 +26,7 @@
+   ctx.connection.fetch.register({
+     path: CHANGED_FILES_PATH, methods: ['GET'], requestBody: 'buffered',
+     fetch: request => Promise.resolve(handleChangesSummary(ctx, request)),
++    ownerAccess: (request, peer) => captureChangesAccess(ctx, request, peer, 'changes/summary'),
+   })
+   const lifetime = new AbortController()
+   const pending = new Set<Promise<Response>>()
+@@ -41,6 +42,8 @@
+       path,
+       methods: [...methods],
+       requestBody: 'buffered',
++      ...(path === CHANGES_DIFF_PATH ? { ownerAccess: (request: Request, peer: PeerScope) =>
++        captureChangesAccess(ctx, request, peer, 'changes/diff') } : {}),
+       fetch: (request) => {
+         const task = handler(ctx, new Request(request, {
+           signal: AbortSignal.any([request.signal, lifetime.signal]),
+@@ -51,6 +54,21 @@
+       },
+     })
+   }
++}
++
++/** These two raw reads use explicit policy operations and their original Session/event coordinates. */
++function captureChangesAccess(ctx: Context, request: Request, peer: PeerScope,
++  action: 'changes/summary' | 'changes/diff') {
++  const query = new URL(request.url).searchParams
++  const id = query.get('sessionId'), seq = coordinate(query.get('seq'))
++  const index = action === 'changes/diff' ? coordinate(query.get('index')) : undefined
++  if (!id || seq === undefined || action === 'changes/diff' && index === undefined) {
++    throw new Error('native change read coordinates required')
++  }
++  const access = ctx.sessionController.captureChangeReadAccess(action,
++    { sessionId: id as SessionId, seq, ...(index === undefined ? {} : { index }) }, peer, request.signal)
++  if (access === undefined) throw new Error('required native change read source unavailable')
++  return access
+ }
+
+ const NUMERIC = /^\d+$/

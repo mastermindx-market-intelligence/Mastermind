@@ -27,7 +27,8 @@ if(parsed.error)throw Error("Native source paths unavailable");
 const roots=["packages/core/agent/src","packages/core/agent-loop/src","apps/cli/src",
   "packages/typert/protocol/src","packages/client/connection/src",
   "packages/api/remote-access/src","packages/api/gateway/src","packages/api/remotes/src",
-  ...(access.schema==="mastermind.dsh_native_access_source.v3"?["packages/client/file-upload/src"]:[])];
+  ...(["mastermind.dsh_native_access_source.v3","mastermind.dsh_native_access_source.v4"].includes(access.schema)?["packages/client/file-upload/src"]:[]),
+  ...(access.schema==="mastermind.dsh_native_access_source.v4"?["packages/client/ui-deliverables/src"]:[])];
 const sessionSource=resolve(donor,"packages/api/session-controller/src");
 const redirect=(path:string)=>{
   if(path===sessionSource||path.startsWith(sessionSource+"/"))
@@ -43,6 +44,8 @@ const regression=process.env.MMX_NATIVE_ACCESS_REGRESSION==="1";
 export default defineConfig({
   resolve:{alias:[
     {find:"mmx-native-test-remote",replacement:resolve(donor,"packages/api/session-controller/tests/test-remote.ts")},
+    {find:"mmx-native-present-open",replacement:resolve(candidate,"packages/client/ui-deliverables/src/present-open.ts")},
+    {find:"mmx-native-changes-support",replacement:resolve(donor,"packages/deliverables/workspace-changes/tests/support.ts")},
     {find:"mmx-native-browser-credentials",replacement:resolve(donor,"packages/api/gateway/tests/browser-credentials.ts")},
     {find:/^@deepseek-ai\/dsh-api-session-controller\/src\//,replacement:resolve(sessionRoot,"packages/api/session-controller/src")+"/"},
     ...aliases,
@@ -51,7 +54,10 @@ export default defineConfig({
     const path=id.startsWith(".")&&importer?resolve(dirname(importer),id):id.startsWith("/")?id:undefined;
     if(path){const mapped=redirect(path);if(mapped!==path)return mapped;}
   }},shared.standardDecoratorPlugin()],
-  test:{environment:"node",include:process.env.MMX_NATIVE_ACCESS_UPLOAD_REGRESSION==="1"?[
+  test:{environment:"node",include:process.env.MMX_NATIVE_ACCESS_CHANGES_REGRESSION==="1"?[
+    resolve(donor,"packages/client/ui-deliverables/tests/changes-open.host.spec.ts"),
+    resolve(donor,"packages/client/ui-deliverables/tests/present-open.host.spec.ts"),
+  ]:process.env.MMX_NATIVE_ACCESS_UPLOAD_REGRESSION==="1"?[
     resolve(donor,"packages/client/file-upload/tests/file-upload-http.host.spec.ts"),
     resolve(donor,"packages/client/connection/tests/fetch-routes.host.spec.ts"),
     resolve(donor,"packages/client/connection/tests/http-bridge.host.spec.ts"),
@@ -59,6 +65,6 @@ export default defineConfig({
   ]:process.env.MMX_NATIVE_ACCESS_SEARCH_REGRESSION==="1"?[resolve(donor,"packages/api/session-controller/tests/session-search.host.spec.ts")]:regression?[
     resolve(donor,"packages/api/remote-access/tests/**/*.host.spec.ts"),
     resolve(donor,"packages/api/gateway/tests/gateway*.host.spec.ts"),
-  ]:["native-owner-access.test.ts","native-owner-hold.test.ts","native-owner-upload.test.ts"],
+  ]:["native-owner-access.test.ts","native-owner-hold.test.ts","native-owner-upload.test.ts","native-owner-changes.test.ts"],
   maxWorkers:1,fileParallelism:false,testTimeout:15000,hookTimeout:15000,execArgv:shared.vitestExecArgv},
 });

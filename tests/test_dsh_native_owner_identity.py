@@ -5,7 +5,7 @@ from tests.executive_identity_review import reviewed_literal_spans
 from tests.test_ceo_submit_armed_composition import ROOT, _d8_frozen_source_diff, _scan_added_identity_diff
 
 PATH = "integrations/deepseek_harness/runtime_compat/native-owner-access.patch"
-SHA = "7da8eb25fe3bd1821f37970d5b573348be9016e93c9d5eb5fc32f0aeb7b29208"
+SHA = "81658504603d40b53eb288c9f206ba7646128cfab9f4e81ff6c58863623bbb00"
 
 
 def scan(source, path=PATH, postimage=True):

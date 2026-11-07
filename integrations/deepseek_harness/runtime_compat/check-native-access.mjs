@@ -24,7 +24,8 @@ for(const [root,files] of [
 const ts=createRequire(resolve(donor,"package.json"))("typescript");
 const packages=["packages/core/agent","packages/core/agent-loop","apps/cli","packages/typert/protocol",
   "packages/client/connection","packages/api/remote-access","packages/api/gateway","packages/api/remotes",
-  "packages/api/session-controller",...(access.schema==="mastermind.dsh_native_access_source.v3"?["packages/client/file-upload"]:[])];
+  "packages/api/session-controller",...(["mastermind.dsh_native_access_source.v3","mastermind.dsh_native_access_source.v4"].includes(access.schema)?["packages/client/file-upload"]:[]),
+  ...(access.schema==="mastermind.dsh_native_access_source.v4"?["packages/client/ui-deliverables"]:[])];
 const configs=packages.map(name=>{
   const root=resolve(donor,name),config=existsSync(resolve(root,"tsconfig.host.json"))?"tsconfig.host.json":"tsconfig.json";
   const raw=ts.readConfigFile(resolve(root,config),ts.sys.readFile);

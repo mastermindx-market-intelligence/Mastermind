@@ -62,7 +62,7 @@ def source(tmp_path, monkeypatch):
     base = lambda name: session_text if name in session.CHANGED else host_text if name in host.CHANGED else old
     access_inputs = access.CHANGED | session_inputs
     access_patch = "".join(diff(name, base(name), access_text) for name in sorted(access.CHANGED)).encode()
-    expected = {"schema": "mastermind.dsh_native_access_source.v3", "donor_sha": pin,
+    expected = {"schema": "mastermind.dsh_native_access_source.v4", "donor_sha": pin,
         "donor_lock_sha256": access.sha(donor / "pnpm-lock.yaml"),
         "source_sha256": {name: package.digest(old) for name in sorted(access_inputs)},
         "base_sha256": {name: package.digest(base(name)) for name in sorted(access_inputs)},
@@ -208,18 +208,19 @@ def test_v1_owner_package_retains_its_original_session_and_receipt(source, tmp_p
     assert (release / "app/packages/api/session-controller/src/commands.ts").read_bytes() == b"export const native = 'session';\n"
 
 
-def test_v2_owner_package_retains_its_original_eight_file_composition(source, tmp_path):
+@pytest.mark.parametrize("version,packages,changed", [("v2", 4, access.CHANGED_V2), ("v3", 6, access.CHANGED_V3)])
+def test_earlier_owner_package_retains_its_original_composition(source, tmp_path, version, packages, changed):
     donor, inputs, native_host, expected = source
     legacy = dict(expected)
-    legacy["schema"] = "mastermind.dsh_native_access_source.v2"
+    legacy["schema"] = "mastermind.dsh_native_access_source." + version
     for name in ("source_sha256", "base_sha256", "output_sha256"):
         legacy[name] = {path: digest for path, digest in legacy[name].items()
-                        if path.startswith(access.PREFIXES[:4])}
+                        if path.startswith(access.PREFIXES[:packages])}
     def before(name):
         return b"export const native = 'session';\n" if name in session.CHANGED else (
             b"export const native = 'host';\n" if name in host.CHANGED else b"export const native = 'donor';\n")
     patch = "".join(diff(name, before(name), b"export const native = 'access';\n")
-                    for name in sorted(access.CHANGED_V2)).encode()
+                    for name in sorted(changed)).encode()
     legacy["patch_sha256"] = package.digest(patch)
     (inputs / "native-owner-access.patch").write_bytes(patch)
     (inputs / "native-access-source.json").write_text(json.dumps(legacy))
@@ -227,6 +228,8 @@ def test_v2_owner_package_retains_its_original_eight_file_composition(source, tm
     final = package.verify(release, config, accepted, protected, head)
     attended.verify_native_session_package(release, config, accepted, protected, head, final_source=final)
     receipt = json.loads((release / "native-owner-access-receipt.json").read_bytes())
-    assert receipt["access"]["schema"] == "mastermind.dsh_native_access_prepared.v2"
-    assert set(receipt["access"]["output_sha256"]) == access.CHANGED_V2
-    assert (release / "app/packages/client/file-upload/src/index.ts").read_bytes() == b"export const native = 'donor';\n"
+    assert receipt["access"]["schema"] == "mastermind.dsh_native_access_prepared." + version
+    assert set(receipt["access"]["output_sha256"]) == changed
+    if version == "v2":
+        assert (release / "app/packages/client/file-upload/src/index.ts").read_bytes() == b"export const native = 'donor';\n"
+    assert (release / "app/packages/client/ui-deliverables/src/present-open.ts").read_bytes() == b"export const native = 'donor';\n"
