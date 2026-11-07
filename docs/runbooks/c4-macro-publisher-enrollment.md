@@ -148,3 +148,56 @@ same-transaction reconciliation, start, installed tool catalog and actual
 ChatGPT4 app snapshot refresh. Re-run the preview at installation time; do
 not blindly reuse the earlier plan, relax pin policy or replay any denied
 legacy Macro/C2 publication.
+
+
+## C4 publisher recovery pair — 2026-11-07
+
+Persistent Sector Leadership ([Mastermind #1202](https://github.com/mastermindx-market-intelligence/Mastermind/issues/1202#issuecomment-6695716256)) needs the incumbent publisher's guarded reconciliation contract. The installed C4 publisher lacks it, and its workspace adapter rejects the corresponding arguments. The new source successor extends this same enrollment owner; it introduces no account, lifecycle, Git publication, retry or queue owner.
+
+Current operation: `persistent-sector-leadership-publisher-20261107-c4`, source base `5f8c13da926011fb5fdc8cea21287b532ac968db`. The original paid C4 source run ended in a root-verified provider error without an accepted source result; the assigned parent completed this bounded recovery. The returned paid adapter leaf is `psl-publisher-adapter-20261107-c4`, commit `e5446e3a2d8a274d3a4d94bc63f2c100678e9075`. Qualification evidence belongs to this source generation; prior installer runs above do not qualify these changes.
+
+The successor requires the completed original native pin, enrollment, Paper-v20 and fleet-status transactions. Its exact predecessor manifest is `c440f2ba4c0bdfbba3aff86303a483e3ab42a1093f330ba9e3fd6c6f923783b4`; config remains `f06dc822015fc11f34d7e1142bdf1b016cb985af701ba929f33b313ff3a570df`.
+
+| Module | Preserved predecessor SHA256 | New C4 SHA256 |
+|---|---|---|
+| git-publish.mjs | `f67119198a0e63c34ae148633402a7ec3ab351ecf7f40a24bdc355b9890f8a2c` | `a8ce5f25f4fc606e294f58de5748a73a36de5178d8e30b27132c3660e161d58e` |
+| workspace-access.mjs | `e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5` | `290cf5e961db2fa30e37c32da473595518df0ded80fc850a84cf5bdae1a1ec3c` |
+
+Generation `c4-publisher-recovery-20261107-v4` uses the existing `native-pool-pin-enrollment` CLI and a distinct retained `native-pool-pin-enrollment-publisher` transaction. The two source modules are required together. The only legal write prefixes are `OLD → PUBLISHER_ONLY → MODULES → COMMITTED`: publisher first, adapter second, manifest third, result last. Both modules' exact modes and before/after bytes are plan-bound. A prior publisher-only prototype intent is not a compatible transaction and must never be silently migrated.
+
+The adapter forwards `status.action_ref` and `push.recovery` to the existing publisher unchanged, removing only the repository selector after its closed binding. The existing publisher owns validation, journal and recovery. Commission status keeps its original closed contract. Commit admits the publisher-owned, mutually exclusive `index_recovery` selector; ordinary message/merge inputs remain closed and unchanged. The adapter forwards this object without interpreting it.
+
+Original enrollment `TARGET_FILES` and generic fleet installation maps remain immutable. The generic compatibility test uses the actual historical publisher and adapter bytes in `fixtures/git-publish.fleet-v10-merge.mjs` (`abc3b4…`) and `fixtures/workspace-access.fleet-v10-merge.mjs` (`e4f74c…`). The C4 source test checks the actual current pair. These fixtures are not runtime bundle members or new admitted installation generations.
+
+### Source and actual-carrier qualification
+
+The initial two-module focused run passed 47 tests, including the C4 filesystem transactions and generic compatibility class. The returned adapter passed all 67 tests on M2. The final full installer run passed **590/590**, including the exhaustive eight-state prefix proof; control-bundle closure passed **53/53**; composition with the actual held C2 patch passed **45/45**. [Exact source hashes, commands and retained logs](../evidence/persistent-sector-leadership-2026-11-07/c4-publisher-pair/README.md) accompany this source. These qualify source, not installation.
+
+A harmless fixture using the **actual configured C4 `/usr/bin/git`**, version **2.50.1 (Apple Git-155)**, proved the publisher's repeated-`-c` URL-clearing projection resolves exactly one pinned URL. The adapter worker's optional test-binary discovery is not relied on as proof for installed C4, and C4's configured binary is unchanged.
+
+### Exact v4 settlement qualification
+
+The same publisher now owns the explicit index-lock recovery variant. Its preview is read-only; apply uses exact HEAD/tree/index and lock identity fences plus declared maintenance custody, and makes at most one unique same-filesystem quarantine move. It never rewrites the real index, creates a commit, deletes a replacement lock or grants retry. Historical origin remains unknown; writer exclusion is caller-declared.
+
+Retained actions are admitted before current-index preparation. Receipt reads and terminal writes require owner-controlled, non-symlink ancestry and a bound action generation. All routes to a new applied settlement establish source and quarantine-ancestor directory durability. Unreadable owner state, uncertain moves and unavailable durability remain structured unknown outcomes. These checks are not atomic inode CAS and do not replace maintenance custody.
+
+Paid candidates `8d2eec…` and `641a37…` remained unaccepted after concrete defects were found. The next two-file corrective request was retained but refused before launch with unclassified code75; it was not retried or rehomed. The assigned parent completed the correction directly in this original source workspace under the authorized blocked-Fabric fallback.
+
+On actual M2, all **11 focused regression cases failed before and passed after**. Four demonstrate formerly missed canonical-path fault injection; seven cover retained receipt ancestry, replacement-time drift, repeat-apply truth and directory durability. The complete final publisher/adapter suite passed **206/206**, zero skips. The final v4 installer suite passed **590/590** with `TMPDIR=/private/tmp`; production HOME and path guards were unchanged. Earlier three canonical-path fixture errors and their separate three-case pass remain distinct historical evidence. Current source evidence is [the v4 receipt](../evidence/persistent-sector-leadership-2026-11-07/c4-publisher-pair/index-recovery-v4.json).
+
+This source qualification does not install the pair, settle any original Macro action, retire its actual lock, establish CI green or prove product acceptance. The inherited Brain composition CI dependency remains with original APPLICATION #2175/#2194 and its existing package-effect fences.
+
+### Protected adoption and recovery order
+
+The current Chairman's ChatGPT Web review waiver supersedes this runbook's historical blanket separate-review wording. Perform self-check, meaningful tests and required CI; obtain non-author GitHub approval only where the actual protected rules require it. No self-approval, self-merge, rule bypass or release-hold bypass is permitted.
+
+1. Complete exact-source qualification and normal protected release.
+2. Through an independent maintenance carrier, freshly verify the existing sealed **13-member control bundle**, then CAS-install that complete qualified bundle with its actual expected digest. Do not copy a single owner into the installed closure, move the installer under a different HOME, or relax path guards. The installed control context supplies the unchanged frozen Paper reader through its existing verified mechanism.
+3. Stage only the exact two qualified module payloads in the allowed HOME-owned source directory. Obtain a fresh C4 preview through the installed private-service owner.
+4. Establish quiescence of C4's own active commands and unread returns, stop only C4 through its owner, and apply the exact preview plan once. The separate Fabric service and its workers are not a C4 drain prerequisite.
+5. Read the same transaction, reconcile an uncertain return there, start through the existing owner, then verify health and the actual installed/live tool catalog. Refresh the same ChatGPT app's supported action snapshot if needed and read back `action_ref`/`recovery` capability.
+6. Only then use the publisher's guarded `LEGACY_FORWARD_ONLY` path for the original Macro operation and its actual current heads. Preserve the historical unknown push action; the new forward action does not retroactively settle or retry it.
+
+A source preview from the candidate `/Volumes` checkout already refused before installation because the frozen private reader's HOME ancestry guard applies there. Preserve that refusal. The existing control-bundle owner is the legitimate installed-source adoption path; there is no alternate installer invocation or guard exception.
+
+No installed action or consumer acceptance is implied by this source procedure. C2's held source, credentials, profiles, grants, config, Node, backend, dependencies, plist and all retained parent transactions remain bound to their existing owners.
