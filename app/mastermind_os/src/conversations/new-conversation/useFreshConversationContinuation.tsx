@@ -34,10 +34,11 @@ type View={scope:object;data:FreshConversationTurnData|null;operation:OperationS
   pending:OperationPointer|null;discovering:boolean;busy:Busy;attempted:boolean;
   request:FreshConversationTurnRequest|null;prepared:PreparedFreshConversationTurn|null;
   originalTurnMessage:string|null;lastTurnKey:string|null;lastKind:"consume"|"turn"|null;
-  draftCapture:FreshConversationTurnDraftCapture|null;
+  draftCapture:FreshConversationTurnDraftCapture|null;turnSettled:boolean;
+  recordedTurns:readonly {data:FreshConversationTurnData;message:string|null}[];
   error:"unavailable"|"pending"|"other"|"changed"|"readFirst"|null};
 const blank=(scope:object):View=>({scope,data:null,operation:null,pending:null,discovering:true,busy:null,
-  attempted:false,request:null,prepared:null,originalTurnMessage:null,lastTurnKey:null,lastKind:null,draftCapture:null,error:null});
+  attempted:false,request:null,prepared:null,originalTurnMessage:null,lastTurnKey:null,lastKind:null,draftCapture:null,turnSettled:false,recordedTurns:[],error:null});
 const sameOwner=(a:OwnerContext|null,b:OwnerContext|null)=>!!a&&!!b&&a.principalScope===b.principalScope&&a.generation===b.generation;
 function ownerOf(binding:FreshConversationAttendedBinding|null):OwnerContext|null {
   try {const owner=binding?.context();return owner?{...owner}:null;}catch{return null;}
@@ -107,7 +108,7 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     patch({pending:pointer,error:pointer?(belongs(pointer,c)?"pending":"other"):null});
     return {held:pointer!==null,pointer};
   }
-  async function readBack(c:Capture,kind:"consume"|"turn",turnKey:string|null){
+  async function readBack(c:Capture,kind:"consume"|"turn",turnKey:string|null,sentMessage?:string){
     if(!valid(c)||!c.read||c.read.current()!==true){if(valid(c))patch({error:"readFirst"});return;}
     const selection=c.read.selection;
     const request=validateFreshConversationTurnRequest(kind==="consume"
@@ -128,6 +129,16 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
       :decoded.data.state==="RECORDED"&&decoded.data.result!==null;
     if(settled&&decoded.data.effect==="COMMITTED"&&c.b.controller.getState().status==="accepted"&&
       valid(c)&&latest.current.read===c.read&&c.read.current()===true){
+      if(kind==="turn"){
+        const sent=sentMessage??current.current.originalTurnMessage;
+        const previous=current.current.recordedTurns.filter(turn=>turn.data.turn_key!==decoded.data.turn_key);
+        patch({turnSettled:true,request:null,prepared:null,draftCapture:null,
+          recordedTurns:[...previous,{data:decoded.data,message:sent}]});
+        // The App draft owner settles its exact capture above. A controlled
+        // stand-alone caller clears only the unchanged, confirmed sent text.
+        if(!latest.current.draftSubmission&&sent!==null&&latest.current.message===sent)
+          latest.current.onMessageChange("");
+      }
       try{latest.current.onOriginalSettled?.();}catch{ /* A local hint observer cannot undo the actual receipt. */ }
     }
   }
@@ -154,7 +165,7 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     const c=enter(true);if(!c)return;
     try{
       if((await pending(c)).held||!valid(c,true)||latest.current.messageReadOnly||!sameOwner(latest.current.draftOwner,c.owner))return;
-      if(!(current.current.data?.initial_consumption??currentConsumption())||current.current.data?.state==="RECORDED"||current.current.lastKind==="turn")return;
+      if(!(current.current.data?.initial_consumption??currentConsumption())||current.current.lastKind==="turn"&&!current.current.turnSettled)return;
       const prior=current.current.request;
       const request=prior&&"message"in prior&&prior.message===c.message?prior:c.b.makeTurnRequest(c.read!,c.message);
       if(!request){patch({error:"unavailable"});return;}
@@ -170,18 +181,18 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     const c=enter(true);if(!c)return;
     try{
       const prepared=current.current.prepared;
-      if(latest.current.messageReadOnly||current.current.lastKind==="turn"||!prepared||!("message"in prepared.request)||prepared.request.message!==c.message||
+      if(latest.current.messageReadOnly||current.current.lastKind==="turn"&&!current.current.turnSettled||!prepared||!("message"in prepared.request)||prepared.request.message!==c.message||
         !sameOwner(latest.current.draftOwner,c.owner)||(await pending(c)).held||!valid(c,true))return;
       const intent=c.b.makeTurnIntent(prepared);if(!intent){patch({prepared:null,error:"changed"});return;}
       if(!("turn_key"in prepared.request))return;
       const key=prepared.request.turn_key;
       const draft=latest.current.draftSubmission,token=draft?.captureSubmission(key,c.message)??null;
       if(draft&&!token){patch({prepared:null,error:"changed"});return;}
-      patch({busy:"sending",lastTurnKey:key,lastKind:"turn",originalTurnMessage:c.message,draftCapture:token,prepared:null,error:null});
+      patch({busy:"sending",lastTurnKey:key,lastKind:"turn",turnSettled:false,originalTurnMessage:c.message,draftCapture:token,prepared:null,error:null});
       const state=await c.b.controller.begin(intent);
       if(!valid(c))return;
       patch({operation:state,pending:state.pointer});
-      if(state.status==="accepted")await readBack(c,"turn",key);
+      if(state.status==="accepted")await readBack(c,"turn",key,c.message);
     }catch{if(valid(c))patch({error:"unavailable"});}finally{leave(c);}
   }
   async function check(){
@@ -222,10 +233,11 @@ export function useFreshConversationContinuation(props:FreshConversationContinua
     :view.error==="changed"?t("The message or its context changed. Review it again before sending.","消息或其上下文已改变。发送前请重新预览。")
     :view.error==="readFirst"?t("The original request was checked. Reopen its first response to continue.","已查询原请求。请重新打开首条回复后继续。")
     :view.error==="unavailable"?t("This action could not be completed here. Check the original request for its outcome.","此处暂时无法完成此操作。请查看原请求以确认结果。") :null;
-  const turnAttempted=view.lastKind==="turn";
-  const canReview=editable&&!props.messageReadOnly&&!turnAttempted&&!!consumption&&view.data?.state!=="RECORDED"&&props.message.length>0;
+  const turnAttempted=view.lastKind==="turn"&&!view.turnSettled;
+  const canReview=editable&&!props.messageReadOnly&&!turnAttempted&&!!consumption&&props.message.length>0;
   const panel=<div ref={root} className="new-conversation-journey" lang={props.locale}>
-    <FreshConversationTurnPanel locale={props.locale} data={view.data} initialConsumption={suppliedConsumption} responsePending={turnAttempted&&view.data?.state!=="RECORDED"} operationState={view.operation}
+    <FreshConversationTurnPanel locale={props.locale} data={turnAttempted&&view.data?.turn_key!==view.lastTurnKey?null:view.data} initialConsumption={consumption}
+      responsePending={turnAttempted} allowNextMessage={view.turnSettled} recordedTurns={view.recordedTurns} operationState={view.operation}
       activity={view.busy==="reviewing"?null:view.busy} message={ownsDraft?props.message:""} originalTurnMessage={view.originalTurnMessage}
       onMessageChange={value=>{if(latest.current.messageReadOnly||!capture(true)||!ownsDraft)return;patch({prepared:null,error:null});props.onMessageChange(value);}}
       messagePreview={prepared?<section className="new-conversation-preview"><h3 data-turn-review tabIndex={-1}>{t("Review message","预览消息")}</h3>

@@ -4770,7 +4770,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       active={active === "Projects"} binding={freshAttendedBinding} host={freshHost} authGeneration={authRevision}
       entry={{kind: "reference", window: source.window, current: source.current}}
       turnDraft={freshTurnDraft} onUnresolvedChange={reportFreshAttendedOriginal}
-      onReadCurrent={reportFreshReferenceRead} onOriginalSettled={onFreshOriginalSettled}/>});
+      onReadCurrent={reportFreshReferenceRead} onOriginalSettled={()=>{onFreshOriginalSettled();source.refresh();}}/>});
   const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
   const knowledgePorts = useMemo(() => {
     const host=retainedResultHost;

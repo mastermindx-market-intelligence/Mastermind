@@ -271,3 +271,67 @@ listener: unauthenticated root 401/no-store, exact packaged JavaScript and CSS
 200 with matching hashes and MIME types, and original child exit 130. This
 caught and corrected relative index asset URLs in the exporter. It sent no
 provider request and did not traverse the VPS/public route.
+
+
+## 2026-11-07 sequential project-conversation milestone
+
+The separate Executive project-conversation consumer no longer closes after one
+follow-up. It retains its existing admitted native writer, original root/child,
+Attempt, initial seal and consumption receipt. Each next message gets its own
+immutable request and native turn; the latest settled request/reply pair is bound
+into preview and rechecked inside reservation. Duplicate keys read the original
+outcome, changed content conflicts, and unresolved or explicitly unknown turns
+cannot admit another send.
+
+The existing service rearms its continuation before waking the HTTP caller. Its
+fresh-conversation branch is selected from original admission, so ordinary Wake
+ACKs cannot be replayed into that waiter. Idle expiry completes even initial-only
+conversations through ordinary cleanup, with 120 seconds reserved from the
+current lease for cleanup. Only a newly qualified request extends the lease.
+Shutdown closes admission before cleanup and wakes a reserved request through
+its original journal, including cancellation before execution or just after a
+reply commit; delivery failure never invents a provider-unknown marker.
+
+The original history reader now serves v2 bounded pages on its existing
+fresh_read route. Cursors are separate from immutable reference identity. The
+initial page always retains the complete initial envelope for Keep recovery;
+older pages retain its validated digest and complete reply envelopes. Pages use
+the actual compact UTF-8 byte budget, exclusive descending event cursors, at most
+eight rows and the existing 28,000-byte source limit. Legacy v1 UI/transport
+readback remains accepted. Native DSH JSONL storage remains its separate original
+owner; this Executive projection creates no new transcript or session store.
+
+The UI retains confirmed replies above the next-message composer, clears only
+the exact confirmed sent draft, mints a new key for the next reviewed message,
+and keeps unresolved requests on their existing recovery controls. Project
+history loads earlier messages without retiring the issued initial witness.
+After a settled send, the open original refreshes in place. Full initial replies
+that occupy a page trigger one recent history-page read as part of that same
+Open/Send gesture, so the latest complete response remains visible.
+
+Observed evidence:
+
+- Signed HTTP/Runtime focused continuation cases: 25 passed across the final
+  24-case result and the corrected consumption fixture rerun. The latter allows
+  60 seconds for fixture Create under the observed busy M2 host, while exercising
+  the unchanged production admission and independently shortened test idle wait.
+- Initial response plus three consecutive follow-ups: two Jobs, one Attempt,
+  one native start and four native turns. Duplicate sends add no Events or I/O;
+  stale-tab preview is refused. The initial seal stays unchanged.
+- Near-16-KB Unicode envelopes survive complete paged history and post-cleanup
+  reads, and consume_status still recovers the original receipt.
+- Early reader closure, pending-key concurrency, expiry, source/writer changes,
+  lost returns, initial-only idle completion and cancellation around reply commit
+  retain their original recovery identity.
+- UI continuation, original-window, history, decoder and panel suites: 72 passed,
+  including three successive messages, draft reset, all replies retained,
+  issued-cursor enforcement and late authorization withdrawal.
+- OS full TypeScript project build and production Vite build: passed.
+- On published predecessor 0506ed5, both previously failing specialized MCP
+  workflows passed, together with hosted frontend/native and CodeQL checks.
+
+These proofs use explicit inert provider/host seams where stated. They do not
+claim an installed Executive upgrade, signed-in production chat or a useful live
+provider answer. The exact VPS SSH refusal and unconfigured native provider
+remain deployment/account gates; no alternate SSH identity or paid-worker replay
+was attempted.

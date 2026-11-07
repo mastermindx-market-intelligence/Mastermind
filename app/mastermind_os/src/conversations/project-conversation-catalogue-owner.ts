@@ -2,8 +2,8 @@ import { decodeProjectConversationCatalogue, decodeProjectConversationRead, vali
   type ProjectConversationCatalogue } from './project-conversation-catalogue-contract';
 import {decodeProjectExecutionCatalogue,decodeProjectExecutionReference,decodeProjectExecutionWindow,
   type ProjectExecutionHistoryCatalogue,type ProjectExecutionReference,type ProjectExecutionHistoryWindow} from './project-execution-history-contract';
-import {decodeFreshConversationCatalogue,decodeFreshConversationReference,decodeFreshConversationWindow,
-  type FreshConversationCatalogue,type FreshConversationReference,type FreshConversationWindow} from './fresh-conversation-reference';
+import {decodeFreshConversationCatalogue,decodeFreshConversationReference,decodeFreshConversationWindow,freshConversationInitialDigest,freshConversationNextPage,
+  type FreshConversationCatalogue,type FreshConversationReadRequest,type FreshConversationWindow} from './fresh-conversation-reference';
 
 export interface ProjectConversationReadScope { readonly workRef:string; readonly principalScope:string; readonly generation:string; }
 export interface ProjectConversationCatalogueTransport {
@@ -19,7 +19,7 @@ export interface ProjectConversationCatalogueTransport {
   /** Separate actual S34 READ owner. The identity context's old reply booleans
    * authorize neither callback. Absence remains a partial source population. */
   freshReferences?(selection:{work_ref:string},signal:AbortSignal):Promise<unknown>;
-  readFreshReference?(reference:FreshConversationReference,signal:AbortSignal):Promise<unknown>;
+  readFreshReference?(reference:FreshConversationReadRequest,signal:AbortSignal):Promise<unknown>;
   executionReferences?(selection:{work_ref:string},signal:AbortSignal):Promise<unknown>;
   readExecutionReference?(reference:ProjectExecutionReference,signal:AbortSignal):Promise<unknown>;
 }
@@ -38,9 +38,9 @@ export function createProjectConversationCatalogueOwner(input:{transport:Project
   let membershipContext:ReturnType<typeof capture>=null;
   let freshTicket=0,freshContext:ReturnType<typeof capture>=null;
   let freshMembers=new Map<string,FreshConversationCatalogue['entries'][number]>();
-  let freshReadEpoch=0;
+  let freshReadEpoch=0,freshHistoryTicket=0;
   let lastFreshRead:{window:FreshConversationWindow;context:NonNullable<ReturnType<typeof capture>>;
-    pageTicket:number;row:FreshConversationCatalogue['entries'][number]}|null=null;
+    pageTicket:number;nextBefore:number|null;row:FreshConversationCatalogue['entries'][number]}|null=null;
   let executionTicket=0,executionReadEpoch=0,executionContext:ReturnType<typeof capture>=null;
   let executionMembers=new Map<string,ProjectExecutionHistoryCatalogue['entries'][number]>();
   let lastExecutionRead:{window:ProjectExecutionHistoryWindow;context:NonNullable<ReturnType<typeof capture>>;
@@ -123,7 +123,25 @@ export function createProjectConversationCatalogueOwner(input:{transport:Project
       const result=await bounded(signal,async child=>decodeFreshConversationWindow(
         await methods.readFreshReference!.call(transport,requested,child),requested));
       if(!current(captured)||ticket!==freshTicket||readEpoch!==freshReadEpoch||freshMembers.get(requested.root_job_id)!==row||result.initial_message!==row.initial_message)fail();
-      lastFreshRead={window:result,context:captured,pageTicket:ticket,row};return result;
+      lastFreshRead={window:result,context:captured,pageTicket:ticket,nextBefore:freshConversationNextPage(result),row};return result;
+    },
+    /** Older display pages retain the issued initial witness. They grant no
+     * continuation and cannot outlive its original/auth/selection generation. */
+    async readFreshOlder(window:FreshConversationWindow,before:number,signal:AbortSignal){
+      const issued=lastFreshRead,readEpoch=freshReadEpoch,ticket=++freshHistoryTicket;
+      if(!issued||issued.window!==window||!current(issued.context)||!methods.readFreshReference||
+        issued.pageTicket!==freshTicket||freshMembers.get(window.reference.root_job_id)!==issued.row||
+        !Number.isSafeInteger(before)||before<1||issued.nextBefore!==before)fail();
+      const requested={...window.reference,before_event_id:before};
+      const result=await bounded(signal,async child=>decodeFreshConversationWindow(
+        await methods.readFreshReference!.call(transport,requested,child),requested));
+      if(lastFreshRead!==issued||readEpoch!==freshReadEpoch||ticket!==freshHistoryTicket||
+        !current(issued.context)||issued.pageTicket!==freshTicket||issued.nextBefore!==before||
+        freshMembers.get(window.reference.root_job_id)!==issued.row||result.initial_message!==window.initial_message||
+        freshConversationInitialDigest(result)!==freshConversationInitialDigest(window)||
+        JSON.stringify(result.locator)!==JSON.stringify(window.locator)||
+        JSON.stringify(result.initial_consumption)!==JSON.stringify(window.initial_consumption))fail();
+      issued.nextBefore=freshConversationNextPage(result);return result;
     },
     currentExecution(window:ProjectExecutionHistoryWindow){const value=lastExecutionRead;return !!value&&value.window===window&&
       current(value.context)&&value.pageTicket===executionTicket&&executionMembers.get(window.reference.root_job_id)===value.row;},

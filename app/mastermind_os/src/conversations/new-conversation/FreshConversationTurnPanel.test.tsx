@@ -266,7 +266,7 @@ describe("FreshConversationTurnPanel", () => {
     expect(screen.queryByLabelText("下一条消息")).toBeNull();
     view.rerender(entry("zh-CN",{data:unitData()}).ui);
     expect(screen.getByLabelText("下一条消息")).toBeTruthy();
-    expect(screen.getByText("此视图仅支持一条后续消息。")).toBeTruthy();
+    expect(screen.getByText("消息将保留在此对话中。")).toBeTruthy();
   });
 
   it("null window invents no receipt, no state and no raw source values", () => {

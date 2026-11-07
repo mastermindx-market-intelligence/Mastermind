@@ -234,3 +234,32 @@ it("notifies local-hint refresh only after accepted original receipt/read, never
  fireEvent.click(screen.getByRole("button",{name:"Check original request"}));await screen.findByText("First response kept");expect(settled).toHaveBeenCalledTimes(1);
  mounted.unmount();expect(settled).toHaveBeenCalledTimes(1);expect(h.transport.consume).toHaveBeenCalledTimes(1);
 });
+
+it("sends three distinct follow-ups and keeps each confirmed reply while resetting only its sent draft",async()=>{
+ const h=setup();h.props.initialConsumption=h.consumption;
+ let draw=0;vi.stubGlobal("crypto",{getRandomValues:(a:Uint8Array)=>{const seed=++draw*17;for(let i=0;i<a.length;i++)a[i]=(seed+i)%256;return a;}});
+ const withKey=(frame:unknown,request:FreshConversationTurnRequest)=>{
+  if(!("turn_key"in request))throw Error("turn key required");
+  const value=structuredClone(frame) as {data:{turn_key:string}};value.data.turn_key=request.turn_key;return value;
+ };
+ h.transport.turnPreview.mockImplementation(async request=>withKey(fixture.turn_preview,request));
+ h.transport.turn.mockImplementation(async request=>withKey(fixture.turn,request));
+ h.transport.turnRead.mockImplementation(async request=>withKey(fixture.turn_read,request));
+ render(<Harness config={h.props}/>);
+ for(let index=1;index<=3;index++){
+  const input=await screen.findByRole("textbox",{name:"Your next message"});
+  await waitFor(()=>expect((input as HTMLTextAreaElement).disabled).toBe(false));
+  fireEvent.change(input,{target:{value:"Sequential message "+index}});
+  fireEvent.click(screen.getByRole("button",{name:"Review message"}));
+  const send=await screen.findByRole("button",{name:"Send message"});fireEvent.click(send);
+  await waitFor(()=>expect(h.transport.turnRead).toHaveBeenCalledTimes(index));
+  await waitFor(()=>expect((screen.getByRole("textbox",{name:"Your next message"}) as HTMLTextAreaElement).value).toBe(""));
+  expect(screen.getByText("Sequential message "+index)).toBeTruthy();
+  expect(h.peek()).toBeNull();
+ }
+ expect(h.transport.consume).not.toHaveBeenCalled();
+ expect(h.transport.turn).toHaveBeenCalledTimes(3);
+ expect(new Set(h.transport.turn.mock.calls.map(([request])=>"turn_key"in request?request.turn_key:null)).size).toBe(3);
+ for(let index=1;index<=3;index++)expect(screen.getByText("Sequential message "+index)).toBeTruthy();
+ expect(screen.getAllByText(fixture.turn_read.data.result.envelope.summary)).toHaveLength(3);
+});

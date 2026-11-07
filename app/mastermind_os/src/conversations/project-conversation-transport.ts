@@ -1,5 +1,5 @@
 import {validateProjectConversationSelection} from './project-conversation-catalogue-contract';
-import {decodeFreshConversationReference} from './fresh-conversation-reference';
+import {decodeFreshConversationReadRequest} from './fresh-conversation-reference';
 import {decodeProjectExecutionReference} from './project-execution-history-contract';
 
 export type ProjectConversationReadOperation='catalogue'|'read'|'fresh_references'|'fresh_read'|'execution_references'|'execution_read';
@@ -13,7 +13,7 @@ export function projectConversationArguments(operation:ProjectConversationReadOp
     if(Reflect.ownKeys(fields).some(k=>typeof k!=='string')||Object.values(fields).some(d=>!('value'in d)))return null;
     const keys=Object.keys(fields).sort().join(','),work=fields.work_ref?.value;
     if(operation==='read')return validateProjectConversationSelection(value);
-    if(operation==='fresh_read')return typeof work==='string'?decodeFreshConversationReference(value,work):null;
+    if(operation==='fresh_read')return typeof work==='string'?decodeFreshConversationReadRequest(value,work):null;
     if(operation==='execution_read')return typeof work==='string'?decodeProjectExecutionReference(value,work):null;
     if(operation!=='catalogue'&&operation!=='fresh_references'&&operation!=='execution_references')return null;
     if(typeof work!=='string'||(operation!=='fresh_references'

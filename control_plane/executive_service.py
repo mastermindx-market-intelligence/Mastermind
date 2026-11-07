@@ -8541,27 +8541,51 @@ class ExecutiveControlService:
             dispatch.started.set_result(OrchestrationDispatchOutcome(
                 command_id=dispatch.command_id, job_id=dispatch.job_id,
                 attempt=current_attempt, outcome="ACTIVE", lease_token=lease.lease_token))
-            # The initial seal exposes this writer before the thread returns
-            # its retained handle. Re-read a persisted ACK once at attachment;
-            # an ingress edge in that interval must not need redelivery.
-            await self._signal_native_continuation()
-            # Wake owns delivery and persisted ACK; no polling or provider retry.
-            read_ref = await asyncio.wait_for(dispatch.continuation, timeout=_NATIVE_CONTINUATION_WAIT_SECONDS)
+            from control_plane.fresh_conversation_admission import read_creation_restriction
             from control_plane.fresh_conversation_turn import FreshConversationTurnSource, execute_attended_turn
-            if type(read_ref) is FreshConversationTurnSource:
-                await self._run_owned_coroutine(execute_attended_turn(self, dispatch, read_ref))
+            root = self._require_runtime().jobs.get_job(dispatch.retained.job.root_job_id)
+            if root is None:
+                raise StateConflict("native continuation lost its exact root")
+            if read_creation_restriction(self._require_runtime(), root) is not None:
+                # Trusted fresh admission, including initial-only conversations,
+                # uses this same retained writer and one bounded idle waiter.
+                while True:
+                    current_attempt = self._require_runtime().attempts.get_attempt(lease.attempt.attempt_id)
+                    if current_attempt is None:
+                        raise StateConflict("fresh continuation lost its exact Attempt")
+                    remaining = datetime.fromisoformat(current_attempt.lease_expires_at).timestamp() - time.time()
+                    # Remote graceful stop can need 90 seconds. No idle renewal.
+                    idle_seconds = min(_NATIVE_CONTINUATION_WAIT_SECONDS, max(0.0, remaining - 120.0))
+                    if idle_seconds <= 0:
+                        break
+                    try:
+                        read_ref = await asyncio.wait_for(dispatch.continuation, timeout=idle_seconds)
+                    except asyncio.TimeoutError:
+                        break
+                    if type(read_ref) is not FreshConversationTurnSource:
+                        raise StateConflict("fresh continuation lost its exact attended source")
+                    await self._run_owned_coroutine(execute_attended_turn(self, dispatch, read_ref))
+                    # No await between successful settlement and the next
+                    # waiter: the HTTP client may send its next message at once.
+                    if getattr(dispatch, "_fresh_turn_source", None) is read_ref:
+                        dispatch._fresh_turn_source = None
+                    dispatch.continuation = asyncio.get_running_loop().create_future()
+                    if not read_ref._completion.done():
+                        read_ref._completion.set_result(None)
             else:
-                root = self._require_runtime().jobs.get_job(dispatch.retained.job.root_job_id)
-                if root is None:
-                    raise StateConflict("native continuation lost its exact root")
-                self._native_return_source(root)  # Fresh installed read/execute admission.
+                # Legacy native return keeps its original persisted-ACK path
+                # and timeout semantics; fresh messages never signal that ACK.
+                await self._signal_native_continuation()
+                read_ref = await asyncio.wait_for(dispatch.continuation, timeout=_NATIVE_CONTINUATION_WAIT_SECONDS)
+                self._native_return_source(root)
                 await self._run_owned_coroutine(supervisor.run_native_continuation(
                     dispatch.retained, source=dispatch.source, read_ref=read_ref))
                 committed_reply = await dispatch.source.require_committed_native_reply(read_ref=read_ref)
-                # Notification is a separate post-COMMIT effect, not a native-Job
-                # terminalization prerequisite. Retain it under existing service
-                # physical-task custody; its Runtime reservation survives restart.
                 self._schedule_native_reply_events(read_ref, committed_reply)
+            # Withdraw the only admission slot before physical cleanup can
+            # await; a zero remaining idle window must not accept a new turn.
+            if not dispatch.continuation.done():
+                dispatch.continuation.cancel()
             await self._run_owned_coroutine(supervisor.finish_retained_native_job(dispatch.retained))
             await self._project_terminal_return(dispatch.job_id,
                 expected_attempt_id=lease.attempt.attempt_id)
@@ -8579,6 +8603,13 @@ class ExecutiveControlService:
             if isinstance(exc, asyncio.CancelledError):
                 raise
         finally:
+            if not dispatch.continuation.done():
+                dispatch.continuation.cancel()
+            source = getattr(dispatch, "_fresh_turn_source", None)
+            if source is not None and not source._completion.done():
+                # Delivery settlement only. The original journal determines
+                # RECORDED vs UNKNOWN, including cancellation around a commit.
+                source._completion.set_result(None)
             if self._native_operator_dispatch is dispatch:
                 self._native_operator_dispatch = None
             if self._dispatch_tasks.get(dispatch.job_id) is asyncio.current_task():
@@ -8680,6 +8711,10 @@ class ExecutiveControlService:
                 or self._closing or self._service_state != "READY"):
             return
         retained, source = dispatch.retained, dispatch.source
+        from control_plane.fresh_conversation_admission import read_creation_restriction
+        root = self._require_runtime().jobs.get_job(retained.job.root_job_id)
+        if root is None or read_creation_restriction(self._require_runtime(), root) is not None:
+            return
         events = self._require_runtime().events.list_events(
             job_id=dispatch.job_id, attempt_id=retained.session.attempt_id)
         requests = [item for item in events if item.event_type == _EVENT]

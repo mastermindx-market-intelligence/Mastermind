@@ -1515,7 +1515,7 @@ class ExecutiveOperatorSupervisor:
             stop_operation=OperationId(f"ohf-op:stop:{retained.session.attempt_id}"), reason=reason)
 
     def retain_native_wait_window(self, retained: RetainedNativeOperatorSession) -> None:
-        """One bounded lease extension for the service's existing ACK waiter."""
+        """Extend the incumbent lease for attachment or one qualified request."""
         self._require_retained_native(retained)
         self._orchestrator(retained.lease, retained.adapter).runtime.extend_operator_lease(
             retained.session.attempt_id, 600)

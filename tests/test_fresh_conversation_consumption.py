@@ -14,7 +14,7 @@ def test_lost_original_keep_readonly_recovery_before_any_turn_then_same_turn(tmp
         request={**request,'operation_key':os.environ.get('S34_CREATE_OPERATION_KEY',request['operation_key'])}
         try:
             _,preview=await post(app,'preview',request,token,wt)
-            _,created=await post(app,'create',{**request,'preview_digest':preview['data']['preview']['digest']},token,wt)
+            _,created=await post(app,'create',{**request,'preview_digest':preview['data']['preview']['digest']},token,wt,timeout_seconds=60)
             assert created['ok']
             raw=calls[-1]['principal'];principal=neutral_principal_projection(**{**raw,'scopes':tuple(raw['scopes'])})
             owner=service._fixture_fresh_owner
@@ -61,6 +61,7 @@ def test_lost_original_keep_readonly_recovery_before_any_turn_then_same_turn(tmp
                 assert not revoked['ok'] and runtime.events.list_events()==before and adapters[0].begin_turn_calls==1
             # No reconsume after the lost response. Only one new attended turn.
             final_turn_request={**turn_request,'preview_digest':ready['data']['preview_digest']}
+            monkeypatch.setattr("control_plane.executive_service._NATIVE_CONTINUATION_WAIT_SECONDS", 2.0)
             _,turn=await post(app,'turn',final_turn_request,token,wt)
             assert turn['ok'] and turn['data']['state']=='RECORDED',turn
             assert adapters[0].begin_turn_calls==2 and len(runtime.jobs.list_jobs())==2 and len(runtime.attempts.list_attempts())==1

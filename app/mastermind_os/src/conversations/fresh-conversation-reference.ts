@@ -6,17 +6,25 @@ export interface FreshConversationReference {
   readonly work_ref:string;readonly root_job_id:string;readonly root_event_id:number;
   readonly root_event_sha256:string;readonly principal_scope_sha256:string;
 }
+export interface FreshConversationReadRequest extends FreshConversationReference {
+  readonly before_event_id?:number;
+}
+export interface FreshConversationPage {
+  readonly kind:'initial'|'history';readonly before_event_id:number|null;readonly next_before_event_id:number|null;
+}
 export interface FreshConversationCatalogue {
   readonly schema:'mastermind.fresh_conversation_references.v1';readonly work_ref:string;readonly state:'AVAILABLE';
   readonly coverage:Readonly<{state:'COMPLETE'|'PARTIAL';limit:8;returned:number}>;
   readonly entries:readonly Readonly<{kind:'fresh_native';reference:FreshConversationReference;initial_message:string;root_state:string}>[];
 }
 export interface FreshConversationWindow {
-  readonly schema:'mastermind.fresh_conversation_window.v1';readonly kind:'fresh_native';readonly reference:FreshConversationReference;
+  readonly schema:'mastermind.fresh_conversation_window.v1'|'mastermind.fresh_conversation_window.v2';readonly kind:'fresh_native';readonly reference:FreshConversationReference;
   readonly state:'ADMITTED'|'RETAINED'|'SETTLED'|'RECONCILIATION_REQUIRED';
   readonly locator:Readonly<{work_ref:string;root_job_id:string;job_id:string|null;attempt_id:string|null}>;
   readonly epoch:null|Readonly<{attempt_id:string;binding_digest:string;generation_digest:string}>;
   readonly initial_message:string;readonly initial_result:FreshConversationPayload|null;
+  /** v2 distinguishes a history page's omitted envelope from an absent seal. */
+  readonly initial_digest?:string|null;readonly page?:FreshConversationPage;
   readonly initial_consumption:null|Readonly<{state:'CONSUMED';event_id:number;event_sha256:string;initial_digest:string}>;
   readonly turns:readonly Readonly<{turn_key:string;message:string;state:'RECORDED'|'RECONCILIATION_REQUIRED';result:FreshConversationPayload|null;parent_consumed:false}>[];
   readonly can_send:false;readonly parent_consumed:false;
@@ -103,11 +111,30 @@ export function decodeFreshConversationCatalogue(raw:unknown,expectedWorkRef:str
 /** The source owns complete Role validation and immutable native Events.
  * Display uses the existing qualified sealed-result digest/locator helper;
  * this reader never creates an old operation-key DTO or a send capability. */
+export function decodeFreshConversationReadRequest(raw:unknown,expectedWorkRef:string):FreshConversationReadRequest{
+  const cursor=raw&&typeof raw==='object'?Object.getOwnPropertyDescriptor(raw,'before_event_id'):undefined;
+  const keys=['schema','work_ref','root_job_id','root_event_id','root_event_sha256','principal_scope_sha256'];
+  const value=exact(raw,cursor?[...keys,'before_event_id']:keys);
+  const base=Object.fromEntries(keys.map(key=>[key,value[key]]));
+  const reference=decodeFreshConversationReference(base,expectedWorkRef);
+  return frozen({...reference,...(cursor?{before_event_id:integer(value.before_event_id,1)}:{})});
+}
+export function freshConversationInitialDigest(window:FreshConversationWindow):string|null{
+  return window.schema==='mastermind.fresh_conversation_window.v2'?window.initial_digest??null:window.initial_result?.digest??null;
+}
+export function freshConversationNextPage(window:FreshConversationWindow):number|null{
+  return window.schema==='mastermind.fresh_conversation_window.v2'?window.page?.next_before_event_id??null:null;
+}
 export function decodeFreshConversationWindow(raw:unknown,expected:unknown):FreshConversationWindow{
-  const expectedData=exact(expected,['schema','work_ref','root_job_id','root_event_id','root_event_sha256','principal_scope_sha256']);
-  const wanted=decodeFreshConversationReference(expectedData,work(expectedData.work_ref));
-  const value=exact(raw,['schema','kind','reference','state','locator','epoch','initial_message','initial_result','initial_consumption','turns','can_send','parent_consumed']);
-  if(value.schema!=='mastermind.fresh_conversation_window.v1'||value.kind!=='fresh_native'||value.can_send!==false||value.parent_consumed!==false||
+  const expectedWork=expected&&typeof expected==='object'?Object.getOwnPropertyDescriptor(expected,'work_ref')?.value:undefined;
+  const requested=decodeFreshConversationReadRequest(expected,work(expectedWork));
+  const {before_event_id:before,...wanted}=requested;
+  const rawSchema=raw&&typeof raw==='object'?Object.getOwnPropertyDescriptor(raw,'schema')?.value:undefined;
+  const v2=rawSchema==='mastermind.fresh_conversation_window.v2';
+  const keys=['schema','kind','reference','state','locator','epoch','initial_message','initial_result','initial_consumption','turns','can_send','parent_consumed'];
+  const value=exact(raw,v2?[...keys,'initial_digest','page']:keys);
+  if(!['mastermind.fresh_conversation_window.v1','mastermind.fresh_conversation_window.v2'].includes(value.schema as string)||
+    value.kind!=='fresh_native'||value.can_send!==false||value.parent_consumed!==false||
     !['ADMITTED','RETAINED','SETTLED','RECONCILIATION_REQUIRED'].includes(value.state as string))fail();
   const reference=decodeFreshConversationReference(value.reference,wanted.work_ref);if(!sameReference(reference,wanted))fail();
   const rawLocator=exact(value.locator,['work_ref','root_job_id','job_id','attempt_id']);
@@ -120,24 +147,36 @@ export function decodeFreshConversationWindow(raw:unknown,expected:unknown):Fres
   if(value.epoch!==null){const item=exact(value.epoch,['attempt_id','binding_digest','generation_digest']);
     if(item.attempt_id!==locator.attempt_id||locator.attempt_id===null)fail();epoch={attempt_id:locator.attempt_id,binding_digest:hex(item.binding_digest),generation_digest:hex(item.generation_digest)};}
   if((value.state==='RETAINED')!==(epoch!==null))fail();
-  // Helper safely detaches the bounded canonical JSON before computing SHA.
   const initial=value.initial_result===null?null:decodeFreshConversationInitialResult(jsonData(value.initial_result),locator);
   if(value.initial_result!==null&&!initial)fail();
+  let initialDigest=initial?.digest??null;
+  let page:FreshConversationPage|undefined;
+  if(v2){
+    const item=exact(value.page,['kind','before_event_id','next_before_event_id']);
+    if(item.kind!==(before===undefined?'initial':'history')||item.before_event_id!==(before??null))fail();
+    const next=item.next_before_event_id===null?null:integer(item.next_before_event_id,1);
+    if(before!==undefined&&(initial!==null||next!==null&&next>=before))fail();
+    const digest=value.initial_digest===null?null:hex(value.initial_digest);
+    if(before===undefined&&digest!==initialDigest)fail();
+    initialDigest=digest;page={kind:item.kind as FreshConversationPage['kind'],before_event_id:before??null,next_before_event_id:next};
+  }else if(before!==undefined)fail();
   let consumed:FreshConversationWindow['initial_consumption']=null;
   if(value.initial_consumption!==null){const item=exact(value.initial_consumption,['state','event_id','event_sha256','initial_digest']);
-    if(item.state!=='CONSUMED'||!initial||hex(item.initial_digest)!==initial.digest)fail();
-    consumed={state:'CONSUMED',event_id:integer(item.event_id,1),event_sha256:hex(item.event_sha256),initial_digest:initial.digest};}
-  const turns=list(value.turns,1).map(rawTurn=>{
+    if(item.state!=='CONSUMED'||!initialDigest||hex(item.initial_digest)!==initialDigest)fail();
+    consumed={state:'CONSUMED',event_id:integer(item.event_id,1),event_sha256:hex(item.event_sha256),initial_digest:initialDigest};}
+  const turns=list(value.turns,v2?8:1).map(rawTurn=>{
     const turn=exact(rawTurn,['turn_key','message','state','result','parent_consumed']);
-    if(turn.parent_consumed!==false||!['RECORDED','RECONCILIATION_REQUIRED'].includes(turn.state as string)||!initial||!consumed)fail();
+    if(turn.parent_consumed!==false||!['RECORDED','RECONCILIATION_REQUIRED'].includes(turn.state as string)||!initialDigest||!consumed)fail();
     const result=turn.result===null?null:decodeFreshConversationInitialResult(jsonData(turn.result),locator);
     if((turn.state==='RECORDED')!==(result!==null)||turn.result!==null&&!result)fail();
     return {turn_key:identifier(turn.turn_key),message:message(turn.message),state:turn.state as 'RECORDED'|'RECONCILIATION_REQUIRED',result,parent_consumed:false as const};
   });
-  if(value.state==='SETTLED'&&!initial)fail();
-  return budget({schema:'mastermind.fresh_conversation_window.v1',kind:'fresh_native',reference,
+  if(new Set(turns.map(turn=>turn.turn_key)).size!==turns.length)fail();
+  if(page?.kind==='history'&&!turns.length&&page.next_before_event_id!==null)fail();
+  if(value.state==='SETTLED'&&!initialDigest)fail();
+  return budget({schema:value.schema as FreshConversationWindow['schema'],kind:'fresh_native',reference,
     state:value.state as FreshConversationWindow['state'],locator,epoch,initial_message:message(value.initial_message),initial_result:initial,
-    initial_consumption:consumed,turns,can_send:false,parent_consumed:false});
+    ...(v2?{initial_digest:initialDigest,page}:{}),initial_consumption:consumed,turns,can_send:false,parent_consumed:false});
 }
 
 /** Reused descriptor-only bounded JSON data snapshot; no source authority. */
