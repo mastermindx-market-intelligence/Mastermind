@@ -23,7 +23,7 @@ INVENTORY_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-sourc
 HOST_PULL_SHA = "464d9a5522a61311d5e8c2b7495a6297c86300d611903ad56524d4aa2e574e72"
 HOST_PULL_PREIMAGE = "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad"
 # Actual prospective109 over exact combined107 host-pull/Broker source image.
-MANIFEST_SHA256 = "45085e1d0427111cef6e177378104bdb175ff421f5275216749a878c4d640a35"
+MANIFEST_SHA256 = "abf6cb6c744982cc4fc49a12a2c829826b733c3c09732fce1a09b262f0381b1e"
 PROGRAM_ARGUMENTS = [
     "/usr/bin/lockf", "-t", "0", "__LOCK__", "/bin/bash", "__HOST_PULL__",
     "__COLLECTOR_OPTION__",
@@ -161,7 +161,7 @@ def _host_pull_cohort():
     # Exercise this historical host-only cohort on its authenticated Broker parent.
     # The combined current image is separately qualified by the source-cohort suite.
     successor = BUILDER.before_qualification_quiescence(
-        BUILDER.before_memory_owner_integrity(json.loads(MANIFEST_PATH.read_text())))
+        BUILDER.before_sparse_index_advice(BUILDER.before_memory_owner_integrity(json.loads(MANIFEST_PATH.read_text()))))
     predecessor = dict(successor)
     predecessor.update(BUILDER.HOST_PULL_INTEGRITY_PREIMAGES)
     assert hashlib.sha256(

@@ -671,3 +671,59 @@ and common-cohort source must be consumed before publication eligibility.
 
 No installed image, CURRENT selection, host read, provider/worker start, study,
 private-source access or runtime adoption was performed by this composition.
+
+
+## Sparse-index advice compatibility successor (source only)
+
+The actual Git2.50.1 observation returned0 and optional sparse-index expansion
+advice; the strict stderr fence correctly refused. The prospective executor
+adds ONLY the command-scoped tuple `advice.sparseIndexExpanded=false` to the
+existing trusted settings. Direct argv and the sanitized pinned-helper environment
+share it. No stderr is filtered or accepted; unknown local config, nonzero status,
+config identity drift and uncertain owned-process cleanup retain their refusals.
+Git config is never written. Sparse-index=True andFalse positives remain covered.
+
+The new fixture appends an exact forward/reverse delta from executor710115e0
+to4a3ec239; earlier patches/maps/digests remain immutable. The canonical producer
+emits107 files, changing only executor bytes/hash. Public inverse
+`before_sparse_index_advice` binds the complete72 parent manifest45a90565 before
+the unchanged H/Q inverses. Captured current dependencies stay separate from
+historical validation. The historical executor guard still accepts its original
+710 endpoint, not the newly updated candidate pin in historical source epochs.
+Historical fixture views explicitly remove this new delta; they are not emitted
+or presented as current source captures. No install/enrollment/host effect occurs.
+
+The retained32 composed-security failures now all match GREEN case identities,
+within67 composed checks. The affected cohort/Go/host-pull/boundary group produced
+135PASS and one historical-fixture mismatch; that fixture was restored to its
+original710 source meaning and its affected case then passed. Two portability
+checks additionally avoid depending on an unmerged branch's historical Git object.
+These scopes are retained separately; do not claim one combined all-green run.
+
+### Prospective Memory compatibility successor — 2026-11-07
+
+The preceding72 epoch and its adverse results remain retained. The common
+source owner subsequently froze `fafa1c9a` with one fixed command-scoped Git
+advice setting; its independent source review and Root acceptance are separate
+from installation. Memory now uses its exact prospective107 parent
+`470305e48c164563b53626967c178d8c3c5cdaff5a58308aea0a9d838eef3e6d`.
+The original72 fixture and original protected107 fixture remain unchanged.
+Memory's exact seven replacements/two helpers derive109 with manifest
+`abf6cb6c744982cc4fc49a12a2c829826b733c3c09732fce1a09b262f0381b1e`
+and inventory
+`2056669981e21fecb35367dad7093ce3ee3012e82524dfd8b3bece466a0ec1b8`.
+
+The new exact sparse-advice inverse runs only after the exact Memory inverse,
+before unchanged H/Q and historical views. Actual capture remains independent
+of every validation view. The affected cohort/Go run reports133 checks with115
+testcase elements, all passing; the security/staging run passes99 cases, closing
+the prior32 observed donor/security failures without relaxing stderr or Git
+custody guards. The separate Brain fixture reproduced the stale source-pin
+failure, then passed the real batch/warm-reuse case and both exact broker and
+provider byte-drift-before-import subtests after only their accepted Memory
+blob bindings changed. No production eligibility or permission is inferred.
+
+The four-case accepted Macro/native evaluation proof is unchanged. This is
+still a prospective source composition: actual PR2224 protected landing and
+final source carry are required before PR2229 continuation, and no installed
+record, host invocation, worker/provider start or study exposure is authorized.

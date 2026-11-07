@@ -123,7 +123,7 @@ def admission_pre_memory_source(relative):
 
 def before_source_successors(manifest):
     return builder.before_qualification_quiescence(
-        builder.before_host_pull_integrity(builder.before_memory_owner_integrity(manifest)))
+        builder.before_host_pull_integrity(builder.before_sparse_index_advice(builder.before_memory_owner_integrity(manifest))))
 
 
 def before_admission_integrity(manifest):
@@ -462,8 +462,10 @@ def test_sparse_config_executor_successor_is_exact_and_does_not_mutate_manifest(
     previous = dict(current)
     previous.update({"ext/" + name: digest for name, digest in builder.GO_UBUNTU4_PREIMAGES.items()})
     for cohort in (previous, current):
+        # This historical sparse-config fixture retains its exact710 endpoint.
+        # The new advice epoch requires the complete current107 parent separately.
         for digest in (builder.GO_BASE_EXECUTOR_SHA256,
-                       builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS["remote_sub_exec.py"]):
+                       builder.SPARSE_INDEX_ADVICE_EXECUTOR_PREIMAGE):
             exact = dict(cohort)
             exact["ext/remote_sub_exec.py"] = digest
             before = dict(exact)

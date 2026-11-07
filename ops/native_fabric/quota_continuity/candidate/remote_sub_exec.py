@@ -163,6 +163,7 @@ _SPARSE_GIT_SETTINGS = (
     ("core.untrackedCache", "false"), ("core.useReplaceRefs", "false"),
     ("maintenance.auto", "false"), ("gc.auto", "0"),
     ("protocol.allow", "never"),
+    ("advice.sparseIndexExpanded", "false"),
 )
 
 
