@@ -288,13 +288,52 @@ class CooHostProvider:
     The installed launcher separately requires the exact root-sealed adapter.
     Keeping this dependency structural preserves the core/integration boundary.
     """
-    def __init__(self, source, workspace):
+    def __init__(self, source, workspace, *, agentos_context_reader=None):
         from control_plane.workspace_read_service import WorkspaceReadService
         if (not callable(getattr(source, "snapshot", None))
                 or not callable(getattr(source, "for_principal", None))
                 or type(workspace) is not WorkspaceReadService):
             _refuse()
         self.source, self.workspace = source, workspace
+        from control_plane.agentos_context_bundle import AgentOsContextBundleReader
+        if agentos_context_reader is not None and type(agentos_context_reader) is not AgentOsContextBundleReader:
+            _refuse()
+        self.agentos_context_reader = agentos_context_reader
+
+    def read_agentos_context(self, frame):
+        """One explicitly granted read; never invoke fresh-effect eligibility."""
+        from common import coo_agentos_context_contract as wire
+        from control_plane.agentos_context_bundle import AgentOsContextBundleReader
+        wire.validate_frame(frame)
+        context = wire.context(frame["principal_context"])
+        source, workspace, reader = self.source, self.workspace, self.agentos_context_reader
+        if type(reader) is not AgentOsContextBundleReader:
+            _refuse()
+
+        def capture():
+            if (self.source is not source or self.workspace is not workspace
+                    or self.agentos_context_reader is not reader):
+                _refuse()
+            source.require_context_source_current()
+            row, fact, authority = source.for_principal(frame["principal"], context.work_ref)
+            actual = PrincipalAdmissionContext(row["work_ref"], fact.principal_binding_digest,
+                authority.mission_authority_ref, authority.authority_generation_digest)
+            if (row["enabled"] is not True or actual != context
+                    or authority.capability_profile_digest != frame["capability_profile_digest"]
+                    or wire.ACTION not in authority.principal_actions
+                    or source.catalogue_for_principal(frame["principal"]) != wire.CATALOGUE):
+                _refuse()
+            # generation(row) excludes enabled. Keep a detached full row as well
+            # as immutable facts so late mission disablement cannot be missed.
+            return json.loads(canonical(row)), dataclasses.replace(fact), dataclasses.replace(authority)
+
+        before = capture()
+        raw, receipt = reader.read(work_ref=context.work_ref)
+        result = wire.result(raw, receipt, principal_context=frame["principal_context"],
+            capability_profile_digest=frame["capability_profile_digest"])
+        if capture() != before:
+            _refuse()
+        return result
 
     async def read_workspace_host_observation(self, frame):
         from control_plane.workspace_host_observation_read import handle_from_original_coo

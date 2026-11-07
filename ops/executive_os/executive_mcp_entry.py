@@ -588,14 +588,27 @@ def build_installed_coo_settings(raw, source, config_path, executive, *, expecte
     validate_document(raw)
     from integrations.mastermind_executive_app.coo import CooAppSettings
     from integrations.mastermind_executive_app.coo_installed import CooFactsClient
+    from integrations.mastermind_executive_app.coo_binding import principal_frame
+    from ops.executive_os.coo_principal_host import CooInstalledSource, CLAUDE_PRINCIPAL_POLICY
+    from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
     public_mcp = executive.public_policies is not None
     if public_mcp and raw.get('executive_mcp_profile') != 'web_ceo_v3':
         raise ValueError('public COO requires the installed Web-CEO v3 profile')
     client = CooFactsClient(raw['ceo_ingress_socket_path'])
+    uid = raw['service_uid'] if expected_uid is None else expected_uid
+    def registry():
+        policy = Path(source) / CLAUDE_PRINCIPAL_POLICY
+        require_sealed_path(policy)
+        return ExecutionCapabilityRegistry.load(policy, source_root=source)
+    catalogue_source = CooInstalledSource(
+        current_projection_loader(config_path, source, raw, 'coo', None, expected_uid=uid), registry)
     settings = dict(executive=executive, policy=optional_policies(raw)['coo'],
         public_mcp=public_mcp,
         load_binding=current_projection_loader(config_path, source, raw, 'coo', 'binding'),
-        authority_provider=client.authority, mission_provider=client.mission)
+        authority_provider=client.authority, mission_provider=client.mission,
+        catalogue_provider=lambda principal, work_ref=None: catalogue_source.catalogue_for_principal(
+            principal_frame(principal), work_ref=work_ref),
+        agentos_context_provider=client.agentos_context)
     publication = build_installed_selected_child_target(raw)
     if publication is not None:
         # One frozen publication, read through the SHARED generation-bound
